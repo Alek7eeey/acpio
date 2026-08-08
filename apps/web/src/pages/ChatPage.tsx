@@ -1,14 +1,13 @@
 import { Link } from "react-router-dom";
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
   type MouseEvent,
 } from "react";
-import { migrateModelParamValues, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
+import { migrateModelParamValues, usesCloudModelCatalog, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
@@ -702,11 +701,16 @@ export function ChatPage() {
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
+  const setComposerMultilineIfNeeded = (next: boolean) => {
+    setComposerMultiline((prev) => (prev === next ? prev : next));
+  };
+
   const syncComposerSize = (el: HTMLTextAreaElement) => {
     const value = el.value;
     if (!value) {
       el.style.height = "auto";
-      setComposerMultiline(false);
+      el.style.width = "";
+      setComposerMultilineIfNeeded(false);
       return;
     }
 
@@ -715,30 +719,25 @@ export function ChatPage() {
     const pillW = pill?.clientWidth ?? el.clientWidth;
 
     el.style.height = "auto";
+    el.style.width = "";
 
     if (hasNewline) {
       el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-      setComposerMultiline(true);
+      setComposerMultilineIfNeeded(true);
       return;
     }
 
     // Probe whether text still wraps if controls sit on the same row (~220px chrome).
     const narrowW = Math.max(120, pillW - 220);
-    const prevWidth = el.style.width;
     el.style.width = `${narrowW}px`;
     const narrowH = el.scrollHeight;
-    el.style.width = prevWidth;
+    el.style.width = "";
 
     const needsMultiline = narrowH > 48;
-    setComposerMultiline(needsMultiline);
+    setComposerMultilineIfNeeded(needsMultiline);
 
     if (needsMultiline) {
-      // Height at full inner width (footer below).
-      el.style.width = `${Math.max(0, pillW - 20)}px`;
-      el.style.height = "auto";
-      const fullH = el.scrollHeight;
-      el.style.width = prevWidth;
-      el.style.height = `${Math.min(fullH, 160)}px`;
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     } else {
       el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
     }
@@ -856,7 +855,8 @@ export function ChatPage() {
   useEffect(() => {
     if (!agentProvider) return;
     const cached = useAppStore.getState().modelsCatalog;
-    const needForce = !cached || cached.provider !== agentProvider;
+    const needForce =
+      !cached || cached.provider !== agentProvider || usesCloudModelCatalog(agentProvider);
     void ensureModels(agentProvider, { force: needForce });
   }, [agentProvider, ensureModels]);
 
@@ -979,29 +979,32 @@ export function ChatPage() {
     syncComposerSize(el);
   };
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = textareaRef.current;
     if (el) syncComposerSize(el);
-  }, [composerMultiline, text]);
+  }, [text]);
 
   useEffect(() => {
-    keepComposerFocus.current = streaming || keepComposerFocus.current;
-    if (!streaming) {
-      // release a bit after turn ends
-      const t = window.setTimeout(() => {
-        keepComposerFocus.current = false;
-      }, 300);
-      return () => window.clearTimeout(t);
+    if (streaming) {
+      keepComposerFocus.current = true;
+      focusComposer();
+      return;
     }
-    focusComposer();
+    const t = window.setTimeout(() => {
+      keepComposerFocus.current = false;
+    }, 300);
+    return () => window.clearTimeout(t);
   }, [streaming]);
+
+  const lastMessageId = activeSession?.messages.at(-1)?.id;
+  const messageCount = activeSession?.messages.length ?? 0;
 
   useEffect(() => {
     const el = threadRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
     if (keepComposerFocus.current) focusComposer();
-  }, [activeSession?.messages, activeSession?.status]);
+  }, [lastMessageId, messageCount, activeSession?.status]);
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -1016,6 +1019,13 @@ export function ChatPage() {
     };
     thread.addEventListener("focusin", onFocusIn);
     return () => thread.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      keepComposerFocus.current = false;
+      textareaRef.current?.blur();
+    };
   }, []);
 
   const onSubmit = (e: FormEvent) => {
@@ -1265,7 +1275,8 @@ export function ChatPage() {
                     const stale =
                       !cached ||
                       cached.provider !== agentProvider ||
-                      (cached.modelParams?.length ?? 0) === 0;
+                      (cached.modelParams?.length ?? 0) === 0 ||
+                      usesCloudModelCatalog(agentProvider);
                     void ensureModels(agentProvider, { force: stale });
                   }}
                   onChange={(v) => void onModelChange(v)}

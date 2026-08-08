@@ -4,6 +4,9 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .thread {
@@ -596,9 +599,17 @@
   border-top: none;
   background: transparent;
   padding: 8px 16px 18px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
   display: grid;
   gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  position: relative;
+  z-index: 10;
   overflow: visible;
+  box-sizing: border-box;
 }
 
 .composerInner {
@@ -661,6 +672,10 @@
   backdrop-filter: blur(14px);
   transition: border-color var(--motion), box-shadow var(--motion), border-radius var(--motion);
   overflow: visible;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .pill:focus-within {
@@ -687,6 +702,8 @@
 .pillInput {
   flex: 1 1 auto;
   order: 2;
+  position: relative;
+  z-index: 0;
   min-width: 0;
   resize: none;
   border: none;
@@ -734,6 +751,8 @@
 .composerModel {
   order: 3;
   align-self: center;
+  position: relative;
+  z-index: 20;
 }
 
 .sendBtn,
@@ -810,8 +829,65 @@
 }
 
 @media (max-width: 700px) {
-  .pill {
+  .composer {
+    padding: 8px 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .pill,
+  .pillMultiline {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 10px 10px 8px;
     border-radius: 22px;
+  }
+
+  .pillInput,
+  .pillMultiline .pillInput {
+    order: 0;
+    width: 100% !important;
+    max-width: 100%;
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 6px 8px;
+    min-height: 44px;
+  }
+
+  .pillFooter,
+  .pillMultiline .pillFooter {
+    display: flex;
+    order: 1;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .pillFooterEnd,
+  .pillMultiline .pillFooterEnd {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    min-width: 0;
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 20;
+  }
+
+  .attachBtn,
+  .pillMultiline .attachBtn {
+    order: unset;
+    flex-shrink: 0;
+  }
+
+  .composerModel,
+  .pillMultiline .composerModel {
+    order: unset;
+    min-width: 0;
+    flex: 0 1 auto;
+    max-width: min(280px, calc(100vw - 140px));
   }
 }
 

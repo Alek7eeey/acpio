@@ -1,9 +1,11 @@
 import {
+  isModelAccessError,
   modelDisplayName,
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
   providerCommand,
+  usesCloudModelCatalog,
   type AgentMode,
   type AgentProvider,
   type ModelParamDto,
@@ -19,6 +21,7 @@ import {
   updateSession,
 } from "../services/sessions.js";
 import { broadcastToSession } from "../services/wsHub.js";
+import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
   findModelConfigOption,
@@ -119,12 +122,61 @@ function toModelParams(options: ConfigOption[]): ModelParamDto[] {
   return params;
 }
 
-function toModelList(options: ConfigOption[]) {
+type ModelOption = { value: string; name: string };
+
+function toModelList(options: ConfigOption[]): ModelOption[] {
   const modelOpt = findModelConfigOption(options);
   return (modelOpt?.options ?? []).map((o) => ({
     value: o.value,
     name: modelDisplayName(o.value, o.name),
   }));
+}
+
+const deniedModelsByProvider = new Map<AgentProvider, Set<string>>();
+
+function filterDeniedModels(provider: AgentProvider, models: ModelOption[]): ModelOption[] {
+  const denied = deniedModelsByProvider.get(provider);
+  if (!denied?.size) return models;
+  return models.filter((m) => !denied.has(m.value));
+}
+
+function denyModel(provider: AgentProvider, model: string) {
+  let denied = deniedModelsByProvider.get(provider);
+  if (!denied) {
+    denied = new Set();
+    deniedModelsByProvider.set(provider, denied);
+  }
+  if (denied.has(model)) return;
+  denied.add(model);
+  if (modelsCache?.provider === provider) {
+    const models = filterDeniedModels(provider, modelsCache.models);
+    const currentModel =
+      modelsCache.currentModel && !denied.has(modelsCache.currentModel)
+        ? modelsCache.currentModel
+        : models[0]?.value;
+    rememberModels(provider, currentModel, models, modelsCache.modelParams);
+  }
+}
+
+function modelsCacheTtlMs(provider: AgentProvider): number {
+  return usesCloudModelCatalog(provider) ? 2 * 60_000 : 24 * 60_000;
+}
+
+async function finalizeModelList(
+  provider: AgentProvider,
+  settings: Awaited<ReturnType<typeof getSettings>>,
+  acpModels: ModelOption[],
+): Promise<ModelOption[]> {
+  const reconciled = await reconcileModelCatalog(provider, settings, acpModels);
+  return filterDeniedModels(provider, reconciled);
+}
+
+function pickCurrentModel(
+  models: ModelOption[],
+  preferred?: string,
+): string | undefined {
+  if (preferred && models.some((m) => m.value === preferred)) return preferred;
+  return models[0]?.value;
 }
 
 type PendingRequest = {
@@ -231,9 +283,17 @@ export async function ensureAcp(
   rt.clientReady = (async () => {
     try {
       await client.start();
-      const models = toModelList(client.configOptions);
+      const settings = await getSettings();
+      const models = await finalizeModelList(
+        opts.provider,
+        settings,
+        toModelList(client.configOptions),
+      );
       const modelParams = toModelParams(client.configOptions);
-      const currentModel = findModelConfigOption(client.configOptions)?.currentValue;
+      const currentModel = pickCurrentModel(
+        models,
+        findModelConfigOption(client.configOptions)?.currentValue,
+      );
       if (models.length || modelParams.length) {
         rememberModels(opts.provider, currentModel, models, modelParams);
       }
@@ -674,6 +734,12 @@ export async function runPrompt(
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    if (isModelAccessError(message)) {
+      const currentModel =
+        (rt.client && findModelConfigOption(rt.client.configOptions)?.currentValue) ||
+        settings.defaultModel;
+      if (currentModel) denyModel(opts.provider, currentModel);
+    }
     try {
       const assistantId = await ensureAssistantMessage(rt);
       await appendPart(sessionId, assistantId, "error", { message });
@@ -730,10 +796,12 @@ export async function probeAgent(provider?: AgentProvider) {
   client.on("log", (line: string) => logs.push(line));
   try {
     await client.start(30000);
-    const models = toModelList(client.configOptions);
+    const acpModels = toModelList(client.configOptions);
+    const models = await finalizeModelList(selected, settings, acpModels);
     const modelParams = toModelParams(client.configOptions);
     const sessionId = client.sessionId ?? undefined;
-    const currentModel = findModelConfigOption(client.configOptions)?.currentValue;
+    const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
+    const currentModel = pickCurrentModel(models, rawCurrent);
     if (models.length || modelParams.length) {
       rememberModels(selected, currentModel, models, modelParams);
     }
@@ -865,10 +933,17 @@ export async function setSessionModel(
       cwd: detail.cwd,
       mode: detail.mode,
     });
-    const models = toModelList(client.configOptions);
+    const settings = await getSettings();
+    const models = await finalizeModelList(
+      detail.provider,
+      settings,
+      toModelList(client.configOptions),
+    );
     const modelParams = toModelParams(client.configOptions);
-    const currentModel =
-      findModelConfigOption(client.configOptions)?.currentValue ?? model;
+    const currentModel = pickCurrentModel(
+      models,
+      findModelConfigOption(client.configOptions)?.currentValue ?? model,
+    );
     rememberModels(detail.provider, currentModel, models, modelParams);
     return {
       ok: true,
@@ -901,10 +976,21 @@ let modelsCache: {
 export function rememberModels(
   provider: AgentProvider,
   currentModel: string | undefined,
-  models: Array<{ value: string; name: string }>,
+  models: ModelOption[],
   modelParams: ModelParamDto[] = [],
 ) {
-  modelsCache = { provider, currentModel, models, modelParams, at: Date.now() };
+  const filtered = filterDeniedModels(provider, models);
+  const resolvedCurrent =
+    currentModel && filtered.some((m) => m.value === currentModel)
+      ? currentModel
+      : filtered[0]?.value;
+  modelsCache = {
+    provider,
+    currentModel: resolvedCurrent,
+    models: filtered,
+    modelParams,
+    at: Date.now(),
+  };
 }
 
 export function clearModelsCache(provider?: AgentProvider) {
@@ -920,20 +1006,30 @@ export async function listModels(
   const settings = await getSettings();
   const selected = provider ?? settings.defaultProvider;
   const force = opts?.force === true;
+  const cacheTtl = modelsCacheTtlMs(selected);
   if (
     !force &&
     modelsCache &&
     modelsCache.provider === selected &&
-    Date.now() - modelsCache.at < 24 * 60_000 &&
+    Date.now() - modelsCache.at < cacheTtl &&
     // Empty params may be a cold partial — don't stick for the full TTL.
     (modelsCache.modelParams.length > 0 || Date.now() - modelsCache.at < 20_000)
   ) {
+    const cache = modelsCache;
+    const models = filterDeniedModels(selected, cache.models);
+    const preferred = settings.defaultModel || cache.currentModel;
+    const currentModel =
+      preferred && models.some((m) => m.value === preferred)
+        ? preferred
+        : cache.currentModel && models.some((m) => m.value === cache.currentModel)
+          ? cache.currentModel
+          : models[0]?.value;
     return {
       ok: true,
       provider: selected,
-      currentModel: settings.defaultModel || modelsCache.currentModel,
-      models: modelsCache.models,
-      modelParams: modelsCache.modelParams,
+      currentModel,
+      models,
+      modelParams: cache.modelParams,
       cached: true,
     };
   }
@@ -941,11 +1037,19 @@ export async function listModels(
   if (probed.ok && (probed.models?.length || probed.modelParams?.length)) {
     rememberModels(selected, probed.currentModel, probed.models ?? [], probed.modelParams ?? []);
   }
+  const models = filterDeniedModels(selected, probed.models ?? []);
+  const preferred = settings.defaultModel || probed.currentModel;
+  const currentModel =
+    preferred && models.some((m) => m.value === preferred)
+      ? preferred
+      : probed.currentModel && models.some((m) => m.value === probed.currentModel)
+        ? probed.currentModel
+        : models[0]?.value;
   return {
     ok: probed.ok,
     provider: selected,
-    currentModel: settings.defaultModel || probed.currentModel,
-    models: probed.models ?? [],
+    currentModel,
+    models,
     modelParams: probed.modelParams ?? [],
     message: probed.message,
     cached: false,

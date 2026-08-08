@@ -124,27 +124,37 @@ type AnchorRect = { top: number; left: number; bottom: number; right: number };
 function flyoutStyle(
   btn: AnchorRect,
   menu: AnchorRect | null,
+  flyoutHeight: number,
 ): { top: number; left: number; width: number; maxHeight: number } {
+  const margin = 12;
   const gap = 8;
-  const width = Math.min(280, window.innerWidth - 24);
-  const maxHeight = Math.min(420, window.innerHeight * 0.7);
+  const width = Math.min(280, window.innerWidth - margin * 2);
+  const maxHeight = Math.min(420, window.innerHeight - margin * 2);
+  const height = Math.min(Math.max(flyoutHeight, 120), maxHeight);
   const box = menu ?? btn;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
 
-  const spaceLeft = box.left - 12;
-  const spaceRight = window.innerWidth - box.right - 12;
-  // Prefer the outer side of the dropdown (not overlapping the list).
-  const openLeft = spaceLeft >= width || spaceLeft >= spaceRight;
+  const candidates = [
+    box.left - gap - width,
+    box.right + gap,
+    btn.left - gap - width,
+    btn.right + gap,
+    (vw - width) / 2,
+  ];
 
-  let left = openLeft ? box.left - gap - width : box.right + gap;
-  left = Math.max(12, Math.min(left, window.innerWidth - width - 12));
-
-  // Keep vertical alignment with the ⋯ row.
-  let top = btn.top;
-  if (top + Math.min(maxHeight, 200) > window.innerHeight - 12) {
-    top = Math.max(12, window.innerHeight - maxHeight - 12);
-  } else if (top < 12) {
-    top = 12;
+  let left = Math.max(margin, Math.min(candidates[0], vw - width - margin));
+  for (const candidate of candidates) {
+    if (candidate >= margin && candidate + width <= vw - margin) {
+      left = candidate;
+      break;
+    }
   }
+  left = Math.max(margin, Math.min(left, vw - width - margin));
+
+  const rowMid = (btn.top + btn.bottom) / 2;
+  let top = rowMid - height / 2;
+  top = Math.max(margin, Math.min(top, vh - height - margin));
 
   return { top, left, width, maxHeight };
 }
@@ -204,6 +214,7 @@ export function ModelPicker({
   const listRef = useRef<HTMLDivElement>(null);
   const paramsPopupRef = useRef<HTMLDivElement>(null);
   const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const paramsReqRef = useRef(0);
   const locked = disabled || loading;
   const paramsBusy = paramsLoading || localParamsBusy;
@@ -215,12 +226,14 @@ export function ModelPicker({
     () => params.filter((p) => p.options.length > 0),
     [params],
   );
-  const options = useMemo(() => {
-    if (model && !models.some((m) => m.value === model)) {
-      return [{ value: model, name: modelDisplayName(model, undefined, defaultModelLabel) }, ...models];
-    }
-    return models.map((m) => ({ ...m, name: modelDisplayName(m.value, m.name, defaultModelLabel) }));
-  }, [model, models, defaultModelLabel]);
+  const options = useMemo(
+    () =>
+      models.map((m) => ({
+        ...m,
+        name: modelDisplayName(m.value, m.name, defaultModelLabel),
+      })),
+    [models, defaultModelLabel],
+  );
   const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
   const paramChips = useMemo(
     () => (paramsBusy ? [] : activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix)),
@@ -338,6 +351,13 @@ export function ModelPicker({
   }, [open, placement, locked]);
 
   useLayoutEffect(() => {
+    if (!open || !model || !listRef.current) return;
+    const row = rowRefs.current.get(model);
+    if (!row) return;
+    row.scrollIntoView({ block: "center", inline: "nearest" });
+  }, [open, model, options.length]);
+
+  useLayoutEffect(() => {
     if (!paramsFor) return;
     syncParamsAnchor();
     const list = listRef.current;
@@ -362,6 +382,29 @@ export function ModelPicker({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramsFor, open, options.length]);
+
+  const refineFlyoutPosition = () => {
+    const el = paramsPopupRef.current;
+    if (!el || !paramsAnchor) return;
+    const layout = flyoutStyle(paramsAnchor, menuAnchor, el.offsetHeight);
+    el.style.top = `${layout.top}px`;
+    el.style.left = `${layout.left}px`;
+    el.style.width = `${layout.width}px`;
+    el.style.maxHeight = `${layout.maxHeight}px`;
+  };
+
+  useLayoutEffect(() => {
+    if (!paramsPopupOpen) return;
+    refineFlyoutPosition();
+    const onResize = () => refineFlyoutPosition();
+    window.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramsPopupOpen, paramsAnchor, menuAnchor, paramsBusy, visibleParams.length, resolvedParams]);
 
   useEffect(() => {
     if (!open) return;
@@ -598,6 +641,10 @@ export function ModelPicker({
               return (
                 <div
                   key={m.value}
+                  ref={(el) => {
+                    if (el) rowRefs.current.set(m.value, el);
+                    else rowRefs.current.delete(m.value);
+                  }}
                   className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
                     rowActive ? styles.modelRowExpanded : ""
                   }`}
@@ -658,7 +705,7 @@ export function ModelPicker({
           <div
             ref={paramsPopupRef}
             className={styles.paramsFlyout}
-            style={flyoutStyle(paramsAnchor, menuAnchor)}
+            style={flyoutStyle(paramsAnchor, menuAnchor, 240)}
             role="dialog"
             aria-label={paramsLabel || t("common.params")}
           >

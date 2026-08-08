@@ -157,6 +157,7 @@ function mergeConfigOptions(prev: ConfigOption[], next: ConfigOption[]): ConfigO
       continue;
     }
     if (
+      old.id !== "model" &&
       (fresh.type === "select" || !fresh.type) &&
       (fresh.options?.length ?? 0) === 0 &&
       (old.options?.length ?? 0) > 0
@@ -202,7 +203,7 @@ function winKnownBins(command: string): string[] {
   return out;
 }
 
-async function resolveCommand(command: string): Promise<{ cmd: string; shell: boolean }> {
+export async function resolveCommand(command: string): Promise<{ cmd: string; shell: boolean }> {
   if (/\.(exe|cmd|bat)$/i.test(command) || command.includes("/") || command.includes("\\")) {
     return { cmd: command, shell: /\.(cmd|bat)$/i.test(command) };
   }
@@ -286,7 +287,7 @@ function looksLikeCommandNotFound(text: string): boolean {
   );
 }
 
-function buildEnv(provider: AgentProvider, settings: AppSettings): NodeJS.ProcessEnv {
+export function buildAgentEnv(provider: AgentProvider, settings: AppSettings): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (settings.cursorApiKey) env.CURSOR_API_KEY = settings.cursorApiKey;
   const openKey = settings.opencodeApiKey || (provider === "opencode" ? settings.cursorApiKey : "");
@@ -439,7 +440,7 @@ export class AcpClient extends EventEmitter {
     const commandName = providerCommand(this.settings, this.provider);
     const args = [...providerArgs(this.settings, this.provider)];
     const resolved = await resolveCommand(commandName);
-    const env = buildEnv(this.provider, this.settings);
+    const env = buildAgentEnv(this.provider, this.settings);
     const cwd = this.cwd || process.cwd();
 
     const resolvedExists =

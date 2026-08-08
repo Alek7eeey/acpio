@@ -110,6 +110,18 @@ export function providerArgs(settings: AppSettings, provider: AgentProvider): st
   return settings.opencodeArgs;
 }
 
+/** OpenCode / OMP catalogs depend on account balance and change often. */
+export function usesCloudModelCatalog(provider: AgentProvider): boolean {
+  return provider === "opencode" || provider === "omp";
+}
+
+/** Billing / credits failure from OpenCode or OMP when a model cannot be used. */
+export function isModelAccessError(message: string): boolean {
+  return /Insufficient balance|CreditsError|insufficient.?credits|payment required|billing/i.test(
+    message,
+  );
+}
+
 /** Human-readable model label; keeps wire id unchanged. */
 export function modelDisplayName(value: string, name?: string, defaultLabel = "Default"): string {
   const raw = (value || "").trim();

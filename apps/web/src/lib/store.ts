@@ -13,15 +13,25 @@ import type {
   UserDto,
   WsServerEvent,
 } from "@acprocess/shared";
-import { DEFAULT_SETTINGS } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, isModelAccessError, usesCloudModelCatalog } from "@acprocess/shared";
 import { api } from "./api";
 
-const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v2";
+const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v4";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v1";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
+const MODELS_CLOUD_SOFT_TTL_MS = 30_000;
 /** Hard TTL: force a blocking reload only after this. */
 const MODELS_HARD_TTL_MS = 7 * 24 * 60_000;
+const MODELS_CLOUD_HARD_TTL_MS = 2 * 60_000;
+
+function modelsHardTtl(provider: AgentProvider): number {
+  return usesCloudModelCatalog(provider) ? MODELS_CLOUD_HARD_TTL_MS : MODELS_HARD_TTL_MS;
+}
+
+function modelsSoftTtl(provider: AgentProvider): number {
+  return usesCloudModelCatalog(provider) ? MODELS_CLOUD_SOFT_TTL_MS : MODELS_SOFT_TTL_MS;
+}
 
 export type ModelsCatalog = {
   provider: AgentProvider;
@@ -246,7 +256,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       existing &&
       existing.provider === provider &&
       existing.models.length > 0 &&
-      Date.now() - existing.at < MODELS_HARD_TTL_MS;
+      Date.now() - existing.at < modelsHardTtl(provider);
     const missingParams = (existing?.modelParams?.length ?? 0) === 0;
 
     // Instantly show the last catalog for this agent (Fast/Усилие) when switching.
@@ -261,7 +271,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (active?.provider !== provider) {
         set({ modelsCatalog: existing, modelsLoading: false });
       }
-      const softStale = Date.now() - existing.at >= MODELS_SOFT_TTL_MS;
+      const softStale = Date.now() - existing.at >= modelsSoftTtl(provider);
       if (softStale) {
         void api
           .listModels(provider)
@@ -610,6 +620,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (event.type === "error") {
       set({ error: event.message });
+      const provider = get().user?.connectedProvider ?? get().settings.defaultProvider;
+      if (provider && isModelAccessError(event.message)) {
+        void get().ensureModels(provider, { force: true });
+      }
+      return;
     }
   },
 

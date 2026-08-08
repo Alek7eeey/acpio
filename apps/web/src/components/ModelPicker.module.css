@@ -4,6 +4,7 @@
   align-self: center;
   z-index: 30;
   overflow: visible;
+  isolation: isolate;
 }
 
 .block {
@@ -24,6 +25,14 @@
   font-weight: 600;
   font-size: 0.88rem;
   min-width: 0;
+}
+
+@media (max-width: 700px) {
+  .modelTrigger {
+    max-width: 100%;
+    font-size: 0.82rem;
+    padding: 5px 6px;
+  }
 }
 
 .modelTriggerBlock {
@@ -160,9 +169,10 @@
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
-  z-index: 40;
+  z-index: 100;
   animation: rise 0.16s ease;
   box-sizing: border-box;
+  pointer-events: auto;
 }
 
 .modelMenuDown {

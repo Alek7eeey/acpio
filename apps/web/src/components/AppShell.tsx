@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
+import { useBrowserLocation } from "../lib/usePathname";
 import {
   getSettingsTree,
   parseSettingsSearch,
@@ -14,6 +15,11 @@ import { ChatSidebar } from "./ChatSidebar";
 import { HoverTip } from "./HoverTip";
 import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
+import { DashboardPage } from "../pages/DashboardPage";
+import { ChatPage } from "../pages/ChatPage";
+import { GiteaPage } from "../pages/GiteaPage";
+import { SettingsPage } from "../pages/SettingsPage";
+import { AdminPage } from "../pages/AdminPage";
 import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acprocess.sidebarWidth.v2";
@@ -29,9 +35,18 @@ function readStoredWidth() {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
 }
 
+function ShellPage({ pathname }: { pathname: string }) {
+  if (pathname === "/" || pathname === "") return <DashboardPage />;
+  if (pathname.startsWith("/chat")) return <ChatPage />;
+  if (pathname.startsWith("/gitea")) return <GiteaPage />;
+  if (pathname.startsWith("/settings")) return <SettingsPage />;
+  if (pathname.startsWith("/admin")) return <AdminPage />;
+  return <DashboardPage />;
+}
+
 export function AppShell() {
   const t = useT();
-  const location = useLocation();
+  const { pathname, search } = useBrowserLocation();
   const navigate = useNavigate();
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
@@ -61,16 +76,13 @@ export function AppShell() {
     });
   }, [user?.connectedProvider, connected, t]);
 
-  const isChat = location.pathname.startsWith("/chat");
-  const isGitea = location.pathname.startsWith("/gitea");
-  const isSettings = location.pathname.startsWith("/settings");
-  const isAdmin = location.pathname.startsWith("/admin");
+  const isChat = pathname.startsWith("/chat");
+  const isGitea = pathname.startsWith("/gitea");
+  const isSettings = pathname.startsWith("/settings");
+  const isAdmin = pathname.startsWith("/admin");
   const showSidebar = isChat || isGitea || isSettings;
 
-  const settingsNav = useMemo(
-    () => parseSettingsSearch(location.search),
-    [location.search],
-  );
+  const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
     agent: true,
     account: true,
@@ -159,6 +171,12 @@ export function AppShell() {
         ? t("common.chat")
         : t("common.dashboard");
 
+  const goDashboard = useCallback(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    if (window.innerWidth < 900) setSidebarOpen(false);
+    navigate("/");
+  }, [navigate, setSidebarOpen]);
+
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
     setOpenBranches((prev) => ({ ...prev, [section]: true }));
@@ -183,14 +201,7 @@ export function AppShell() {
       {showSidebar && (
         <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""}`}>
           <div className={styles.brandRow}>
-            <button
-              type="button"
-              className={styles.backBtn}
-              onClick={() => {
-                navigate("/");
-                if (window.innerWidth < 900) setSidebarOpen(false);
-              }}
-            >
+            <button type="button" className={styles.backBtn} onClick={goDashboard}>
               {t("common.backToDashboard")}
             </button>
             <button
@@ -377,7 +388,7 @@ export function AppShell() {
           <button
             type="button"
             className={styles.headerBrand}
-            onClick={() => navigate("/")}
+            onClick={goDashboard}
             title={t("common.goToDashboard")}
             aria-label="ACProcess"
           >
@@ -471,7 +482,7 @@ export function AppShell() {
           </div>
         </header>
         <div className={styles.content}>
-          <Outlet />
+          <ShellPage pathname={pathname} />
         </div>
       </div>
     </div>

@@ -4,6 +4,7 @@ import {
   migrateModelParamValues,
   modelDisplayName,
   providerCommand,
+  usesCloudModelCatalog,
   type AgentProbeResult,
   type AgentProvider,
   type AppSettings,
@@ -421,7 +422,7 @@ export function SettingsPage() {
                   const provider = user.connectedProvider;
                   if (!provider) return;
                   void ensureModels(provider, {
-                    force: modelParams.length === 0,
+                    force: usesCloudModelCatalog(provider) || modelParams.length === 0,
                   }).then((catalog) => {
                     if (!catalog) return;
                     setModels(catalog.models ?? []);
