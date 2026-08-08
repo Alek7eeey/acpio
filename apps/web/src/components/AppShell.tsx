@@ -374,9 +374,19 @@ export function AppShell() {
             className={styles.headerBrand}
             onClick={() => navigate("/")}
             title="На дашборд"
+            aria-label="ACProcess"
           >
-            <span className={styles.brandMark}>ACP</span>
-            <span>rocess</span>
+            <span className={styles.brandLetters} aria-hidden>
+              {"ACProcess".split("").map((ch, i) => (
+                <span
+                  key={`${ch}-${i}`}
+                  className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
+                  style={{ "--i": i } as CSSProperties}
+                >
+                  {ch}
+                </span>
+              ))}
+            </span>
           </button>
           <div className={styles.headerSpacer} />
           <div className={styles.headerRight}>

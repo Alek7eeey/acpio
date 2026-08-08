@@ -1,8 +1,9 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAppStore } from "./lib/store";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
+import { BootSplash } from "./components/BootSplash";
 import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ChatPage } from "./pages/ChatPage";
@@ -14,6 +15,7 @@ export function App() {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const loading = useAppStore((s) => s.loading);
   const user = useAppStore((s) => s.user);
+  const [splashVisible, setSplashVisible] = useState(true);
 
   useEffect(() => {
     void loadBootstrap();
@@ -21,27 +23,28 @@ export function App() {
 
   useSessionSocket(user ? activeSessionId : null, Boolean(user));
 
-  if (loading) {
-    return (
-      <div className="boot">
-        <div className="boot-card">Загрузка ACProcess…</div>
-      </div>
-    );
-  }
+  const onSplashDone = useCallback(() => setSplashVisible(false), []);
 
-  if (!user) {
-    return <AuthPage />;
-  }
+  // Mount app under the splash so exit never leaves a blank tree.
+  const app =
+    loading && splashVisible ? null : !user ? (
+      <AuthPage />
+    ) : (
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="chat" element={<ChatPage />} />
+          <Route path="gitea" element={<GiteaPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    );
 
   return (
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<DashboardPage />} />
-        <Route path="chat" element={<ChatPage />} />
-        <Route path="gitea" element={<GiteaPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <>
+      {app}
+      {splashVisible && <BootSplash ready={!loading} onDone={onSplashDone} />}
+    </>
   );
 }
