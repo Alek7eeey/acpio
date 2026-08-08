@@ -1,6 +1,13 @@
 import { Link } from "react-router-dom";
-import { useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent,
+} from "react";
 import { migrateModelParamValues, type MessageDto, type MessagePartDto, type ModelParamDto } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
@@ -12,6 +19,7 @@ import {
   collectRecentCwds,
   CreateSessionFolderPicker,
 } from "../components/CreateSessionFolderPicker";
+import { MarkdownContent } from "../components/MarkdownContent";
 import styles from "./ChatPage.module.css";
 
 function peelAnswerFromThought(thought: string): { thought: string; answer: string } {
@@ -115,29 +123,18 @@ function PartView({
     const text = String(part.payload.text ?? "");
     if (!text.trim()) return null;
     return (
-      <div className={`${styles.textPart} ${streaming ? styles.streaming : ""}`}>
-        <ReactMarkdown>{text}</ReactMarkdown>
-      </div>
+      <MarkdownContent
+        text={text}
+        streaming={streaming}
+        className={streaming ? styles.streaming : undefined}
+      />
     );
   }
 
   if (part.type === "thought") {
-    const text = String(part.payload.text ?? "");
-    if (!text.trim()) return null;
-    const steps = text
-      .split(/\n{2,}/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const body = (
-      <div className={styles.thoughtChain}>
-        {steps.map((step, i) => (
-          <div key={i} className={styles.thoughtStep}>
-            {steps.length > 1 && <span className={styles.thoughtStepIndex}>{i + 1}</span>}
-            <pre className={`${styles.pre} ${styles.thoughtBody}`}>{step}</pre>
-          </div>
-        ))}
-      </div>
-    );
+    const text = String(part.payload.text ?? "").trim();
+    if (!text) return null;
+    const body = <pre className={styles.thoughtBody}>{text}</pre>;
     if (embedded) {
       return (
         <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
@@ -149,6 +146,7 @@ function PartView({
         </div>
       );
     }
+    // Standalone thoughts are folded into «Шаги»; keep a minimal fallback.
     return (
       <div
         className={`${styles.thought} ${open ? styles.thoughtOpen : ""} ${
@@ -159,9 +157,6 @@ function PartView({
           <span className={styles.thoughtLabel}>
             {streaming && <span className={styles.pulseDot} />}
             Рассуждение
-            {!streaming && steps.length > 1 ? (
-              <span className={styles.thoughtMeta}>{steps.length} шагов</span>
-            ) : null}
           </span>
           <span className={styles.thoughtChevron} aria-hidden>
             {open ? "▾" : "▸"}
@@ -172,68 +167,9 @@ function PartView({
     );
   }
 
-  if (part.type === "subagent") {
-    const title = String(
-      part.payload.description ?? part.payload.subagentType ?? part.payload.title ?? "Субагент",
-    );
-    const status = String(part.payload.status ?? "");
-    return (
-      <div className={styles.subagent}>
-        <button {...toggleProps} onClick={() => setOpen(!open)}>
-          <span>
-            Субагент · {title}
-            {status ? ` · ${status}` : ""}
-          </span>
-          <span>{open ? "▾" : "▸"}</span>
-        </button>
-        {open && (
-          <div className={styles.subagentBody}>
-            {typeof part.payload.prompt === "string" && (
-              <p className={styles.subagentPrompt}>{String(part.payload.prompt)}</p>
-            )}
-            {typeof part.payload.result === "string" && (
-              <pre className={styles.pre}>{String(part.payload.result)}</pre>
-            )}
-            {!part.payload.prompt && !part.payload.result && (
-              <pre className={styles.pre}>
-                {JSON.stringify(
-                  {
-                    description: part.payload.description,
-                    subagentType: part.payload.subagentType,
-                    status: part.payload.status,
-                  },
-                  null,
-                  2,
-                )}
-              </pre>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (part.type === "tool_call") {
-    const title = String(part.payload.title ?? "Tool");
-    const status = String(part.payload.status ?? "");
-    const kind = String(
-      (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
-    );
-    const isTask = /task|subagent|explore|agent/i.test(`${title} ${kind}`);
-    const label = isTask ? "Субагент" : "Инструмент";
-    return (
-      <div className={isTask ? styles.subagent : styles.toolChip}>
-        <div className={styles.toolChipInner}>
-          <span className={styles.toolChipLabel}>
-            {streaming && status !== "completed" && status !== "failed" && (
-              <span className={styles.pulseDot} />
-            )}
-            {label} · {title}
-            {status ? ` · ${status}` : ""}
-          </span>
-        </div>
-      </div>
-    );
+  // Tool calls and subagent/task tools are hidden — only thoughts + answer text.
+  if (part.type === "subagent" || part.type === "tool_call") {
+    return null;
   }
 
   if (part.type === "error") {
@@ -243,8 +179,8 @@ function PartView({
   return null;
 }
 
-function isStepPart(part: MessagePartDto) {
-  return part.type === "thought" || part.type === "tool_call" || part.type === "subagent";
+function isThoughtPart(part: MessagePartDto) {
+  return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
 }
 
 function StepsSpoiler({
@@ -255,13 +191,9 @@ function StepsSpoiler({
   streaming: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const visible = parts.filter((part) => {
-    if (part.type === "thought") return Boolean(String(part.payload.text ?? "").trim());
-    return true;
-  });
-  const count = visible.length;
+  const thoughts = parts.filter(isThoughtPart);
 
-  if (count === 0) return null;
+  if (thoughts.length === 0) return null;
 
   return (
     <div
@@ -280,9 +212,6 @@ function StepsSpoiler({
         <span className={styles.thoughtLabel}>
           {streaming && <span className={styles.pulseDot} />}
           Шаги
-          <span className={styles.thoughtMeta}>
-            {count} {count === 1 ? "шаг" : count < 5 ? "шага" : "шагов"}
-          </span>
         </span>
         <span className={styles.thoughtChevron} aria-hidden>
           {open ? "▾" : "▸"}
@@ -290,16 +219,12 @@ function StepsSpoiler({
       </button>
       {open && (
         <div className={styles.stepsBody}>
-          {visible.map((part, idx) => (
+          {thoughts.map((part, idx) => (
             <PartView
-              key={part.type === "thought" ? "thought" : part.id}
+              key={part.id}
               part={part}
               embedded
-              streaming={
-                streaming &&
-                idx === visible.length - 1 &&
-                (part.type === "thought" || part.type === "tool_call")
-              }
+              streaming={streaming && idx === thoughts.length - 1}
             />
           ))}
         </div>
@@ -315,9 +240,6 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
     }
     if (p.type === "error") {
       return Boolean(String(p.payload.message ?? "").trim());
-    }
-    if (p.type === "tool_call" || p.type === "subagent") {
-      return true;
     }
     return false;
   });
@@ -438,23 +360,23 @@ function AssistantParts({
 }) {
   const parts = useMemo(() => {
     const coalesced = coalesceParts(message.parts);
+    // Hide tool_call / subagent rows; keep thoughts, text, errors.
     return coalesced.filter(
-      (p) =>
-        p.type === "thought" ||
-        p.type === "text" ||
-        p.type === "error" ||
-        p.type === "subagent" ||
-        p.type === "tool_call",
+      (p) => p.type === "thought" || p.type === "text" || p.type === "error",
     );
   }, [message.id, message.parts]);
 
-  const stepParts = useMemo(() => parts.filter(isStepPart), [parts]);
-  const mainParts = useMemo(() => parts.filter((p) => !isStepPart(p)), [parts]);
+  const thoughtParts = useMemo(() => parts.filter((p) => p.type === "thought"), [parts]);
+  const mainParts = useMemo(
+    () => parts.filter((p) => p.type === "text" || p.type === "error"),
+    [parts],
+  );
   const plain = useMemo(() => assistantPlainText(message), [message]);
+  const thoughtsStreaming = streaming && mainParts.every((p) => p.type !== "text");
 
   return (
     <div className={styles.parts}>
-      <StepsSpoiler parts={stepParts} streaming={streaming} />
+      <StepsSpoiler parts={thoughtParts} streaming={thoughtsStreaming || (streaming && mainParts.length === 0)} />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -474,6 +396,7 @@ export function ChatPage() {
   const activeSession = useAppStore((s) => s.activeSession);
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
+  const user = useAppStore((s) => s.user);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
   const cancelPrompt = useAppStore((s) => s.cancelPrompt);
@@ -484,6 +407,7 @@ export function ChatPage() {
   const ensureModels = useAppStore((s) => s.ensureModels);
   const rememberModelsCatalog = useAppStore((s) => s.rememberModelsCatalog);
   const [text, setText] = useState("");
+  const [composerMultiline, setComposerMultiline] = useState(false);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => settings.defaultModelParams ?? {},
   );
@@ -497,20 +421,65 @@ export function ChatPage() {
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
-  // Models follow the connected agent in Settings (not a stale session.provider).
-  const agentProvider = settings.defaultProvider;
+  const syncComposerSize = (el: HTMLTextAreaElement) => {
+    const value = el.value;
+    if (!value) {
+      el.style.height = "auto";
+      setComposerMultiline(false);
+      return;
+    }
 
-  const catalog = modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
+    const hasNewline = value.includes("\n");
+    const pill = el.parentElement;
+    const pillW = pill?.clientWidth ?? el.clientWidth;
+
+    el.style.height = "auto";
+
+    if (hasNewline) {
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+      setComposerMultiline(true);
+      return;
+    }
+
+    // Probe whether text still wraps if controls sit on the same row (~220px chrome).
+    const narrowW = Math.max(120, pillW - 220);
+    const prevWidth = el.style.width;
+    el.style.width = `${narrowW}px`;
+    const narrowH = el.scrollHeight;
+    el.style.width = prevWidth;
+
+    const needsMultiline = narrowH > 48;
+    setComposerMultiline(needsMultiline);
+
+    if (needsMultiline) {
+      // Height at full inner width (footer below).
+      el.style.width = `${Math.max(0, pillW - 20)}px`;
+      el.style.height = "auto";
+      const fullH = el.scrollHeight;
+      el.style.width = prevWidth;
+      el.style.height = `${Math.min(fullH, 160)}px`;
+    } else {
+      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    }
+  };
+
+  // Models / ACP only after the user explicitly connected an agent.
+  const agentProvider = user?.connectedProvider ?? null;
+  const agentMissing = !agentProvider;
+
+  const catalog =
+    agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
   const models = catalog?.models ?? [];
   const modelParams = catalog?.modelParams ?? [];
-  // Block typing only while we have nothing cached and a fetch is in flight.
-  const composerLocked = modelsLoading && models.length === 0;
+  // Block typing while agent missing, or while models are loading with empty list.
+  const composerLocked = agentMissing || (modelsLoading && models.length === 0);
 
   const recentCwds = useMemo(
     () => collectRecentCwds(sessions, settings.defaultCwd),
     [sessions, settings.defaultCwd],
   );
   useEffect(() => {
+    if (!agentProvider) return;
     const cached = useAppStore.getState().modelsCatalog;
     const needForce = !cached || cached.provider !== agentProvider;
     void ensureModels(agentProvider, { force: needForce });
@@ -566,6 +535,7 @@ export function ChatPage() {
     setModel(nextModel);
     setModelParamValues(supported);
     await saveSettings({ defaultModel: nextModel, defaultModelParams: supported });
+    if (!agentProvider) return modelParams;
     if (activeSession?.id) {
       try {
         const res = await api.setSessionModel(activeSession.id, nextModel, supported);
@@ -622,15 +592,22 @@ export function ChatPage() {
   const focusComposer = () => {
     const el = textareaRef.current;
     if (!el) return;
-    if (document.activeElement === el) return;
-    el.focus({ preventScroll: true });
-    const len = el.value.length;
-    try {
-      el.setSelectionRange(len, len);
-    } catch {
-      // ignore
+    if (document.activeElement !== el) {
+      el.focus({ preventScroll: true });
+      const len = el.value.length;
+      try {
+        el.setSelectionRange(len, len);
+      } catch {
+        // ignore
+      }
     }
+    syncComposerSize(el);
   };
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (el) syncComposerSize(el);
+  }, [composerMultiline, text]);
 
   useEffect(() => {
     keepComposerFocus.current = streaming || keepComposerFocus.current;
@@ -673,6 +650,11 @@ export function ChatPage() {
     if (!value) return;
     keepComposerFocus.current = true;
     setText("");
+    setComposerMultiline(false);
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+    }
     focusComposer();
     void sendPrompt(value).finally(() => {
       requestAnimationFrame(focusComposer);
@@ -697,22 +679,34 @@ export function ChatPage() {
               Харнесс для Cursor, OpenCode, OMP и PI. Рассуждение идёт одним блоком, ответ стримится в ленте.
             </p>
             <div className={styles.emptyActions}>
-              <button
-                type="button"
-                onClick={(e) => {
-                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                  setFolderPicker({ x: rect.left, y: rect.bottom + 8 });
-                }}
-              >
-                Начать чат
-              </button>
-              <Link
-                className={styles.secondary}
-                to="/settings"
-                style={{ display: "inline-flex", alignItems: "center" }}
-              >
-                Настроить агента
-              </Link>
+              {agentMissing ? (
+                <Link
+                  className={styles.secondary}
+                  to="/settings?section=agent&leaf=connect"
+                  style={{ display: "inline-flex", alignItems: "center" }}
+                >
+                  Подключить агента
+                </Link>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                      setFolderPicker({ x: rect.left, y: rect.bottom + 8 });
+                    }}
+                  >
+                    Начать чат
+                  </button>
+                  <Link
+                    className={styles.secondary}
+                    to="/settings"
+                    style={{ display: "inline-flex", alignItems: "center" }}
+                  >
+                    Настроить агента
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -760,7 +754,12 @@ export function ChatPage() {
 
       <form className={styles.composer} onSubmit={onSubmit}>
         <div className={styles.composerInner}>
-          {composerLocked && (
+          {agentMissing && (
+            <div className={styles.typingBar} aria-live="polite">
+              Сначала подключите агента в Настройках
+            </div>
+          )}
+          {composerLocked && !agentMissing && (
             <div className={styles.typingBar} aria-live="polite">
               <span className={styles.modelsLoaderSpin} aria-hidden />
               <span>Загрузка моделей…</span>
@@ -806,26 +805,10 @@ export function ChatPage() {
             </div>
           ) : null}
           <div
-            className={`${styles.pill} ${streaming ? styles.pillBusy : ""} ${
-              composerLocked ? styles.pillLoading : ""
-            }`}
+            className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
+              streaming ? styles.pillBusy : ""
+            } ${composerLocked ? styles.pillLoading : ""}`}
           >
-            <HoverTip
-              as="button"
-              className={styles.attachBtn}
-              aria-label="Прикрепление файлов пока не реализовано"
-              disabled={composerLocked}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 5v14M5 12h14"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </HoverTip>
-
             <textarea
               ref={textareaRef}
               className={styles.pillInput}
@@ -833,11 +816,15 @@ export function ChatPage() {
               onChange={(e) => {
                 if (composerLocked) return;
                 setText(e.target.value);
-                const el = e.currentTarget;
-                el.style.height = "auto";
-                el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+                syncComposerSize(e.currentTarget);
               }}
-              placeholder={composerLocked ? "Загрузка моделей…" : "Введите сообщение…"}
+              placeholder={
+                agentMissing
+                  ? "Подключите агента…"
+                  : composerLocked
+                    ? "Загрузка моделей…"
+                    : "Введите сообщение…"
+              }
               rows={1}
               disabled={composerLocked}
               readOnly={composerLocked}
@@ -854,59 +841,86 @@ export function ChatPage() {
               }}
             />
 
-            <ModelPicker
-              className={styles.composerModel}
-              model={model}
-              models={models}
-              params={stableParams}
-              paramValues={modelParamValues}
-              paramsLoading={paramsLoading}
-              loading={composerLocked}
-              disabled={composerLocked}
-              onOpen={() => {
-                const cached = useAppStore.getState().modelsCatalog;
-                const stale =
-                  !cached ||
-                  cached.provider !== agentProvider ||
-                  (cached.modelParams?.length ?? 0) === 0;
-                void ensureModels(agentProvider, { force: stale });
-              }}
-              onChange={(v) => void onModelChange(v)}
-              onParamsOpen={(v) => loadParamsForModel(v)}
-              onParamsChange={(next) => void onParamsChange(next)}
-            />
-
-            {streaming ? (
-              <button
-                type="button"
-                className={styles.stopBtn}
-                title="Остановить"
-                aria-label="Остановить"
-                onClick={() => void cancelPrompt()}
+            <div className={styles.pillFooter}>
+              <HoverTip
+                as="button"
+                className={styles.attachBtn}
+                aria-label="Прикрепление файлов пока не реализовано"
+                disabled={composerLocked}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                  <rect x="6" y="6" width="12" height="12" rx="2" />
-                </svg>
-              </button>
-            ) : (
-              <button
-                type="submit"
-                className={styles.sendBtn}
-                disabled={composerLocked || !text.trim()}
-                title={composerLocked ? "Загрузка моделей…" : "Отправить"}
-                aria-label="Отправить"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
-                    d="M12 19V5M12 5l-6 6M12 5l6 6"
+                    d="M12 5v14M5 12h14"
                     stroke="currentColor"
                     strokeWidth="2"
                     strokeLinecap="round"
-                    strokeLinejoin="round"
                   />
                 </svg>
-              </button>
-            )}
+              </HoverTip>
+
+              <div className={styles.pillFooterEnd}>
+                <ModelPicker
+                  className={styles.composerModel}
+                  model={model}
+                  models={models}
+                  params={stableParams}
+                  paramValues={modelParamValues}
+                  paramsLoading={paramsLoading}
+                  loading={composerLocked}
+                  disabled={composerLocked}
+                  onOpen={() => {
+                    if (!agentProvider) return;
+                    const cached = useAppStore.getState().modelsCatalog;
+                    const stale =
+                      !cached ||
+                      cached.provider !== agentProvider ||
+                      (cached.modelParams?.length ?? 0) === 0;
+                    void ensureModels(agentProvider, { force: stale });
+                  }}
+                  onChange={(v) => void onModelChange(v)}
+                  onParamsOpen={(v) => loadParamsForModel(v)}
+                  onParamsChange={(next) => void onParamsChange(next)}
+                />
+
+                {streaming ? (
+                  <button
+                    type="button"
+                    className={styles.stopBtn}
+                    title="Остановить"
+                    aria-label="Остановить"
+                    onClick={() => void cancelPrompt()}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className={styles.sendBtn}
+                    disabled={composerLocked || !text.trim()}
+                    title={
+                      agentMissing
+                        ? "Подключите агента"
+                        : composerLocked
+                          ? "Загрузка моделей…"
+                          : "Отправить"
+                    }
+                    aria-label="Отправить"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M12 19V5M12 5l-6 6M12 5l6 6"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </form>

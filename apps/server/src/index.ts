@@ -7,6 +7,7 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes.js";
 import { ensureSchema } from "./db/ensureSchema.js";
+import { ensureAdminUser } from "./services/auth.js";
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
@@ -17,6 +18,7 @@ const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
 
 async function main() {
   await ensureSchema();
+  await ensureAdminUser();
   const app = Fastify({ logger: true });
   await app.register(cors, { origin: corsOrigin, credentials: true });
   await app.register(cookie);

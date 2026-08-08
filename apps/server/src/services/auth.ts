@@ -1,12 +1,14 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { and, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, ne, sql } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { UserDto } from "@acprocess/shared";
+import type { AdminUserDto, AgentProvider, UserDto, UserRole } from "@acprocess/shared";
 import { db } from "../db/client.js";
 import { authSessions, users } from "../db/schema.js";
 
 export const AUTH_COOKIE = "acprocess.sid";
 const SESSION_DAYS = 30;
+const ADMIN_USERNAME = "admin";
+const ADMIN_PASSWORD = "sysdba";
 
 function hashToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -31,17 +33,71 @@ function verifyPassword(password: string, stored: string) {
   }
 }
 
+function asRole(value: string | null | undefined): UserRole {
+  return value === "admin" ? "admin" : "user";
+}
+
+function asProvider(value: string | null | undefined): AgentProvider | null {
+  if (
+    value === "cursor" ||
+    value === "opencode" ||
+    value === "omp" ||
+    value === "pi"
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function mapUser(row: typeof users.$inferSelect): UserDto {
   return {
     id: row.id,
     username: row.username,
     displayName: row.displayName || row.username,
+    role: asRole(row.role),
+    connectedProvider: asProvider(row.connectedProvider),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapAdminUser(row: typeof users.$inferSelect): AdminUserDto {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.displayName || row.username,
+    role: asRole(row.role),
+    connectedProvider: asProvider(row.connectedProvider),
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 function normalizeUsername(username: string) {
   return username.trim();
+}
+
+/** Seed default admin (admin / sysdba) once. */
+export async function ensureAdminUser() {
+  const rows = await db
+    .select()
+    .from(users)
+    .where(eq(users.username, ADMIN_USERNAME))
+    .limit(1);
+  if (rows[0]) {
+    if (asRole(rows[0].role) !== "admin") {
+      await db
+        .update(users)
+        .set({ role: "admin", updatedAt: new Date() })
+        .where(eq(users.id, rows[0].id));
+    }
+    return;
+  }
+  await db.insert(users).values({
+    username: ADMIN_USERNAME,
+    displayName: "Admin",
+    passwordHash: hashPassword(ADMIN_PASSWORD),
+    role: "admin",
+  });
+  console.log(`Seeded admin user "${ADMIN_USERNAME}"`);
 }
 
 export async function registerUser(usernameRaw: string, password: string) {
@@ -64,6 +120,7 @@ export async function registerUser(usernameRaw: string, password: string) {
       username,
       displayName: username,
       passwordHash: hashPassword(password),
+      role: "user",
     })
     .returning();
   return mapUser(rows[0]);
@@ -162,10 +219,57 @@ export async function updateProfile(userId: string, displayNameRaw: string) {
   return mapUser(rows[0]);
 }
 
+export async function setUserConnectedProvider(
+  userId: string,
+  provider: AgentProvider | null,
+) {
+  await db
+    .update(users)
+    .set({ connectedProvider: provider, updatedAt: new Date() })
+    .where(eq(users.id, userId));
+}
+
+export async function listAdminUsers(): Promise<AdminUserDto[]> {
+  const rows = await db.select().from(users).orderBy(asc(users.createdAt));
+  return rows.map(mapAdminUser);
+}
+
+export async function deleteUser(targetId: string, actorId: string) {
+  if (targetId === actorId) {
+    throw Object.assign(new Error("Нельзя удалить свой аккаунт"), { statusCode: 400 });
+  }
+  const rows = await db.select().from(users).where(eq(users.id, targetId)).limit(1);
+  const target = rows[0];
+  if (!target) {
+    throw Object.assign(new Error("Пользователь не найден"), { statusCode: 404 });
+  }
+  if (asRole(target.role) === "admin") {
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(users)
+      .where(and(eq(users.role, "admin"), ne(users.id, targetId)));
+    if (!count) {
+      throw Object.assign(new Error("Нельзя удалить последнего админа"), { statusCode: 400 });
+    }
+  }
+  await db.delete(users).where(eq(users.id, targetId));
+  return { ok: true as const };
+}
+
 export async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   const user = await getRequestUser(req);
   if (!user) {
     reply.code(401).send({ error: "Unauthorized" });
+    return null;
+  }
+  return user;
+}
+
+export async function requireAdmin(req: FastifyRequest, reply: FastifyReply) {
+  const user = await requireUser(req, reply);
+  if (!user) return null;
+  if (user.role !== "admin") {
+    reply.code(403).send({ error: "Forbidden" });
     return null;
   }
   return user;

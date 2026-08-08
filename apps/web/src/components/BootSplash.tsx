@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import styles from "./BootSplash.module.css";
 
 const BRAND = "ACProcess";
 const MIN_MS = 2600;
-const EXIT_MS = 480;
+const EXIT_MS = 320;
 
 type BootSplashProps = {
   /** When true, splash may begin exit (bootstrap finished). */
@@ -13,8 +13,20 @@ type BootSplashProps = {
 
 export function BootSplash({ ready, onDone }: BootSplashProps) {
   const [minElapsed, setMinElapsed] = useState(false);
+  const [skipping, setSkipping] = useState(false);
   const [exiting, setExiting] = useState(false);
   const finishedRef = useRef(false);
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+
+  const beginExit = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    setExiting(true);
+    window.setTimeout(() => {
+      onDone();
+    }, EXIT_MS);
+  }, [onDone]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setMinElapsed(true), MIN_MS);
@@ -22,26 +34,38 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
   }, []);
 
   useEffect(() => {
-    if (!ready || !minElapsed || finishedRef.current) return;
-    finishedRef.current = true;
-    setExiting(true);
-    const t = window.setTimeout(() => {
-      onDone();
-    }, EXIT_MS);
-    // Do not clear this timeout on Strict Mode cleanup — otherwise onDone never runs
-    // and the faded splash stays mounted over an empty tree (black screen).
-    return () => {
-      // keep timer; finishedRef prevents double schedule
-      void t;
-    };
-  }, [ready, minElapsed, onDone]);
+    if (!ready || !minElapsed) return;
+    beginExit();
+  }, [ready, minElapsed, beginExit]);
+
+  const onSkip = () => {
+    if (finishedRef.current || exiting) return;
+    setSkipping(true);
+    setMinElapsed(true);
+    if (readyRef.current) beginExit();
+  };
 
   return (
     <div
-      className={`${styles.splash}${exiting ? ` ${styles.exiting}` : ""}`}
+      className={[
+        styles.splash,
+        skipping ? styles.skipping : "",
+        exiting ? styles.exiting : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       role="status"
       aria-live="polite"
       aria-label="Loading ACProcess"
+      title="Нажмите, чтобы пропустить"
+      onClick={onSkip}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
+          e.preventDefault();
+          onSkip();
+        }
+      }}
+      tabIndex={0}
     >
       <div className={styles.glowA} aria-hidden />
       <div className={styles.glowB} aria-hidden />
@@ -64,6 +88,7 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
         </div>
 
         <p className={styles.sub}>Harness for agents</p>
+        <p className={styles.hint}>Нажмите, чтобы продолжить</p>
       </div>
     </div>
   );

@@ -173,7 +173,7 @@
 
 .thoughtBody {
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.55;
   max-height: none;
   margin: 0;
   background: transparent;
@@ -193,34 +193,6 @@
   font-size: 0.72rem;
   color: var(--text-secondary);
   opacity: 0.85;
-}
-
-.thoughtChain {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-  min-width: 0;
-}
-
-.thoughtStep {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
-  align-items: start;
-  min-width: 0;
-}
-
-.thoughtStepIndex {
-  width: 18px;
-  height: 18px;
-  margin-top: 2px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
 }
 
 .pulseDot {
@@ -619,7 +591,8 @@
 
 .pill {
   display: flex;
-  align-items: flex-end;
+  flex-direction: row;
+  align-items: center;
   gap: 8px;
   padding: 8px 8px 8px 10px;
   border-radius: 28px;
@@ -627,7 +600,7 @@
   border: 1px solid color-mix(in srgb, var(--border) 70%, var(--accent) 30%);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
-  transition: border-color var(--motion), box-shadow var(--motion);
+  transition: border-color var(--motion), box-shadow var(--motion), border-radius var(--motion);
   overflow: visible;
 }
 
@@ -652,6 +625,35 @@
   cursor: wait;
 }
 
+.pillInput {
+  flex: 1 1 auto;
+  order: 2;
+  min-width: 0;
+  resize: none;
+  border: none;
+  background: transparent;
+  outline: none;
+  padding: 10px 4px;
+  min-height: 40px;
+  max-height: 160px;
+  line-height: 1.45;
+  box-shadow: none;
+}
+
+.pillInput:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Single-line: footer children join the pill row (attach | text | model | send) */
+.pillFooter {
+  display: contents;
+}
+
+.pillFooterEnd {
+  display: contents;
+}
+
 .attachBtn,
 .sendBtn,
 .stopBtn {
@@ -667,7 +669,17 @@
 }
 
 .attachBtn {
-  /* cursor via HoverTip */
+  order: 1;
+}
+
+.composerModel {
+  order: 3;
+  align-self: center;
+}
+
+.sendBtn,
+.stopBtn {
+  order: 4;
 }
 
 .attachBtn:hover,
@@ -692,50 +704,55 @@
   color: var(--danger);
 }
 
-.pillInput {
-  flex: 1 1 auto;
-  min-width: 0;
-  resize: none;
-  border: none;
-  background: transparent;
-  outline: none;
-  padding: 10px 4px;
-  min-height: 40px;
-  max-height: 140px;
-  line-height: 1.45;
-  box-shadow: none;
+/* Multiline: text full width, controls in an inner footer */
+.pillMultiline {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 10px 10px 8px;
+  border-radius: 22px;
 }
 
-.pillInput:focus {
-  outline: none;
-  box-shadow: none;
+.pillMultiline .pillInput {
+  order: 0;
+  width: 100%;
+  flex: 1 1 auto;
+  padding: 4px 6px 8px;
+  min-height: 48px;
+}
+
+.pillMultiline .pillFooter {
+  display: flex;
+  order: 1;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.pillMultiline .attachBtn {
+  order: unset;
+}
+
+.pillMultiline .pillFooterEnd {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.pillMultiline .composerModel,
+.pillMultiline .sendBtn,
+.pillMultiline .stopBtn {
+  order: unset;
+  align-self: center;
+  margin-bottom: 0;
 }
 
 @media (max-width: 700px) {
   .pill {
-    flex-wrap: wrap;
     border-radius: 22px;
-    padding: 10px;
-  }
-
-  .pillInput {
-    order: 1;
-    flex: 1 1 100%;
-    padding: 4px 6px 8px;
-  }
-
-  .attachBtn {
-    order: 2;
-  }
-
-  .composerModel {
-    order: 3;
-    margin-left: auto;
-  }
-
-  .sendBtn,
-  .stopBtn {
-    order: 4;
   }
 }
 

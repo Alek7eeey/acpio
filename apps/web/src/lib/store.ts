@@ -180,8 +180,13 @@ async function loadAppData(
   get().applyTheme(theme);
   const [sessions, themes] = await Promise.all([api.listSessions(), api.listThemes()]);
   set({ settings: { ...settings, theme }, sessions, themes });
-  // Warm models from disk / refresh quietly — don't block bootstrap.
-  void get().ensureModels(settings.defaultProvider);
+  // Models only after the user explicitly connected an agent.
+  const provider = get().user?.connectedProvider;
+  if (provider) {
+    void get().ensureModels(provider);
+  } else {
+    set({ modelsCatalog: null, modelsLoading: false });
+  }
   if (sessions[0]) {
     await get().selectSession(sessions[0].id);
   } else {
@@ -595,10 +600,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     const settings = await api.updateSettings(nextPatch);
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
     set({ settings });
-    if (providerChanged) {
+    if (nextPatch.defaultProvider) {
+      // Refresh connectedProvider on the current user for admin / UI badges.
+      try {
+        const { user } = await api.me();
+        if (user) set({ user });
+      } catch {
+        /* ignore */
+      }
+      void get().ensureModels(nextPatch.defaultProvider, { force: true });
+      const activeId = get().activeSessionId;
+      if (activeId) void get().selectSession(activeId);
+    } else if (providerChanged) {
       void get().ensureModels(settings.defaultProvider, { force: true });
       const activeId = get().activeSessionId;
-      // Re-open chat so server syncs session.provider → new agent and refreshes models.
       if (activeId) void get().selectSession(activeId);
     }
   },

@@ -1,4 +1,5 @@
 import type {
+  AdminUserDto,
   AgentProbeResult,
   AgentProvider,
   AppSettings,
@@ -57,6 +58,9 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ displayName }),
     }),
+  adminListUsers: () => request<AdminUserDto[]>("/api/admin/users"),
+  adminDeleteUser: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   getSettings: () => request<AppSettings>("/api/settings"),
   updateSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {

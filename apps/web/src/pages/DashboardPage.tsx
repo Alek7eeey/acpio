@@ -36,13 +36,26 @@ const modules = [
 
 export function DashboardPage() {
   const settings = useAppStore((s) => s.settings);
+  const user = useAppStore((s) => s.user);
   const sessions = useAppStore((s) => s.sessions);
   const connected = useAppStore((s) => s.connected);
 
-  const provider = settings.defaultProvider;
-  const model = settings.defaultModel
-    ? modelDisplayName(settings.defaultModel)
-    : "не выбрана";
+  const provider = user?.connectedProvider;
+  const providerLabel = !provider
+    ? "не подключён"
+    : provider === "cursor"
+      ? "Cursor"
+      : provider === "opencode"
+        ? "OpenCode"
+        : provider === "omp"
+          ? "OMP"
+          : provider === "pi"
+            ? "PI"
+            : provider;
+  const model =
+    provider && settings.defaultModel
+      ? modelDisplayName(settings.defaultModel)
+      : "—";
 
   return (
     <div className={styles.page}>
@@ -59,7 +72,7 @@ export function DashboardPage() {
         <div className={styles.stats}>
           <div className={styles.stat}>
             <span className={styles.statLabel}>Агент</span>
-            <strong>{provider}</strong>
+            <strong className={!provider ? styles.bad : undefined}>{providerLabel}</strong>
           </div>
           <div className={styles.stat}>
             <span className={styles.statLabel}>Модель</span>

@@ -43,6 +43,14 @@ export async function ensureSchema() {
     ALTER TABLE users
     ADD COLUMN IF NOT EXISTS display_name text NOT NULL DEFAULT ''
   `);
+  await db.execute(sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user'
+  `);
+  await db.execute(sql`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS connected_provider text
+  `);
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS auth_sessions (

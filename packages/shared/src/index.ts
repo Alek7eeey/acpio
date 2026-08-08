@@ -1,11 +1,25 @@
+export type UserRole = "user" | "admin";
+export type AgentProvider = "cursor" | "opencode" | "omp" | "pi";
+
 export interface UserDto {
   id: string;
   username: string;
   displayName: string;
+  role: UserRole;
+  /** Last agent the user connected in Settings, if any. */
+  connectedProvider: AgentProvider | null;
   createdAt: string;
 }
 
-export type AgentProvider = "cursor" | "opencode" | "omp" | "pi";
+export interface AdminUserDto {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  connectedProvider: AgentProvider | null;
+  createdAt: string;
+}
+
 export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
 export type PermissionPolicy = "prompt" | "allowlist" | "always";

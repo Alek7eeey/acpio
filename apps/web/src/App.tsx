@@ -8,6 +8,7 @@ import { AuthPage } from "./pages/AuthPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AdminPage } from "./pages/AdminPage";
 import { GiteaPage } from "./pages/GiteaPage";
 
 export function App() {
@@ -36,6 +37,7 @@ export function App() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="gitea" element={<GiteaPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="admin" element={<AdminPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

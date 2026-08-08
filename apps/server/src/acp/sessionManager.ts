@@ -640,12 +640,16 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.toolsHintSent = false;
 }
 
-/** Align chat row + ACP with the currently connected agent in settings. */
-export async function syncSessionAgent(sessionId: string) {
+/** Align chat row + ACP with the user's connected agent (if any). */
+export async function syncSessionAgent(
+  sessionId: string,
+  preferredProvider?: AgentProvider | null,
+) {
   const detail = await getSessionDetail(sessionId);
   if (!detail) return null;
   const settings = await getSettings();
-  const provider = settings.defaultProvider;
+  const provider = preferredProvider ?? settings.defaultProvider;
+  if (!preferredProvider) return detail;
   if (detail.provider === provider) return detail;
 
   const rt = runtimes.get(sessionId);

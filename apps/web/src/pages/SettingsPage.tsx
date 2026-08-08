@@ -49,8 +49,8 @@ export function SettingsPage() {
     [location.search],
   );
   const settings = useAppStore((s) => s.settings);
-  const saveSettings = useAppStore((s) => s.saveSettings);
   const user = useAppStore((s) => s.user);
+  const saveSettings = useAppStore((s) => s.saveSettings);
   const updateProfile = useAppStore((s) => s.updateProfile);
   const changePassword = useAppStore((s) => s.changePassword);
   const [form, setForm] = useState<AppSettings>(settings);
@@ -102,8 +102,14 @@ export function SettingsPage() {
         defaultModelParams: migrateModelParamValues(form.defaultModelParams ?? {}, modelParams),
       };
       setForm(next);
-      await saveSettings(next);
-      const catalog = await ensureModels(form.defaultProvider, { force: true });
+      await saveSettings({
+        defaultModel: next.defaultModel,
+        defaultModelParams: next.defaultModelParams,
+      });
+      const catalog = await ensureModels(
+        user?.connectedProvider ?? form.defaultProvider,
+        { force: true },
+      );
       const fresh = catalog?.modelParams ?? [];
       setModels(catalog?.models ?? models);
       setModelParams(fresh);
@@ -153,18 +159,22 @@ export function SettingsPage() {
       const result = await api.probeAgent(provider);
       setProbes((prev) => ({ ...prev, [provider]: result }));
       if (result.ok && result.currentModel && form.defaultProvider === provider && !form.defaultModel) {
-        const next = {
-          ...form,
-          defaultModel: result.currentModel,
-          defaultModelParams: Object.fromEntries(
-            (result.modelParams ?? [])
-              .filter((p) => p.currentValue != null && p.currentValue !== "")
-              .map((p) => [p.id, p.currentValue!]),
-          ),
-        };
-        setForm(next);
+        const defaultModelParams = Object.fromEntries(
+          (result.modelParams ?? [])
+            .filter((p) => p.currentValue != null && p.currentValue !== "")
+            .map((p) => [p.id, p.currentValue!]),
+        );
+        setForm((prev) => ({
+          ...prev,
+          defaultModel: result.currentModel!,
+          defaultModelParams,
+        }));
         setModelParams(result.modelParams ?? []);
-        await saveSettings(next);
+        // Do not send defaultProvider — that would auto-connect the agent.
+        await saveSettings({
+          defaultModel: result.currentModel,
+          defaultModelParams,
+        });
       } else if (result.modelParams) {
         setModelParams(result.modelParams);
       }
@@ -188,10 +198,18 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (section !== "agent" || leaf !== "model") return;
+    const provider = user?.connectedProvider;
+    if (!provider) {
+      setModels([]);
+      setModelParams([]);
+      setModelsLoading(false);
+      setModelsError(null);
+      return;
+    }
     let cancelled = false;
     setModelsLoading(true);
     setModelsError(null);
-    void ensureModels(form.defaultProvider, { force: true })
+    void ensureModels(provider, { force: true })
       .then((catalog) => {
         if (cancelled || !catalog) return;
         setModels(catalog.models ?? []);
@@ -228,12 +246,14 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [section, leaf, form.defaultProvider, ensureModels]);
+  }, [section, leaf, user?.connectedProvider, ensureModels]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (section === "account") return;
-    await saveSettings(form);
+    // Never send defaultProvider from the form submit — only «Подключить» binds an agent.
+    const { defaultProvider: _provider, ...rest } = form;
+    await saveSettings(rest);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
   };
@@ -284,7 +304,8 @@ export function SettingsPage() {
   ) => {
     const next = { ...form, [key]: "" };
     setForm(next);
-    await saveSettings(next);
+    const { defaultProvider: _provider, ...rest } = next;
+    await saveSettings(rest);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
   };
@@ -321,10 +342,11 @@ export function SettingsPage() {
         {section === "agent" && leaf === "connect" && (
           <section className={styles.providerList}>
             <p className={styles.hint}>
-              Используются локальные настройки CLI. Ключи не нужны, если агент уже авторизован.
+              Агент не подключён, пока вы не нажмёте «Подключить». Проверка только тестирует CLI.
             </p>
             {PROVIDERS.map((item) => {
-              const active = form.defaultProvider === item.id;
+              // Per-user connection (admin column), not the shared global defaultProvider.
+              const active = user?.connectedProvider === item.id;
               const probe = probes[item.id];
               const probing = probingId === item.id;
               const connecting = connectingId === item.id;
@@ -382,6 +404,12 @@ export function SettingsPage() {
 
         {section === "agent" && leaf === "model" && (
           <section className={styles.card}>
+            {!user?.connectedProvider ? (
+              <p className={styles.hint}>
+                Сначала подключите агента на вкладке «Подключение агента».
+              </p>
+            ) : (
+              <>
             <div className={styles.modelField}>
               <span className={styles.modelLabel}>Модель по умолчанию</span>
               <ModelPicker
@@ -401,7 +429,9 @@ export function SettingsPage() {
                 }
                 onParamsOpen={(value) => loadParamsForModel(value)}
                 onOpen={() => {
-                  void ensureModels(form.defaultProvider, {
+                  const provider = user.connectedProvider;
+                  if (!provider) return;
+                  void ensureModels(provider, {
                     force: modelParams.length === 0,
                   }).then((catalog) => {
                     if (!catalog) return;
@@ -418,11 +448,13 @@ export function SettingsPage() {
                 <p className={styles.hint}>Не удалось обновить список: {modelsError}</p>
               )}
             </div>
-            {modelParams.length === 0 && !modelsLoading && form.defaultProvider === "cursor" && (
+            {modelParams.length === 0 && !modelsLoading && user.connectedProvider === "cursor" && (
               <p className={styles.hint}>
                 Если нет выбора Fast / Effort — нажми «Проверить» у Cursor на вкладке Подключение
                 (нужен рестарт ACP-сессии).
               </p>
+            )}
+              </>
             )}
           </section>
         )}

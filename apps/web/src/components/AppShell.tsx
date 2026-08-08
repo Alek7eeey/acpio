@@ -36,23 +36,27 @@ export function AppShell() {
   const setTheme = useAppStore((s) => s.setTheme);
   const connected = useAppStore((s) => s.connected);
   const settings = useAppStore((s) => s.settings);
+  const user = useAppStore((s) => s.user);
   const agentStatusTitle = useMemo(() => {
-    const agent =
-      settings.defaultProvider === "cursor"
+    const provider = user?.connectedProvider;
+    const agent = !provider
+      ? "No agent"
+      : provider === "cursor"
         ? "Cursor"
-        : settings.defaultProvider === "opencode"
+        : provider === "opencode"
           ? "OpenCode"
-          : settings.defaultProvider === "omp"
+          : provider === "omp"
             ? "OMP"
-            : settings.defaultProvider === "pi"
+            : provider === "pi"
               ? "PI"
-              : settings.defaultProvider;
+              : provider;
     return `${agent} · ${connected ? "online" : "offline"}`;
-  }, [settings.defaultProvider, connected]);
+  }, [user?.connectedProvider, connected]);
 
   const isChat = location.pathname.startsWith("/chat");
   const isGitea = location.pathname.startsWith("/gitea");
   const isSettings = location.pathname.startsWith("/settings");
+  const isAdmin = location.pathname.startsWith("/admin");
   const showSidebar = isChat || isGitea || isSettings;
 
   const settingsNav = useMemo(
@@ -116,7 +120,6 @@ export function AppShell() {
     };
   }, [dragging, sidebarOpen, setSidebarOpen]);
 
-  const user = useAppStore((s) => s.user);
   const logout = useAppStore((s) => s.logout);
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
@@ -402,7 +405,7 @@ export function AppShell() {
             <div className={styles.accountWrap} ref={accountRef}>
               <button
                 type="button"
-                className={`${styles.accountBtn} ${accountOpen || isSettings ? styles.headerIconActive : ""}`}
+                className={`${styles.accountBtn} ${accountOpen || isSettings || isAdmin ? styles.headerIconActive : ""}`}
                 aria-label="Аккаунт"
                 aria-expanded={accountOpen}
                 aria-haspopup="menu"
@@ -435,6 +438,19 @@ export function AppShell() {
                   >
                     Настройки
                   </button>
+                  {user?.role === "admin" && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.accountMenuItem}
+                      onClick={() => {
+                        setAccountOpen(false);
+                        navigate("/admin");
+                      }}
+                    >
+                      Админка
+                    </button>
+                  )}
                   <button
                     type="button"
                     role="menuitem"

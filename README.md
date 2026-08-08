@@ -68,6 +68,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\setup-gitea.ps1
 
 Если чат «завис» — нажмите **Стоп** и отправьте снова.
 
+## Админка
+
+Логин `admin` / пароль `sysdba` (создаётся при старте сервера).  
+Меню аккаунта → **Админка**: список пользователей, подключённый агент, удаление.
+
 ## Архитектура
 
 Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `opencode acp` / `omp acp` / `pi-acp` (JSON-RPC NDJSON) ↔ Postgres.

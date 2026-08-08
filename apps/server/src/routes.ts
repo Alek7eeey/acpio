@@ -43,12 +43,16 @@ import {
   changePassword,
   clearAuthCookie,
   createSession as createAuthSession,
+  deleteUser,
   destroySession,
   getRequestUser,
+  listAdminUsers,
   loginUser,
   registerUser,
+  requireAdmin,
   requireUser,
   setAuthCookie,
+  setUserConnectedProvider,
   updateProfile,
 } from "./services/auth.js";
 
@@ -196,10 +200,13 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post("/api/agent/probe", async (req) => {
+  app.post("/api/agent/probe", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
     const body = z
       .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
       .parse(req.body ?? {});
+    // Probe does NOT mark the agent as connected — user must click Connect.
     return probeAgent(body.provider);
   });
 
@@ -217,13 +224,37 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/settings", async () => getSettings());
-  app.put("/api/settings", async (req) => {
+  app.put("/api/settings", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
     const patch = settingsSchema.parse(req.body);
     const current = await getSettings();
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
     }
-    return updateSettings(patch);
+    const updated = await updateSettings(patch);
+    // Only an explicit Connect (defaultProvider in patch) binds the agent to this user.
+    if (patch.defaultProvider) {
+      await setUserConnectedProvider(user.id, patch.defaultProvider);
+    }
+    return updated;
+  });
+
+  app.get("/api/admin/users", async (req, reply) => {
+    const admin = await requireAdmin(req, reply);
+    if (!admin) return;
+    return listAdminUsers();
+  });
+
+  app.delete("/api/admin/users/:id", async (req, reply) => {
+    const admin = await requireAdmin(req, reply);
+    if (!admin) return;
+    const { id } = req.params as { id: string };
+    try {
+      return await deleteUser(id, admin.id);
+    } catch (err) {
+      return sendAuthError(reply, err);
+    }
   });
 
   app.get("/api/sessions", async () => listSessions());
@@ -264,7 +295,14 @@ export async function registerRoutes(app: FastifyInstance) {
     return updated;
   });
 
-  app.post("/api/sessions", async (req) => {
+  app.post("/api/sessions", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!user.connectedProvider) {
+      return reply
+        .code(400)
+        .send({ error: "Сначала подключите агента в Настройках" });
+    }
     const body = z
       .object({
         title: z.string().optional(),
@@ -276,9 +314,10 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body ?? {});
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
+    const provider = body.provider ?? user.connectedProvider;
     const session = await createSession({
       title: body.title,
-      provider: body.provider ?? settings.defaultProvider,
+      provider,
       cwd,
       mode: body.mode ?? settings.defaultMode,
       themeId: body.themeId,
@@ -324,14 +363,18 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/sessions/:id", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
     const { id } = req.params as { id: string };
-    const detail = await syncSessionAgent(id);
+    const detail = await syncSessionAgent(id, user.connectedProvider);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    void warmAcp(id, {
-      provider: detail.provider,
-      cwd: detail.cwd,
-      mode: detail.mode,
-    });
+    if (user.connectedProvider) {
+      void warmAcp(id, {
+        provider: detail.provider,
+        cwd: detail.cwd,
+        mode: detail.mode,
+      });
+    }
     return detail;
   });
 
@@ -344,9 +387,16 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
     const { id } = req.params as { id: string };
     const body = z.object({ text: z.string().min(1) }).parse(req.body);
-    const detail = await syncSessionAgent(id);
+    if (!user.connectedProvider) {
+      return reply
+        .code(400)
+        .send({ error: "Сначала подключите агента в Настройках" });
+    }
+    const detail = await syncSessionAgent(id, user.connectedProvider);
     if (!detail) return reply.code(404).send({ error: "Not found" });
 
     void runPrompt(id, body.text, {
@@ -368,6 +418,13 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions/:id/model", async (req, reply) => {
+    const user = await requireUser(req, reply);
+    if (!user) return;
+    if (!user.connectedProvider) {
+      return reply
+        .code(400)
+        .send({ error: "Сначала подключите агента в Настройках" });
+    }
     const { id } = req.params as { id: string };
     const body = z
       .object({
@@ -377,6 +434,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
+    await syncSessionAgent(id, user.connectedProvider);
     return setSessionModel(id, body.model, body.params);
   });
 
