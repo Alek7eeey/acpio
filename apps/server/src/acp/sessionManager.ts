@@ -27,6 +27,66 @@ import {
   type ConfigOption,
 } from "./AcpClient.js";
 
+function isSubagentTool(title: string, kind: string) {
+  return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
+    `${title} ${kind}`,
+  );
+}
+
+function textFromUnknown(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    ) {
+      try {
+        return textFromUnknown(JSON.parse(trimmed));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => textFromUnknown(item))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.prompt === "string") return obj.prompt;
+    if (typeof obj.output === "string") return obj.output;
+    if (obj.content !== undefined) return textFromUnknown(obj.content);
+    if (obj.result !== undefined) return textFromUnknown(obj.result);
+  }
+  return "";
+}
+
+function subagentFieldsFromRaw(raw: Record<string, unknown>) {
+  const prompt =
+    textFromUnknown(raw.prompt) ||
+    textFromUnknown((raw.rawInput as Record<string, unknown> | undefined)?.prompt) ||
+    textFromUnknown((raw.arguments as Record<string, unknown> | undefined)?.prompt) ||
+    textFromUnknown((raw.input as Record<string, unknown> | undefined)?.prompt);
+  const result = textFromUnknown(raw.result) || textFromUnknown(raw.content);
+  const titled = String(raw.title ?? raw.description ?? raw.name ?? raw.label ?? "").trim();
+  const fromBody =
+    result.match(/^###\s+([^\n\[]+?)(?:\s*\[|$)/m)?.[1]?.trim() ||
+    result.match(/^\s*Label:\s*(.+)$/m)?.[1]?.trim() ||
+    result.match(/<task-result\b[^>]*\bid="([^"]+)"/i)?.[1]?.trim() ||
+    "";
+  const niceTitle = [titled, fromBody].find((v) => v && !/^(tool|task|subagent|субагент)$/i.test(v));
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(result ? { result } : {}),
+    ...(niceTitle ? { title: niceTitle, description: niceTitle } : {}),
+  };
+}
+
 function toModelParams(options: ConfigOption[]): ModelParamDto[] {
   const params = listModelParamOptions(options).map((o) => ({
     id: o.id,
@@ -282,8 +342,9 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     rt.openTextPartId = null; // next text starts a new segment after tool
     const title = update.title ?? "Tool";
     const kind = String((update.raw.kind as string) ?? "");
-    const isSubagent = /task|subagent|explore|browser|generalPurpose/i.test(`${title} ${kind}`);
-    const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
+    const isSubagent = isSubagentTool(title, kind);
+    const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
+    const payload: Record<string, unknown> = {
       toolCallId: update.toolCallId,
       title,
       description: title,
@@ -291,7 +352,29 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       status: update.status ?? "pending",
       kind,
       raw: update.raw,
-    });
+      ...extra,
+    };
+
+    const existingId = update.toolCallId ? rt.toolPartByCallId.get(update.toolCallId) : undefined;
+    if (existingId) {
+      // cursor/task may have arrived first — enrich that one card without clobbering its title.
+      const { title: _title, description: _description, ...rest } = payload;
+      const named = title && !/^tool$/i.test(title) ? { title, description: title } : {};
+      await updatePart(
+        rt.sessionId,
+        existingId,
+        { ...rest, ...named },
+        isSubagent ? "subagent" : undefined,
+      );
+      return;
+    }
+
+    const part = await appendPart(
+      rt.sessionId,
+      messageId,
+      isSubagent ? "subagent" : "tool_call",
+      payload,
+    );
     if (update.toolCallId) rt.toolPartByCallId.set(update.toolCallId, part.id);
     return;
   }
@@ -301,9 +384,10 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const partId = rt.toolPartByCallId.get(update.toolCallId);
     const title = (update.raw.title as string) ?? "Tool";
     const status = update.status ?? "in_progress";
+    const kind = String((update.raw.kind as string) ?? "");
+    const isSubagent = isSubagentTool(title, kind);
+    const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
     if (!partId) {
-      const kind = String((update.raw.kind as string) ?? "");
-      const isSubagent = /task|subagent|explore|browser|generalPurpose/i.test(`${title} ${kind}`);
       const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
         toolCallId: update.toolCallId,
         title,
@@ -312,17 +396,25 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         status,
         kind,
         raw: update.raw,
+        ...extra,
       });
       rt.toolPartByCallId.set(update.toolCallId, part.id);
       return;
     }
-    await updatePart(rt.sessionId, partId, {
-      toolCallId: update.toolCallId,
-      title,
-      description: title,
-      status,
-      raw: update.raw,
-    });
+    const named = title && !/^tool$/i.test(title) ? { title, description: title } : {};
+    await updatePart(
+      rt.sessionId,
+      partId,
+      {
+        toolCallId: update.toolCallId,
+        status,
+        kind,
+        raw: update.raw,
+        ...extra,
+        ...named,
+      },
+      isSubagent ? "subagent" : undefined,
+    );
     return;
   }
 
@@ -431,7 +523,39 @@ async function handleExtension(
     return;
   }
   if (method === "cursor/task") {
-    await appendPart(rt.sessionId, messageId, "subagent", params);
+    const toolCallId = String(
+      params.tool_call_id ?? params.toolCallId ?? params.toolCallID ?? "",
+    );
+    const title = String(
+      params.title ?? params.description ?? params.name ?? params.subtitle ?? "",
+    ).trim();
+    const status = String(params.status ?? "").trim();
+    const subagentType = String(
+      params.subagent_type ?? params.subagentType ?? params.kind ?? params.type ?? "",
+    ).trim();
+    const extra = subagentFieldsFromRaw(params);
+    const payload: Record<string, unknown> = {
+      ...(toolCallId ? { toolCallId } : {}),
+      ...(title ? { title, description: title } : {}),
+      ...(status ? { status } : {}),
+      ...(subagentType ? { subagentType } : {}),
+      raw: params,
+      ...extra,
+    };
+
+    // Same Task arrives as ACP tool_call + cursor/task — keep one card.
+    const existingId = toolCallId ? rt.toolPartByCallId.get(toolCallId) : undefined;
+    if (existingId) {
+      await updatePart(rt.sessionId, existingId, payload, "subagent");
+      return;
+    }
+
+    const part = await appendPart(rt.sessionId, messageId, "subagent", {
+      title: title || "Субагент",
+      description: title || "Субагент",
+      ...payload,
+    });
+    if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
     return;
   }
   if (method === "cursor/generate_image") {

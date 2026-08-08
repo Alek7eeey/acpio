@@ -136,18 +136,25 @@
 
 .copyBtn {
   flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
   border: 1px solid var(--border);
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-secondary);
   border-radius: 8px;
-  padding: 4px 9px;
-  font-size: 0.72rem;
-  font-weight: 650;
-  line-height: 1.2;
+  padding: 0;
+  line-height: 0;
 }
 
 .copyBtn:hover {
   background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.copyBtn svg {
+  display: block;
 }
 
 .codePre {
@@ -168,4 +175,69 @@
   border: none;
   padding: 0;
   color: inherit;
+  display: block;
+  min-width: max-content;
+}
+
+/* Syntax highlighting — soft tokens for light/dark */
+.codePre :global(.hljs-comment),
+.codePre :global(.hljs-quote) {
+  color: color-mix(in srgb, var(--text-secondary) 88%, var(--accent));
+  font-style: italic;
+}
+
+.codePre :global(.hljs-keyword),
+.codePre :global(.hljs-selector-tag),
+.codePre :global(.hljs-addition) {
+  color: color-mix(in srgb, var(--accent) 72%, #7c3aed);
+}
+
+.codePre :global(.hljs-number),
+.codePre :global(.hljs-literal),
+.codePre :global(.hljs-variable),
+.codePre :global(.hljs-template-variable),
+.codePre :global(.hljs-tag .hljs-attr) {
+  color: color-mix(in srgb, #c2410c 55%, var(--accent));
+}
+
+.codePre :global(.hljs-string),
+.codePre :global(.hljs-doctag),
+.codePre :global(.hljs-regexp) {
+  color: color-mix(in srgb, #15803d 70%, var(--success));
+}
+
+.codePre :global(.hljs-title),
+.codePre :global(.hljs-section),
+.codePre :global(.hljs-selector-id) {
+  color: color-mix(in srgb, var(--accent) 55%, #0891b2);
+  font-weight: 650;
+}
+
+.codePre :global(.hljs-type),
+.codePre :global(.hljs-class .hljs-title),
+.codePre :global(.hljs-built_in) {
+  color: color-mix(in srgb, #a16207 50%, var(--warning));
+}
+
+.codePre :global(.hljs-meta),
+.codePre :global(.hljs-meta .hljs-keyword) {
+  color: var(--text-secondary);
+}
+
+.codePre :global(.hljs-symbol),
+.codePre :global(.hljs-bullet),
+.codePre :global(.hljs-link) {
+  color: color-mix(in srgb, var(--accent) 65%, #db2777);
+}
+
+.codePre :global(.hljs-deletion) {
+  color: var(--danger);
+}
+
+.codePre :global(.hljs-emphasis) {
+  font-style: italic;
+}
+
+.codePre :global(.hljs-strong) {
+  font-weight: 700;
 }

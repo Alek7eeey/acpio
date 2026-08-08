@@ -199,10 +199,16 @@ export async function updatePart(
   payload: Record<string, unknown>,
   type?: MessagePartType,
 ): Promise<MessagePartDto | null> {
+  const existing = await db.select().from(messageParts).where(eq(messageParts.id, partId)).limit(1);
+  if (!existing[0]) return null;
+  const prev =
+    existing[0].payload && typeof existing[0].payload === "object" && !Array.isArray(existing[0].payload)
+      ? (existing[0].payload as Record<string, unknown>)
+      : {};
   const [row] = await db
     .update(messageParts)
     .set({
-      payload,
+      payload: { ...prev, ...payload },
       ...(type ? { type } : {}),
     })
     .where(eq(messageParts.id, partId))

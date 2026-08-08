@@ -402,6 +402,11 @@
   gap: 6px;
 }
 
+.subagentMarkdown {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
 .subagentPrompt {
   margin: 0;
   color: var(--text-secondary);

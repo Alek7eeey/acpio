@@ -943,8 +943,34 @@ export class AcpClient extends EventEmitter {
       method === "cursor/task" ||
       method === "cursor/generate_image"
     ) {
-      this.emit("extension", { method, params: msg.params ?? {} });
-      if (msg.id !== undefined) this.respond(msg.id as JsonRpcId, {});
+      const params = (msg.params ?? {}) as Record<string, unknown>;
+      this.emit("extension", { method, params });
+      if (msg.id !== undefined) {
+        // Cursor extension methods expect an `outcome` envelope. An empty `{}`
+        // makes the parent agent treat the Task as "no result" and retry.
+        if (method === "cursor/task") {
+          this.respond(msg.id as JsonRpcId, {
+            outcome: {
+              outcome: "completed",
+              ...(typeof params.agentId === "string" ? { agentId: params.agentId } : {}),
+              ...(typeof params.durationMs === "number" ? { durationMs: params.durationMs } : {}),
+            },
+          });
+        } else if (method === "cursor/update_todos") {
+          const todos = Array.isArray(params.todos) ? params.todos : [];
+          this.respond(msg.id as JsonRpcId, {
+            outcome: { outcome: "accepted", todos },
+          });
+        } else {
+          const filePath = typeof params.filePath === "string" ? params.filePath : "";
+          this.respond(
+            msg.id as JsonRpcId,
+            filePath
+              ? { outcome: { outcome: "generated", filePath } }
+              : { outcome: { outcome: "rejected", reason: "missing filePath" } },
+          );
+        }
+      }
       return;
     }
 

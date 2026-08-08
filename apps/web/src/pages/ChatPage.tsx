@@ -101,6 +101,79 @@ function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
   return thought ? [thought, ...rest] : out;
 }
 
+function extractStructuredText(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    if (
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    ) {
+      try {
+        return extractStructuredText(JSON.parse(trimmed));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => extractStructuredText(item))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.output === "string") return obj.output;
+    if (typeof obj.result === "string") return obj.result;
+    if (obj.content !== undefined) return extractStructuredText(obj.content);
+  }
+  return "";
+}
+
+function titleFromSubagentBody(text: string): string {
+  const heading = text.match(/^###\s+([^\n\[]+?)(?:\s*\[|$)/m);
+  if (heading?.[1]?.trim()) return heading[1].trim();
+  const label = text.match(/^\s*Label:\s*(.+)$/m);
+  if (label?.[1]?.trim()) return label[1].trim();
+  const taskResult = text.match(/<task-result\b[^>]*\bid="([^"]+)"/i);
+  if (taskResult?.[1]?.trim()) return taskResult[1].trim();
+  return "";
+}
+
+function resolveSubagentTitle(part: MessagePartDto, body: string): string {
+  const candidates = [
+    part.payload.description,
+    part.payload.title,
+    (part.payload.raw as { title?: string; description?: string; name?: string; label?: string } | undefined)
+      ?.title,
+    (part.payload.raw as { description?: string } | undefined)?.description,
+    (part.payload.raw as { name?: string } | undefined)?.name,
+    (part.payload.raw as { label?: string } | undefined)?.label,
+    titleFromSubagentBody(body),
+    part.payload.subagentType,
+  ]
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean)
+    .filter((v) => !/^(tool|task|subagent|субагент)$/i.test(v));
+  return candidates[0] ?? "";
+}
+
+function resolveSubagentBody(part: MessagePartDto): string {
+  const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
+  return (
+    extractStructuredText(part.payload.result) ||
+    extractStructuredText(raw.result) ||
+    extractStructuredText(raw.content) ||
+    extractStructuredText(raw.output) ||
+    extractStructuredText(part.payload.prompt) ||
+    extractStructuredText(raw.prompt)
+  ).trim();
+}
+
 function PartView({
   part,
   streaming,
@@ -167,8 +240,39 @@ function PartView({
     );
   }
 
-  // Tool calls and subagent/task tools are hidden — only thoughts + answer text.
-  if (part.type === "subagent" || part.type === "tool_call") {
+  if (part.type === "subagent") {
+    const body = resolveSubagentBody(part);
+    const title = resolveSubagentTitle(part, body);
+    const status = String(part.payload.status ?? "");
+    const live = streaming && status !== "completed" && status !== "failed";
+    const label = title ? `Субагент · ${title}` : "Субагент";
+    return (
+      <div className={styles.subagent}>
+        <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
+          <span className={styles.thoughtLabel}>
+            {live && <span className={styles.pulseDot} />}
+            {label}
+            {status === "failed" ? " · ошибка" : live ? " · работает" : ""}
+          </span>
+          <span className={styles.thoughtChevron} aria-hidden>
+            {open ? "▾" : "▸"}
+          </span>
+        </button>
+        {open && (
+          <div className={styles.subagentBody}>
+            {body ? (
+              <MarkdownContent text={body} className={styles.subagentMarkdown} />
+            ) : (
+              <p className={styles.subagentPrompt}>Нет текста результата</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Regular tool calls stay hidden — only thoughts + subagent cards + answer text.
+  if (part.type === "tool_call") {
     return null;
   }
 
@@ -240,6 +344,9 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
     }
     if (p.type === "error") {
       return Boolean(String(p.payload.message ?? "").trim());
+    }
+    if (p.type === "subagent") {
+      return true;
     }
     return false;
   });
@@ -351,6 +458,108 @@ function MessageActions({ text }: { text: string }) {
   );
 }
 
+function subagentKey(part: MessagePartDto): string | null {
+  const id = String(
+    part.payload.toolCallId ??
+      part.payload.tool_call_id ??
+      (part.payload.raw as { toolCallId?: string; tool_call_id?: string } | undefined)?.toolCallId ??
+      (part.payload.raw as { tool_call_id?: string } | undefined)?.tool_call_id ??
+      "",
+  ).trim();
+  if (id) return `call:${id}`;
+  const taskId = String(
+    part.payload.task_id ??
+      part.payload.taskId ??
+      (part.payload.raw as { task_id?: string; taskId?: string } | undefined)?.task_id ??
+      (part.payload.raw as { taskId?: string } | undefined)?.taskId ??
+      "",
+  ).trim();
+  if (taskId) return `task:${taskId}`;
+  return null;
+}
+
+function subagentDisplayTitle(part: MessagePartDto): string {
+  return String(
+    part.payload.description ?? part.payload.title ?? part.payload.subagentType ?? "",
+  ).trim();
+}
+
+function isGenericSubagentTitle(title: string) {
+  return !title || /^(tool|task|subagent|агент|субагент)$/i.test(title);
+}
+
+function preferSubagentPart(a: MessagePartDto, b: MessagePartDto): MessagePartDto {
+  const aTitle = subagentDisplayTitle(a);
+  const bTitle = subagentDisplayTitle(b);
+  const aGeneric = isGenericSubagentTitle(aTitle);
+  const bGeneric = isGenericSubagentTitle(bTitle);
+  if (aGeneric && !bGeneric) return { ...a, payload: { ...a.payload, ...b.payload, title: bTitle || aTitle, description: bTitle || aTitle } };
+  if (!aGeneric && bGeneric) return { ...a, payload: { ...a.payload, ...b.payload, title: aTitle, description: aTitle } };
+  // Prefer longer/more specific title, keep richer payload.
+  const title = bTitle.length > aTitle.length ? bTitle : aTitle;
+  return {
+    ...a,
+    type: "subagent",
+    payload: {
+      ...a.payload,
+      ...b.payload,
+      title: title || aTitle || bTitle || "Субагент",
+      description: title || aTitle || bTitle || "Субагент",
+    },
+  };
+}
+
+function isSubagentLike(part: MessagePartDto) {
+  if (part.type === "subagent") return true;
+  if (part.type !== "tool_call") return false;
+  const title = String(part.payload.title ?? part.payload.description ?? "");
+  const kind = String(
+    (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
+  );
+  return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
+    `${title} ${kind}`,
+  );
+}
+
+function coalesceAssistantParts(parts: MessagePartDto[]): MessagePartDto[] {
+  const coalesced = coalesceParts(parts);
+  const out: MessagePartDto[] = [];
+  const subagentIndexByKey = new Map<string, number>();
+
+  for (const part of coalesced) {
+    if (part.type === "thought" || part.type === "text" || part.type === "error") {
+      out.push(part);
+      continue;
+    }
+
+    if (!isSubagentLike(part)) continue;
+
+    const asSubagent: MessagePartDto =
+      part.type === "tool_call" ? { ...part, type: "subagent" } : part;
+    const key = subagentKey(asSubagent);
+
+    if (key && subagentIndexByKey.has(key)) {
+      const idx = subagentIndexByKey.get(key)!;
+      out[idx] = preferSubagentPart(out[idx], asSubagent);
+      continue;
+    }
+
+    // Drop a lone generic "Tool" card if a named sibling already exists without shared id.
+    const title = subagentDisplayTitle(asSubagent);
+    if (isGenericSubagentTitle(title)) {
+      const hasNamed = out.some(
+        (p) => p.type === "subagent" && !isGenericSubagentTitle(subagentDisplayTitle(p)),
+      );
+      if (hasNamed) continue;
+    }
+
+    if (key) subagentIndexByKey.set(key, out.length);
+    out.push(asSubagent);
+  }
+
+  return out;
+}
+
 function AssistantParts({
   message,
   streaming,
@@ -358,17 +567,17 @@ function AssistantParts({
   message: MessageDto;
   streaming: boolean;
 }) {
-  const parts = useMemo(() => {
-    const coalesced = coalesceParts(message.parts);
-    // Hide tool_call / subagent rows; keep thoughts, text, errors.
-    return coalesced.filter(
-      (p) => p.type === "thought" || p.type === "text" || p.type === "error",
-    );
-  }, [message.id, message.parts]);
+  const parts = useMemo(
+    () => coalesceAssistantParts(message.parts),
+    [message.id, message.parts],
+  );
 
-  const thoughtParts = useMemo(() => parts.filter((p) => p.type === "thought"), [parts]);
+  const thoughtParts = useMemo(
+    () => parts.filter((p) => p.type === "thought" && Boolean(String(p.payload.text ?? "").trim())),
+    [parts],
+  );
   const mainParts = useMemo(
-    () => parts.filter((p) => p.type === "text" || p.type === "error"),
+    () => parts.filter((p) => p.type === "text" || p.type === "error" || p.type === "subagent"),
     [parts],
   );
   const plain = useMemo(() => assistantPlainText(message), [message]);
@@ -383,7 +592,9 @@ function AssistantParts({
           <PartView
             key={part.id}
             part={part}
-            streaming={streaming && isLast && part.type === "text"}
+            streaming={
+              streaming && isLast && (part.type === "text" || part.type === "subagent")
+            }
           />
         );
       })}
