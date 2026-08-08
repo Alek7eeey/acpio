@@ -497,8 +497,10 @@ export function ChatPage() {
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
-  const catalog =
-    modelsCatalog?.provider === settings.defaultProvider ? modelsCatalog : null;
+  // Models follow the connected agent in Settings (not a stale session.provider).
+  const agentProvider = settings.defaultProvider;
+
+  const catalog = modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
   const models = catalog?.models ?? [];
   const modelParams = catalog?.modelParams ?? [];
   // Block typing only while we have nothing cached and a fetch is in flight.
@@ -509,15 +511,10 @@ export function ChatPage() {
     [sessions, settings.defaultCwd],
   );
   useEffect(() => {
-    setModel(settings.defaultModel);
-    setModelParamValues(settings.defaultModelParams ?? {});
-  }, [settings.defaultModel, settings.defaultModelParams]);
-
-  useEffect(() => {
     const cached = useAppStore.getState().modelsCatalog;
-    const needForce = !cached || cached.provider !== settings.defaultProvider;
-    void ensureModels(settings.defaultProvider, { force: needForce });
-  }, [settings.defaultProvider, ensureModels]);
+    const needForce = !cached || cached.provider !== agentProvider;
+    void ensureModels(agentProvider, { force: needForce });
+  }, [agentProvider, ensureModels]);
 
   useEffect(() => {
     if (paramsLoading) return;
@@ -528,20 +525,34 @@ export function ChatPage() {
   }, [modelParams, model, paramsLoading]);
 
   useEffect(() => {
-    if (!catalog) return;
-    setModel((prev) => prev || settings.defaultModel || catalog.currentModel || "");
-    setModelParamValues((prev) => {
-      const exposed = catalog.modelParams ?? [];
-      if (!exposed.length) return prev;
-      const migrated = migrateModelParamValues(prev, exposed);
-      if (Object.keys(migrated).length) return migrated;
-      return Object.fromEntries(
-        exposed
-          .filter((p) => p.currentValue != null && p.currentValue !== "")
-          .map((p) => [p.id, p.currentValue!]),
-      );
-    });
-  }, [catalog, settings.defaultModel]);
+    if (!catalog?.models.length) {
+      setModel(settings.defaultModel);
+      setModelParamValues(settings.defaultModelParams ?? {});
+      return;
+    }
+    // Drop a defaultModel that belongs to another agent (e.g. Cursor id in OpenCode chat).
+    const preferred = settings.defaultModel || catalog.currentModel || "";
+    const nextModel =
+      preferred && catalog.models.some((m) => m.value === preferred)
+        ? preferred
+        : catalog.currentModel || catalog.models[0]?.value || "";
+    setModel(nextModel);
+    const exposed = catalog.modelParams ?? [];
+    if (!exposed.length) {
+      setModelParamValues(settings.defaultModelParams ?? {});
+      return;
+    }
+    const migrated = migrateModelParamValues(settings.defaultModelParams ?? {}, exposed);
+    setModelParamValues(
+      Object.keys(migrated).length
+        ? migrated
+        : Object.fromEntries(
+            exposed
+              .filter((p) => p.currentValue != null && p.currentValue !== "")
+              .map((p) => [p.id, p.currentValue!]),
+          ),
+    );
+  }, [catalog, settings.defaultModel, settings.defaultModelParams]);
 
   const applyModelSelection = async (
     nextModel: string,
@@ -563,7 +574,7 @@ export function ChatPage() {
           res.modelParams && res.modelParams.length > 0 ? res.modelParams : modelParams;
         if (res.models?.length || (res.modelParams && res.modelParams.length > 0)) {
           rememberModelsCatalog({
-            provider: settings.defaultProvider,
+            provider: agentProvider,
             models: res.models?.length ? res.models : models,
             modelParams: nextModelParams,
             currentModel: res.currentModel ?? nextModel,
@@ -576,7 +587,7 @@ export function ChatPage() {
         // settings already saved; live apply optional
       }
     } else {
-      const cat = await ensureModels(settings.defaultProvider, { force: true });
+      const cat = await ensureModels(agentProvider, { force: true });
       return cat?.modelParams ?? modelParams;
     }
     return modelParams;
@@ -585,7 +596,7 @@ export function ChatPage() {
   const loadParamsForModel = async (nextModel: string) => {
     setParamsLoading(true);
     try {
-      const fresh = await applyModelSelection(nextModel, modelParamValues);
+      const fresh = await applyModelSelection(nextModel, {});
       const committed = fresh?.length ? fresh : [];
       paramsCacheRef.current.set(nextModel, committed);
       setStableParams(committed);
@@ -595,7 +606,9 @@ export function ChatPage() {
   };
 
   const onModelChange = async (value: string) => {
-    await applyModelSelection(value, modelParamValues);
+    // Don't carry Fast/Effort from the previous model — they often aren't valid
+    // for the new one and used to leave the ACP session broken.
+    await applyModelSelection(value, {});
   };
 
   const onParamsChange = async (next: Record<string, string>) => {
@@ -681,7 +694,7 @@ export function ChatPage() {
               <span>ACP</span>rocess
             </h1>
             <p>
-              Харнесс для Cursor и OpenCode. Рассуждение идёт одним блоком, ответ стримится в ленте.
+              Харнесс для Cursor, OpenCode, OMP и PI. Рассуждение идёт одним блоком, ответ стримится в ленте.
             </p>
             <div className={styles.emptyActions}>
               <button
@@ -854,9 +867,9 @@ export function ChatPage() {
                 const cached = useAppStore.getState().modelsCatalog;
                 const stale =
                   !cached ||
-                  cached.provider !== settings.defaultProvider ||
+                  cached.provider !== agentProvider ||
                   (cached.modelParams?.length ?? 0) === 0;
-                void ensureModels(settings.defaultProvider, { force: stale });
+                void ensureModels(agentProvider, { force: stale });
               }}
               onChange={(v) => void onModelChange(v)}
               onParamsOpen={(v) => loadParamsForModel(v)}

@@ -9,7 +9,7 @@ const modules = [
     id: "chat",
     to: "/chat",
     title: "AI-чат",
-    subtitle: "ACP · Cursor / OpenCode",
+    subtitle: "ACP",
     description: "Чат с агентом: рассуждения и ответы в одной ленте.",
     status: "ready" as const,
     cta: "Открыть чат",

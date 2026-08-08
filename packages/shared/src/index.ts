@@ -5,7 +5,7 @@ export interface UserDto {
   createdAt: string;
 }
 
-export type AgentProvider = "cursor" | "opencode" | "omp";
+export type AgentProvider = "cursor" | "opencode" | "omp" | "pi";
 export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
 export type PermissionPolicy = "prompt" | "allowlist" | "always";
@@ -38,6 +38,8 @@ export interface AppSettings {
   opencodeArgs: string[];
   ompCommand: string;
   ompArgs: string[];
+  piCommand: string;
+  piArgs: string[];
   cursorApiKey: string;
   opencodeApiKey: string;
   anthropicApiKey: string;
@@ -63,6 +65,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   opencodeArgs: ["acp"],
   ompCommand: "omp",
   ompArgs: ["acp"],
+  piCommand: "pi-acp",
+  piArgs: [],
   cursorApiKey: "",
   opencodeApiKey: "",
   anthropicApiKey: "",
@@ -78,12 +82,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {
   if (provider === "cursor") return settings.cursorCommand;
   if (provider === "omp") return settings.ompCommand;
+  if (provider === "pi") return settings.piCommand;
   return settings.opencodeCommand;
 }
 
 export function providerArgs(settings: AppSettings, provider: AgentProvider): string[] {
   if (provider === "cursor") return settings.cursorArgs;
   if (provider === "omp") return settings.ompArgs;
+  if (provider === "pi") return settings.piArgs;
   return settings.opencodeArgs;
 }
 
@@ -186,7 +192,8 @@ export function mapEffortParamValue(value: string, allowed?: string[]): string {
       }
     }
   }
-  return raw;
+  // Don't send a value the agent doesn't expose (breaks mid-session model switches).
+  return "";
 }
 
 /** Resolve a value for an exposed config option id from a loose params map (alias-aware). */
@@ -451,7 +458,7 @@ export function modelParamLabel(paramId: string, value: string, name?: string): 
   const v = value.toLowerCase();
   if (family === "fast") {
     if (v === "true" || v === "1" || v === "yes") return "Fast";
-    if (v === "false" || v === "0" || v === "no") return "Не Fast";
+    if (v === "false" || v === "0" || v === "no") return "Not Fast";
   }
   if (family === "effort") {
     const map: Record<string, string> = {

@@ -26,6 +26,7 @@ import {
   probeAgent,
   runPrompt,
   setSessionModel,
+  syncSessionAgent,
   warmAcp,
 } from "./acp/sessionManager.js";
 import {
@@ -53,7 +54,7 @@ import {
 
 const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
-  defaultProvider: z.enum(["cursor", "opencode", "omp"]).optional(),
+  defaultProvider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
@@ -64,6 +65,8 @@ const settingsSchema = z.object({
   opencodeArgs: z.array(z.string()).optional(),
   ompCommand: z.string().optional(),
   ompArgs: z.array(z.string()).optional(),
+  piCommand: z.string().optional(),
+  piArgs: z.array(z.string()).optional(),
   cursorApiKey: z.string().optional(),
   opencodeApiKey: z.string().optional(),
   anthropicApiKey: z.string().optional(),
@@ -195,7 +198,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/agent/probe", async (req) => {
     const body = z
-      .object({ provider: z.enum(["cursor", "opencode", "omp"]).optional() })
+      .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
       .parse(req.body ?? {});
     return probeAgent(body.provider);
   });
@@ -203,7 +206,10 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/agent/models", async (req) => {
     const q = req.query as { provider?: string; force?: string };
     const provider =
-      q.provider === "cursor" || q.provider === "opencode" || q.provider === "omp"
+      q.provider === "cursor" ||
+      q.provider === "opencode" ||
+      q.provider === "omp" ||
+      q.provider === "pi"
         ? q.provider
         : undefined;
     const force = q.force === "1" || q.force === "true";
@@ -262,7 +268,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().optional(),
-        provider: z.enum(["cursor", "opencode", "omp"]).optional(),
+        provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
         cwd: z.string().optional(),
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
@@ -319,7 +325,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const detail = await getSessionDetail(id);
+    const detail = await syncSessionAgent(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
     void warmAcp(id, {
       provider: detail.provider,
@@ -340,7 +346,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = z.object({ text: z.string().min(1) }).parse(req.body);
-    const detail = await getSessionDetail(id);
+    const detail = await syncSessionAgent(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
 
     void runPrompt(id, body.text, {

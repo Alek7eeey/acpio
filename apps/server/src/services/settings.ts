@@ -17,7 +17,16 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.ompArgs)) {
     merged.ompArgs = [...DEFAULT_SETTINGS.ompArgs];
   }
-  if (merged.defaultProvider !== "cursor" && merged.defaultProvider !== "opencode" && merged.defaultProvider !== "omp") {
+  if (!merged.piCommand) merged.piCommand = DEFAULT_SETTINGS.piCommand;
+  if (!Array.isArray(merged.piArgs)) {
+    merged.piArgs = [...DEFAULT_SETTINGS.piArgs];
+  }
+  if (
+    merged.defaultProvider !== "cursor" &&
+    merged.defaultProvider !== "opencode" &&
+    merged.defaultProvider !== "omp" &&
+    merged.defaultProvider !== "pi"
+  ) {
     merged.defaultProvider = DEFAULT_SETTINGS.defaultProvider;
   }
   return merged;

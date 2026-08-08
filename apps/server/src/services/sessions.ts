@@ -108,6 +108,7 @@ export async function updateSession(
     acpSessionId: string | null;
     mode: AgentMode;
     cwd: string;
+    provider: AgentProvider;
     themeId: string | null;
     sortOrder: number;
   }>,

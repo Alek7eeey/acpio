@@ -13,6 +13,7 @@ import {
   appendPart,
   appendTextChunk,
   createMessage,
+  getSessionDetail,
   updatePart,
   updateSession,
 } from "../services/sessions.js";
@@ -74,6 +75,8 @@ class SessionRuntime {
   client: AcpClient | null = null;
   /** Resolves when client.start() has finished (or failed). */
   clientReady: Promise<AcpClient> | null = null;
+  /** Provider the live ACP process was started with. */
+  provider: AgentProvider | null = null;
   assistantMessageId: string | null = null;
   openTextPartId: string | null = null;
   /** One thought block for the whole turn */
@@ -114,12 +117,17 @@ export async function ensureAcp(
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
+  // Switching Cursor ↔ OpenCode must replace the live process, not reuse it.
+  if (rt.provider && rt.provider !== opts.provider) {
+    resetAcpClient(rt);
+  }
   if (rt.clientReady) return rt.clientReady;
   if (rt.client) return rt.client;
 
   const settings = await getSettings();
   const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
   rt.client = client;
+  rt.provider = opts.provider;
 
   client.on("log", (line: string) => {
     console.log(`[acp:${sessionId}]`, line.trim());
@@ -128,6 +136,7 @@ export async function ensureAcp(
   client.on("exit", async () => {
     rt.client = null;
     rt.clientReady = null;
+    rt.provider = null;
     rt.running = false;
     rt.toolsHintSent = false;
     await updateSession(sessionId, { status: "closed" });
@@ -599,8 +608,8 @@ export async function probeAgent(provider?: AgentProvider) {
       provider: selected,
       command: providerCommand(settings, selected),
       message: currentModel
-        ? `ACP OK. Модель: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
-        : `ACP OK — сессия ${sessionId}`,
+        ? `ACP OK. Model: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
+        : `ACP OK — session ${sessionId}`,
       details: logs.join("\n").slice(-1500),
       sessionId,
       currentModel,
@@ -619,6 +628,34 @@ export async function probeAgent(provider?: AgentProvider) {
   }
 }
 
+function resetAcpClient(rt: SessionRuntime) {
+  rt.clientReady = null;
+  try {
+    rt.client?.dispose();
+  } catch {
+    // ignore
+  }
+  rt.client = null;
+  rt.provider = null;
+  rt.toolsHintSent = false;
+}
+
+/** Align chat row + ACP with the currently connected agent in settings. */
+export async function syncSessionAgent(sessionId: string) {
+  const detail = await getSessionDetail(sessionId);
+  if (!detail) return null;
+  const settings = await getSettings();
+  const provider = settings.defaultProvider;
+  if (detail.provider === provider) return detail;
+
+  const rt = runtimes.get(sessionId);
+  if (rt) resetAcpClient(rt);
+  const updated = await updateSession(sessionId, { provider });
+  return updated
+    ? { ...detail, ...updated, messages: detail.messages }
+    : { ...detail, provider };
+}
+
 export async function setSessionModel(
   sessionId: string,
   model: string,
@@ -629,28 +666,46 @@ export async function setSessionModel(
   };
   if (params) patch.defaultModelParams = params;
   await updateSettings(patch);
+
+  const detail = await syncSessionAgent(sessionId);
   const rt = runtimes.get(sessionId);
-  if (rt?.client) {
-    const settings = await getSettings();
-    await rt.client.applyModelSelection(model, params ?? settings.defaultModelParams);
-    const models = toModelList(rt.client.configOptions);
-    const modelParams = toModelParams(rt.client.configOptions);
-    rememberModels(
-      settings.defaultProvider,
-      findModelConfigOption(rt.client.configOptions)?.currentValue ?? model,
-      models,
-      modelParams,
-    );
+  // Mid-session set_config_option often leaves OpenCode/Cursor in a broken state
+  // ("Model is unavailable"). Restart ACP so the new model applies like a new chat.
+  if (rt) resetAcpClient(rt);
+
+  if (!detail) {
+    return { ok: true, model, appliedLive: false };
+  }
+
+  try {
+    const client = await ensureAcp(sessionId, {
+      provider: detail.provider,
+      cwd: detail.cwd,
+      mode: detail.mode,
+    });
+    const models = toModelList(client.configOptions);
+    const modelParams = toModelParams(client.configOptions);
+    const currentModel =
+      findModelConfigOption(client.configOptions)?.currentValue ?? model;
+    rememberModels(detail.provider, currentModel, models, modelParams);
     return {
       ok: true,
       model,
       appliedLive: true,
-      currentModel: findModelConfigOption(rt.client.configOptions)?.currentValue ?? model,
+      restarted: true,
+      currentModel,
       models,
       modelParams,
     };
+  } catch (err) {
+    console.error(`[acp:${sessionId}] setSessionModel restart failed`, err);
+    return {
+      ok: true,
+      model,
+      appliedLive: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
   }
-  return { ok: true, model, appliedLive: false };
 }
 
 let modelsCache: {

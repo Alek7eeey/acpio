@@ -178,7 +178,9 @@ function winKnownBins(command: string): string[] {
         ? ["opencode.exe", "opencode.cmd"]
         : command === "omp" || command === "omp-acp"
           ? ["omp.exe", "omp.cmd", "omp-acp.exe", "omp-acp.cmd"]
-          : [`${command}.exe`, `${command}.cmd`];
+          : command === "pi" || command === "pi-acp"
+            ? ["pi-acp.exe", "pi-acp.cmd", "pi.exe", "pi.cmd"]
+            : [`${command}.exe`, `${command}.cmd`];
 
   const dirs = [
     local ? path.join(local, "cursor-agent") : "",
@@ -186,6 +188,8 @@ function winKnownBins(command: string): string[] {
     home ? path.join(home, ".local", "bin") : "",
     appData ? path.join(appData, "npm") : "",
     appData ? path.join(appData, "npm", "node_modules", "opencode-ai", "bin") : "",
+    appData ? path.join(appData, "npm", "node_modules", "pi-acp", "bin") : "",
+    appData ? path.join(appData, "npm", "node_modules", "@mariozechner", "pi-coding-agent", "dist") : "",
   ].filter(Boolean);
 
   const out: string[] = [];
@@ -256,6 +260,12 @@ function commandNotFoundHint(provider: AgentProvider, command: string): string {
     return (
       `Команда "${command}" не найдена. Убедитесь, что omp в PATH ` +
       `(или поставьте omp-acp и укажите его в «CLI и права»).`
+    );
+  }
+  if (provider === "pi") {
+    return (
+      `Команда "${command}" не найдена. Установите Pi ACP-адаптер: npm i -g pi-acp ` +
+      `(нужен также pi CLI), либо укажите полный путь / npx в «CLI и права».`
     );
   }
   return (
@@ -587,34 +597,44 @@ export class AcpClient extends EventEmitter {
     if (!wire) return;
     const parsed = parseModelWire(wire);
     const modelOpt = findModelConfigOption(this.configOptions);
-    const hadParams = listModelParamOptions(this.configOptions).length > 0;
     const mergedParams = { ...parsed.params, ...(params ?? {}) };
     const modelId = modelOpt?.id ?? "model";
-
-    if (hadParams || Object.keys(mergedParams).length > 0) {
-      await this.setConfigOption(modelId, parsed.base);
-      this.emit("log", `model set to ${parsed.base}`);
-
-      // Re-read after model change — Cursor swaps effort ↔ reasoning and may
-      // drop Effort entirely (Composer). Apply alias-aware values to fresh ids.
-      const freshParams = listModelParamOptions(this.configOptions);
-      for (const opt of freshParams) {
-        const allowed = opt.options?.map((o) => o.value);
-        const value = resolveModelParamValue(opt.id, mergedParams, allowed);
-        if (value === undefined || value === "") continue;
-        if (opt.currentValue != null && String(opt.currentValue) === value) continue;
-        try {
-          await this.setConfigOption(opt.id, value);
-          this.emit("log", `${opt.id} set to ${value}`);
-        } catch (err) {
-          this.emit("log", `set ${opt.id} failed: ${String(err)}`);
-        }
-      }
+    const allowedModels = (modelOpt?.options ?? []).map((o) => o.value);
+    // Never send `composer-2.5[fast=true]` as a model id — always base (+ params separately).
+    const base = parsed.base || wire;
+    const target =
+      !allowedModels.length ||
+      allowedModels.includes(base) ||
+      allowedModels.includes(wire)
+        ? base
+        : null;
+    if (!target) {
+      this.emit(
+        "log",
+        `model skip: "${base}" is not in this agent's model list (${this.provider})`,
+      );
       return;
     }
 
-    await this.setConfigOption(modelId, wire);
-    this.emit("log", `model set to ${wire}`);
+    await this.setConfigOption(modelId, target);
+    this.emit("log", `model set to ${target}`);
+
+    // Re-read after model change — Cursor swaps effort ↔ reasoning and may
+    // drop Effort entirely (Composer). Only apply values the agent exposes.
+    const freshParams = listModelParamOptions(this.configOptions);
+    for (const opt of freshParams) {
+      const allowed = opt.options?.map((o) => o.value);
+      const value = resolveModelParamValue(opt.id, mergedParams, allowed);
+      if (value === undefined || value === "") continue;
+      if (allowed?.length && !allowed.includes(value)) continue;
+      if (opt.currentValue != null && String(opt.currentValue) === value) continue;
+      try {
+        await this.setConfigOption(opt.id, value);
+        this.emit("log", `${opt.id} set to ${value}`);
+      } catch (err) {
+        this.emit("log", `set ${opt.id} failed: ${String(err)}`);
+      }
+    }
   }
 
   async prompt(text: string): Promise<{ stopReason?: string; raw: unknown }> {

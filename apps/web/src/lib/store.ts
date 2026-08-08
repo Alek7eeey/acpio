@@ -597,6 +597,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ settings });
     if (providerChanged) {
       void get().ensureModels(settings.defaultProvider, { force: true });
+      const activeId = get().activeSessionId;
+      // Re-open chat so server syncs session.provider → new agent and refreshes models.
+      if (activeId) void get().selectSession(activeId);
     }
   },
 }));

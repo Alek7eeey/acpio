@@ -36,6 +36,19 @@ export function AppShell() {
   const setTheme = useAppStore((s) => s.setTheme);
   const connected = useAppStore((s) => s.connected);
   const settings = useAppStore((s) => s.settings);
+  const agentStatusTitle = useMemo(() => {
+    const agent =
+      settings.defaultProvider === "cursor"
+        ? "Cursor"
+        : settings.defaultProvider === "opencode"
+          ? "OpenCode"
+          : settings.defaultProvider === "omp"
+            ? "OMP"
+            : settings.defaultProvider === "pi"
+              ? "PI"
+              : settings.defaultProvider;
+    return `${agent} · ${connected ? "online" : "offline"}`;
+  }, [settings.defaultProvider, connected]);
 
   const isChat = location.pathname.startsWith("/chat");
   const isGitea = location.pathname.startsWith("/gitea");
@@ -367,7 +380,11 @@ export function AppShell() {
           </button>
           <div className={styles.headerSpacer} />
           <div className={styles.headerRight}>
-            <span className={`${styles.dot} ${connected ? styles.on : ""}`} title="WebSocket" />
+            <span
+              className={`${styles.dot} ${connected ? styles.on : ""}`}
+              title={agentStatusTitle}
+              aria-label={agentStatusTitle}
+            />
             <ThemeToggle
               theme={theme}
               onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}

@@ -33,7 +33,12 @@ const PROVIDERS: Array<{
   {
     id: "omp",
     title: "OMP",
-    description: "Oh My Pi через ACP",
+    description: "Oh My Pi через ACP (`omp acp`)",
+  },
+  {
+    id: "pi",
+    title: "PI",
+    description: "Pi coding agent через ACP (`pi-acp`)",
   },
 ];
 
@@ -343,7 +348,7 @@ export function SettingsPage() {
                         <strong>{probe.ok ? "Подключено" : "Ошибка"}</strong>
                         <div>{probe.message}</div>
                         {probe.currentModel && (
-                          <div>Модель: {modelDisplayName(probe.currentModel)}</div>
+                          <div>Model: {modelDisplayName(probe.currentModel)}</div>
                         )}
                       </div>
                     )}
@@ -549,7 +554,7 @@ export function SettingsPage() {
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>
                   Команда и аргументы для локального ACP-бинарника. Обычно хватает значений по
-                  умолчанию (`agent acp`, `opencode acp`, `omp acp`). Меняйте только если CLI
+                  умолчанию (`agent acp`, `opencode acp`, `omp acp`, `pi-acp`). Меняйте только если CLI
                   установлен под другим именем или путём.
                 </p>
                 <label>
@@ -609,6 +614,26 @@ export function SettingsPage() {
                         )
                       }
                       placeholder="acp"
+                    />
+                  </div>
+                </label>
+                <label>
+                  PI — команда / аргументы
+                  <div className={styles.row}>
+                    <input
+                      value={form.piCommand ?? "pi-acp"}
+                      onChange={(e) => patch("piCommand", e.target.value)}
+                      placeholder="pi-acp"
+                    />
+                    <input
+                      value={(form.piArgs ?? []).join(" ")}
+                      onChange={(e) =>
+                        patch(
+                          "piArgs",
+                          e.target.value.split(/\s+/).filter(Boolean),
+                        )
+                      }
+                      placeholder="(пусто) или -y pi-acp для npx"
                     />
                   </div>
                 </label>
