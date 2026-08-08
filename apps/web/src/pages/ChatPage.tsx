@@ -10,6 +10,7 @@ import {
 } from "react";
 import { migrateModelParamValues, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
@@ -39,6 +40,7 @@ function UserMessage({
   message: MessageDto;
   slashCommands: SlashCommandDto[];
 }) {
+  const t = useT();
   const text = message.parts
     .filter((p) => p.type === "text")
     .map((p) => String(p.payload.text ?? ""))
@@ -57,7 +59,7 @@ function UserMessage({
     return (
       <div className={styles.userCommand}>
         <div className={styles.userCommandHeader}>
-          <span className={styles.userCommandBadge}>Команда</span>
+          <span className={styles.userCommandBadge}>{t("common.command")}</span>
           <code className={styles.userCommandName}>/{parsed.name}</code>
         </div>
         {parsed.args ? (
@@ -243,6 +245,7 @@ function PartView({
   streaming?: boolean;
   embedded?: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
 
   const toggleProps = {
@@ -273,7 +276,7 @@ function PartView({
         <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
           <div className={styles.thoughtEmbeddedLabel}>
             {streaming && <span className={styles.pulseDot} />}
-            Рассуждение
+            {t("common.reasoning")}
           </div>
           {body}
         </div>
@@ -289,7 +292,7 @@ function PartView({
         <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className={styles.thoughtLabel}>
             {streaming && <span className={styles.pulseDot} />}
-            Рассуждение
+            {t("common.reasoning")}
           </span>
           <span className={styles.thoughtChevron} aria-hidden>
             {open ? "▾" : "▸"}
@@ -305,14 +308,14 @@ function PartView({
     const title = resolveSubagentTitle(part, body);
     const status = String(part.payload.status ?? "");
     const live = streaming && status !== "completed" && status !== "failed";
-    const label = title ? `Субагент · ${title}` : "Субагент";
+    const label = title ? `${t("agent.subagent")} · ${title}` : t("agent.subagent");
     return (
       <div className={styles.subagent}>
         <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className={styles.thoughtLabel}>
             {live && <span className={styles.pulseDot} />}
             {label}
-            {status === "failed" ? " · ошибка" : live ? " · работает" : ""}
+            {status === "failed" ? t("common.subagentFailed") : live ? t("common.subagentWorking") : ""}
           </span>
           <span className={styles.thoughtChevron} aria-hidden>
             {open ? "▾" : "▸"}
@@ -323,7 +326,7 @@ function PartView({
             {body ? (
               <MarkdownContent text={body} className={styles.subagentMarkdown} />
             ) : (
-              <p className={styles.subagentPrompt}>Нет текста результата</p>
+              <p className={styles.subagentPrompt}>{t("common.emptyList")}</p>
             )}
           </div>
         )}
@@ -337,7 +340,7 @@ function PartView({
   }
 
   if (part.type === "error") {
-    return <div className={styles.error}>{String(part.payload.message ?? "Ошибка")}</div>;
+    return <div className={styles.error}>{String(part.payload.message ?? t("common.error"))}</div>;
   }
 
   return null;
@@ -354,6 +357,7 @@ function StepsSpoiler({
   parts: MessagePartDto[];
   streaming: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const thoughts = parts.filter(isThoughtPart);
 
@@ -375,7 +379,7 @@ function StepsSpoiler({
       >
         <span className={styles.thoughtLabel}>
           {streaming && <span className={styles.pulseDot} />}
-          Шаги
+          {t("common.steps")}
         </span>
         <span className={styles.thoughtChevron} aria-hidden>
           {open ? "▾" : "▸"}
@@ -421,6 +425,7 @@ function assistantPlainText(message: MessageDto) {
 }
 
 function MessageActions({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -435,12 +440,12 @@ function MessageActions({ text }: { text: string }) {
   };
 
   return (
-    <div className={styles.msgActions} aria-label="Действия">
+    <div className={styles.msgActions} aria-label={t("common.actions")}>
       <button
         type="button"
         className={styles.msgAction}
-        title={copied ? "Скопировано" : "Копировать"}
-        aria-label="Копировать"
+        title={copied ? t("common.copied") : t("common.copy")}
+        aria-label={t("common.copy")}
         onClick={() => void copy()}
       >
         {copied ? (
@@ -465,7 +470,7 @@ function MessageActions({ text }: { text: string }) {
           </svg>
         )}
       </button>
-      <HoverTip as="button" className={styles.msgAction} aria-label="Нравится" text="Скоро">
+      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.like")} text={t("common.soon")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path
             d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
@@ -475,7 +480,7 @@ function MessageActions({ text }: { text: string }) {
           />
         </svg>
       </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label="Не нравится" text="Скоро">
+      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.dislike")} text={t("common.soon")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path
             d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
@@ -485,7 +490,7 @@ function MessageActions({ text }: { text: string }) {
           />
         </svg>
       </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label="Поделиться" text="Скоро">
+      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.share")} text={t("common.soon")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path
             d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
@@ -496,7 +501,7 @@ function MessageActions({ text }: { text: string }) {
           />
         </svg>
       </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label="Повторить" text="Скоро">
+      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.retry")} text={t("common.soon")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path
             d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
@@ -507,7 +512,7 @@ function MessageActions({ text }: { text: string }) {
           />
         </svg>
       </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label="Ещё" text="Скоро">
+      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.more")} text={t("common.soon")}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="5" cy="12" r="1.5" fill="currentColor" />
           <circle cx="12" cy="12" r="1.5" fill="currentColor" />
@@ -563,8 +568,8 @@ function preferSubagentPart(a: MessagePartDto, b: MessagePartDto): MessagePartDt
     payload: {
       ...a.payload,
       ...b.payload,
-      title: title || aTitle || bTitle || "Субагент",
-      description: title || aTitle || bTitle || "Субагент",
+      title: title || aTitle || bTitle || "",
+      description: title || aTitle || bTitle || "",
     },
   };
 }
@@ -664,6 +669,7 @@ function AssistantParts({
 }
 
 export function ChatPage() {
+  const t = useT();
   const activeSession = useAppStore((s) => s.activeSession);
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
@@ -750,8 +756,8 @@ export function ChatPage() {
   const composerLocked = agentMissing || (modelsLoading && models.length === 0);
 
   const slashCommands = useMemo(
-    () => mergeSlashCommands(activeSession?.slashCommands),
-    [activeSession?.slashCommands],
+    () => mergeSlashCommands(activeSession?.slashCommands, t),
+    [activeSession?.slashCommands, t],
   );
   const slashCtx = useMemo(() => getSlashContext(text, cursorPos), [text, cursorPos]);
   const filteredSlashCommands = useMemo(() => {
@@ -1029,9 +1035,7 @@ export function ChatPage() {
             <h1>
               <span>ACP</span>rocess
             </h1>
-            <p>
-              Харнесс для Cursor, OpenCode, OMP и PI. Рассуждение идёт одним блоком, ответ стримится в ленте.
-            </p>
+            <p>{t("chat.emptyDescription")}</p>
             <div className={styles.emptyActions}>
               {agentMissing ? (
                 <Link
@@ -1039,7 +1043,7 @@ export function ChatPage() {
                   to="/settings?section=agent&leaf=connect"
                   style={{ display: "inline-flex", alignItems: "center" }}
                 >
-                  Подключить агента
+                  {t("chat.connectAgent")}
                 </Link>
               ) : (
                 <>
@@ -1050,14 +1054,14 @@ export function ChatPage() {
                       setFolderPicker({ x: rect.left, y: rect.bottom + 8 });
                     }}
                   >
-                    Начать чат
+                    {t("chat.newSession")}
                   </button>
                   <Link
                     className={styles.secondary}
                     to="/settings"
                     style={{ display: "inline-flex", alignItems: "center" }}
                   >
-                    Настроить агента
+                    {t("common.settings")}
                   </Link>
                 </>
               )}
@@ -1102,18 +1106,18 @@ export function ChatPage() {
         <div className={styles.composerInner}>
           {agentMissing && (
             <div className={styles.typingBar} aria-live="polite">
-              Сначала подключите агента в Настройках
+              {t("common.connectAgentInSettings")}
             </div>
           )}
           {composerLocked && !agentMissing && (
             <div className={styles.typingBar} aria-live="polite">
               <span className={styles.modelsLoaderSpin} aria-hidden />
-              <span>Загрузка моделей…</span>
+              <span>{t("common.loadingModels")}</span>
             </div>
           )}
           {activeSession?.status === "running" && (
             <div className={styles.typingBar} aria-live="polite">
-              <span>Агент думает</span>
+              <span>{t("common.agentThinking")}</span>
               <span className={styles.typingDots} aria-hidden>
                 <span />
                 <span />
@@ -1122,7 +1126,7 @@ export function ChatPage() {
             </div>
           )}
           {activeSession?.status === "waiting" && (
-            <div className={styles.typingBar}>Ждёт вашего ответа…</div>
+            <div className={styles.typingBar}>{t("common.waitingInput")}</div>
           )}
           {activeSession?.cwd?.trim() ? (
             <div className={styles.sessionCwd} title={activeSession.cwd}>
@@ -1182,10 +1186,10 @@ export function ChatPage() {
               placeholder={
                 slashInputHint ??
                 (agentMissing
-                  ? "Подключите агента…"
+                  ? t("common.connectAgentEllipsis")
                   : composerLocked
-                    ? "Загрузка моделей…"
-                    : "Сообщение или /команда…")
+                    ? t("common.loadingModels")
+                    : t("common.messageOrCommand"))
               }
               rows={1}
               disabled={composerLocked}
@@ -1232,7 +1236,7 @@ export function ChatPage() {
               <HoverTip
                 as="button"
                 className={styles.attachBtn}
-                aria-label="Прикрепление файлов пока не реализовано"
+                aria-label={t("common.attachNotImplemented")}
                 disabled={composerLocked}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1273,8 +1277,8 @@ export function ChatPage() {
                   <button
                     type="button"
                     className={styles.stopBtn}
-                    title="Остановить"
-                    aria-label="Остановить"
+                    title={t("common.stop")}
+                    aria-label={t("common.stop")}
                     onClick={() => void cancelPrompt()}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -1288,12 +1292,12 @@ export function ChatPage() {
                     disabled={composerLocked || !text.trim()}
                     title={
                       agentMissing
-                        ? "Подключите агента"
+                        ? t("common.connectAgentFirst")
                         : composerLocked
-                          ? "Загрузка моделей…"
-                          : "Отправить"
+                          ? t("common.loadingModels")
+                          : t("common.send")
                     }
-                    aria-label="Отправить"
+                    aria-label={t("common.send")}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
                       <path

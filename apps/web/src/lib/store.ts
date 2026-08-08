@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AgentProvider,
+  AppLocale,
   AppSettings,
   ChatThemeDto,
   MessageDto,
@@ -62,6 +63,8 @@ type AppState = {
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
   applyTheme: (theme: Theme) => void;
+  setLocale: (locale: AppLocale) => Promise<void>;
+  applyLocale: (locale: AppLocale) => void;
   loadBootstrap: () => Promise<void>;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
@@ -174,12 +177,16 @@ async function loadAppData(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
 ) {
-  const stored = localStorage.getItem("acprocess.theme") as Theme | null;
+  const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
+  const storedLocale = localStorage.getItem("acprocess.locale") as AppLocale | null;
   const settings = { ...DEFAULT_SETTINGS, ...(await api.getSettings()) };
-  const theme = stored ?? settings.theme ?? "light";
+  const theme = storedTheme ?? settings.theme ?? "light";
+  const locale =
+    storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "ru";
   get().applyTheme(theme);
+  get().applyLocale(locale);
   const [sessions, themes] = await Promise.all([api.listSessions(), api.listThemes()]);
-  set({ settings: { ...settings, theme }, sessions, themes });
+  set({ settings: { ...settings, theme, locale }, sessions, themes });
   // Models only after the user explicitly connected an agent.
   const provider = get().user?.connectedProvider;
   if (provider) {
@@ -216,6 +223,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("acprocess.theme", theme);
+  },
+
+  applyLocale(locale) {
+    document.documentElement.lang = locale;
+    localStorage.setItem("acprocess.locale", locale);
   },
 
   rememberModelsCatalog(catalog) {
@@ -307,15 +319,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ settings });
   },
 
+  async setLocale(locale) {
+    get().applyLocale(locale);
+    const settings = await api.updateSettings({ locale });
+    set({ settings });
+  },
+
   async loadBootstrap() {
     set({ loading: true, error: null });
     try {
-      const stored = localStorage.getItem("acprocess.theme") as Theme | null;
-      if (stored) get().applyTheme(stored);
+      const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
+      const storedLocale = localStorage.getItem("acprocess.locale") as AppLocale | null;
+      if (storedTheme) get().applyTheme(storedTheme);
+      if (storedLocale === "en" || storedLocale === "ru") get().applyLocale(storedLocale);
       const { user } = await api.me();
       if (!user) {
+        const locale =
+          storedLocale === "en" || storedLocale === "ru" ? storedLocale : DEFAULT_SETTINGS.locale;
         set({
           user: null,
+          settings: { ...DEFAULT_SETTINGS, locale },
           sessions: [],
           themes: [],
           activeSessionId: null,
@@ -423,7 +446,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async renameSession(id, title) {
-    const updated = await api.updateSession(id, { title: title.trim() || "Новый чат" });
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    const updated = await api.updateSession(id, { title: trimmed });
     set({
       sessions: get().sessions.map((s) => (s.id === id ? updated : s)),
       activeSession:
@@ -450,7 +475,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async renameTheme(id, name) {
-    const updated = await api.updateTheme(id, { name: name.trim() || "Тема" });
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const updated = await api.updateTheme(id, { name: trimmed });
     set({ themes: get().themes.map((t) => (t.id === id ? updated : t)) });
   },
 
@@ -610,6 +637,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         : patch;
     const settings = await api.updateSettings(nextPatch);
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
+    if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings });
     if (nextPatch.defaultProvider) {
       // Refresh connectedProvider on the current user for admin / UI badges.

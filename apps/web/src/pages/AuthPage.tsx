@@ -1,12 +1,15 @@
 import { useState, type FormEvent } from "react";
 import { AuthHero } from "../components/AuthHero";
+import { LocaleToggle } from "../components/LocaleToggle";
 import { ThemeToggle } from "../components/ThemeToggle";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import styles from "./AuthPage.module.css";
 
 type Mode = "login" | "register";
 
 export function AuthPage() {
+  const t = useT();
   const login = useAppStore((s) => s.login);
   const register = useAppStore((s) => s.register);
   const applyTheme = useAppStore((s) => s.applyTheme);
@@ -32,11 +35,11 @@ export function AuthPage() {
     e.preventDefault();
     setError(null);
     if (!username.trim() || !password) {
-      setError("Введите логин и пароль");
+      setError(t("auth.enterCredentials"));
       return;
     }
     if (mode === "register" && password !== password2) {
-      setError("Пароли не совпадают");
+      setError(t("auth.passwordsMismatch"));
       return;
     }
     setBusy(true);
@@ -59,6 +62,7 @@ export function AuthPage() {
             <span>rocess</span>
           </div>
           <div className={styles.topActions}>
+            <LocaleToggle />
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
             <button
               type="button"
@@ -70,11 +74,11 @@ export function AuthPage() {
             >
               {mode === "login" ? (
                 <>
-                  Нет аккаунта? <strong>Регистрация</strong>
+                  {t("auth.noAccount")} <strong>{t("auth.register")}</strong>
                 </>
               ) : (
                 <>
-                  Уже есть аккаунт? <strong>Войти</strong>
+                  {t("auth.hasAccount")} <strong>{t("auth.login")}</strong>
                 </>
               )}
             </button>
@@ -88,36 +92,36 @@ export function AuthPage() {
 
           <form className={styles.form} onSubmit={(e) => void onSubmit(e)}>
             <div className={styles.formHead}>
-              <h1>{mode === "login" ? "С возвращением!" : "Добро пожаловать!"}</h1>
-              <p>{mode === "login" ? "Войдите в аккаунт" : "Создайте аккаунт"}</p>
+              <h1>{mode === "login" ? t("auth.welcomeBack") : t("auth.welcome")}</h1>
+              <p>{mode === "login" ? t("auth.loginSubtitle") : t("auth.registerSubtitle")}</p>
             </div>
 
             <label className={styles.field}>
-              <span>Логин</span>
+              <span>{t("auth.username")}</span>
               <input
                 autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Введите логин"
+                placeholder={t("auth.enterUsername")}
                 maxLength={64}
               />
             </label>
 
             <label className={styles.field}>
-              <span>Пароль</span>
+              <span>{t("auth.password")}</span>
               <div className={styles.passwordWrap}>
                 <input
                   type={showPassword ? "text" : "password"}
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Введите пароль"
+                  placeholder={t("auth.enterPassword")}
                   maxLength={200}
                 />
                 <button
                   type="button"
                   className={styles.eyeBtn}
-                  aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+                  aria-label={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
                   onClick={() => setShowPassword((v) => !v)}
                 >
                   {showPassword ? (
@@ -145,13 +149,13 @@ export function AuthPage() {
 
             {mode === "register" && (
               <label className={styles.field}>
-                <span>Подтверждение пароля</span>
+                <span>{t("auth.confirmPassword")}</span>
                 <input
                   type={showPassword ? "text" : "password"}
                   autoComplete="new-password"
                   value={password2}
                   onChange={(e) => setPassword2(e.target.value)}
-                  placeholder="Подтвердите пароль"
+                  placeholder={t("auth.confirmPasswordPlaceholder")}
                   maxLength={200}
                 />
               </label>
@@ -160,7 +164,7 @@ export function AuthPage() {
             {error && <div className={styles.error}>{error}</div>}
 
             <button type="submit" className={styles.submit} disabled={busy}>
-              {busy ? "…" : mode === "login" ? "Войти" : "Создать аккаунт"}
+              {busy ? "…" : mode === "login" ? t("auth.login") : t("auth.createAccount")}
             </button>
           </form>
         </div>

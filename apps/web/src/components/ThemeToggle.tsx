@@ -1,3 +1,4 @@
+import { useT } from "../lib/i18n";
 import styles from "./ThemeToggle.module.css";
 
 type Theme = "light" | "dark";
@@ -9,13 +10,16 @@ type ThemeToggleProps = {
 };
 
 export function ThemeToggle({ theme, onToggle, className }: ThemeToggleProps) {
+  const t = useT();
+  const label = theme === "light" ? t("common.themeDark") : t("common.themeLight");
+
   return (
     <button
       type="button"
       className={`${styles.themeIconBtn} ${className ?? ""}`}
       data-mode={theme}
-      aria-label={theme === "light" ? "Тёмная тема" : "Светлая тема"}
-      title={theme === "light" ? "Тёмная тема" : "Светлая тема"}
+      aria-label={label}
+      title={label}
       onClick={onToggle}
     >
       <span className={styles.themeGlyph} aria-hidden>

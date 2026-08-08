@@ -21,13 +21,15 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.piArgs)) {
     merged.piArgs = [...DEFAULT_SETTINGS.piArgs];
   }
-  if (
-    merged.defaultProvider !== "cursor" &&
+  if (merged.defaultProvider !== "cursor" &&
     merged.defaultProvider !== "opencode" &&
     merged.defaultProvider !== "omp" &&
     merged.defaultProvider !== "pi"
   ) {
     merged.defaultProvider = DEFAULT_SETTINGS.defaultProvider;
+  }
+  if (merged.locale !== "en" && merged.locale !== "ru") {
+    merged.locale = DEFAULT_SETTINGS.locale;
   }
   return merged;
 }

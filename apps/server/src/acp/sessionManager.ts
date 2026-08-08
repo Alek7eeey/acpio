@@ -8,6 +8,7 @@ import {
   type AgentProvider,
   type ModelParamDto,
 } from "@acprocess/shared";
+import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
 import {
   appendPart,
@@ -581,10 +582,11 @@ export async function runPrompt(
   text: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode; titleHint?: string },
 ) {
+  const settings = await getSettings();
+  const locale = settings.locale ?? "ru";
   const rt = getRuntime(sessionId);
   if (rt.running) {
-    // Auto-recover stuck runtimes older than nothing tracked — force unlock via cancel path
-    throw new Error("Сессия уже выполняет запрос. Нажмите «Стоп» и попробуйте снова.");
+    throw Object.assign(new Error(errorMessage(locale, "sessionBusy")), { code: "sessionBusy" });
   }
 
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
@@ -622,11 +624,7 @@ export async function runPrompt(
     let promptText = text;
     if (!rt.toolsHintSent) {
       rt.toolsHintSent = true;
-      promptText =
-        `${text}\n\n` +
-        `[Системно: в этой среде у тебя есть инструменты web/fetch, terminal и fs. ` +
-        `Для актуальных данных (погода, сайты, новости) сразу вызывай инструменты — ` +
-        `не отвечай, что «нет доступа к интернету/погоде».]`;
+      promptText = `${text}\n\n${t(locale, "agent.toolsHint")}`;
     }
     const result = await client.prompt(promptText);
     // Let in-flight update handlers settle; keep short to avoid a long "blank" wait.

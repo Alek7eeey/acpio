@@ -1,7 +1,9 @@
 import { useAppStore } from "../lib/store";
+import { useT } from "../lib/i18n";
 import styles from "./Modal.module.css";
 
 export function PermissionModal() {
+  const t = useT();
   const pending = useAppStore((s) => s.pendingPermission);
   const answerPermission = useAppStore((s) => s.answerPermission);
   if (!pending) return null;
@@ -21,15 +23,16 @@ export function PermissionModal() {
           return rank(a) - rank(b);
         })
       : [
-          { optionId: "allow_always", name: "Всегда", kind: "allow_always" },
-          { optionId: "allow_once", name: "Разрешить", kind: "allow_once" },
-          { optionId: "reject_once", name: "Отклонить", kind: "reject_once" },
+          { optionId: "allow_always", name: t("common.always"), kind: "allow_always" },
+          { optionId: "allow_once", name: t("common.allow"), kind: "allow_once" },
+          { optionId: "reject_once", name: t("common.deny"), kind: "reject_once" },
         ];
 
   return (
     <div className={styles.overlay}>
       <div className={styles.modal} role="dialog" aria-modal="true">
-        <h2>Разрешение инструмента</h2>
+        <h2>{t("permission.title")}</h2>
+        <p className={styles.muted}>{t("permission.description")}</p>
         <pre className={styles.pre}>{JSON.stringify(pending.payload, null, 2)}</pre>
         <div className={styles.actions}>
           {buttons.map((opt) => {

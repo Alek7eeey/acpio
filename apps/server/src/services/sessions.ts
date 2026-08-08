@@ -9,9 +9,11 @@ import type {
   AgentProvider,
   SessionStatus,
 } from "@acprocess/shared";
+import { defaultSessionTitle } from "@acprocess/i18n";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
 import { broadcastToSession } from "./wsHub.js";
+import { getSettings } from "./settings.js";
 
 function mapSession(row: typeof sessions.$inferSelect): SessionDto {
   return {
@@ -85,10 +87,11 @@ export async function createSession(input: {
 }): Promise<SessionDto> {
   const siblings = await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
+  const settings = await getSettings();
   const [row] = await db
     .insert(sessions)
     .values({
-      title: input.title ?? "Новый чат",
+      title: input.title ?? defaultSessionTitle(settings.locale),
       provider: input.provider,
       cwd: input.cwd,
       mode: input.mode,

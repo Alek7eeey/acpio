@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@acprocess/i18n": "*",
     "@acprocess/shared": "*",
     "highlight.js": "^11.11.1",
     "react": "^19.0.0",

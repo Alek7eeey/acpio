@@ -1,48 +1,50 @@
 import { Link } from "react-router-dom";
 import { modelDisplayName } from "@acprocess/shared";
 import { HoverTip } from "../components/HoverTip";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import styles from "./DashboardPage.module.css";
 
-const modules = [
-  {
-    id: "chat",
-    to: "/chat",
-    title: "AI-чат",
-    subtitle: "ACP",
-    description: "Чат с агентом: рассуждения и ответы в одной ленте.",
-    status: "ready" as const,
-    cta: "Открыть чат",
-  },
-  {
-    id: "gitea",
-    to: "/gitea",
-    title: "Gitea",
-    subtitle: "Git · PR · конфликты",
-    description: "Коммиты, pull request и резолв конфликтов через агента и Gitea API.",
-    status: "soon" as const,
-    cta: "Скоро",
-  },
-  {
-    id: "processes",
-    to: "#",
-    title: "Процессы",
-    subtitle: "Оркестрация",
-    description: "Оркестрация внутренних процессов через агентов ACP.",
-    status: "soon" as const,
-    cta: "Скоро",
-  },
-];
-
 export function DashboardPage() {
+  const t = useT();
   const settings = useAppStore((s) => s.settings);
   const user = useAppStore((s) => s.user);
   const sessions = useAppStore((s) => s.sessions);
   const connected = useAppStore((s) => s.connected);
 
+  const modules = [
+    {
+      id: "chat",
+      to: "/chat",
+      title: t("dashboard.chatTitle"),
+      subtitle: t("dashboard.chatSubtitle"),
+      description: t("dashboard.chatDescription"),
+      status: "ready" as const,
+      cta: t("common.openChat"),
+    },
+    {
+      id: "gitea",
+      to: "/gitea",
+      title: t("dashboard.giteaTitle"),
+      subtitle: t("dashboard.giteaSubtitle"),
+      description: t("dashboard.giteaDescription"),
+      status: "soon" as const,
+      cta: t("common.soon"),
+    },
+    {
+      id: "processes",
+      to: "#",
+      title: t("dashboard.processesTitle"),
+      subtitle: t("dashboard.processesSubtitle"),
+      description: t("dashboard.processesDescription"),
+      status: "soon" as const,
+      cta: t("common.soon"),
+    },
+  ];
+
   const provider = user?.connectedProvider;
   const providerLabel = !provider
-    ? "не подключён"
+    ? t("common.notConnected")
     : provider === "cursor"
       ? "Cursor"
       : provider === "opencode"
@@ -54,7 +56,7 @@ export function DashboardPage() {
             : provider;
   const model =
     provider && settings.defaultModel
-      ? modelDisplayName(settings.defaultModel)
+      ? modelDisplayName(settings.defaultModel, undefined, t("models.default"))
       : "—";
 
   return (
@@ -65,27 +67,25 @@ export function DashboardPage() {
           <h1>
             <span>ACP</span>rocess
           </h1>
-          <p className={styles.lead}>
-            Единая панель для агентов и внутренних модулей. Настройки — в меню аккаунта.
-          </p>
+          <p className={styles.lead}>{t("dashboard.tagline")}</p>
         </div>
         <div className={styles.stats}>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>Агент</span>
+            <span className={styles.statLabel}>{t("common.agent")}</span>
             <strong className={!provider ? styles.bad : undefined}>{providerLabel}</strong>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>Модель</span>
+            <span className={styles.statLabel}>{t("common.model")}</span>
             <strong className={styles.truncate}>{model}</strong>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>Сессии</span>
+            <span className={styles.statLabel}>{t("chat.newSession")}</span>
             <strong>{sessions.length}</strong>
           </div>
           <div className={styles.stat}>
             <span className={styles.statLabel}>WS</span>
             <strong className={connected ? styles.ok : styles.bad}>
-              {connected ? "online" : "offline"}
+              {connected ? t("common.online") : t("common.offline")}
             </strong>
           </div>
         </div>
@@ -101,7 +101,7 @@ export function DashboardPage() {
                   <p className={styles.subtitle}>{mod.subtitle}</p>
                 </div>
                 <span className={mod.status === "ready" ? styles.badgeReady : styles.badgeSoon}>
-                  {mod.status === "ready" ? "Готово" : "Скоро"}
+                  {mod.status === "ready" ? t("common.ready") : t("common.soon")}
                 </span>
               </div>
               <p className={styles.desc}>{mod.description}</p>

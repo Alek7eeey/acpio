@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import { useT } from "../lib/i18n";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import c from "highlight.js/lib/languages/c";
@@ -157,13 +158,14 @@ function highlightCode(code: string, language?: string) {
 }
 
 function CopyButton({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <button
       type="button"
       className={styles.copyBtn}
-      title={copied ? "Скопировано" : "Копировать"}
-      aria-label={copied ? "Скопировано" : "Копировать"}
+      title={copied ? t("common.copied") : t("common.copy")}
+      aria-label={copied ? t("common.copied") : t("common.copy")}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -199,7 +201,8 @@ function CopyButton({ text }: { text: string }) {
 }
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
-  const label = languageLabel(language) ?? "Code";
+  const t = useT();
+  const label = languageLabel(language) ?? t("common.code");
   const highlighted = useMemo(() => highlightCode(code, language), [code, language]);
 
   return (

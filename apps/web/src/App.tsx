@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAppStore } from "./lib/store";
+import { I18nProvider } from "./lib/i18n";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
 import { BootSplash } from "./components/BootSplash";
@@ -44,9 +45,9 @@ export function App() {
     );
 
   return (
-    <>
+    <I18nProvider>
       {app}
       {splashVisible && <BootSplash ready={!loading} onDone={onSplashDone} />}
-    </>
+    </I18nProvider>
   );
 }

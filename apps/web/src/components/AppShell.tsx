@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAppStore } from "../lib/store";
+import { useT } from "../lib/i18n";
 import {
-  SETTINGS_TREE,
+  getSettingsTree,
   parseSettingsSearch,
   settingsPath,
   defaultLeafFor,
@@ -11,6 +12,7 @@ import {
 } from "../lib/settingsNav";
 import { ChatSidebar } from "./ChatSidebar";
 import { HoverTip } from "./HoverTip";
+import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
 import styles from "./AppShell.module.css";
 
@@ -28,6 +30,7 @@ function readStoredWidth() {
 }
 
 export function AppShell() {
+  const t = useT();
   const location = useLocation();
   const navigate = useNavigate();
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
@@ -37,10 +40,12 @@ export function AppShell() {
   const connected = useAppStore((s) => s.connected);
   const settings = useAppStore((s) => s.settings);
   const user = useAppStore((s) => s.user);
+  const settingsTree = useMemo(() => getSettingsTree(t), [t]);
+
   const agentStatusTitle = useMemo(() => {
     const provider = user?.connectedProvider;
     const agent = !provider
-      ? "No agent"
+      ? t("common.noAgent")
       : provider === "cursor"
         ? "Cursor"
         : provider === "opencode"
@@ -50,8 +55,11 @@ export function AppShell() {
             : provider === "pi"
               ? "PI"
               : provider;
-    return `${agent} · ${connected ? "online" : "offline"}`;
-  }, [user?.connectedProvider, connected]);
+    return t("dashboard.agentStatus", {
+      agent,
+      status: connected ? t("common.online") : t("common.offline"),
+    });
+  }, [user?.connectedProvider, connected, t]);
 
   const isChat = location.pathname.startsWith("/chat");
   const isGitea = location.pathname.startsWith("/gitea");
@@ -124,7 +132,7 @@ export function AppShell() {
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
 
-  const displayLabel = user?.displayName || user?.username || "Пользователь";
+  const displayLabel = user?.displayName || user?.username || t("common.user");
   const userInitial = (displayLabel[0] ?? "?").toUpperCase();
 
   useEffect(() => {
@@ -144,12 +152,12 @@ export function AppShell() {
   }, [accountOpen]);
 
   const title = isGitea
-    ? "Gitea"
+    ? t("common.gitea")
     : isSettings
-      ? "Настройки"
+      ? t("common.settings")
       : isChat
-        ? "AI-чат"
-        : "Дашборд";
+        ? t("common.chat")
+        : t("common.dashboard");
 
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
@@ -183,13 +191,13 @@ export function AppShell() {
                 if (window.innerWidth < 900) setSidebarOpen(false);
               }}
             >
-              ← Дашборд
+              {t("common.backToDashboard")}
             </button>
             <button
               type="button"
               className={styles.collapseBtn}
-              aria-label="Свернуть дерево"
-              title="Свернуть дерево"
+              aria-label={t("common.collapseTree")}
+              title={t("common.collapseTree")}
               onClick={() => setSidebarOpen(false)}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -230,15 +238,13 @@ export function AppShell() {
                   {settings.giteaOwner || "—"}/{settings.giteaRepo || "—"}
                 </strong>
               </div>
-              <p className={styles.emptyHint}>
-                Коммиты, PR и конфликты — в основной панели справа.
-              </p>
+              <p className={styles.emptyHint}>{t("common.giteaSidebarHint")}</p>
             </div>
           )}
 
           {isSettings && (
-            <nav className={styles.settingsTree} aria-label="Разделы настроек">
-              {SETTINGS_TREE.map((branch) => {
+            <nav className={styles.settingsTree} aria-label={t("common.settingsSections")}>
+              {settingsTree.map((branch) => {
                 const open = openBranches[branch.id] ?? true;
                 const activeBranch = settingsNav.section === branch.id;
                 const hasChildren = branch.children.length > 0;
@@ -338,15 +344,11 @@ export function AppShell() {
           onDoubleClick={onSplitterDoubleClick}
           role="separator"
           aria-orientation="vertical"
-          aria-label="Изменить ширину дерева"
+          aria-label={t("common.resizeTree")}
           aria-valuenow={sidebarOpen ? sidebarWidth : 0}
           aria-valuemin={0}
           aria-valuemax={SIDEBAR_MAX}
-          title={
-            sidebarOpen
-              ? "Потяните, чтобы изменить ширину · двойной клик — свернуть"
-              : "Потяните или двойной клик — открыть дерево"
-          }
+          title={sidebarOpen ? t("common.resizeTreeHint") : t("common.resizeTreeCollapsed")}
         />
       )}
 
@@ -354,7 +356,7 @@ export function AppShell() {
         <button
           type="button"
           className={styles.backdrop}
-          aria-label="Закрыть меню"
+          aria-label={t("common.closeMenu")}
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -365,8 +367,8 @@ export function AppShell() {
             <button
               type="button"
               className={styles.iconBtn}
-              aria-label="Открыть дерево"
-              title="Открыть дерево"
+              aria-label={t("common.openTree")}
+              title={t("common.openTree")}
               onClick={() => setSidebarOpen(true)}
             >
               ☰
@@ -376,7 +378,7 @@ export function AppShell() {
             type="button"
             className={styles.headerBrand}
             onClick={() => navigate("/")}
-            title="На дашборд"
+            title={t("common.goToDashboard")}
             aria-label="ACProcess"
           >
             <span className={styles.brandLetters} aria-hidden>
@@ -398,6 +400,7 @@ export function AppShell() {
               title={agentStatusTitle}
               aria-label={agentStatusTitle}
             />
+            <LocaleToggle />
             <ThemeToggle
               theme={theme}
               onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
@@ -406,10 +409,10 @@ export function AppShell() {
               <button
                 type="button"
                 className={`${styles.accountBtn} ${accountOpen || isSettings || isAdmin ? styles.headerIconActive : ""}`}
-                aria-label="Аккаунт"
+                aria-label={t("common.account")}
                 aria-expanded={accountOpen}
                 aria-haspopup="menu"
-                title="Аккаунт"
+                title={t("common.account")}
                 onClick={() => setAccountOpen((v) => !v)}
               >
                 <span className={styles.accountAvatar} aria-hidden>
@@ -436,7 +439,7 @@ export function AppShell() {
                       navigate(settingsPath("agent", "connect"));
                     }}
                   >
-                    Настройки
+                    {t("common.settings")}
                   </button>
                   {user?.role === "admin" && (
                     <button
@@ -448,7 +451,7 @@ export function AppShell() {
                         navigate("/admin");
                       }}
                     >
-                      Админка
+                      {t("common.admin")}
                     </button>
                   )}
                   <button
@@ -460,7 +463,7 @@ export function AppShell() {
                       void logout();
                     }}
                   >
-                    Выйти
+                    {t("common.logout")}
                   </button>
                 </div>
               )}

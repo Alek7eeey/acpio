@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useT } from "../lib/i18n";
 import styles from "./BootSplash.module.css";
 
 const BRAND = "ACProcess";
@@ -12,6 +13,7 @@ type BootSplashProps = {
 };
 
 export function BootSplash({ ready, onDone }: BootSplashProps) {
+  const t = useT();
   const [minElapsed, setMinElapsed] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [exiting, setExiting] = useState(false);
@@ -29,8 +31,8 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
   }, [onDone]);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setMinElapsed(true), MIN_MS);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setMinElapsed(true), MIN_MS);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -56,8 +58,8 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
         .join(" ")}
       role="status"
       aria-live="polite"
-      aria-label="Loading ACProcess"
-      title="Нажмите, чтобы пропустить"
+      aria-label={t("common.loadingApp")}
+      title={t("common.skipSplash")}
       onClick={onSkip}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " " || e.key === "Escape") {
@@ -87,8 +89,8 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
           ))}
         </div>
 
-        <p className={styles.sub}>Harness for agents</p>
-        <p className={styles.hint}>Нажмите, чтобы продолжить</p>
+        <p className={styles.sub}>{t("common.harnessForAgents")}</p>
+        <p className={styles.hint}>{t("common.continueSplash")}</p>
       </div>
     </div>
   );

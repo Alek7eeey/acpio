@@ -11,38 +11,31 @@ import {
 } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { parseSettingsSearch } from "../lib/settingsNav";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import styles from "./SettingsPage.module.css";
 
-const PROVIDERS: Array<{
-  id: AgentProvider;
-  title: string;
-  description: string;
-}> = [
-  {
-    id: "cursor",
-    title: "Cursor",
-    description: "Cursor Agent CLI (`agent acp`)",
-  },
-  {
-    id: "opencode",
-    title: "OpenCode",
-    description: "Локальный OpenCode CLI через ACP",
-  },
-  {
-    id: "omp",
-    title: "OMP",
-    description: "Oh My Pi через ACP (`omp acp`)",
-  },
-  {
-    id: "pi",
-    title: "PI",
-    description: "Pi coding agent через ACP (`pi-acp`)",
-  },
-];
+const PROVIDER_IDS = ["cursor", "opencode", "omp", "pi"] as const satisfies readonly AgentProvider[];
 
 export function SettingsPage() {
+  const t = useT();
+  const providers = useMemo(
+    () =>
+      PROVIDER_IDS.map((id) => ({
+        id,
+        title: id === "cursor" ? "Cursor" : id === "opencode" ? "OpenCode" : id === "omp" ? "OMP" : "PI",
+        description:
+          id === "cursor"
+            ? t("settings.cursorDesc")
+            : id === "opencode"
+              ? t("settings.opencodeDesc")
+              : id === "omp"
+                ? t("settings.ompDesc")
+                : t("settings.piDesc"),
+      })),
+    [t],
+  );
   const location = useLocation();
   const { section, leaf } = useMemo(
     () => parseSettingsSearch(location.search),
@@ -264,7 +257,7 @@ export function SettingsPage() {
     setProfileBusy(true);
     try {
       await updateProfile(displayName);
-      setProfileMsg("Имя сохранено");
+      setProfileMsg(t("settings.profileSaved"));
       window.setTimeout(() => setProfileMsg(null), 1600);
     } catch (err) {
       setProfileErr(err instanceof Error ? err.message : String(err));
@@ -277,11 +270,11 @@ export function SettingsPage() {
     setPasswordErr(null);
     setPasswordMsg(null);
     if (!currentPassword || !newPassword || !confirmPassword) {
-      setPasswordErr("Заполните все поля");
+      setPasswordErr(t("settings.fillAllFields"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordErr("Пароли не совпадают");
+      setPasswordErr(t("auth.passwordsMismatch"));
       return;
     }
     setPasswordBusy(true);
@@ -290,7 +283,7 @@ export function SettingsPage() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setPasswordMsg("Пароль обновлён");
+      setPasswordMsg(t("settings.passwordUpdated"));
       window.setTimeout(() => setPasswordMsg(null), 1600);
     } catch (err) {
       setPasswordErr(err instanceof Error ? err.message : String(err));
@@ -313,20 +306,20 @@ export function SettingsPage() {
   const title =
     section === "agent"
       ? leaf === "connect"
-        ? "Подключение агента"
+        ? t("settings.agentConnectTitle")
         : leaf === "model"
-          ? "Модель"
-          : "Дополнительно"
-      : "Профиль";
+          ? t("settings.agentModelTitle")
+          : t("settings.agentAdvancedTitle")
+      : t("settings.profileTitle");
 
   const subtitle =
     section === "agent"
       ? leaf === "advanced"
-        ? "Папка по умолчанию, API-ключи и запуск CLI"
-        : "Выберите агент и проверьте ACP"
-      : "Имя и пароль аккаунта";
+        ? t("settings.agentAdvancedDesc")
+        : t("settings.agentConnectDesc")
+      : t("settings.profileDesc");
 
-  const eyebrow = section === "agent" ? "Агенты" : "Общее";
+  const eyebrow = section === "agent" ? t("settings.agents") : t("settings.general");
 
   return (
     <div className={styles.page}>
@@ -341,10 +334,8 @@ export function SettingsPage() {
 
         {section === "agent" && leaf === "connect" && (
           <section className={styles.providerList}>
-            <p className={styles.hint}>
-              Агент не подключён, пока вы не нажмёте «Подключить». Проверка только тестирует CLI.
-            </p>
-            {PROVIDERS.map((item) => {
+            <p className={styles.hint}>{t("settings.agentConnectDesc")}</p>
+            {providers.map((item) => {
               // Per-user connection (admin column), not the shared global defaultProvider.
               const active = user?.connectedProvider === item.id;
               const probe = probes[item.id];
@@ -358,7 +349,7 @@ export function SettingsPage() {
                   <div className={styles.providerMeta}>
                     <div className={styles.providerTitleRow}>
                       <span className={styles.providerTitle}>{item.title}</span>
-                      {active && <span className={styles.providerBadge}>Активен</span>}
+                      {active && <span className={styles.providerBadge}>{t("common.connected")}</span>}
                     </div>
                     <p className={styles.providerDesc}>{item.description}</p>
                     {probe && (
@@ -367,7 +358,7 @@ export function SettingsPage() {
                           probe.ok ? styles.probeOk : styles.probeFail
                         }`}
                       >
-                        <strong>{probe.ok ? "Подключено" : "Ошибка"}</strong>
+                        <strong>{probe.ok ? t("common.connected") : t("common.error")}</strong>
                         <div>{probe.message}</div>
                         {probe.currentModel && (
                           <div>Model: {modelDisplayName(probe.currentModel)}</div>
@@ -382,7 +373,7 @@ export function SettingsPage() {
                       disabled={probing || connecting}
                       onClick={() => void runProbe(item.id)}
                     >
-                      {probing ? "Проверяю…" : "Проверить"}
+                      {probing ? t("common.checking") : t("common.check")}
                     </button>
                     <button
                       type="button"
@@ -390,14 +381,14 @@ export function SettingsPage() {
                       disabled={connecting || (active && !connecting)}
                       onClick={() => void connectProvider(item.id)}
                     >
-                      {connecting ? "…" : active ? "Подключён" : "Подключить"}
+                      {connecting ? "…" : active ? t("common.connected") : t("common.connect")}
                     </button>
                   </div>
                 </div>
               );
             })}
             {saved && leaf === "connect" && (
-              <span className={styles.ok}>Сохранено</span>
+              <span className={styles.ok}>{t("settings.profileSaved")}</span>
             )}
           </section>
         )}
@@ -405,13 +396,11 @@ export function SettingsPage() {
         {section === "agent" && leaf === "model" && (
           <section className={styles.card}>
             {!user?.connectedProvider ? (
-              <p className={styles.hint}>
-                Сначала подключите агента на вкладке «Подключение агента».
-              </p>
+              <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
             ) : (
               <>
             <div className={styles.modelField}>
-              <span className={styles.modelLabel}>Модель по умолчанию</span>
+              <span className={styles.modelLabel}>{t("settings.modelSection")}</span>
               <ModelPicker
                 model={form.defaultModel}
                 models={models}
@@ -445,14 +434,11 @@ export function SettingsPage() {
                 loading={modelsLoading}
               />
               {modelsError && !modelsLoading && (
-                <p className={styles.hint}>Не удалось обновить список: {modelsError}</p>
+                <p className={styles.hint}>{modelsError}</p>
               )}
             </div>
             {modelParams.length === 0 && !modelsLoading && user.connectedProvider === "cursor" && (
-              <p className={styles.hint}>
-                Если нет выбора Fast / Effort — нажми «Проверить» у Cursor на вкладке Подключение
-                (нужен рестарт ACP-сессии).
-              </p>
+              <p className={styles.hint}>{t("common.check")}</p>
             )}
               </>
             )}
@@ -463,12 +449,12 @@ export function SettingsPage() {
           <section className={styles.card}>
             <div className={styles.sectionBlock}>
               <label>
-                Папка по умолчанию для новых чатов
+                {t("settings.defaultFolder")}
                 <div className={styles.cwdPickRow}>
                   <input
                     value={form.defaultCwd}
                     readOnly
-                    placeholder="Не задана"
+                    placeholder={t("common.notSet")}
                     title={form.defaultCwd || undefined}
                   />
                   <button
@@ -485,7 +471,7 @@ export function SettingsPage() {
                         });
                     }}
                   >
-                    Выбрать…
+                    {t("common.selectFolder")}
                   </button>
                   {form.defaultCwd ? (
                     <button
@@ -493,59 +479,53 @@ export function SettingsPage() {
                       className={styles.secondaryBtn}
                       onClick={() => patch("defaultCwd", "")}
                     >
-                      Сбросить
+                      {t("common.cancel")}
                     </button>
                   ) : null}
                 </div>
               </label>
-              <p className={styles.fieldHint}>
-                Подставляется в диалоге создания чата. Рабочая папка чата выбирается в Проводнике
-                при создании.
-              </p>
+              <p className={styles.fieldHint}>{t("settings.defaultFolder")}</p>
               <label>
-                Политика разрешений
+                {t("settings.permissionPolicy")}
                 <select
                   value={form.permissionPolicy}
                   onChange={(e) =>
                     patch("permissionPolicy", e.target.value as AppSettings["permissionPolicy"])
                   }
                 >
-                  <option value="always">Всегда разрешать</option>
-                  <option value="prompt">Спрашивать</option>
-                  <option value="allowlist">Allowlist</option>
+                  <option value="always">{t("settings.permissionAlways")}</option>
+                  <option value="prompt">{t("settings.permissionPrompt")}</option>
+                  <option value="allowlist">{t("settings.permissionAllowlist")}</option>
                 </select>
               </label>
             </div>
 
             <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>API-ключи</h2>
-              <p className={styles.fieldHint}>
-                Необязательны, если CLI уже авторизован локально (`agent login` / `opencode auth
-                login`). Нужны для headless/сервера без интерактивного логина.
-              </p>
+              <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
+              <p className={styles.fieldHint}>{t("settings.cliAndPermissions")}</p>
               {(
                 [
                   {
                     key: "cursorApiKey" as const,
-                    label: "API-ключ Cursor",
+                    label: `Cursor ${t("settings.apiKeys")}`,
                     env: "CURSOR_API_KEY",
                     placeholder: "",
                   },
                   {
                     key: "opencodeApiKey" as const,
-                    label: "API-ключ OpenCode",
+                    label: `OpenCode ${t("settings.apiKeys")}`,
                     env: "OPENCODE_API_KEY",
                     placeholder: "",
                   },
                   {
                     key: "anthropicApiKey" as const,
-                    label: "API-ключ Anthropic",
+                    label: `Anthropic ${t("settings.apiKeys")}`,
                     env: "ANTHROPIC_API_KEY",
                     placeholder: "sk-ant-...",
                   },
                   {
                     key: "openaiApiKey" as const,
-                    label: "API-ключ OpenAI",
+                    label: `OpenAI ${t("settings.apiKeys")}`,
                     env: "OPENAI_API_KEY",
                     placeholder: "",
                   },
@@ -570,10 +550,10 @@ export function SettingsPage() {
                         type="button"
                         className={styles.clearKeyBtn}
                         disabled={!hasValue}
-                        title="Удалить ключ из настроек"
+                        title={t("settings.removeKey")}
                         onClick={() => void clearApiKey(item.key)}
                       >
-                        Удалить
+                        {t("common.delete")}
                       </button>
                     </div>
                   </div>
@@ -582,15 +562,11 @@ export function SettingsPage() {
             </div>
 
             <details className={styles.cliDisclosure}>
-              <summary>Запуск CLI — дополнительно</summary>
+              <summary>{t("settings.cliAndPermissions")}</summary>
               <div className={styles.cliDisclosureBody}>
-                <p className={styles.fieldHint}>
-                  Команда и аргументы для локального ACP-бинарника. Обычно хватает значений по
-                  умолчанию (`agent acp`, `opencode acp`, `omp acp`, `pi-acp`). Меняйте только если CLI
-                  установлен под другим именем или путём.
-                </p>
+                <p className={styles.fieldHint}>{t("settings.agentAdvancedDesc")}</p>
                 <label>
-                  Cursor — команда / аргументы
+                  Cursor
                   <div className={styles.row}>
                     <input
                       value={form.cursorCommand}
@@ -610,7 +586,7 @@ export function SettingsPage() {
                   </div>
                 </label>
                 <label>
-                  OpenCode — команда / аргументы
+                  OpenCode
                   <div className={styles.row}>
                     <input
                       value={form.opencodeCommand}
@@ -630,7 +606,7 @@ export function SettingsPage() {
                   </div>
                 </label>
                 <label>
-                  OMP — команда / аргументы
+                  OMP
                   <div className={styles.row}>
                     <input
                       value={form.ompCommand ?? "omp"}
@@ -650,7 +626,7 @@ export function SettingsPage() {
                   </div>
                 </label>
                 <label>
-                  PI — команда / аргументы
+                  PI
                   <div className={styles.row}>
                     <input
                       value={form.piCommand ?? "pi-acp"}
@@ -677,18 +653,18 @@ export function SettingsPage() {
         {section === "account" && (
           <>
             <section className={styles.card}>
-              <h2 className={styles.cardTitle}>Имя</h2>
-              <p className={styles.cardHint}>Отображается в аккаунте</p>
+              <h2 className={styles.cardTitle}>{t("settings.displayName")}</h2>
+              <p className={styles.cardHint}>{t("settings.profileDesc")}</p>
               <label>
-                Логин
+                {t("auth.username")}
                 <input value={user?.username ?? ""} disabled readOnly />
               </label>
               <label>
-                Имя
+                {t("settings.displayName")}
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="Как к вам обращаться"
+                  placeholder={t("settings.displayNamePlaceholder")}
                   maxLength={80}
                 />
               </label>
@@ -700,42 +676,42 @@ export function SettingsPage() {
                   disabled={profileBusy}
                   onClick={() => void saveProfile()}
                 >
-                  {profileBusy ? "…" : "Сохранить"}
+                  {profileBusy ? "…" : t("common.save")}
                 </button>
               </div>
             </section>
 
             <section className={styles.card}>
-              <h2 className={styles.cardTitle}>Пароль</h2>
-              <p className={styles.cardHint}>Смена пароля аккаунта</p>
+              <h2 className={styles.cardTitle}>{t("auth.password")}</h2>
+              <p className={styles.cardHint}>{t("settings.changePassword")}</p>
               <label>
-                Текущий пароль
+                {t("settings.currentPassword")}
                 <input
                   type="password"
                   autoComplete="current-password"
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="Введите текущий пароль"
+                  placeholder={t("settings.currentPasswordPlaceholder")}
                 />
               </label>
               <label>
-                Новый пароль
+                {t("settings.newPassword")}
                 <input
                   type="password"
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Введите новый пароль"
+                  placeholder={t("settings.newPasswordPlaceholder")}
                 />
               </label>
               <label>
-                Подтвердите пароль
+                {t("settings.confirmNewPassword")}
                 <input
                   type="password"
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Повторите новый пароль"
+                  placeholder={t("settings.confirmNewPasswordPlaceholder")}
                 />
               </label>
               {passwordErr && <div className={styles.accountErr}>{passwordErr}</div>}
@@ -746,7 +722,7 @@ export function SettingsPage() {
                   disabled={passwordBusy}
                   onClick={() => void savePassword()}
                 >
-                  {passwordBusy ? "…" : "Сменить пароль"}
+                  {passwordBusy ? "…" : t("settings.changePassword")}
                 </button>
               </div>
             </section>
@@ -755,8 +731,8 @@ export function SettingsPage() {
 
         {section === "agent" && leaf !== "connect" && (
           <div className={styles.footerBar}>
-            <button type="submit">Сохранить</button>
-            {saved && <span className={styles.ok}>Сохранено</span>}
+            <button type="submit">{t("common.save")}</button>
+            {saved && <span className={styles.ok}>{t("settings.profileSaved")}</span>}
           </div>
         )}
       </form>

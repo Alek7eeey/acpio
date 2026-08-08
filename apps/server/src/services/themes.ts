@@ -1,7 +1,9 @@
 import { asc, eq } from "drizzle-orm";
 import type { ChatThemeDto } from "@acprocess/shared";
+import { defaultThemeName } from "@acprocess/i18n";
 import { db } from "../db/client.js";
 import { chatThemes } from "../db/schema.js";
+import { getSettings } from "./settings.js";
 
 function mapTheme(row: typeof chatThemes.$inferSelect): ChatThemeDto {
   return {
@@ -25,7 +27,8 @@ export async function getTheme(id: string): Promise<ChatThemeDto | null> {
 }
 
 export async function createTheme(input: { name?: string }): Promise<ChatThemeDto> {
-  const name = (input.name?.trim() || "Новая тема").slice(0, 80);
+  const settings = await getSettings();
+  const name = (input.name?.trim() || defaultThemeName(settings.locale)).slice(0, 80);
   const existing = await db.select().from(chatThemes);
   const sortOrder = existing.reduce((max, t) => Math.max(max, t.sortOrder), -1) + 1;
   const [row] = await db

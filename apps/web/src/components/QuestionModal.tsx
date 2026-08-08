@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import { useAppStore } from "../lib/store";
+import { useT } from "../lib/i18n";
 import styles from "./Modal.module.css";
 
 export function QuestionModal() {
+  const t = useT();
   const pending = useAppStore((s) => s.pendingQuestion);
   const answerQuestion = useAppStore((s) => s.answerQuestion);
   const [selected, setSelected] = useState<Record<string, string[]>>({});
@@ -23,7 +25,7 @@ export function QuestionModal() {
     return (
       <div className={styles.overlay}>
         <div className={styles.modal} role="dialog" aria-modal="true">
-          <h2>{String(pending.payload.name ?? "План")}</h2>
+          <h2>{String(pending.payload.name ?? t("question.plan"))}</h2>
           <p className={styles.muted}>{String(pending.payload.overview ?? "")}</p>
           <pre className={styles.pre}>{String(pending.payload.plan ?? "")}</pre>
           <div className={styles.actions}>
@@ -33,14 +35,14 @@ export function QuestionModal() {
                 void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } })
               }
             >
-              Отклонить
+              {t("common.reject")}
             </button>
             <button
               type="button"
               className={styles.primary}
               onClick={() => void answerQuestion({ outcome: { outcome: "accepted" } })}
             >
-              Принять
+              {t("common.accept")}
             </button>
           </div>
         </div>
@@ -51,7 +53,7 @@ export function QuestionModal() {
   return (
     <div className={styles.overlay}>
       <div className={styles.modal} role="dialog" aria-modal="true">
-        <h2>{String(pending.payload.title ?? "Вопрос агента")}</h2>
+        <h2>{String(pending.payload.title ?? t("question.agentQuestion"))}</h2>
         <div className={styles.questions}>
           {questions.map((q) => (
             <div key={q.id} className={styles.q}>
@@ -90,7 +92,7 @@ export function QuestionModal() {
             type="button"
             onClick={() => void answerQuestion({ outcome: { outcome: "skipped" } })}
           >
-            Пропустить
+            {t("common.skip")}
           </button>
           <button
             type="button"
@@ -107,7 +109,7 @@ export function QuestionModal() {
               })
             }
           >
-            Ответить
+            {t("common.send")}
           </button>
         </div>
       </div>

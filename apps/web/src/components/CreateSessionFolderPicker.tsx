@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionDto } from "@acprocess/shared";
 import { api } from "../lib/api";
+import { useT } from "../lib/i18n";
 import styles from "./AppShell.module.css";
 
 function normalizeCwd(cwd: string | null | undefined) {
@@ -14,10 +15,10 @@ function shortPath(pathValue: string) {
   return `…${normalized.slice(-46)}`;
 }
 
-function folderName(pathValue: string) {
+function folderName(pathValue: string, fallback: string) {
   const normalized = normalizeCwd(pathValue).replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
-  return parts[parts.length - 1] || normalized || "Папка";
+  return parts[parts.length - 1] || normalized || fallback;
 }
 
 function parentPath(pathValue: string) {
@@ -80,6 +81,7 @@ export function CreateSessionFolderPicker({
   onClose,
   onConfirm,
 }: CreateSessionFolderPickerProps) {
+  const t = useT();
   const [cwd, setCwd] = useState("");
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -144,10 +146,10 @@ export function CreateSessionFolderPicker({
       style={{ left: pos.left, top: pos.top }}
       role="dialog"
       aria-modal="true"
-      aria-label="Рабочая папка"
+      aria-label={t("common.workingDir")}
     >
-      <div className={styles.popoverTitle}>Рабочая папка</div>
-      <p className={styles.popoverText}>Выберите папку — в ней будет работать агент.</p>
+      <div className={styles.popoverTitle}>{t("common.workingDir")}</div>
+      <p className={styles.popoverText}>{t("errors.folderPickerPrompt")}</p>
 
       <button
         type="button"
@@ -155,7 +157,7 @@ export function CreateSessionFolderPicker({
         onClick={() => void openExplorer()}
         disabled={picking || busy}
       >
-        {picking ? "Открыт диалог…" : "Выбрать папку…"}
+        {picking ? t("common.dialogOpen") : t("common.selectFolder")}
       </button>
 
       {cwd.trim() ? (
@@ -171,22 +173,22 @@ export function CreateSessionFolderPicker({
             </svg>
           </span>
           <span className={styles.folderPickSelectedMeta}>
-            <span className={styles.folderPickSelectedName}>{folderName(cwd)}</span>
+            <span className={styles.folderPickSelectedName}>{folderName(cwd, t("common.folder"))}</span>
             <span className={styles.folderPickSelectedPath}>{shortPath(cwd)}</span>
           </span>
         </div>
       ) : usingDefault ? (
         <p className={styles.folderPickEmpty} title={fallback}>
-          Без выбора → по умолчанию:
+          {t("common.default")}:
           <span className={styles.folderPickDefaultPath}>{fallback}</span>
         </p>
       ) : (
-        <p className={styles.folderPickEmpty}>Выберите папку или задайте её в настройках</p>
+        <p className={styles.folderPickEmpty}>{t("common.selectFolder")}</p>
       )}
 
       {suggestions.length > 0 && (
-        <div className={styles.recentFolders} role="listbox" aria-label="Недавние папки">
-          <div className={styles.recentFoldersHead}>Недавние</div>
+        <div className={styles.recentFolders} role="listbox" aria-label={t("common.recentFolders")}>
+          <div className={styles.recentFoldersHead}>{t("common.recentFolders")}</div>
           <div className={styles.recentFoldersList}>
             {suggestions.map((path) => {
               const active = normalizeCwd(path).toLowerCase() === normalizeCwd(cwd).toLowerCase();
@@ -212,7 +214,7 @@ export function CreateSessionFolderPicker({
                     </svg>
                   </span>
                   <span className={styles.recentFolderMeta}>
-                    <span className={styles.recentFolderName}>{folderName(path)}</span>
+                    <span className={styles.recentFolderName}>{folderName(path, t("common.folder"))}</span>
                     <span className={styles.recentFolderPath}>{parentPath(path) || path}</span>
                   </span>
                 </button>
@@ -226,7 +228,7 @@ export function CreateSessionFolderPicker({
 
       <div className={styles.popoverActions}>
         <button type="button" onClick={onClose} disabled={busy}>
-          Отмена
+          {t("common.cancel")}
         </button>
         <button
           type="button"
@@ -234,7 +236,7 @@ export function CreateSessionFolderPicker({
           disabled={!resolved || busy || picking}
           onClick={() => void submit()}
         >
-          Создать
+          {t("chat.newSession")}
         </button>
       </div>
     </div>,

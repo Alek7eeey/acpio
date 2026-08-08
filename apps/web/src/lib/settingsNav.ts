@@ -1,3 +1,5 @@
+import type { TranslateFn } from "@acprocess/i18n";
+
 export type SettingsSection = "agent" | "account" | "gitea";
 export type SettingsAgentLeaf = "connect" | "model" | "advanced";
 export type SettingsAccountLeaf = "profile";
@@ -20,27 +22,29 @@ type TreeBranch =
       children: Array<{ id: SettingsLeaf; label: string }>;
     };
 
-export const SETTINGS_TREE: TreeBranch[] = [
-  {
-    id: "agent",
-    label: "Агенты",
-    children: [
-      { id: "connect", label: "Подключение" },
-      { id: "model", label: "Модель" },
-      { id: "advanced", label: "Дополнительно" },
-    ],
-  },
-  {
-    id: "account",
-    label: "Общее",
-    children: [{ id: "profile", label: "Профиль" }],
-  },
-  {
-    id: "gitea",
-    label: "Gitea",
-    children: [],
-  },
-];
+export function getSettingsTree(t: TranslateFn): TreeBranch[] {
+  return [
+    {
+      id: "agent",
+      label: t("settings.agents"),
+      children: [
+        { id: "connect", label: t("settings.connection") },
+        { id: "model", label: t("settings.modelSection") },
+        { id: "advanced", label: t("settings.advanced") },
+      ],
+    },
+    {
+      id: "account",
+      label: t("settings.general"),
+      children: [{ id: "profile", label: t("settings.profile") }],
+    },
+    {
+      id: "gitea",
+      label: t("common.gitea"),
+      children: [],
+    },
+  ];
+}
 
 export function parseSettingsSearch(search: string): {
   section: SettingsSection;
@@ -48,7 +52,6 @@ export function parseSettingsSearch(search: string): {
 } {
   const params = new URLSearchParams(search);
   const rawSection = params.get("section");
-  // Gitea settings are temporarily disabled; appearance/password → account/profile
   const section: SettingsSection =
     rawSection === "account" || rawSection === "appearance" ? "account" : "agent";
 

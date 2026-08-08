@@ -1,0 +1,9 @@
+.flag {
+  width: 18px;
+  height: 12px;
+  flex: 0 0 auto;
+  display: block;
+  border-radius: 2px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  box-shadow: 0 0 0 0.5px color-mix(in srgb, #000 8%, transparent);
+}

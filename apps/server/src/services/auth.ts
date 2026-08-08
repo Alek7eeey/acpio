@@ -100,10 +100,14 @@ export async function ensureAdminUser() {
   console.log(`Seeded admin user "${ADMIN_USERNAME}"`);
 }
 
+function authError(code: string, statusCode: number) {
+  return Object.assign(new Error(code), { statusCode, code });
+}
+
 export async function registerUser(usernameRaw: string, password: string) {
   const username = normalizeUsername(usernameRaw);
-  if (!username) throw Object.assign(new Error("Укажите имя пользователя"), { statusCode: 400 });
-  if (!password) throw Object.assign(new Error("Укажите пароль"), { statusCode: 400 });
+  if (!username) throw authError("usernameRequired", 400);
+  if (!password) throw authError("passwordRequired", 400);
 
   const existing = await db
     .select({ id: users.id })
@@ -111,7 +115,7 @@ export async function registerUser(usernameRaw: string, password: string) {
     .where(eq(users.username, username))
     .limit(1);
   if (existing[0]) {
-    throw Object.assign(new Error("Такой пользователь уже есть"), { statusCode: 409 });
+    throw authError("userExists", 409);
   }
 
   const rows = await db
@@ -131,7 +135,7 @@ export async function loginUser(usernameRaw: string, password: string) {
   const rows = await db.select().from(users).where(eq(users.username, username)).limit(1);
   const row = rows[0];
   if (!row || !verifyPassword(password, row.passwordHash)) {
-    throw Object.assign(new Error("Неверный логин или пароль"), { statusCode: 401 });
+    throw authError("invalidCredentials", 401);
   }
   return mapUser(row);
 }
@@ -187,12 +191,12 @@ export function clearAuthCookie(reply: FastifyReply) {
 
 export async function changePassword(userId: string, currentPassword: string, newPassword: string) {
   if (!newPassword) {
-    throw Object.assign(new Error("Укажите новый пароль"), { statusCode: 400 });
+    throw authError("newPasswordRequired", 400);
   }
   const rows = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   const row = rows[0];
   if (!row || !verifyPassword(currentPassword, row.passwordHash)) {
-    throw Object.assign(new Error("Текущий пароль неверный"), { statusCode: 400 });
+    throw authError("wrongCurrentPassword", 400);
   }
   await db
     .update(users)
@@ -203,10 +207,10 @@ export async function changePassword(userId: string, currentPassword: string, ne
 export async function updateProfile(userId: string, displayNameRaw: string) {
   const displayName = displayNameRaw.trim();
   if (!displayName) {
-    throw Object.assign(new Error("Укажите имя"), { statusCode: 400 });
+    throw authError("displayNameRequired", 400);
   }
   if (displayName.length > 80) {
-    throw Object.assign(new Error("Имя слишком длинное"), { statusCode: 400 });
+    throw authError("displayNameTooLong", 400);
   }
   const rows = await db
     .update(users)
@@ -214,7 +218,7 @@ export async function updateProfile(userId: string, displayNameRaw: string) {
     .where(eq(users.id, userId))
     .returning();
   if (!rows[0]) {
-    throw Object.assign(new Error("Пользователь не найден"), { statusCode: 404 });
+    throw authError("userNotFound", 404);
   }
   return mapUser(rows[0]);
 }
@@ -236,12 +240,12 @@ export async function listAdminUsers(): Promise<AdminUserDto[]> {
 
 export async function deleteUser(targetId: string, actorId: string) {
   if (targetId === actorId) {
-    throw Object.assign(new Error("Нельзя удалить свой аккаунт"), { statusCode: 400 });
+    throw authError("cannotDeleteSelf", 400);
   }
   const rows = await db.select().from(users).where(eq(users.id, targetId)).limit(1);
   const target = rows[0];
   if (!target) {
-    throw Object.assign(new Error("Пользователь не найден"), { statusCode: 404 });
+    throw authError("userNotFound", 404);
   }
   if (asRole(target.role) === "admin") {
     const [{ count }] = await db
@@ -249,7 +253,7 @@ export async function deleteUser(targetId: string, actorId: string) {
       .from(users)
       .where(and(eq(users.role, "admin"), ne(users.id, targetId)));
     if (!count) {
-      throw Object.assign(new Error("Нельзя удалить последнего админа"), { statusCode: 400 });
+      throw authError("cannotDeleteLastAdmin", 400);
     }
   }
   await db.delete(users).where(eq(users.id, targetId));

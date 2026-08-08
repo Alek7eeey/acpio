@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ChatThemeDto, SessionDto } from "@acprocess/shared";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import {
   collectRecentCwds,
@@ -59,9 +60,9 @@ function normalizeCwd(cwd: string | null | undefined) {
   return (cwd ?? "").trim().replace(/[\\/]+$/, "");
 }
 
-function folderLabel(cwd: string) {
+function folderLabel(cwd: string, noFolderLabel: string) {
   const normalized = normalizeCwd(cwd);
-  if (!normalized) return "Без папки";
+  if (!normalized) return noFolderLabel;
   const parts = normalized.split(/[\\/]/).filter(Boolean);
   const leaf = parts[parts.length - 1] || normalized;
   if (normalized.length <= 36) return normalized;
@@ -89,6 +90,7 @@ function groupByFolder(list: SessionDto[]) {
 }
 
 export function ChatSidebar() {
+  const t = useT();
   const sessions = useAppStore((s) => s.sessions);
   const themes = useAppStore((s) => s.themes);
   const settings = useAppStore((s) => s.settings);
@@ -361,7 +363,7 @@ export function ChatSidebar() {
             <button
               type="button"
               className={styles.sessionMore}
-              aria-label="Меню чата"
+              aria-label={t("common.chatMenu")}
               onClick={(e) => openSessionMenu(e, s.id)}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -382,7 +384,7 @@ export function ChatSidebar() {
     const list = byTheme.get(themeId) ?? [];
     if (!theme && list.length === 0) return null;
 
-    const label = theme?.name ?? "Без темы";
+    const label = theme?.name ?? t("common.noTheme");
     const isDropTheme =
       dropTarget?.kind === "theme" && dropTarget.themeId === themeId ? styles.dropTheme : "";
     const isRenaming = theme && renamingThemeId === theme.id;
@@ -438,7 +440,7 @@ export function ChatSidebar() {
             <button
               type="button"
               className={styles.themeMore}
-              aria-label="Меню темы"
+              aria-label={t("common.themeMenu")}
               onClick={(e) => openThemeMenu(e, theme.id)}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -482,14 +484,14 @@ export function ChatSidebar() {
                       />
                     </svg>
                   </span>
-                  <span className={styles.folderLabel}>{folderLabel(folder.cwd)}</span>
+                  <span className={styles.folderLabel}>{folderLabel(folder.cwd, t("common.noFolder"))}</span>
                 </div>
               )}
               {folder.sessions.map((s) => renderSession(s, themeId))}
             </div>
           ))}
           {theme && list.length === 0 && (
-            <p className={styles.themeEmpty}>Перетащите чат сюда или создайте новый</p>
+            <p className={styles.themeEmpty}>{t("chat.emptyDescription")}</p>
           )}
         </div>
       </section>
@@ -511,12 +513,12 @@ export function ChatSidebar() {
               openFolderPicker({ x: rect.left, y: rect.bottom + 6 });
             }}
           >
-            Новый чат
+            {t("common.newChat")}
           </button>
           <button
             className={styles.newTheme}
             type="button"
-            title="Добавить тему"
+            title={t("common.addTheme")}
             onClick={(e) => {
               const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
               setThemeName("");
@@ -525,15 +527,15 @@ export function ChatSidebar() {
               setPopover({ kind: "create-theme", x: rect.right, y: rect.bottom + 6 });
             }}
           >
-            + Тема
+            + {t("common.theme")}
           </button>
         </div>
 
         <div className={styles.sessionList}>
-          {themes.map((t) => renderThemeBranch(t))}
+          {themes.map((theme) => renderThemeBranch(theme))}
           {renderThemeBranch(null)}
           {themes.length === 0 && sessions.length === 0 && (
-            <p className={styles.emptyHint}>Создайте чат или тему для группировки</p>
+            <p className={styles.emptyHint}>{t("chat.emptyDescription")}</p>
           )}
         </div>
       </div>
@@ -553,7 +555,7 @@ export function ChatSidebar() {
                   role="menuitem"
                   onClick={() => startRenameSession(menuSession)}
                 >
-                  Переименовать
+                  {t("chat.renameSession")}
                 </button>
                 <button
                   type="button"
@@ -571,7 +573,7 @@ export function ChatSidebar() {
                     });
                   }}
                 >
-                  Новый чат рядом
+                  {t("common.newChat")}
                 </button>
                 <button
                   type="button"
@@ -583,7 +585,7 @@ export function ChatSidebar() {
                     setPopover({ kind: "delete-session", session: menuSession, x, y });
                   }}
                 >
-                  Удалить
+                  {t("common.delete")}
                 </button>
               </>
             )}
@@ -601,10 +603,10 @@ export function ChatSidebar() {
                     });
                   }}
                 >
-                  Новый чат
+                  {t("common.newChat")}
                 </button>
                 <button type="button" role="menuitem" onClick={() => startRenameTheme(menuTheme)}>
-                  Переименовать
+                  {t("chat.renameTheme")}
                 </button>
                 <button
                   type="button"
@@ -616,7 +618,7 @@ export function ChatSidebar() {
                     setPopover({ kind: "delete-theme", theme: menuTheme, x, y });
                   }}
                 >
-                  Удалить тему
+                  {t("chat.deleteThemeTitle")}
                 </button>
               </>
             )}
@@ -641,13 +643,13 @@ export function ChatSidebar() {
           >
             {popover.kind === "create-theme" && (
               <>
-                <div className={styles.popoverTitle}>Новая тема</div>
-                <p className={styles.popoverText}>Тема — ярлык для группировки чатов.</p>
+                <div className={styles.popoverTitle}>{t("common.newTheme")}</div>
+                <p className={styles.popoverText}>{t("common.addTheme")}</p>
                 <input
                   className={styles.popoverInput}
                   value={themeName}
                   onChange={(e) => setThemeName(e.target.value)}
-                  placeholder="Название"
+                  placeholder={t("common.title")}
                   maxLength={80}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -659,7 +661,7 @@ export function ChatSidebar() {
                 />
                 <div className={styles.popoverActions}>
                   <button type="button" onClick={() => setPopover(null)}>
-                    Отмена
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -670,7 +672,7 @@ export function ChatSidebar() {
                       void createTheme({ name });
                     }}
                   >
-                    Создать
+                    {t("chat.newSession")}
                   </button>
                 </div>
               </>
@@ -678,13 +680,11 @@ export function ChatSidebar() {
 
             {popover.kind === "delete-theme" && (
               <>
-                <div className={styles.popoverTitle}>Удалить тему?</div>
-                <p className={styles.popoverText}>
-                  «{popover.theme.name}» исчезнет. Чаты останутся без темы.
-                </p>
+                <div className={styles.popoverTitle}>{t("chat.deleteThemeTitle")}</div>
+                <p className={styles.popoverText}>{t("chat.deleteThemeBody")}</p>
                 <div className={styles.popoverActions}>
                   <button type="button" onClick={() => setPopover(null)}>
-                    Отмена
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -695,7 +695,7 @@ export function ChatSidebar() {
                       void deleteTheme(id);
                     }}
                   >
-                    Удалить
+                    {t("common.delete")}
                   </button>
                 </div>
               </>
@@ -703,13 +703,11 @@ export function ChatSidebar() {
 
             {popover.kind === "delete-session" && (
               <>
-                <div className={styles.popoverTitle}>Удалить чат?</div>
-                <p className={styles.popoverText}>
-                  «{popover.session.title}» будет удалён без восстановления.
-                </p>
+                <div className={styles.popoverTitle}>{t("chat.deleteSessionTitle")}</div>
+                <p className={styles.popoverText}>{t("chat.deleteSessionBody")}</p>
                 <div className={styles.popoverActions}>
                   <button type="button" onClick={() => setPopover(null)}>
-                    Отмена
+                    {t("common.cancel")}
                   </button>
                   <button
                     type="button"
@@ -720,7 +718,7 @@ export function ChatSidebar() {
                       void deleteSession(id);
                     }}
                   >
-                    Удалить
+                    {t("common.delete")}
                   </button>
                 </div>
               </>

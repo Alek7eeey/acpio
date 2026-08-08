@@ -1,6 +1,7 @@
 import { memo, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { SlashCommandDto } from "@acprocess/shared";
+import { useT } from "../lib/i18n";
 import styles from "./SlashCommandMenu.module.css";
 
 type SlashCommandMenuProps = {
@@ -22,6 +23,7 @@ function SlashCommandMenuInner({
   onSelect,
   onActiveIndexChange,
 }: SlashCommandMenuProps) {
+  const t = useT();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -59,7 +61,7 @@ function SlashCommandMenuInner({
   if (!open || commands.length === 0) return null;
 
   return createPortal(
-    <div ref={menuRef} className={styles.menu} role="listbox" aria-label="Команды">
+    <div ref={menuRef} className={styles.menu} role="listbox" aria-label={t("common.commands")}>
       {commands.map((cmd, idx) => (
         <button
           key={cmd.name}

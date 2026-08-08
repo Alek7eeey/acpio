@@ -7,17 +7,22 @@ import {
   modelParamSectionName,
   type ModelParamDto,
 } from "@acprocess/shared";
+import { useT } from "../lib/i18n";
 import styles from "./ModelPicker.module.css";
 
-function shortModelName(value: string, name?: string) {
-  const raw = modelDisplayName(value, name);
-  if (!raw) return "По умолчанию";
+function shortModelName(value: string, name: string | undefined, defaultLabel: string) {
+  const raw = modelDisplayName(value, name, defaultLabel);
   const tail = raw.includes("/") ? raw.split("/").pop()! : raw;
   return tail.length > 22 ? `${tail.slice(0, 20)}…` : tail;
 }
 
-function optionLabel(param: ModelParamDto, value: string, name?: string) {
-  return modelParamLabel(param.id, value, name);
+function optionLabel(
+  param: ModelParamDto,
+  value: string,
+  name: string | undefined,
+  labels: { yes: string; no: string },
+) {
+  return modelParamLabel(param.id, value, name, labels);
 }
 
 function shortEffortChip(label: string): string {
@@ -47,6 +52,9 @@ type ParamChip = { key: string; label: string; title: string; kind: "fast" | "ef
 function activeParamChips(
   params: ModelParamDto[],
   values: Record<string, string>,
+  labels: { yes: string; no: string },
+  effortPrefix: string,
+  contextPrefix: string,
 ): ParamChip[] {
   const chips: ParamChip[] = [];
   for (const param of params) {
@@ -60,12 +68,12 @@ function activeParamChips(
       continue;
     }
     const opt = param.options.find((o) => o.value === value);
-    const full = optionLabel(param, value, opt?.name);
+    const full = optionLabel(param, value, opt?.name, labels);
     if (family === "effort") {
       chips.push({
         key: param.id,
         label: shortEffortChip(full),
-        title: `Effort: ${full}`,
+        title: `${effortPrefix}: ${full}`,
         kind: "effort",
       });
       continue;
@@ -74,7 +82,7 @@ function activeParamChips(
       chips.push({
         key: param.id,
         label: full.length > 5 ? full.slice(0, 4).toUpperCase() : full.toUpperCase(),
-        title: `Context: ${full}`,
+        title: `${contextPrefix}: ${full}`,
         kind: "other",
       });
     }
@@ -85,8 +93,11 @@ function activeParamChips(
 function activeParamSummary(
   params: ModelParamDto[],
   values: Record<string, string>,
+  labels: { yes: string; no: string },
+  effortPrefix: string,
+  contextPrefix: string,
 ): string {
-  return activeParamChips(params, values)
+  return activeParamChips(params, values, labels, effortPrefix, contextPrefix)
     .map((c) => c.title)
     .join(" · ");
 }
@@ -177,6 +188,11 @@ export function ModelPicker({
   disabled = false,
   loading = false,
 }: ModelPickerProps) {
+  const t = useT();
+  const paramLabels = { yes: t("models.yes"), no: t("models.no") };
+  const defaultModelLabel = t("models.default");
+  const effortPrefix = t("models.effort");
+  const contextPrefix = t("models.context");
   const [open, setOpen] = useState(false);
   /** ⋯ popup open for this model value. */
   const [paramsFor, setParamsFor] = useState<string | null>(null);
@@ -201,20 +217,20 @@ export function ModelPicker({
   );
   const options = useMemo(() => {
     if (model && !models.some((m) => m.value === model)) {
-      return [{ value: model, name: modelDisplayName(model) }, ...models];
+      return [{ value: model, name: modelDisplayName(model, undefined, defaultModelLabel) }, ...models];
     }
-    return models.map((m) => ({ ...m, name: modelDisplayName(m.value, m.name) }));
-  }, [model, models]);
-  const paramSummary = activeParamSummary(visibleParams, resolvedParams);
+    return models.map((m) => ({ ...m, name: modelDisplayName(m.value, m.name, defaultModelLabel) }));
+  }, [model, models, defaultModelLabel]);
+  const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
   const paramChips = useMemo(
-    () => (paramsBusy ? [] : activeParamChips(visibleParams, resolvedParams)),
-    [visibleParams, resolvedParams, paramsBusy],
+    () => (paramsBusy ? [] : activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix)),
+    [visibleParams, resolvedParams, paramsBusy, paramLabels, effortPrefix, contextPrefix],
   );
   const baseLabel = loading
-    ? "Загрузка…"
+    ? t("common.loading")
     : !model
-      ? "Выбрать модель"
-      : shortModelName(model, models.find((m) => m.value === model)?.name);
+      ? t("common.selectModel")
+      : shortModelName(model, models.find((m) => m.value === model)?.name, defaultModelLabel);
   const triggerLabel =
     variant === "block" && paramSummary && !loading && !paramsBusy
       ? `${baseLabel} · ${paramSummary}`
@@ -397,7 +413,7 @@ export function ModelPicker({
       return (
         <div className={styles.paramsLoader} aria-busy="true">
           <span className={styles.paramsSpinner} aria-hidden />
-          <span>Загрузка…</span>
+          <span>{t("common.loading")}</span>
         </div>
       );
     }
@@ -471,7 +487,7 @@ export function ModelPicker({
                 }}
               >
                 <span className={styles.modelOptionName}>
-                  {optionLabel(param, opt.value, opt.name)}
+                  {optionLabel(param, opt.value, opt.name, paramLabels)}
                 </span>
               </button>
             );
@@ -502,8 +518,8 @@ export function ModelPicker({
         disabled={locked}
         title={
           loading
-            ? "Загрузка списка моделей…"
-            : [model || "Модель", paramSummary].filter(Boolean).join(" · ")
+            ? t("common.loadingModelsList")
+            : [model || t("common.model"), paramSummary].filter(Boolean).join(" · ")
         }
         onClick={() => {
           if (locked) return;
@@ -571,9 +587,9 @@ export function ModelPicker({
           className={`${styles.modelMenu} ${placement === "down" ? styles.modelMenuDown : ""}`}
           role="listbox"
         >
-          <div className={styles.modelMenuHead}>Модель</div>
+          <div className={styles.modelMenuHead}>{t("common.model")}</div>
           {options.length === 0 && (
-            <div className={styles.modelEmpty}>Список пуст — проверь подключение агента</div>
+            <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
           )}
           <div className={styles.modelList} ref={listRef}>
             {options.map((m) => {
@@ -609,10 +625,10 @@ export function ModelPicker({
                         else moreBtnRefs.current.delete(m.value);
                       }}
                       className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
-                      aria-label={paramsLabel || "Параметры"}
+                      aria-label={paramsLabel || t("common.params")}
                       aria-expanded={rowActive}
                       aria-haspopup="dialog"
-                      title={paramsLabel || "Параметры"}
+                      title={paramsLabel || t("common.params")}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -644,7 +660,7 @@ export function ModelPicker({
             className={styles.paramsFlyout}
             style={flyoutStyle(paramsAnchor, menuAnchor)}
             role="dialog"
-            aria-label={paramsLabel || "Параметры"}
+            aria-label={paramsLabel || t("common.params")}
           >
             {renderParamSections()}
           </div>,

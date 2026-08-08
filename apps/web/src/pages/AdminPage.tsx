@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import type { AdminUserDto, AgentProvider } from "@acprocess/shared";
 import { api } from "../lib/api";
+import { useLocale, useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import styles from "./AdminPage.module.css";
 
@@ -14,23 +15,28 @@ function providerLabel(provider: AgentProvider | null) {
   return provider;
 }
 
-function formatDate(iso: string) {
-  try {
-    return new Intl.DateTimeFormat("ru-RU", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
-}
-
 export function AdminPage() {
+  const t = useT();
+  const locale = useLocale();
   const me = useAppStore((s) => s.user);
   const [users, setUsers] = useState<AdminUserDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const formatDate = useCallback(
+    (iso: string) => {
+      try {
+        return new Intl.DateTimeFormat(locale === "en" ? "en-US" : "ru-RU", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }).format(new Date(iso));
+      } catch {
+        return iso;
+      }
+    },
+    [locale],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,7 +61,7 @@ export function AdminPage() {
 
   const onDelete = async (user: AdminUserDto) => {
     if (user.id === me.id) return;
-    const ok = window.confirm(`Удалить пользователя @${user.username}?`);
+    const ok = window.confirm(t("common.deleteUserConfirm", { username: user.username }));
     if (!ok) return;
     setDeletingId(user.id);
     setError(null);
@@ -72,11 +78,9 @@ export function AdminPage() {
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <p className={styles.eyebrow}>Admin</p>
-        <h1>Пользователи</h1>
-        <p className={styles.lead}>
-          Список аккаунтов и агент, который пользователь подключил в настройках.
-        </p>
+        <p className={styles.eyebrow}>{t("common.admin")}</p>
+        <h1>{t("common.usersTitle")}</h1>
+        <p className={styles.lead}>{t("settings.agentConnectDesc")}</p>
       </header>
 
       {error && <div className={styles.error}>{error}</div>}
@@ -84,10 +88,12 @@ export function AdminPage() {
       <div className={styles.panel}>
         <div className={styles.toolbar}>
           <strong>
-            {loading ? "Загрузка…" : `${users.length} ${users.length === 1 ? "пользователь" : "пользователей"}`}
+            {loading
+              ? t("common.loading")
+              : t("common.userCount", { count: users.length })}
           </strong>
           <button type="button" className={styles.ghostBtn} disabled={loading} onClick={() => void load()}>
-            Обновить
+            {t("common.refresh")}
           </button>
         </div>
 
@@ -95,10 +101,10 @@ export function AdminPage() {
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>Пользователь</th>
-                <th>Роль</th>
-                <th>Агент</th>
-                <th>Создан</th>
+                <th>{t("common.user")}</th>
+                <th>{t("common.role")}</th>
+                <th>{t("common.agent")}</th>
+                <th>{t("common.created")}</th>
                 <th />
               </tr>
             </thead>
@@ -106,7 +112,7 @@ export function AdminPage() {
               {!loading && users.length === 0 && (
                 <tr>
                   <td colSpan={5} className={styles.empty}>
-                    Пользователей пока нет
+                    {t("common.emptyList")}
                   </td>
                 </tr>
               )}
@@ -130,7 +136,7 @@ export function AdminPage() {
                       {agent ? (
                         <span className={styles.agentOn}>{agent}</span>
                       ) : (
-                        <span className={styles.agentOff}>не подключён</span>
+                        <span className={styles.agentOff}>{t("common.notConnected")}</span>
                       )}
                     </td>
                     <td className={styles.muted}>{formatDate(user.createdAt)}</td>
@@ -139,10 +145,10 @@ export function AdminPage() {
                         type="button"
                         className={styles.deleteBtn}
                         disabled={isSelf || deletingId === user.id}
-                        title={isSelf ? "Нельзя удалить себя" : "Удалить"}
+                        title={isSelf ? t("common.cannotDeleteSelf") : t("common.delete")}
                         onClick={() => void onDelete(user)}
                       >
-                        {deletingId === user.id ? "…" : "Удалить"}
+                        {deletingId === user.id ? "…" : t("common.delete")}
                       </button>
                     </td>
                   </tr>

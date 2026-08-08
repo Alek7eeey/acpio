@@ -22,6 +22,7 @@ export interface AdminUserDto {
 
 export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
+export type AppLocale = "ru" | "en";
 export type PermissionPolicy = "prompt" | "allowlist" | "always";
 
 export type MessagePartType =
@@ -40,6 +41,7 @@ export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
 export interface AppSettings {
   theme: Theme;
+  locale: AppLocale;
   defaultProvider: AgentProvider;
   defaultMode: AgentMode;
   defaultCwd: string;
@@ -68,6 +70,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
+  locale: "ru",
   defaultProvider: "opencode",
   defaultMode: "agent",
   defaultCwd: "",
@@ -108,7 +111,7 @@ export function providerArgs(settings: AppSettings, provider: AgentProvider): st
 }
 
 /** Human-readable model label; keeps wire id unchanged. */
-export function modelDisplayName(value: string, name?: string): string {
+export function modelDisplayName(value: string, name?: string, defaultLabel = "Default"): string {
   const raw = (value || "").trim();
   const lower = raw.toLowerCase();
   if (
@@ -117,17 +120,17 @@ export function modelDisplayName(value: string, name?: string): string {
     lower.startsWith("default[") ||
     lower === "auto"
   ) {
-    return "По умолчанию";
+    return defaultLabel;
   }
 
   const provided = (name || "").trim();
   // Prefer a clean agent-provided title (e.g. "Cursor Grok 4.5 Fast").
   if (provided && !hasModelParams(provided) && !isRawWireSlug(provided)) {
-    if (/^default(\[.*\])?$/i.test(provided) || /^auto$/i.test(provided)) return "По умолчанию";
+    if (/^default(\[.*\])?$/i.test(provided) || /^auto$/i.test(provided)) return defaultLabel;
     return provided;
   }
 
-  return prettifyModelWireId(raw || provided);
+  return prettifyModelWireId(raw || provided, defaultLabel);
 }
 
 function hasModelParams(label: string): boolean {
@@ -139,9 +142,9 @@ function isRawWireSlug(label: string): boolean {
   return /^[a-z0-9][a-z0-9._/-]*(?:\[[^\]]*\])?$/i.test(label) && !/\s/.test(label);
 }
 
-function prettifyModelWireId(wire: string): string {
-  if (!wire) return "По умолчанию";
-  if (/^default(\[.*\])?$/i.test(wire) || /^auto$/i.test(wire)) return "По умолчанию";
+function prettifyModelWireId(wire: string, defaultLabel = "Default"): string {
+  if (!wire) return defaultLabel;
+  if (/^default(\[.*\])?$/i.test(wire) || /^auto$/i.test(wire)) return defaultLabel;
 
   const match = wire.match(/^([^[\]]+?)\s*\[([^\]]*)\]\s*$/);
   const base = (match?.[1] ?? wire).trim();
@@ -481,7 +484,12 @@ export function parseModelWire(wire: string): { base: string; params: Record<str
   return { base: (match[1] ?? "").trim(), params };
 }
 
-export function modelParamLabel(paramId: string, value: string, name?: string): string {
+export function modelParamLabel(
+  paramId: string,
+  value: string,
+  name?: string,
+  labels?: { yes?: string; no?: string },
+): string {
   const family = modelParamFamily(paramId) ?? inferParamFamily(paramId, name);
   const v = value.toLowerCase();
   if (family === "fast") {
@@ -510,8 +518,8 @@ export function modelParamLabel(paramId: string, value: string, name?: string): 
     return capitalizeToken(value);
   }
   if (name && name.trim() && name.trim() !== value) return name.trim();
-  if (v === "true") return "Да";
-  if (v === "false") return "Нет";
+  if (v === "true") return labels?.yes ?? "Yes";
+  if (v === "false") return labels?.no ?? "No";
   return value;
 }
 

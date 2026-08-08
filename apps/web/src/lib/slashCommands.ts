@@ -1,11 +1,14 @@
 import type { SlashCommandDto } from "@acprocess/shared";
+import type { TranslateFn } from "@acprocess/i18n";
 
-export const BUILTIN_SLASH_COMMANDS: SlashCommandDto[] = [
-  {
-    name: "stop",
-    description: "Остановить текущую генерацию",
-  },
-];
+export function getBuiltinSlashCommands(t: TranslateFn): SlashCommandDto[] {
+  return [
+    {
+      name: "stop",
+      description: t("chat.stopGeneration"),
+    },
+  ];
+}
 
 const HIDDEN_COMMAND_NAMES = new Set(["plugins", "plugin", "manage-plugins", "manage_plugins"]);
 
@@ -40,10 +43,10 @@ export function sanitizeSlashCommand(cmd: SlashCommandDto): SlashCommandDto | nu
   };
 }
 
-export function mergeSlashCommands(agentCommands: SlashCommandDto[] = []) {
+export function mergeSlashCommands(agentCommands: SlashCommandDto[] = [], t: TranslateFn) {
   const seen = new Set<string>();
   const out: SlashCommandDto[] = [];
-  for (const cmd of [...BUILTIN_SLASH_COMMANDS, ...agentCommands]) {
+  for (const cmd of [...getBuiltinSlashCommands(t), ...agentCommands]) {
     const clean = sanitizeSlashCommand(cmd);
     if (!clean) continue;
     const key = clean.name.toLowerCase();

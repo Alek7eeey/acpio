@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { defaultSessionTitle, errorMessage } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
@@ -56,9 +57,11 @@ import {
   setUserConnectedProvider,
   updateProfile,
 } from "./services/auth.js";
+import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 
 const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
+  locale: z.enum(["ru", "en"]).optional(),
   defaultProvider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
@@ -99,9 +102,10 @@ function isPublicPath(url: string) {
   );
 }
 
-function sendAuthError(reply: FastifyReply, err: unknown) {
+function sendAuthError(req: FastifyRequest, reply: FastifyReply, err: unknown) {
+  const locale = localeFromRequest(req);
   if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: "Укажите логин и пароль" });
+    return reply.code(400).send({ error: errorMessage(locale, "credentialsRequired") });
   }
   const status =
     typeof err === "object" &&
@@ -110,7 +114,7 @@ function sendAuthError(reply: FastifyReply, err: unknown) {
     typeof (err as { statusCode: unknown }).statusCode === "number"
       ? (err as { statusCode: number }).statusCode
       : 400;
-  const message = err instanceof Error ? err.message : String(err);
+  const message = localizeError(locale, err);
   return reply.code(status).send({ error: message });
 }
 
@@ -150,7 +154,7 @@ export async function registerRoutes(app: FastifyInstance) {
       setAuthCookie(reply, session.token, session.expiresAt);
       return { user };
     } catch (err) {
-      return sendAuthError(reply, err);
+      return sendAuthError(req, reply, err);
     }
   });
 
@@ -162,7 +166,7 @@ export async function registerRoutes(app: FastifyInstance) {
       setAuthCookie(reply, session.token, session.expiresAt);
       return { user };
     } catch (err) {
-      return sendAuthError(reply, err);
+      return sendAuthError(req, reply, err);
     }
   });
 
@@ -185,7 +189,7 @@ export async function registerRoutes(app: FastifyInstance) {
       await changePassword(user.id, body.currentPassword, body.newPassword);
       return { ok: true };
     } catch (err) {
-      return sendAuthError(reply, err);
+      return sendAuthError(req, reply, err);
     }
   });
 
@@ -197,7 +201,7 @@ export async function registerRoutes(app: FastifyInstance) {
       const updated = await updateProfile(user.id, body.displayName);
       return { user: updated };
     } catch (err) {
-      return sendAuthError(reply, err);
+      return sendAuthError(req, reply, err);
     }
   });
 
@@ -254,7 +258,7 @@ export async function registerRoutes(app: FastifyInstance) {
     try {
       return await deleteUser(id, admin.id);
     } catch (err) {
-      return sendAuthError(reply, err);
+      return sendAuthError(req, reply, err);
     }
   });
 
@@ -302,7 +306,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!user.connectedProvider) {
       return reply
         .code(400)
-        .send({ error: "Сначала подключите агента в Настройках" });
+        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
     }
     const body = z
       .object({
@@ -395,16 +399,21 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!user.connectedProvider) {
       return reply
         .code(400)
-        .send({ error: "Сначала подключите агента в Настройках" });
+        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
     }
     const detail = await syncSessionAgent(id, user.connectedProvider);
     if (!detail) return reply.code(404).send({ error: "Not found" });
 
+    const settings = await getSettings();
+    const defaultTitle = defaultSessionTitle(settings.locale);
     void runPrompt(id, body.text, {
       provider: detail.provider,
       cwd: detail.cwd,
       mode: detail.mode,
-      titleHint: detail.title === "Новый чат" ? body.text : undefined,
+      titleHint:
+        detail.title === defaultTitle || detail.title === "Новый чат" || detail.title === "New chat"
+          ? body.text
+          : undefined,
     }).catch((err) => {
       console.error("prompt failed", err);
     });
@@ -424,7 +433,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!user.connectedProvider) {
       return reply
         .code(400)
-        .send({ error: "Сначала подключите агента в Настройках" });
+        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
     }
     const { id } = req.params as { id: string };
     const body = z

@@ -1,5 +1,6 @@
 import { useCallback, useState, type ReactNode, type CSSProperties, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "../lib/i18n";
 import styles from "./HoverTip.module.css";
 
 type HoverTipProps = {
@@ -15,7 +16,7 @@ type HoverTipProps = {
 };
 
 export function HoverTip({
-  text = "Пока не реализовано",
+  text,
   children,
   className,
   style,
@@ -24,6 +25,8 @@ export function HoverTip({
   disabled,
   ...rest
 }: HoverTipProps) {
+  const t = useT();
+  const tipText = text ?? t("common.notImplemented");
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   const onMove = useCallback((e: MouseEvent) => {
@@ -36,7 +39,7 @@ export function HoverTip({
     pos &&
     createPortal(
       <div className={styles.tip} style={{ left: pos.x, top: pos.y }} role="tooltip">
-        {text}
+        {tipText}
       </div>,
       document.body,
     );
