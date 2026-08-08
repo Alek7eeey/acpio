@@ -570,6 +570,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    if (event.type === "commands.updated") {
+      if (state.activeSession?.id !== event.sessionId) return;
+      set({
+        activeSession: {
+          ...state.activeSession!,
+          slashCommands: event.commands,
+        },
+      });
+      return;
+    }
+
     if (event.type === "error") {
       set({ error: event.message });
     }

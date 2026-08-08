@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type MouseEvent,
 } from "react";
-import { migrateModelParamValues, type MessageDto, type MessagePartDto, type ModelParamDto } from "@acprocess/shared";
+import { migrateModelParamValues, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
@@ -20,7 +20,67 @@ import {
   CreateSessionFolderPicker,
 } from "../components/CreateSessionFolderPicker";
 import { MarkdownContent } from "../components/MarkdownContent";
+import { SlashCommandMenu } from "../components/SlashCommandMenu";
+import {
+  buildSlashInsertion,
+  filterSlashCommands,
+  getSlashContext,
+  isSlashCommandReadyToSend,
+  mergeSlashCommands,
+  parseSlashCommandText,
+  slashCommandRequiresInput,
+} from "../lib/slashCommands";
 import styles from "./ChatPage.module.css";
+
+function UserMessage({
+  message,
+  slashCommands,
+}: {
+  message: MessageDto;
+  slashCommands: SlashCommandDto[];
+}) {
+  const text = message.parts
+    .filter((p) => p.type === "text")
+    .map((p) => String(p.payload.text ?? ""))
+    .join("\n")
+    .trim();
+  const explicitCommand = message.parts.some(
+    (p) => p.type === "text" && Boolean(p.payload.isSlashCommand),
+  );
+  const parsed = parseSlashCommandText(text);
+  const isCommand = explicitCommand || Boolean(parsed);
+
+  if (!text) return null;
+
+  if (isCommand && parsed) {
+    const meta = slashCommands.find((c) => c.name.toLowerCase() === parsed.name.toLowerCase());
+    return (
+      <div className={styles.userCommand}>
+        <div className={styles.userCommandHeader}>
+          <span className={styles.userCommandBadge}>Команда</span>
+          <code className={styles.userCommandName}>/{parsed.name}</code>
+        </div>
+        {parsed.args ? (
+          <p className={styles.userCommandArgs}>{parsed.args}</p>
+        ) : meta?.description ? (
+          <p className={styles.userCommandDesc}>{meta.description}</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
+      {message.parts.map((part) =>
+        part.type === "text" ? (
+          <div key={part.id}>{String(part.payload.text ?? "")}</div>
+        ) : (
+          <PartView key={part.id} part={part} />
+        ),
+      )}
+    </div>
+  );
+}
 
 function peelAnswerFromThought(thought: string): { thought: string; answer: string } {
   const trimmed = thought.trim();
@@ -619,6 +679,10 @@ export function ChatPage() {
   const rememberModelsCatalog = useAppStore((s) => s.rememberModelsCatalog);
   const [text, setText] = useState("");
   const [composerMultiline, setComposerMultiline] = useState(false);
+  const [cursorPos, setCursorPos] = useState(0);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashKeyboardNav, setSlashKeyboardNav] = useState(false);
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => settings.defaultModelParams ?? {},
   );
@@ -684,6 +748,100 @@ export function ChatPage() {
   const modelParams = catalog?.modelParams ?? [];
   // Block typing while agent missing, or while models are loading with empty list.
   const composerLocked = agentMissing || (modelsLoading && models.length === 0);
+
+  const slashCommands = useMemo(
+    () => mergeSlashCommands(activeSession?.slashCommands),
+    [activeSession?.slashCommands],
+  );
+  const slashCtx = useMemo(() => getSlashContext(text, cursorPos), [text, cursorPos]);
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashCtx) return [];
+    return filterSlashCommands(slashCommands, slashCtx.query);
+  }, [slashCommands, slashCtx]);
+  const slashMenuOpen =
+    !slashMenuDismissed &&
+    !composerLocked &&
+    !streaming &&
+    slashCtx != null &&
+    filteredSlashCommands.length > 0;
+
+  const slashInputHint = useMemo(() => {
+    const parsed = parseSlashCommandText(text);
+    if (!parsed || parsed.args) return null;
+    const cmd = slashCommands.find((c) => c.name.toLowerCase() === parsed.name.toLowerCase());
+    if (!cmd || !slashCommandRequiresInput(cmd)) return null;
+    return cmd.inputHint ?? cmd.description;
+  }, [text, slashCommands]);
+
+  const insertSlashCommand = (cmd: SlashCommandDto) => {
+    const insertion = buildSlashInsertion(cmd);
+    setText(insertion);
+    setCursorPos(insertion.length);
+    setSlashMenuDismissed(true);
+    setComposerMultiline(insertion.includes("\n"));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(insertion.length, insertion.length);
+      syncComposerSize(el);
+    });
+  };
+
+  useEffect(() => {
+    setSlashIndex(0);
+    setSlashKeyboardNav(false);
+    setSlashMenuDismissed(false);
+  }, [slashCtx?.query, slashCtx?.start]);
+
+  const applySlashCommand = (cmd: SlashCommandDto) => {
+    setSlashMenuDismissed(true);
+    if (cmd.name === "stop") {
+      setText("");
+      setCursorPos(0);
+      setComposerMultiline(false);
+      const el = textareaRef.current;
+      if (el) el.style.height = "auto";
+      void cancelPrompt();
+      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
+      return;
+    }
+    if (slashCommandRequiresInput(cmd)) {
+      insertSlashCommand(cmd);
+      return;
+    }
+    submitMessage(`/${cmd.name}`);
+  };
+
+  const submitMessage = (raw: string) => {
+    const value = raw.trim();
+    if (!value || composerLocked || streaming) return;
+    if (!isSlashCommandReadyToSend(value, slashCommands)) {
+      focusComposer();
+      return;
+    }
+    if (value === "/stop") {
+      setText("");
+      setComposerMultiline(false);
+      void cancelPrompt();
+      return;
+    }
+    keepComposerFocus.current = true;
+    setText("");
+    setCursorPos(0);
+    setComposerMultiline(false);
+    setSlashMenuDismissed(true);
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+    }
+    focusComposer();
+    void sendPrompt(value).finally(() => {
+      requestAnimationFrame(focusComposer);
+      window.setTimeout(focusComposer, 0);
+      window.setTimeout(focusComposer, 100);
+    });
+  };
 
   const recentCwds = useMemo(
     () => collectRecentCwds(sessions, settings.defaultCwd),
@@ -856,22 +1014,7 @@ export function ChatPage() {
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (composerLocked || streaming) return;
-    const value = text.trim();
-    if (!value) return;
-    keepComposerFocus.current = true;
-    setText("");
-    setComposerMultiline(false);
-    const el = textareaRef.current;
-    if (el) {
-      el.style.height = "auto";
-    }
-    focusComposer();
-    void sendPrompt(value).finally(() => {
-      requestAnimationFrame(focusComposer);
-      window.setTimeout(focusComposer, 0);
-      window.setTimeout(focusComposer, 100);
-    });
+    submitMessage(text);
   };
 
   const lastAssistantId = [...(activeSession?.messages ?? [])]
@@ -944,15 +1087,7 @@ export function ChatPage() {
               }}
             >
               {msg.role === "user" ? (
-                <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
-                  {msg.parts.map((part) =>
-                    part.type === "text" ? (
-                      <div key={part.id}>{String(part.payload.text ?? "")}</div>
-                    ) : (
-                      <PartView key={part.id} part={part} />
-                    ),
-                  )}
-                </div>
+                <UserMessage message={msg} slashCommands={slashCommands} />
               ) : (
                 <AssistantParts message={msg} streaming={!!isLiveAssistant} />
               )}
@@ -1020,6 +1155,18 @@ export function ChatPage() {
               streaming ? styles.pillBusy : ""
             } ${composerLocked ? styles.pillLoading : ""}`}
           >
+            <SlashCommandMenu
+              open={slashMenuOpen}
+              commands={filteredSlashCommands}
+              activeIndex={slashIndex}
+              scrollActiveIntoView={slashKeyboardNav}
+              anchorRef={textareaRef}
+              onSelect={applySlashCommand}
+              onActiveIndexChange={(idx) => {
+                setSlashKeyboardNav(false);
+                setSlashIndex(idx);
+              }}
+            />
             <textarea
               ref={textareaRef}
               className={styles.pillInput}
@@ -1027,14 +1174,18 @@ export function ChatPage() {
               onChange={(e) => {
                 if (composerLocked) return;
                 setText(e.target.value);
+                setCursorPos(e.target.selectionStart);
                 syncComposerSize(e.currentTarget);
               }}
+              onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}
+              onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}
               placeholder={
-                agentMissing
+                slashInputHint ??
+                (agentMissing
                   ? "Подключите агента…"
                   : composerLocked
                     ? "Загрузка моделей…"
-                    : "Введите сообщение…"
+                    : "Сообщение или /команда…")
               }
               rows={1}
               disabled={composerLocked}
@@ -1044,6 +1195,31 @@ export function ChatPage() {
                 if (composerLocked) {
                   e.preventDefault();
                   return;
+                }
+                if (slashMenuOpen) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSlashKeyboardNav(true);
+                    setSlashIndex((i) => Math.min(i + 1, filteredSlashCommands.length - 1));
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSlashKeyboardNav(true);
+                    setSlashIndex((i) => Math.max(i - 1, 0));
+                    return;
+                  }
+                  if (e.key === "Tab" || e.key === "Enter") {
+                    e.preventDefault();
+                    const cmd = filteredSlashCommands[slashIndex];
+                    if (cmd) applySlashCommand(cmd);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSlashMenuDismissed(true);
+                    return;
+                  }
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

@@ -338,6 +338,14 @@ export interface ChatThemeDto {
   updatedAt: string;
 }
 
+export interface SlashCommandDto {
+  name: string;
+  description: string;
+  /** Agent command expects text after the command name. */
+  requiresInput?: boolean;
+  inputHint?: string;
+}
+
 export interface SessionDto {
   id: string;
   title: string;
@@ -371,6 +379,7 @@ export interface MessageDto {
 
 export interface SessionDetailDto extends SessionDto {
   messages: MessageDto[];
+  slashCommands?: SlashCommandDto[];
 }
 
 export type WsServerEvent =
@@ -400,6 +409,11 @@ export type WsServerEvent =
       requestId: string;
       kind: "ask_question" | "create_plan";
       payload: Record<string, unknown>;
+    }
+  | {
+      type: "commands.updated";
+      sessionId: string;
+      commands: SlashCommandDto[];
     }
   | { type: "error"; sessionId?: string; message: string }
   | { type: "pong" };

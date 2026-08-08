@@ -143,6 +143,7 @@ class SessionRuntime {
   turnThoughtPartId: string | null = null;
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
+  availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
   toolsHintSent = false;
@@ -272,9 +273,18 @@ async function ensureAssistantMessage(rt: SessionRuntime) {
 }
 
 async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js").AcpUpdate) {
+  if (update.kind === "available_commands") {
+    rt.availableCommands = parseAvailableCommands(update.raw);
+    broadcastToSession(rt.sessionId, {
+      type: "commands.updated",
+      sessionId: rt.sessionId,
+      commands: rt.availableCommands,
+    });
+    return;
+  }
+
   // Metadata-only updates should not create empty assistant bubbles
   if (
-    update.kind === "available_commands" ||
     update.kind === "session_info" ||
     update.kind === "other" ||
     update.kind === "user_message_chunk"
@@ -581,7 +591,14 @@ export async function runPrompt(
   const acpReady = ensureAcp(sessionId, opts);
 
   const userMsg = await createMessage(sessionId, "user");
-  await appendPart(sessionId, userMsg.id, "text", { text });
+  const trimmed = text.trim();
+  const slashMatch = trimmed.match(/^\/([\w-]+)/);
+  await appendPart(sessionId, userMsg.id, "text", {
+    text,
+    ...(slashMatch
+      ? { isSlashCommand: true, commandName: slashMatch[1] }
+      : {}),
+  });
 
   if (opts.titleHint) {
     await updateSession(sessionId, {
@@ -752,6 +769,40 @@ export async function probeAgent(provider?: AgentProvider) {
   }
 }
 
+function parseAvailableCommands(raw: Record<string, unknown>) {
+  const list = (raw.availableCommands ?? raw.commands ?? []) as unknown[];
+  if (!Array.isArray(list)) return [];
+  const hidden = new Set(["plugins", "plugin", "manage-plugins", "manage_plugins"]);
+  const out: import("@acprocess/shared").SlashCommandDto[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const cmd = item as Record<string, unknown>;
+    const name = String(cmd.name ?? "").trim().replace(/^\//, "");
+    if (!name || !/^[a-z][\w-]*$/i.test(name)) continue;
+    if (hidden.has(name.toLowerCase())) continue;
+    const description = String(cmd.description ?? "").trim();
+    if (/manage\s+plugins?/i.test(description)) continue;
+    if (/^\[[^\]]*\|[^\]]*\]/.test(description)) continue;
+    const input = cmd.input;
+    const hasInput = Boolean(input && typeof input === "object" && !Array.isArray(input));
+    let inputHint = "";
+    if (hasInput) {
+      const hint = (input as { hint?: string }).hint;
+      if (typeof hint === "string") inputHint = hint.trim();
+    }
+    if (inputHint && /^\[[^\]]*\|[^\]]*\]/.test(inputHint)) {
+      inputHint = "";
+    }
+    out.push({
+      name,
+      description: description || name,
+      ...(hasInput ? { requiresInput: true } : {}),
+      ...(inputHint ? { inputHint } : {}),
+    });
+  }
+  return out;
+}
+
 function resetAcpClient(rt: SessionRuntime) {
   rt.clientReady = null;
   try {
@@ -762,6 +813,11 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.client = null;
   rt.provider = null;
   rt.toolsHintSent = false;
+  rt.availableCommands = [];
+}
+
+export function getSessionSlashCommands(sessionId: string) {
+  return runtimes.get(sessionId)?.availableCommands ?? [];
 }
 
 /** Align chat row + ACP with the user's connected agent (if any). */

@@ -21,6 +21,7 @@ import {
   answerQuestion,
   cancelPrompt,
   disposeRuntime,
+  getSessionSlashCommands,
   listModels,
   clearModelsCache,
   probeAgent,
@@ -375,7 +376,7 @@ export async function registerRoutes(app: FastifyInstance) {
         mode: detail.mode,
       });
     }
-    return detail;
+    return { ...detail, slashCommands: getSessionSlashCommands(id) };
   });
 
   app.delete("/api/sessions/:id", async (req, reply) => {

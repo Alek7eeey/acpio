@@ -261,6 +261,60 @@
   box-shadow: none;
 }
 
+.userCommand {
+  max-width: min(78%, 520px);
+  width: fit-content;
+  justify-self: end;
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: var(--shadow-soft);
+}
+
+.userCommandHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.userCommandBadge {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.userCommandName {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.userCommandDesc,
+.userCommandArgs {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.userCommandArgs {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
 .parts {
   display: grid;
   gap: 10px;
