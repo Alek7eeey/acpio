@@ -1,0 +1,24 @@
+{
+  "name": "acprocess",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acprocess/server\" \"npm run dev -w @acprocess/web\"",
+    "dev:server": "npm run dev -w @acprocess/server",
+    "dev:web": "npm run dev -w @acprocess/web",
+    "build": "npm run build -w @acprocess/shared && npm run build -w @acprocess/server && npm run build -w @acprocess/web",
+    "db:generate": "npm run db:generate -w @acprocess/server",
+    "db:migrate": "npm run db:migrate -w @acprocess/server",
+    "db:push": "npm run db:push -w @acprocess/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

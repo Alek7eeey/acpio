@@ -1,0 +1,73 @@
+# ACProcess
+
+Self-hosted веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode).  
+Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META, обёртка Gitea.
+
+## Стек
+
+- `apps/web` — React + Vite + TypeScript
+- `apps/server` — Fastify + WebSocket + ACP stdio bridge
+- `packages/shared` — общие типы
+- PostgreSQL (Docker)
+
+## Быстрый старт
+
+```bash
+# 1. Postgres (порт хоста 5433, чтобы не конфликтовать с локальным PG)
+docker compose up -d
+
+# 2. Env
+copy .env.example .env   # Windows
+# cp .env.example .env   # macOS/Linux
+
+# 3. Install
+npm install
+
+# 4. DB schema
+npm run db:push
+
+# 5. Dev
+npm run dev
+```
+
+- Web: [http://localhost:5173](http://localhost:5173)  
+- API: [http://localhost:3001](http://localhost:3001)  
+- Postgres: `localhost:5433`
+
+## Cursor / OpenCode
+
+1. Установите [Cursor CLI](https://cursor.com/docs/cli) и/или OpenCode.
+2. Авторизуйтесь: `agent login` (или задайте `CURSOR_API_KEY` в настройках).
+3. Проверьте ACP: `agent acp` (процесс должен стартовать и ждать JSON-RPC на stdin).
+4. В UI → **Настройки** укажите command/args и `default cwd`.
+5. Создайте чат и отправьте сообщение.
+
+Для OpenCode: `opencode auth login`, command `opencode`, args `acp`.
+
+## Gitea (локально)
+
+```bash
+docker compose up -d
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-gitea.ps1
+```
+
+Скрипт создаст пользователя `acprocess` / `acprocess`, репо `demo` и выведет token.  
+Вставьте token в **Настройки → Gitea**. UI: [http://localhost:3000](http://localhost:3000)
+
+## Подключение агента
+
+1. В **Настройки** выберите провайдер (OpenCode / Cursor).
+2. Укажите API key в правильном поле:
+  - OpenCode → `OPENCODE_API_KEY` (+ опционально Anthropic/OpenAI)
+  - Cursor → `CURSOR_API_KEY`
+3. Нажмите **Проверить подключение агента**.
+4. Permission policy для локалки: `Всегда разрешать`.
+5. Создайте чат и отправьте сообщение.
+
+Если чат «завис» — нажмите **Стоп** и отправьте снова.
+
+## Архитектура
+
+Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `opencode acp` (JSON-RPC NDJSON) ↔ Postgres.
+
+События `session/update`, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` отображаются в ленте чата.

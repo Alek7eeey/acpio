@@ -1,0 +1,495 @@
+.modelPicker {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: center;
+  z-index: 30;
+  overflow: visible;
+}
+
+.block {
+  width: 100%;
+  align-self: stretch;
+}
+
+.modelTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(340px, 46vw);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-weight: 600;
+  font-size: 0.88rem;
+  min-width: 0;
+}
+
+.modelTriggerBlock {
+  width: 100%;
+  max-width: none;
+  justify-content: flex-start;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+.modelTriggerBlock .modelTriggerText {
+  max-width: none;
+  flex: 1;
+  text-align: left;
+}
+
+.modelTriggerBlock .modelChevron {
+  margin-left: auto;
+}
+
+.modelTrigger:hover,
+.modelTriggerOpen {
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  color: var(--text);
+}
+
+.modelTriggerBlock:hover,
+.modelTriggerBlock.modelTriggerOpen {
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.modelTriggerDisabled,
+.modelTriggerDisabled:hover,
+.modelTriggerBlock.modelTriggerDisabled,
+.modelTriggerBlock.modelTriggerDisabled:hover {
+  opacity: 0.62;
+  cursor: not-allowed;
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
+.modelBot {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.modelTriggerText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+.modelTriggerName {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.modelTriggerChips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.paramChip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.paramChipFast {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.paramChipEffort {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--surface));
+  border-color: var(--border);
+}
+
+.modelTrigger:hover .modelTriggerName,
+.modelTriggerOpen .modelTriggerName {
+  color: var(--text);
+}
+
+.modelChevron {
+  display: grid;
+  place-items: center;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.modelMenu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(360px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: min(360px, 50vh);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding: 8px;
+  border-radius: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  z-index: 40;
+  animation: rise 0.16s ease;
+  box-sizing: border-box;
+}
+
+.modelMenuDown {
+  bottom: auto;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  width: auto;
+  max-height: min(400px, 55vh);
+  animation: drop 0.16s ease;
+}
+
+.modelList {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modelRow {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.modelRowActive {
+  background: var(--accent-soft);
+}
+
+.modelRowExpanded {
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg-secondary));
+}
+
+.modelRowMain {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 10px 8px 10px 12px;
+  color: var(--text);
+}
+
+.modelRowMain:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
+}
+
+.modelRowActive .modelRowMain:hover {
+  background: transparent;
+}
+
+.modelRowMain .modelOptionName {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMore {
+  flex: 0 0 34px;
+  flex-shrink: 0;
+  width: 34px;
+  margin: 4px 4px 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.rowMore:hover,
+.rowMoreOpen {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.paramsFlyout {
+  position: fixed;
+  z-index: 1200;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+  animation: flyIn 0.14s ease;
+}
+
+@keyframes flyIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.paramsPopupTitle {
+  padding: 4px 10px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.paramsEmpty {
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.paramsLoader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.paramsSpinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes paramsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.paramSection + .paramSection {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.fastToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  min-height: 40px;
+}
+
+.fastToggleLabel {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.fastSwitch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.fastSwitchOn {
+  background: var(--accent);
+}
+
+.fastSwitchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  transition: transform 0.18s ease;
+}
+
+.fastSwitchOn .fastSwitchThumb {
+  transform: translateX(18px);
+}
+
+.paramsHint {
+  padding: 8px 10px 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.modelTriggerParams {
+  color: var(--text-secondary);
+  font-weight: 550;
+}
+
+.modelMenuHead {
+  padding: 6px 10px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.modelEmpty {
+  padding: 12px 10px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.modelOption {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 9px 12px;
+  color: var(--text);
+}
+
+.modelOption:hover {
+  background: var(--bg-secondary);
+}
+
+.modelOptionActive {
+  background: var(--accent-soft);
+}
+
+.modelOptionName {
+  font-weight: 650;
+  font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 700px) {
+  .modelTrigger {
+    max-width: min(280px, 72vw);
+  }
+
+  .modelTriggerName {
+    max-width: 72px;
+  }
+
+  .modelTriggerText {
+    max-width: 88px;
+  }
+
+  .modelTriggerBlock .modelTriggerText {
+    max-width: none;
+  }
+
+  .paramChip {
+    padding: 0 6px;
+    font-size: 0.64rem;
+  }
+
+  .modelMenu {
+    /* Horizontal placement is applied via JS (fixed + insets). */
+    width: auto;
+    max-width: none;
+    max-height: min(50vh, 420px);
+    z-index: 1100;
+  }
+
+  .modelMenuDown {
+    width: auto;
+    max-height: min(55vh, 460px);
+  }
+}

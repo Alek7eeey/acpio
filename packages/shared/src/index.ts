@@ -1,0 +1,504 @@
+export interface UserDto {
+  id: string;
+  username: string;
+  displayName: string;
+  createdAt: string;
+}
+
+export type AgentProvider = "cursor" | "opencode" | "omp";
+export type AgentMode = "agent" | "plan" | "ask";
+export type Theme = "light" | "dark";
+export type PermissionPolicy = "prompt" | "allowlist" | "always";
+
+export type MessagePartType =
+  | "text"
+  | "thought"
+  | "tool_call"
+  | "plan"
+  | "todo"
+  | "subagent"
+  | "permission"
+  | "question"
+  | "error"
+  | "status";
+
+export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
+
+export interface AppSettings {
+  theme: Theme;
+  defaultProvider: AgentProvider;
+  defaultMode: AgentMode;
+  defaultCwd: string;
+  defaultModel: string;
+  /** Cursor ACP parameterized picker values (fast, effort, context, …). */
+  defaultModelParams: Record<string, string>;
+  cursorCommand: string;
+  cursorArgs: string[];
+  opencodeCommand: string;
+  opencodeArgs: string[];
+  ompCommand: string;
+  ompArgs: string[];
+  cursorApiKey: string;
+  opencodeApiKey: string;
+  anthropicApiKey: string;
+  openaiApiKey: string;
+  permissionPolicy: PermissionPolicy;
+  permissionAllowlist: string[];
+  giteaBaseUrl: string;
+  giteaToken: string;
+  giteaOwner: string;
+  giteaRepo: string;
+}
+
+export const DEFAULT_SETTINGS: AppSettings = {
+  theme: "light",
+  defaultProvider: "opencode",
+  defaultMode: "agent",
+  defaultCwd: "",
+  defaultModel: "",
+  defaultModelParams: {},
+  cursorCommand: "agent",
+  cursorArgs: ["acp"],
+  opencodeCommand: "opencode",
+  opencodeArgs: ["acp"],
+  ompCommand: "omp",
+  ompArgs: ["acp"],
+  cursorApiKey: "",
+  opencodeApiKey: "",
+  anthropicApiKey: "",
+  openaiApiKey: "",
+  permissionPolicy: "always",
+  permissionAllowlist: [],
+  giteaBaseUrl: "http://localhost:3000",
+  giteaToken: "",
+  giteaOwner: "acprocess",
+  giteaRepo: "demo",
+};
+
+export function providerCommand(settings: AppSettings, provider: AgentProvider): string {
+  if (provider === "cursor") return settings.cursorCommand;
+  if (provider === "omp") return settings.ompCommand;
+  return settings.opencodeCommand;
+}
+
+export function providerArgs(settings: AppSettings, provider: AgentProvider): string[] {
+  if (provider === "cursor") return settings.cursorArgs;
+  if (provider === "omp") return settings.ompArgs;
+  return settings.opencodeArgs;
+}
+
+/** Human-readable model label; keeps wire id unchanged. */
+export function modelDisplayName(value: string, name?: string): string {
+  const raw = (value || "").trim();
+  const lower = raw.toLowerCase();
+  if (
+    lower === "default" ||
+    lower === "default[]" ||
+    lower.startsWith("default[") ||
+    lower === "auto"
+  ) {
+    return "По умолчанию";
+  }
+
+  const provided = (name || "").trim();
+  // Prefer a clean agent-provided title (e.g. "Cursor Grok 4.5 Fast").
+  if (provided && !hasModelParams(provided) && !isRawWireSlug(provided)) {
+    if (/^default(\[.*\])?$/i.test(provided) || /^auto$/i.test(provided)) return "По умолчанию";
+    return provided;
+  }
+
+  return prettifyModelWireId(raw || provided);
+}
+
+function hasModelParams(label: string): boolean {
+  return /\[[^\]]*[=:][^\]]*\]/.test(label);
+}
+
+function isRawWireSlug(label: string): boolean {
+  // slug-like: no spaces, mostly lowercase/digits/dashes, optional params
+  return /^[a-z0-9][a-z0-9._/-]*(?:\[[^\]]*\])?$/i.test(label) && !/\s/.test(label);
+}
+
+function prettifyModelWireId(wire: string): string {
+  if (!wire) return "По умолчанию";
+  if (/^default(\[.*\])?$/i.test(wire) || /^auto$/i.test(wire)) return "По умолчанию";
+
+  const match = wire.match(/^([^[\]]+?)\s*\[([^\]]*)\]\s*$/);
+  const base = (match?.[1] ?? wire).trim();
+  const params = match?.[2] ?? "";
+  const extras = formatModelParams(params);
+  const baseLabel = humanizeModelBase(base);
+
+  if (!extras.length) return baseLabel;
+  const filtered = extras.filter((part) => {
+    const p = part.toLowerCase();
+    const b = baseLabel.toLowerCase();
+    return !b.includes(p) && !(p === "fast" && /-?fast$/i.test(base));
+  });
+  return filtered.length ? `${baseLabel} · ${filtered.join(" · ")}` : baseLabel;
+}
+
+/** Cursor (and others) rename the same knob per model: effort ↔ reasoning ↔ thinking. */
+const EFFORT_PARAM_IDS = new Set([
+  "effort",
+  "reasoning",
+  "thinking",
+  "thought_level",
+  "reasoning_effort",
+]);
+const FAST_PARAM_IDS = new Set(["fast", "fast_mode"]);
+const CONTEXT_PARAM_IDS = new Set(["context", "context_size"]);
+
+export type ModelParamFamily = "fast" | "effort" | "context";
+
+export function modelParamFamily(id: string): ModelParamFamily | null {
+  const key = id.trim().toLowerCase();
+  if (FAST_PARAM_IDS.has(key)) return "fast";
+  if (EFFORT_PARAM_IDS.has(key)) return "effort";
+  if (CONTEXT_PARAM_IDS.has(key)) return "context";
+  return null;
+}
+
+const EFFORT_VALUE_ALIASES: Record<string, string[]> = {
+  none: ["none", "off", "0", "false"],
+  low: ["low"],
+  medium: ["medium", "med"],
+  high: ["high"],
+  "extra-high": ["extra-high", "xhigh", "extra_high", "extrahigh"],
+  xhigh: ["xhigh", "extra-high", "extra_high", "extrahigh"],
+  max: ["max"],
+};
+
+/** Map a stored effort value onto an option list the agent currently exposes. */
+export function mapEffortParamValue(value: string, allowed?: string[]): string {
+  const raw = value.trim();
+  if (!raw) return raw;
+  if (!allowed?.length) return raw;
+  if (allowed.includes(raw)) return raw;
+  const lower = raw.toLowerCase();
+  const allowedLower = new Map(allowed.map((v) => [v.toLowerCase(), v]));
+  if (allowedLower.has(lower)) return allowedLower.get(lower)!;
+  for (const [canonical, aliases] of Object.entries(EFFORT_VALUE_ALIASES)) {
+    if (aliases.includes(lower) || canonical === lower) {
+      for (const alias of [canonical, ...aliases]) {
+        const hit = allowedLower.get(alias);
+        if (hit) return hit;
+      }
+    }
+  }
+  return raw;
+}
+
+/** Resolve a value for an exposed config option id from a loose params map (alias-aware). */
+export function resolveModelParamValue(
+  optId: string,
+  params: Record<string, string>,
+  allowedValues?: string[],
+): string | undefined {
+  const direct = params[optId];
+  if (direct != null && direct !== "") {
+    return modelParamFamily(optId) === "effort"
+      ? mapEffortParamValue(direct, allowedValues)
+      : direct;
+  }
+  const family = modelParamFamily(optId);
+  if (!family) return undefined;
+  for (const [key, value] of Object.entries(params)) {
+    if (value === "" || modelParamFamily(key) !== family) continue;
+    return family === "effort" ? mapEffortParamValue(value, allowedValues) : value;
+  }
+  return undefined;
+}
+
+/**
+ * Re-key stored params onto currently exposed option ids (effort→reasoning, etc.).
+ * Drops families the agent no longer exposes (e.g. Composer without Effort).
+ */
+export function migrateModelParamValues(
+  params: Record<string, string>,
+  exposed: Array<{ id: string; options?: Array<{ value: string }>; currentValue?: string }>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const opt of exposed) {
+    const allowed = opt.options?.map((o) => o.value);
+    const value = resolveModelParamValue(opt.id, params, allowed);
+    if (value != null && value !== "") next[opt.id] = value;
+    else if (opt.currentValue != null && opt.currentValue !== "") next[opt.id] = String(opt.currentValue);
+  }
+  return next;
+}
+
+function formatModelParams(params: string): string[] {
+  if (!params.trim()) return [];
+  const out: string[] = [];
+  for (const piece of params.split(",")) {
+    const [rawKey, ...rest] = piece.split("=");
+    const key = (rawKey ?? "").trim().toLowerCase();
+    const val = rest.join("=").trim().toLowerCase();
+    if (!key) continue;
+    if (modelParamFamily(key) === "fast") {
+      if (val === "true" || val === "1" || val === "yes") out.push("Fast");
+      continue;
+    }
+    if (modelParamFamily(key) === "context" && val) {
+      out.push(val.toUpperCase());
+      continue;
+    }
+    if (modelParamFamily(key) === "effort" && val) {
+      const effortMap: Record<string, string> = {
+        none: "None",
+        low: "Low",
+        medium: "Medium",
+        high: "High",
+        "extra-high": "Extra High",
+        xhigh: "Extra High",
+        max: "Max",
+      };
+      out.push(effortMap[val] ?? capitalizeToken(val));
+      continue;
+    }
+    if (val === "true" || val === "1") {
+      out.push(capitalizeToken(key));
+      continue;
+    }
+    if (!val || val === "false" || val === "0") continue;
+    out.push(`${capitalizeToken(key)} ${val}`);
+  }
+  return out;
+}
+
+function humanizeModelBase(base: string): string {
+  const tail = base.includes("/") ? base.split("/").pop()! : base;
+  // Keep version-like tokens with dots intact: grok-4.5 → Grok 4.5
+  return tail
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((token) => {
+      if (/^\d+(\.\d+)*$/.test(token)) return token;
+      if (/^\d+m$/i.test(token)) return token.toUpperCase();
+      const known: Record<string, string> = {
+        gpt: "GPT",
+        claude: "Claude",
+        opus: "Opus",
+        sonnet: "Sonnet",
+        haiku: "Haiku",
+        codex: "Codex",
+        composer: "Composer",
+        cursor: "Cursor",
+        grok: "Grok",
+        sol: "Sol",
+        terra: "Terra",
+        kimi: "Kimi",
+        xhigh: "Extra High",
+        fast: "Fast",
+        high: "High",
+        medium: "Medium",
+        low: "Low",
+        max: "Max",
+        none: "None",
+      };
+      return known[token.toLowerCase()] ?? capitalizeToken(token);
+    })
+    .join(" ");
+}
+
+function capitalizeToken(token: string): string {
+  if (!token) return token;
+  return token.charAt(0).toUpperCase() + token.slice(1);
+}
+
+export interface ChatThemeDto {
+  id: string;
+  name: string;
+  /** Legacy unused column; folder cwd lives on sessions. */
+  path: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionDto {
+  id: string;
+  title: string;
+  provider: AgentProvider;
+  cwd: string;
+  mode: AgentMode;
+  status: SessionStatus;
+  acpSessionId: string | null;
+  themeId: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessagePartDto {
+  id: string;
+  messageId: string;
+  type: MessagePartType;
+  order: number;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface MessageDto {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant" | "system";
+  createdAt: string;
+  parts: MessagePartDto[];
+}
+
+export interface SessionDetailDto extends SessionDto {
+  messages: MessageDto[];
+}
+
+export type WsServerEvent =
+  | { type: "session.updated"; sessionId: string; session: SessionDto }
+  | { type: "message.created"; sessionId: string; message: MessageDto }
+  | {
+      type: "part.appended";
+      sessionId: string;
+      messageId: string;
+      part: MessagePartDto;
+    }
+  | {
+      type: "part.updated";
+      sessionId: string;
+      messageId: string;
+      part: MessagePartDto;
+    }
+  | {
+      type: "permission.request";
+      sessionId: string;
+      requestId: string;
+      payload: Record<string, unknown>;
+    }
+  | {
+      type: "question.request";
+      sessionId: string;
+      requestId: string;
+      kind: "ask_question" | "create_plan";
+      payload: Record<string, unknown>;
+    }
+  | { type: "error"; sessionId?: string; message: string }
+  | { type: "pong" };
+
+export type WsClientEvent =
+  | { type: "ping" }
+  | { type: "subscribe"; sessionId: string }
+  | { type: "unsubscribe"; sessionId: string };
+
+export interface GiteaStatusDto {
+  configured: boolean;
+  baseUrl: string;
+  owner: string;
+  repo: string;
+  branch: string | null;
+  dirty: boolean;
+  ahead: number;
+  behind: number;
+  conflicted: string[];
+  diffStat: string;
+  error?: string;
+}
+
+export interface GiteaJobDto {
+  id: string;
+  kind: "commit" | "pr" | "conflicts";
+  status: "pending" | "running" | "done" | "error";
+  result: Record<string, unknown> | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelParamDto {
+  id: string;
+  name: string;
+  currentValue?: string;
+  options: Array<{ value: string; name: string }>;
+}
+
+export interface AgentProbeResult {
+  ok: boolean;
+  provider: AgentProvider;
+  command: string;
+  message: string;
+  details?: string;
+  sessionId?: string;
+  currentModel?: string;
+  models?: Array<{ value: string; name: string }>;
+  modelParams?: ModelParamDto[];
+}
+
+/** Parse `base[k=v,k2=v2]` into base + params. */
+export function parseModelWire(wire: string): { base: string; params: Record<string, string> } {
+  const raw = (wire || "").trim();
+  const match = raw.match(/^([^[\]]+?)\s*\[([^\]]*)\]\s*$/);
+  if (!match) return { base: raw, params: {} };
+  const params: Record<string, string> = {};
+  for (const piece of (match[2] ?? "").split(",")) {
+    const [k, ...rest] = piece.split("=");
+    const key = (k ?? "").trim();
+    if (!key) continue;
+    params[key] = rest.join("=").trim();
+  }
+  return { base: (match[1] ?? "").trim(), params };
+}
+
+export function modelParamLabel(paramId: string, value: string, name?: string): string {
+  const family = modelParamFamily(paramId) ?? inferParamFamily(paramId, name);
+  const v = value.toLowerCase();
+  if (family === "fast") {
+    if (v === "true" || v === "1" || v === "yes") return "Fast";
+    if (v === "false" || v === "0" || v === "no") return "Не Fast";
+  }
+  if (family === "effort") {
+    const map: Record<string, string> = {
+      none: "None",
+      off: "None",
+      low: "Low",
+      medium: "Medium",
+      med: "Medium",
+      high: "High",
+      "extra-high": "Extra High",
+      xhigh: "Extra High",
+      extra_high: "Extra High",
+      extrahigh: "Extra High",
+      max: "Max",
+      minimal: "Minimal",
+      default: "Default",
+    };
+    if (map[v]) return map[v];
+    const fromName = (name ?? "").trim().toLowerCase();
+    if (fromName && map[fromName]) return map[fromName];
+    return capitalizeToken(value);
+  }
+  if (name && name.trim() && name.trim() !== value) return name.trim();
+  if (v === "true") return "Да";
+  if (v === "false") return "Нет";
+  return value;
+}
+
+function inferParamFamily(paramId: string, name?: string): ModelParamFamily | null {
+  const blob = `${paramId} ${name ?? ""}`.toLowerCase();
+  if (/\bfast\b/.test(blob)) return "fast";
+  if (/effort|reason|thought|thinking/.test(blob)) return "effort";
+  if (/\bcontext\b/.test(blob)) return "context";
+  return null;
+}
+
+/** Prefer stable section titles for Cursor aliases (reasoning → Effort). */
+export function modelParamSectionName(paramId: string, name?: string): string {
+  const family = modelParamFamily(paramId) ?? inferParamFamily(paramId, name);
+  if (family === "fast") return "Fast";
+  if (family === "effort") return "Effort";
+  if (family === "context") return name?.trim() || "Context";
+  if (name && name.trim()) {
+    const n = name.trim();
+    if (/^effort$/i.test(n) || /^усилие$/i.test(n)) return "Effort";
+    if (/^fast$/i.test(n)) return "Fast";
+    return n;
+  }
+  return paramId;
+}

@@ -1,0 +1,241 @@
+.page {
+  --auth-hero-panel-a: #ffffff;
+  --auth-hero-panel-b: #f3f6fb;
+  --auth-hero-chip: color-mix(in srgb, var(--accent) 18%, #eef3ff);
+  --auth-hero-line: #d9e2ef;
+  --auth-hero-core: #ffffff;
+  --auth-hero-shadow: rgba(15, 20, 25, 0.1);
+
+  min-height: 100%;
+  display: grid;
+  place-items: center;
+  padding: 28px 16px;
+  background:
+    radial-gradient(1000px 520px at 12% -8%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 58%),
+    radial-gradient(900px 480px at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
+    var(--bg);
+}
+
+:global(html[data-theme="dark"]) .page {
+  --auth-hero-panel-a: #1d2430;
+  --auth-hero-panel-b: #151a23;
+  --auth-hero-chip: color-mix(in srgb, var(--accent) 22%, #1a2230);
+  --auth-hero-line: #2f3848;
+  --auth-hero-core: #0f1419;
+  --auth-hero-shadow: rgba(0, 0, 0, 0.35);
+}
+
+.card {
+  width: min(920px, 100%);
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 0;
+}
+
+.logo {
+  font-weight: 750;
+  font-size: 1.15rem;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.logoMark {
+  color: var(--accent);
+}
+
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topSwitch {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 550;
+  padding: 4px 2px;
+}
+
+.topSwitch strong {
+  color: var(--accent);
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.topSwitch:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 8px;
+  padding: 12px 22px 26px;
+  align-items: center;
+}
+
+.visual {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.heroImg {
+  width: min(100%, 340px);
+  height: auto;
+  display: block;
+}
+
+.form {
+  display: grid;
+  gap: 14px;
+  padding: 8px 8px 8px 18px;
+  max-width: 380px;
+  width: 100%;
+  justify-self: end;
+}
+
+.formHead h1 {
+  margin: 0 0 6px;
+  font-size: clamp(1.55rem, 2.4vw, 1.9rem);
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+
+.formHead p {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.field input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  font-weight: 500;
+  transition:
+    border-color var(--motion),
+    box-shadow var(--motion);
+}
+
+.field input:hover {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.field input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.passwordWrap {
+  position: relative;
+}
+
+.passwordWrap input {
+  padding-right: 44px;
+}
+
+.eyeBtn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+}
+
+.eyeBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.submit {
+  margin-top: 4px;
+  border: none;
+  border-radius: 999px;
+  padding: 13px 16px;
+  font-weight: 700;
+  font-size: 0.98rem;
+  color: #fff;
+  background: linear-gradient(180deg, var(--accent), var(--accent-hover));
+  box-shadow: 0 10px 22px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.submit:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 820px) {
+  .columns {
+    grid-template-columns: 1fr;
+    padding: 8px 18px 22px;
+  }
+
+  .visual {
+    min-height: 0;
+    order: -1;
+    padding: 4px 0 8px;
+  }
+
+  .heroImg {
+    width: min(100%, 280px);
+  }
+
+  .form {
+    justify-self: stretch;
+    max-width: none;
+    padding: 0;
+  }
+
+  .cardTop {
+    padding: 16px 18px 0;
+  }
+}
