@@ -1,4 +1,5 @@
 import {
+  ensureAnswerFromThought,
   isModelAccessError,
   modelDisplayName,
   modelParamFamily,
@@ -32,7 +33,6 @@ import {
   isSwitchableModeList,
   listAgentModes,
   listModelParamOptions,
-  peelAnswerFromThought,
   type AcpRequest,
   type ConfigOption,
 } from "./AcpClient.js";
@@ -898,9 +898,9 @@ export async function runPrompt(
       await updateSession(sessionId, { status: "idle" });
       return result;
     }
-    // Let in-flight update handlers settle; keep short to avoid a long "blank" wait.
+    // Let in-flight update handlers settle briefly before finalizing.
     await rt.enqueue(async () => undefined);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 50));
     await rt.enqueue(async () => undefined);
 
     const detail = await import("../services/sessions.js").then((m) => m.getSessionDetail(sessionId));
@@ -910,6 +910,7 @@ export async function runPrompt(
     );
 
     // If the model put the answer into the thought channel, peel it into a text part.
+    // Always ensure a text part exists when the turn ends with thought-only content.
     if (lastAssistant) {
       const thoughtPart = lastAssistant.parts.find((p) => p.type === "thought");
       const hasText = lastAssistant.parts.some(
@@ -917,16 +918,22 @@ export async function runPrompt(
       );
       if (thoughtPart && !hasText) {
         const rawThought = String(thoughtPart.payload.text ?? "");
-        const peeled = peelAnswerFromThought(rawThought);
-        if (peeled.answer) {
-          await updatePart(sessionId, thoughtPart.id, { text: peeled.thought });
+        const ensured = ensureAnswerFromThought(rawThought);
+        const answer = ensured.answer.trim();
+        if (answer) {
+          // Append text only — never blank the thought part (that made the
+          // assistant bubble disappear for a frame before text arrived).
           rt.openTextPartId = await appendTextChunk(
             sessionId,
             lastAssistant.id,
             "text",
-            peeled.answer,
+            answer,
             null,
           );
+          const remain = ensured.thought.trim();
+          if (remain && remain !== answer) {
+            await updatePart(sessionId, thoughtPart.id, { text: remain });
+          }
         }
       }
     }

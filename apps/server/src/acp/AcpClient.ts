@@ -468,28 +468,12 @@ export function splitInlineThinking(raw: string): { thought: string; text: strin
   };
 }
 
-/**
- * When the model dumps the final answer into the thought channel,
- * peel the user-facing answer away from the short meta-reasoning.
- */
-export function peelAnswerFromThought(thought: string): { thought: string; answer: string } {
-  const trimmed = thought.trim();
-  if (!trimmed) return { thought: "", answer: "" };
-
-  const blocks = trimmed.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
-  if (blocks.length < 2) return { thought: trimmed, answer: "" };
-
-  const first = blocks[0];
-  const rest = blocks.slice(1).join("\n\n");
-  const meta =
-    /^(the user|let me|i (need|should|will|think)|okay|ok[,.]|hmm|рассужд|пользователь)/i.test(
-      first,
-    ) ||
-    (first.length < 280 && rest.length > first.length * 1.2);
-
-  if (!meta || rest.length < 24) return { thought: trimmed, answer: "" };
-  return { thought: first, answer: rest };
-}
+// Re-export shared peel helpers so server call sites keep working.
+export {
+  ensureAnswerFromThought,
+  looksLikeMetaReasoning,
+  peelAnswerFromThought,
+} from "@acprocess/shared";
 
 export class AcpClient extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;

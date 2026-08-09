@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
 import hljs from "highlight.js/lib/core";
@@ -265,56 +265,66 @@ function expandSourceCitations(text: string): string {
     .replace(/(^|[\s(])Ъ(?=\))/g, "$1Коммерсантъ");
 }
 
-export function MarkdownContent({ text, streaming = false, className }: MarkdownContentProps) {
+// Stable identity — a fresh `components` object every render remounts the whole tree.
+const markdownComponents: Components = {
+  p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
+  ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
+  ol: ({ children }) => <ol className={styles.list}>{children}</ol>,
+  li: ({ children }) => <li className={styles.listItem}>{children}</li>,
+  h1: ({ children }) => <h1 className={styles.heading}>{children}</h1>,
+  h2: ({ children }) => <h2 className={styles.heading}>{children}</h2>,
+  h3: ({ children }) => <h3 className={styles.heading}>{children}</h3>,
+  pre: ({ children }) => <>{children}</>,
+  code: ({ className: codeClass, children }) => {
+    const match = /language-([\w#+-]+)/.exec(codeClass ?? "");
+    const value = String(children).replace(/\n$/, "");
+    const isBlock = Boolean(match) || value.includes("\n");
+    if (!isBlock) {
+      return <code className={styles.inlineCode}>{children}</code>;
+    }
+    return <CodeBlock language={match?.[1]} code={value} />;
+  },
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noreferrer" className={styles.link}>
+      {friendlyLinkLabel(href, children)}
+    </a>
+  ),
+  blockquote: ({ children }) => (
+    <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
+  ),
+  table: ({ children }) => (
+    <div className={styles.tableWrap}>
+      <table className={styles.table}>{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className={styles.thead}>{children}</thead>,
+  tbody: ({ children }) => <tbody>{children}</tbody>,
+  tr: ({ children }) => <tr className={styles.tr}>{children}</tr>,
+  th: ({ children }) => <th className={styles.th}>{children}</th>,
+  td: ({ children }) => <td className={styles.td}>{children}</td>,
+};
+
+const remarkPlugins = [remarkGfm];
+
+export const MarkdownContent = memo(function MarkdownContent({
+  text,
+  streaming = false,
+  className,
+}: MarkdownContentProps) {
+  // Render the server buffer directly. Each incoming chunk becomes visible
+  // immediately; no synthetic typing or delayed catch-up animation.
   const rendered = useMemo(() => expandSourceCitations(text), [text]);
   if (!text.trim()) return null;
 
   return (
-    <div className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${className ? ` ${className}` : ""}`}>
+    <div
+      className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${className ? ` ${className}` : ""}`}
+    >
       <div className={styles.body}>
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
-            ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
-            ol: ({ children }) => <ol className={styles.list}>{children}</ol>,
-            li: ({ children }) => <li className={styles.listItem}>{children}</li>,
-            h1: ({ children }) => <h1 className={styles.heading}>{children}</h1>,
-            h2: ({ children }) => <h2 className={styles.heading}>{children}</h2>,
-            h3: ({ children }) => <h3 className={styles.heading}>{children}</h3>,
-            pre: ({ children }) => <>{children}</>,
-            code: ({ className: codeClass, children }) => {
-              const match = /language-([\w#+-]+)/.exec(codeClass ?? "");
-              const value = String(children).replace(/\n$/, "");
-              const isBlock = Boolean(match) || value.includes("\n");
-              if (!isBlock) {
-                return <code className={styles.inlineCode}>{children}</code>;
-              }
-              return <CodeBlock language={match?.[1]} code={value} />;
-            },
-            a: ({ href, children }) => (
-              <a href={href} target="_blank" rel="noreferrer" className={styles.link}>
-                {friendlyLinkLabel(href, children)}
-              </a>
-            ),
-            blockquote: ({ children }) => (
-              <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
-            ),
-            table: ({ children }) => (
-              <div className={styles.tableWrap}>
-                <table className={styles.table}>{children}</table>
-              </div>
-            ),
-            thead: ({ children }) => <thead className={styles.thead}>{children}</thead>,
-            tbody: ({ children }) => <tbody>{children}</tbody>,
-            tr: ({ children }) => <tr className={styles.tr}>{children}</tr>,
-            th: ({ children }) => <th className={styles.th}>{children}</th>,
-            td: ({ children }) => <td className={styles.td}>{children}</td>,
-          }}
-        >
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
           {rendered}
         </ReactMarkdown>
       </div>
     </div>
   );
-}
+});

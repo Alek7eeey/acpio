@@ -232,11 +232,11 @@
     );
   color: color-mix(in srgb, var(--accent) 70%, var(--text));
   padding: 16px 9px 16px 11px;
-  font: inherit;
-  font-weight: 750;
-  font-size: 0.78rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-family: var(--font);
+  font-weight: 600;
+  font-size: 0.84rem;
+  letter-spacing: -0.01em;
+  text-transform: none;
   cursor: pointer;
   box-shadow:
     -6px 4px 18px rgba(0, 0, 0, 0.08),
@@ -281,7 +281,10 @@
 .tabLabel {
   display: inline-flex;
   align-items: center;
-  line-height: 1.1;
+  line-height: 1.15;
+  font-family: var(--font);
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .tabDot {

@@ -9,7 +9,16 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { migrateModelParamValues, usesCloudModelCatalog, type AgentMode, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
+import {
+  migrateModelParamValues,
+  peelAnswerFromThought,
+  usesCloudModelCatalog,
+  type AgentMode,
+  type MessageDto,
+  type MessagePartDto,
+  type ModelParamDto,
+  type SlashCommandDto,
+} from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { sanitizeCatalogModes, useAppStore } from "../lib/store";
@@ -191,22 +200,6 @@ function UserMessageActions({ text, onEdit }: { text: string; onEdit: () => void
   );
 }
 
-function peelAnswerFromThought(thought: string): { thought: string; answer: string } {
-  const trimmed = thought.trim();
-  if (!trimmed) return { thought: "", answer: "" };
-  const blocks = trimmed.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
-  if (blocks.length < 2) return { thought: trimmed, answer: "" };
-  const first = blocks[0];
-  const rest = blocks.slice(1).join("\n\n");
-  const meta =
-    /^(the user|let me|i (need|should|will|think)|okay|ok[,.]|hmm|рассужд|пользователь)/i.test(
-      first,
-    ) ||
-    (first.length < 280 && rest.length > first.length * 1.2);
-  if (!meta || rest.length < 24) return { thought: trimmed, answer: "" };
-  return { thought: first, answer: rest };
-}
-
 function coalesceParts(
   parts: MessagePartDto[],
   opts?: { peelAnswer?: boolean },
@@ -245,8 +238,8 @@ function coalesceParts(
     out.push(part);
   }
 
-  // Never peel while streaming: partial thoughts briefly look like an "answer",
-  // then snap back into reasoning when heuristics flip or real text arrives.
+  // Display-only peel for history: never destroy the thought row (that caused
+  // flicker when the server later sent the real text part).
   const peelAnswer = opts?.peelAnswer !== false;
   const hasText = out.some((p) => p.type === "text" && String(p.payload.text ?? "").trim());
   if (peelAnswer && !hasText) {
@@ -254,17 +247,21 @@ function coalesceParts(
     if (thoughtIdx >= 0) {
       const thought = out[thoughtIdx];
       const peeled = peelAnswerFromThought(String(thought.payload.text ?? ""));
-      if (peeled.answer) {
+      const answer = peeled.answer.trim();
+      const remain = peeled.thought.trim();
+      // Only split when we have a distinct answer — leave thought-only turns alone
+      // until the server appends a real text part.
+      if (answer && remain && answer !== remain) {
         out[thoughtIdx] = {
           ...thought,
-          payload: { ...thought.payload, text: peeled.thought },
+          payload: { ...thought.payload, text: remain },
         };
         out.splice(thoughtIdx + 1, 0, {
           ...thought,
           id: `${thought.id}-peeled-answer`,
           type: "text",
           order: thought.order + 0.5,
-          payload: { text: peeled.answer },
+          payload: { text: answer },
         });
       }
     }
@@ -495,12 +492,17 @@ function StepsSpoiler({
   autoExpand: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(autoExpand);
+  // Open with the turn so thinking doesn't appear as a second stage after the bubble.
+  const [open, setOpen] = useState(() => Boolean(streaming || autoExpand));
   const thoughts = parts.filter(isThoughtPart);
   const startedAtRef = useRef<number | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
+    if (streaming) {
+      setOpen(true);
+      return;
+    }
     if (autoExpand) setOpen(true);
   }, [autoExpand, streaming]);
 
@@ -522,11 +524,12 @@ function StepsSpoiler({
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
   }, [streaming]);
 
-  const pending = streaming && thoughts.length === 0;
-  if (thoughts.length === 0 && !pending) return null;
+  // Show one stable thinking row for the whole turn (including empty pending).
+  if (thoughts.length === 0 && !streaming) return null;
 
-  const label = streaming || pending
-    ? t("common.thoughtWhile")
+  // Same title while live — don't flip «Думаю…» ↔ «Размышления».
+  const label = streaming
+    ? t("common.steps")
     : elapsedSec > 0
       ? t("common.thoughtFor", { seconds: elapsedSec, count: elapsedSec })
       : t("common.steps");
@@ -544,7 +547,10 @@ function StepsSpoiler({
         <span className={styles.stepsIcon}>
           <ThoughtSparkIcon size={16} />
         </span>
-        <span className={styles.stepsTitle}>{label}</span>
+        <span className={styles.stepsTitle}>
+          {streaming ? <span className={styles.pulseDot} /> : null}
+          {label}
+        </span>
         <span
           className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
           aria-hidden
@@ -599,7 +605,7 @@ function assistantPlainText(message: MessageDto) {
     .trim();
 }
 
-function MessageActions({ text }: { text: string }) {
+function MessageActions({ text, hidden = false }: { text: string; hidden?: boolean }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
 
@@ -615,12 +621,17 @@ function MessageActions({ text }: { text: string }) {
   };
 
   return (
-    <div className={styles.msgActions} aria-label={t("common.actions")}>
+    <div
+      className={`${styles.msgActions}${hidden ? ` ${styles.msgActionsHidden}` : ""}`}
+      aria-label={t("common.actions")}
+      aria-hidden={hidden}
+    >
       <button
         type="button"
         className={styles.msgAction}
         title={copied ? t("common.copied") : t("common.copy")}
         aria-label={t("common.copy")}
+        tabIndex={hidden ? -1 : undefined}
         onClick={() => void copy()}
       >
         <IconCopy done={copied} />
@@ -792,10 +803,23 @@ function AssistantParts({
   streaming: boolean;
   autoExpandSteps: boolean;
 }) {
-  const parts = useMemo(
-    () => coalesceAssistantParts(message.parts, { peelAnswer: !streaming }),
-    [message.id, message.parts, streaming],
-  );
+  // Keep typewriter "live" after the turn so late/peeled text still types out
+  // instead of dumping in one frame when status flips to idle.
+  const [paintStreaming, setPaintStreaming] = useState(streaming);
+  useEffect(() => {
+    if (streaming) {
+      setPaintStreaming(true);
+      return;
+    }
+    const id = window.setTimeout(() => setPaintStreaming(false), 3200);
+    return () => window.clearTimeout(id);
+  }, [streaming]);
+
+  const parts = useMemo(() => {
+    return coalesceAssistantParts(message.parts, {
+      peelAnswer: !streaming && !paintStreaming,
+    });
+  }, [message.parts, streaming, paintStreaming]);
 
   const thoughtParts = useMemo(
     () => parts.filter((p) => p.type === "thought" && Boolean(String(p.payload.text ?? "").trim())),
@@ -805,17 +829,19 @@ function AssistantParts({
     () => parts.filter((p) => p.type === "text" || p.type === "error" || p.type === "subagent"),
     [parts],
   );
-  const plain = useMemo(() => assistantPlainText(message), [message]);
-  const hasAnswerText = mainParts.some(
-    (p) => p.type === "text" && Boolean(String(p.payload.text ?? "").trim()),
-  );
-  const thoughtsLive = streaming && !hasAnswerText;
+  const plain = useMemo(() => {
+    return mainParts
+      .filter((p) => p.type === "text")
+      .map((p) => String(p.payload.text ?? ""))
+      .join("\n\n")
+      .trim();
+  }, [mainParts]);
 
   return (
     <div className={styles.parts}>
       <StepsSpoiler
         parts={thoughtParts}
-        streaming={thoughtsLive}
+        streaming={streaming}
         autoExpand={autoExpandSteps}
       />
       {mainParts.map((part, idx) => {
@@ -825,12 +851,12 @@ function AssistantParts({
             key={part.id}
             part={part}
             streaming={
-              streaming && isLast && (part.type === "text" || part.type === "subagent")
+              paintStreaming && isLast && (part.type === "text" || part.type === "subagent")
             }
           />
         );
       })}
-      {!streaming && plain ? <MessageActions text={plain} /> : null}
+      {plain ? <MessageActions text={plain} hidden={paintStreaming} /> : null}
     </div>
   );
 }
@@ -884,9 +910,12 @@ export function ChatPage() {
   const [folderPicker, setFolderPicker] = useState<{ x: number; y: number } | null>(null);
   const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
     try {
-      return localStorage.getItem("acprocess.autoExpandSteps") === "1";
+      // v2: thinking/steps open by default (legacy key defaulted to off).
+      const raw = localStorage.getItem("acprocess.autoExpandSteps.v2");
+      if (raw === null) return true;
+      return raw === "1";
     } catch {
-      return false;
+      return true;
     }
   });
   /** Assistant message ids that already existed when the toggle was turned on — skip them. */
@@ -904,7 +933,7 @@ export function ChatPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("acprocess.autoExpandSteps", autoExpandSteps ? "1" : "0");
+      localStorage.setItem("acprocess.autoExpandSteps.v2", autoExpandSteps ? "1" : "0");
     } catch {
       // ignore
     }
@@ -1413,7 +1442,7 @@ export function ChatPage() {
   const messageCount = activeSession?.messages.length ?? 0;
   const activeSessionId = activeSession?.id ?? null;
   const streamDigest = useMemo(() => {
-    if (!activeSession?.messages.length) return "";
+    if (!activeSession?.messages.length) return `${activeSession?.status ?? ""}`;
     let parts = 0;
     let chars = 0;
     for (const m of activeSession.messages) {
@@ -1429,23 +1458,34 @@ export function ChatPage() {
   }, [activeSession?.messages, activeSession?.status]);
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
+  const suppressScrollWatchRef = useRef(false);
   const scrollRafRef = useRef(0);
+  const threadInnerRef = useRef<HTMLDivElement>(null);
+  const streamingRef = useRef(streaming);
+  streamingRef.current = streaming;
 
   const scrollThreadToEnd = () => {
     const thread = threadRef.current;
     if (!thread) return;
-    // Only adjust the thread scroller — scrollIntoView also nudges ancestors and feels jumpy.
-    const top = thread.scrollHeight - thread.clientHeight;
-    if (Math.abs(thread.scrollTop - top) < 1) return;
-    thread.scrollTop = top;
+    suppressScrollWatchRef.current = true;
+    stickToBottomRef.current = true;
+    thread.scrollTop = thread.scrollHeight;
+    window.requestAnimationFrame(() => {
+      const node = threadRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+      suppressScrollWatchRef.current = false;
+      stickToBottomRef.current = true;
+    });
   };
 
   const scheduleScrollToEnd = () => {
-    if (!stickToBottomRef.current) return;
+    if (!stickToBottomRef.current && !streamingRef.current && !userJustSentRef.current) return;
     if (scrollRafRef.current) return;
     scrollRafRef.current = window.requestAnimationFrame(() => {
       scrollRafRef.current = 0;
-      if (stickToBottomRef.current) scrollThreadToEnd();
+      if (stickToBottomRef.current || streamingRef.current || userJustSentRef.current) {
+        scrollThreadToEnd();
+      }
     });
   };
 
@@ -1453,6 +1493,12 @@ export function ChatPage() {
     const thread = threadRef.current;
     if (!thread) return;
     const onScroll = () => {
+      if (suppressScrollWatchRef.current) return;
+      // Growth during stream can temporarily look like "scrolled away" before we catch up.
+      if (streamingRef.current || userJustSentRef.current) {
+        stickToBottomRef.current = true;
+        return;
+      }
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
       stickToBottomRef.current = gap < 140;
     };
@@ -1461,12 +1507,24 @@ export function ChatPage() {
   }, [activeSessionId]);
 
   useEffect(() => {
+    const inner = threadInnerRef.current;
+    if (!inner || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (stickToBottomRef.current || streamingRef.current || userJustSentRef.current) {
+        scrollThreadToEnd();
+      }
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [activeSessionId]);
+
+  useEffect(() => {
     return () => {
       if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
     };
   }, []);
 
-  // Hard snap when switching chats or right after send / permission card mounts.
+  // Snap on session switch, send, stream tokens, and permission prompts.
   useLayoutEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
@@ -1476,8 +1534,8 @@ export function ChatPage() {
     if (sessionChanged) {
       prevSessionIdRef.current = activeSessionId;
       stickToBottomRef.current = true;
-      scrollThreadToEnd();
       userJustSentRef.current = false;
+      scrollThreadToEnd();
       if (!shouldAutoFocusComposer()) {
         textareaRef.current?.blur();
       } else if (keepComposerFocus.current) {
@@ -1485,29 +1543,30 @@ export function ChatPage() {
       }
       return;
     }
-    if (userJustSentRef.current) {
+    if (userJustSentRef.current || promptId) {
       stickToBottomRef.current = true;
       userJustSentRef.current = false;
       scrollThreadToEnd();
       return;
     }
-    if (promptId) {
+    // Follow while streaming; when the turn ends, don't hard-jump (composer
+    // chrome changes would otherwise look like a full remount).
+    if (streaming) {
       stickToBottomRef.current = true;
       scrollThreadToEnd();
+      return;
     }
+    if (!stickToBottomRef.current) return;
+    scheduleScrollToEnd();
   }, [
     activeSessionId,
     lastMessageId,
     messageCount,
+    streamDigest,
+    streaming,
     pendingPermission?.requestId,
     pendingQuestion?.requestId,
   ]);
-
-  // Soft follow during streaming — one rAF per frame, after paint (no layout fight).
-  useEffect(() => {
-    if (userJustSentRef.current) return;
-    scheduleScrollToEnd();
-  }, [streamDigest]);
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -1544,14 +1603,11 @@ export function ChatPage() {
     submitMessage(text);
   };
 
-  const lastAssistantId = [...(activeSession?.messages ?? [])]
-    .reverse()
-    .find((m) => m.role === "assistant")?.id;
-
   return (
     <div className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""}`}>
       <div className={styles.mainColumn}>
       <div className={styles.thread} ref={threadRef}>
+        <div className={styles.threadInner} ref={threadInnerRef}>
         {!activeSession && (
           <div className={styles.empty}>
             <h1>
@@ -1591,9 +1647,11 @@ export function ChatPage() {
           </div>
         )}
 
-        {activeSession?.messages.map((msg) => {
-          const isLiveAssistant = streaming && msg.id === lastAssistantId;
-          // Hide empty historical assistant shells, but keep the live one so «Думаю…» shows ASAP.
+        {(activeSession?.messages ?? []).map((msg, index) => {
+          const isLiveAssistant =
+            streaming &&
+            msg.role === "assistant" &&
+            index === (activeSession?.messages.length ?? 0) - 1;
           if (
             msg.role === "assistant" &&
             !hasRenderableAssistantContent(msg.parts) &&
@@ -1634,25 +1692,17 @@ export function ChatPage() {
                   message={msg}
                   streaming={!!isLiveAssistant}
                   autoExpandSteps={
-                    thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
+                    isLiveAssistant
+                      ? autoExpandSteps
+                      : thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
                   }
                 />
               )}
             </article>
           );
         })}
-        {streaming && activeSession?.messages.at(-1)?.role === "user" ? (
-          <article className={`${styles.msg} ${styles.assistant} ${styles.live}`}>
-            <div className={styles.parts}>
-              <StepsSpoiler
-                parts={[]}
-                streaming
-                autoExpand={thoughtsArmed && autoExpandSteps}
-              />
-            </div>
-          </article>
-        ) : null}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
+        </div>
       </div>
 
       {(pendingPermission || pendingQuestion) &&
@@ -1667,46 +1717,39 @@ export function ChatPage() {
 
       <form className={styles.composer} onSubmit={onSubmit}>
         <div className={styles.composerInner}>
-          {editingMessageId && (
-            <div className={styles.typingBar} aria-live="polite">
-              <span>{t("chat.editingMessage")}</span>
-              <button
-                type="button"
-                className={styles.editCancel}
-                onClick={() => {
-                  setEditingMessageId(null);
-                  setText("");
-                  setComposerMultilineIfNeeded(false);
-                }}
-              >
-                {t("common.cancel")}
-              </button>
-            </div>
-          )}
-          {agentMissing && (
-            <div className={styles.typingBar} aria-live="polite">
-              {t("common.connectAgentInSettings")}
-            </div>
-          )}
-          {activeSession?.status === "running" && (
-            <div className={styles.typingBar} aria-live="polite">
-              <span>{t("common.agentThinking")}</span>
-              <span className={styles.typingDots} aria-hidden>
-                <span />
-                <span />
-                <span />
-              </span>
-            </div>
-          )}
-          {activeSession?.status === "waiting" && (
-            <div className={styles.typingBar}>{t("common.waitingInput")}</div>
-          )}
-          {composerLocked && !agentMissing && !streaming && (
-            <div className={styles.typingBar} aria-live="polite">
-              <span className={styles.modelsLoaderSpin} aria-hidden />
-              <span>{t("common.loadingModels")}</span>
-            </div>
-          )}
+          <div className={styles.composerStatusSlot} aria-live="polite">
+            {editingMessageId && (
+              <div className={styles.typingBar}>
+                <span>{t("chat.editingMessage")}</span>
+                <button
+                  type="button"
+                  className={styles.editCancel}
+                  onClick={() => {
+                    setEditingMessageId(null);
+                    setText("");
+                    setComposerMultilineIfNeeded(false);
+                  }}
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+            )}
+            {!editingMessageId && agentMissing && (
+              <div className={styles.typingBar}>{t("common.connectAgentInSettings")}</div>
+            )}
+            {!editingMessageId && !agentMissing && activeSession?.status === "waiting" && (
+              <div className={styles.typingBar}>{t("common.waitingInput")}</div>
+            )}
+            {!editingMessageId &&
+              !agentMissing &&
+              composerLocked &&
+              !streaming && (
+                <div className={styles.typingBar}>
+                  <span className={styles.modelsLoaderSpin} aria-hidden />
+                  <span>{t("common.loadingModels")}</span>
+                </div>
+              )}
+          </div>
           <div className={styles.composerMeta}>
             <div className={styles.composerMetaStart}>
               {activeSession?.cwd?.trim() ? (

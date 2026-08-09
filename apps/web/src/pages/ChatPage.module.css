@@ -29,12 +29,19 @@
   flex: 1;
   overflow: auto;
   overflow-x: hidden;
-  padding: 20px 16px 28px;
+  padding: 20px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+}
+
+.threadInner {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  min-width: 0;
   width: 100%;
+  min-height: min-content;
 }
 
 .threadEnd {
@@ -103,13 +110,16 @@
   margin: 0 auto;
   display: grid;
   gap: 6px;
-  animation: msgEnter 0.26s ease both;
   outline: none;
   caret-color: transparent;
   min-width: 0;
   box-sizing: border-box;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.msgEnter {
+  animation: msgEnter 0.26s ease both;
 }
 
 @keyframes msgEnter {
@@ -609,13 +619,18 @@
   transition: opacity var(--motion);
 }
 
+.msgActionsHidden {
+  opacity: 0 !important;
+  pointer-events: none;
+}
+
 @media (hover: hover) and (pointer: fine) {
   .msgActions {
     opacity: 0;
   }
 
-  .msg:hover .msgActions,
-  .msgActions:focus-within {
+  .msg:hover .msgActions:not(.msgActionsHidden),
+  .msgActions:focus-within:not(.msgActionsHidden) {
     opacity: 1;
   }
 }
@@ -749,7 +764,7 @@
 
 /* Keep composer height stable when status text appears/disappears. */
 .composerStatusSlot {
-  min-height: 18px;
+  min-height: 0;
   display: flex;
   align-items: center;
 }
@@ -845,10 +860,10 @@
 .composer {
   border-top: none;
   background: transparent;
-  padding: 8px 16px 18px;
-  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  padding: 2px 16px 14px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
   display: grid;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
   min-width: 0;
   width: 100%;

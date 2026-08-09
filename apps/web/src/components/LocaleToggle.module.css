@@ -92,6 +92,19 @@
   height: 18px;
 }
 
+@media (max-width: 899px) {
+  .triggerLabel {
+    display: none;
+  }
+
+  .triggerCompact {
+    width: var(--toolbar-btn-size, 36px) !important;
+    min-width: var(--toolbar-btn-size, 36px) !important;
+    padding: 0 !important;
+    gap: 0;
+  }
+}
+
 @keyframes flagWave {
   0% {
     transform: rotate(0deg) translateY(0);

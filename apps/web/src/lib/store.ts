@@ -221,12 +221,193 @@ function upsertPart(parts: MessagePartDto[], part: MessagePartDto) {
   return next;
 }
 
+function upsertMessagePart(message: MessageDto, part: MessagePartDto): MessagePartDto[] {
+  // An optimistic user message already has its one text part. The persisted
+  // `part.appended` event has a new server id, so replacing by part id alone
+  // would render the same prompt twice in the one bubble.
+  if (isLocalUserId(message.id) && part.type === "text") {
+    const localTextIdx = message.parts.findIndex((item) => item.type === "text");
+    if (localTextIdx >= 0) {
+      const next = [...message.parts];
+      next[localTextIdx] = {
+        ...part,
+        // Keep the local key stable; the server part is only confirmation.
+        id: next[localTextIdx]!.id,
+        messageId: message.id,
+      };
+      return next;
+    }
+  }
+  return upsertPart(message.parts, part);
+}
+
+function isLocalUserId(id: string) {
+  return id.startsWith("local-user-");
+}
+
+function isLocalAssistantId(id: string) {
+  return id.startsWith("local-assistant-");
+}
+
+/** Server message ids → stable client ids so optimistic bubbles never remount. */
+const serverToClientMessageId = new Map<string, string>();
+/** One prompt may be active at a time. Map its server messages only to its pair. */
+let pendingOptimisticPair: { userId: string; assistantId: string } | null = null;
+
+function resolveClientMessageId(messageId: string) {
+  return serverToClientMessageId.get(messageId) ?? messageId;
+}
+
+function clearMessageIdAliases() {
+  serverToClientMessageId.clear();
+  pendingOptimisticPair = null;
+}
+
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
-  const idx = messages.findIndex((m) => m.id === message.id);
-  if (idx === -1) return [...messages, message];
-  const next = [...messages];
-  next[idx] = message;
-  return next;
+  const clientMessageId = resolveClientMessageId(message.id);
+  const idx = messages.findIndex((m) => m.id === clientMessageId);
+  if (idx >= 0) {
+    const next = messages.slice();
+    const previous = next[idx]!;
+    next[idx] = {
+      ...message,
+      id: previous.id,
+      // `message.created` is empty; a detail refresh has the canonical parts.
+      parts: message.parts.length ? message.parts : previous.parts,
+    };
+    return next;
+  }
+
+  const pendingId =
+    message.role === "user"
+      ? pendingOptimisticPair?.userId
+      : message.role === "assistant"
+        ? pendingOptimisticPair?.assistantId
+        : null;
+  if (pendingId && messages.some((item) => item.id === pendingId)) {
+    serverToClientMessageId.set(message.id, pendingId);
+    const next = messages.slice();
+    const index = next.findIndex((item) => item.id === pendingId);
+    const previous = next[index]!;
+    next[index] = {
+      ...message,
+      id: pendingId,
+      // `message.created` is intentionally empty; never wipe locally received parts.
+      parts: message.parts.length ? message.parts : previous.parts,
+    };
+    if (message.role === "assistant") pendingOptimisticPair = null;
+    return next;
+  }
+
+  return [...messages, message];
+}
+
+/** Keep recently opened chats warm so tree → chat feels instant. */
+const sessionDetailCache = new Map<string, SessionDetailDto>();
+let selectSessionSeq = 0;
+
+function rememberSessionDetail(detail: SessionDetailDto | null | undefined) {
+  if (!detail?.id) return;
+  sessionDetailCache.set(detail.id, detail);
+  if (sessionDetailCache.size <= 24) return;
+  const oldest = sessionDetailCache.keys().next().value;
+  if (oldest) sessionDetailCache.delete(oldest);
+}
+
+/** Coalesce rapid token WS events into one React paint per frame. */
+type PendingPartEvent = Extract<WsServerEvent, { type: "part.appended" | "part.updated" }>;
+let pendingPartEvents: PendingPartEvent[] = [];
+let pendingPartRaf = 0;
+
+function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppState>) => void) {
+  pendingPartRaf = 0;
+  const batch = pendingPartEvents;
+  pendingPartEvents = [];
+  if (!batch.length) return;
+
+  const state = get();
+  const active = state.activeSession;
+  if (!active) return;
+
+  let messages = active.messages;
+  let touched = false;
+  for (const event of batch) {
+    if (active.id !== event.sessionId) continue;
+    if (state.cancelledPromptEpoch === state.promptEpoch) continue;
+    let messageId = resolveClientMessageId(event.messageId);
+    if (messageId === event.messageId) {
+      const optimisticId = pendingOptimisticPair?.assistantId;
+      if (optimisticId && messages.some((message) => message.id === optimisticId)) {
+        serverToClientMessageId.set(event.messageId, optimisticId);
+        messageId = optimisticId;
+      }
+    }
+    let found = false;
+    messages = messages.map((m) => {
+      if (m.id !== messageId) return m;
+      found = true;
+      touched = true;
+      return { ...m, parts: upsertMessagePart(m, { ...event.part, messageId }) };
+    });
+    if (!found) {
+      touched = true;
+      messages = [
+        ...messages,
+        {
+          id: messageId,
+          sessionId: event.sessionId,
+          role: "assistant",
+          createdAt: new Date().toISOString(),
+          parts: [{ ...event.part, messageId }],
+        },
+      ];
+    }
+  }
+  if (!touched) return;
+  const nextActive = {
+    ...active,
+    messages,
+  };
+  rememberSessionDetail(nextActive);
+  set({
+    activeSession: nextActive,
+  });
+}
+
+function queuePartEvent(
+  event: PendingPartEvent,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  pendingPartEvents.push(event);
+  if (pendingPartRaf) return;
+  pendingPartRaf = requestAnimationFrame(() => flushPendingPartEvents(get, set));
+}
+
+function reconcileFinishedTurn(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  window.setTimeout(() => {
+    void api
+      .getSession(sessionId)
+      .then((detail) => {
+        const state = get();
+        const active = state.activeSession;
+        // Another chat has taken over; don't apply this session's result there.
+        if (!active || active.id !== sessionId) {
+          return;
+        }
+        // The persisted detail is the reliable final answer. Render it as
+        // normal text; never gate the visible answer on a client animation.
+        rememberSessionDetail(detail);
+        set({ activeSession: detail });
+      })
+      .catch(() => {
+        // The live WS already rendered what it could; a later selection retries.
+      });
+  }, 120);
 }
 
 async function loadAppData(
@@ -466,18 +647,53 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectSession(id) {
     if (!id) {
       localStorage.removeItem(ACTIVE_SESSION_KEY);
-      set({ activeSessionId: null, activeSession: null });
+      clearMessageIdAliases();
+      set({
+        activeSessionId: null,
+        activeSession: null,
+        pendingPermission: null,
+        permissionQueue: [],
+        pendingQuestion: null,
+      });
       return;
     }
+
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
-    const detail = await api.getSession(id);
+    const seq = ++selectSessionSeq;
+    const cached = sessionDetailCache.get(id);
+    const listItem = get().sessions.find((s) => s.id === id);
+    const current = get().activeSession;
+
+    // Highlight + show cached/skeleton immediately — don't wait on the network.
+    const optimistic: SessionDetailDto | null =
+      cached ??
+      (current?.id === id
+        ? current
+        : listItem
+          ? { ...listItem, messages: [], slashCommands: [] }
+          : null);
+
+    if (current?.id !== id) clearMessageIdAliases();
+
     set({
       activeSessionId: id,
-      activeSession: detail,
+      activeSession: optimistic,
       pendingPermission: null,
       permissionQueue: [],
       pendingQuestion: null,
     });
+
+    try {
+      const detail = await api.getSession(id);
+      rememberSessionDetail(detail);
+      if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+      // Don't clobber an in-flight optimistic turn with a stale GET snapshot.
+      if (get().activeSession?.status === "running") return;
+      set({ activeSession: detail });
+    } catch (err) {
+      if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
   },
 
   async createSession(cwd) {
@@ -528,22 +744,74 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().activeSessionId;
     set({ error: null });
 
-    const markRunning = (sessionId: string) => {
+    const buildOptimisticPair = (sessionId: string, baseMessages: MessageDto[]) => {
+      const epoch = get().promptEpoch + 1;
+      const now = new Date().toISOString();
+      const userId = `local-user-${epoch}`;
+      const assistantId = `local-assistant-${epoch}`;
+      const trimmed = text.trim();
+      const slashMatch = trimmed.match(/^\/([\w-]+)/);
+      const userMsg: MessageDto = {
+        id: userId,
+        sessionId,
+        role: "user",
+        createdAt: now,
+        parts: [
+          {
+            id: `${userId}-text`,
+            messageId: userId,
+            type: "text",
+            order: 0,
+            payload: {
+              text,
+              ...(slashMatch
+                ? { isSlashCommand: true, commandName: slashMatch[1] }
+                : {}),
+            },
+            createdAt: now,
+          },
+        ],
+      };
+      const assistantMsg: MessageDto = {
+        id: assistantId,
+        sessionId,
+        role: "assistant",
+        createdAt: now,
+        parts: [],
+      };
+      return {
+        epoch,
+        userId,
+        assistantId,
+        messages: [...baseMessages, userMsg, assistantMsg] as MessageDto[],
+      };
+    };
+
+    const commitRunning = (sessionId: string, messages: MessageDto[] | null, epoch: number) => {
       const active = get().activeSession;
       set({
         modelsLoading: false,
-        promptEpoch: get().promptEpoch + 1,
+        promptEpoch: epoch,
         sessions: get().sessions.map((s) =>
           s.id === sessionId ? { ...s, status: "running" as const } : s,
         ),
         activeSession:
-          active?.id === sessionId ? { ...active, status: "running" } : active,
+          active?.id === sessionId
+            ? {
+                ...active,
+                status: "running",
+                ...(messages ? { messages } : {}),
+              }
+            : active,
       });
     };
 
     if (!id) {
       const session = await get().createSession();
-      markRunning(session.id);
+      const active = get().activeSession;
+      const pair = buildOptimisticPair(session.id, active?.id === session.id ? active.messages : []);
+      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId };
+      commitRunning(session.id, pair.messages, pair.epoch);
       await api.prompt(session.id, text);
       return;
     }
@@ -554,7 +822,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (idx >= 0) {
         const trimmed = text.trim();
         const slashMatch = trimmed.match(/^\/([\w-]+)/);
-        const nextMessages = msgs.slice(0, idx + 1).map((m, i) => {
+        const truncated = msgs.slice(0, idx + 1).map((m, i) => {
           if (i !== idx) return m;
           return {
             ...m,
@@ -575,13 +843,38 @@ export const useAppStore = create<AppState>((set, get) => ({
             ],
           };
         });
-        set({
-          activeSession: { ...get().activeSession!, messages: nextMessages, status: "running" },
-        });
+        const epoch = get().promptEpoch + 1;
+        const now = new Date().toISOString();
+        const assistantId = `local-assistant-${epoch}`;
+        const userId = msgs[idx]!.id;
+        pendingOptimisticPair = { userId, assistantId };
+        commitRunning(
+          id,
+          [
+            ...truncated,
+            {
+              id: assistantId,
+              sessionId: id,
+              role: "assistant",
+              createdAt: now,
+              parts: [],
+            },
+          ],
+          epoch,
+        );
+        await api.prompt(id, text, { editMessageId: opts.editMessageId });
+        return;
       }
     }
 
-    markRunning(id);
+    const active = get().activeSession;
+    if (active?.id === id) {
+      const pair = buildOptimisticPair(id, active.messages);
+      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId };
+      commitRunning(id, pair.messages, pair.epoch);
+    } else {
+      commitRunning(id, null, get().promptEpoch + 1);
+    }
     await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : undefined);
   },
 
@@ -617,6 +910,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleWsEvent(event) {
+    if (event.type !== "part.appended" && event.type !== "part.updated") {
+      if (pendingPartRaf) {
+        cancelAnimationFrame(pendingPartRaf);
+        pendingPartRaf = 0;
+      }
+      if (pendingPartEvents.length) {
+        flushPendingPartEvents(get, set);
+      }
+    }
+
     const state = get();
 
     if (event.type === "session.updated") {
@@ -675,6 +978,16 @@ export const useAppStore = create<AppState>((set, get) => ({
               }
             : state.activeSession,
       });
+      // A few ACP adapters finish their RPC before the final WS part has
+      // crossed the proxy. Reconcile only after idle so that answer cannot
+      // remain hidden until the user reloads the chat.
+      if (
+        session.status === "idle" &&
+        state.activeSession?.id === event.sessionId &&
+        !cancelled
+      ) {
+        reconcileFinishedTurn(event.sessionId, get, set);
+      }
       return;
     }
 
@@ -692,25 +1005,29 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ sessions: nextSessions });
         return;
       }
+      const nextActive = {
+        ...state.activeSession!,
+        lastMessageAt: event.message.createdAt,
+        updatedAt: event.message.createdAt,
+        messages: upsertMessage(state.activeSession!.messages, event.message),
+      };
+      rememberSessionDetail(nextActive);
       set({
         sessions: nextSessions,
-        activeSession: {
-          ...state.activeSession!,
-          lastMessageAt: event.message.createdAt,
-          updatedAt: event.message.createdAt,
-          messages: upsertMessage(state.activeSession!.messages, event.message),
-        },
+        activeSession: nextActive,
       });
       return;
     }
 
     if (event.type === "messages.truncated") {
       if (state.activeSession?.id !== event.sessionId) return;
+      const replacedActive = {
+        ...state.activeSession!,
+        messages: event.messages,
+      };
+      rememberSessionDetail(replacedActive);
       set({
-        activeSession: {
-          ...state.activeSession!,
-          messages: event.messages,
-        },
+        activeSession: replacedActive,
       });
       return;
     }
@@ -719,25 +1036,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (state.activeSession?.id !== event.sessionId) return;
       // User hit Stop — ignore late tokens still arriving over WS.
       if (state.cancelledPromptEpoch === state.promptEpoch) return;
-      const messages = state.activeSession!.messages.map((m) => {
-        if (m.id !== event.messageId) return m;
-        return { ...m, parts: upsertPart(m.parts, event.part) };
-      });
-      if (!messages.some((m) => m.id === event.messageId)) {
-        messages.push({
-          id: event.messageId,
-          sessionId: event.sessionId,
-          role: "assistant",
-          createdAt: new Date().toISOString(),
-          parts: [event.part],
-        });
-      }
-      set({
-        activeSession: {
-          ...state.activeSession!,
-          messages,
-        },
-      });
+      queuePartEvent(event, get, set);
       return;
     }
 

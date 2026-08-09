@@ -226,8 +226,13 @@ export function ChatSidebar() {
     if (window.innerWidth < 900) setSidebarOpen(false);
   };
 
-  const openChat = async (sessionId: string) => {
-    await selectSession(sessionId);
+  const openChat = (sessionId: string) => {
+    void selectSession(sessionId);
+    navigate("/chat");
+    closeMobile();
+  };
+
+  const goToChat = () => {
     navigate("/chat");
     closeMobile();
   };
@@ -381,8 +386,13 @@ export function ChatSidebar() {
             <button
               type="button"
               className={styles.sessionBtn}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                // Paint selection on press, before click/navigation.
+                void selectSession(s.id);
+              }}
               onClick={() => {
-                void openChat(s.id);
+                goToChat();
               }}
               onDoubleClick={(e) => {
                 e.preventDefault();
@@ -435,7 +445,21 @@ export function ChatSidebar() {
               openFolderPicker({ x: rect.left, y: rect.bottom + 6 });
             }}
           >
-            {t("common.newChat")}
+            <span className={styles.newChatIcon} aria-hidden>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </span>
+            <span className={styles.newChatLabel}>{t("common.newChat")}</span>
           </button>
         </div>
 
