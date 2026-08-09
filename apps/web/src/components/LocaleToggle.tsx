@@ -93,10 +93,16 @@ export function LocaleToggle({ triggerClassName, compact }: LocaleToggleProps = 
         title={current.label}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className={styles.flagWrap}>
-          <LocaleFlag locale={current.id} />
-        </span>
-        <span className={styles.triggerLabel}>{current.label}</span>
+        {compact ? (
+          <span className={styles.compactCode}>{current.id}</span>
+        ) : (
+          <>
+            <span className={styles.flagWrap}>
+              <LocaleFlag locale={current.id} />
+            </span>
+            <span className={styles.triggerLabel}>{current.label}</span>
+          </>
+        )}
         {!compact ? (
           <svg className={styles.chevron} width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path

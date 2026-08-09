@@ -475,7 +475,7 @@ export function ChatSidebar() {
                 {showFolderHeaders && (
                   <div className={styles.folderHead} title={folder.cwd || undefined}>
                     <span className={styles.folderIcon} aria-hidden>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                         <path
                           d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
                           stroke="currentColor"

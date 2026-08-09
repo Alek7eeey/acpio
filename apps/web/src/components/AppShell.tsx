@@ -407,8 +407,8 @@ export function AppShell() {
               <span className={styles.agentChipText}>{agentLabel}</span>
             </div>
             <div className={styles.toolCluster} role="group" aria-label={t("common.toolbar")}>
-              <InstallAppButton className={styles.toolClusterBtn} />
               <LocaleToggle triggerClassName={styles.toolClusterLocale} compact />
+              <InstallAppButton className={styles.toolClusterBtn} />
               <ThemeToggle
                 theme={theme}
                 className={styles.toolClusterBtn}

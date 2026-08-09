@@ -48,20 +48,47 @@
 }
 
 .triggerCompact {
-  width: auto !important;
+  width: var(--toolbar-btn-size, 36px) !important;
   min-width: var(--toolbar-btn-size, 36px) !important;
   height: var(--toolbar-btn-size, 36px) !important;
   min-height: var(--toolbar-btn-size, 36px) !important;
   justify-content: center;
   align-items: center;
-  padding: 0 8px !important;
-  gap: 6px;
+  padding: 0 !important;
+  gap: 0;
   line-height: 1 !important;
+}
+
+.triggerCompact .triggerLabel {
+  display: none;
+}
+
+.compactCode {
+  font-family:
+    ui-monospace,
+    "Cascadia Mono",
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: lowercase;
+  transform: translateY(0);
+  transition:
+    color 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .trigger:hover .flagWrap {
     animation: flagWave 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .triggerCompact:hover .compactCode {
+    color: var(--accent);
+    transform: translateY(-1px) scale(1.08);
   }
 }
 

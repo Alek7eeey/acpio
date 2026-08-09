@@ -289,6 +289,13 @@
   transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
 }
 
+:global([data-theme="light"]) .newChat {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #18181b;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 5%), 0 2px 7px rgb(15 23 42 / 3%);
+}
+
 :global([data-theme="dark"]) .newChat {
   background: #3f3f46;
   color: #fff;
@@ -296,6 +303,12 @@
 
 .newChat:hover {
   background: color-mix(in srgb, var(--text) 16%, var(--bg-secondary));
+}
+
+:global([data-theme="light"]) .newChat:hover {
+  background: #f8fafc;
+  border-color: #d9dee7;
+  filter: none;
 }
 
 :global([data-theme="dark"]) .newChat:hover {
@@ -407,7 +420,7 @@
 .folderGroup {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -441,19 +454,21 @@
 .folderHead {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
   min-width: 0;
-  padding: 6px 10px 4px 8px;
-  color: var(--text-secondary);
+  min-height: 30px;
+  padding: 5px 10px 5px 6px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--text) 78%, var(--text-secondary));
 }
 
 .folderIcon {
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
-  opacity: 0.75;
+  opacity: 0.82;
 }
 
 .folderIcon svg {
@@ -465,11 +480,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  opacity: 0.82;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: -0.012em;
 }
 
 .themeEmpty {
@@ -552,12 +566,20 @@
   background: color-mix(in srgb, var(--text) 9%, transparent);
 }
 
+:global([data-theme="light"]) .sessionItem.active {
+  background: #e8f0ff;
+}
+
 .sessionItem:hover {
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 
 .sessionItem.active:hover {
   background: color-mix(in srgb, var(--text) 11%, transparent);
+}
+
+:global([data-theme="light"]) .sessionItem.active:hover {
+  background: #dfeaff;
 }
 
 .sessionBtn {
@@ -610,6 +632,11 @@
 
 .sessionItem.active .sessionTitle {
   color: var(--text);
+}
+
+:global([data-theme="light"]) .sessionItem.active .sessionTitle,
+:global([data-theme="light"]) .sessionItem.active .sessionMore {
+  color: #2563eb;
 }
 
 .sessionItem.active .sessionActivity {
@@ -1760,20 +1787,20 @@
 }
 
 .toolClusterLocale {
-  width: auto !important;
+  width: var(--toolbar-btn-size) !important;
   min-width: var(--toolbar-btn-size) !important;
   height: var(--toolbar-btn-size) !important;
   min-height: var(--toolbar-btn-size) !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 6px !important;
+  gap: 0 !important;
   border: none !important;
   background: transparent !important;
   border-radius: 9px !important;
   box-shadow: none !important;
   color: var(--text-secondary);
-  padding: 0 8px !important;
+  padding: 0 !important;
   margin: 0 !important;
   cursor: pointer;
   font: inherit;

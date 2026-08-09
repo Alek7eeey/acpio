@@ -892,6 +892,8 @@ export async function runPrompt(
       rt.toolsHintSent = true;
       promptText = `${promptText}\n\n${t(locale, "agent.toolsHint")}`;
     }
+    // Measure the actual ACP request, not time spent creating UI/DB messages.
+    const agentStartedAt = Date.now();
     const result = await client.prompt(promptText);
     // Stop was pressed — don't peel/append more content for this turn.
     if (!rt.acceptingStream || result.stopReason === "cancelled") {
@@ -935,6 +937,11 @@ export async function runPrompt(
             await updatePart(sessionId, thoughtPart.id, { text: remain });
           }
         }
+      }
+      if (thoughtPart) {
+        await updatePart(sessionId, thoughtPart.id, {
+          durationMs: Math.max(0, Date.now() - agentStartedAt),
+        });
       }
     }
 
@@ -1539,8 +1546,12 @@ export async function setSessionMode(sessionId: string, mode: AgentMode) {
   const rt = runtimes.get(sessionId);
 
   if (rt?.client?.sessionId) {
-    // Persist first; apply to ACP without blocking the HTTP response.
-    void rt.client.setMode(mode).catch((err) => {
+    // Wait for ACP to accept the mode. Applying in the background let a stale
+    // `agent` mode event race back and overwrite the Plan selection in the UI.
+    try {
+      await rt.client.setMode(mode);
+      return { ok: true, mode, appliedLive: true, session: updated };
+    } catch (err) {
       console.error(`[acp:${sessionId}] setMode live failed`, err);
       if (!rt.running) {
         resetAcpClient(rt);
@@ -1552,8 +1563,8 @@ export async function setSessionMode(sessionId: string, mode: AgentMode) {
           console.error(`[acp:${sessionId}] setSessionMode warm failed`, warmErr);
         });
       }
-    });
-    return { ok: true, mode, appliedLive: true, session: updated };
+      return { ok: true, mode, appliedLive: false, session: updated };
+    }
   }
   if (rt?.running) {
     return { ok: true, mode, appliedLive: false, session: updated };

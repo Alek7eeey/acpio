@@ -19,7 +19,7 @@ export function LocaleFlag({ locale }: { locale: AppLocale }) {
   const clipT = `gb-t-${id}`;
 
   return (
-    <svg className={styles.flag} viewBox="0 0 60 30" aria-hidden>
+    <svg className={`${styles.flag} ${styles.flagGb}`} viewBox="0 0 60 30" aria-hidden>
       <clipPath id={clipS}>
         <path d="M0,0 v30 h60 v-30 z" />
       </clipPath>

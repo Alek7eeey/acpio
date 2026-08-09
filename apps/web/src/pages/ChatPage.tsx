@@ -486,25 +486,34 @@ function StepsSpoiler({
   parts,
   streaming,
   autoExpand,
+  startedAt,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
+  startedAt: string;
 }) {
   const t = useT();
-  // Open with the turn so thinking doesn't appear as a second stage after the bubble.
-  const [open, setOpen] = useState(() => Boolean(streaming || autoExpand));
+  const [open, setOpen] = useState(autoExpand);
   const thoughts = parts.filter(isThoughtPart);
-  const startedAtRef = useRef<number | null>(null);
-  const [elapsedSec, setElapsedSec] = useState(0);
+  const agentDurationSec = thoughts.reduce((max, part) => {
+    const ms = Number(part.payload.durationMs);
+    return Number.isFinite(ms) && ms > 0 ? Math.max(max, Math.max(1, Math.round(ms / 1000))) : max;
+  }, 0);
+  const messageStartedAt = Date.parse(startedAt);
+  const startedAtRef = useRef<number | null>(
+    Number.isFinite(messageStartedAt) ? messageStartedAt : null,
+  );
+  const [elapsedSec, setElapsedSec] = useState(() => {
+    if (streaming) return 0;
+    const value = Date.parse(startedAt);
+    return Number.isFinite(value) ? Math.max(1, Math.round((Date.now() - value) / 1000)) : 0;
+  });
 
   useEffect(() => {
-    if (streaming) {
-      setOpen(true);
-      return;
-    }
+    // Only the explicit auto-expand preference opens the spoiler.
     if (autoExpand) setOpen(true);
-  }, [autoExpand, streaming]);
+  }, [autoExpand]);
 
   useEffect(() => {
     if (!streaming) return;
@@ -520,9 +529,13 @@ function StepsSpoiler({
 
   useEffect(() => {
     if (streaming) return;
+    if (startedAtRef.current == null) {
+      const value = Date.parse(startedAt);
+      if (Number.isFinite(value)) startedAtRef.current = value;
+    }
     if (startedAtRef.current == null) return;
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
-  }, [streaming]);
+  }, [startedAt, streaming]);
 
   // Show one stable thinking row for the whole turn (including empty pending).
   if (thoughts.length === 0 && !streaming) return null;
@@ -530,8 +543,11 @@ function StepsSpoiler({
   // Same title while live — don't flip «Думаю…» ↔ «Размышления».
   const label = streaming
     ? t("common.steps")
-    : elapsedSec > 0
-      ? t("common.thoughtFor", { seconds: elapsedSec, count: elapsedSec })
+    : (agentDurationSec || elapsedSec) > 0
+      ? t("common.thoughtFor", {
+          seconds: agentDurationSec || elapsedSec,
+          count: agentDurationSec || elapsedSec,
+        })
       : t("common.steps");
 
   return (
@@ -843,6 +859,7 @@ function AssistantParts({
         parts={thoughtParts}
         streaming={streaming}
         autoExpand={autoExpandSteps}
+        startedAt={message.createdAt}
       />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;

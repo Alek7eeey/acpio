@@ -10,3 +10,10 @@
   transform-origin: center;
   transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+
+/* The Union Jack is a 2:1 flag; keep its native ratio instead of stretching it
+   into the Russian flag's 3:2 frame. */
+.flagGb {
+  height: 9px;
+  margin-block: 4.5px;
+}
