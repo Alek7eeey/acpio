@@ -7,26 +7,36 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes.js";
 import { ensureSchema } from "./db/ensureSchema.js";
-import { ensureAdminUser } from "./services/auth.js";
-
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
 
 const port = Number(process.env.PORT ?? 3001);
-const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:5173";
+const corsOrigin = process.env.CORS_ORIGIN;
+/** Set CORS_STRICT=1 to pin origins from CORS_ORIGIN again. */
+const corsStrict = process.env.CORS_STRICT === "1";
 
 async function main() {
   await ensureSchema();
-  await ensureAdminUser();
   const app = Fastify({ logger: true });
-  await app.register(cors, { origin: corsOrigin, credentials: true });
+  await app.register(cors, {
+    // TEMPORARY: reflect any browser Origin so LAN / alternate hostnames work.
+    origin:
+      corsStrict && corsOrigin
+        ? corsOrigin.split(",").map((s) => s.trim())
+        : true,
+    credentials: true,
+  });
+  if (!corsStrict) {
+    app.log.warn("CORS: allowing any Origin (temporary). Set CORS_STRICT=1 to whitelist.");
+  }
   await app.register(cookie);
   await app.register(websocket);
   await registerRoutes(app);
 
-  await app.listen({ port, host: "0.0.0.0" });
-  console.log(`ACProcess server on http://localhost:${port}`);
+  const host = process.env.HOST ?? "0.0.0.0";
+  await app.listen({ port, host });
+  console.log(`ACProcess server on http://${host}:${port}`);
 }
 
 main().catch((err) => {

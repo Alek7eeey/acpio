@@ -31,6 +31,18 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.locale !== "en" && merged.locale !== "ru") {
     merged.locale = DEFAULT_SETTINGS.locale;
   }
+  if (typeof merged.displayName !== "string") {
+    merged.displayName = DEFAULT_SETTINGS.displayName;
+  }
+  if (
+    merged.connectedProvider !== null &&
+    merged.connectedProvider !== "cursor" &&
+    merged.connectedProvider !== "opencode" &&
+    merged.connectedProvider !== "omp" &&
+    merged.connectedProvider !== "pi"
+  ) {
+    merged.connectedProvider = DEFAULT_SETTINGS.connectedProvider;
+  }
   return merged;
 }
 

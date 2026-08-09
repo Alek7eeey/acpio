@@ -92,6 +92,9 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--border-soft);
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 
 .codeBlock {
@@ -100,8 +103,10 @@
   border-radius: 12px;
   background: var(--bg-secondary);
   overflow: hidden;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .codeBlock:first-child {
@@ -160,23 +165,33 @@
 .codePre {
   margin: 0;
   padding: 12px 12px 14px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   max-height: 360px;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.8rem;
   line-height: 1.5;
   tab-size: 2;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
-.codePre code {
+.codePre code,
+.codePre :global(.hljs) {
   font: inherit;
   background: none;
   border: none;
   padding: 0;
   color: inherit;
   display: block;
-  min-width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 /* Syntax highlighting — soft tokens for light/dark */
@@ -240,4 +255,11 @@
 
 .codePre :global(.hljs-strong) {
   font-weight: 700;
+}
+
+@media (max-width: 899px) {
+  .codePre {
+    max-height: none;
+    font-size: clamp(0.68rem, 2.8vw, 0.8rem);
+  }
 }

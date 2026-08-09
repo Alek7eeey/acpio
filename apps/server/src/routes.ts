@@ -26,6 +26,8 @@ import {
   listModels,
   clearModelsCache,
   probeAgent,
+  resolveModelParams,
+  warmModelParamsProbe,
   runPrompt,
   setSessionModel,
   syncSessionAgent,
@@ -39,29 +41,16 @@ import {
   resolveConflicts,
 } from "./services/gitea.js";
 import { pickDirectory } from "./services/pickDirectory.js";
+import { browseDirectory } from "./services/browseDirectory.js";
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
-import {
-  AUTH_COOKIE,
-  changePassword,
-  clearAuthCookie,
-  createSession as createAuthSession,
-  deleteUser,
-  destroySession,
-  getRequestUser,
-  listAdminUsers,
-  loginUser,
-  registerUser,
-  requireAdmin,
-  requireUser,
-  setAuthCookie,
-  setUserConnectedProvider,
-  updateProfile,
-} from "./services/auth.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
+import type { AgentProvider } from "@acprocess/shared";
 
 const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
   locale: z.enum(["ru", "en"]).optional(),
+  displayName: z.string().max(80).optional(),
+  connectedProvider: z.enum(["cursor", "opencode", "omp", "pi"]).nullable().optional(),
   defaultProvider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
@@ -87,45 +76,12 @@ const settingsSchema = z.object({
   giteaRepo: z.string().optional(),
 });
 
-const authBodySchema = z.object({
-  username: z.string().min(1).max(64),
-  password: z.string().min(1).max(200),
-});
-
-function isPublicPath(url: string) {
-  const path = url.split("?")[0] ?? url;
-  return (
-    path === "/api/health" ||
-    path === "/api/auth/register" ||
-    path === "/api/auth/login" ||
-    path === "/api/auth/me"
-  );
-}
-
-function sendAuthError(req: FastifyRequest, reply: FastifyReply, err: unknown) {
-  const locale = localeFromRequest(req);
-  if (err instanceof z.ZodError) {
-    return reply.code(400).send({ error: errorMessage(locale, "credentialsRequired") });
-  }
-  const status =
-    typeof err === "object" &&
-    err &&
-    "statusCode" in err &&
-    typeof (err as { statusCode: unknown }).statusCode === "number"
-      ? (err as { statusCode: number }).statusCode
-      : 400;
-  const message = localizeError(locale, err);
-  return reply.code(status).send({ error: message });
+async function agentConnected(): Promise<AgentProvider | null> {
+  const settings = await getSettings();
+  return settings.connectedProvider;
 }
 
 export async function registerRoutes(app: FastifyInstance) {
-  app.addHook("preHandler", async (req, reply) => {
-    const path = req.url.split("?")[0] ?? req.url;
-    if (!path.startsWith("/api/") || isPublicPath(path)) return;
-    const user = await requireUser(req, reply);
-    if (!user) return;
-  });
-
   app.get("/api/health", async () => ({ ok: true }));
 
   app.post("/api/fs/pick-directory", async (req, reply) => {
@@ -141,77 +97,31 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/api/auth/me", async (req) => {
-    const user = await getRequestUser(req);
-    return { user };
-  });
-
-  app.post("/api/auth/register", async (req, reply) => {
+  app.get("/api/fs/browse", async (req, reply) => {
+    const q = req.query as { path?: string };
+    const rawPath = typeof q.path === "string" ? q.path : undefined;
     try {
-      const body = authBodySchema.parse(req.body);
-      const user = await registerUser(body.username, body.password);
-      const session = await createAuthSession(user.id);
-      setAuthCookie(reply, session.token, session.expiresAt);
-      return { user };
+      return browseDirectory(rawPath);
     } catch (err) {
-      return sendAuthError(req, reply, err);
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
     }
   });
 
-  app.post("/api/auth/login", async (req, reply) => {
+  app.post("/api/fs/browse", async (req, reply) => {
+    const body = z.object({ path: z.string().optional() }).parse(req.body ?? {});
     try {
-      const body = authBodySchema.parse(req.body);
-      const user = await loginUser(body.username, body.password);
-      const session = await createAuthSession(user.id);
-      setAuthCookie(reply, session.token, session.expiresAt);
-      return { user };
+      return browseDirectory(body.path);
     } catch (err) {
-      return sendAuthError(req, reply, err);
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
     }
   });
 
-  app.post("/api/auth/logout", async (req, reply) => {
-    await destroySession(req.cookies?.[AUTH_COOKIE]);
-    clearAuthCookie(reply);
-    return { ok: true };
-  });
-
-  app.post("/api/auth/password", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    try {
-      const body = z
-        .object({
-          currentPassword: z.string().min(1).max(200),
-          newPassword: z.string().min(1).max(200),
-        })
-        .parse(req.body);
-      await changePassword(user.id, body.currentPassword, body.newPassword);
-      return { ok: true };
-    } catch (err) {
-      return sendAuthError(req, reply, err);
-    }
-  });
-
-  app.patch("/api/auth/profile", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    try {
-      const body = z.object({ displayName: z.string().min(1).max(80) }).parse(req.body);
-      const updated = await updateProfile(user.id, body.displayName);
-      return { user: updated };
-    } catch (err) {
-      return sendAuthError(req, reply, err);
-    }
-  });
-
-  app.post("/api/agent/probe", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
+  app.post("/api/agent/probe", async (req) => {
     const body = z
       .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
       .parse(req.body ?? {});
-    // Probe does NOT mark the agent as connected — user must click Connect.
     return probeAgent(body.provider);
   });
 
@@ -228,38 +138,40 @@ export async function registerRoutes(app: FastifyInstance) {
     return listModels(provider, { force });
   });
 
+  app.get("/api/agent/model-params", async (req, reply) => {
+    const q = req.query as { provider?: string; model?: string; sessionId?: string; force?: string };
+    const provider =
+      q.provider === "cursor" ||
+      q.provider === "opencode" ||
+      q.provider === "omp" ||
+      q.provider === "pi"
+        ? q.provider
+        : undefined;
+    const model = typeof q.model === "string" ? q.model.trim() : "";
+    if (!provider || !model) {
+      return reply.code(400).send({ error: "provider and model required" });
+    }
+    const force = q.force === "1" || q.force === "true";
+    const sessionId = typeof q.sessionId === "string" && q.sessionId ? q.sessionId : undefined;
+    return resolveModelParams(provider, model, { sessionId, force });
+  });
+
+  app.post("/api/agent/warm-params", async (req) => {
+    const body = z
+      .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
+      .parse(req.body ?? {});
+    warmModelParamsProbe(body.provider);
+    return { ok: true };
+  });
+
   app.get("/api/settings", async () => getSettings());
-  app.put("/api/settings", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
+  app.put("/api/settings", async (req) => {
     const patch = settingsSchema.parse(req.body);
     const current = await getSettings();
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
     }
-    const updated = await updateSettings(patch);
-    // Only an explicit Connect (defaultProvider in patch) binds the agent to this user.
-    if (patch.defaultProvider) {
-      await setUserConnectedProvider(user.id, patch.defaultProvider);
-    }
-    return updated;
-  });
-
-  app.get("/api/admin/users", async (req, reply) => {
-    const admin = await requireAdmin(req, reply);
-    if (!admin) return;
-    return listAdminUsers();
-  });
-
-  app.delete("/api/admin/users/:id", async (req, reply) => {
-    const admin = await requireAdmin(req, reply);
-    if (!admin) return;
-    const { id } = req.params as { id: string };
-    try {
-      return await deleteUser(id, admin.id);
-    } catch (err) {
-      return sendAuthError(req, reply, err);
-    }
+    return updateSettings(patch);
   });
 
   app.get("/api/sessions", async () => listSessions());
@@ -301,9 +213,8 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    if (!user.connectedProvider) {
+    const connected = await agentConnected();
+    if (!connected) {
       return reply
         .code(400)
         .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
@@ -319,7 +230,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body ?? {});
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
-    const provider = body.provider ?? user.connectedProvider;
+    const provider = body.provider ?? connected;
     const session = await createSession({
       title: body.title,
       provider,
@@ -368,12 +279,11 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/sessions/:id", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
     const { id } = req.params as { id: string };
-    const detail = await syncSessionAgent(id, user.connectedProvider);
+    const connected = await agentConnected();
+    const detail = await syncSessionAgent(id, connected);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    if (user.connectedProvider) {
+    if (connected) {
       void warmAcp(id, {
         provider: detail.provider,
         cwd: detail.cwd,
@@ -392,16 +302,15 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
     const { id } = req.params as { id: string };
     const body = z.object({ text: z.string().min(1) }).parse(req.body);
-    if (!user.connectedProvider) {
+    const connected = await agentConnected();
+    if (!connected) {
       return reply
         .code(400)
         .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
     }
-    const detail = await syncSessionAgent(id, user.connectedProvider);
+    const detail = await syncSessionAgent(id, connected);
     if (!detail) return reply.code(404).send({ error: "Not found" });
 
     const settings = await getSettings();
@@ -428,9 +337,8 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions/:id/model", async (req, reply) => {
-    const user = await requireUser(req, reply);
-    if (!user) return;
-    if (!user.connectedProvider) {
+    const connected = await agentConnected();
+    if (!connected) {
       return reply
         .code(400)
         .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
@@ -444,7 +352,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    await syncSessionAgent(id, user.connectedProvider);
+    await syncSessionAgent(id, connected);
     return setSessionModel(id, body.model, body.params);
   });
 
@@ -488,13 +396,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/gitea/conflicts", async () => resolveConflicts());
 
-  app.get("/ws", { websocket: true }, async (socket, req) => {
-    const user = await getRequestUser(req as FastifyRequest);
-    if (!user) {
-      socket.close(4401, "Unauthorized");
-      return;
-    }
-
+  app.get("/ws", { websocket: true }, async (socket) => {
     const client = addWsClient(socket);
     socket.send(JSON.stringify({ type: "pong" }));
 

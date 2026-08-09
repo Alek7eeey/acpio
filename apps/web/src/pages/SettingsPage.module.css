@@ -160,6 +160,133 @@
   color: var(--text);
 }
 
+.remoteTips {
+  margin: 8px 0 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.remoteCard {
+  gap: 14px;
+}
+
+.remoteStep {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.remoteStep:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.remoteStepNum {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: var(--accent);
+  background: var(--accent-soft);
+  flex-shrink: 0;
+}
+
+.remoteStepBody {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remoteUrlLabel {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.remoteUrlRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.remoteUrlRow input {
+  min-width: 0;
+  width: 100%;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+
+.remoteTipsBlock {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 12px;
+  }
+
+  .panel {
+    padding: 16px 14px;
+    border-radius: 16px;
+  }
+
+  .header h1 {
+    font-size: 1.28rem;
+  }
+
+  .remoteCard {
+    padding: 14px 12px;
+    border-radius: 14px;
+  }
+
+  .remoteStep {
+    grid-template-columns: 24px 1fr;
+    gap: 10px;
+  }
+
+  .remoteStepNum {
+    width: 24px;
+    height: 24px;
+    font-size: 0.72rem;
+  }
+
+  .remoteUrlRow {
+    grid-template-columns: 1fr;
+  }
+
+  .remoteUrlRow .secondaryBtn {
+    width: 100%;
+  }
+
+  .remoteTips {
+    padding-left: 1.05em;
+    font-size: 0.86rem;
+    gap: 10px;
+  }
+
+  .fieldHint {
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+}
+
 .secretRow {
   display: grid;
   grid-template-columns: 1fr auto;

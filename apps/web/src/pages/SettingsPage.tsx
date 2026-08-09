@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
 import {
   migrateModelParamValues,
@@ -15,6 +15,7 @@ import { parseSettingsSearch } from "../lib/settingsNav";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
+import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "opencode", "omp", "pi"] as const satisfies readonly AgentProvider[];
@@ -43,14 +44,13 @@ export function SettingsPage() {
     [location.search],
   );
   const settings = useAppStore((s) => s.settings);
-  const user = useAppStore((s) => s.user);
   const saveSettings = useAppStore((s) => s.saveSettings);
-  const updateProfile = useAppStore((s) => s.updateProfile);
-  const changePassword = useAppStore((s) => s.changePassword);
   const [form, setForm] = useState<AppSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
   const [probingId, setProbingId] = useState<AgentProvider | null>(null);
+  const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
   const [models, setModels] = useState<Array<{ value: string; name: string }>>([]);
   const [modelParams, setModelParams] = useState<ModelParamDto[]>([]);
@@ -58,21 +58,7 @@ export function SettingsPage() {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
-
-  const [displayName, setDisplayName] = useState(user?.displayName ?? "");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [profileMsg, setProfileMsg] = useState<string | null>(null);
-  const [profileErr, setProfileErr] = useState<string | null>(null);
-  const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
-  const [passwordErr, setPasswordErr] = useState<string | null>(null);
-  const [profileBusy, setProfileBusy] = useState(false);
-  const [passwordBusy, setPasswordBusy] = useState(false);
-
-  useEffect(() => {
-    setDisplayName(user?.displayName ?? user?.username ?? "");
-  }, [user?.displayName, user?.username]);
+  const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
 
   useEffect(() => {
     setForm(settings);
@@ -88,32 +74,27 @@ export function SettingsPage() {
   };
 
   const loadParamsForModel = async (nextModel: string) => {
+    const cached = paramsCacheRef.current.get(nextModel);
+    if (cached?.length) {
+      setStableParams(cached);
+      return;
+    }
+    if (nextModel === form.defaultModel && modelParams.length) {
+      paramsCacheRef.current.set(nextModel, modelParams);
+      setStableParams(modelParams);
+      return;
+    }
+    const provider = settings.connectedProvider ?? form.defaultProvider;
+    if (!provider) return;
     setParamsLoading(true);
     try {
-      const next = {
-        ...form,
-        defaultModel: nextModel,
-        defaultModelParams: migrateModelParamValues(form.defaultModelParams ?? {}, modelParams),
-      };
-      setForm(next);
-      await saveSettings({
-        defaultModel: next.defaultModel,
-        defaultModelParams: next.defaultModelParams,
-      });
-      const catalog = await ensureModels(
-        user?.connectedProvider ?? form.defaultProvider,
-        { force: true },
-      );
-      const fresh = catalog?.modelParams ?? [];
-      setModels(catalog?.models ?? models);
-      setModelParams(fresh);
+      const res = await api.getModelParams(provider, nextModel);
+      const fresh = res.modelParams ?? [];
+      paramsCacheRef.current.set(nextModel, fresh);
       setStableParams(fresh);
-      if (catalog) rememberModelsCatalog(catalog);
-      setForm((prev) => ({
-        ...prev,
-        defaultModel: nextModel,
-        defaultModelParams: migrateModelParamValues(prev.defaultModelParams ?? {}, fresh),
-      }));
+      if (nextModel === form.defaultModel) {
+        setModelParams(fresh);
+      }
     } finally {
       setParamsLoading(false);
     }
@@ -122,15 +103,22 @@ export function SettingsPage() {
   const connectProvider = async (provider: AgentProvider) => {
     setConnectingId(provider);
     try {
+      const same = form.connectedProvider === provider;
       const next: AppSettings = {
         ...form,
         defaultProvider: provider,
-        defaultModel: form.defaultProvider === provider ? form.defaultModel : "",
-        defaultModelParams: form.defaultProvider === provider ? form.defaultModelParams : {},
+        connectedProvider: provider,
+        defaultModel: same ? form.defaultModel : "",
+        defaultModelParams: same ? form.defaultModelParams : {},
       };
       setForm(next);
       setModelsError(null);
-      await saveSettings(next);
+      await saveSettings({
+        defaultProvider: provider,
+        connectedProvider: provider,
+        defaultModel: next.defaultModel,
+        defaultModelParams: next.defaultModelParams,
+      });
       // Pull Fast/Усилие for the new agent immediately (uses per-provider cache).
       const catalog = await useAppStore.getState().ensureModels(provider, { force: true });
       setModels(catalog?.models ?? []);
@@ -192,7 +180,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (section !== "agent" || leaf !== "model") return;
-    const provider = user?.connectedProvider;
+    const provider = settings.connectedProvider;
     if (!provider) {
       setModels([]);
       setModelParams([]);
@@ -203,7 +191,9 @@ export function SettingsPage() {
     let cancelled = false;
     setModelsLoading(true);
     setModelsError(null);
-    void ensureModels(provider, { force: true })
+    void ensureModels(provider, {
+      force: usesCloudModelCatalog(provider),
+    })
       .then((catalog) => {
         if (cancelled || !catalog) return;
         setModels(catalog.models ?? []);
@@ -240,57 +230,15 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [section, leaf, user?.connectedProvider, ensureModels]);
+  }, [section, leaf, settings.connectedProvider, ensureModels]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (section === "account") return;
     // Never send defaultProvider from the form submit — only «Подключить» binds an agent.
     const { defaultProvider: _provider, ...rest } = form;
     await saveSettings(rest);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
-  };
-
-  const saveProfile = async () => {
-    setProfileErr(null);
-    setProfileMsg(null);
-    setProfileBusy(true);
-    try {
-      await updateProfile(displayName);
-      setProfileMsg(t("settings.profileSaved"));
-      window.setTimeout(() => setProfileMsg(null), 1600);
-    } catch (err) {
-      setProfileErr(err instanceof Error ? err.message : String(err));
-    } finally {
-      setProfileBusy(false);
-    }
-  };
-
-  const savePassword = async () => {
-    setPasswordErr(null);
-    setPasswordMsg(null);
-    if (!currentPassword || !newPassword || !confirmPassword) {
-      setPasswordErr(t("settings.fillAllFields"));
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setPasswordErr(t("auth.passwordsMismatch"));
-      return;
-    }
-    setPasswordBusy(true);
-    try {
-      await changePassword(currentPassword, newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setPasswordMsg(t("settings.passwordUpdated"));
-      window.setTimeout(() => setPasswordMsg(null), 1600);
-    } catch (err) {
-      setPasswordErr(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPasswordBusy(false);
-    }
   };
 
   const clearApiKey = async (
@@ -310,17 +258,31 @@ export function SettingsPage() {
         ? t("settings.agentConnectTitle")
         : leaf === "model"
           ? t("settings.agentModelTitle")
-          : t("settings.agentAdvancedTitle")
-      : t("settings.profileTitle");
+          : leaf === "remote"
+            ? t("settings.remoteAccessTitle")
+            : t("settings.agentAdvancedTitle")
+      : t("settings.agentConnectTitle");
 
   const subtitle =
-    section === "agent"
-      ? leaf === "advanced"
-        ? t("settings.agentAdvancedDesc")
-        : t("settings.agentConnectDesc")
-      : t("settings.profileDesc");
+    section === "agent" && leaf === "advanced"
+      ? t("settings.agentAdvancedDesc")
+      : section === "agent" && leaf === "remote"
+        ? t("settings.remoteAccessDesc")
+        : t("settings.agentConnectDesc");
 
-  const eyebrow = section === "agent" ? t("settings.agents") : t("settings.general");
+  const eyebrow = t("settings.agents");
+  const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  const copyUrl = async () => {
+    if (!pageUrl) return;
+    try {
+      await navigator.clipboard.writeText(pageUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -337,8 +299,7 @@ export function SettingsPage() {
           <section className={styles.providerList}>
             <p className={styles.hint}>{t("settings.agentConnectDesc")}</p>
             {providers.map((item) => {
-              // Per-user connection (admin column), not the shared global defaultProvider.
-              const active = user?.connectedProvider === item.id;
+              const active = settings.connectedProvider === item.id;
               const probe = probes[item.id];
               const probing = probingId === item.id;
               const connecting = connectingId === item.id;
@@ -396,7 +357,7 @@ export function SettingsPage() {
 
         {section === "agent" && leaf === "model" && (
           <section className={styles.card}>
-            {!user?.connectedProvider ? (
+            {!settings.connectedProvider ? (
               <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
             ) : (
               <>
@@ -419,7 +380,7 @@ export function SettingsPage() {
                 }
                 onParamsOpen={(value) => loadParamsForModel(value)}
                 onOpen={() => {
-                  const provider = user.connectedProvider;
+                  const provider = settings.connectedProvider;
                   if (!provider) return;
                   void ensureModels(provider, {
                     force: usesCloudModelCatalog(provider) || modelParams.length === 0,
@@ -438,7 +399,7 @@ export function SettingsPage() {
                 <p className={styles.hint}>{modelsError}</p>
               )}
             </div>
-            {modelParams.length === 0 && !modelsLoading && user.connectedProvider === "cursor" && (
+            {modelParams.length === 0 && !modelsLoading && settings.connectedProvider === "cursor" && (
               <p className={styles.hint}>{t("common.check")}</p>
             )}
               </>
@@ -461,16 +422,7 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => {
-                      void api
-                        .pickDirectory(form.defaultCwd || undefined)
-                        .then((res) => {
-                          if (res.path) patch("defaultCwd", res.path);
-                        })
-                        .catch(() => {
-                          /* dialog cancel / failure — ignore toast here */
-                        });
-                    }}
+                    onClick={() => setFolderBrowseOpen(true)}
                   >
                     {t("common.selectFolder")}
                   </button>
@@ -651,92 +603,71 @@ export function SettingsPage() {
           </section>
         )}
 
-        {section === "account" && (
-          <>
-            <section className={styles.card}>
-              <h2 className={styles.cardTitle}>{t("settings.displayName")}</h2>
-              <p className={styles.cardHint}>{t("settings.profileDesc")}</p>
-              <label>
-                {t("auth.username")}
-                <input value={user?.username ?? ""} disabled readOnly />
-              </label>
-              <label>
-                {t("settings.displayName")}
-                <input
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder={t("settings.displayNamePlaceholder")}
-                  maxLength={80}
-                />
-              </label>
-              {profileErr && <div className={styles.accountErr}>{profileErr}</div>}
-              {profileMsg && <div className={styles.accountOk}>{profileMsg}</div>}
-              <div className={styles.footerBar}>
-                <button
-                  type="button"
-                  disabled={profileBusy}
-                  onClick={() => void saveProfile()}
-                >
-                  {profileBusy ? "…" : t("common.save")}
-                </button>
+        {section === "agent" && leaf === "remote" && (
+          <section className={`${styles.card} ${styles.remoteCard}`}>
+            <div className={styles.remoteStep}>
+              <span className={styles.remoteStepNum} aria-hidden>
+                1
+              </span>
+              <div className={styles.remoteStepBody}>
+                <h2 className={styles.sectionHeading}>{t("settings.remoteStep1Title")}</h2>
+                <p className={styles.fieldHint}>{t("settings.remoteStep1Body")}</p>
               </div>
-            </section>
-
-            <section className={styles.card}>
-              <h2 className={styles.cardTitle}>{t("auth.password")}</h2>
-              <p className={styles.cardHint}>{t("settings.changePassword")}</p>
-              <label>
-                {t("settings.currentPassword")}
-                <input
-                  type="password"
-                  autoComplete="current-password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder={t("settings.currentPasswordPlaceholder")}
-                />
-              </label>
-              <label>
-                {t("settings.newPassword")}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder={t("settings.newPasswordPlaceholder")}
-                />
-              </label>
-              <label>
-                {t("settings.confirmNewPassword")}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder={t("settings.confirmNewPasswordPlaceholder")}
-                />
-              </label>
-              {passwordErr && <div className={styles.accountErr}>{passwordErr}</div>}
-              {passwordMsg && <div className={styles.accountOk}>{passwordMsg}</div>}
-              <div className={styles.footerBar}>
-                <button
-                  type="button"
-                  disabled={passwordBusy}
-                  onClick={() => void savePassword()}
-                >
-                  {passwordBusy ? "…" : t("settings.changePassword")}
-                </button>
+            </div>
+            <div className={styles.remoteStep}>
+              <span className={styles.remoteStepNum} aria-hidden>
+                2
+              </span>
+              <div className={styles.remoteStepBody}>
+                <h2 className={styles.sectionHeading}>{t("settings.remoteStep2Title")}</h2>
+                <p className={styles.fieldHint}>{t("settings.remoteStep2Body")}</p>
+                <p className={styles.fieldHint}>{t("settings.remoteStep2HowIp")}</p>
               </div>
-            </section>
-          </>
+            </div>
+            <div className={styles.remoteStep}>
+              <span className={styles.remoteStepNum} aria-hidden>
+                3
+              </span>
+              <div className={styles.remoteStepBody}>
+                <h2 className={styles.sectionHeading}>{t("settings.remoteStep3Title")}</h2>
+                <p className={styles.fieldHint}>{t("settings.remoteStep3Body")}</p>
+                <label className={styles.remoteUrlLabel}>
+                  {t("settings.remoteCurrentUrl")}
+                  <div className={styles.remoteUrlRow}>
+                    <input value={pageUrl} readOnly title={pageUrl || undefined} />
+                    <button type="button" className={styles.secondaryBtn} onClick={() => void copyUrl()}>
+                      {copied ? t("settings.remoteCopied") : t("settings.remoteCopy")}
+                    </button>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div className={styles.remoteTipsBlock}>
+              <h2 className={styles.sectionHeading}>{t("settings.remoteTipTitle")}</h2>
+              <ul className={styles.remoteTips}>
+                <li>{t("settings.remoteTipLocalhost")}</li>
+                <li>{t("settings.remoteTipSameNetwork")}</li>
+                <li>{t("settings.remoteTipFirewall")}</li>
+                <li>{t("settings.remoteTipHttp")}</li>
+                <li>{t("settings.remoteTipInstall")}</li>
+              </ul>
+            </div>
+          </section>
         )}
 
-        {section === "agent" && leaf !== "connect" && (
+        {section === "agent" && leaf !== "connect" && leaf !== "remote" && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>
             {saved && <span className={styles.ok}>{t("settings.profileSaved")}</span>}
           </div>
         )}
       </form>
+      <ServerFolderBrowseDialog
+        open={folderBrowseOpen}
+        initialPath={form.defaultCwd || undefined}
+        onClose={() => setFolderBrowseOpen(false)}
+        onSelect={(path) => patch("defaultCwd", path)}
+      />
     </div>
   );
 }

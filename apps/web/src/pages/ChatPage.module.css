@@ -13,12 +13,18 @@
   flex: 1;
   overflow: auto;
   overflow-x: hidden;
-  padding: 20px 16px 12px;
+  padding: 20px 16px 28px;
   display: flex;
   flex-direction: column;
   gap: 18px;
   min-width: 0;
   width: 100%;
+}
+
+.threadEnd {
+  height: 1px;
+  flex-shrink: 0;
+  scroll-margin-bottom: 12px;
 }
 
 .empty {
@@ -370,16 +376,25 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 10px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   margin: 6px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  word-break: break-word;
+  word-break: break-all;
   font-size: 0.8rem;
   max-height: 320px;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
+}
+
+@media (max-width: 899px) {
+  .textPart :global(pre),
+  .pre {
+    max-height: none;
+    font-size: clamp(0.68rem, 2.8vw, 0.8rem);
+  }
 }
 
 .thought,
@@ -624,13 +639,14 @@
 
 .sessionCwd {
   margin: 0;
-  padding: 5px 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   max-width: 100%;
-  width: fit-content;
-  border-radius: 999px;
+  width: 100%;
+  box-sizing: border-box;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 70%, var(--surface));
   color: var(--text-secondary);
@@ -649,6 +665,7 @@
 
 .sessionCwdText {
   min-width: 0;
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -831,6 +848,15 @@
 @media (max-width: 700px) {
   .composer {
     padding: 8px 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .sessionCwdText {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    word-break: break-word;
+    line-height: 1.4;
+    font-size: 0.74rem;
   }
 
   .pill,

@@ -129,8 +129,9 @@ function flyoutStyle(
   const margin = 12;
   const gap = 8;
   const width = Math.min(280, window.innerWidth - margin * 2);
-  const maxHeight = Math.min(420, window.innerHeight - margin * 2);
-  const height = Math.min(Math.max(flyoutHeight, 120), maxHeight);
+  const maxHeight = Math.min(360, window.innerHeight - margin * 2);
+  const measured = Math.min(Math.max(flyoutHeight, 120), maxHeight);
+  const height = measured;
   const box = menu ?? btn;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -154,6 +155,9 @@ function flyoutStyle(
 
   const rowMid = (btn.top + btn.bottom) / 2;
   let top = rowMid - height / 2;
+  if (top + height > vh - margin) {
+    top = vh - margin - height;
+  }
   top = Math.max(margin, Math.min(top, vh - height - margin));
 
   return { top, left, width, maxHeight };

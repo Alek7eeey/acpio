@@ -8,7 +8,6 @@ import styles from "./DashboardPage.module.css";
 export function DashboardPage() {
   const t = useT();
   const settings = useAppStore((s) => s.settings);
-  const user = useAppStore((s) => s.user);
   const sessions = useAppStore((s) => s.sessions);
   const connected = useAppStore((s) => s.connected);
 
@@ -42,7 +41,7 @@ export function DashboardPage() {
     },
   ];
 
-  const provider = user?.connectedProvider;
+  const provider = settings.connectedProvider;
   const providerLabel = !provider
     ? t("common.notConnected")
     : provider === "cursor"

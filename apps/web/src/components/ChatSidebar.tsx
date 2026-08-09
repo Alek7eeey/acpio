@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import type { ChatThemeDto, SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
@@ -91,11 +92,11 @@ function groupByFolder(list: SessionDto[]) {
 
 export function ChatSidebar() {
   const t = useT();
+  const navigate = useNavigate();
   const sessions = useAppStore((s) => s.sessions);
   const themes = useAppStore((s) => s.themes);
   const settings = useAppStore((s) => s.settings);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
-  const activeSession = useAppStore((s) => s.activeSession);
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
@@ -114,23 +115,41 @@ export function ChatSidebar() {
   const [menu, setMenu] = useState<MenuState>(null);
   const [popover, setPopover] = useState<PopoverState>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
+  /** HTML5 drag breaks single-tap open on touch devices. */
+  const [canDrag, setCanDrag] = useState(false);
   const dragRef = useRef<{ sessionId: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
+    const sync = () => setCanDrag(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
 
   const recentCwds = useMemo(
     () => collectRecentCwds(sessions, settings.defaultCwd),
     [sessions, settings.defaultCwd],
   );
 
-  const dialogStartPath = () =>
-    activeSession?.cwd?.trim() || settings.defaultCwd?.trim() || "";
+  const closeMobile = () => {
+    if (window.innerWidth < 900) setSidebarOpen(false);
+  };
+
+  const openChat = async (sessionId: string) => {
+    await selectSession(sessionId);
+    navigate("/chat");
+    closeMobile();
+  };
 
   const openFolderPicker = (opts: {
     x: number;
     y: number;
     themeId?: string | null;
+    /** Hint for OS dialog on the server; omit to start at server home directory. */
     dialogStartPath?: string;
   }) => {
     setMenu(null);
@@ -139,7 +158,7 @@ export function ChatSidebar() {
       x: opts.x,
       y: opts.y,
       themeId: opts.themeId,
-      dialogStartPath: opts.dialogStartPath ?? dialogStartPath(),
+      dialogStartPath: opts.dialogStartPath,
     });
   };
 
@@ -194,10 +213,6 @@ export function ChatSidebar() {
     for (const [k, list] of map) map.set(k, sortSessions(list));
     return map;
   }, [sessions, themes]);
-
-  const closeMobile = () => {
-    if (window.innerWidth < 900) setSidebarOpen(false);
-  };
 
   const startRenameSession = (s: SessionDto) => {
     setMenu(null);
@@ -309,7 +324,7 @@ export function ChatSidebar() {
       <div
         key={s.id}
         className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${dropBefore}`}
-        draggable={!isRenaming}
+        draggable={!isRenaming && canDrag}
         onDragStart={(e: DragEvent) => {
           dragRef.current = { sessionId: s.id };
           e.dataTransfer.effectAllowed = "move";
@@ -350,10 +365,10 @@ export function ChatSidebar() {
               type="button"
               className={styles.sessionBtn}
               onClick={() => {
-                void selectSession(s.id);
-                closeMobile();
+                void openChat(s.id);
               }}
               onDoubleClick={(e) => {
+                if (!canDrag) return;
                 e.preventDefault();
                 startRenameSession(s);
               }}
@@ -732,13 +747,14 @@ export function ChatSidebar() {
           x={folderPicker.x}
           y={folderPicker.y}
           defaultCwd={settings.defaultCwd ?? ""}
-          dialogStartPath={folderPicker.dialogStartPath}
+          dialogStartPath={folderPicker.dialogStartPath ?? ""}
           recentCwds={recentCwds}
           onClose={() => setFolderPicker(null)}
           onConfirm={async (cwd) => {
             const themeId = folderPicker.themeId;
             setFolderPicker(null);
             await createSession(themeId, cwd);
+            navigate("/chat");
             closeMobile();
           }}
         />

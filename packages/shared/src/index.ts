@@ -1,24 +1,4 @@
-export type UserRole = "user" | "admin";
 export type AgentProvider = "cursor" | "opencode" | "omp" | "pi";
-
-export interface UserDto {
-  id: string;
-  username: string;
-  displayName: string;
-  role: UserRole;
-  /** Last agent the user connected in Settings, if any. */
-  connectedProvider: AgentProvider | null;
-  createdAt: string;
-}
-
-export interface AdminUserDto {
-  id: string;
-  username: string;
-  displayName: string;
-  role: UserRole;
-  connectedProvider: AgentProvider | null;
-  createdAt: string;
-}
 
 export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
@@ -42,6 +22,10 @@ export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 export interface AppSettings {
   theme: Theme;
   locale: AppLocale;
+  /** Local display name shown in the header. */
+  displayName: string;
+  /** Agent explicitly connected in Settings → Connect. */
+  connectedProvider: AgentProvider | null;
   defaultProvider: AgentProvider;
   defaultMode: AgentMode;
   defaultCwd: string;
@@ -71,6 +55,8 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
   locale: "ru",
+  displayName: "",
+  connectedProvider: null,
   defaultProvider: "opencode",
   defaultMode: "agent",
   defaultCwd: "",

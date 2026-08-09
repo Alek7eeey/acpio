@@ -1,19 +1,28 @@
 .wrap {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  flex: 0 0 auto;
 }
 
 .trigger {
-  height: 30px;
+  height: var(--toolbar-btn-size, 36px);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 0 7px 0 6px;
+  padding: 0 8px 0 7px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--text-secondary);
   cursor: pointer;
-  box-shadow: var(--shadow-soft);
+  box-shadow: none;
+  line-height: 0;
+  box-sizing: border-box;
   transition:
     background 0.2s ease,
     color 0.2s ease,
@@ -26,7 +35,23 @@
   background: var(--surface);
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   color: var(--text);
-  box-shadow: var(--shadow);
+  box-shadow: none;
+}
+
+.triggerCompact {
+  width: var(--toolbar-btn-size, 36px);
+  min-width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  gap: 0;
+}
+
+.triggerCompact .triggerCode {
+  font-size: 0.72rem;
+  line-height: 1;
+  display: block;
 }
 
 .triggerCode {
@@ -48,18 +73,16 @@
 }
 
 .menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 320;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 600;
   min-width: 148px;
   padding: 4px;
   border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--text) 12%);
+  border: 1px solid var(--border);
   background: var(--surface);
-  box-shadow:
-    0 16px 40px color-mix(in srgb, var(--text) 16%, transparent),
-    0 2px 8px color-mix(in srgb, var(--text) 8%, transparent);
+  box-shadow: var(--shadow);
   display: grid;
   gap: 2px;
 }

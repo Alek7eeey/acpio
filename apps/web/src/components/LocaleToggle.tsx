@@ -1,18 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AppLocale } from "@acprocess/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { LocaleFlag } from "./LocaleFlag";
 import styles from "./LocaleToggle.module.css";
 
-export function LocaleToggle() {
+type LocaleToggleProps = {
+  triggerClassName?: string;
+  compact?: boolean;
+};
+
+export function LocaleToggle({ triggerClassName, compact }: LocaleToggleProps = {}) {
   const t = useT();
   const locale = useAppStore((s) => s.settings.locale);
-  const applyLocale = useAppStore((s) => s.applyLocale);
   const setLocale = useAppStore((s) => s.setLocale);
-  const user = useAppStore((s) => s.user);
   const [open, setOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const options: Array<{ id: AppLocale; label: string }> = [
     { id: "ru", label: t("common.languageRu") },
@@ -24,18 +30,41 @@ export function LocaleToggle() {
       setOpen(false);
       return;
     }
-    if (user) void setLocale(next);
-    else {
-      applyLocale(next);
-      useAppStore.setState({ settings: { ...useAppStore.getState().settings, locale: next } });
-    }
+    void setLocale(next);
     setOpen(false);
   };
+
+  useLayoutEffect(() => {
+    if (!open || !wrapRef.current) {
+      setMenuPos(null);
+      return;
+    }
+    const place = () => {
+      const rect = wrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = menuRef.current?.offsetWidth ?? 148;
+      const left = Math.min(
+        Math.max(8, rect.right - width),
+        window.innerWidth - width - 8,
+      );
+      setMenuPos({ top: rect.bottom + 6, left });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (wrapRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -54,7 +83,7 @@ export function LocaleToggle() {
     <div className={styles.wrap} ref={wrapRef}>
       <button
         type="button"
-        className={`${styles.trigger}${open ? ` ${styles.triggerOpen}` : ""}`}
+        className={`${styles.trigger}${open ? ` ${styles.triggerOpen}` : ""}${compact ? ` ${styles.triggerCompact}` : ""}${triggerClassName ? ` ${triggerClassName}` : ""}`}
         aria-label={t("common.language")}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -62,33 +91,48 @@ export function LocaleToggle() {
         onClick={() => setOpen((v) => !v)}
       >
         <span className={styles.triggerCode}>{current.id}</span>
-        <svg className={styles.chevron} width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M6 9l6 6 6-6"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        {!compact ? (
+          <svg className={styles.chevron} width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M6 9l6 6 6-6"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : null}
       </button>
-      {open ? (
-        <div className={styles.menu} role="listbox" aria-label={t("common.language")}>
-          {options.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              role="option"
-              aria-selected={opt.id === locale}
-              className={`${styles.option}${opt.id === locale ? ` ${styles.optionActive}` : ""}`}
-              onClick={() => setNext(opt.id)}
+      {open
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className={styles.menu}
+              role="listbox"
+              aria-label={t("common.language")}
+              style={
+                menuPos
+                  ? { top: menuPos.top, left: menuPos.left, right: "auto" }
+                  : { visibility: "hidden", top: 0, left: 0 }
+              }
             >
-              <LocaleFlag locale={opt.id} />
-              <span className={styles.optionLabel}>{opt.label}</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
+              {options.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  role="option"
+                  aria-selected={opt.id === locale}
+                  className={`${styles.option}${opt.id === locale ? ` ${styles.optionActive}` : ""}`}
+                  onClick={() => setNext(opt.id)}
+                >
+                  <LocaleFlag locale={opt.id} />
+                  <span className={styles.optionLabel}>{opt.label}</span>
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

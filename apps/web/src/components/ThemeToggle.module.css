@@ -1,13 +1,17 @@
 .themeIconBtn {
-  width: 30px;
-  height: 30px;
+  width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  min-width: var(--toolbar-btn-size, 36px);
   display: grid;
   place-items: center;
   border: 1px solid transparent;
   background: transparent;
   padding: 0;
+  margin: 0;
   border-radius: 9px;
   color: var(--text-secondary);
+  line-height: 0;
+  box-sizing: border-box;
   transition:
     background 0.2s ease,
     color 0.2s ease,
@@ -25,8 +29,8 @@
 
 .themeGlyph {
   position: relative;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   display: block;
 }
 

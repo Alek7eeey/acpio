@@ -13,13 +13,13 @@ import {
 } from "../lib/settingsNav";
 import { ChatSidebar } from "./ChatSidebar";
 import { HoverTip } from "./HoverTip";
+import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
 import { DashboardPage } from "../pages/DashboardPage";
 import { ChatPage } from "../pages/ChatPage";
 import { GiteaPage } from "../pages/GiteaPage";
 import { SettingsPage } from "../pages/SettingsPage";
-import { AdminPage } from "../pages/AdminPage";
 import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acprocess.sidebarWidth.v2";
@@ -40,7 +40,6 @@ function ShellPage({ pathname }: { pathname: string }) {
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/gitea")) return <GiteaPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
-  if (pathname.startsWith("/admin")) return <AdminPage />;
   return <DashboardPage />;
 }
 
@@ -54,11 +53,13 @@ export function AppShell() {
   const setTheme = useAppStore((s) => s.setTheme);
   const connected = useAppStore((s) => s.connected);
   const settings = useAppStore((s) => s.settings);
-  const user = useAppStore((s) => s.user);
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
 
+  const hasAgent = Boolean(settings.connectedProvider);
+  const agentOnline = hasAgent && connected;
+
   const agentStatusTitle = useMemo(() => {
-    const provider = user?.connectedProvider;
+    const provider = settings.connectedProvider;
     const agent = !provider
       ? t("common.noAgent")
       : provider === "cursor"
@@ -72,20 +73,18 @@ export function AppShell() {
               : provider;
     return t("dashboard.agentStatus", {
       agent,
-      status: connected ? t("common.online") : t("common.offline"),
+      status: agentOnline ? t("common.online") : t("common.offline"),
     });
-  }, [user?.connectedProvider, connected, t]);
+  }, [settings.connectedProvider, agentOnline, t]);
 
   const isChat = pathname.startsWith("/chat");
   const isGitea = pathname.startsWith("/gitea");
   const isSettings = pathname.startsWith("/settings");
-  const isAdmin = pathname.startsWith("/admin");
   const showSidebar = isChat || isGitea || isSettings;
 
   const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
     agent: true,
-    account: true,
     gitea: true,
   });
   const [sidebarWidth, setSidebarWidth] = useState(readStoredWidth);
@@ -140,28 +139,15 @@ export function AppShell() {
     };
   }, [dragging, sidebarOpen, setSidebarOpen]);
 
-  const logout = useAppStore((s) => s.logout);
-  const [accountOpen, setAccountOpen] = useState(false);
-  const accountRef = useRef<HTMLDivElement>(null);
-
-  const displayLabel = user?.displayName || user?.username || t("common.user");
-  const userInitial = (displayLabel[0] ?? "?").toUpperCase();
-
-  useEffect(() => {
-    if (!accountOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!accountRef.current?.contains(e.target as Node)) setAccountOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAccountOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [accountOpen]);
+  const agentLabel = useMemo(() => {
+    const provider = settings.connectedProvider;
+    if (!provider) return t("common.noAgent");
+    if (provider === "cursor") return "Cursor";
+    if (provider === "opencode") return "OpenCode";
+    if (provider === "omp") return "OMP";
+    if (provider === "pi") return "PI";
+    return provider;
+  }, [settings.connectedProvider, t]);
 
   const title = isGitea
     ? t("common.gitea")
@@ -405,79 +391,46 @@ export function AppShell() {
             </span>
           </button>
           <div className={styles.headerSpacer} />
-          <div className={styles.headerRight}>
-            <span
-              className={`${styles.dot} ${connected ? styles.on : ""}`}
+          <div className={styles.headerActions}>
+            <div
+              className={`${styles.agentChip}${hasAgent ? "" : ` ${styles.agentChipUnset}`}`}
               title={agentStatusTitle}
-              aria-label={agentStatusTitle}
-            />
-            <LocaleToggle />
-            <ThemeToggle
-              theme={theme}
-              onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
-            />
-            <div className={styles.accountWrap} ref={accountRef}>
+            >
+              <span
+                className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
+                aria-hidden
+              />
+              <span className={styles.agentChipText}>{agentLabel}</span>
+            </div>
+            <div className={styles.toolCluster} role="group" aria-label={t("common.toolbar")}>
+              <InstallAppButton className={styles.toolClusterBtn} />
+              <LocaleToggle triggerClassName={styles.toolClusterBtn} compact />
+              <ThemeToggle
+                theme={theme}
+                className={styles.toolClusterBtn}
+                onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
+              />
               <button
                 type="button"
-                className={`${styles.accountBtn} ${accountOpen || isSettings || isAdmin ? styles.headerIconActive : ""}`}
-                aria-label={t("common.account")}
-                aria-expanded={accountOpen}
-                aria-haspopup="menu"
-                title={t("common.account")}
-                onClick={() => setAccountOpen((v) => !v)}
+                className={`${styles.toolClusterBtn} ${isSettings ? styles.toolClusterBtnActive : ""}`}
+                aria-label={t("common.settings")}
+                title={t("common.settings")}
+                onClick={() => navigate(settingsPath("agent", "connect"))}
               >
-                <span className={styles.accountAvatar} aria-hidden>
-                  {userInitial}
-                </span>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+                  <path
+                    d="M19.4 13a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.7a8 8 0 0 0-1.7-1L15 3h-6l-.5 2.7a8 8 0 0 0-1.7 1L4.5 6 2.5 9.5l2 1.5a7.9 7.9 0 0 0 0 2l-2 1.5 2 3.5 2.3-.7a8 8 0 0 0 1.7 1L9 21h6l.5-2.7a8 8 0 0 0 1.7-1l2.3.7 2-3.5-2-1.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </button>
-              {accountOpen && (
-                <div className={styles.accountMenu} role="menu">
-                  <div className={styles.accountMenuHead}>
-                    <span className={styles.accountAvatarLg} aria-hidden>
-                      {userInitial}
-                    </span>
-                    <div className={styles.accountMeta}>
-                      <strong>{displayLabel}</strong>
-                      <span>@{user?.username ?? "user"}</span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.accountMenuItem}
-                    onClick={() => {
-                      setAccountOpen(false);
-                      navigate(settingsPath("agent", "connect"));
-                    }}
-                  >
-                    {t("common.settings")}
-                  </button>
-                  {user?.role === "admin" && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.accountMenuItem}
-                      onClick={() => {
-                        setAccountOpen(false);
-                        navigate("/admin");
-                      }}
-                    >
-                      {t("common.admin")}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={`${styles.accountMenuItem} ${styles.accountMenuDanger}`}
-                    onClick={() => {
-                      setAccountOpen(false);
-                      void logout();
-                    }}
-                  >
-                    {t("common.logout")}
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </header>

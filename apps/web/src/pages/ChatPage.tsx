@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -31,6 +32,12 @@ import {
   slashCommandRequiresInput,
 } from "../lib/slashCommands";
 import styles from "./ChatPage.module.css";
+
+/** Desktop-only: avoid popping the mobile keyboard during stream / scroll updates. */
+function shouldAutoFocusComposer() {
+  if (typeof window === "undefined") return true;
+  return window.matchMedia("(pointer: fine)").matches;
+}
 
 function UserMessage({
   message,
@@ -672,7 +679,6 @@ export function ChatPage() {
   const activeSession = useAppStore((s) => s.activeSession);
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
-  const user = useAppStore((s) => s.user);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
   const cancelPrompt = useAppStore((s) => s.cancelPrompt);
@@ -697,6 +703,8 @@ export function ChatPage() {
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const messageEndRef = useRef<HTMLDivElement>(null);
+  const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
@@ -744,7 +752,7 @@ export function ChatPage() {
   };
 
   // Models / ACP only after the user explicitly connected an agent.
-  const agentProvider = user?.connectedProvider ?? null;
+  const agentProvider = settings.connectedProvider ?? null;
   const agentMissing = !agentProvider;
 
   const catalog =
@@ -822,7 +830,7 @@ export function ChatPage() {
     const value = raw.trim();
     if (!value || composerLocked || streaming) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
-      focusComposer();
+      if (shouldAutoFocusComposer()) focusComposer();
       return;
     }
     if (value === "/stop") {
@@ -831,7 +839,12 @@ export function ChatPage() {
       void cancelPrompt();
       return;
     }
-    keepComposerFocus.current = true;
+    if (shouldAutoFocusComposer()) {
+      keepComposerFocus.current = true;
+    } else {
+      keepComposerFocus.current = false;
+    }
+    userJustSentRef.current = true;
     setText("");
     setCursorPos(0);
     setComposerMultiline(false);
@@ -840,12 +853,17 @@ export function ChatPage() {
     if (el) {
       el.style.height = "auto";
     }
-    focusComposer();
-    void sendPrompt(value).finally(() => {
-      requestAnimationFrame(focusComposer);
-      window.setTimeout(focusComposer, 0);
-      window.setTimeout(focusComposer, 100);
-    });
+    if (shouldAutoFocusComposer()) {
+      focusComposer();
+      void sendPrompt(value).finally(() => {
+        requestAnimationFrame(focusComposer);
+        window.setTimeout(focusComposer, 0);
+        window.setTimeout(focusComposer, 100);
+      });
+    } else {
+      textareaRef.current?.blur();
+      void sendPrompt(value);
+    }
   };
 
   const recentCwds = useMemo(
@@ -858,6 +876,7 @@ export function ChatPage() {
     const needForce =
       !cached || cached.provider !== agentProvider || usesCloudModelCatalog(agentProvider);
     void ensureModels(agentProvider, { force: needForce });
+    void api.warmModelParams(agentProvider);
   }, [agentProvider, ensureModels]);
 
   useEffect(() => {
@@ -867,6 +886,24 @@ export function ChatPage() {
       paramsCacheRef.current.set(model, modelParams);
     }
   }, [modelParams, model, paramsLoading]);
+
+  useEffect(() => {
+    if (!agentProvider || !model) return;
+    if (paramsCacheRef.current.get(model)?.length) return;
+    if (modelParams.length) return;
+    let cancelled = false;
+    void api
+      .getModelParams(agentProvider, model, { sessionId: activeSession?.id ?? undefined })
+      .then((res) => {
+        if (cancelled || !res.modelParams?.length) return;
+        paramsCacheRef.current.set(model, res.modelParams);
+        setStableParams((prev) => (prev.length ? prev : res.modelParams));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [agentProvider, model, activeSession?.id, modelParams.length]);
 
   useEffect(() => {
     if (!catalog?.models.length) {
@@ -939,12 +976,42 @@ export function ChatPage() {
   };
 
   const loadParamsForModel = async (nextModel: string) => {
+    const cached = paramsCacheRef.current.get(nextModel);
+    if (cached?.length) {
+      setStableParams(cached);
+      return;
+    }
+    if (nextModel === model) {
+      if (modelParams.length) {
+        paramsCacheRef.current.set(nextModel, modelParams);
+        setStableParams(modelParams);
+        return;
+      }
+      const catParams = catalog?.modelParams ?? [];
+      if (catParams.length) {
+        paramsCacheRef.current.set(nextModel, catParams);
+        setStableParams(catParams);
+        return;
+      }
+    }
+    if (!agentProvider) return;
     setParamsLoading(true);
     try {
-      const fresh = await applyModelSelection(nextModel, {});
-      const committed = fresh?.length ? fresh : [];
+      const res = await api.getModelParams(agentProvider, nextModel, {
+        sessionId: activeSession?.id,
+      });
+      const committed = res.modelParams?.length ? res.modelParams : [];
       paramsCacheRef.current.set(nextModel, committed);
       setStableParams(committed);
+      if (committed.length && nextModel === model) {
+        rememberModelsCatalog({
+          provider: agentProvider,
+          models,
+          modelParams: committed,
+          currentModel: model,
+          at: Date.now(),
+        });
+      }
     } finally {
       setParamsLoading(false);
     }
@@ -965,6 +1032,7 @@ export function ChatPage() {
   };
 
   const focusComposer = () => {
+    if (!shouldAutoFocusComposer()) return;
     const el = textareaRef.current;
     if (!el) return;
     if (document.activeElement !== el) {
@@ -986,8 +1054,13 @@ export function ChatPage() {
 
   useEffect(() => {
     if (streaming) {
-      keepComposerFocus.current = true;
-      focusComposer();
+      if (shouldAutoFocusComposer()) {
+        keepComposerFocus.current = true;
+        focusComposer();
+      } else {
+        keepComposerFocus.current = false;
+        textareaRef.current?.blur();
+      }
       return;
     }
     const t = window.setTimeout(() => {
@@ -998,19 +1071,49 @@ export function ChatPage() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
+  const activeSessionId = activeSession?.id ?? null;
+  const prevSessionIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    const el = threadRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
+  const scrollThreadToEnd = () => {
+    const thread = threadRef.current;
+    const end = messageEndRef.current;
+    if (!thread) return;
+    thread.scrollTop = thread.scrollHeight;
+    end?.scrollIntoView({ block: "end", behavior: "auto" });
+  };
+
+  useLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const sessionChanged = activeSessionId !== prevSessionIdRef.current;
+    if (sessionChanged) {
+      prevSessionIdRef.current = activeSessionId;
+      scrollThreadToEnd();
+      requestAnimationFrame(() => {
+        scrollThreadToEnd();
+        requestAnimationFrame(scrollThreadToEnd);
+      });
+      userJustSentRef.current = false;
+      if (!shouldAutoFocusComposer()) {
+        textareaRef.current?.blur();
+      } else if (keepComposerFocus.current) {
+        focusComposer();
+      }
+      return;
+    }
+    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
+    if (userJustSentRef.current || nearBottom) {
+      scrollThreadToEnd();
+      userJustSentRef.current = false;
+    }
     if (keepComposerFocus.current) focusComposer();
-  }, [lastMessageId, messageCount, activeSession?.status]);
+  }, [activeSessionId, lastMessageId, messageCount, activeSession?.status]);
 
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
     const onFocusIn = (e: FocusEvent) => {
-      if (!keepComposerFocus.current) return;
+      if (!shouldAutoFocusComposer() || !keepComposerFocus.current) return;
       const target = e.target as Node | null;
       if (!target || target === textareaRef.current) return;
       if (thread.contains(target)) {
@@ -1108,6 +1211,7 @@ export function ChatPage() {
             </article>
           );
         })}
+        <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
       </div>
 
       {error && <div className={styles.banner}>{error}</div>}
@@ -1157,11 +1261,7 @@ export function ChatPage() {
                   />
                 </svg>
               </span>
-              <span className={styles.sessionCwdText}>
-                {activeSession.cwd.length > 56
-                  ? `…${activeSession.cwd.slice(-54)}`
-                  : activeSession.cwd}
-              </span>
+              <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
             </div>
           ) : null}
           <div
@@ -1271,6 +1371,7 @@ export function ChatPage() {
                   disabled={composerLocked}
                   onOpen={() => {
                     if (!agentProvider) return;
+                    void api.warmModelParams(agentProvider);
                     const cached = useAppStore.getState().modelsCatalog;
                     const stale =
                       !cached ||
@@ -1278,6 +1379,15 @@ export function ChatPage() {
                       (cached.modelParams?.length ?? 0) === 0 ||
                       usesCloudModelCatalog(agentProvider);
                     void ensureModels(agentProvider, { force: stale });
+                    if (model) {
+                      void api.getModelParams(agentProvider, model, {
+                        sessionId: activeSession?.id,
+                      }).then((res) => {
+                        if (!res.modelParams?.length) return;
+                        paramsCacheRef.current.set(model, res.modelParams);
+                        setStableParams((prev) => (prev.length ? prev : res.modelParams));
+                      });
+                    }
                   }}
                   onChange={(v) => void onModelChange(v)}
                   onParamsOpen={(v) => loadParamsForModel(v)}
@@ -1334,13 +1444,12 @@ export function ChatPage() {
           x={folderPicker.x}
           y={folderPicker.y}
           defaultCwd={settings.defaultCwd ?? ""}
-          dialogStartPath={settings.defaultCwd?.trim() || ""}
           recentCwds={recentCwds}
           onClose={() => setFolderPicker(null)}
           onConfirm={async (cwd) => {
             setFolderPicker(null);
             await createSession(undefined, cwd);
-            focusComposer();
+            if (shouldAutoFocusComposer()) focusComposer();
           }}
         />
       )}

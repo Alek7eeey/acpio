@@ -1,8 +1,29 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const PICK_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** Default folder dialog location on the machine running the API. */
+export function defaultPickerPath(): string {
+  return os.homedir();
+}
+
+function resolvePickerStartPath(initialPath?: string): string {
+  const trimmed = (initialPath ?? "").trim();
+  if (trimmed) {
+    try {
+      const resolved = path.resolve(trimmed);
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+        return resolved;
+      }
+    } catch {
+      // fall through to server home
+    }
+  }
+  return defaultPickerPath();
+}
 
 function run(
   command: string,
@@ -52,13 +73,13 @@ function normalizePicked(raw: string): string | null {
 }
 
 async function pickWindows(initialPath?: string): Promise<string | null> {
-  const initial = (initialPath ?? "").trim().replace(/'/g, "''");
+  const initial = resolvePickerStartPath(initialPath).replace(/'/g, "''");
   const script = `
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.Description = 'Выберите рабочую папку'
 $dialog.ShowNewFolderButton = $true
-${initial ? `if (Test-Path -LiteralPath '${initial}') { $dialog.SelectedPath = '${initial}' }` : ""}
+$dialog.SelectedPath = '${initial}'
 $result = $dialog.ShowDialog()
 if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -76,10 +97,12 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
   return normalizePicked(stdout);
 }
 
-async function pickMac(): Promise<string | null> {
+async function pickMac(initialPath?: string): Promise<string | null> {
+  const initial = resolvePickerStartPath(initialPath).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const script =
-    'try\n' +
-    '  set p to POSIX path of (choose folder with prompt "Выберите рабочую папку")\n' +
+    "try\n" +
+    `  set defaultLocation to POSIX file "${initial}"\n` +
+    '  set p to POSIX path of (choose folder with prompt "Выберите рабочую папку" default location defaultLocation)\n' +
     "  return p\n" +
     "on error\n" +
     '  return ""\n' +
@@ -89,18 +112,16 @@ async function pickMac(): Promise<string | null> {
 }
 
 async function pickLinux(initialPath?: string): Promise<string | null> {
+  const initial = resolvePickerStartPath(initialPath);
   const args = ["--file-selection", "--directory", "--title=Выберите рабочую папку"];
-  const initial = (initialPath ?? "").trim();
-  if (initial) args.push(`--filename=${initial}`);
+  args.push(`--filename=${initial}`);
   try {
     const { code, stdout } = await run("zenity", args);
     if (code !== 0) return null;
     return normalizePicked(stdout);
   } catch {
     try {
-      const kdialogArgs = ["--getexistingdirectory"];
-      if (initial) kdialogArgs.push(initial);
-      else kdialogArgs.push(process.env.HOME || "/");
+      const kdialogArgs = ["--getexistingdirectory", initial];
       const { code, stdout } = await run("kdialog", kdialogArgs);
       if (code !== 0) return null;
       return normalizePicked(stdout);
@@ -115,6 +136,6 @@ async function pickLinux(initialPath?: string): Promise<string | null> {
 /** Open a native OS folder dialog and return the absolute path, or null if cancelled. */
 export async function pickDirectory(initialPath?: string): Promise<string | null> {
   if (process.platform === "win32") return pickWindows(initialPath);
-  if (process.platform === "darwin") return pickMac();
+  if (process.platform === "darwin") return pickMac(initialPath);
   return pickLinux(initialPath);
 }

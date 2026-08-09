@@ -436,7 +436,7 @@ export class AcpClient extends EventEmitter {
     return this.stderrBuf.slice(-4000);
   }
 
-  async start(timeoutMs = 45000): Promise<void> {
+  async start(timeoutMs = 45000, opts?: { catalogOnly?: boolean }): Promise<void> {
     const commandName = providerCommand(this.settings, this.provider);
     const args = [...providerArgs(this.settings, this.provider)];
     const resolved = await resolveCommand(commandName);
@@ -542,7 +542,9 @@ export class AcpClient extends EventEmitter {
       );
 
       try {
-        await this.applyModelSelection(this.settings.defaultModel, this.settings.defaultModelParams);
+        if (!opts?.catalogOnly) {
+          await this.applyModelSelection(this.settings.defaultModel, this.settings.defaultModelParams);
+        }
       } catch (err) {
         this.emit("log", `set model failed: ${String(err)}`);
       }

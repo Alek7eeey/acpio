@@ -4,6 +4,7 @@ import {
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
+  parseModelWire,
   providerCommand,
   usesCloudModelCatalog,
   type AgentMode,
@@ -783,7 +784,10 @@ export async function cancelPrompt(sessionId: string) {
   await updateSession(sessionId, { status: "idle" });
 }
 
-export async function probeAgent(provider?: AgentProvider) {
+export async function probeAgent(
+  provider?: AgentProvider,
+  opts?: { catalogOnly?: boolean },
+) {
   const settings = await getSettings();
   const selected = provider ?? settings.defaultProvider;
   const client = new AcpClient(
@@ -795,7 +799,9 @@ export async function probeAgent(provider?: AgentProvider) {
   const logs: string[] = [];
   client.on("log", (line: string) => logs.push(line));
   try {
-    await client.start(30000);
+    await client.start(opts?.catalogOnly ? 20_000 : 30_000, {
+      catalogOnly: opts?.catalogOnly,
+    });
     const acpModels = toModelList(client.configOptions);
     const models = await finalizeModelList(selected, settings, acpModels);
     const modelParams = toModelParams(client.configOptions);
@@ -997,6 +1003,179 @@ export function clearModelsCache(provider?: AgentProvider) {
   if (!provider || modelsCache?.provider === provider) {
     modelsCache = null;
   }
+  if (!provider || paramsProbe?.provider === provider) {
+    disposeParamsProbe();
+  }
+  if (!provider) {
+    modelParamsCache.clear();
+    modelParamsInflight.clear();
+    return;
+  }
+  for (const key of modelParamsCache.keys()) {
+    if (key.startsWith(`${provider}:`)) modelParamsCache.delete(key);
+  }
+  for (const key of modelParamsInflight.keys()) {
+    if (key.startsWith(`${provider}:`)) modelParamsInflight.delete(key);
+  }
+}
+
+const modelParamsCache = new Map<string, { params: ModelParamDto[]; at: number }>();
+const modelParamsInflight = new Map<string, Promise<ModelParamDto[]>>();
+
+let paramsProbe: {
+  provider: AgentProvider;
+  client: AcpClient;
+  boot: Promise<AcpClient>;
+} | null = null;
+
+function disposeParamsProbe() {
+  if (!paramsProbe) return;
+  try {
+    paramsProbe.client.dispose();
+  } catch {
+    // ignore
+  }
+  paramsProbe = null;
+}
+
+async function warmParamsProbeClient(provider: AgentProvider): Promise<AcpClient> {
+  if (paramsProbe?.provider === provider) {
+    try {
+      return await paramsProbe.boot;
+    } catch {
+      disposeParamsProbe();
+    }
+  } else if (paramsProbe) {
+    disposeParamsProbe();
+  }
+
+  const settings = await getSettings();
+  const client = new AcpClient(
+    provider,
+    settings,
+    settings.defaultCwd || process.cwd(),
+    settings.defaultMode,
+  );
+  const boot = client
+    .start(18_000, { catalogOnly: true })
+    .then(() => client)
+    .catch((err) => {
+      disposeParamsProbe();
+      throw err;
+    });
+  paramsProbe = { provider, client, boot };
+  return boot;
+}
+
+/** Pre-spawn ACP for Effort/Fast lookups (reused across models). */
+export function warmModelParamsProbe(provider?: AgentProvider) {
+  void (async () => {
+    const settings = await getSettings();
+    const selected = provider ?? settings.connectedProvider ?? settings.defaultProvider;
+    await warmParamsProbeClient(selected);
+  })().catch(() => {
+    // best-effort
+  });
+}
+
+async function probeModelParams(provider: AgentProvider, model: string): Promise<ModelParamDto[]> {
+  const client = await warmParamsProbeClient(provider);
+  await client.applyModelSelection(model, {});
+  return toModelParams(client.configOptions);
+}
+
+function modelParamsKey(provider: AgentProvider, model: string) {
+  return `${provider}:${model}`;
+}
+
+function storeModelParamsCache(provider: AgentProvider, model: string, params: ModelParamDto[]) {
+  if (!params.length) return;
+  modelParamsCache.set(modelParamsKey(provider, model), { params, at: Date.now() });
+  if (modelsCache?.provider === provider) {
+    modelsCache = { ...modelsCache, modelParams: params, at: Date.now() };
+  }
+}
+
+async function readLiveModelParams(sessionId: string, model: string): Promise<ModelParamDto[] | null> {
+  const rt = runtimes.get(sessionId);
+  if (!rt?.clientReady) return null;
+  let client: AcpClient | null = null;
+  try {
+    client = await rt.clientReady;
+  } catch {
+    return null;
+  }
+  if (!client) return null;
+
+  const models = toModelList(client.configOptions);
+  const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
+  const currentModel = pickCurrentModel(models, rawCurrent);
+  const { base } = parseModelWire(model);
+  const matches =
+    currentModel === model ||
+    currentModel === base ||
+    rawCurrent === model ||
+    rawCurrent === base;
+  if (!matches) return null;
+
+  const params = toModelParams(client.configOptions);
+  return params.length ? params : null;
+}
+
+/** Fast Effort/Fast lookup — does not restart the live chat session. */
+export async function resolveModelParams(
+  provider: AgentProvider,
+  model: string,
+  opts?: { sessionId?: string; force?: boolean },
+): Promise<{ ok: boolean; modelParams: ModelParamDto[]; cached: boolean; live?: boolean; message?: string }> {
+  const wire = model.trim();
+  if (!wire) return { ok: false, modelParams: [], cached: false, message: "model required" };
+
+  if (!opts?.force && opts?.sessionId) {
+    const live = await readLiveModelParams(opts.sessionId, wire);
+    if (live?.length) {
+      storeModelParamsCache(provider, wire, live);
+      return { ok: true, modelParams: live, cached: true, live: true };
+    }
+  }
+
+  const key = modelParamsKey(provider, wire);
+  const ttl = modelsCacheTtlMs(provider);
+  if (!opts?.force) {
+    const hit = modelParamsCache.get(key);
+    if (hit && Date.now() - hit.at < ttl && hit.params.length) {
+      return { ok: true, modelParams: hit.params, cached: true };
+    }
+    const inflight = modelParamsInflight.get(key);
+    if (inflight) {
+      const params = await inflight;
+      return { ok: true, modelParams: params, cached: true };
+    }
+  } else {
+    modelParamsCache.delete(key);
+  }
+
+  const probe = (async () => {
+    try {
+      return await probeModelParams(provider, wire);
+    } finally {
+      modelParamsInflight.delete(key);
+    }
+  })();
+
+  modelParamsInflight.set(key, probe);
+  try {
+    const params = await probe;
+    storeModelParamsCache(provider, wire, params);
+    return { ok: true, modelParams: params, cached: false };
+  } catch (err) {
+    return {
+      ok: false,
+      modelParams: [],
+      cached: false,
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export async function listModels(
@@ -1024,6 +1203,7 @@ export async function listModels(
         : cache.currentModel && models.some((m) => m.value === cache.currentModel)
           ? cache.currentModel
           : models[0]?.value;
+    warmModelParamsProbe(selected);
     return {
       ok: true,
       provider: selected,
@@ -1033,7 +1213,8 @@ export async function listModels(
       cached: true,
     };
   }
-  const probed = await probeAgent(selected);
+  warmModelParamsProbe(selected);
+  const probed = await probeAgent(selected, { catalogOnly: !force });
   if (probed.ok && (probed.models?.length || probed.modelParams?.length)) {
     rememberModels(selected, probed.currentModel, probed.models ?? [], probed.modelParams ?? []);
   }

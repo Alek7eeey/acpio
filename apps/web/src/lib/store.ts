@@ -10,7 +10,6 @@ import type {
   SessionDetailDto,
   SessionDto,
   Theme,
-  UserDto,
   WsServerEvent,
 } from "@acprocess/shared";
 import { DEFAULT_SETTINGS, isModelAccessError, usesCloudModelCatalog } from "@acprocess/shared";
@@ -18,6 +17,7 @@ import { api } from "./api";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v4";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v1";
+const ACTIVE_SESSION_KEY = "acprocess.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
 const MODELS_CLOUD_SOFT_TTL_MS = 30_000;
@@ -57,7 +57,6 @@ type PendingQuestion = {
 };
 
 type AppState = {
-  user: UserDto | null;
   settings: AppSettings;
   sessions: SessionDto[];
   themes: ChatThemeDto[];
@@ -76,12 +75,6 @@ type AppState = {
   setLocale: (locale: AppLocale) => Promise<void>;
   applyLocale: (locale: AppLocale) => void;
   loadBootstrap: () => Promise<void>;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
-  enterApp: (user: UserDto) => Promise<void>;
-  logout: () => Promise<void>;
-  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
-  updateProfile: (displayName: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   refreshThemes: () => Promise<void>;
   selectSession: (id: string | null) => Promise<void>;
@@ -197,22 +190,26 @@ async function loadAppData(
   get().applyLocale(locale);
   const [sessions, themes] = await Promise.all([api.listSessions(), api.listThemes()]);
   set({ settings: { ...settings, theme, locale }, sessions, themes });
-  // Models only after the user explicitly connected an agent.
-  const provider = get().user?.connectedProvider;
+  const provider = get().settings.connectedProvider;
   if (provider) {
     void get().ensureModels(provider);
   } else {
     set({ modelsCatalog: null, modelsLoading: false });
   }
-  if (sessions[0]) {
-    await get().selectSession(sessions[0].id);
+  const storedId =
+    typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
+  const pick =
+    storedId && sessions.some((s) => s.id === storedId)
+      ? storedId
+      : sessions[0]?.id ?? null;
+  if (pick) {
+    await get().selectSession(pick);
   } else {
     set({ activeSessionId: null, activeSession: null });
   }
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  user: null,
   settings: DEFAULT_SETTINGS,
   sessions: [],
   themes: [],
@@ -338,79 +335,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   async loadBootstrap() {
     set({ loading: true, error: null });
     try {
-      const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
-      const storedLocale = localStorage.getItem("acprocess.locale") as AppLocale | null;
-      if (storedTheme) get().applyTheme(storedTheme);
-      if (storedLocale === "en" || storedLocale === "ru") get().applyLocale(storedLocale);
-      const { user } = await api.me();
-      if (!user) {
-        const locale =
-          storedLocale === "en" || storedLocale === "ru" ? storedLocale : DEFAULT_SETTINGS.locale;
-        set({
-          user: null,
-          settings: { ...DEFAULT_SETTINGS, locale },
-          sessions: [],
-          themes: [],
-          activeSessionId: null,
-          activeSession: null,
-        });
-        return;
-      }
-      set({ user });
       await loadAppData(set, get);
     } catch (err) {
       set({
-        user: null,
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
       set({ loading: false });
     }
-  },
-
-  async login(username, password) {
-    const { user } = await api.login(username.trim(), password);
-    await get().enterApp(user);
-  },
-
-  async register(username, password) {
-    const { user } = await api.register(username.trim(), password);
-    await get().enterApp(user);
-  },
-
-  async enterApp(user) {
-    set({ user, error: null, loading: true });
-    try {
-      await loadAppData(set, get);
-    } finally {
-      set({ loading: false });
-    }
-  },
-
-  async logout() {
-    try {
-      await api.logout();
-    } finally {
-      set({
-        user: null,
-        sessions: [],
-        themes: [],
-        activeSessionId: null,
-        activeSession: null,
-        pendingPermission: null,
-        pendingQuestion: null,
-        connected: false,
-      });
-    }
-  },
-
-  async changePassword(currentPassword, newPassword) {
-    await api.changePassword(currentPassword, newPassword);
-  },
-
-  async updateProfile(displayName) {
-    const { user } = await api.updateProfile(displayName);
-    set({ user });
   },
 
   async refreshSessions() {
@@ -425,9 +357,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectSession(id) {
     if (!id) {
+      localStorage.removeItem(ACTIVE_SESSION_KEY);
       set({ activeSessionId: null, activeSession: null });
       return;
     }
+    localStorage.setItem(ACTIVE_SESSION_KEY, id);
     const detail = await api.getSession(id);
     set({ activeSessionId: id, activeSession: detail });
   },
@@ -620,7 +554,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (event.type === "error") {
       set({ error: event.message });
-      const provider = get().user?.connectedProvider ?? get().settings.defaultProvider;
+      const provider = get().settings.connectedProvider ?? get().settings.defaultProvider;
       if (provider && isModelAccessError(event.message)) {
         void get().ensureModels(provider, { force: true });
       }
@@ -654,15 +588,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings });
-    if (nextPatch.defaultProvider) {
-      // Refresh connectedProvider on the current user for admin / UI badges.
-      try {
-        const { user } = await api.me();
-        if (user) set({ user });
-      } catch {
-        /* ignore */
-      }
-      void get().ensureModels(nextPatch.defaultProvider, { force: true });
+    const providerToLoad =
+      nextPatch.connectedProvider ?? (providerChanged ? settings.defaultProvider : null);
+    if (providerToLoad) {
+      void get().ensureModels(providerToLoad, {
+        force: nextPatch.connectedProvider != null || providerChanged,
+      });
       const activeId = get().activeSessionId;
       if (activeId) void get().selectSession(activeId);
     } else if (providerChanged) {

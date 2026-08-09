@@ -1,5 +1,4 @@
 import type {
-  AdminUserDto,
   AgentProbeResult,
   AgentProvider,
   AppSettings,
@@ -9,7 +8,6 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
-  UserDto,
 } from "@acprocess/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -36,31 +34,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => request<{ user: UserDto | null }>("/api/auth/me"),
-  login: (username: string, password: string) =>
-    request<{ user: UserDto }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  register: (username: string, password: string) =>
-    request<{ user: UserDto }>("/api/auth/register", {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST", body: "{}" }),
-  changePassword: (currentPassword: string, newPassword: string) =>
-    request<{ ok: boolean }>("/api/auth/password", {
-      method: "POST",
-      body: JSON.stringify({ currentPassword, newPassword }),
-    }),
-  updateProfile: (displayName: string) =>
-    request<{ user: UserDto }>("/api/auth/profile", {
-      method: "PATCH",
-      body: JSON.stringify({ displayName }),
-    }),
-  adminListUsers: () => request<AdminUserDto[]>("/api/admin/users"),
-  adminDeleteUser: (id: string) =>
-    request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   getSettings: () => request<AppSettings>("/api/settings"),
   updateSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {
@@ -87,6 +60,27 @@ export const api = {
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
   },
+  getModelParams: (
+    provider: AgentProvider,
+    model: string,
+    opts?: { sessionId?: string; force?: boolean },
+  ) => {
+    const q = new URLSearchParams({ provider, model });
+    if (opts?.sessionId) q.set("sessionId", opts.sessionId);
+    if (opts?.force) q.set("force", "1");
+    return request<{
+      ok: boolean;
+      modelParams: ModelParamDto[];
+      cached?: boolean;
+      live?: boolean;
+      message?: string;
+    }>(`/api/agent/model-params?${q}`);
+  },
+  warmModelParams: (provider?: AgentProvider) =>
+    request<{ ok: boolean }>("/api/agent/warm-params", {
+      method: "POST",
+      body: JSON.stringify({ provider }),
+    }),
   setSessionModel: (id: string, model: string, params?: Record<string, string>) =>
     request<{
       ok: boolean;
@@ -103,6 +97,16 @@ export const api = {
     request<{ path: string | null }>("/api/fs/pick-directory", {
       method: "POST",
       body: JSON.stringify({ initialPath: initialPath || undefined }),
+    }),
+  browseDirectory: (path?: string) =>
+    request<{
+      path: string;
+      parent: string | null;
+      kind?: "drives" | "directory";
+      entries: Array<{ name: string; path: string }>;
+    }>("/api/fs/browse", {
+      method: "POST",
+      body: JSON.stringify({ path: path || undefined }),
     }),
   listSessions: () => request<SessionDto[]>("/api/sessions"),
   createSession: (body?: Partial<SessionDto>) =>

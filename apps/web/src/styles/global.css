@@ -22,6 +22,7 @@
   --radius-sm: 8px;
   --sidebar-width: 300px;
   --header-height: 66px;
+  --toolbar-btn-size: 36px;
   --font: "Figtree", sans-serif;
   --motion: 180ms ease;
   color-scheme: light;
@@ -150,5 +151,12 @@ button:active {
   }
   50% {
     opacity: 1;
+  }
+}
+
+@media (max-width: 899px) {
+  :root {
+    --toolbar-btn-size: clamp(34px, 9vw, 40px);
+    --header-height: 56px;
   }
 }

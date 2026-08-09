@@ -1,18 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionDto } from "@acprocess/shared";
-import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { ServerFolderBrowseDialog } from "./ServerFolderBrowseDialog";
 import styles from "./AppShell.module.css";
 
 function normalizeCwd(cwd: string | null | undefined) {
   return (cwd ?? "").trim().replace(/[\\/]+$/, "");
-}
-
-function shortPath(pathValue: string) {
-  const normalized = normalizeCwd(pathValue);
-  if (normalized.length <= 48) return normalized;
-  return `…${normalized.slice(-46)}`;
 }
 
 function folderName(pathValue: string, fallback: string) {
@@ -45,27 +39,53 @@ export function collectRecentCwds(
     out.push((raw ?? "").trim());
   };
   const sorted = [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  push(defaultCwd);
   for (const s of sorted) {
     push(s.cwd);
     if (out.length >= limit) break;
   }
-  // Default cwd last among suggestions only if not already in recents.
-  if (out.length < limit) push(defaultCwd);
   return out.slice(0, limit);
 }
 
 function clampPopover(x: number, y: number, width = 380, height = 360) {
-  const left = Math.min(Math.max(8, x), window.innerWidth - width - 8);
-  const top = Math.min(Math.max(8, y), window.innerHeight - height - 8);
-  return { left, top };
+  const margin = window.innerWidth < 640 ? 12 : 8;
+  const maxW = Math.min(width, window.innerWidth - margin * 2);
+  const left = Math.min(Math.max(margin, x), window.innerWidth - maxW - margin);
+  const top = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
+  return { left, top, width: maxW };
 }
+
+function useMobileFolderSheet() {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 900,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 899px)");
+    const sync = () => setMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return mobile;
+}
+
+const folderIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8.5Z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 type CreateSessionFolderPickerProps = {
   x: number;
   y: number;
   /** Soft default from settings — used if user doesn't pick a folder. */
   defaultCwd?: string;
-  /** Preferred start folder for the OS dialog only (not shown until picked). */
+  /** Preferred start folder for the folder dialog (not shown until picked). */
   dialogStartPath?: string;
   recentCwds: string[];
   onClose: () => void;
@@ -83,25 +103,31 @@ export function CreateSessionFolderPicker({
 }: CreateSessionFolderPickerProps) {
   const t = useT();
   const [cwd, setCwd] = useState("");
-  const [picking, setPicking] = useState(false);
+  const [browseDialogOpen, setBrowseDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const mobileSheet = useMobileFolderSheet();
 
   const fallback = defaultCwd.trim();
   const resolved = cwd.trim() || fallback;
   const usingDefault = !cwd.trim() && !!fallback;
-  const suggestions = useMemo(() => recentCwds, [recentCwds]);
+  const suggestions = useMemo(() => {
+    const fallbackKey = normalizeCwd(fallback).toLowerCase();
+    if (!fallbackKey) return recentCwds;
+    return recentCwds.filter((path) => normalizeCwd(path).toLowerCase() !== fallbackKey);
+  }, [recentCwds, fallback]);
+  const dialogBlocked = browseDialogOpen;
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
-      // Keep popover open while OS folder dialog is up (focus leaves the page).
-      if (picking) return;
+      if (dialogBlocked) return;
+      if (mobileSheet) return;
       if (panelRef.current?.contains(e.target as Node)) return;
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (picking) return;
+      if (dialogBlocked) return;
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("mousedown", onDown);
@@ -110,23 +136,10 @@ export function CreateSessionFolderPicker({
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [onClose, picking]);
-
-  const openExplorer = async () => {
-    setError(null);
-    setPicking(true);
-    try {
-      const res = await api.pickDirectory(cwd || dialogStartPath || fallback || undefined);
-      if (res.path) setCwd(res.path);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPicking(false);
-    }
-  };
+  }, [onClose, dialogBlocked, mobileSheet]);
 
   const submit = async () => {
-    if (!resolved || busy || picking) return;
+    if (!resolved || busy || dialogBlocked) return;
     setBusy(true);
     setError(null);
     try {
@@ -137,59 +150,86 @@ export function CreateSessionFolderPicker({
     }
   };
 
-  const pos = clampPopover(x, y);
+  const pos = mobileSheet ? null : clampPopover(x, y);
 
-  return createPortal(
+  const pickerPanel = (
     <div
       ref={panelRef}
-      className={`${styles.actionPopover} ${styles.folderPickerPopover}`}
-      style={{ left: pos.left, top: pos.top }}
+      className={`${styles.actionPopover} ${styles.folderPickerPopover}${
+        mobileSheet ? ` ${styles.folderPickerModal}` : ""
+      }`}
+      style={pos ? { left: pos.left, top: pos.top, width: pos.width } : undefined}
       role="dialog"
       aria-modal="true"
       aria-label={t("common.workingDir")}
+      onClick={(e) => e.stopPropagation()}
     >
       <div className={styles.popoverTitle}>{t("common.workingDir")}</div>
       <p className={styles.popoverText}>{t("errors.folderPickerPrompt")}</p>
 
+      {fallback ? (
+        <section className={styles.folderSection} aria-label={t("settings.defaultFolder")}>
+          <div className={styles.folderSectionHead}>
+            <span className={styles.folderSectionBadge}>{t("common.default")}</span>
+          </div>
+          <button
+            type="button"
+            className={`${styles.folderPickSelected} ${styles.folderPickDefaultCard}${
+              usingDefault || normalizeCwd(cwd).toLowerCase() === normalizeCwd(fallback).toLowerCase()
+                ? ` ${styles.folderPickDefaultCardActive}`
+                : ""
+            }`}
+            title={fallback}
+            disabled={busy || dialogBlocked}
+            onClick={() => setCwd(fallback)}
+          >
+            <span className={styles.folderPickSelectedIcon}>{folderIcon}</span>
+            <span className={styles.folderPickSelectedMeta}>
+              <span className={styles.folderPickSelectedName}>
+                {folderName(fallback, t("common.folder"))}
+              </span>
+              <span className={`${styles.folderPickSelectedPath} ${styles.folderPickPathWrap}`}>
+                {fallback}
+              </span>
+            </span>
+          </button>
+        </section>
+      ) : null}
+
       <button
         type="button"
         className={styles.folderPickBtn}
-        onClick={() => void openExplorer()}
-        disabled={picking || busy}
+        onClick={() => setBrowseDialogOpen(true)}
+        disabled={busy || dialogBlocked}
       >
-        {picking ? t("common.dialogOpen") : t("common.selectFolder")}
+        {t("common.selectFolder")}
       </button>
 
-      {cwd.trim() ? (
+      {cwd.trim() &&
+      normalizeCwd(cwd).toLowerCase() !== normalizeCwd(fallback).toLowerCase() ? (
         <div className={styles.folderPickSelected} title={cwd}>
-          <span className={styles.folderPickSelectedIcon} aria-hidden>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8.5Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
+          <span className={styles.folderPickSelectedIcon}>{folderIcon}</span>
           <span className={styles.folderPickSelectedMeta}>
-            <span className={styles.folderPickSelectedName}>{folderName(cwd, t("common.folder"))}</span>
-            <span className={styles.folderPickSelectedPath}>{shortPath(cwd)}</span>
+            <span className={styles.folderPickSelectedName}>
+              {folderName(cwd, t("common.folder"))}
+            </span>
+            <span className={`${styles.folderPickSelectedPath} ${styles.folderPickPathWrap}`}>
+              {cwd}
+            </span>
           </span>
         </div>
-      ) : usingDefault ? (
-        <p className={styles.folderPickEmpty} title={fallback}>
-          {t("common.default")}:
-          <span className={styles.folderPickDefaultPath}>{fallback}</span>
-        </p>
-      ) : (
+      ) : !fallback && !cwd.trim() ? (
         <p className={styles.folderPickEmpty}>{t("common.selectFolder")}</p>
-      )}
+      ) : null}
 
-      {suggestions.length > 0 && (
-        <div className={styles.recentFolders} role="listbox" aria-label={t("common.recentFolders")}>
-          <div className={styles.recentFoldersHead}>{t("common.recentFolders")}</div>
-          <div className={styles.recentFoldersList}>
+      {suggestions.length > 0 ? (
+        <section className={styles.folderSection} aria-label={t("common.recentFolders")}>
+          <div className={styles.folderSectionHead}>
+            <span className={`${styles.folderSectionBadge} ${styles.folderSectionBadgeMuted}`}>
+              {t("common.recentFolders")}
+            </span>
+          </div>
+          <div className={styles.recentFoldersList} role="listbox">
             {suggestions.map((path) => {
               const active = normalizeCwd(path).toLowerCase() === normalizeCwd(cwd).toLowerCase();
               return (
@@ -200,46 +240,69 @@ export function CreateSessionFolderPicker({
                   aria-selected={active}
                   className={`${styles.recentFolderItem} ${active ? styles.recentFolderItemActive : ""}`}
                   title={path}
-                  disabled={picking || busy}
+                  disabled={busy}
                   onClick={() => setCwd(path)}
                 >
                   <span className={styles.recentFolderIcon} aria-hidden>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8.5Z"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    {folderIcon}
                   </span>
                   <span className={styles.recentFolderMeta}>
-                    <span className={styles.recentFolderName}>{folderName(path, t("common.folder"))}</span>
+                    <span className={styles.recentFolderName}>
+                      {folderName(path, t("common.folder"))}
+                    </span>
                     <span className={styles.recentFolderPath}>{parentPath(path) || path}</span>
                   </span>
                 </button>
               );
             })}
           </div>
-        </div>
-      )}
+        </section>
+      ) : null}
 
       {error ? <p className={styles.popoverError}>{error}</p> : null}
 
       <div className={styles.popoverActions}>
-        <button type="button" onClick={onClose} disabled={busy}>
+        <button type="button" onClick={onClose} disabled={busy || dialogBlocked}>
           {t("common.cancel")}
         </button>
         <button
           type="button"
           className={styles.popoverPrimary}
-          disabled={!resolved || busy || picking}
+          disabled={!resolved || busy || dialogBlocked}
           onClick={() => void submit()}
         >
           {t("chat.newSession")}
         </button>
       </div>
-    </div>,
+    </div>
+  );
+
+  return createPortal(
+    <>
+      {mobileSheet ? (
+        <div
+          className={`${styles.folderPickerOverlay}${
+            browseDialogOpen ? ` ${styles.folderPickerOverlayHidden}` : ""
+          }`}
+          role="presentation"
+          onClick={() => {
+            if (dialogBlocked) return;
+            onClose();
+          }}
+        >
+          {pickerPanel}
+        </div>
+      ) : (
+        pickerPanel
+      )}
+
+      <ServerFolderBrowseDialog
+        open={browseDialogOpen}
+        initialPath={cwd.trim() || dialogStartPath.trim() || fallback || undefined}
+        onClose={() => setBrowseDialogOpen(false)}
+        onSelect={setCwd}
+      />
+    </>,
     document.body,
   );
 }

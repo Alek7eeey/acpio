@@ -278,6 +278,7 @@
   gap: 2px;
   overflow-x: hidden;
   overflow-y: auto;
+  max-height: min(360px, calc(100vh - 24px));
   box-sizing: border-box;
   animation: flyIn 0.14s ease;
 }
