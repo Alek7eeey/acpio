@@ -7,15 +7,18 @@ import {
   useState,
   type FormEvent,
   type MouseEvent,
+  type ReactNode,
 } from "react";
-import { migrateModelParamValues, usesCloudModelCatalog, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
+import { migrateModelParamValues, usesCloudModelCatalog, type AgentMode, type MessageDto, type MessagePartDto, type ModelParamDto, type SlashCommandDto } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { useAppStore } from "../lib/store";
+import { sanitizeCatalogModes, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
-import { PermissionModal } from "../components/PermissionModal";
-import { QuestionModal } from "../components/QuestionModal";
+import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
+import { PlanSidePanel, PlanTabButton } from "../components/PlanSidePanel";
+import { coercePlanPayload, type PlanPayload } from "../components/PlanApprovalBody";
+import { OptionPicker } from "../components/OptionPicker";
 import {
   collectRecentCwds,
   CreateSessionFolderPicker,
@@ -42,9 +45,11 @@ function shouldAutoFocusComposer() {
 function UserMessage({
   message,
   slashCommands,
+  onEdit,
 }: {
   message: MessageDto;
   slashCommands: SlashCommandDto[];
+  onEdit: (messageId: string, text: string) => void;
 }) {
   const t = useT();
   const text = message.parts
@@ -60,9 +65,8 @@ function UserMessage({
 
   if (!text) return null;
 
-  if (isCommand && parsed) {
-    const meta = slashCommands.find((c) => c.name.toLowerCase() === parsed.name.toLowerCase());
-    return (
+  const body =
+    isCommand && parsed ? (
       <div className={styles.userCommand}>
         <div className={styles.userCommandHeader}>
           <span className={styles.userCommandBadge}>{t("common.command")}</span>
@@ -70,22 +74,119 @@ function UserMessage({
         </div>
         {parsed.args ? (
           <p className={styles.userCommandArgs}>{parsed.args}</p>
-        ) : meta?.description ? (
-          <p className={styles.userCommandDesc}>{meta.description}</p>
+        ) : metaDescription(slashCommands, parsed.name) ? (
+          <p className={styles.userCommandDesc}>{metaDescription(slashCommands, parsed.name)}</p>
         ) : null}
       </div>
+    ) : (
+      <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
+        {message.parts.map((part) =>
+          part.type === "text" ? (
+            <div key={part.id}>{String(part.payload.text ?? "")}</div>
+          ) : (
+            <PartView key={part.id} part={part} />
+          ),
+        )}
+      </div>
     );
-  }
 
   return (
-    <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
-      {message.parts.map((part) =>
-        part.type === "text" ? (
-          <div key={part.id}>{String(part.payload.text ?? "")}</div>
-        ) : (
-          <PartView key={part.id} part={part} />
-        ),
-      )}
+    <div className={styles.userMsg}>
+      {body}
+      <UserMessageActions text={text} onEdit={() => onEdit(message.id, text)} />
+    </div>
+  );
+}
+
+function metaDescription(slashCommands: SlashCommandDto[], name: string) {
+  return slashCommands.find((c) => c.name.toLowerCase() === name.toLowerCase())?.description;
+}
+
+function MsgIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg className={styles.msgActionIcon} viewBox="0 0 24 24" fill="none" aria-hidden>
+      {children}
+    </svg>
+  );
+}
+
+function IconCopy({ done = false }: { done?: boolean }) {
+  if (done) {
+    return (
+      <MsgIcon>
+        <path
+          d="M5 13l4 4L19 7"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </MsgIcon>
+    );
+  }
+  return (
+    <MsgIcon>
+      <rect x="8" y="8" width="13" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.85" />
+      <path
+        d="M8 16H6.5A2.5 2.5 0 0 1 4 13.5v-9A2.5 2.5 0 0 1 6.5 2H15.5A2.5 2.5 0 0 1 18 4.5V8"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </MsgIcon>
+  );
+}
+
+function IconEdit() {
+  return (
+    <MsgIcon>
+      <path
+        d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinejoin="round"
+      />
+      <path d="M12.8 6.8 17.2 11.2" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" />
+    </MsgIcon>
+  );
+}
+
+function UserMessageActions({ text, onEdit }: { text: string; onEdit: () => void }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className={`${styles.msgActions} ${styles.userMsgActions}`} aria-label={t("common.actions")}>
+      <button
+        type="button"
+        className={styles.msgAction}
+        title={copied ? t("common.copied") : t("common.copy")}
+        aria-label={t("common.copy")}
+        onClick={() => void copy()}
+      >
+        <IconCopy done={copied} />
+      </button>
+      <button
+        type="button"
+        className={styles.msgAction}
+        title={t("common.edit")}
+        aria-label={t("common.edit")}
+        onClick={() => onEdit()}
+      >
+        <IconEdit />
+      </button>
     </div>
   );
 }
@@ -106,7 +207,10 @@ function peelAnswerFromThought(thought: string): { thought: string; answer: stri
   return { thought: first, answer: rest };
 }
 
-function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
+function coalesceParts(
+  parts: MessagePartDto[],
+  opts?: { peelAnswer?: boolean },
+): MessagePartDto[] {
   const out: MessagePartDto[] = [];
   for (const part of parts) {
     const prev = out[out.length - 1];
@@ -141,8 +245,11 @@ function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
     out.push(part);
   }
 
+  // Never peel while streaming: partial thoughts briefly look like an "answer",
+  // then snap back into reasoning when heuristics flip or real text arrives.
+  const peelAnswer = opts?.peelAnswer !== false;
   const hasText = out.some((p) => p.type === "text" && String(p.payload.text ?? "").trim());
-  if (!hasText) {
+  if (peelAnswer && !hasText) {
     const thoughtIdx = out.findIndex((p) => p.type === "thought");
     if (thoughtIdx >= 0) {
       const thought = out[thoughtIdx];
@@ -280,15 +387,11 @@ function PartView({
     if (embedded) {
       return (
         <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
-          <div className={styles.thoughtEmbeddedLabel}>
-            {streaming && <span className={styles.pulseDot} />}
-            {t("common.reasoning")}
-          </div>
           {body}
         </div>
       );
     }
-    // Standalone thoughts are folded into «Шаги»; keep a minimal fallback.
+    // Standalone thoughts are folded into the thinking spoiler; keep a minimal fallback.
     return (
       <div
         className={`${styles.thought} ${open ? styles.thoughtOpen : ""} ${
@@ -352,6 +455,32 @@ function PartView({
   return null;
 }
 
+/** Icon for thinking toggle (composer) and in-message thinking header. */
+function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M12 3.2 13.2 8.1 18 9.3 13.2 10.5 12 15.4 10.8 10.5 6 9.3 10.8 8.1 12 3.2Z"
+        stroke="currentColor"
+        strokeWidth="1.55"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18.2 14.2 18.8 16.6 21.2 17.2 18.8 17.8 18.2 20.2 17.6 17.8 15.2 17.2 17.6 16.6 18.2 14.2Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.2 13.8 6.7 15.8 8.7 16.3 6.7 16.8 6.2 18.8 5.7 16.8 3.7 16.3 5.7 15.8 6.2 13.8Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function isThoughtPart(part: MessagePartDto) {
   return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
 }
@@ -359,39 +488,79 @@ function isThoughtPart(part: MessagePartDto) {
 function StepsSpoiler({
   parts,
   streaming,
+  autoExpand,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
+  autoExpand: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(autoExpand);
   const thoughts = parts.filter(isThoughtPart);
+  const startedAtRef = useRef<number | null>(null);
+  const [elapsedSec, setElapsedSec] = useState(0);
 
-  if (thoughts.length === 0) return null;
+  useEffect(() => {
+    if (autoExpand) setOpen(true);
+  }, [autoExpand, streaming]);
+
+  useEffect(() => {
+    if (!streaming) return;
+    if (startedAtRef.current == null) startedAtRef.current = Date.now();
+    const tick = () => {
+      const start = startedAtRef.current ?? Date.now();
+      setElapsedSec(Math.max(1, Math.round((Date.now() - start) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [streaming]);
+
+  useEffect(() => {
+    if (streaming) return;
+    if (startedAtRef.current == null) return;
+    setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
+  }, [streaming]);
+
+  const pending = streaming && thoughts.length === 0;
+  if (thoughts.length === 0 && !pending) return null;
+
+  const label = streaming || pending
+    ? t("common.thoughtWhile")
+    : elapsedSec > 0
+      ? t("common.thoughtFor", { seconds: elapsedSec, count: elapsedSec })
+      : t("common.steps");
 
   return (
-    <div
-      className={`${styles.steps} ${open ? styles.stepsOpen : ""} ${
-        streaming ? styles.stepsLive : ""
-      }`}
-    >
+    <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`}>
       <button
         type="button"
         tabIndex={-1}
-        className={styles.partToggle}
+        className={styles.stepsToggle}
         aria-expanded={open}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className={styles.thoughtLabel}>
-          {streaming && <span className={styles.pulseDot} />}
-          {t("common.steps")}
+        <span className={styles.stepsIcon}>
+          <ThoughtSparkIcon size={16} />
         </span>
-        <span className={styles.thoughtChevron} aria-hidden>
-          {open ? "▾" : "▸"}
+        <span className={styles.stepsTitle}>{label}</span>
+        <span
+          className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
+          aria-hidden
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M9 6l6 6-6 6"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         </span>
       </button>
-      {open && (
+      {open && thoughts.length > 0 && (
         <div className={styles.stepsBody}>
           {thoughts.map((part, idx) => (
             <PartView
@@ -454,76 +623,56 @@ function MessageActions({ text }: { text: string }) {
         aria-label={t("common.copy")}
         onClick={() => void copy()}
       >
-        {copied ? (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M5 13l4 4L19 7"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        ) : (
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <rect x="8" y="8" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.7" />
-            <path
-              d="M6 16V6a2 2 0 0 1 2-2h10"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-            />
-          </svg>
-        )}
+        <IconCopy done={copied} />
       </button>
       <HoverTip as="button" className={styles.msgAction} aria-label={t("common.like")} text={t("common.soon")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <MsgIcon>
           <path
             d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.85"
             strokeLinejoin="round"
           />
-        </svg>
+        </MsgIcon>
       </HoverTip>
       <HoverTip as="button" className={styles.msgAction} aria-label={t("common.dislike")} text={t("common.soon")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <MsgIcon>
           <path
             d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
             stroke="currentColor"
-            strokeWidth="1.6"
+            strokeWidth="1.85"
             strokeLinejoin="round"
           />
-        </svg>
+        </MsgIcon>
       </HoverTip>
       <HoverTip as="button" className={styles.msgAction} aria-label={t("common.share")} text={t("common.soon")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <MsgIcon>
           <path
             d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
             stroke="currentColor"
-            strokeWidth="1.7"
+            strokeWidth="1.85"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-        </svg>
+        </MsgIcon>
       </HoverTip>
       <HoverTip as="button" className={styles.msgAction} aria-label={t("common.retry")} text={t("common.soon")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <MsgIcon>
           <path
             d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
             stroke="currentColor"
-            strokeWidth="1.7"
+            strokeWidth="1.85"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
-        </svg>
+        </MsgIcon>
       </HoverTip>
       <HoverTip as="button" className={styles.msgAction} aria-label={t("common.more")} text={t("common.soon")}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <circle cx="5" cy="12" r="1.5" fill="currentColor" />
-          <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-          <circle cx="19" cy="12" r="1.5" fill="currentColor" />
-        </svg>
+        <MsgIcon>
+          <circle cx="5" cy="12" r="1.7" fill="currentColor" />
+          <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+          <circle cx="19" cy="12" r="1.7" fill="currentColor" />
+        </MsgIcon>
       </HoverTip>
     </div>
   );
@@ -592,8 +741,11 @@ function isSubagentLike(part: MessagePartDto) {
   );
 }
 
-function coalesceAssistantParts(parts: MessagePartDto[]): MessagePartDto[] {
-  const coalesced = coalesceParts(parts);
+function coalesceAssistantParts(
+  parts: MessagePartDto[],
+  opts?: { peelAnswer?: boolean },
+): MessagePartDto[] {
+  const coalesced = coalesceParts(parts, opts);
   const out: MessagePartDto[] = [];
   const subagentIndexByKey = new Map<string, number>();
 
@@ -634,13 +786,15 @@ function coalesceAssistantParts(parts: MessagePartDto[]): MessagePartDto[] {
 function AssistantParts({
   message,
   streaming,
+  autoExpandSteps,
 }: {
   message: MessageDto;
   streaming: boolean;
+  autoExpandSteps: boolean;
 }) {
   const parts = useMemo(
-    () => coalesceAssistantParts(message.parts),
-    [message.id, message.parts],
+    () => coalesceAssistantParts(message.parts, { peelAnswer: !streaming }),
+    [message.id, message.parts, streaming],
   );
 
   const thoughtParts = useMemo(
@@ -652,11 +806,18 @@ function AssistantParts({
     [parts],
   );
   const plain = useMemo(() => assistantPlainText(message), [message]);
-  const thoughtsStreaming = streaming && mainParts.every((p) => p.type !== "text");
+  const hasAnswerText = mainParts.some(
+    (p) => p.type === "text" && Boolean(String(p.payload.text ?? "").trim()),
+  );
+  const thoughtsLive = streaming && !hasAnswerText;
 
   return (
     <div className={styles.parts}>
-      <StepsSpoiler parts={thoughtParts} streaming={thoughtsStreaming || (streaming && mainParts.length === 0)} />
+      <StepsSpoiler
+        parts={thoughtParts}
+        streaming={thoughtsLive}
+        autoExpand={autoExpandSteps}
+      />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -674,6 +835,22 @@ function AssistantParts({
   );
 }
 
+function findLatestPlan(session: { messages: MessageDto[] } | null): PlanPayload | null {
+  if (!session) return null;
+  for (let mi = session.messages.length - 1; mi >= 0; mi -= 1) {
+    const parts = session.messages[mi]?.parts ?? [];
+    for (let pi = parts.length - 1; pi >= 0; pi -= 1) {
+      const part = parts[pi];
+      if (!part) continue;
+      if (part.type === "plan" || part.type === "question" || part.type === "permission") {
+        const coerced = coercePlanPayload(part.payload);
+        if (coerced) return coerced;
+      }
+    }
+  }
+  return null;
+}
+
 export function ChatPage() {
   const t = useT();
   const activeSession = useAppStore((s) => s.activeSession);
@@ -688,17 +865,34 @@ export function ChatPage() {
   const modelsLoading = useAppStore((s) => s.modelsLoading);
   const ensureModels = useAppStore((s) => s.ensureModels);
   const rememberModelsCatalog = useAppStore((s) => s.rememberModelsCatalog);
+  const pendingPermission = useAppStore((s) => s.pendingPermission);
+  const pendingQuestion = useAppStore((s) => s.pendingQuestion);
+  const answerQuestion = useAppStore((s) => s.answerQuestion);
   const [text, setText] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
+  const composerMultilineRef = useRef(false);
   const [cursorPos, setCursorPos] = useState(0);
   const [slashIndex, setSlashIndex] = useState(0);
   const [slashKeyboardNav, setSlashKeyboardNav] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [planPanelOpen, setPlanPanelOpen] = useState(false);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => settings.defaultModelParams ?? {},
   );
   const [model, setModel] = useState(settings.defaultModel);
   const [folderPicker, setFolderPicker] = useState<{ x: number; y: number } | null>(null);
+  const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
+    try {
+      return localStorage.getItem("acprocess.autoExpandSteps") === "1";
+    } catch {
+      return false;
+    }
+  });
+  /** Assistant message ids that already existed when the toggle was turned on — skip them. */
+  const [thoughtsSkipIds, setThoughtsSkipIds] = useState<Set<string>>(() => new Set());
+  /** True after skip-set is snapshotted so old messages don't flash open. */
+  const [thoughtsArmed, setThoughtsArmed] = useState(false);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -707,48 +901,122 @@ export function ChatPage() {
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("acprocess.autoExpandSteps", autoExpandSteps ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [autoExpandSteps]);
+
+  // When enabling (incl. restored from localStorage) or switching chat — only future replies open.
+  useEffect(() => {
+    if (!autoExpandSteps) {
+      setThoughtsSkipIds(new Set());
+      setThoughtsArmed(false);
+      return;
+    }
+    const ids = new Set(
+      (activeSession?.messages ?? [])
+        .filter((m) => m.role === "assistant")
+        .map((m) => m.id),
+    );
+    setThoughtsSkipIds(ids);
+    setThoughtsArmed(true);
+    // Snapshot once per toggle/session — not on every streamed part.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoExpandSteps, activeSession?.id]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
+  const planPending = pendingQuestion?.kind === "create_plan";
+  const activePlan = useMemo((): PlanPayload | null => {
+    if (planPending && pendingQuestion) {
+      return coercePlanPayload(pendingQuestion.payload) ?? null;
+    }
+    return findLatestPlan(activeSession);
+  }, [planPending, pendingQuestion, activeSession]);
+
+  const planSignature = useMemo(() => {
+    if (!activePlan) return "";
+    return [
+      activePlan.name ?? "",
+      (activePlan.plan ?? "").slice(0, 120),
+      String(activePlan.todos?.length ?? 0),
+      pendingQuestion?.requestId ?? "",
+    ].join("|");
+  }, [activePlan, pendingQuestion?.requestId]);
+
+  useEffect(() => {
+    if (planPending || planSignature) setPlanPanelOpen(true);
+  }, [planPending, pendingQuestion?.requestId, planSignature]);
+
+  useEffect(() => {
+    setPlanPanelOpen(false);
+  }, [activeSession?.id]);
+
   const setComposerMultilineIfNeeded = (next: boolean) => {
+    composerMultilineRef.current = next;
     setComposerMultiline((prev) => (prev === next ? prev : next));
+  };
+
+  const applyComposerHeight = (el: HTMLTextAreaElement) => {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 160)}px`;
   };
 
   const syncComposerSize = (el: HTMLTextAreaElement) => {
     const value = el.value;
+    // Never poke width — that flicker + single↔multi oscillation is what made the pill "dance".
+    el.style.width = "";
+
     if (!value) {
-      el.style.height = "auto";
-      el.style.width = "";
+      el.style.height = "";
       setComposerMultilineIfNeeded(false);
       return;
     }
 
     const hasNewline = value.includes("\n");
-    const pill = el.parentElement;
-    const pillW = pill?.clientWidth ?? el.clientWidth;
+    const pillW = el.parentElement?.clientWidth ?? el.clientWidth;
+    const textBudget = Math.max(96, pillW - 230);
+    const approxFit = Math.max(8, Math.floor(textBudget / 7.2));
+    // Hysteresis: enter early, leave only when clearly short again (no bounce at the edge).
+    const enterAt = Math.min(approxFit, 36);
+    const exitAt = Math.max(4, Math.floor(enterAt * 0.45));
 
-    el.style.height = "auto";
-    el.style.width = "";
-
-    if (hasNewline) {
-      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-      setComposerMultilineIfNeeded(true);
+    if (composerMultilineRef.current) {
+      if (!hasNewline && value.length <= exitAt) {
+        setComposerMultilineIfNeeded(false);
+        requestAnimationFrame(() => {
+          const node = textareaRef.current;
+          if (!node) return;
+          applyComposerHeight(node);
+        });
+        return;
+      }
+      applyComposerHeight(el);
       return;
     }
 
-    // Probe whether text still wraps if controls sit on the same row (~220px chrome).
-    const narrowW = Math.max(120, pillW - 220);
-    el.style.width = `${narrowW}px`;
-    const narrowH = el.scrollHeight;
-    el.style.width = "";
-
-    const needsMultiline = narrowH > 48;
-    setComposerMultilineIfNeeded(needsMultiline);
-
-    if (needsMultiline) {
-      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
-    } else {
-      el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+    if (hasNewline) {
+      setComposerMultilineIfNeeded(true);
+      applyComposerHeight(el);
+      return;
     }
+
+    el.style.height = "auto";
+    const wrapsNow = el.scrollHeight > 44;
+    if (wrapsNow || value.length >= enterAt) {
+      setComposerMultilineIfNeeded(true);
+      requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) return;
+        applyComposerHeight(node);
+      });
+      return;
+    }
+
+    applyComposerHeight(el);
   };
 
   // Models / ACP only after the user explicitly connected an agent.
@@ -759,8 +1027,15 @@ export function ChatPage() {
     agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
   const models = catalog?.models ?? [];
   const modelParams = catalog?.modelParams ?? [];
+  const modeOptions = agentProvider
+    ? sanitizeCatalogModes(agentProvider, catalog?.modes)
+    : [];
+  const modeSwitcher = modeOptions.length >= 2 ? modeOptions : [];
+  const sessionMode = activeSession?.mode ?? settings.defaultMode;
   // Block typing while agent missing, or while models are loading with empty list.
-  const composerLocked = agentMissing || (modelsLoading && models.length === 0);
+  // Once the agent is already answering, don't keep the composer stuck on "loading models".
+  const composerLocked =
+    agentMissing || (!streaming && modelsLoading && models.length === 0);
 
   const slashCommands = useMemo(
     () => mergeSlashCommands(activeSession?.slashCommands, t),
@@ -791,7 +1066,7 @@ export function ChatPage() {
     setText(insertion);
     setCursorPos(insertion.length);
     setSlashMenuDismissed(true);
-    setComposerMultiline(insertion.includes("\n"));
+    setComposerMultilineIfNeeded(insertion.includes("\n"));
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
@@ -812,7 +1087,7 @@ export function ChatPage() {
     if (cmd.name === "stop") {
       setText("");
       setCursorPos(0);
-      setComposerMultiline(false);
+      setComposerMultilineIfNeeded(false);
       const el = textareaRef.current;
       if (el) el.style.height = "auto";
       void cancelPrompt();
@@ -835,7 +1110,8 @@ export function ChatPage() {
     }
     if (value === "/stop") {
       setText("");
-      setComposerMultiline(false);
+      setEditingMessageId(null);
+      setComposerMultilineIfNeeded(false);
       void cancelPrompt();
       return;
     }
@@ -845,9 +1121,11 @@ export function ChatPage() {
       keepComposerFocus.current = false;
     }
     userJustSentRef.current = true;
+    const editId = editingMessageId;
     setText("");
+    setEditingMessageId(null);
     setCursorPos(0);
-    setComposerMultiline(false);
+    setComposerMultilineIfNeeded(false);
     setSlashMenuDismissed(true);
     const el = textareaRef.current;
     if (el) {
@@ -855,14 +1133,14 @@ export function ChatPage() {
     }
     if (shouldAutoFocusComposer()) {
       focusComposer();
-      void sendPrompt(value).finally(() => {
+      void sendPrompt(value, editId ? { editMessageId: editId } : undefined).finally(() => {
         requestAnimationFrame(focusComposer);
         window.setTimeout(focusComposer, 0);
         window.setTimeout(focusComposer, 100);
       });
     } else {
       textareaRef.current?.blur();
-      void sendPrompt(value);
+      void sendPrompt(value, editId ? { editMessageId: editId } : undefined);
     }
   };
 
@@ -959,6 +1237,8 @@ export function ChatPage() {
             provider: agentProvider,
             models: res.models?.length ? res.models : models,
             modelParams: nextModelParams,
+            // Never keep prior Cursor modes when the agent returns an empty list (OMP).
+            modes: res.modes ?? [],
             currentModel: res.currentModel ?? nextModel,
             at: Date.now(),
           });
@@ -1008,6 +1288,7 @@ export function ChatPage() {
           provider: agentProvider,
           models,
           modelParams: committed,
+          modes: catalog?.modes ?? [],
           currentModel: model,
           at: Date.now(),
         });
@@ -1021,6 +1302,65 @@ export function ChatPage() {
     // Don't carry Fast/Effort from the previous model — they often aren't valid
     // for the new one and used to leave the ACP session broken.
     await applyModelSelection(value, {});
+  };
+
+  const modeLabel = (value: string, fallback?: string) => {
+    if (value === "agent") return t("modes.agent");
+    if (value === "plan") return t("modes.plan");
+    if (value === "ask") return t("modes.ask");
+    return (fallback || value).trim() || value;
+  };
+
+  const onModeChange = async (nextMode: string) => {
+    if (nextMode !== "agent" && nextMode !== "plan" && nextMode !== "ask") return;
+    const mode = nextMode as AgentMode;
+    if (mode === sessionMode) return;
+
+    const sessionId = activeSession?.id ?? null;
+    const prevMode = sessionMode;
+    const prevSettingsMode = settings.defaultMode;
+
+    // Show the new mode immediately — ACP sync can take seconds.
+    useAppStore.setState((s) => ({
+      settings: { ...s.settings, defaultMode: mode },
+      sessions: sessionId
+        ? s.sessions.map((row) => (row.id === sessionId ? { ...row, mode } : row))
+        : s.sessions,
+      activeSession:
+        sessionId && s.activeSession?.id === sessionId
+          ? { ...s.activeSession, mode }
+          : s.activeSession,
+    }));
+
+    try {
+      if (sessionId) {
+        const res = await api.setSessionMode(sessionId, mode);
+        if (res.session) {
+          useAppStore.setState((s) => ({
+            settings: { ...s.settings, defaultMode: mode },
+            sessions: s.sessions.map((row) => (row.id === res.session!.id ? res.session! : row)),
+            activeSession:
+              s.activeSession?.id === res.session!.id
+                ? { ...s.activeSession, ...res.session!, mode: res.session!.mode ?? mode }
+                : s.activeSession,
+          }));
+        }
+      } else {
+        await saveSettings({ defaultMode: mode });
+      }
+    } catch (err) {
+      useAppStore.setState((s) => ({
+        error: err instanceof Error ? err.message : String(err),
+        settings: { ...s.settings, defaultMode: prevSettingsMode },
+        sessions: sessionId
+          ? s.sessions.map((row) => (row.id === sessionId ? { ...row, mode: prevMode } : row))
+          : s.sessions,
+        activeSession:
+          sessionId && s.activeSession?.id === sessionId
+            ? { ...s.activeSession, mode: prevMode }
+            : s.activeSession,
+      }));
+    }
   };
 
   const onParamsChange = async (next: Record<string, string>) => {
@@ -1044,7 +1384,7 @@ export function ChatPage() {
         // ignore
       }
     }
-    syncComposerSize(el);
+    // Don't syncComposerSize here during stream — height thrash makes the thread jump.
   };
 
   useEffect(() => {
@@ -1072,27 +1412,71 @@ export function ChatPage() {
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
   const activeSessionId = activeSession?.id ?? null;
+  const streamDigest = useMemo(() => {
+    if (!activeSession?.messages.length) return "";
+    let parts = 0;
+    let chars = 0;
+    for (const m of activeSession.messages) {
+      parts += m.parts.length;
+      for (const p of m.parts) {
+        const text = p.payload?.text;
+        if (typeof text === "string") chars += text.length;
+        const message = p.payload?.message;
+        if (typeof message === "string") chars += message.length;
+      }
+    }
+    return `${parts}:${chars}:${activeSession.status}`;
+  }, [activeSession?.messages, activeSession?.status]);
   const prevSessionIdRef = useRef<string | null>(null);
+  const stickToBottomRef = useRef(true);
+  const scrollRafRef = useRef(0);
 
   const scrollThreadToEnd = () => {
     const thread = threadRef.current;
-    const end = messageEndRef.current;
     if (!thread) return;
-    thread.scrollTop = thread.scrollHeight;
-    end?.scrollIntoView({ block: "end", behavior: "auto" });
+    // Only adjust the thread scroller — scrollIntoView also nudges ancestors and feels jumpy.
+    const top = thread.scrollHeight - thread.clientHeight;
+    if (Math.abs(thread.scrollTop - top) < 1) return;
+    thread.scrollTop = top;
   };
 
+  const scheduleScrollToEnd = () => {
+    if (!stickToBottomRef.current) return;
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = window.requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      if (stickToBottomRef.current) scrollThreadToEnd();
+    });
+  };
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    const onScroll = () => {
+      const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+      stickToBottomRef.current = gap < 140;
+    };
+    thread.addEventListener("scroll", onScroll, { passive: true });
+    return () => thread.removeEventListener("scroll", onScroll);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
+    };
+  }, []);
+
+  // Hard snap when switching chats or right after send / permission card mounts.
   useLayoutEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
     const sessionChanged = activeSessionId !== prevSessionIdRef.current;
+    const promptId =
+      pendingPermission?.requestId ?? pendingQuestion?.requestId ?? null;
     if (sessionChanged) {
       prevSessionIdRef.current = activeSessionId;
+      stickToBottomRef.current = true;
       scrollThreadToEnd();
-      requestAnimationFrame(() => {
-        scrollThreadToEnd();
-        requestAnimationFrame(scrollThreadToEnd);
-      });
       userJustSentRef.current = false;
       if (!shouldAutoFocusComposer()) {
         textareaRef.current?.blur();
@@ -1101,21 +1485,45 @@ export function ChatPage() {
       }
       return;
     }
-    const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 120;
-    if (userJustSentRef.current || nearBottom) {
-      scrollThreadToEnd();
+    if (userJustSentRef.current) {
+      stickToBottomRef.current = true;
       userJustSentRef.current = false;
+      scrollThreadToEnd();
+      return;
     }
-    if (keepComposerFocus.current) focusComposer();
-  }, [activeSessionId, lastMessageId, messageCount, activeSession?.status]);
+    if (promptId) {
+      stickToBottomRef.current = true;
+      scrollThreadToEnd();
+    }
+  }, [
+    activeSessionId,
+    lastMessageId,
+    messageCount,
+    pendingPermission?.requestId,
+    pendingQuestion?.requestId,
+  ]);
+
+  // Soft follow during streaming — one rAF per frame, after paint (no layout fight).
+  useEffect(() => {
+    if (userJustSentRef.current) return;
+    scheduleScrollToEnd();
+  }, [streamDigest]);
 
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
     const onFocusIn = (e: FocusEvent) => {
       if (!shouldAutoFocusComposer() || !keepComposerFocus.current) return;
-      const target = e.target as Node | null;
+      const target = e.target as HTMLElement | null;
       if (!target || target === textareaRef.current) return;
+      // Don't steal focus from permission / question actions or other controls in the thread.
+      if (
+        target.closest(
+          "button, a, input, textarea, select, [role='button'], [role='option'], [role='menuitem']",
+        )
+      ) {
+        return;
+      }
       if (thread.contains(target)) {
         focusComposer();
       }
@@ -1141,7 +1549,8 @@ export function ChatPage() {
     .find((m) => m.role === "assistant")?.id;
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""}`}>
+      <div className={styles.mainColumn}>
       <div className={styles.thread} ref={threadRef}>
         {!activeSession && (
           <div className={styles.empty}>
@@ -1184,11 +1593,11 @@ export function ChatPage() {
 
         {activeSession?.messages.map((msg) => {
           const isLiveAssistant = streaming && msg.id === lastAssistantId;
-          // Don't render an empty assistant shell — it caused a blank gap
-          // between "Агент думает" and the first streamed tokens.
+          // Hide empty historical assistant shells, but keep the live one so «Думаю…» shows ASAP.
           if (
             msg.role === "assistant" &&
-            !hasRenderableAssistantContent(msg.parts)
+            !hasRenderableAssistantContent(msg.parts) &&
+            !isLiveAssistant
           ) {
             return null;
           }
@@ -1204,29 +1613,79 @@ export function ChatPage() {
               }}
             >
               {msg.role === "user" ? (
-                <UserMessage message={msg} slashCommands={slashCommands} />
+                <UserMessage
+                  message={msg}
+                  slashCommands={slashCommands}
+                  onEdit={(messageId, value) => {
+                    setEditingMessageId(messageId);
+                    setText(value);
+                    window.requestAnimationFrame(() => {
+                      const el = textareaRef.current;
+                      if (!el) return;
+                      el.focus();
+                      syncComposerSize(el);
+                      const end = value.length;
+                      el.setSelectionRange(end, end);
+                    });
+                  }}
+                />
               ) : (
-                <AssistantParts message={msg} streaming={!!isLiveAssistant} />
+                <AssistantParts
+                  message={msg}
+                  streaming={!!isLiveAssistant}
+                  autoExpandSteps={
+                    thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
+                  }
+                />
               )}
             </article>
           );
         })}
+        {streaming && activeSession?.messages.at(-1)?.role === "user" ? (
+          <article className={`${styles.msg} ${styles.assistant} ${styles.live}`}>
+            <div className={styles.parts}>
+              <StepsSpoiler
+                parts={[]}
+                streaming
+                autoExpand={thoughtsArmed && autoExpandSteps}
+              />
+            </div>
+          </article>
+        ) : null}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
       </div>
+
+      {(pendingPermission || pendingQuestion) &&
+      (!pendingPermission || pendingPermission.sessionId === activeSession?.id) &&
+      (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
+        <div className={styles.inlinePromptDock}>
+          <ChatInlinePrompt onOpenPlan={() => setPlanPanelOpen(true)} />
+        </div>
+      ) : null}
 
       {error && <div className={styles.banner}>{error}</div>}
 
       <form className={styles.composer} onSubmit={onSubmit}>
         <div className={styles.composerInner}>
+          {editingMessageId && (
+            <div className={styles.typingBar} aria-live="polite">
+              <span>{t("chat.editingMessage")}</span>
+              <button
+                type="button"
+                className={styles.editCancel}
+                onClick={() => {
+                  setEditingMessageId(null);
+                  setText("");
+                  setComposerMultilineIfNeeded(false);
+                }}
+              >
+                {t("common.cancel")}
+              </button>
+            </div>
+          )}
           {agentMissing && (
             <div className={styles.typingBar} aria-live="polite">
               {t("common.connectAgentInSettings")}
-            </div>
-          )}
-          {composerLocked && !agentMissing && (
-            <div className={styles.typingBar} aria-live="polite">
-              <span className={styles.modelsLoaderSpin} aria-hidden />
-              <span>{t("common.loadingModels")}</span>
             </div>
           )}
           {activeSession?.status === "running" && (
@@ -1242,28 +1701,70 @@ export function ChatPage() {
           {activeSession?.status === "waiting" && (
             <div className={styles.typingBar}>{t("common.waitingInput")}</div>
           )}
-          {activeSession?.cwd?.trim() ? (
-            <div className={styles.sessionCwd} title={activeSession.cwd}>
-              <span className={styles.sessionCwdIcon} aria-hidden>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <path
-                    d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
-              <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
+          {composerLocked && !agentMissing && !streaming && (
+            <div className={styles.typingBar} aria-live="polite">
+              <span className={styles.modelsLoaderSpin} aria-hidden />
+              <span>{t("common.loadingModels")}</span>
             </div>
-          ) : null}
+          )}
+          <div className={styles.composerMeta}>
+            <div className={styles.composerMetaStart}>
+              {activeSession?.cwd?.trim() ? (
+                <div className={styles.sessionCwd} title={activeSession.cwd}>
+                  <span className={styles.sessionCwdIcon} aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}`}
+                aria-pressed={autoExpandSteps}
+                aria-label={t("common.autoSteps")}
+                title={t("common.autoStepsHint")}
+                onClick={() => setAutoExpandSteps((v) => !v)}
+              >
+                <span className={styles.metaChipIcon} aria-hidden>
+                  <ThoughtSparkIcon size={15} />
+                </span>
+                <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
+              </button>
+            </div>
+            {modeSwitcher.length > 0 ? (
+              <OptionPicker
+                className={`${styles.composerMode} ${styles.composerModeDesktop}`}
+                variant="quiet"
+                placement="up"
+                menuTitle={t("modes.label")}
+                value={
+                  modeSwitcher.some((m) => m.value === sessionMode)
+                    ? sessionMode
+                    : modeSwitcher[0]?.value ?? "agent"
+                }
+                disabled={composerLocked}
+                onChange={(v) => void onModeChange(v)}
+                options={modeSwitcher.map((m) => ({
+                  value: m.value,
+                  label: modeLabel(m.value, m.name),
+                }))}
+              />
+            ) : null}
+          </div>
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               streaming ? styles.pillBusy : ""
@@ -1394,6 +1895,26 @@ export function ChatPage() {
                   onParamsChange={(next) => void onParamsChange(next)}
                 />
 
+                {modeSwitcher.length > 0 ? (
+                  <OptionPicker
+                    className={`${styles.composerMode} ${styles.composerModeMobile}`}
+                    variant="compact"
+                    placement="up"
+                    menuTitle={t("modes.label")}
+                    value={
+                      modeSwitcher.some((m) => m.value === sessionMode)
+                        ? sessionMode
+                        : modeSwitcher[0]?.value ?? "agent"
+                    }
+                    disabled={composerLocked}
+                    onChange={(v) => void onModeChange(v)}
+                    options={modeSwitcher.map((m) => ({
+                      value: m.value,
+                      label: modeLabel(m.value, m.name),
+                    }))}
+                  />
+                ) : null}
+
                 {streaming ? (
                   <button
                     type="button"
@@ -1402,8 +1923,8 @@ export function ChatPage() {
                     aria-label={t("common.stop")}
                     onClick={() => void cancelPrompt()}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    <svg className={styles.stopIcon} width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                      <rect x="4" y="4" width="16" height="16" rx="2.5" />
                     </svg>
                   </button>
                 ) : (
@@ -1437,8 +1958,6 @@ export function ChatPage() {
         </div>
       </form>
 
-      <PermissionModal />
-      <QuestionModal />
       {folderPicker && (
         <CreateSessionFolderPicker
           x={folderPicker.x}
@@ -1453,6 +1972,33 @@ export function ChatPage() {
           }}
         />
       )}
+      </div>
+
+      <PlanTabButton
+        visible={Boolean(activePlan) && !planPanelOpen}
+        open={planPanelOpen}
+        pending={planPending}
+        onClick={() => setPlanPanelOpen(true)}
+      />
+      <PlanSidePanel
+        plan={activePlan}
+        open={planPanelOpen}
+        pending={planPending}
+        onClose={() => setPlanPanelOpen(false)}
+        onAccept={
+          planPending
+            ? () => void answerQuestion({ outcome: { outcome: "accepted" } })
+            : undefined
+        }
+        onReject={
+          planPending
+            ? () =>
+                void answerQuestion({
+                  outcome: { outcome: "rejected", reason: "rejected by user" },
+                })
+            : undefined
+        }
+      />
     </div>
   );
 }

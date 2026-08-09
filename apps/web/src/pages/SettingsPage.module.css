@@ -555,6 +555,22 @@
   color: var(--text);
 }
 
+.primaryBtn {
+  justify-self: start;
+  border: none;
+  border-radius: 999px;
+  padding: 11px 16px;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -672,4 +688,141 @@
   .page {
     padding: 24px;
   }
+}
+
+.diagActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.diagList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.diagCard {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+}
+
+.diagCardMain {
+  min-width: 0;
+  flex: 1 1 200px;
+  display: grid;
+  gap: 4px;
+}
+
+.diagCardTop {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: baseline;
+}
+
+.diagReason {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.diagItemMeta {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.diagPath {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagCardActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.diagCardActions .secondaryBtn {
+  padding: 8px 12px;
+  font-size: 0.82rem;
+}
+
+.diagDelete {
+  margin: 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.diagDelete:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+}
+
+.usageMeter {
+  display: grid;
+  gap: 10px;
+}
+
+.usageMeterTrack {
+  height: 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+
+.usageMeterFill {
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--accent) 75%, var(--text));
+  transition: width 0.25s ease;
+}
+
+.usageStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.usageStats strong {
+  color: var(--text);
+  font-size: 1.05rem;
+}
+
+.usageCost {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }

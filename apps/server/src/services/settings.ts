@@ -43,6 +43,9 @@ function mergeSettings(raw: unknown): AppSettings {
   ) {
     merged.connectedProvider = DEFAULT_SETTINGS.connectedProvider;
   }
+  if (typeof merged.diagnosticsDir !== "string") {
+    merged.diagnosticsDir = DEFAULT_SETTINGS.diagnosticsDir;
+  }
   return merged;
 }
 

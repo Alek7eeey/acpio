@@ -18,6 +18,8 @@ import {
   appendTextChunk,
   createMessage,
   getSessionDetail,
+  replaceUserMessageText,
+  truncateMessagesAfter,
   updatePart,
   updateSession,
 } from "../services/sessions.js";
@@ -25,7 +27,10 @@ import { broadcastToSession } from "../services/wsHub.js";
 import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
+  findModeConfigOption,
   findModelConfigOption,
+  isSwitchableModeList,
+  listAgentModes,
   listModelParamOptions,
   peelAnswerFromThought,
   type AcpRequest,
@@ -36,6 +41,27 @@ function isSubagentTool(title: string, kind: string) {
   return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
     `${title} ${kind}`,
   );
+}
+
+/** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
+function coerceUiMode(raw: string): AgentMode | null {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (!v) return null;
+  if (v === "agent" || v === "plan" || v === "ask") return v;
+  if (v === "code" || v === "edit" || v === "default" || v === "normal") return "agent";
+  if (v === "architect") return "plan";
+  if (v === "chat" || v === "readonly" || v === "read-only" || v === "read") return "ask";
+  return null;
+}
+
+async function applyAgentReportedMode(rt: SessionRuntime, rawModeId: string) {
+  const mode = coerceUiMode(rawModeId);
+  if (!mode) return;
+  rt.client?.applyReportedMode(mode);
+  const detail = await getSessionDetail(rt.sessionId);
+  if (detail?.mode === mode) return;
+  await updateSettings({ defaultMode: mode });
+  await updateSession(rt.sessionId, { mode });
 }
 
 function textFromUnknown(value: unknown): string {
@@ -124,6 +150,7 @@ function toModelParams(options: ConfigOption[]): ModelParamDto[] {
 }
 
 type ModelOption = { value: string; name: string };
+type ModeOption = { value: string; name: string };
 
 function toModelList(options: ConfigOption[]): ModelOption[] {
   const modelOpt = findModelConfigOption(options);
@@ -131,6 +158,12 @@ function toModelList(options: ConfigOption[]): ModelOption[] {
     value: o.value,
     name: modelDisplayName(o.value, o.name),
   }));
+}
+
+function toModesList(options: ConfigOption[], provider: AgentProvider, sessionModes?: Array<{ value: string; name: string }>): ModeOption[] {
+  const modes = listAgentModes(options, provider, sessionModes);
+  // Hide non-switchable lists (OMP's lone "default") from the client catalog.
+  return isSwitchableModeList(modes) ? modes : [];
 }
 
 const deniedModelsByProvider = new Map<AgentProvider, Set<string>>();
@@ -155,7 +188,7 @@ function denyModel(provider: AgentProvider, model: string) {
       modelsCache.currentModel && !denied.has(modelsCache.currentModel)
         ? modelsCache.currentModel
         : models[0]?.value;
-    rememberModels(provider, currentModel, models, modelsCache.modelParams);
+    rememberModels(provider, currentModel, models, modelsCache.modelParams, modelsCache.modes);
   }
 }
 
@@ -183,6 +216,8 @@ function pickCurrentModel(
 type PendingRequest = {
   resolve: (value: unknown) => void;
   kind: AcpRequest["kind"];
+  /** Original JSON-RPC id from the agent (number | string) — do not re-parse from the URL key. */
+  rpcId: string | number;
 };
 
 class SessionRuntime {
@@ -198,9 +233,19 @@ class SessionRuntime {
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
+  usage: import("@acprocess/shared").SessionUsageDto | null = null;
   pending = new Map<string, PendingRequest>();
   running = false;
+  /**
+   * Active prompt generation. Bumped when a prompt starts.
+   * Stream chunks captured under an older gen (or while acceptingStream=false) are dropped.
+   */
+  streamGen = 0;
+  /** False after Stop until the next prompt starts — blocks late tokens. */
+  acceptingStream = false;
   toolsHintSent = false;
+  /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
+  disposing = false;
   private chain: Promise<void> = Promise.resolve();
 
   constructor(public readonly sessionId: string) {}
@@ -227,6 +272,46 @@ function requestIdFor(sessionId: string, rpcId: string | number) {
   return `${sessionId}:${String(rpcId)}`;
 }
 
+function parseRpcId(requestId: string, sessionId: string): string | number {
+  const rpcId = requestId.slice(sessionId.length + 1);
+  const numericId = Number(rpcId);
+  return Number.isFinite(numericId) && String(numericId) === rpcId ? numericId : rpcId;
+}
+
+/** Normalize ACP plan updates / create_plan payloads for the UI side panel. */
+function normalizePlanPartPayload(raw: Record<string, unknown>): Record<string, unknown> {
+  const name = String(raw.name ?? raw.title ?? "").trim();
+  const overview = String(raw.overview ?? "").trim();
+  const plan = String(raw.plan ?? raw.content ?? "").trim();
+  const todosFromField = Array.isArray(raw.todos) ? raw.todos : null;
+  const entries = Array.isArray(raw.entries) ? raw.entries : null;
+  const phases = Array.isArray(raw.phases) ? raw.phases : undefined;
+
+  const todos =
+    todosFromField ??
+    (entries
+      ? entries.map((item, i) => {
+          const row = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+          return {
+            id: String(row.id ?? `entry-${i}`),
+            content: String(row.content ?? row.title ?? "").trim(),
+            status: String(row.status ?? "pending"),
+          };
+        })
+      : undefined);
+
+  const cleanedTodos = todos?.filter((t) => String((t as { content?: string }).content ?? "").trim());
+
+  return {
+    ...raw,
+    ...(name ? { name } : {}),
+    ...(overview ? { overview } : {}),
+    ...(plan ? { plan } : {}),
+    ...(cleanedTodos?.length ? { todos: cleanedTodos } : {}),
+    ...(phases ? { phases } : {}),
+  };
+}
+
 export async function ensureAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
@@ -249,17 +334,31 @@ export async function ensureAcp(
   });
 
   client.on("exit", async () => {
+    const intentional = rt.disposing;
     rt.client = null;
     rt.clientReady = null;
     rt.provider = null;
     rt.running = false;
     rt.toolsHintSent = false;
-    await updateSession(sessionId, { status: "closed" });
+    // Don't flip the chat to "closed" when we dispose ACP to regenerate after edit.
+    if (!intentional) {
+      await updateSession(sessionId, { status: "closed" });
+    }
   });
 
   client.on("update", (update) => {
+    const gen = rt.streamGen;
     void rt.enqueue(async () => {
       try {
+        const isStream =
+          update.kind === "agent_message_chunk" ||
+          update.kind === "agent_thought_chunk" ||
+          update.kind === "mixed_chunks";
+        // Drop tokens from a cancelled / superseded prompt (including chunks that
+        // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
+        if (isStream && (!rt.acceptingStream || rt.streamGen !== gen)) {
+          return;
+        }
         await handleUpdate(rt, update);
       } catch (err) {
         console.error("update handler error", err);
@@ -291,12 +390,13 @@ export async function ensureAcp(
         toModelList(client.configOptions),
       );
       const modelParams = toModelParams(client.configOptions);
+      const modes = toModesList(client.configOptions, opts.provider, client.sessionModes);
       const currentModel = pickCurrentModel(
         models,
         findModelConfigOption(client.configOptions)?.currentValue,
       );
-      if (models.length || modelParams.length) {
-        rememberModels(opts.provider, currentModel, models, modelParams);
+      if (models.length || modelParams.length || modes.length) {
+        rememberModels(opts.provider, currentModel, models, modelParams, modes);
       }
       await updateSession(sessionId, {
         acpSessionId: client.sessionId,
@@ -345,6 +445,38 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     return;
   }
 
+  if (update.kind === "current_mode") {
+    await applyAgentReportedMode(rt, update.modeId);
+    return;
+  }
+
+  if (update.kind === "config_options") {
+    rt.client?.applyConfigOptionsUpdate(update.configOptions);
+    const modeOpt = findModeConfigOption(rt.client?.configOptions ?? update.configOptions);
+    if (modeOpt?.currentValue) {
+      await applyAgentReportedMode(rt, String(modeOpt.currentValue));
+    }
+    return;
+  }
+
+  if (update.kind === "usage") {
+    const usage: import("@acprocess/shared").SessionUsageDto = {
+      used: update.used,
+      size: update.size,
+      cost: update.cost,
+      updatedAt: new Date().toISOString(),
+      provider: rt.provider ?? undefined,
+    };
+    rt.usage = usage;
+    rememberProviderUsage(rt.provider, usage);
+    broadcastToSession(rt.sessionId, {
+      type: "usage.updated",
+      sessionId: rt.sessionId,
+      usage,
+    });
+    return;
+  }
+
   // Metadata-only updates should not create empty assistant bubbles
   if (
     update.kind === "session_info" ||
@@ -355,6 +487,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "agent_message_chunk") {
+    if (!rt.acceptingStream) return;
     if (!update.text) return;
     const messageId = await ensureAssistantMessage(rt);
     // Continue same text part for the turn; tools may split later via clearing openTextPartId
@@ -369,6 +502,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "mixed_chunks") {
+    if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     if (update.thought) {
       const partId = await appendTextChunk(
@@ -394,6 +528,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "agent_thought_chunk") {
+    if (!rt.acceptingStream) return;
     if (!update.text) return;
     const messageId = await ensureAssistantMessage(rt);
     // Always one reasoning block per turn
@@ -493,7 +628,9 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   if (update.kind === "plan") {
     const messageId = await ensureAssistantMessage(rt);
     rt.openTextPartId = null;
-    await appendPart(rt.sessionId, messageId, "plan", update.raw);
+    const payload = normalizePlanPartPayload(update.raw);
+    await appendPart(rt.sessionId, messageId, "plan", payload);
+    return;
   }
 }
 
@@ -549,9 +686,11 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
       payload: { ...req.params, options },
     });
 
+    console.log(`[acp:${rt.sessionId}] permission pending rpcId=${String(req.id)}`);
     await new Promise<void>((resolve) => {
       rt.pending.set(reqKey, {
         kind: "permission",
+        rpcId: req.id,
         resolve: () => resolve(),
       });
     });
@@ -561,11 +700,11 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
   await rt.enqueue(async () => {
     const messageId = await ensureAssistantMessage(rt);
     const kind = req.kind === "ask_question" ? "question" : "plan";
-    await appendPart(rt.sessionId, messageId, kind === "question" ? "question" : "plan", {
-      requestId: reqKey,
-      pending: true,
-      ...req.params,
-    });
+    const payload =
+      kind === "plan"
+        ? normalizePlanPartPayload({ requestId: reqKey, pending: true, ...req.params })
+        : { requestId: reqKey, pending: true, ...req.params };
+    await appendPart(rt.sessionId, messageId, kind === "question" ? "question" : "plan", payload);
   });
   await updateSession(rt.sessionId, { status: "waiting" });
   broadcastToSession(rt.sessionId, {
@@ -573,12 +712,16 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
     sessionId: rt.sessionId,
     requestId: reqKey,
     kind: req.kind === "ask_question" ? "ask_question" : "create_plan",
-    payload: req.params,
+    payload:
+      req.kind === "create_plan"
+        ? normalizePlanPartPayload(req.params as Record<string, unknown>)
+        : req.params,
   });
 
   await new Promise<void>((resolve) => {
     rt.pending.set(reqKey, {
       kind: req.kind,
+      rpcId: req.id,
       resolve: () => resolve(),
     });
   });
@@ -638,30 +781,84 @@ async function handleExtension(
   }
 }
 
+function buildPriorTranscript(
+  messages: Array<{ id: string; role: string; parts: Array<{ type: string; payload: Record<string, unknown> }> }>,
+  upToExclusiveId: string,
+) {
+  const lines: string[] = [];
+  for (const msg of messages) {
+    if (msg.id === upToExclusiveId) break;
+    const text = msg.parts
+      .filter((p) => p.type === "text")
+      .map((p) => String(p.payload.text ?? ""))
+      .join("\n")
+      .trim();
+    if (!text) continue;
+    lines.push(`${msg.role === "user" ? "User" : "Assistant"}: ${text}`);
+  }
+  return lines.join("\n\n");
+}
+
 export async function runPrompt(
   sessionId: string,
   text: string,
-  opts: { provider: AgentProvider; cwd: string; mode: AgentMode; titleHint?: string },
+  opts: {
+    provider: AgentProvider;
+    cwd: string;
+    mode: AgentMode;
+    titleHint?: string;
+    /** Edit existing user message: truncate later turns and regenerate. */
+    editMessageId?: string;
+  },
 ) {
   const settings = await getSettings();
   const locale = settings.locale ?? "ru";
-  const rt = getRuntime(sessionId);
+  let rt = getRuntime(sessionId);
   if (rt.running) {
     throw Object.assign(new Error(errorMessage(locale, "sessionBusy")), { code: "sessionBusy" });
+  }
+
+  let promptUserText = text;
+  let priorTranscript = "";
+
+  if (opts.editMessageId) {
+    const detailBefore = await getSessionDetail(sessionId);
+    if (!detailBefore) {
+      throw Object.assign(new Error("Session not found"), { statusCode: 404 });
+    }
+    const target = detailBefore.messages.find((m) => m.id === opts.editMessageId);
+    if (!target || target.role !== "user") {
+      throw Object.assign(new Error("User message not found"), { statusCode: 404 });
+    }
+    await truncateMessagesAfter(sessionId, opts.editMessageId);
+    await replaceUserMessageText(sessionId, opts.editMessageId, text);
+    const detailAfter = await getSessionDetail(sessionId);
+    priorTranscript = buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
+    promptUserText = text;
+
+    try {
+      await cancelPrompt(sessionId);
+    } catch {
+      // ignore
+    }
+    disposeRuntime(sessionId);
+    rt = getRuntime(sessionId);
   }
 
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
   const acpReady = ensureAcp(sessionId, opts);
 
-  const userMsg = await createMessage(sessionId, "user");
-  const trimmed = text.trim();
-  const slashMatch = trimmed.match(/^\/([\w-]+)/);
-  await appendPart(sessionId, userMsg.id, "text", {
-    text,
-    ...(slashMatch
-      ? { isSlashCommand: true, commandName: slashMatch[1] }
-      : {}),
-  });
+  if (!opts.editMessageId) {
+    const userMsg = await createMessage(sessionId, "user");
+    const trimmed = text.trim();
+    const slashMatch = trimmed.match(/^\/([\w-]+)/);
+    await appendPart(sessionId, userMsg.id, "text", {
+      text,
+      ...(slashMatch
+        ? { isSlashCommand: true, commandName: slashMatch[1] }
+        : {}),
+    });
+  }
 
   if (opts.titleHint) {
     await updateSession(sessionId, {
@@ -670,24 +867,37 @@ export async function runPrompt(
   }
 
   rt.running = true;
+  rt.streamGen += 1;
+  rt.acceptingStream = true;
   rt.assistantMessageId = null;
   rt.openTextPartId = null;
   rt.openThoughtPartId = null;
   rt.turnThoughtPartId = null;
   rt.toolPartByCallId.clear();
   await updateSession(sessionId, { status: "running" });
-  // Assistant bubble is created only when the first real update arrives,
-  // so the UI doesn't show an empty "Агент" gap before tokens stream.
+  // Create the assistant bubble immediately so the UI can show «Думаю…» without waiting
+  // for the first ACP token (spawn/prompt can take a while).
+  await ensureAssistantMessage(rt);
 
   try {
     const client = await acpReady;
     // UI shows the raw user text; agent gets a tools reminder so it doesn't refuse web lookups.
-    let promptText = text;
+    let promptText = promptUserText;
+    if (priorTranscript) {
+      promptText =
+        `Earlier conversation (for context only):\n${priorTranscript}\n\n` +
+        `The user edited their last message. Continue from this message:\n${promptUserText}`;
+    }
     if (!rt.toolsHintSent) {
       rt.toolsHintSent = true;
-      promptText = `${text}\n\n${t(locale, "agent.toolsHint")}`;
+      promptText = `${promptText}\n\n${t(locale, "agent.toolsHint")}`;
     }
     const result = await client.prompt(promptText);
+    // Stop was pressed — don't peel/append more content for this turn.
+    if (!rt.acceptingStream || result.stopReason === "cancelled") {
+      await updateSession(sessionId, { status: "idle" });
+      return result;
+    }
     // Let in-flight update handlers settle; keep short to avoid a long "blank" wait.
     await rt.enqueue(async () => undefined);
     await new Promise((r) => setTimeout(r, 400));
@@ -758,19 +968,28 @@ export async function runPrompt(
     throw err;
   } finally {
     rt.running = false;
+    rt.acceptingStream = false;
   }
 }
 
 export async function cancelPrompt(sessionId: string) {
   const rt = runtimes.get(sessionId);
   if (rt) {
+    rt.acceptingStream = false;
     rt.running = false;
+    rt.openTextPartId = null;
+    rt.openThoughtPartId = null;
     for (const [reqKey, p] of rt.pending) {
-      if (p.kind === "permission") {
-        const rpcId = reqKey.slice(sessionId.length + 1);
-        const numericId = Number(rpcId);
-        const id = Number.isFinite(numericId) && String(numericId) === rpcId ? numericId : rpcId;
-        rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+      const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
+      try {
+        if (p.kind === "permission") {
+          rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+        } else {
+          // ask_question / create_plan
+          rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+        }
+      } catch {
+        // ignore respond failures
       }
       p.resolve(undefined);
     }
@@ -805,11 +1024,12 @@ export async function probeAgent(
     const acpModels = toModelList(client.configOptions);
     const models = await finalizeModelList(selected, settings, acpModels);
     const modelParams = toModelParams(client.configOptions);
+    const modes = toModesList(client.configOptions, selected, client.sessionModes);
     const sessionId = client.sessionId ?? undefined;
     const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
     const currentModel = pickCurrentModel(models, rawCurrent);
-    if (models.length || modelParams.length) {
-      rememberModels(selected, currentModel, models, modelParams);
+    if (models.length || modelParams.length || modes.length) {
+      rememberModels(selected, currentModel, models, modelParams, modes);
     }
     client.dispose();
     const paramSummary = modelParams
@@ -828,6 +1048,7 @@ export async function probeAgent(
       currentModel,
       models,
       modelParams,
+      modes,
     };
   } catch (err) {
     client.dispose();
@@ -886,10 +1107,58 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.provider = null;
   rt.toolsHintSent = false;
   rt.availableCommands = [];
+  // Keep rt.usage — proves the agent emitted usage_update at least once.
 }
 
 export function getSessionSlashCommands(sessionId: string) {
   return runtimes.get(sessionId)?.availableCommands ?? [];
+}
+
+const usageByProvider = new Map<
+  AgentProvider,
+  import("@acprocess/shared").SessionUsageDto
+>();
+
+function rememberProviderUsage(
+  provider: AgentProvider | null | undefined,
+  usage: import("@acprocess/shared").SessionUsageDto,
+) {
+  if (!provider) return;
+  usageByProvider.set(provider, { ...usage, provider });
+}
+
+/** Latest ACP usage_update for a provider (or active session), if the agent reports it. */
+export function getAgentUsage(opts?: { provider?: AgentProvider; sessionId?: string }) {
+  if (opts?.sessionId) {
+    const rt = runtimes.get(opts.sessionId);
+    if (rt?.usage) {
+      return {
+        supported: true as const,
+        usage: rt.usage,
+        sessionId: opts.sessionId,
+      };
+    }
+  }
+  const provider = opts?.provider;
+  if (provider && usageByProvider.has(provider)) {
+    return {
+      supported: true as const,
+      usage: usageByProvider.get(provider)!,
+      sessionId: null as string | null,
+    };
+  }
+  // Any known usage for connected agents?
+  if (!provider && usageByProvider.size > 0) {
+    const first = [...usageByProvider.values()][0]!;
+    return { supported: true as const, usage: first, sessionId: null as string | null };
+  }
+  // Live runtimes that have usage even if provider map empty
+  for (const [sessionId, rt] of runtimes) {
+    if (!rt.usage) continue;
+    if (provider && rt.provider && rt.provider !== provider) continue;
+    return { supported: true as const, usage: rt.usage, sessionId };
+  }
+  return { supported: false as const, usage: null, sessionId: null as string | null };
 }
 
 /** Align chat row + ACP with the user's connected agent (if any). */
@@ -946,11 +1215,12 @@ export async function setSessionModel(
       toModelList(client.configOptions),
     );
     const modelParams = toModelParams(client.configOptions);
+    const modes = toModesList(client.configOptions, detail.provider, client.sessionModes);
     const currentModel = pickCurrentModel(
       models,
       findModelConfigOption(client.configOptions)?.currentValue ?? model,
     );
-    rememberModels(detail.provider, currentModel, models, modelParams);
+    rememberModels(detail.provider, currentModel, models, modelParams, modes);
     return {
       ok: true,
       model,
@@ -959,6 +1229,7 @@ export async function setSessionModel(
       currentModel,
       models,
       modelParams,
+      modes,
     };
   } catch (err) {
     console.error(`[acp:${sessionId}] setSessionModel restart failed`, err);
@@ -976,6 +1247,7 @@ let modelsCache: {
   currentModel?: string;
   models: Array<{ value: string; name: string }>;
   modelParams: ModelParamDto[];
+  modes: ModeOption[];
   at: number;
 } | null = null;
 
@@ -984,6 +1256,7 @@ export function rememberModels(
   currentModel: string | undefined,
   models: ModelOption[],
   modelParams: ModelParamDto[] = [],
+  modes: ModeOption[] = [],
 ) {
   const filtered = filterDeniedModels(provider, models);
   const resolvedCurrent =
@@ -995,6 +1268,7 @@ export function rememberModels(
     currentModel: resolvedCurrent,
     models: filtered,
     modelParams,
+    modes,
     at: Date.now(),
   };
 }
@@ -1192,7 +1466,9 @@ export async function listModels(
     modelsCache.provider === selected &&
     Date.now() - modelsCache.at < cacheTtl &&
     // Empty params may be a cold partial — don't stick for the full TTL.
-    (modelsCache.modelParams.length > 0 || Date.now() - modelsCache.at < 20_000)
+    (modelsCache.modelParams.length > 0 || Date.now() - modelsCache.at < 20_000) &&
+    // Cursor always exposes modes; refresh if an older cache omitted them.
+    (selected !== "cursor" || modelsCache.modes.length > 0)
   ) {
     const cache = modelsCache;
     const models = filterDeniedModels(selected, cache.models);
@@ -1210,13 +1486,20 @@ export async function listModels(
       currentModel,
       models,
       modelParams: cache.modelParams,
+      modes: cache.modes,
       cached: true,
     };
   }
   warmModelParamsProbe(selected);
   const probed = await probeAgent(selected, { catalogOnly: !force });
-  if (probed.ok && (probed.models?.length || probed.modelParams?.length)) {
-    rememberModels(selected, probed.currentModel, probed.models ?? [], probed.modelParams ?? []);
+  if (probed.ok && (probed.models?.length || probed.modelParams?.length || probed.modes?.length)) {
+    rememberModels(
+      selected,
+      probed.currentModel,
+      probed.models ?? [],
+      probed.modelParams ?? [],
+      probed.modes ?? [],
+    );
   }
   const models = filterDeniedModels(selected, probed.models ?? []);
   const preferred = settings.defaultModel || probed.currentModel;
@@ -1232,9 +1515,55 @@ export async function listModels(
     currentModel,
     models,
     modelParams: probed.modelParams ?? [],
+    modes: probed.modes ?? [],
     message: probed.message,
     cached: false,
   };
+}
+
+export async function setSessionMode(sessionId: string, mode: AgentMode) {
+  await updateSettings({ defaultMode: mode });
+  const detail = await syncSessionAgent(sessionId);
+  if (!detail) {
+    return { ok: true, mode, appliedLive: false };
+  }
+
+  const updated = await updateSession(sessionId, { mode });
+  const rt = runtimes.get(sessionId);
+
+  if (rt?.client?.sessionId) {
+    // Persist first; apply to ACP without blocking the HTTP response.
+    void rt.client.setMode(mode).catch((err) => {
+      console.error(`[acp:${sessionId}] setMode live failed`, err);
+      if (!rt.running) {
+        resetAcpClient(rt);
+        void ensureAcp(sessionId, {
+          provider: detail.provider,
+          cwd: detail.cwd,
+          mode,
+        }).catch((warmErr) => {
+          console.error(`[acp:${sessionId}] setSessionMode warm failed`, warmErr);
+        });
+      }
+    });
+    return { ok: true, mode, appliedLive: true, session: updated };
+  }
+  if (rt?.running) {
+    return { ok: true, mode, appliedLive: false, session: updated };
+  }
+  if (rt) {
+    resetAcpClient(rt);
+  }
+
+  // Don't block the UI on a cold ACP spawn — mode is already persisted.
+  void ensureAcp(sessionId, {
+    provider: detail.provider,
+    cwd: detail.cwd,
+    mode,
+  }).catch((err) => {
+    console.error(`[acp:${sessionId}] setSessionMode warm failed`, err);
+  });
+  return { ok: true, mode, appliedLive: false, session: updated };
 }
 
 export function answerPermission(sessionId: string, requestId: string, optionId: string) {
@@ -1243,9 +1572,10 @@ export function answerPermission(sessionId: string, requestId: string, optionId:
   const pending = rt.pending.get(requestId);
   if (!pending) throw new Error("Permission request not found");
 
-  const rpcId = requestId.slice(sessionId.length + 1);
-  const numericId = Number(rpcId);
-  const id = Number.isFinite(numericId) && String(numericId) === rpcId ? numericId : rpcId;
+  const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
+  console.log(
+    `[acp:${sessionId}] permission answer rpcId=${String(id)} optionId=${optionId}`,
+  );
 
   rt.client?.respond(id, {
     outcome: { outcome: "selected", optionId },
@@ -1265,9 +1595,7 @@ export function answerQuestion(
   const pending = rt.pending.get(requestId);
   if (!pending) throw new Error("Question request not found");
 
-  const rpcId = requestId.slice(sessionId.length + 1);
-  const numericId = Number(rpcId);
-  const id = Number.isFinite(numericId) && String(numericId) === rpcId ? numericId : rpcId;
+  const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
 
   rt.client?.respond(id, result);
   pending.resolve(result);
@@ -1278,6 +1606,7 @@ export function answerQuestion(
 export function disposeRuntime(sessionId: string) {
   const rt = runtimes.get(sessionId);
   if (rt) {
+    rt.disposing = true;
     rt.clientReady = null;
     rt.client?.dispose();
   }

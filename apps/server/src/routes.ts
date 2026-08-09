@@ -30,6 +30,8 @@ import {
   warmModelParamsProbe,
   runPrompt,
   setSessionModel,
+  setSessionMode,
+  getAgentUsage,
   syncSessionAgent,
   warmAcp,
 } from "./acp/sessionManager.js";
@@ -42,6 +44,13 @@ import {
 } from "./services/gitea.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
+import {
+  defaultDiagnosticsDir,
+  deleteDiagnosticsDump,
+  listDiagnosticsDumps,
+  readDiagnosticsDump,
+  writeDiagnosticsDump,
+} from "./services/diagnostics.js";
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import type { AgentProvider } from "@acprocess/shared";
@@ -74,6 +83,7 @@ const settingsSchema = z.object({
   giteaToken: z.string().optional(),
   giteaOwner: z.string().optional(),
   giteaRepo: z.string().optional(),
+  diagnosticsDir: z.string().optional(),
 });
 
 async function agentConnected(): Promise<AgentProvider | null> {
@@ -136,6 +146,19 @@ export async function registerRoutes(app: FastifyInstance) {
         : undefined;
     const force = q.force === "1" || q.force === "true";
     return listModels(provider, { force });
+  });
+
+  app.get("/api/agent/usage", async (req) => {
+    const q = req.query as { provider?: string; sessionId?: string };
+    const provider =
+      q.provider === "cursor" ||
+      q.provider === "opencode" ||
+      q.provider === "omp" ||
+      q.provider === "pi"
+        ? q.provider
+        : undefined;
+    const sessionId = typeof q.sessionId === "string" && q.sessionId ? q.sessionId : undefined;
+    return getAgentUsage({ provider, sessionId });
   });
 
   app.get("/api/agent/model-params", async (req, reply) => {
@@ -303,7 +326,12 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z.object({ text: z.string().min(1) }).parse(req.body);
+    const body = z
+      .object({
+        text: z.string().min(1),
+        editMessageId: z.string().uuid().optional(),
+      })
+      .parse(req.body);
     const connected = await agentConnected();
     if (!connected) {
       return reply
@@ -319,6 +347,7 @@ export async function registerRoutes(app: FastifyInstance) {
       provider: detail.provider,
       cwd: detail.cwd,
       mode: detail.mode,
+      editMessageId: body.editMessageId,
       titleHint:
         detail.title === defaultTitle || detail.title === "Новый чат" || detail.title === "New chat"
           ? body.text
@@ -356,20 +385,43 @@ export async function registerRoutes(app: FastifyInstance) {
     return setSessionModel(id, body.model, body.params);
   });
 
+  app.post("/api/sessions/:id/mode", async (req, reply) => {
+    const connected = await agentConnected();
+    if (!connected) {
+      return reply
+        .code(400)
+        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
+    }
+    const { id } = req.params as { id: string };
+    const body = z.object({ mode: z.enum(["agent", "plan", "ask"]) }).parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    await syncSessionAgent(id, connected);
+    return setSessionMode(id, body.mode);
+  });
+
   app.post("/api/sessions/:id/permissions/:requestId", async (req) => {
-    const { id, requestId } = req.params as { id: string; requestId: string };
+    const { id, requestId: rawRequestId } = req.params as { id: string; requestId: string };
     const body = z
       .object({
         optionId: z.string().min(1),
+        requestId: z.string().min(1).optional(),
       })
       .parse(req.body);
-    answerPermission(id, requestId, body.optionId as "allow-once" | "allow-always" | "reject-once");
+    const requestId = body.requestId ?? decodeURIComponent(rawRequestId);
+    answerPermission(id, requestId, body.optionId);
     return { ok: true };
   });
 
   app.post("/api/sessions/:id/answers/:requestId", async (req) => {
-    const { id, requestId } = req.params as { id: string; requestId: string };
-    const body = z.object({ result: z.record(z.unknown()) }).parse(req.body);
+    const { id, requestId: rawRequestId } = req.params as { id: string; requestId: string };
+    const body = z
+      .object({
+        result: z.record(z.unknown()),
+        requestId: z.string().min(1).optional(),
+      })
+      .parse(req.body);
+    const requestId = body.requestId ?? decodeURIComponent(rawRequestId);
     answerQuestion(id, requestId, body.result);
     return { ok: true };
   });
@@ -395,6 +447,38 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/gitea/conflicts", async () => resolveConflicts());
+
+  app.get("/api/diagnostics", async () => listDiagnosticsDumps());
+  app.get("/api/diagnostics/default-dir", async () => ({
+    path: defaultDiagnosticsDir(),
+  }));
+  app.post("/api/diagnostics/dump", async (req) => {
+    const body = z
+      .object({
+        reason: z.string().max(80).optional(),
+        note: z.string().max(2000).optional(),
+        client: z.record(z.unknown()).optional(),
+      })
+      .parse(req.body ?? {});
+    const meta = await writeDiagnosticsDump({
+      reason: body.reason,
+      note: body.note,
+      client: body.client as Record<string, unknown> | undefined,
+    });
+    return { ok: true, dump: meta };
+  });
+  app.get("/api/diagnostics/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const dump = await readDiagnosticsDump(id);
+    if (!dump) return reply.code(404).send({ error: "Not found" });
+    return dump;
+  });
+  app.delete("/api/diagnostics/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const ok = await deleteDiagnosticsDump(id);
+    if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
+  });
 
   app.get("/ws", { websocket: true }, async (socket) => {
     const client = addWsClient(socket);

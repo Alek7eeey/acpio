@@ -85,6 +85,73 @@
   margin-bottom: 0;
 }
 
+.tableWrap {
+  margin: 0.85em 0 1.1em;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+}
+
+.tableWrap:first-child {
+  margin-top: 0;
+}
+
+.tableWrap:last-child {
+  margin-bottom: 0.35em;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+
+.thead {
+  background: color-mix(in srgb, var(--surface) 70%, var(--bg-secondary));
+}
+
+.th,
+.td {
+  padding: 0.55em 0.75em;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.th {
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.td {
+  color: var(--text);
+}
+
+.tr:last-child .td {
+  border-bottom: none;
+}
+
+.table tbody .tr:nth-child(even) .td {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+.body > .paragraph + .tableWrap,
+.body > .list + .tableWrap,
+.body > .heading + .tableWrap {
+  margin-top: 0.35em;
+}
+
+.body > .tableWrap + .paragraph,
+.body > .tableWrap + .list,
+.body > .tableWrap + .heading {
+  margin-top: 1.05em;
+}
+
 .inlineCode {
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.88em;

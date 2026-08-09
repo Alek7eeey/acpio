@@ -1,6 +1,7 @@
 .shell {
+  position: relative;
   display: grid;
-  grid-template-columns: var(--sidebar-width, 360px) 6px 1fr;
+  grid-template-columns: var(--sidebar-width, 360px) 1fr;
   height: 100%;
   max-height: 100dvh;
   min-height: 0;
@@ -12,11 +13,11 @@
 }
 
 .withSidebar {
-  grid-template-columns: var(--sidebar-width, 360px) 6px 1fr;
+  grid-template-columns: var(--sidebar-width, 360px) 1fr;
 }
 
 .withSidebar.sidebarCollapsed {
-  grid-template-columns: 0 6px 1fr;
+  grid-template-columns: 0 1fr;
 }
 
 .resizing {
@@ -30,8 +31,13 @@
 }
 
 .splitter {
-  position: relative;
-  z-index: 25;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--sidebar-width, 360px);
+  width: 12px;
+  margin-left: -6px;
+  z-index: 250; /* above header toolbar */
   cursor: col-resize;
   touch-action: none;
   background: transparent;
@@ -42,14 +48,23 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 1px;
+  left: 50%;
   width: 4px;
+  transform: translateX(-50%);
   border-radius: 2px;
   background: transparent;
   transition: background 0.15s ease;
 }
 
+.splitterCollapsed {
+  left: 0;
+  margin-left: 0;
+  width: 10px;
+}
+
 .splitterCollapsed::before {
+  left: 2px;
+  transform: none;
   background: color-mix(in srgb, var(--border) 90%, transparent);
 }
 
@@ -377,6 +392,33 @@
   min-width: 0;
 }
 
+.timeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.timeGroupHead {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px 2px;
+  color: var(--text-secondary);
+}
+
+.timeGroupLabel {
+  min-width: 0;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .folderHead {
   display: flex;
   align-items: center;
@@ -487,16 +529,6 @@
   touch-action: manipulation;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .sessionItem {
-    cursor: grab;
-  }
-
-  .sessionItem:active {
-    cursor: grabbing;
-  }
-}
-
 .sessionItem.active {
   background: color-mix(in srgb, var(--text) 9%, transparent);
 }
@@ -509,23 +541,11 @@
   background: color-mix(in srgb, var(--text) 11%, transparent);
 }
 
-.sessionItem.dropBefore::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  top: -1px;
-  height: 2px;
-  border-radius: 2px;
-  background: var(--accent);
-  z-index: 2;
-}
-
 .sessionBtn {
   text-align: left;
   border: none;
   background: transparent;
-  padding: 8px 10px;
+  padding: 8px 4px 8px 10px;
   min-width: 0;
   color: var(--text);
   width: 100%;
@@ -534,7 +554,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  column-gap: 10px;
 }
 
 .sessionTitle {
@@ -542,32 +562,45 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-weight: 400;
-  font-size: 0.94rem;
-  line-height: 1.35;
-  letter-spacing: -0.01em;
-  color: color-mix(in srgb, var(--text) 92%, var(--text-secondary));
+  font-weight: 500;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
   min-width: 0;
 }
 
 .sessionActivity {
-  flex: 0 0 auto;
-  font-size: 0.72rem;
-  font-weight: 550;
-  letter-spacing: -0.01em;
-  color: var(--text-secondary);
-  white-space: nowrap;
+  justify-self: end;
+  align-self: center;
+  margin: 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
   line-height: 1;
-  opacity: 0.9;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  white-space: nowrap;
+  max-width: 7.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sessionItem.active .sessionTitle {
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text);
 }
 
 .sessionItem.active .sessionActivity {
-  color: color-mix(in srgb, var(--text-secondary) 80%, var(--text));
+  color: color-mix(in srgb, var(--text-secondary) 70%, var(--text));
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.sessionItem:hover .sessionActivity {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .renameInput,
@@ -596,35 +629,136 @@
 .contextMenu {
   position: fixed;
   z-index: 300;
-  min-width: 176px;
+  min-width: 198px;
   padding: 6px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   gap: 2px;
+  animation: rise 0.16s ease;
 }
 
 .contextMenu button {
   border: none;
   background: transparent;
   text-align: left;
-  padding: 9px 11px;
-  border-radius: 8px;
+  padding: 9px 10px;
+  border-radius: 10px;
   color: var(--text);
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   font-weight: 550;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
 }
 
 .contextMenu button:hover {
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.contextMenuIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  opacity: 0.9;
+}
+
+.contextMenuIcon svg {
+  display: block;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
 }
 
 .menuDanger {
   color: var(--danger) !important;
+}
+
+.menuDanger .contextMenuIcon {
+  color: var(--danger);
+}
+
+.sessionConfirm {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+  box-shadow: var(--shadow-soft);
+  animation: rise 0.18s ease;
+}
+
+.sessionConfirmActive {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
+
+.sessionConfirmCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.sessionConfirmTitle {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.sessionConfirmText {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.sessionConfirmActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.sessionConfirmCancel,
+.sessionConfirmDelete {
+  border: none;
+  border-radius: 9px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sessionConfirmCancel {
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  color: var(--text);
+}
+
+.sessionConfirmCancel:hover {
+  background: var(--bg-tertiary);
+}
+
+.sessionConfirmDelete {
+  background: color-mix(in srgb, var(--danger) 88%, #000);
+  color: #fff;
+}
+
+.sessionConfirmDelete:hover {
+  background: var(--danger);
 }
 
 .actionPopover {
@@ -1607,16 +1741,60 @@
     color var(--motion);
 }
 
+.toolClusterLocale {
+  width: auto !important;
+  min-width: var(--toolbar-btn-size) !important;
+  height: var(--toolbar-btn-size) !important;
+  min-height: var(--toolbar-btn-size) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+  color: var(--text-secondary);
+  padding: 0 8px !important;
+  margin: 0 !important;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1 !important;
+  box-sizing: border-box;
+  align-self: center;
+  transition:
+    background var(--motion),
+    color var(--motion);
+}
+
+.toolClusterLocale:hover {
+  background: var(--bg-tertiary) !important;
+  color: var(--text);
+}
+
 .toolClusterBtn svg {
   width: 18px;
   height: 18px;
   display: block;
   flex-shrink: 0;
+  transform-origin: center;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .toolClusterBtn:hover {
   background: var(--bg-tertiary) !important;
   color: var(--text);
+}
+
+.toolClusterSettingsIcon {
+  transform-origin: 50% 50% !important;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .toolClusterSettings:hover .toolClusterSettingsIcon {
+    transform: rotate(135deg) scale(1.1) !important;
+  }
 }
 
 .toolClusterBtnActive {
@@ -1888,26 +2066,27 @@
 
   .agentChip {
     max-width: none;
-    width: 28px;
-    height: 28px;
-    min-width: 28px;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
     padding: 0;
     justify-content: center;
     flex-shrink: 0;
     border-radius: 999px;
+    gap: 0;
   }
 
   .agentChip .dot {
-    width: 7px;
-    height: 7px;
+    width: 5px;
+    height: 5px;
   }
 
   .agentChip .dot.off {
-    box-shadow: 0 0 0 2px var(--danger-soft);
+    box-shadow: 0 0 0 1.5px var(--danger-soft);
   }
 
   .agentChip .dot.on {
-    box-shadow: 0 0 0 2px var(--success-soft);
+    box-shadow: 0 0 0 1.5px var(--success-soft);
   }
 
   .collapseBtn {

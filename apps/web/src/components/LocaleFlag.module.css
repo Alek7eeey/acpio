@@ -6,4 +6,7 @@
   border-radius: 2px;
   border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
   box-shadow: 0 0 0 0.5px color-mix(in srgb, #000 8%, transparent);
+  margin-block: 3px;
+  transform-origin: center;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }

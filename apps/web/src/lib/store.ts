@@ -9,14 +9,17 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
+  SessionUsageDto,
   Theme,
   WsServerEvent,
 } from "@acprocess/shared";
 import { DEFAULT_SETTINGS, isModelAccessError, usesCloudModelCatalog } from "@acprocess/shared";
 import { api } from "./api";
+import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 
-const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v4";
-const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v1";
+const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
+const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
+const USAGE_SUPPORT_KEY = "acprocess.usageSupported.v1";
 const ACTIVE_SESSION_KEY = "acprocess.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
@@ -37,11 +40,54 @@ export type ModelsCatalog = {
   provider: AgentProvider;
   models: Array<{ value: string; name: string }>;
   modelParams: ModelParamDto[];
+  /** Session modes (Agent / Plan / Ask) when the agent supports them. */
+  modes: Array<{ value: string; name: string }>;
   currentModel?: string;
   at: number;
 };
 
+/** Cursor trio must not stick to OMP/OpenCode catalogs after an agent switch. */
+export function sanitizeCatalogModes(
+  provider: AgentProvider,
+  modes: Array<{ value: string; name: string }> | undefined | null,
+): Array<{ value: string; name: string }> {
+  const list = Array.isArray(modes) ? modes : [];
+  if (provider === "cursor") {
+    return list.filter(
+      (m) => m.value === "agent" || m.value === "plan" || m.value === "ask",
+    );
+  }
+  // OMP (and similar) only advertise a lone "default" — never a switcher.
+  if (provider === "omp" || provider === "pi") return [];
+  return list.filter((m) => {
+    if (m.value === "agent" || m.value === "plan" || m.value === "ask") return false;
+    if (/^(default|normal|standard)$/i.test(m.value)) return false;
+    return Boolean(m.value);
+  });
+}
+
 type ModelsCatalogMap = Partial<Record<AgentProvider, ModelsCatalog>>;
+
+function readUsageSupportMap(): Partial<Record<AgentProvider, boolean>> {
+  try {
+    const raw = localStorage.getItem(USAGE_SUPPORT_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<Record<AgentProvider, boolean>>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeUsageSupport(provider: AgentProvider, supported: boolean) {
+  try {
+    const map = readUsageSupportMap();
+    map[provider] = supported;
+    localStorage.setItem(USAGE_SUPPORT_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
 
 type PendingPermission = {
   sessionId: string;
@@ -64,10 +110,18 @@ type AppState = {
   activeSession: SessionDetailDto | null;
   modelsCatalog: ModelsCatalog | null;
   modelsLoading: boolean;
+  /** Agent reported ACP usage_update at least once (session context / cost). */
+  usageSupported: boolean;
+  sessionUsage: SessionUsageDto | null;
   sidebarOpen: boolean;
   connected: boolean;
   pendingPermission: PendingPermission | null;
+  /** Extra permission prompts waiting behind the one shown in the UI. */
+  permissionQueue: PendingPermission[];
   pendingQuestion: PendingQuestion | null;
+  /** Bumped on each send; cancel stamps cancelledPromptEpoch to ignore late WS parts. */
+  promptEpoch: number;
+  cancelledPromptEpoch: number;
   loading: boolean;
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
@@ -84,7 +138,7 @@ type AppState = {
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
-  sendPrompt: (text: string) => Promise<void>;
+  sendPrompt: (text: string, opts?: { editMessageId?: string }) => Promise<void>;
   cancelPrompt: () => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
@@ -97,6 +151,7 @@ type AppState = {
     provider: AgentProvider,
     opts?: { force?: boolean },
   ) => Promise<ModelsCatalog | null>;
+  refreshAgentUsage: () => Promise<void>;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -105,6 +160,7 @@ function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): Mo
     provider: parsed.provider,
     models: parsed.models,
     modelParams: Array.isArray(parsed.modelParams) ? parsed.modelParams : [],
+    modes: sanitizeCatalogModes(parsed.provider, parsed.modes),
     currentModel: parsed.currentModel,
     at: typeof parsed.at === "number" ? parsed.at : 0,
   };
@@ -190,8 +246,9 @@ async function loadAppData(
   const provider = get().settings.connectedProvider;
   if (provider) {
     void get().ensureModels(provider);
+    void get().refreshAgentUsage();
   } else {
-    set({ modelsCatalog: null, modelsLoading: false });
+    set({ modelsCatalog: null, modelsLoading: false, usageSupported: false, sessionUsage: null });
   }
   const storedId =
     typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
@@ -217,10 +274,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     typeof window !== "undefined"
       ? !(readStoredModelsCatalog()?.models?.length)
       : true,
+  usageSupported:
+    typeof window !== "undefined"
+      ? Object.values(readUsageSupportMap()).some(Boolean)
+      : false,
+  sessionUsage: null,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
   pendingPermission: null,
+  permissionQueue: [],
   pendingQuestion: null,
+  promptEpoch: 0,
+  cancelledPromptEpoch: -1,
   loading: true,
   error: null,
 
@@ -235,8 +300,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   rememberModelsCatalog(catalog) {
-    writeStoredModelsCatalog(catalog);
-    set({ modelsCatalog: catalog, modelsLoading: false });
+    const cleaned: ModelsCatalog = {
+      ...catalog,
+      modes: sanitizeCatalogModes(catalog.provider, catalog.modes),
+    };
+    writeStoredModelsCatalog(cleaned);
+    set({ modelsCatalog: cleaned, modelsLoading: false });
   },
 
   async ensureModels(provider, opts) {
@@ -252,18 +321,44 @@ export const useAppStore = create<AppState>((set, get) => ({
       existing.models.length > 0 &&
       Date.now() - existing.at < modelsHardTtl(provider);
     const missingParams = (existing?.modelParams?.length ?? 0) === 0;
+    const missingModes = provider === "cursor" && (existing?.modes?.length ?? 0) === 0;
 
     // Instantly show the last catalog for this agent (Fast/Усилие) when switching.
     if (providerMismatch) {
       set({
-        modelsCatalog: existing?.provider === provider ? existing : null,
+        modelsCatalog:
+          existing?.provider === provider
+            ? {
+                ...existing,
+                modes: sanitizeCatalogModes(provider, existing.modes),
+              }
+            : null,
         modelsLoading: !(existing?.models?.length),
       });
     }
 
-    if (freshEnough && !force && !missingParams) {
-      if (active?.provider !== provider) {
-        set({ modelsCatalog: existing, modelsLoading: false });
+    // Don't keep Cursor Agent/Plan/Ask chips on OMP/OpenCode after a switch.
+    const staleCursorModes =
+      provider !== "cursor" &&
+      (existing?.modes?.some(
+        (m) =>
+          m.value === "agent" ||
+          m.value === "plan" ||
+          m.value === "ask" ||
+          /^default$/i.test(m.value),
+      ) ??
+        false);
+
+    if (freshEnough && !force && !missingParams && !missingModes && !staleCursorModes) {
+      const cleanedModes = sanitizeCatalogModes(provider, existing.modes);
+      const cleaned =
+        cleanedModes.length === existing.modes.length
+          ? existing
+          : { ...existing, modes: cleanedModes };
+      if (cleaned !== existing || active?.provider !== provider) {
+        get().rememberModelsCatalog(cleaned);
+      } else {
+        set({ modelsLoading: false });
       }
       const softStale = Date.now() - existing.at >= modelsSoftTtl(provider);
       if (softStale) {
@@ -275,6 +370,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               provider,
               models: res.models ?? [],
               modelParams: res.modelParams ?? [],
+              modes: sanitizeCatalogModes(provider, res.modes),
               currentModel: res.currentModel,
               at: Date.now(),
             });
@@ -284,34 +380,49 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
       }
       set({ modelsLoading: false });
-      return existing;
+      return cleaned;
     }
 
+    const hasModels = Boolean(existing?.models?.length);
+    const agentBusy =
+      get().activeSession?.status === "running" || get().activeSession?.status === "waiting";
     // Keep prior catalog for this provider while reloading so Усилие doesn't blink away.
+    // If the agent is already answering (or we already have models), don't block the UI.
+    // Drop stale Cursor mode chips immediately when switching to OMP/etc.
     set({
-      modelsCatalog: existing?.provider === provider ? existing : null,
-      modelsLoading: !(existing?.models?.length),
+      modelsCatalog:
+        existing?.provider === provider
+          ? staleCursorModes
+            ? { ...existing, modes: [] }
+            : existing
+          : null,
+      modelsLoading: hasModels || agentBusy ? false : true,
     });
 
     try {
-      const res = await api.listModels(provider, { force: force || missingParams || providerMismatch });
+      const res = await api.listModels(provider, {
+        force: force || missingParams || missingModes || staleCursorModes || providerMismatch,
+      });
       const catalog: ModelsCatalog = {
         provider,
         models: res.models ?? [],
         modelParams: res.modelParams ?? [],
+        modes: sanitizeCatalogModes(provider, res.modes),
         currentModel: res.currentModel,
         at: Date.now(),
       };
-      if (catalog.models.length || catalog.modelParams.length) {
+      if (catalog.models.length || catalog.modelParams.length || catalog.modes.length) {
         get().rememberModelsCatalog(catalog);
       } else {
         set({ modelsLoading: false });
       }
       return catalog;
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      rememberDiagnosticsError(message, "models");
       set({
         modelsLoading: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
       return get().modelsCatalog;
     }
@@ -360,7 +471,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
     const detail = await api.getSession(id);
-    set({ activeSessionId: id, activeSession: detail });
+    set({
+      activeSessionId: id,
+      activeSession: detail,
+      pendingPermission: null,
+      permissionQueue: [],
+      pendingQuestion: null,
+    });
   },
 
   async createSession(cwd) {
@@ -407,13 +524,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
-  async sendPrompt(text) {
+  async sendPrompt(text, opts) {
     const id = get().activeSessionId;
     set({ error: null });
 
     const markRunning = (sessionId: string) => {
       const active = get().activeSession;
       set({
+        modelsLoading: false,
+        promptEpoch: get().promptEpoch + 1,
         sessions: get().sessions.map((s) =>
           s.id === sessionId ? { ...s, status: "running" as const } : s,
         ),
@@ -428,14 +547,65 @@ export const useAppStore = create<AppState>((set, get) => ({
       await api.prompt(session.id, text);
       return;
     }
+
+    if (opts?.editMessageId && get().activeSession?.id === id) {
+      const msgs = get().activeSession!.messages;
+      const idx = msgs.findIndex((m) => m.id === opts.editMessageId);
+      if (idx >= 0) {
+        const trimmed = text.trim();
+        const slashMatch = trimmed.match(/^\/([\w-]+)/);
+        const nextMessages = msgs.slice(0, idx + 1).map((m, i) => {
+          if (i !== idx) return m;
+          return {
+            ...m,
+            parts: [
+              {
+                id: m.parts[0]?.id ?? `local-${m.id}`,
+                messageId: m.id,
+                type: "text" as const,
+                order: 0,
+                payload: {
+                  text,
+                  ...(slashMatch
+                    ? { isSlashCommand: true, commandName: slashMatch[1] }
+                    : {}),
+                },
+                createdAt: m.parts[0]?.createdAt ?? m.createdAt,
+              },
+            ],
+          };
+        });
+        set({
+          activeSession: { ...get().activeSession!, messages: nextMessages, status: "running" },
+        });
+      }
+    }
+
     markRunning(id);
-    await api.prompt(id, text);
+    await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : undefined);
   },
 
   async cancelPrompt() {
     const id = get().activeSessionId;
     if (!id) return;
-    await api.cancel(id);
+    const state = get();
+    set({
+      cancelledPromptEpoch: state.promptEpoch,
+      pendingPermission:
+        state.pendingPermission?.sessionId === id ? null : state.pendingPermission,
+      permissionQueue: state.permissionQueue.filter((p) => p.sessionId !== id),
+      pendingQuestion: state.pendingQuestion?.sessionId === id ? null : state.pendingQuestion,
+      sessions: state.sessions.map((s) => (s.id === id ? { ...s, status: "idle" as const } : s)),
+      activeSession:
+        state.activeSession?.id === id
+          ? { ...state.activeSession, status: "idle" as const }
+          : state.activeSession,
+    });
+    try {
+      await api.cancel(id);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
   },
 
   setSidebarOpen(open) {
@@ -450,22 +620,96 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
 
     if (event.type === "session.updated") {
+      // Ignore transient "closed" from intentional ACP dispose during edit/regenerate.
+      if (
+        event.session.status === "closed" &&
+        state.activeSession?.id === event.sessionId &&
+        state.activeSession.status === "running"
+      ) {
+        set({
+          sessions: state.sessions.map((s) =>
+            s.id === event.sessionId ? { ...event.session, status: "running" } : s,
+          ),
+          activeSession: {
+            ...state.activeSession,
+            ...event.session,
+            status: "running",
+            messages: state.activeSession.messages,
+          },
+        });
+        return;
+      }
+      // After Stop, don't let a late "running"/"waiting" event revive the stream UI.
+      const cancelled =
+        state.activeSession?.id === event.sessionId &&
+        state.cancelledPromptEpoch === state.promptEpoch;
+      const session =
+        cancelled && (event.session.status === "running" || event.session.status === "waiting")
+          ? { ...event.session, status: "idle" as const }
+          : event.session;
       set({
-        sessions: state.sessions.map((s) => (s.id === event.sessionId ? event.session : s)),
+        ...(session.status === "running" || session.status === "waiting"
+          ? { modelsLoading: false }
+          : {}),
+        ...(session.mode && session.mode !== state.settings.defaultMode
+          ? { settings: { ...state.settings, defaultMode: session.mode } }
+          : {}),
+        sessions: state.sessions.map((s) =>
+          s.id === event.sessionId
+            ? {
+                ...session,
+                lastMessageAt: session.lastMessageAt ?? s.lastMessageAt ?? s.createdAt,
+              }
+            : s,
+        ),
         activeSession:
           state.activeSession?.id === event.sessionId
-            ? { ...state.activeSession, ...event.session }
+            ? {
+                ...state.activeSession,
+                ...session,
+                lastMessageAt:
+                  session.lastMessageAt ??
+                  state.activeSession.lastMessageAt ??
+                  state.activeSession.createdAt,
+                messages: state.activeSession.messages,
+              }
             : state.activeSession,
       });
       return;
     }
 
     if (event.type === "message.created") {
+      const nextSessions = state.sessions.map((s) =>
+        s.id === event.sessionId
+          ? {
+              ...s,
+              lastMessageAt: event.message.createdAt,
+              updatedAt: event.message.createdAt,
+            }
+          : s,
+      );
+      if (state.activeSession?.id !== event.sessionId) {
+        set({ sessions: nextSessions });
+        return;
+      }
+      set({
+        sessions: nextSessions,
+        activeSession: {
+          ...state.activeSession!,
+          lastMessageAt: event.message.createdAt,
+          updatedAt: event.message.createdAt,
+          messages: upsertMessage(state.activeSession!.messages, event.message),
+        },
+      });
+      return;
+    }
+
+    if (event.type === "messages.truncated") {
       if (state.activeSession?.id !== event.sessionId) return;
       set({
         activeSession: {
           ...state.activeSession!,
-          messages: upsertMessage(state.activeSession!.messages, event.message),
+          messages: event.messages,
         },
       });
       return;
@@ -473,6 +717,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (event.type === "part.appended" || event.type === "part.updated") {
       if (state.activeSession?.id !== event.sessionId) return;
+      // User hit Stop — ignore late tokens still arriving over WS.
+      if (state.cancelledPromptEpoch === state.promptEpoch) return;
       const messages = state.activeSession!.messages.map((m) => {
         if (m.id !== event.messageId) return m;
         return { ...m, parts: upsertPart(m.parts, event.part) };
@@ -496,13 +742,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (event.type === "permission.request") {
-      set({
-        pendingPermission: {
-          sessionId: event.sessionId,
-          requestId: event.requestId,
-          payload: event.payload,
-        },
-      });
+      const next: PendingPermission = {
+        sessionId: event.sessionId,
+        requestId: event.requestId,
+        payload: event.payload,
+      };
+      const cur = state.pendingPermission;
+      // Don't drop a still-open prompt when the agent asks for another tool at once.
+      if (
+        cur &&
+        cur.requestId !== next.requestId &&
+        !state.permissionQueue.some((p) => p.requestId === next.requestId)
+      ) {
+        set({ permissionQueue: [...state.permissionQueue, next] });
+        return;
+      }
+      if (cur?.requestId === next.requestId) return;
+      set({ pendingPermission: next });
       return;
     }
 
@@ -529,8 +785,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    if (event.type === "usage.updated") {
+      const provider =
+        event.usage.provider ??
+        state.settings.connectedProvider ??
+        state.activeSession?.provider;
+      if (provider) writeUsageSupport(provider, true);
+      set({
+        usageSupported: true,
+        sessionUsage: event.usage,
+      });
+      return;
+    }
+
     if (event.type === "error") {
       set({ error: event.message });
+      rememberDiagnosticsError(event.message, "ws");
+      void submitAutoErrorDump(event.message);
       const provider = get().settings.connectedProvider ?? get().settings.defaultProvider;
       if (provider && isModelAccessError(event.message)) {
         void get().ensureModels(provider, { force: true });
@@ -542,8 +813,62 @@ export const useAppStore = create<AppState>((set, get) => ({
   async answerPermission(optionId) {
     const pending = get().pendingPermission;
     if (!pending) return;
-    await api.answerPermission(pending.sessionId, pending.requestId, optionId);
-    set({ pendingPermission: null });
+    const queue = get().permissionQueue;
+    const allowAlways = /allow[_-]?always/i.test(optionId);
+
+    // "Always" — clear the whole queue with the same choice so parallel tool
+    // prompts (common for Cursor web/fetch) don't leave the agent hung.
+    if (allowAlways && queue.length) {
+      const active = get().activeSession;
+      set({
+        pendingPermission: null,
+        permissionQueue: [],
+        activeSession:
+          active?.id === pending.sessionId ? { ...active, status: "running" } : active,
+        sessions: get().sessions.map((s) =>
+          s.id === pending.sessionId ? { ...s, status: "running" } : s,
+        ),
+      });
+      try {
+        await api.answerPermission(pending.sessionId, pending.requestId, optionId);
+        for (const item of queue) {
+          try {
+            await api.answerPermission(item.sessionId, item.requestId, optionId);
+          } catch {
+            // ignore individual queue failures
+          }
+        }
+      } catch (err) {
+        set({
+          pendingPermission: pending,
+          permissionQueue: queue,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
+
+    const [next, ...rest] = queue;
+    const active = get().activeSession;
+    const nextStatus = next ? ("waiting" as const) : ("running" as const);
+    set({
+      pendingPermission: next ?? null,
+      permissionQueue: rest,
+      activeSession:
+        active?.id === pending.sessionId ? { ...active, status: nextStatus } : active,
+      sessions: get().sessions.map((s) =>
+        s.id === pending.sessionId ? { ...s, status: nextStatus } : s,
+      ),
+    });
+    try {
+      await api.answerPermission(pending.sessionId, pending.requestId, optionId);
+    } catch (err) {
+      set({
+        pendingPermission: pending,
+        permissionQueue: next ? [next, ...rest] : rest,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   },
 
   async answerQuestion(result) {
@@ -571,12 +896,34 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().ensureModels(providerToLoad, {
         force: nextPatch.connectedProvider != null || providerChanged,
       });
+      void get().refreshAgentUsage();
       const activeId = get().activeSessionId;
       if (activeId) void get().selectSession(activeId);
     } else if (providerChanged) {
       void get().ensureModels(settings.defaultProvider, { force: true });
+      void get().refreshAgentUsage();
       const activeId = get().activeSessionId;
       if (activeId) void get().selectSession(activeId);
+    }
+  },
+
+  async refreshAgentUsage() {
+    const provider = get().settings.connectedProvider ?? undefined;
+    const sessionId = get().activeSessionId ?? undefined;
+    const cached = provider ? readUsageSupportMap()[provider] === true : false;
+    try {
+      const res = await api.getAgentUsage({ provider, sessionId: sessionId ?? undefined });
+      if (res.supported && res.usage) {
+        if (provider) writeUsageSupport(provider, true);
+        set({ usageSupported: true, sessionUsage: res.usage });
+        return;
+      }
+      set({
+        usageSupported: cached,
+        sessionUsage: null,
+      });
+    } catch {
+      set({ usageSupported: cached });
     }
   },
 }));

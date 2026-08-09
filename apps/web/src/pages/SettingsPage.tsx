@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   migrateModelParamValues,
   modelDisplayName,
@@ -8,20 +8,39 @@ import {
   type AgentProbeResult,
   type AgentProvider,
   type AppSettings,
+  type DiagnosticsDumpMeta,
   type ModelParamDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
-import { parseSettingsSearch } from "../lib/settingsNav";
+import { parseSettingsSearch, settingsPath } from "../lib/settingsNav";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
+import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
+import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "opencode", "omp", "pi"] as const satisfies readonly AgentProvider[];
 
+function formatTokenCount(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}K`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+  return String(Math.round(n));
+}
+
+function formatCostAmount(n: number) {
+  if (!Number.isFinite(n)) return "—";
+  if (n >= 1) return n.toFixed(2);
+  if (n >= 0.01) return n.toFixed(3);
+  return n.toFixed(4);
+}
+
 export function SettingsPage() {
   const t = useT();
+  const navigate = useNavigate();
   const providers = useMemo(
     () =>
       PROVIDER_IDS.map((id) => ({
@@ -45,11 +64,19 @@ export function SettingsPage() {
   );
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const usageSupported = useAppStore((s) => s.usageSupported);
+  const sessionUsage = useAppStore((s) => s.sessionUsage);
+  const refreshAgentUsage = useAppStore((s) => s.refreshAgentUsage);
+  const sessions = useAppStore((s) => s.sessions);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
   const [form, setForm] = useState<AppSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
   const [probingId, setProbingId] = useState<AgentProvider | null>(null);
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
+  const [folderBrowseTarget, setFolderBrowseTarget] = useState<"defaultCwd" | "diagnosticsDir">(
+    "defaultCwd",
+  );
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
   const [models, setModels] = useState<Array<{ value: string; name: string }>>([]);
@@ -58,6 +85,16 @@ export function SettingsPage() {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
+  const [diagDirDefault, setDiagDirDefault] = useState("");
+  const [diagDirResolved, setDiagDirResolved] = useState("");
+  const [diagItems, setDiagItems] = useState<DiagnosticsDumpMeta[]>([]);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagBusy, setDiagBusy] = useState(false);
+  const [diagMessage, setDiagMessage] = useState<string | null>(null);
+  const [diagSessionId, setDiagSessionId] = useState<string | null>(
+    () => useAppStore.getState().activeSessionId,
+  );
+  const [diagCopyId, setDiagCopyId] = useState<string | null>(null);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
 
   useEffect(() => {
@@ -65,9 +102,53 @@ export function SettingsPage() {
   }, [settings]);
 
   useEffect(() => {
+    if (leaf !== "diagnostics") return;
+    setDiagSessionId((prev) => {
+      if (prev === "") return prev;
+      if (prev && sessions.some((s) => s.id === prev)) return prev;
+      if (activeSessionId && sessions.some((s) => s.id === activeSessionId)) {
+        return activeSessionId;
+      }
+      return sessions[0]?.id ?? "";
+    });
+  }, [leaf, sessions, activeSessionId]);
+
+  useEffect(() => {
     if (paramsLoading) return;
     setStableParams(modelParams);
   }, [modelParams, paramsLoading]);
+
+  const refreshDiagnostics = async () => {
+    setDiagLoading(true);
+    setDiagMessage(null);
+    try {
+      const [list, def] = await Promise.all([
+        api.listDiagnostics(),
+        api.getDiagnosticsDefaultDir(),
+      ]);
+      setDiagItems(list.items);
+      setDiagDirResolved(list.dir);
+      setDiagDirDefault(def.path || list.defaultDir);
+    } catch (err) {
+      setDiagMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (leaf !== "diagnostics") return;
+    void refreshDiagnostics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaf]);
+
+  useEffect(() => {
+    if (leaf === "usage" && !usageSupported) {
+      navigate(settingsPath("agent", "connect"), { replace: true });
+      return;
+    }
+    if (leaf === "usage") void refreshAgentUsage();
+  }, [leaf, usageSupported, navigate, refreshAgentUsage]);
 
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -260,7 +341,11 @@ export function SettingsPage() {
           ? t("settings.agentModelTitle")
           : leaf === "remote"
             ? t("settings.remoteAccessTitle")
-            : t("settings.agentAdvancedTitle")
+            : leaf === "diagnostics"
+              ? t("settings.diagnosticsTitle")
+              : leaf === "usage"
+                ? t("settings.usageTitle")
+                : t("settings.agentAdvancedTitle")
       : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -268,7 +353,11 @@ export function SettingsPage() {
       ? t("settings.agentAdvancedDesc")
       : section === "agent" && leaf === "remote"
         ? t("settings.remoteAccessDesc")
-        : t("settings.agentConnectDesc");
+        : section === "agent" && leaf === "diagnostics"
+          ? t("settings.diagnosticsDesc")
+          : section === "agent" && leaf === "usage"
+            ? t("settings.usageDesc")
+            : t("settings.agentConnectDesc");
 
   const eyebrow = t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -422,7 +511,10 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => setFolderBrowseOpen(true)}
+                    onClick={() => {
+                      setFolderBrowseTarget("defaultCwd");
+                      setFolderBrowseOpen(true);
+                    }}
                   >
                     {t("common.selectFolder")}
                   </button>
@@ -603,6 +695,264 @@ export function SettingsPage() {
           </section>
         )}
 
+        {section === "agent" && leaf === "diagnostics" && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <label>
+                {t("diagnostics.folder")}
+                <div className={styles.cwdPickRow}>
+                  <input
+                    value={form.diagnosticsDir ?? ""}
+                    readOnly
+                    placeholder={diagDirDefault || t("diagnostics.folderDefault")}
+                    title={form.diagnosticsDir || diagDirDefault || undefined}
+                  />
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      setFolderBrowseTarget("diagnosticsDir");
+                      setFolderBrowseOpen(true);
+                    }}
+                  >
+                    {t("common.selectFolder")}
+                  </button>
+                  {form.diagnosticsDir ? (
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => patch("diagnosticsDir", "")}
+                    >
+                      {t("diagnostics.useDefault")}
+                    </button>
+                  ) : null}
+                </div>
+              </label>
+              <p className={styles.fieldHint}>
+                {t("diagnostics.folderHint", {
+                  path: diagDirResolved || diagDirDefault || "…",
+                })}
+              </p>
+            </div>
+
+            <div className={styles.sectionBlock}>
+              <div className={styles.modelField}>
+                <span className={styles.modelLabel}>{t("diagnostics.chat")}</span>
+                <OptionPicker
+                  value={diagSessionId ?? ""}
+                  placement="down"
+                  menuTitle={t("diagnostics.chat")}
+                  placeholder={t("diagnostics.chatNone")}
+                  emptyLabel={t("diagnostics.noChats")}
+                  onChange={(value) => setDiagSessionId(value)}
+                  options={[
+                    { value: "", label: t("diagnostics.chatNone") },
+                    ...sessions.map((s) => ({
+                      value: s.id,
+                      label: s.title || s.id.slice(0, 8),
+                      hint:
+                        s.id === activeSessionId
+                          ? `${s.provider} · ${t("diagnostics.chatActive")}`
+                          : s.provider,
+                    })),
+                  ]}
+                />
+              </div>
+              <p className={styles.fieldHint}>
+                {sessions.length === 0 ? t("diagnostics.noChats") : t("diagnostics.chatHint")}
+              </p>
+              <div className={styles.diagActions}>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={diagBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setDiagBusy(true);
+                      setDiagMessage(null);
+                      try {
+                        const dump = await submitDiagnosticsDump({
+                          reason: "manual",
+                          sessionId: diagSessionId ?? "",
+                        });
+                        setDiagMessage(t("diagnostics.savedTo", { path: dump.path }));
+                        await refreshDiagnostics();
+                      } catch (err) {
+                        setDiagMessage(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setDiagBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {diagBusy ? t("diagnostics.saving") : t("diagnostics.createNow")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  disabled={diagLoading}
+                  onClick={() => void refreshDiagnostics()}
+                >
+                  {t("common.refresh")}
+                </button>
+              </div>
+              {diagMessage ? <p className={styles.hint}>{diagMessage}</p> : null}
+            </div>
+
+            <div className={styles.sectionBlock}>
+              <h2 className={styles.sectionHeading}>{t("diagnostics.dumpsTitle")}</h2>
+              <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
+              {diagLoading && !diagItems.length ? (
+                <p className={styles.hint}>{t("common.loading")}</p>
+              ) : null}
+              {!diagLoading && diagItems.length === 0 ? (
+                <p className={styles.hint}>{t("diagnostics.empty")}</p>
+              ) : null}
+              <ul className={styles.diagList}>
+                {diagItems.map((item) => (
+                  <li key={item.id} className={styles.diagCard}>
+                    <div className={styles.diagCardMain}>
+                      <div className={styles.diagCardTop}>
+                        <span className={styles.diagReason}>{item.reason}</span>
+                        <span className={styles.diagItemMeta}>
+                          {new Date(item.createdAt).toLocaleString()} ·{" "}
+                          {Math.max(1, Math.round(item.size / 1024))} KB
+                        </span>
+                      </div>
+                      <p className={styles.diagPath} title={item.path}>
+                        {item.fileName}
+                      </p>
+                    </div>
+                    <div className={styles.diagCardActions}>
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        disabled={diagCopyId === item.id}
+                        onClick={() => {
+                          void (async () => {
+                            setDiagCopyId(item.id);
+                            setDiagMessage(null);
+                            try {
+                              const full = await getDiagnosticsDump(item.id);
+                              await navigator.clipboard.writeText(
+                                JSON.stringify(full.payload, null, 2),
+                              );
+                              setDiagMessage(t("diagnostics.copied"));
+                            } catch (err) {
+                              setDiagMessage(err instanceof Error ? err.message : String(err));
+                            } finally {
+                              setDiagCopyId(null);
+                            }
+                          })();
+                        }}
+                      >
+                        {diagCopyId === item.id ? t("diagnostics.copying") : t("diagnostics.copyJson")}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.diagDelete}
+                        aria-label={t("common.delete")}
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await api.deleteDiagnosticsDump(item.id);
+                              await refreshDiagnostics();
+                            } catch (err) {
+                              setDiagMessage(err instanceof Error ? err.message : String(err));
+                            }
+                          })();
+                        }}
+                      >
+                        {t("common.delete")}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )}
+
+        {section === "agent" && leaf === "usage" && usageSupported && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <div className={styles.diagActions}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => void refreshAgentUsage()}
+                >
+                  {t("usage.refresh")}
+                </button>
+              </div>
+              <p className={styles.fieldHint}>{t("usage.periodNote")}</p>
+            </div>
+
+            {sessionUsage ? (
+              <>
+                <div className={styles.sectionBlock}>
+                  <h2 className={styles.sectionHeading}>{t("usage.context")}</h2>
+                  <p className={styles.fieldHint}>{t("usage.contextHint")}</p>
+                  <div className={styles.usageMeter}>
+                    <div className={styles.usageMeterTrack} aria-hidden>
+                      <div
+                        className={styles.usageMeterFill}
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.max(0, (sessionUsage.used / sessionUsage.size) * 100),
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                    <div className={styles.usageStats}>
+                      <strong>
+                        {t("usage.percent", {
+                          percent: Math.round((sessionUsage.used / sessionUsage.size) * 100),
+                        })}
+                      </strong>
+                      <span>
+                        {t("usage.usedOfSize", {
+                          used: formatTokenCount(sessionUsage.used),
+                          size: formatTokenCount(sessionUsage.size),
+                        })}
+                      </span>
+                      <span>
+                        {t("usage.remaining", {
+                          remaining: formatTokenCount(
+                            Math.max(0, sessionUsage.size - sessionUsage.used),
+                          ),
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {sessionUsage.cost ? (
+                  <div className={styles.sectionBlock}>
+                    <h2 className={styles.sectionHeading}>{t("usage.cost")}</h2>
+                    <p className={styles.fieldHint}>{t("usage.costHint")}</p>
+                    <p className={styles.usageCost}>
+                      {t("usage.costValue", {
+                        amount: formatCostAmount(sessionUsage.cost.amount),
+                        currency: sessionUsage.cost.currency,
+                      })}
+                    </p>
+                  </div>
+                ) : null}
+
+                <p className={styles.hint}>
+                  {t("usage.updatedAt", {
+                    time: new Date(sessionUsage.updatedAt).toLocaleString(),
+                  })}
+                </p>
+              </>
+            ) : (
+              <p className={styles.hint}>{t("usage.empty")}</p>
+            )}
+          </section>
+        )}
+
         {section === "agent" && leaf === "remote" && (
           <section className={`${styles.card} ${styles.remoteCard}`}>
             <div className={styles.remoteStep}>
@@ -655,7 +1005,10 @@ export function SettingsPage() {
           </section>
         )}
 
-        {section === "agent" && leaf !== "connect" && leaf !== "remote" && (
+        {section === "agent" &&
+          leaf !== "connect" &&
+          leaf !== "remote" &&
+          leaf !== "usage" && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>
             {saved && <span className={styles.ok}>{t("settings.profileSaved")}</span>}
@@ -664,9 +1017,13 @@ export function SettingsPage() {
       </form>
       <ServerFolderBrowseDialog
         open={folderBrowseOpen}
-        initialPath={form.defaultCwd || undefined}
+        initialPath={
+          folderBrowseTarget === "diagnosticsDir"
+            ? form.diagnosticsDir || diagDirDefault || undefined
+            : form.defaultCwd || undefined
+        }
         onClose={() => setFolderBrowseOpen(false)}
-        onSelect={(path) => patch("defaultCwd", path)}
+        onSelect={(path) => patch(folderBrowseTarget, path)}
       />
     </div>
   );

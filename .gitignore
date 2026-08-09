@@ -9,3 +9,4 @@ coverage
 .turbo
 *.tsbuildinfo
 .vite
+diagnostics/

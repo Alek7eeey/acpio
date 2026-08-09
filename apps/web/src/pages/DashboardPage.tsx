@@ -78,7 +78,7 @@ export function DashboardPage() {
             <strong className={styles.truncate}>{model}</strong>
           </div>
           <div className={styles.stat}>
-            <span className={styles.statLabel}>{t("chat.newSession")}</span>
+            <span className={styles.statLabel}>{t("common.chats")}</span>
             <strong>{sessions.length}</strong>
           </div>
           <div className={styles.stat}>

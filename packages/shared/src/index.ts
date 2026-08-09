@@ -50,6 +50,8 @@ export interface AppSettings {
   giteaToken: string;
   giteaOwner: string;
   giteaRepo: string;
+  /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
+  diagnosticsDir: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -80,6 +82,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   giteaToken: "",
   giteaOwner: "acprocess",
   giteaRepo: "demo",
+  diagnosticsDir: "",
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {
@@ -359,6 +362,8 @@ export interface SessionDto {
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
+  /** Timestamp of the latest message in the session (falls back to createdAt). */
+  lastMessageAt: string;
 }
 
 export interface MessagePartDto {
@@ -416,8 +421,27 @@ export type WsServerEvent =
       sessionId: string;
       commands: SlashCommandDto[];
     }
+  | {
+      type: "usage.updated";
+      sessionId: string;
+      usage: SessionUsageDto;
+    }
+  | {
+      type: "messages.truncated";
+      sessionId: string;
+      messages: MessageDto[];
+    }
   | { type: "error"; sessionId?: string; message: string }
   | { type: "pong" };
+
+/** ACP `usage_update` — context window + optional session cost (not period quotas). */
+export interface SessionUsageDto {
+  used: number;
+  size: number;
+  cost?: { amount: number; currency: string } | null;
+  updatedAt: string;
+  provider?: AgentProvider;
+}
 
 export type WsClientEvent =
   | { type: "ping" }
@@ -465,6 +489,20 @@ export interface AgentProbeResult {
   currentModel?: string;
   models?: Array<{ value: string; name: string }>;
   modelParams?: ModelParamDto[];
+  modes?: Array<{ value: string; name: string }>;
+}
+
+export interface DiagnosticsDumpMeta {
+  id: string;
+  fileName: string;
+  reason: string;
+  createdAt: string;
+  size: number;
+  path: string;
+}
+
+export interface DiagnosticsDumpDto extends DiagnosticsDumpMeta {
+  payload: Record<string, unknown>;
 }
 
 /** Parse `base[k=v,k2=v2]` into base + params. */

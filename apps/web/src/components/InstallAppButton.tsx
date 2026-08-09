@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../lib/i18n";
+import {
+  getDeferredInstallPrompt,
+  initPwaInstallCapture,
+  isPwaInstalled,
+  promptPwaInstall,
+  subscribePwaInstall,
+} from "../lib/pwaInstall";
 import styles from "./InstallAppButton.module.css";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
 
 type InstallAppButtonProps = {
   className?: string;
@@ -22,41 +24,23 @@ function isIosDevice() {
 
 export function InstallAppButton({ className }: InstallAppButtonProps) {
   const t = useT();
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [installed, setInstalled] = useState(false);
-  const [ios, setIos] = useState(false);
+  const [deferredReady, setDeferredReady] = useState(() => Boolean(getDeferredInstallPrompt()));
+  const [installed, setInstalled] = useState(() => isPwaInstalled());
+  const [ios] = useState(() => isIosDevice());
   const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setIos(isIosDevice());
-
-    const standalone =
-      window.matchMedia("(display-mode: standalone)").matches ||
-      ("standalone" in navigator && Boolean((navigator as { standalone?: boolean }).standalone));
-    if (standalone) {
-      setInstalled(true);
-      return;
-    }
-
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
+    initPwaInstallCapture();
+    const sync = () => {
+      setDeferredReady(Boolean(getDeferredInstallPrompt()));
+      setInstalled(isPwaInstalled());
     };
-    const onInstalled = () => {
-      setDeferred(null);
-      setInstalled(true);
-      setOpen(false);
-    };
-
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
-    };
+    sync();
+    return subscribePwaInstall(sync);
   }, []);
 
   useLayoutEffect(() => {
@@ -102,19 +86,24 @@ export function InstallAppButton({ className }: InstallAppButtonProps) {
   if (installed) return null;
 
   const runInstall = async () => {
-    if (deferred) {
-      await deferred.prompt();
-      await deferred.userChoice;
-      setDeferred(null);
+    if (busy) return;
+
+    // Chrome/Edge: native install dialog from deferred beforeinstallprompt.
+    if (getDeferredInstallPrompt()) {
+      setBusy(true);
       setOpen(false);
+      try {
+        const outcome = await promptPwaInstall();
+        if (outcome === "unavailable") setOpen(true);
+      } finally {
+        setBusy(false);
+      }
       return;
     }
-    // iOS has no beforeinstallprompt — show Safari Add to Home Screen steps.
-    // Other browsers without a deferred prompt: show short fallback tips.
+
+    // iOS or Chromium without a ready prompt → show instructions / status.
     setOpen((v) => !v);
   };
-
-  const showIosGuide = ios || !deferred;
 
   return (
     <div className={styles.wrap} ref={wrapRef}>
@@ -124,10 +113,11 @@ export function InstallAppButton({ className }: InstallAppButtonProps) {
         title={t("common.installApp")}
         aria-label={t("common.installApp")}
         aria-expanded={open}
-        aria-haspopup={deferred && !ios ? undefined : "dialog"}
+        aria-haspopup={deferredReady && !ios ? undefined : "dialog"}
+        disabled={busy}
         onClick={() => void runInstall()}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <svg className={styles.icon} width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
           <path
             d="M12 3v10m0 0l-3.5-3.5M12 13l3.5-3.5"
             stroke="currentColor"
@@ -143,7 +133,7 @@ export function InstallAppButton({ className }: InstallAppButtonProps) {
           />
         </svg>
       </button>
-      {open && showIosGuide
+      {open
         ? createPortal(
             <div
               ref={menuRef}
@@ -168,10 +158,11 @@ export function InstallAppButton({ className }: InstallAppButtonProps) {
                 </>
               ) : (
                 <>
-                  <p className={styles.menuText}>{t("common.installAppHint")}</p>
+                  <p className={styles.menuText}>{t("common.installAppWaiting")}</p>
                   <ul className={styles.menuList}>
+                    <li>{t("common.installAppNeedHttps")}</li>
+                    <li>{t("common.installAppNeedSw")}</li>
                     <li>{t("common.installAppAndroid")}</li>
-                    <li>{t("common.installAppDesktop")}</li>
                   </ul>
                 </>
               )}

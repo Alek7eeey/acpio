@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acprocess/shared";
@@ -10,11 +10,7 @@ import {
 } from "./CreateSessionFolderPicker";
 import styles from "./AppShell.module.css";
 
-type DropTarget = { sessionId: string };
-
 type MenuState = { id: string; x: number; y: number } | null;
-
-type PopoverState = { kind: "delete-session"; session: SessionDto; x: number; y: number } | null;
 
 type FolderPickerState = {
   x: number;
@@ -24,21 +20,10 @@ type FolderPickerState = {
 
 function sortSessions(list: SessionDto[]) {
   return [...list].sort(
-    (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.sortOrder - b.sortOrder,
+    (a, b) =>
+      b.lastMessageAt.localeCompare(a.lastMessageAt) ||
+      b.createdAt.localeCompare(a.createdAt),
   );
-}
-
-function clampPopover(x: number, y: number, width = 280, height = 160) {
-  const margin = window.innerWidth < 480 ? 16 : 12;
-  const maxW = Math.min(width, window.innerWidth - margin * 2);
-  let left: number;
-  if (window.innerWidth < 480) {
-    left = Math.round((window.innerWidth - maxW) / 2);
-  } else {
-    left = Math.min(Math.max(margin, x), window.innerWidth - maxW - margin);
-  }
-  const top = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
-  return { left, top, width: maxW };
 }
 
 function normalizeCwd(cwd: string | null | undefined) {
@@ -65,38 +50,142 @@ function groupByFolder(list: SessionDto[]) {
   const entries = [...map.entries()].map(([cwd, sessions]) => ({
     cwd,
     sessions: sortSessions(sessions),
-    latest: sessions.reduce((max, s) => (s.updatedAt > max ? s.updatedAt : max), ""),
+    latest: sessions.reduce((max, s) => (s.lastMessageAt > max ? s.lastMessageAt : max), ""),
   }));
   entries.sort((a, b) => {
+    if (a.latest !== b.latest) return b.latest.localeCompare(a.latest);
     if (!a.cwd && b.cwd) return 1;
     if (a.cwd && !b.cwd) return -1;
-    if (a.latest !== b.latest) return b.latest.localeCompare(a.latest);
     return a.cwd.localeCompare(b.cwd, undefined, { sensitivity: "base" });
   });
   return entries;
 }
 
+function startOfLocalDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function stripDateDots(value: string) {
+  return value.replace(/\./g, "").replace(/\s+/g, " ").trim();
+}
+
 function formatRelativeActivity(
   iso: string,
+  locale: string,
   t: (key: string, vars?: Record<string, string | number>) => string,
   nowMs: number,
 ) {
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return "";
-  const diffMs = Math.max(0, nowMs - then);
+  const thenMs = Date.parse(iso);
+  if (!Number.isFinite(thenMs)) return "";
+  const then = new Date(thenMs);
+  const now = new Date(nowMs);
+  const diffMs = Math.max(0, nowMs - thenMs);
   const minutes = Math.floor(diffMs / 60_000);
+
   if (minutes < 1) return t("common.relativeJustNow");
   if (minutes < 60) return t("common.relativeMinutes", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t("common.relativeHours", { count: hours });
-  const days = Math.floor(hours / 24);
-  if (days < 7) return t("common.relativeDays", { count: days });
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return t("common.relativeWeeks", { count: weeks });
-  const months = Math.floor(days / 30);
-  if (months < 12) return t("common.relativeMonths", { count: months });
-  const years = Math.max(1, Math.floor(days / 365));
-  return t("common.relativeYears", { count: years });
+
+  const thenDay = startOfLocalDay(then);
+  const nowDay = startOfLocalDay(now);
+  const dayDiff = Math.round((nowDay - thenDay) / 86_400_000);
+
+  if (dayDiff === 0) {
+    return new Intl.DateTimeFormat(locale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(then);
+  }
+  if (dayDiff === 1) return t("common.relativeYesterday");
+  if (dayDiff > 1 && dayDiff < 7) {
+    return stripDateDots(
+      new Intl.DateTimeFormat(locale, { weekday: "short" }).format(then),
+    );
+  }
+
+  const sameYear = then.getFullYear() === now.getFullYear();
+  return stripDateDots(
+    new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month: "short",
+      ...(sameYear ? {} : { year: "2-digit" }),
+    }).format(then),
+  );
+}
+
+/** Coarse bucket for grouping siblings that share the same relative day/period. */
+function activityBucket(
+  iso: string,
+  locale: string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  nowMs: number,
+): { key: string; label: string } | null {
+  const thenMs = Date.parse(iso);
+  if (!Number.isFinite(thenMs)) return null;
+  const then = new Date(thenMs);
+  const now = new Date(nowMs);
+  const thenDay = startOfLocalDay(then);
+  const nowDay = startOfLocalDay(now);
+  const dayDiff = Math.round((nowDay - thenDay) / 86_400_000);
+
+  if (dayDiff <= 0) {
+    return { key: "today", label: t("common.relativeToday") };
+  }
+  if (dayDiff === 1) {
+    return { key: "yesterday", label: t("common.relativeYesterday") };
+  }
+  if (dayDiff > 1 && dayDiff < 7) {
+    const label = stripDateDots(
+      new Intl.DateTimeFormat(locale, { weekday: "short" }).format(then),
+    );
+    return { key: `dow:${dayDiff}`, label };
+  }
+
+  const sameYear = then.getFullYear() === now.getFullYear();
+  const label = stripDateDots(
+    new Intl.DateTimeFormat(locale, {
+      day: "numeric",
+      month: "short",
+      ...(sameYear ? {} : { year: "2-digit" }),
+    }).format(then),
+  );
+  return { key: `date:${thenDay}`, label };
+}
+
+type TimeGroup = {
+  key: string;
+  label: string;
+  sessions: SessionDto[];
+};
+
+function groupSessionsByActivity(
+  sessions: SessionDto[],
+  locale: string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  nowMs: number,
+): TimeGroup[] {
+  const groups: TimeGroup[] = [];
+  for (const session of sessions) {
+    const bucket = activityBucket(session.lastMessageAt || session.createdAt, locale, t, nowMs);
+    const key = bucket?.key ?? `id:${session.id}`;
+    const label = bucket?.label ?? "";
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) {
+      last.sessions.push(session);
+    } else {
+      groups.push({ key, label, sessions: [session] });
+    }
+  }
+  return groups;
+}
+
+function MenuIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className={styles.contextMenuIcon} aria-hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+        {children}
+      </svg>
+    </span>
+  );
 }
 
 export function ChatSidebar() {
@@ -109,29 +198,17 @@ export function ChatSidebar() {
   const createSession = useAppStore((s) => s.createSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
-  const reorderSessions = useAppStore((s) => s.reorderSessions);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
-  const [popover, setPopover] = useState<PopoverState>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
-  const [canDrag, setCanDrag] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const dragRef = useRef<{ sessionId: string } | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(hover: hover) and (pointer: fine)");
-    const sync = () => setCanDrag(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
+  const confirmRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
@@ -157,7 +234,7 @@ export function ChatSidebar() {
 
   const openFolderPicker = (opts: { x: number; y: number; dialogStartPath?: string }) => {
     setMenu(null);
-    setPopover(null);
+    setConfirmDeleteId(null);
     setFolderPicker({
       x: opts.x,
       y: opts.y,
@@ -173,17 +250,17 @@ export function ChatSidebar() {
   }, [renamingId]);
 
   useEffect(() => {
-    if (!menu && !popover) return;
+    if (!menu && !confirmDeleteId) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (menuRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target) || confirmRef.current?.contains(target)) return;
       setMenu(null);
-      setPopover(null);
+      setConfirmDeleteId(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMenu(null);
-        setPopover(null);
+        setConfirmDeleteId(null);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -192,15 +269,16 @@ export function ChatSidebar() {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [menu, popover]);
+  }, [menu, confirmDeleteId]);
 
   useEffect(() => {
-    if (!popover) return;
-    popoverRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-  }, [popover]);
+    if (!confirmDeleteId) return;
+    confirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [confirmDeleteId]);
 
   const startRenameSession = (s: SessionDto) => {
     setMenu(null);
+    setConfirmDeleteId(null);
     setRenamingId(s.id);
     setDraft(s.title);
   };
@@ -213,54 +291,137 @@ export function ChatSidebar() {
     if (title) await renameSession(id, title);
   };
 
-  const buildReorder = (sessionId: string, beforeId: string) => {
-    const moving = sessions.find((s) => s.id === sessionId);
-    const before = sessions.find((s) => s.id === beforeId);
-    if (!moving || !before) return null;
-
-    const folderKey = normalizeCwd(moving.cwd);
-    if (normalizeCwd(before.cwd) !== folderKey) return null;
-
-    const inFolder = sortSessions(
-      sessions.filter((s) => normalizeCwd(s.cwd) === folderKey && s.id !== sessionId),
-    );
-    const idx = inFolder.findIndex((s) => s.id === beforeId);
-    if (idx >= 0) inFolder.splice(idx, 0, moving);
-    else inFolder.push(moving);
-
-    return inFolder.map((s, i) => ({
-      id: s.id,
-      themeId: null as string | null,
-      sortOrder: i,
-    }));
-  };
-
-  const applyDrop = async (target: DropTarget) => {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    setDropTarget(null);
-    if (!drag || target.sessionId === drag.sessionId) return;
-    const items = buildReorder(drag.sessionId, target.sessionId);
-    if (items) await reorderSessions(items);
-  };
-
   const openSessionMenu = (e: ReactMouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
     setFolderPicker(null);
+    setConfirmDeleteId(null);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x =
       e.type === "contextmenu"
         ? e.clientX
-        : (e.currentTarget as HTMLElement).getBoundingClientRect().right - 8;
+        : Math.min(rect.right - 8, window.innerWidth - 200);
     const y =
       e.type === "contextmenu"
         ? e.clientY
-        : (e.currentTarget as HTMLElement).getBoundingClientRect().bottom + 4;
+        : Math.min(rect.bottom + 6, window.innerHeight - 160);
     setMenu({ id, x, y });
   };
 
   const showFolderHeaders = folders.length > 1 || (folders.length === 1 && !!folders[0]?.cwd);
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
+  const dateLocale = settings.locale === "en" ? "en-US" : "ru-RU";
+
+  const renderSessionRow = (s: SessionDto, showActivity: boolean) => {
+    const isActive = s.id === activeSessionId;
+    const isRenaming = renamingId === s.id;
+    const menuOpen = menu?.id === s.id;
+    const confirming = confirmDeleteId === s.id;
+    const activity = showActivity
+      ? formatRelativeActivity(s.lastMessageAt || s.createdAt, dateLocale, t, nowMs)
+      : "";
+
+    if (confirming) {
+      return (
+        <div
+          key={s.id}
+          ref={confirmRef}
+          className={`${styles.sessionConfirm} ${isActive ? styles.sessionConfirmActive : ""}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("chat.deleteSessionTitle")}
+        >
+          <div className={styles.sessionConfirmCopy}>
+            <div className={styles.sessionConfirmTitle}>{t("chat.deleteSessionTitle")}</div>
+            <p className={styles.sessionConfirmText}>{t("chat.deleteSessionBody")}</p>
+          </div>
+          <div className={styles.sessionConfirmActions}>
+            <button
+              type="button"
+              className={styles.sessionConfirmCancel}
+              onClick={() => setConfirmDeleteId(null)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className={styles.sessionConfirmDelete}
+              onClick={() => {
+                setConfirmDeleteId(null);
+                void deleteSession(s.id);
+              }}
+            >
+              {t("common.delete")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={s.id}
+        className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""}`}
+        onContextMenu={(e) => openSessionMenu(e, s.id)}
+      >
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            className={styles.renameInput}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commitRenameSession()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void commitRenameSession();
+              if (e.key === "Escape") setRenamingId(null);
+            }}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              className={styles.sessionBtn}
+              onClick={() => {
+                void openChat(s.id);
+              }}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                startRenameSession(s);
+              }}
+            >
+              <span className={styles.sessionTitle}>{s.title}</span>
+              {activity ? (
+                <span
+                  className={styles.sessionActivity}
+                  title={new Intl.DateTimeFormat(dateLocale, {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  }).format(new Date(s.lastMessageAt || s.createdAt))}
+                >
+                  {activity}
+                </span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={styles.sessionMore}
+              aria-label={t("common.chatMenu")}
+              onClick={(e) => openSessionMenu(e, s.id)}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="5" cy="12" r="1.8" />
+                <circle cx="12" cy="12" r="1.8" />
+                <circle cx="19" cy="12" r="1.8" />
+              </svg>
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <>
@@ -279,118 +440,56 @@ export function ChatSidebar() {
         </div>
 
         <div className={styles.sessionList}>
-          {folders.map((folder) => (
-            <div key={folder.cwd || "__no_folder__"} className={styles.folderGroup}>
-              {showFolderHeaders && (
-                <div className={styles.folderHead} title={folder.cwd || undefined}>
-                  <span className={styles.folderIcon} aria-hidden>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className={styles.folderLabel}>
-                    {folderLabel(folder.cwd, t("common.noFolder"))}
-                  </span>
-                </div>
-              )}
-              {folder.sessions.map((s) => {
-                const isActive = s.id === activeSessionId;
-                const isRenaming = renamingId === s.id;
-                const menuOpen = menu?.id === s.id;
-                const dropBefore = dropTarget?.sessionId === s.id ? styles.dropBefore : "";
-                const activity = formatRelativeActivity(s.updatedAt, t, nowMs);
+          {folders.map((folder) => {
+            const useTimeGroups = folder.sessions.length > 1;
+            const timeGroups = useTimeGroups
+              ? groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs)
+              : null;
 
-                return (
-                  <div
-                    key={s.id}
-                    className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${dropBefore}`}
-                    draggable={!isRenaming && canDrag}
-                    onDragStart={(e: DragEvent) => {
-                      dragRef.current = { sessionId: s.id };
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", s.id);
-                      setMenu(null);
-                    }}
-                    onDragEnd={() => {
-                      dragRef.current = null;
-                      setDropTarget(null);
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setDropTarget({ sessionId: s.id });
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      void applyDrop({ sessionId: s.id });
-                    }}
-                    onContextMenu={(e) => openSessionMenu(e, s.id)}
-                  >
-                    {isRenaming ? (
-                      <input
-                        ref={renameInputRef}
-                        className={styles.renameInput}
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onBlur={() => void commitRenameSession()}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void commitRenameSession();
-                          if (e.key === "Escape") setRenamingId(null);
-                        }}
-                      />
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          className={styles.sessionBtn}
-                          onClick={() => {
-                            void openChat(s.id);
-                          }}
-                          onDoubleClick={(e) => {
-                            if (!canDrag) return;
-                            e.preventDefault();
-                            startRenameSession(s);
-                          }}
-                        >
-                          <span className={styles.sessionTitle}>{s.title}</span>
-                          {activity ? (
-                            <span className={styles.sessionActivity} title={s.updatedAt}>
-                              {activity}
-                            </span>
-                          ) : null}
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.sessionMore}
-                          aria-label={t("common.chatMenu")}
-                          onClick={(e) => openSessionMenu(e, s.id)}
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <circle cx="5" cy="12" r="1.8" />
-                            <circle cx="12" cy="12" r="1.8" />
-                            <circle cx="19" cy="12" r="1.8" />
-                          </svg>
-                        </button>
-                      </>
-                    )}
+            return (
+              <div key={folder.cwd || "__no_folder__"} className={styles.folderGroup}>
+                {showFolderHeaders && (
+                  <div className={styles.folderHead} title={folder.cwd || undefined}>
+                    <span className={styles.folderIcon} aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span className={styles.folderLabel}>
+                      {folderLabel(folder.cwd, t("common.noFolder"))}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                )}
+                {timeGroups
+                  ? timeGroups.map((group) => {
+                      const sharedHeading = group.sessions.length > 1 && !!group.label;
+                      return (
+                        <div key={group.key} className={styles.timeGroup}>
+                          {sharedHeading ? (
+                            <div className={styles.timeGroupHead}>
+                              <span className={styles.timeGroupLabel}>{group.label}</span>
+                            </div>
+                          ) : null}
+                          {group.sessions.map((s) => renderSessionRow(s, !sharedHeading))}
+                        </div>
+                      );
+                    })
+                  : folder.sessions.map((s) => renderSessionRow(s, true))}
+              </div>
+            );
+          })}
           {sessions.length === 0 && <p className={styles.emptyHint}>{t("chat.emptyDescription")}</p>}
         </div>
       </div>
@@ -401,10 +500,19 @@ export function ChatSidebar() {
           <div
             ref={menuRef}
             className={styles.contextMenu}
-            style={{ left: Math.min(menu.x, window.innerWidth - 180), top: menu.y }}
+            style={{ left: Math.min(menu.x, window.innerWidth - 200), top: menu.y }}
             role="menu"
           >
             <button type="button" role="menuitem" onClick={() => startRenameSession(menuSession)}>
+              <MenuIcon>
+                <path
+                  d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path d="M12.8 6.8 17.2 11.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </MenuIcon>
               {t("chat.renameSession")}
             </button>
             <button
@@ -420,51 +528,37 @@ export function ChatSidebar() {
                 });
               }}
             >
-              {t("common.newChat")}
+              <MenuIcon>
+                <path
+                  d="M12 5v14M5 12h14"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </MenuIcon>
+              {t("chat.newInFolder")}
             </button>
+            <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"
               role="menuitem"
               className={styles.menuDanger}
               onClick={() => {
-                const { x, y } = menu;
                 setMenu(null);
-                setPopover({ kind: "delete-session", session: menuSession, x, y });
+                setConfirmDeleteId(menuSession.id);
               }}
             >
+              <MenuIcon>
+                <path
+                  d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
               {t("common.delete")}
             </button>
-          </div>,
-          document.body,
-        )}
-
-      {popover &&
-        createPortal(
-          <div
-            ref={popoverRef}
-            className={styles.actionPopover}
-            style={clampPopover(popover.x, popover.y, 280, 170)}
-            role="dialog"
-            aria-modal="true"
-          >
-            <div className={styles.popoverTitle}>{t("chat.deleteSessionTitle")}</div>
-            <p className={styles.popoverText}>{t("chat.deleteSessionBody")}</p>
-            <div className={styles.popoverActions}>
-              <button type="button" onClick={() => setPopover(null)}>
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className={styles.popoverDanger}
-                onClick={() => {
-                  const id = popover.session.id;
-                  setPopover(null);
-                  void deleteSession(id);
-                }}
-              >
-                {t("common.delete")}
-              </button>
-            </div>
           </div>,
           document.body,
         )}
@@ -480,8 +574,6 @@ export function ChatSidebar() {
           onConfirm={async (cwd) => {
             setFolderPicker(null);
             await createSession(cwd);
-            navigate("/chat");
-            closeMobile();
           }}
         />
       )}

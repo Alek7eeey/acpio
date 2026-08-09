@@ -1,0 +1,363 @@
+.panel {
+  --plan-panel-width: 380px;
+  position: relative;
+  flex: 0 0 var(--plan-panel-width);
+  width: var(--plan-panel-width);
+  max-width: min(70vw, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 7%, var(--surface)) 0%,
+      color-mix(in srgb, var(--bg-secondary) 45%, var(--surface)) 120px,
+      color-mix(in srgb, var(--bg-secondary) 55%, var(--surface)) 100%
+    );
+  box-shadow:
+    -12px 0 28px rgba(0, 0, 0, 0.06),
+    inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: slideIn 0.2s ease;
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.resizingBody,
+.resizingBody * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 12%;
+  bottom: 12%;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
+  transition:
+    background 0.15s ease,
+    width 0.15s ease,
+    opacity 0.15s ease;
+  opacity: 0.85;
+}
+
+.splitter:hover::before,
+.resizing .splitter::before {
+  width: 4px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 1;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  flex-shrink: 0;
+}
+
+.headerText {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.eyebrow {
+  font-size: 0.78rem;
+  font-weight: 780;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+}
+
+.pendingBadge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.closeBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.closeBtn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 22%, var(--border));
+  background: var(--surface);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  flex-shrink: 0;
+}
+
+.footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+.footer button svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+    0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.primary:hover {
+  filter: brightness(1.05);
+  transform: translateY(-1px);
+}
+
+.primary:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.danger {
+  background: transparent;
+  color: color-mix(in srgb, var(--danger, #c44) 82%, var(--text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #c44) 32%, var(--border));
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--danger, #c44) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #c44) 48%, var(--border));
+}
+
+.danger:active {
+  background: color-mix(in srgb, var(--danger, #c44) 14%, transparent);
+}
+
+.tab {
+  position: absolute;
+  top: 96px;
+  right: 0;
+  z-index: 20;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 108px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 6%, var(--surface)) 55%,
+      var(--surface) 100%
+    );
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  padding: 16px 9px 16px 11px;
+  font: inherit;
+  font-weight: 750;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow:
+    -6px 4px 18px rgba(0, 0, 0, 0.08),
+    inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease,
+    padding 0.15s ease;
+}
+
+.tab:hover {
+  color: var(--accent);
+  transform: translateX(-2px);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 20%, var(--surface)) 0%,
+      color-mix(in srgb, var(--accent) 8%, var(--surface)) 60%,
+      var(--surface) 100%
+    );
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow:
+    -8px 6px 22px rgba(0, 0, 0, 0.1),
+    inset 2px 0 0 color-mix(in srgb, var(--accent) 75%, transparent);
+  padding-left: 13px;
+}
+
+.tabActive {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.tabPending {
+  color: var(--accent);
+  animation: tabPulse 1.6s ease-in-out infinite;
+}
+
+.tabLabel {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.1;
+}
+
+.tabDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  flex-shrink: 0;
+  writing-mode: horizontal-tb;
+}
+
+@keyframes tabPulse {
+  0%,
+  100% {
+    box-shadow:
+      -6px 4px 18px rgba(0, 0, 0, 0.08),
+      inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+  50% {
+    box-shadow:
+      -8px 6px 22px color-mix(in srgb, var(--accent) 18%, transparent),
+      inset 2px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 899px) {
+  .panel {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    width: 100%;
+    flex-basis: auto;
+    max-width: none;
+    border-left: none;
+    box-shadow: none;
+    background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .footer {
+    grid-template-columns: 1fr 1fr;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .tab {
+    top: auto;
+    bottom: 120px;
+    writing-mode: horizontal-tb;
+    text-orientation: mixed;
+    transform: none;
+    min-height: 0;
+    border-radius: 12px 0 0 12px;
+    padding: 12px 14px;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    font-size: 0.84rem;
+    gap: 8px;
+  }
+
+  .tab:hover {
+    transform: none;
+    padding-left: 14px;
+  }
+}

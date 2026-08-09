@@ -153,6 +153,35 @@
   flex: 0 0 auto;
 }
 
+.quiet {
+  z-index: 25;
+}
+
+.quietTrigger {
+  max-width: 7rem;
+  gap: 3px;
+  padding: 2px 5px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
+  border-radius: 8px;
+}
+
+.quietTrigger:hover,
+.quietTrigger.modelTriggerOpen {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-secondary);
+}
+
+.quietTriggerName {
+  max-width: 5.2rem;
+  color: inherit;
+}
+
+.quietChevron {
+  opacity: 0.55;
+}
+
 .modelMenu {
   position: absolute;
   right: 0;
@@ -440,8 +469,19 @@
 }
 
 .modelOptionName {
-  font-weight: 650;
+  font-weight: 400;
   font-size: 0.92rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelOptionMeta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

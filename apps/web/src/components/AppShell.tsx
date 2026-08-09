@@ -53,7 +53,11 @@ export function AppShell() {
   const setTheme = useAppStore((s) => s.setTheme);
   const connected = useAppStore((s) => s.connected);
   const settings = useAppStore((s) => s.settings);
-  const settingsTree = useMemo(() => getSettingsTree(t), [t]);
+  const usageSupported = useAppStore((s) => s.usageSupported);
+  const settingsTree = useMemo(
+    () => getSettingsTree(t, { showUsage: usageSupported }),
+    [t, usageSupported],
+  );
 
   const hasAgent = Boolean(settings.connectedProvider);
   const agentOnline = hasAgent && connected;
@@ -404,7 +408,7 @@ export function AppShell() {
             </div>
             <div className={styles.toolCluster} role="group" aria-label={t("common.toolbar")}>
               <InstallAppButton className={styles.toolClusterBtn} />
-              <LocaleToggle triggerClassName={styles.toolClusterBtn} compact />
+              <LocaleToggle triggerClassName={styles.toolClusterLocale} compact />
               <ThemeToggle
                 theme={theme}
                 className={styles.toolClusterBtn}
@@ -412,12 +416,19 @@ export function AppShell() {
               />
               <button
                 type="button"
-                className={`${styles.toolClusterBtn} ${isSettings ? styles.toolClusterBtnActive : ""}`}
+                className={`${styles.toolClusterBtn} ${styles.toolClusterSettings}${isSettings ? ` ${styles.toolClusterBtnActive}` : ""}`}
                 aria-label={t("common.settings")}
                 title={t("common.settings")}
                 onClick={() => navigate(settingsPath("agent", "connect"))}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg
+                  className={styles.toolClusterSettingsIcon}
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
                   <path
                     d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
                     stroke="currentColor"

@@ -49,7 +49,16 @@ export type AcpUpdate =
   | { kind: "tool_call_update"; toolCallId: string; status?: string; raw: Record<string, unknown> }
   | { kind: "plan"; raw: Record<string, unknown> }
   | { kind: "session_info"; raw: Record<string, unknown> }
+  | { kind: "current_mode"; modeId: string; raw: Record<string, unknown> }
+  | { kind: "config_options"; configOptions: ConfigOption[]; raw: Record<string, unknown> }
   | { kind: "available_commands"; raw: Record<string, unknown> }
+  | {
+      kind: "usage";
+      used: number;
+      size: number;
+      cost?: { amount: number; currency: string } | null;
+      raw: Record<string, unknown>;
+    }
   | { kind: "mixed_chunks"; thought?: string; text?: string }
   | { kind: "other"; sessionUpdate: string; raw: Record<string, unknown> };
 
@@ -105,6 +114,75 @@ export function findModelConfigOption(options: ConfigOption[]): ConfigOption | u
   );
 }
 
+export function findModeConfigOption(options: ConfigOption[]): ConfigOption | undefined {
+  return (
+    options.find((o) => o.id === "mode" || o.id === "session_mode") ??
+    options.find((o) => o.category === "mode")
+  );
+}
+
+export type AgentModeOption = { value: string; name: string };
+
+/** Modes from ACP `session/new` → `modes.availableModes` (Cursor/OMP/…) */
+export function modesFromSessionState(raw: unknown): AgentModeOption[] {
+  if (!raw || typeof raw !== "object") return [];
+  const state = raw as {
+    availableModes?: Array<{ id?: string; value?: string; name?: string }>;
+    modes?: Array<{ id?: string; value?: string; name?: string }>;
+  };
+  const list = state.availableModes ?? state.modes ?? [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((m) => {
+      const value = String(m.id ?? m.value ?? "").trim();
+      if (!value) return null;
+      return {
+        value,
+        name: String(m.name ?? value).trim() || value,
+      };
+    })
+    .filter((m): m is AgentModeOption => Boolean(m));
+}
+
+/**
+ * Modes the agent exposes for session/set_mode.
+ * Prefer explicit `modes.availableModes` from session/new; fall back to configOptions;
+ * Cursor gets Agent/Plan/Ask when the agent omits the list.
+ */
+export function listAgentModes(
+  options: ConfigOption[],
+  provider?: AgentProvider,
+  sessionModes?: AgentModeOption[],
+): AgentModeOption[] {
+  if (sessionModes && sessionModes.length > 0) {
+    return sessionModes;
+  }
+  const opt = findModeConfigOption(options);
+  if (opt?.options?.length) {
+    return opt.options.map((o) => ({
+      value: o.value,
+      name: (o.name || o.value).trim() || o.value,
+    }));
+  }
+  // Cursor ACP supports these even when configOptions omit the mode select.
+  if (provider === "cursor") {
+    return [
+      { value: "agent", name: "Agent" },
+      { value: "plan", name: "Plan" },
+      { value: "ask", name: "Ask" },
+    ];
+  }
+  // OMP (and similar) only advertise a single "default" mode — not a real switcher.
+  return [];
+}
+
+/** True when the agent exposes a real multi-mode switcher (not a lone default). */
+export function isSwitchableModeList(modes: AgentModeOption[]): boolean {
+  if (modes.length < 2) return false;
+  if (modes.length === 1 && /^(default|normal|standard)$/i.test(modes[0]!.value)) return false;
+  return true;
+}
+
 const SKIP_PARAM_IDS = new Set(["model", "mode", "session_mode"]);
 
 export function listModelParamOptions(options: ConfigOption[]): ConfigOption[] {
@@ -145,7 +223,7 @@ export function listModelParamOptions(options: ConfigOption[]): ConfigOption[] {
 }
 
 /** Keep prior param options if a partial refresh omits them or returns empty choices. */
-function mergeConfigOptions(prev: ConfigOption[], next: ConfigOption[]): ConfigOption[] {
+export function mergeConfigOptions(prev: ConfigOption[], next: ConfigOption[]): ConfigOption[] {
   if (!next.length) return prev;
   const byId = new Map(next.map((o) => [o.id, o]));
   for (const old of prev) {
@@ -417,17 +495,20 @@ export class AcpClient extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
   private pending = new Map<JsonRpcId, Pending>();
+  private promptRequestId: JsonRpcId | null = null;
   private closed = false;
   private stderrBuf = "";
   private terminals = new Map<string, TerminalEntry>();
   sessionId: string | null = null;
   configOptions: ConfigOption[] = [];
+  /** From session/new `modes.availableModes` when the agent provides it. */
+  sessionModes: AgentModeOption[] = [];
 
   constructor(
     private readonly provider: AgentProvider,
     private readonly settings: AppSettings,
     private readonly cwd: string,
-    private readonly mode: AgentMode,
+    private mode: AgentMode,
   ) {
     super();
   }
@@ -524,13 +605,18 @@ export class AcpClient extends EventEmitter {
       const result = (await this.send("session/new", {
         cwd,
         mcpServers: [],
-      })) as { sessionId?: string; configOptions?: ConfigOption[] };
+      })) as {
+        sessionId?: string;
+        configOptions?: ConfigOption[];
+        modes?: unknown;
+      };
 
       if (!result?.sessionId) {
         throw new Error("session/new did not return sessionId");
       }
       this.sessionId = result.sessionId;
       this.configOptions = normalizeConfigOptions(result.configOptions ?? []);
+      this.sessionModes = modesFromSessionState(result.modes);
       this.emit(
         "log",
         `configOptions: ${this.configOptions
@@ -540,6 +626,12 @@ export class AcpClient extends EventEmitter {
           )
           .join(", ")}`,
       );
+      if (this.sessionModes.length) {
+        this.emit(
+          "log",
+          `modes: ${this.sessionModes.map((m) => m.value).join(", ")}`,
+        );
+      }
 
       try {
         if (!opts?.catalogOnly) {
@@ -549,12 +641,11 @@ export class AcpClient extends EventEmitter {
         this.emit("log", `set model failed: ${String(err)}`);
       }
 
-      if (this.provider === "cursor") {
+      const modes = listAgentModes(this.configOptions, this.provider, this.sessionModes);
+      // Only apply when the agent actually supports this mode id (OMP has only "default").
+      if (!opts?.catalogOnly && modes.some((m) => m.value === this.mode)) {
         try {
-          await this.send("session/set_mode", {
-            sessionId: this.sessionId,
-            modeId: this.mode,
-          });
+          await this.setMode(this.mode);
         } catch (err) {
           this.emit("log", `set_mode skipped: ${String(err)}`);
         }
@@ -592,6 +683,38 @@ export class AcpClient extends EventEmitter {
       this.configOptions = mergeConfigOptions(prev, normalized);
     }
     return result;
+  }
+
+  async setMode(modeId: string) {
+    if (!this.sessionId) throw new Error("no session");
+    const modes = listAgentModes(this.configOptions, this.provider, this.sessionModes);
+    if (modes.length && !modes.some((m) => m.value === modeId)) {
+      throw new Error(`Unsupported mode: ${modeId}`);
+    }
+    try {
+      await this.send("session/set_mode", {
+        sessionId: this.sessionId,
+        modeId,
+      });
+    } catch (err) {
+      const modeOpt = findModeConfigOption(this.configOptions);
+      if (!modeOpt) throw err;
+      await this.setConfigOption(modeOpt.id, modeId);
+    }
+    if (modeId === "agent" || modeId === "plan" || modeId === "ask") {
+      this.mode = modeId;
+    }
+  }
+
+  /** Keep local mode in sync when the agent reports a mode change. */
+  applyReportedMode(modeId: string) {
+    if (modeId === "agent" || modeId === "plan" || modeId === "ask") {
+      this.mode = modeId;
+    }
+  }
+
+  applyConfigOptionsUpdate(options: ConfigOption[]) {
+    this.configOptions = mergeConfigOptions(this.configOptions, options);
   }
 
   /** Apply base model + optional fast/effort/… for Cursor parameterized picker. */
@@ -642,23 +765,39 @@ export class AcpClient extends EventEmitter {
 
   async prompt(text: string): Promise<{ stopReason?: string; raw: unknown }> {
     if (!this.sessionId) throw new Error("ACP session not started");
-    const raw = await this.send("session/prompt", {
+    const { id, promise } = this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
-    const stopReason =
-      raw && typeof raw === "object" && "stopReason" in (raw as object)
-        ? String((raw as { stopReason?: string }).stopReason ?? "")
-        : undefined;
-    return { stopReason, raw };
+    this.promptRequestId = id;
+    try {
+      const raw = await promise;
+      const stopReason =
+        raw && typeof raw === "object" && "stopReason" in (raw as object)
+          ? String((raw as { stopReason?: string }).stopReason ?? "")
+          : undefined;
+      return { stopReason, raw };
+    } finally {
+      if (this.promptRequestId === id) this.promptRequestId = null;
+    }
   }
 
   async cancel(): Promise<void> {
     if (!this.sessionId || !this.proc) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
+    // Unblock session/prompt immediately — agents may keep streaming briefly,
+    // but the host must not stay stuck waiting for the prompt RPC.
+    const id = this.promptRequestId;
+    if (id == null) return;
+    const waiter = this.pending.get(id);
+    if (!waiter) return;
+    this.pending.delete(id);
+    this.promptRequestId = null;
+    waiter.resolve({ stopReason: "cancelled" });
   }
 
   respond(id: JsonRpcId, result: unknown) {
+    this.emit("log", `respond id=${String(id)}`);
     this.write({ jsonrpc: "2.0", id, result });
   }
 
@@ -750,10 +889,11 @@ export class AcpClient extends EventEmitter {
     }
 
     const id = randomUUID();
+    // Avoid shell:true on Windows — it can hang or mangle argv for curl/web fetches.
     const child = spawn(command, args, {
       cwd,
       env,
-      shell: process.platform === "win32",
+      shell: false,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -768,6 +908,7 @@ export class AcpClient extends EventEmitter {
       byteLimit,
     };
     this.terminals.set(id, entry);
+    this.emit("log", `terminal/create ${id} ${command} ${args.join(" ")}`.trim());
 
     child.stdout.on("data", (buf: Buffer) => this.appendTerminalOutput(entry, buf.toString("utf8")));
     child.stderr.on("data", (buf: Buffer) => this.appendTerminalOutput(entry, buf.toString("utf8")));
@@ -815,8 +956,24 @@ export class AcpClient extends EventEmitter {
     if (entry.exitCode != null || entry.signal != null) {
       return { exitCode: entry.exitCode, signal: entry.signal };
     }
-    await new Promise<void>((resolve) => {
-      entry.proc.once("close", () => resolve());
+    const timeoutMs = Math.max(
+      5_000,
+      Math.min(Number(params.timeoutMs ?? 90_000) || 90_000, 300_000),
+    );
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        try {
+          entry.proc.kill();
+        } catch {
+          // ignore
+        }
+        this.appendTerminalOutput(entry, `\n[timeout after ${timeoutMs}ms]\n`);
+        reject(new Error(`Terminal timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      entry.proc.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
     });
     return { exitCode: entry.exitCode, signal: entry.signal };
   }
@@ -856,14 +1013,25 @@ export class AcpClient extends EventEmitter {
   }
 
   private send(method: string, params: unknown): Promise<unknown> {
+    return this.request(method, params).promise;
+  }
+
+  private request(
+    method: string,
+    params: unknown,
+  ): { id: JsonRpcId; promise: Promise<unknown> } {
     if (!this.proc || this.closed) {
-      return Promise.reject(new Error("ACP client is closed"));
+      return {
+        id: -1,
+        promise: Promise.reject(new Error("ACP client is closed")),
+      };
     }
     const id = this.nextId++;
     this.write({ jsonrpc: "2.0", id, method, params });
-    return new Promise((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
     });
+    return { id, promise };
   }
 
   private notify(method: string, params: unknown) {
@@ -979,6 +1147,7 @@ export class AcpClient extends EventEmitter {
 
     // Client-side methods the agent may call (fs / terminal). Always reply.
     if (msg.id !== undefined) {
+      this.emit("log", `client method ${method} id=${String(msg.id)}`);
       void this.handleClientMethod(method, (msg.params ?? {}) as Record<string, unknown>)
         .then((result) => this.respond(msg.id as JsonRpcId, result))
         .catch((err) => {
@@ -1042,8 +1211,76 @@ export class AcpClient extends EventEmitter {
     }
     if (sessionUpdate === "plan") return { kind: "plan", raw: update };
     if (sessionUpdate === "session_info_update") return { kind: "session_info", raw: update };
+    if (sessionUpdate === "current_mode_update") {
+      const modeId = String(update.modeId ?? update.currentModeId ?? update.mode ?? "").trim();
+      if (!modeId) return { kind: "other", sessionUpdate, raw: update };
+      return { kind: "current_mode", modeId, raw: update };
+    }
+    if (sessionUpdate === "config_option_update" || sessionUpdate === "config_options_update") {
+      const rawOptions = Array.isArray(update.configOptions)
+        ? update.configOptions
+        : Array.isArray(update.options)
+          ? update.options
+          : [];
+      const configOptions = rawOptions
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const row = item as Record<string, unknown>;
+          const id = String(row.id ?? row.configId ?? "").trim();
+          if (!id) return null;
+          return {
+            id,
+            name: typeof row.name === "string" ? row.name : undefined,
+            category: typeof row.category === "string" ? row.category : undefined,
+            type: typeof row.type === "string" ? row.type : undefined,
+            currentValue:
+              row.currentValue != null
+                ? String(row.currentValue)
+                : row.value != null
+                  ? String(row.value)
+                  : undefined,
+            options: Array.isArray(row.options)
+              ? row.options
+                  .map((opt) => {
+                    if (!opt || typeof opt !== "object") return null;
+                    const o = opt as Record<string, unknown>;
+                    const value = String(o.value ?? o.id ?? "").trim();
+                    if (!value) return null;
+                    return {
+                      value,
+                      name: String(o.name ?? value),
+                    };
+                  })
+                  .filter(Boolean) as Array<{ value: string; name: string }>
+              : undefined,
+          } satisfies ConfigOption;
+        })
+        .filter(Boolean) as ConfigOption[];
+      if (!configOptions.length) return { kind: "other", sessionUpdate, raw: update };
+      return { kind: "config_options", configOptions, raw: update };
+    }
     if (sessionUpdate === "available_commands_update") {
       return { kind: "available_commands", raw: update };
+    }
+    if (sessionUpdate === "usage_update") {
+      const used = Number(update.used);
+      const size = Number(update.size);
+      if (!Number.isFinite(used) || !Number.isFinite(size) || size <= 0) {
+        return { kind: "other", sessionUpdate, raw: update };
+      }
+      let cost: { amount: number; currency: string } | null | undefined;
+      const rawCost = update.cost;
+      if (rawCost && typeof rawCost === "object" && !Array.isArray(rawCost)) {
+        const c = rawCost as { amount?: unknown; currency?: unknown };
+        const amount = Number(c.amount);
+        const currency = typeof c.currency === "string" ? c.currency : "";
+        if (Number.isFinite(amount) && currency) {
+          cost = { amount, currency };
+        } else {
+          cost = null;
+        }
+      }
+      return { kind: "usage", used, size, cost, raw: update };
     }
     return { kind: "other", sessionUpdate, raw: update };
   }

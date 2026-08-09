@@ -23,10 +23,6 @@
   color: var(--text);
 }
 
-.themeIconBtn:active {
-  transform: scale(0.92);
-}
-
 .themeGlyph {
   position: relative;
   width: 18px;
@@ -66,18 +62,12 @@
   transform: rotate(-90deg) scale(0.35);
 }
 
-.themeIconBtn:hover[data-mode="dark"] .themeSun {
-  transform: rotate(28deg) scale(1.06);
-}
+@media (hover: hover) and (pointer: fine) {
+  .themeIconBtn:hover[data-mode="dark"] .themeSun {
+    transform: rotate(28deg) scale(1.06);
+  }
 
-.themeIconBtn:hover[data-mode="light"] .themeMoon {
-  transform: rotate(-18deg) scale(1.06);
-}
-
-.themeIconBtn:active[data-mode="dark"] .themeSun {
-  transform: rotate(48deg) scale(0.9);
-}
-
-.themeIconBtn:active[data-mode="light"] .themeMoon {
-  transform: rotate(-32deg) scale(0.9);
+  .themeIconBtn:hover[data-mode="light"] .themeMoon {
+    transform: rotate(-18deg) scale(1.06);
+  }
 }

@@ -1,12 +1,28 @@
 .page {
   flex: 1;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-width: 0;
   min-height: 0;
   width: 100%;
   max-width: 100%;
   overflow: hidden;
+  position: relative;
+}
+
+.mainColumn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pageWithPlan .mainColumn {
+  min-width: 0;
+  border-right: none;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .thread {
@@ -16,7 +32,7 @@
   padding: 20px 16px 28px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   min-width: 0;
   width: 100%;
 }
@@ -87,7 +103,7 @@
   margin: 0 auto;
   display: grid;
   gap: 6px;
-  animation: rise 0.25s ease;
+  animation: msgEnter 0.26s ease both;
   outline: none;
   caret-color: transparent;
   min-width: 0;
@@ -96,12 +112,28 @@
   word-break: break-word;
 }
 
+@keyframes msgEnter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .msg.user {
   justify-items: end;
 }
 
 .msg.assistant {
   justify-items: stretch;
+}
+
+/* Tighter pair: user bubble → assistant reply */
+.msg.user + .msg.assistant {
+  margin-top: -7px; /* thread gap 12px → effective 5px */
 }
 
 .msg:focus,
@@ -118,20 +150,15 @@
 }
 
 .live {
-  animation: rise 0.25s ease;
-}
-
-.thoughtLive {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  /* Don't re-play entrance while tokens stream in. */
+  animation: none;
 }
 
 .steps {
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-  border-radius: 12px;
-  padding: 2px 10px;
-  width: fit-content;
+  border: none;
+  padding: 0;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -139,34 +166,105 @@
 
 .stepsOpen {
   width: 100%;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: transparent;
 }
 
 .stepsLive {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  border: none;
+}
+
+.stepsToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 72%, transparent);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stepsToggle:hover {
+  color: var(--text);
+}
+
+.stepsToggle:hover .stepsIcon {
+  animation: thoughtIconTwinkle 0.55s ease;
+}
+
+.stepsIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--accent);
+  transform-origin: center;
+}
+
+.stepsIcon svg {
+  display: block;
+}
+
+.stepsTitle {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stepsChevron {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: inherit;
+  opacity: 0.65;
+  transition: transform 160ms ease;
+}
+
+.stepsChevronOpen {
+  transform: rotate(90deg);
 }
 
 .stepsBody {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin-top: 8px;
-  padding-bottom: 8px;
+  margin-left: 7px;
+  padding: 2px 0 4px 14px;
+  border-left: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
   min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .thoughtEmbedded {
   display: grid;
-  gap: 6px;
+  gap: 0;
   min-width: 0;
+  position: relative;
+  padding-left: 0.9em;
+}
+
+.thoughtEmbedded::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 35%, transparent);
 }
 
 .thoughtEmbeddedLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.78rem;
-  font-weight: 650;
-  color: var(--text-secondary);
+  display: none;
 }
 
 .thoughtLabel {
@@ -181,7 +279,7 @@
 }
 
 .thoughtBody {
-  color: var(--text-secondary);
+  color: color-mix(in srgb, var(--text) 68%, transparent);
   line-height: 1.55;
   max-height: none;
   margin: 0;
@@ -190,6 +288,7 @@
   padding: 0;
   font-family: inherit;
   font-size: 0.88rem;
+  font-weight: 400;
   min-width: 0;
   max-width: 100%;
   white-space: pre-wrap;
@@ -244,10 +343,37 @@
   }
 }
 
+@keyframes thoughtIconTwinkle {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  35% {
+    transform: rotate(-14deg) scale(1.12);
+  }
+  65% {
+    transform: rotate(10deg) scale(1.06);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes sendArrowNudge {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-3px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
 .userBubble {
   max-width: min(78%, 520px);
   width: fit-content;
-  justify-self: end;
+  box-sizing: border-box;
   background: color-mix(in srgb, var(--text) 12%, var(--bg-secondary));
   border: none;
   border-radius: 22px;
@@ -259,9 +385,38 @@
   caret-color: transparent;
   outline: none;
   cursor: default;
-  min-width: 0;
+  /* Wrap long tokens inside the capped bubble; keep parent .userMsg at
+     overflow-wrap:normal so fit-content doesn't collapse to ~1ch. */
   overflow-wrap: anywhere;
   word-break: break-word;
+  white-space: pre-wrap;
+  min-width: 0;
+}
+
+/* Light theme: soft blue like reference chat bubbles */
+:global(:root:not([data-theme="dark"])) .userBubble,
+:global([data-theme="light"]) .userBubble {
+  background: #ecf2ff;
+  border: none;
+}
+
+.userMsg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  /* Override .msg { overflow-wrap: anywhere } — with fit-content it collapses
+     the bubble to ~1 character (commands wrap letter-by-letter). */
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.userMsgActions {
+  align-self: flex-end;
 }
 
 .userBubble:focus,
@@ -270,10 +425,16 @@
   box-shadow: none;
 }
 
+.userBubble > * {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .userCommand {
   max-width: min(78%, 520px);
   width: fit-content;
-  justify-self: end;
+  min-width: 0;
+  box-sizing: border-box;
   display: grid;
   gap: 4px;
   padding: 8px 12px;
@@ -281,6 +442,8 @@
   border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   box-shadow: var(--shadow-soft);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .userCommandHeader {
@@ -300,6 +463,8 @@
 }
 
 .userCommandName {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-size: 0.86rem;
   font-weight: 650;
@@ -307,6 +472,8 @@
   background: transparent;
   border: none;
   padding: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .userCommandDesc,
@@ -315,7 +482,7 @@
   font-size: 0.82rem;
   line-height: 1.4;
   color: var(--text-secondary);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   word-break: break-word;
 }
 
@@ -438,18 +605,26 @@
   align-items: center;
   gap: 2px;
   margin-top: 2px;
-  opacity: 0.55;
+  opacity: 1;
   transition: opacity var(--motion);
 }
 
-.msg.assistant:hover .msgActions,
-.msgActions:focus-within {
-  opacity: 1;
+@media (hover: hover) and (pointer: fine) {
+  .msgActions {
+    opacity: 0;
+  }
+
+  .msg:hover .msgActions,
+  .msgActions:focus-within {
+    opacity: 1;
+  }
 }
 
 .msgAction {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   display: grid;
   place-items: center;
   border: none;
@@ -457,6 +632,7 @@
   padding: 0;
   background: transparent;
   color: var(--text-secondary);
+  box-sizing: border-box;
 }
 
 .msgAction:hover {
@@ -464,8 +640,12 @@
   color: var(--text);
 }
 
+.msgActionIcon,
 .msgAction svg {
   display: block;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .subagentBody {
@@ -535,15 +715,23 @@
   background: var(--danger-soft);
   border-radius: 12px;
   padding: 10px 12px;
+  width: max-content;
+  max-width: min(100%, 520px);
+  box-sizing: border-box;
+  justify-self: start;
+  display: inline-block;
 }
 
 .banner {
-  margin: 0 16px;
+  margin: 0 auto;
   padding: 10px 12px;
   background: var(--danger-soft);
   color: var(--danger);
   border-radius: 12px;
   font-weight: 600;
+  width: max-content;
+  max-width: min(720px, calc(100% - 32px));
+  box-sizing: border-box;
 }
 
 .typingBar {
@@ -556,6 +744,38 @@
   font-weight: 650;
   letter-spacing: 0.01em;
   min-height: 18px;
+  animation: statusFade 0.18s ease both;
+}
+
+/* Keep composer height stable when status text appears/disappears. */
+.composerStatusSlot {
+  min-height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+@keyframes statusFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.editCancel {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.editCancel:hover {
+  text-decoration: underline;
 }
 
 .modelsLoaderSpin {
@@ -610,6 +830,18 @@
   }
 }
 
+.inlinePromptDock {
+  position: relative;
+  z-index: 12;
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0 16px 4px;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
 .composer {
   border-top: none;
   background: transparent;
@@ -639,14 +871,14 @@
 
 .sessionCwd {
   margin: 0;
-  padding: 8px 10px;
-  display: flex;
-  align-items: flex-start;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
+  width: fit-content;
   max-width: 100%;
-  width: 100%;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   background: color-mix(in srgb, var(--bg-secondary) 70%, var(--surface));
   color: var(--text-secondary);
@@ -665,7 +897,7 @@
 
 .sessionCwdText {
   min-width: 0;
-  flex: 1;
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -674,6 +906,105 @@
   opacity: 0.9;
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
   letter-spacing: -0.01em;
+}
+
+.composerMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composerMetaStart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.composerMode {
+  flex: 0 0 auto;
+  margin-left: auto;
+  max-width: 7rem;
+}
+
+.composerModeMobile {
+  display: none;
+  margin-left: 0;
+  max-width: min(110px, 30vw);
+}
+
+.metaChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition:
+    border-color var(--motion),
+    color var(--motion),
+    background var(--motion);
+}
+
+.metaChip:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--text);
+}
+
+.metaChip:hover .metaChipIcon {
+  animation: thoughtIconTwinkle 0.55s ease;
+}
+
+.metaChipActive {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.metaChipActive:hover {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  color: var(--accent);
+}
+
+.metaChipIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--accent);
+  transform-origin: center;
+}
+
+.metaChipIcon svg {
+  display: block;
+}
+
+.metaChipLabel {
+  line-height: 1;
+}
+
+@media (max-width: 700px) {
+  .metaChipLabel {
+    display: none;
+  }
+
+  .metaChip {
+    padding: 7px;
+  }
 }
 
 .pill {
@@ -788,6 +1119,17 @@
   background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--surface));
 }
 
+.sendBtn svg {
+  display: block;
+  transform-origin: center;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sendBtn:hover:not(:disabled) svg {
+    animation: sendArrowNudge 0.45s ease;
+  }
+}
+
 .sendBtn:disabled {
   opacity: 0.4;
   cursor: default;
@@ -797,6 +1139,12 @@
   border-radius: 14px;
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.stopIcon {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 /* Multiline: text full width, controls in an inner footer */
@@ -848,6 +1196,16 @@
 @media (max-width: 700px) {
   .composer {
     padding: 8px 10px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .inlinePromptDock {
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+
+  .thread {
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
   }
 
   .sessionCwdText {
@@ -914,6 +1272,20 @@
     min-width: 0;
     flex: 0 1 auto;
     max-width: min(280px, calc(100vw - 140px));
+  }
+
+  .composerModeDesktop {
+    display: none;
+  }
+
+  .composerModeMobile {
+    display: block;
+  }
+
+  .userBubble,
+  .userCommand {
+    /* Full column width on phones — avoids right-edge clip from % + padding. */
+    max-width: 100%;
   }
 }
 

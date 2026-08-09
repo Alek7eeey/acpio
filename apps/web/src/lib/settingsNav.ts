@@ -1,7 +1,13 @@
 import type { TranslateFn } from "@acprocess/i18n";
 
 export type SettingsSection = "agent" | "gitea";
-export type SettingsAgentLeaf = "connect" | "model" | "advanced" | "remote";
+export type SettingsAgentLeaf =
+  | "connect"
+  | "model"
+  | "advanced"
+  | "remote"
+  | "diagnostics"
+  | "usage";
 export type SettingsLeaf = SettingsAgentLeaf;
 
 type TreeBranch =
@@ -16,17 +22,27 @@ type TreeBranch =
       children: Array<{ id: SettingsLeaf; label: string }>;
     };
 
-export function getSettingsTree(t: TranslateFn): TreeBranch[] {
+export function getSettingsTree(
+  t: TranslateFn,
+  opts?: { showUsage?: boolean },
+): TreeBranch[] {
+  const children: Array<{ id: SettingsAgentLeaf; label: string }> = [
+    { id: "connect", label: t("settings.connection") },
+    { id: "model", label: t("settings.modelSection") },
+    { id: "advanced", label: t("settings.advanced") },
+    { id: "diagnostics", label: t("settings.diagnostics") },
+  ];
+  // Only when the connected agent has emitted ACP usage_update.
+  if (opts?.showUsage) {
+    children.push({ id: "usage", label: t("settings.usage") });
+  }
+  children.push({ id: "remote", label: t("settings.remoteAccess") });
+
   return [
     {
       id: "agent",
       label: t("settings.agents"),
-      children: [
-        { id: "connect", label: t("settings.connection") },
-        { id: "model", label: t("settings.modelSection") },
-        { id: "advanced", label: t("settings.advanced") },
-        { id: "remote", label: t("settings.remoteAccess") },
-      ],
+      children,
     },
     {
       id: "gitea",
@@ -51,7 +67,9 @@ export function parseSettingsSearch(search: string): {
     rawLeaf === "model" ||
     rawLeaf === "advanced" ||
     rawLeaf === "connect" ||
-    rawLeaf === "remote"
+    rawLeaf === "remote" ||
+    rawLeaf === "diagnostics" ||
+    rawLeaf === "usage"
       ? rawLeaf
       : "connect";
   return { section: "agent", leaf };

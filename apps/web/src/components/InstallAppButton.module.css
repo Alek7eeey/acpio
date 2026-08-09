@@ -23,18 +23,44 @@
   line-height: 0;
   box-sizing: border-box;
   cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
 }
 
-.btn svg {
+.icon {
   width: 18px;
   height: 18px;
   display: block;
+  transform-origin: center bottom;
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .btn:hover,
 .btnActive {
   background: var(--bg-tertiary);
   color: var(--text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover .icon {
+    animation: installNudge 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes installNudge {
+  0% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(3px);
+  }
+  55% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0);
+  }
 }
 
 .menu {

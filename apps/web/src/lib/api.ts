@@ -3,11 +3,14 @@ import type {
   AgentProvider,
   AppSettings,
   ChatThemeDto,
+  DiagnosticsDumpDto,
+  DiagnosticsDumpMeta,
   GiteaJobDto,
   GiteaStatusDto,
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
+  SessionUsageDto,
 } from "@acprocess/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,9 +59,21 @@ export const api = {
       currentModel?: string;
       models: Array<{ value: string; name: string }>;
       modelParams?: ModelParamDto[];
+      modes?: Array<{ value: string; name: string }>;
       cached?: boolean;
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
+  },
+  getAgentUsage: (opts?: { provider?: AgentProvider; sessionId?: string }) => {
+    const q = new URLSearchParams();
+    if (opts?.provider) q.set("provider", opts.provider);
+    if (opts?.sessionId) q.set("sessionId", opts.sessionId);
+    const qs = q.toString();
+    return request<{
+      supported: boolean;
+      usage: SessionUsageDto | null;
+      sessionId: string | null;
+    }>(`/api/agent/usage${qs ? `?${qs}` : ""}`);
   },
   getModelParams: (
     provider: AgentProvider,
@@ -89,9 +104,21 @@ export const api = {
       currentModel?: string;
       models?: Array<{ value: string; name: string }>;
       modelParams?: ModelParamDto[];
+      modes?: Array<{ value: string; name: string }>;
     }>(`/api/sessions/${id}/model`, {
       method: "POST",
       body: JSON.stringify({ model, params }),
+    }),
+  setSessionMode: (id: string, mode: "agent" | "plan" | "ask") =>
+    request<{
+      ok: boolean;
+      mode: "agent" | "plan" | "ask";
+      appliedLive: boolean;
+      session?: SessionDto;
+      message?: string;
+    }>(`/api/sessions/${id}/mode`, {
+      method: "POST",
+      body: JSON.stringify({ mode }),
     }),
   pickDirectory: (initialPath?: string) =>
     request<{ path: string | null }>("/api/fs/pick-directory", {
@@ -150,10 +177,13 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ ids }),
     }),
-  prompt: (id: string, text: string) =>
+  prompt: (id: string, text: string, opts?: { editMessageId?: string }) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({
+        text,
+        ...(opts?.editMessageId ? { editMessageId: opts.editMessageId } : {}),
+      }),
     }),
   cancel: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/cancel`, {
@@ -167,12 +197,12 @@ export const api = {
   ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/permissions/${encodeURIComponent(requestId)}`, {
       method: "POST",
-      body: JSON.stringify({ optionId }),
+      body: JSON.stringify({ optionId, requestId }),
     }),
   answerQuestion: (id: string, requestId: string, result: Record<string, unknown>) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/answers/${encodeURIComponent(requestId)}`, {
       method: "POST",
-      body: JSON.stringify({ result }),
+      body: JSON.stringify({ result, requestId }),
     }),
   giteaStatus: () => request<GiteaStatusDto>("/api/gitea/status"),
   giteaJobs: () => request<GiteaJobDto[]>("/api/gitea/jobs"),
@@ -190,5 +220,23 @@ export const api = {
     request<GiteaJobDto>("/api/gitea/conflicts", {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+  listDiagnostics: () =>
+    request<{ dir: string; defaultDir: string; items: DiagnosticsDumpMeta[] }>("/api/diagnostics"),
+  getDiagnosticsDefaultDir: () => request<{ path: string }>("/api/diagnostics/default-dir"),
+  createDiagnosticsDump: (body?: {
+    reason?: string;
+    note?: string;
+    client?: Record<string, unknown>;
+  }) =>
+    request<{ ok: boolean; dump: DiagnosticsDumpMeta }>("/api/diagnostics/dump", {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    }),
+  getDiagnosticsDump: (id: string) =>
+    request<DiagnosticsDumpDto>(`/api/diagnostics/${encodeURIComponent(id)}`),
+  deleteDiagnosticsDump: (id: string) =>
+    request<{ ok: boolean }>(`/api/diagnostics/${encodeURIComponent(id)}`, {
+      method: "DELETE",
     }),
 };

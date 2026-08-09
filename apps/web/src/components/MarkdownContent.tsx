@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -231,13 +232,48 @@ type MarkdownContentProps = {
   className?: string;
 };
 
+function childrenToPlainText(children: ReactNode): string {
+  if (children == null || typeof children === "boolean") return "";
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(childrenToPlainText).join("");
+  if (typeof children === "object" && "props" in children) {
+    return childrenToPlainText((children as { props?: { children?: ReactNode } }).props?.children);
+  }
+  return "";
+}
+
+/** Newspaper «Коммерсантъ» is often cited as «Ъ» — expand so it doesn't look like a broken glyph. */
+function friendlyLinkLabel(href: string | undefined, children: ReactNode): ReactNode {
+  const plain = childrenToPlainText(children).trim();
+  if (plain === "Ъ" || plain === "ъ") return "Коммерсантъ";
+  if (!plain && href) {
+    try {
+      const host = new URL(href).hostname.replace(/^www\./, "");
+      if (/kommersant/i.test(host)) return "Коммерсантъ";
+    } catch {
+      // ignore
+    }
+  }
+  return children;
+}
+
+/** Expand bare (Ъ) citations in plain markdown text. */
+function expandSourceCitations(text: string): string {
+  return text
+    .replace(/\[Ъ\]\((https?:\/\/[^)\s]+)\)/g, "[Коммерсантъ]($1)")
+    .replace(/\[ъ\]\((https?:\/\/[^)\s]+)\)/g, "[Коммерсантъ]($1)")
+    .replace(/(^|[\s(])Ъ(?=\))/g, "$1Коммерсантъ");
+}
+
 export function MarkdownContent({ text, streaming = false, className }: MarkdownContentProps) {
+  const rendered = useMemo(() => expandSourceCitations(text), [text]);
   if (!text.trim()) return null;
 
   return (
     <div className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${className ? ` ${className}` : ""}`}>
       <div className={styles.body}>
         <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
           components={{
             p: ({ children }) => <p className={styles.paragraph}>{children}</p>,
             ul: ({ children }) => <ul className={styles.list}>{children}</ul>,
@@ -258,15 +294,25 @@ export function MarkdownContent({ text, streaming = false, className }: Markdown
             },
             a: ({ href, children }) => (
               <a href={href} target="_blank" rel="noreferrer" className={styles.link}>
-                {children}
+                {friendlyLinkLabel(href, children)}
               </a>
             ),
             blockquote: ({ children }) => (
               <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
             ),
+            table: ({ children }) => (
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>{children}</table>
+              </div>
+            ),
+            thead: ({ children }) => <thead className={styles.thead}>{children}</thead>,
+            tbody: ({ children }) => <tbody>{children}</tbody>,
+            tr: ({ children }) => <tr className={styles.tr}>{children}</tr>,
+            th: ({ children }) => <th className={styles.th}>{children}</th>,
+            td: ({ children }) => <td className={styles.td}>{children}</td>,
           }}
         >
-          {text}
+          {rendered}
         </ReactMarkdown>
       </div>
     </div>
