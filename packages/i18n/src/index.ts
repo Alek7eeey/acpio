@@ -45,8 +45,6 @@ function interpolate(template: string, vars?: TranslateVars): string {
 export function createTranslator(locale: AppLocale): TranslateFn {
   const messages = catalogs[locale] ?? catalogs.ru;
   return (key: MessageKey, vars?: TranslateVars) => {
-    const direct = getByPath(messages, key);
-    if (direct) return interpolate(direct, vars);
     if (vars?.count != null && locale === "ru") {
       const count = Number(vars.count);
       const mod10 = count % 10;
@@ -59,6 +57,8 @@ export function createTranslator(locale: AppLocale): TranslateFn {
       const plural = getByPath(messages, pluralKey);
       if (plural) return interpolate(plural, vars);
     }
+    const direct = getByPath(messages, key);
+    if (direct) return interpolate(direct, vars);
     const fallback = getByPath(catalogs.en, key);
     return fallback ? interpolate(fallback, vars) : key;
   };

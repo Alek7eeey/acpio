@@ -1448,7 +1448,7 @@ export function ChatPage() {
           onClose={() => setFolderPicker(null)}
           onConfirm={async (cwd) => {
             setFolderPicker(null);
-            await createSession(undefined, cwd);
+            await createSession(cwd);
             if (shouldAutoFocusComposer()) focusComposer();
           }}
         />

@@ -245,7 +245,7 @@
 
 .chatToolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   align-items: stretch;
   flex: 0 0 auto;
@@ -531,6 +531,10 @@
   width: 100%;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
 }
 
 .sessionTitle {
@@ -543,11 +547,27 @@
   line-height: 1.35;
   letter-spacing: -0.01em;
   color: color-mix(in srgb, var(--text) 92%, var(--text-secondary));
+  min-width: 0;
+}
+
+.sessionActivity {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  line-height: 1;
+  opacity: 0.9;
 }
 
 .sessionItem.active .sessionTitle {
   font-weight: 500;
   color: var(--text);
+}
+
+.sessionItem.active .sessionActivity {
+  color: color-mix(in srgb, var(--text-secondary) 80%, var(--text));
 }
 
 .renameInput,

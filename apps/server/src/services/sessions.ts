@@ -46,7 +46,7 @@ export async function listSessions(): Promise<SessionDto[]> {
   const rows = await db
     .select()
     .from(sessions)
-    .orderBy(asc(sessions.sortOrder), desc(sessions.updatedAt));
+    .orderBy(desc(sessions.updatedAt), asc(sessions.sortOrder));
   return rows.map(mapSession);
 }
 

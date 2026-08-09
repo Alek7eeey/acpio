@@ -78,15 +78,12 @@ type AppState = {
   refreshSessions: () => Promise<void>;
   refreshThemes: () => Promise<void>;
   selectSession: (id: string | null) => Promise<void>;
-  createSession: (themeId?: string | null, cwd?: string) => Promise<SessionDto>;
+  createSession: (cwd?: string) => Promise<SessionDto>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
-  createTheme: (input?: { name?: string }) => Promise<ChatThemeDto>;
-  renameTheme: (id: string, name: string) => Promise<void>;
-  deleteTheme: (id: string) => Promise<void>;
   sendPrompt: (text: string) => Promise<void>;
   cancelPrompt: () => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
@@ -188,8 +185,8 @@ async function loadAppData(
     storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "ru";
   get().applyTheme(theme);
   get().applyLocale(locale);
-  const [sessions, themes] = await Promise.all([api.listSessions(), api.listThemes()]);
-  set({ settings: { ...settings, theme, locale }, sessions, themes });
+  const sessions = await api.listSessions();
+  set({ settings: { ...settings, theme, locale }, sessions, themes: [] });
   const provider = get().settings.connectedProvider;
   if (provider) {
     void get().ensureModels(provider);
@@ -366,12 +363,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeSessionId: id, activeSession: detail });
   },
 
-  async createSession(themeId, cwd) {
-    const resolvedThemeId =
-      themeId !== undefined ? themeId : get().activeSession?.themeId ?? null;
+  async createSession(cwd) {
     const trimmedCwd = cwd?.trim();
     const session = await api.createSession({
-      themeId: resolvedThemeId,
+      themeId: null,
       ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
     } as Partial<SessionDto>);
     await get().refreshSessions();
@@ -410,24 +405,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions,
       activeSession: active && nextActive ? { ...active, ...nextActive } : active,
     });
-  },
-
-  async createTheme(input) {
-    const theme = await api.createTheme(input ?? {});
-    await get().refreshThemes();
-    return theme;
-  },
-
-  async renameTheme(id, name) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    const updated = await api.updateTheme(id, { name: trimmed });
-    set({ themes: get().themes.map((t) => (t.id === id ? updated : t)) });
-  },
-
-  async deleteTheme(id) {
-    await api.deleteTheme(id);
-    await Promise.all([get().refreshThemes(), get().refreshSessions()]);
   },
 
   async sendPrompt(text) {
