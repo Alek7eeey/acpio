@@ -139,11 +139,13 @@
 .queueBar {
   display: grid;
   gap: 6px;
-  margin: 0 16px 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface) 85%, var(--bg));
+  width: 100%;
+  max-width: min(720px, 100%);
+  margin: 0 auto 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 80%, var(--bg));
   box-shadow: var(--shadow-soft);
   flex-shrink: 0;
   animation: rise 0.18s ease;
@@ -156,13 +158,13 @@
 }
 
 .queueBarTitle {
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 650;
   color: var(--text);
 }
 
 .queueBarCount {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
 }
 
@@ -175,9 +177,9 @@
   background: transparent;
   color: var(--text-secondary);
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 2px 9px;
   font: inherit;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
@@ -194,26 +196,26 @@
 
 .queueList {
   display: grid;
-  gap: 5px;
-  max-height: 180px;
+  gap: 4px;
+  max-height: 132px;
   overflow-y: auto;
 }
 
 .queueItem {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-  padding: 5px 8px 5px 12px;
+  padding: 4px 6px 4px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 9px;
   background: var(--surface-2);
 }
 
 .queueItemText {
   flex: 1;
   min-width: 0;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -223,11 +225,11 @@
 .queueItemBtn {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -243,21 +245,8 @@
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-.queueEditInput {
-  flex: 1;
-  min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.82rem;
-  padding: 4px 8px;
-  outline: none;
-}
-
 .msg {
-  max-width: min(720px, 100%);
+  max-width: min(840px, 100%);
   width: 100%;
   margin: 0 auto;
   display: grid;

@@ -55,6 +55,19 @@
   box-sizing: border-box;
 }
 
+/* Text blocks never legitimately show a text caret. Hide it everywhere and
+   keep it only in real inputs — also tames browser caret-browsing artifacts
+   that otherwise blink a cursor in every paragraph on click. */
+* {
+  caret-color: transparent;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable="plaintext-only"] {
+  caret-color: auto;
+}
+
 html,
 body,
 #root {
