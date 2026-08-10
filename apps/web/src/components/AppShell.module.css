@@ -569,16 +569,69 @@
 }
 
 .sessionTitle {
-  display: block;
-  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sessionTitleText {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 500;
   font-size: 0.9rem;
   line-height: 1.25;
   letter-spacing: -0.015em;
   color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
-  min-width: 0;
+}
+
+/* "Working" indicator: a pulsing dot with a ping ring — deliberately not the
+   classic spinner, so it reads as "a process is still running" at a glance. */
+.sessionRunning {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.sessionRunningDot {
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: sessionDotPulse 1.4s ease-in-out infinite;
+}
+
+.sessionRunning::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  animation: sessionPing 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes sessionDotPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes sessionPing {
+  from {
+    transform: scale(0.7);
+    opacity: 0.8;
+  }
+  to {
+    transform: scale(2.1);
+    opacity: 0;
+  }
 }
 
 .sessionActivity {

@@ -399,7 +399,18 @@ export function ChatSidebar() {
                 startRenameSession(s);
               }}
             >
-              <span className={styles.sessionTitle}>{s.title}</span>
+              <span className={styles.sessionTitle}>
+                <span className={styles.sessionTitleText}>{s.title}</span>
+                {(s.status === "running" || s.status === "waiting") && (
+                  <span
+                    className={styles.sessionRunning}
+                    title={t("chat.sessionRunning")}
+                    aria-label={t("chat.sessionRunning")}
+                  >
+                    <span className={styles.sessionRunningDot} />
+                  </span>
+                )}
+              </span>
               {activity ? (
                 <span
                   className={styles.sessionActivity}

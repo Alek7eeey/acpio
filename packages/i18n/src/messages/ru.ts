@@ -224,6 +224,7 @@ export const ru = {
     jumpToLatest: "Перейти к последним сообщениям",
     promptQueue: "Очередь запросов",
     queueCount: "В очереди: {{count}}",
+    sessionRunning: "Работает…",
     multitask: "Мультизадача",
     multitaskHint: "Агент берёт следующий запрос, как только закончит предыдущий",
     deleteThemeTitle: "Удалить тему?",

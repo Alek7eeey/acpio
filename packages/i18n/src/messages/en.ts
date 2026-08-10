@@ -200,6 +200,7 @@ export const en = {
     jumpToLatest: "Jump to latest",
     promptQueue: "Request queue",
     queueCount: "Queued: {{count}}",
+    sessionRunning: "Working…",
     multitask: "Multitask",
     multitaskHint: "The agent takes the next request as soon as it finishes the previous one",
     deleteThemeTitle: "Delete theme?",
