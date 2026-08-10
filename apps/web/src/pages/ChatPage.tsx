@@ -451,27 +451,37 @@ function isThoughtPart(part: MessagePartDto) {
   return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
 }
 
-/** Short human-readable outcome of a tool: written/read path or output first line. */
-function toolOutputDetail(part: MessagePartDto): string {
+/** Full text output of a tool call (string or array of content blocks). */
+function toolOutputText(part: MessagePartDto): string {
   const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
   const rawOutput = (raw.rawOutput ?? {}) as Record<string, unknown>;
-  const resolvedPath =
-    (rawOutput.details as { resolvedPath?: string } | undefined)?.resolvedPath ?? "";
   const content = raw.content ?? rawOutput.content;
   let text = "";
   if (Array.isArray(content)) {
     for (const block of content) {
       const b = (block ?? {}) as Record<string, unknown>;
       const inner = b.content as Record<string, unknown> | undefined;
-      const t = typeof inner?.text === "string" ? inner.text : typeof b.text === "string" ? b.text : "";
-      if (t.trim()) {
-        text = t.trim();
-        break;
-      }
+      const t =
+        typeof inner?.text === "string"
+          ? inner.text
+          : typeof b.text === "string"
+            ? b.text
+            : "";
+      text += t;
     }
   } else if (typeof content === "string") {
-    text = content.trim();
+    text = content;
   }
+  return text.trim();
+}
+
+/** Short human-readable outcome of a tool: written/read path or output first line. */
+function toolOutputDetail(part: MessagePartDto): string {
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const rawOutput = (raw.rawOutput ?? {}) as Record<string, unknown>;
+  const resolvedPath =
+    (rawOutput.details as { resolvedPath?: string } | undefined)?.resolvedPath ?? "";
+  const text = toolOutputText(part);
   if (resolvedPath) {
     const short = resolvedPath.split(/[\\/]/).slice(-2).join("/");
     if (text.includes("Successfully wrote")) return `✎ ${short}`;
@@ -481,25 +491,103 @@ function toolOutputDetail(part: MessagePartDto): string {
   return text.split("\n")[0]?.slice(0, 90) ?? "";
 }
 
+/** Location/meta line shown above the expanded output. */
+function toolMetaLine(part: MessagePartDto): string {
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const details = ((raw.rawOutput ?? {}) as Record<string, unknown>).details as
+    | Record<string, unknown>
+    | undefined;
+  if (!details) return "";
+  const bits: string[] = [];
+  if (typeof details.resolvedPath === "string" && details.resolvedPath) {
+    bits.push(details.resolvedPath);
+  }
+  if (typeof details.url === "string" && details.url) {
+    bits.push(details.url);
+  } else if (typeof details.method === "string" && details.method) {
+    bits.push(details.method);
+  }
+  if (typeof details.totalLines === "number") {
+    bits.push(`${details.totalLines} lines`);
+  }
+  return bits.join(" · ");
+}
+
+const TOOL_OUTPUT_CAP = 20000;
+
 function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: boolean }) {
   const t = useT();
+  const [open, setOpen] = useState(false);
   const title = String(part.payload.title ?? part.payload.description ?? "Tool").trim();
   const status = String(part.payload.status ?? "").toLowerCase();
   const busy =
     streaming || status === "in_progress" || status === "pending" || status === "running";
   const detail = busy ? "" : toolOutputDetail(part);
+  const output = busy ? "" : toolOutputText(part);
+  const meta = busy ? "" : toolMetaLine(part);
+  const expandable = !busy && output.length > 0;
+  const truncated = output.length > TOOL_OUTPUT_CAP;
+  const shown = truncated ? output.slice(0, TOOL_OUTPUT_CAP) : output;
+  const toggle = () => {
+    if (expandable) setOpen((v) => !v);
+  };
   return (
-    <div className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""}`}>
-      {busy ? (
-        <span className={styles.toolLoader} aria-hidden />
-      ) : (
-        <span className={styles.toolCheck} aria-hidden>
-          ✓
-        </span>
-      )}
-      <span className={styles.toolName}>{title}</span>
-      {busy ? <span className={styles.toolStatus}>{t("common.toolWorking")}</span> : null}
-      {detail ? <span className={styles.toolDetail}>{detail}</span> : null}
+    <div
+      className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""} ${
+        expandable ? styles.toolRowClickable : ""
+      }`}
+    >
+      <button
+        type="button"
+        className={styles.toolRowMain}
+        onClick={toggle}
+        disabled={!expandable}
+        aria-expanded={expandable ? open : undefined}
+        aria-label={
+          expandable ? (open ? t("common.toolCollapse") : t("common.toolExpand")) : undefined
+        }
+        title={
+          expandable ? (open ? t("common.toolCollapse") : t("common.toolExpand")) : undefined
+        }
+      >
+        {busy ? (
+          <span className={styles.toolLoader} aria-hidden />
+        ) : (
+          <span className={styles.toolCheck} aria-hidden>
+            ✓
+          </span>
+        )}
+        <span className={styles.toolName}>{title}</span>
+        {busy ? <span className={styles.toolStatus}>{t("common.toolWorking")}</span> : null}
+        {expandable ? (
+          <svg
+            className={`${styles.toolChevron} ${open ? styles.toolChevronOpen : ""}`}
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <path
+              d="M9 6l6 6-6 6"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : null}
+      </button>
+      {open ? (
+        <div className={styles.toolBody}>
+          {meta ? <div className={styles.toolMeta}>{meta}</div> : null}
+          <pre className={styles.toolOutput}>
+            {shown}
+            {truncated ? `\n… ${t("common.outputTruncated")}` : ""}
+          </pre>
+        </div>
+      ) : null}
+      {!open && detail ? <span className={styles.toolDetail}>{detail}</span> : null}
     </div>
   );
 }
