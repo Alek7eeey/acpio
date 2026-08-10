@@ -666,10 +666,38 @@ export function ChatSidebar() {
           {archivedSessions.length > 0 && (
             <div className={styles.archiveGroup}>
               <div className={styles.archiveHead}>
+                <button
+                  type="button"
+                  className={`${styles.archiveChevron} ${
+                    collapsedFolders.has("__archive__") ? "" : styles.folderChevronOpen
+                  }`}
+                  title={
+                    collapsedFolders.has("__archive__")
+                      ? t("chat.expandFolder")
+                      : t("chat.collapseFolder")
+                  }
+                  aria-label={
+                    collapsedFolders.has("__archive__")
+                      ? t("chat.expandFolder")
+                      : t("chat.collapseFolder")
+                  }
+                  onClick={() => toggleFolder("__archive__")}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
                 <span className={styles.archiveLabel}>{t("chat.archiveSection")}</span>
                 <span className={styles.archiveCount}>{archivedSessions.length}</span>
               </div>
-              {archivedSessions.map((s) => renderSessionRow(s, true, true))}
+              {!collapsedFolders.has("__archive__") &&
+                archivedSessions.map((s) => renderSessionRow(s, true, true))}
             </div>
           )}
           {sessions.length === 0 && <p className={styles.emptyHint}>{t("chat.emptyDescription")}</p>}

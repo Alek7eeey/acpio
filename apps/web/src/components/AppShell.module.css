@@ -450,10 +450,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.88rem;
-  font-weight: 500;
+  font-size: 0.96rem;
+  font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.012em;
+  color: color-mix(in srgb, var(--text) 85%, var(--text-secondary));
 }
 
 .folderAdd {
@@ -484,7 +485,8 @@
   color: var(--text);
 }
 
-.folderChevron {
+.folderChevron,
+.archiveChevron {
   flex: 0 0 auto;
   width: 20px;
   height: 20px;
@@ -499,16 +501,19 @@
   transition: color 0.15s ease, background 0.15s ease;
 }
 
-.folderChevron svg {
+.folderChevron svg,
+.archiveChevron svg {
   display: block;
   transition: transform 0.2s ease;
 }
 
-.folderChevron:not(.folderChevronOpen) svg {
+.folderChevron:not(.folderChevronOpen) svg,
+.archiveChevron:not(.folderChevronOpen) svg {
   transform: rotate(-90deg);
 }
 
-.folderChevron:hover {
+.folderChevron:hover,
+.archiveChevron:hover {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
 }
@@ -2333,10 +2338,6 @@
     border-right: none;
     padding: 0;
     pointer-events: none;
-  }
-
-  .folderLabel {
-    font-size: 0.78rem;
   }
 
   .sessionTitle {
