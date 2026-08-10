@@ -462,21 +462,21 @@
   max-width: 100%;
   min-width: 0;
   justify-self: start;
-  padding: 3px 11px;
-  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 60%, transparent);
-  font-size: 0.8rem;
+  padding: 1px 0;
+  font-size: 0.82rem;
   line-height: 1.5;
+  color: var(--text);
 }
 
-.toolRowBusy {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+.toolRowBusy .toolName {
+  color: var(--accent);
 }
 
-.toolRowError {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
-  color: var(--danger);
+.toolCheck {
+  color: var(--success);
+  font-size: 0.66rem;
+  line-height: 1;
+  opacity: 0.85;
 }
 
 .toolName {
@@ -487,12 +487,6 @@
 
 .toolCheck {
   color: var(--success);
-  font-size: 0.68rem;
-  line-height: 1;
-}
-
-.toolFail {
-  color: var(--danger);
   font-size: 0.68rem;
   line-height: 1;
 }

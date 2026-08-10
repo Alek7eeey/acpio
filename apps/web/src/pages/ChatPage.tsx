@@ -475,7 +475,7 @@ function toolOutputDetail(part: MessagePartDto): string {
   if (resolvedPath) {
     const short = resolvedPath.split(/[\\/]/).slice(-2).join("/");
     if (text.includes("Successfully wrote")) return `✎ ${short}`;
-    if (text.includes("Successfully deleted")) return `✕ ${short}`;
+    if (text.includes("Successfully deleted")) return `− ${short}`;
     return short;
   }
   return text.split("\n")[0]?.slice(0, 90) ?? "";
@@ -487,20 +487,11 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
   const status = String(part.payload.status ?? "").toLowerCase();
   const busy =
     streaming || status === "in_progress" || status === "pending" || status === "running";
-  const failed = status === "error" || status === "failed";
-  const detail = busy || failed ? "" : toolOutputDetail(part);
+  const detail = busy ? "" : toolOutputDetail(part);
   return (
-    <div
-      className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""} ${
-        failed ? styles.toolRowError : ""
-      }`}
-    >
+    <div className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""}`}>
       {busy ? (
         <span className={styles.toolLoader} aria-hidden />
-      ) : failed ? (
-        <span className={styles.toolFail} aria-hidden>
-          ✕
-        </span>
       ) : (
         <span className={styles.toolCheck} aria-hidden>
           ✓
