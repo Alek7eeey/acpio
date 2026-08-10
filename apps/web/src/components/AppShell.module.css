@@ -569,8 +569,7 @@
 
 .themeMore:hover,
 .sessionMore:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* Pin / archive actions — revealed only on row hover. */
@@ -597,8 +596,7 @@
 }
 
 .sessionRowAction:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* Light "pop" as the icons appear on row hover. */
