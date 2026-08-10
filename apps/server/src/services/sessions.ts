@@ -343,7 +343,7 @@ export async function replaceUserMessageText(
   }
   await db.delete(messageParts).where(eq(messageParts.messageId, messageId));
   const trimmed = text.trim();
-  const slashMatch = trimmed.match(/^\/([\w-]+)/);
+  const slashMatch = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)/i);
   await appendPart(sessionId, messageId, "text", {
     text,
     ...(slashMatch ? { isSlashCommand: true, commandName: slashMatch[1] } : {}),

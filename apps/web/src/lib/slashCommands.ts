@@ -13,7 +13,10 @@ export function getBuiltinSlashCommands(t: TranslateFn): SlashCommandDto[] {
 const HIDDEN_COMMAND_NAMES = new Set(["plugins", "plugin", "manage-plugins", "manage_plugins"]);
 
 function isValidSlashCommandName(name: string) {
-  return /^[a-z][\w-]*$/i.test(name);
+  // `namespace:name` is legal (OMP skills arrive as `skill:<name>`); the
+  // part after the colon must start with a letter so Windows paths like
+  // "/C:/…" don't parse as commands.
+  return /^[a-z][\w-]*(?::[a-z][\w-]*)?$/i.test(name);
 }
 
 function isBracketSyntaxHint(hint: string) {
@@ -59,7 +62,7 @@ export function mergeSlashCommands(agentCommands: SlashCommandDto[] = [], t: Tra
 
 export function getSlashContext(text: string, cursor: number) {
   const before = text.slice(0, cursor);
-  const match = before.match(/(?:^|\n)\/([\w-]*)$/);
+  const match = before.match(/(?:^|\n)\/([\w:-]*)$/);
   if (!match) return null;
   const query = match[1] ?? "";
   const start = before.lastIndexOf("/");
@@ -96,7 +99,7 @@ export function isSlashCommandReadyToSend(text: string, commands: SlashCommandDt
 
 export function parseSlashCommandText(text: string) {
   const trimmed = text.trim();
-  const match = trimmed.match(/^\/([\w-]+)(?:\s+([\s\S]*))?$/);
+  const match = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
   return {
     name: match[1],

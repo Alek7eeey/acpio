@@ -845,7 +845,7 @@ export async function runPrompt(
   if (!opts.editMessageId) {
     const userMsg = await createMessage(sessionId, "user");
     const trimmed = text.trim();
-    const slashMatch = trimmed.match(/^\/([\w-]+)/);
+    const slashMatch = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)/i);
     await appendPart(sessionId, userMsg.id, "text", {
       text,
       ...(slashMatch
@@ -1054,7 +1054,8 @@ function parseAvailableCommands(raw: Record<string, unknown>) {
     if (!item || typeof item !== "object") continue;
     const cmd = item as Record<string, unknown>;
     const name = String(cmd.name ?? "").trim().replace(/^\//, "");
-    if (!name || !/^[a-z][\w-]*$/i.test(name)) continue;
+    // Names may carry a `namespace:name` form (OMP skills arrive as `skill:<name>`).
+    if (!name || !/^[a-z][\w-]*(?::[a-z][\w-]*)?$/i.test(name)) continue;
     if (hidden.has(name.toLowerCase())) continue;
     const description = String(cmd.description ?? "").trim();
     if (/manage\s+plugins?/i.test(description)) continue;
