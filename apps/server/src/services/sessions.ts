@@ -36,6 +36,8 @@ function mapSession(
     acpSessionId: row.acpSessionId,
     themeId: row.themeId ?? null,
     sortOrder: row.sortOrder ?? 0,
+    pinned: row.pinned ?? false,
+    archived: row.archived ?? false,
     createdAt,
     updatedAt: row.updatedAt.toISOString(),
     lastMessageAt: lastAt,
@@ -153,6 +155,8 @@ export async function updateSession(
     provider: AgentProvider;
     themeId: string | null;
     sortOrder: number;
+    pinned: boolean;
+    archived: boolean;
   }>,
 ): Promise<SessionDto | null> {
   const [row] = await db

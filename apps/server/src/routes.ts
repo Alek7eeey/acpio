@@ -240,6 +240,8 @@ export async function registerRoutes(app: FastifyInstance) {
         title: z.string().min(1).max(120).optional(),
         themeId: z.string().uuid().nullable().optional(),
         sortOrder: z.number().int().optional(),
+        pinned: z.boolean().optional(),
+        archived: z.boolean().optional(),
       })
       .parse(req.body ?? {});
     const updated = await updateSession(id, body);

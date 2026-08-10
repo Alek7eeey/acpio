@@ -367,6 +367,10 @@ export interface SessionDto {
   acpSessionId: string | null;
   themeId: string | null;
   sortOrder: number;
+  /** Pinned sessions float to the top of the sidebar. */
+  pinned: boolean;
+  /** Archived sessions are hidden from the main tree (Архив section). */
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
   /** Timestamp of the latest message in the session (falls back to createdAt). */

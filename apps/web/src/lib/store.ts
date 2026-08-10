@@ -145,6 +145,11 @@ type AppState = {
   createSession: (cwd?: string) => Promise<SessionDto>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
+  /** Toggle pin/archive flags (optimistic PATCH). */
+  setSessionFlags: (
+    id: string,
+    patch: { pinned?: boolean; archived?: boolean },
+  ) => Promise<void>;
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
@@ -775,6 +780,30 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...get().activeSession!, ...updated }
           : get().activeSession,
     });
+  },
+
+  async setSessionFlags(id, patch) {
+    // Optimistic flip, then reconcile with the server's canonical row.
+    const apply = (s: SessionDto) => (s.id === id ? { ...s, ...patch } : s);
+    set({
+      sessions: get().sessions.map(apply),
+      activeSession:
+        get().activeSession?.id === id
+          ? { ...get().activeSession!, ...patch }
+          : get().activeSession,
+    });
+    try {
+      const updated = await api.updateSession(id, patch);
+      set({
+        sessions: get().sessions.map((s) => (s.id === id ? updated : s)),
+        activeSession:
+          get().activeSession?.id === id
+            ? { ...get().activeSession!, ...updated }
+            : get().activeSession,
+      });
+    } catch {
+      // keep the optimistic value
+    }
   },
 
   async reorderSessions(items) {

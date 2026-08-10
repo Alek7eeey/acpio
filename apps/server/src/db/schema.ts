@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   uuid,
+  boolean,
 } from "drizzle-orm/pg-core";
 
 export const settings = pgTable("settings", {
@@ -33,6 +34,8 @@ export const sessions = pgTable("sessions", {
   acpSessionId: text("acp_session_id"),
   themeId: uuid("theme_id").references(() => chatThemes.id, { onDelete: "set null" }),
   sortOrder: integer("sort_order").notNull().default(0),
+  pinned: boolean("pinned").notNull().default(false),
+  archived: boolean("archived").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

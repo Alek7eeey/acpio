@@ -256,24 +256,45 @@
   justify-items: stretch;
 }
 
-/* One request + its replies. With multitask enabled, each segment becomes a
-   distinct card so concurrent requests read as separate workspaces. */
-.turnSegment {
-  display: grid;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-
-.turnSegmentMultitask {
+.turnDivider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   max-width: min(840px, 100%);
-  margin: 0 auto;
-  padding: 10px 12px;
-  border: 1px solid var(--border-soft);
-  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  margin: 10px auto 2px;
+  color: var(--text-secondary);
+}
+
+.turnDivider::before,
+.turnDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.turnDividerLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.turnDividerLabel svg {
+  display: block;
+}
+
+/* Each user message starts a new turn segment (one request + its replies).
+   The wrapper itself is invisible (display: contents keeps the original flat
+   feed layout); with multitask on, a labeled divider is inserted between
+   segments so concurrent requests read as separate workspaces. */
+.turnSegment {
+  display: contents;
 }
 
 /* Tighter pair: user bubble → assistant reply */

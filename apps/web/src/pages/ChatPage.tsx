@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -1711,13 +1712,24 @@ export function ChatPage() {
         )}
 
         {segments.map((segment, segIndex) => (
-          <div
-            key={segment[0]?.id ?? `seg-${segIndex}`}
-            className={`${styles.turnSegment}${
-              settings.multitask ? ` ${styles.turnSegmentMultitask}` : ""
-            }`}
-          >
-            {segment.map((msg, index) => {
+          <Fragment key={segment[0]?.id ?? `seg-${segIndex}`}>
+            {settings.multitask && segIndex > 0 && (
+              <div className={styles.turnDivider} aria-hidden>
+                <span className={styles.turnDividerLabel}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {t("chat.parallelTurn")}
+                </span>
+              </div>
+            )}
+            <div className={styles.turnSegment}>
+              {segment.map((msg, index) => {
               const globalIndex =
                 activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
               const isLiveAssistant =
@@ -1774,6 +1786,7 @@ export function ChatPage() {
               );
             })}
           </div>
+          </Fragment>
         ))}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
         </div>

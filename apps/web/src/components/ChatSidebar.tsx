@@ -21,6 +21,7 @@ type FolderPickerState = {
 function sortSessions(list: SessionDto[]) {
   return [...list].sort(
     (a, b) =>
+      Number(b.pinned) - Number(a.pinned) ||
       b.lastMessageAt.localeCompare(a.lastMessageAt) ||
       b.createdAt.localeCompare(a.createdAt),
   );
@@ -198,6 +199,7 @@ export function ChatSidebar() {
   const createSession = useAppStore((s) => s.createSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
+  const setSessionFlags = useAppStore((s) => s.setSessionFlags);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -220,7 +222,8 @@ export function ChatSidebar() {
     [sessions, settings.defaultCwd],
   );
 
-  const folders = useMemo(() => groupByFolder(sessions), [sessions]);
+  const archivedSessions = useMemo(() => sortSessions(sessions.filter((s) => s.archived)), [sessions]);
+  const folders = useMemo(() => groupByFolder(sessions.filter((s) => !s.archived)), [sessions]);
 
   const closeMobile = () => {
     if (window.innerWidth < 900) setSidebarOpen(false);
@@ -317,7 +320,7 @@ export function ChatSidebar() {
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
   const dateLocale = settings.locale === "en" ? "en-US" : "ru-RU";
 
-  const renderSessionRow = (s: SessionDto, showActivity: boolean) => {
+  const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
     const isRenaming = renamingId === s.id;
     const menuOpen = menu?.id === s.id;
@@ -431,6 +434,69 @@ export function ChatSidebar() {
             </button>
             <button
               type="button"
+              className={`${styles.sessionRowAction}${s.pinned ? ` ${styles.sessionRowActionOn}` : ""}`}
+              title={s.pinned ? t("chat.unpin") : t("chat.pin")}
+              aria-label={s.pinned ? t("chat.unpin") : t("chat.pin")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void setSessionFlags(s.id, { pinned: !s.pinned });
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M9 4h6l.5 5 3 2.5V14H5.5v-2.5l3-2.5L9 4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path d="M12 14v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.sessionRowAction}
+              title={inArchive ? t("chat.unarchive") : t("chat.archive")}
+              aria-label={inArchive ? t("chat.unarchive") : t("chat.archive")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void setSessionFlags(s.id, { archived: !s.archived });
+              }}
+            >
+              {inArchive ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v5m0 0-2-2m2 2 2-2"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v4"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
               className={styles.sessionMore}
               aria-label={t("common.chatMenu")}
               onClick={(e) => openSessionMenu(e, s.id)}
@@ -508,6 +574,24 @@ export function ChatSidebar() {
                     <span className={styles.folderLabel}>
                       {folderLabel(folder.cwd, t("common.noFolder"))}
                     </span>
+                    <button
+                      type="button"
+                      className={styles.folderAdd}
+                      title={t("chat.newInFolder")}
+                      aria-label={t("chat.newInFolder")}
+                      onClick={() => {
+                        void createSession(folder.cwd || undefined).then(() => goToChat());
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M12 5v14M5 12h14"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
                   </div>
                 )}
                 {timeGroups
@@ -528,6 +612,15 @@ export function ChatSidebar() {
               </div>
             );
           })}
+          {archivedSessions.length > 0 && (
+            <div className={styles.archiveGroup}>
+              <div className={styles.archiveHead}>
+                <span className={styles.archiveLabel}>{t("chat.archiveSection")}</span>
+                <span className={styles.archiveCount}>{archivedSessions.length}</span>
+              </div>
+              {archivedSessions.map((s) => renderSessionRow(s, true, true))}
+            </div>
+          )}
           {sessions.length === 0 && <p className={styles.emptyHint}>{t("chat.emptyDescription")}</p>}
         </div>
       </div>
