@@ -237,7 +237,29 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
-  align-items: center;
+  align-items: start;
+}
+
+.cwdPath {
+  display: block;
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-weight: 500;
+  font-size: 0.88rem;
+  color: var(--text);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+@media (max-width: 700px) {
+  .cwdPickRow {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
 }
 
 .cwdPickRow input {

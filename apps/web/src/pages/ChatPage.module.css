@@ -876,10 +876,10 @@
 }
 
 .msgAction {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
   display: grid;
   place-items: center;
   border: none;
@@ -898,8 +898,8 @@
 .msgActionIcon,
 .msgAction svg {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
 }
 

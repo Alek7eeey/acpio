@@ -507,12 +507,12 @@ export function SettingsPage() {
               <label>
                 {t("settings.defaultFolder")}
                 <div className={styles.cwdPickRow}>
-                  <input
-                    value={form.defaultCwd}
-                    readOnly
-                    placeholder={t("common.notSet")}
+                  <span
+                    className={styles.cwdPath}
                     title={form.defaultCwd || undefined}
-                  />
+                  >
+                    {form.defaultCwd || t("common.notSet")}
+                  </span>
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -736,12 +736,12 @@ export function SettingsPage() {
               <label>
                 {t("diagnostics.folder")}
                 <div className={styles.cwdPickRow}>
-                  <input
-                    value={form.diagnosticsDir ?? ""}
-                    readOnly
-                    placeholder={diagDirDefault || t("diagnostics.folderDefault")}
+                  <span
+                    className={styles.cwdPath}
                     title={form.diagnosticsDir || diagDirDefault || undefined}
-                  />
+                  >
+                    {form.diagnosticsDir || diagDirDefault || t("diagnostics.folderDefault")}
+                  </span>
                   <button
                     type="button"
                     className={styles.secondaryBtn}
