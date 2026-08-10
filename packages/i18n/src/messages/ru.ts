@@ -231,6 +231,8 @@ export const ru = {
     archive: "В архив",
     unarchive: "Вернуть из архива",
     archiveSection: "Архив",
+    collapseFolder: "Свернуть папку",
+    expandFolder: "Развернуть папку",
     multitask: "Мультизадача",
     multitaskHint: "Агент берёт следующий запрос, как только закончит предыдущий",
     deleteThemeTitle: "Удалить тему?",

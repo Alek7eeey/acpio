@@ -207,6 +207,8 @@ export const en = {
     archive: "Archive",
     unarchive: "Restore from archive",
     archiveSection: "Archive",
+    collapseFolder: "Collapse folder",
+    expandFolder: "Expand folder",
     multitask: "Multitask",
     multitaskHint: "The agent takes the next request as soon as it finishes the previous one",
     deleteThemeTitle: "Delete theme?",

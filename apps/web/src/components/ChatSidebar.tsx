@@ -208,6 +208,28 @@ export function ChatSidebar() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem("acprocess.collapsedFolders.v1");
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggleFolder = (key: string) => {
+    setCollapsedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      try {
+        localStorage.setItem("acprocess.collapsedFolders.v1", JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -561,6 +583,27 @@ export function ChatSidebar() {
               <div key={folder.cwd || "__no_folder__"} className={styles.folderGroup}>
                 {showFolderHeaders && (
                   <div className={styles.folderHead} title={folder.cwd || undefined}>
+                    <button
+                      type="button"
+                      className={`${styles.folderChevron} ${
+                        collapsedFolders.has(folder.cwd || "__no_folder__")
+                          ? ""
+                          : styles.folderChevronOpen
+                      }`}
+                      title={collapsedFolders.has(folder.cwd || "__no_folder__") ? t("chat.expandFolder") : t("chat.collapseFolder")}
+                      aria-label={collapsedFolders.has(folder.cwd || "__no_folder__") ? t("chat.expandFolder") : t("chat.collapseFolder")}
+                      onClick={() => toggleFolder(folder.cwd || "__no_folder__")}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M6 9l6 6 6-6"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
                     <span className={styles.folderIcon} aria-hidden>
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                         <path
@@ -601,21 +644,22 @@ export function ChatSidebar() {
                     </button>
                   </div>
                 )}
-                {timeGroups
-                  ? timeGroups.map((group) => {
-                      const sharedHeading = group.sessions.length > 1 && !!group.label;
-                      return (
-                        <div key={group.key} className={styles.timeGroup}>
-                          {sharedHeading ? (
-                            <div className={styles.timeGroupHead}>
-                              <span className={styles.timeGroupLabel}>{group.label}</span>
-                            </div>
-                          ) : null}
-                          {group.sessions.map((s) => renderSessionRow(s, !sharedHeading))}
-                        </div>
-                      );
-                    })
-                  : folder.sessions.map((s) => renderSessionRow(s, true))}
+                {!collapsedFolders.has(folder.cwd || "__no_folder__") &&
+                  (timeGroups
+                    ? timeGroups.map((group) => {
+                        const sharedHeading = group.sessions.length > 1 && !!group.label;
+                        return (
+                          <div key={group.key} className={styles.timeGroup}>
+                            {sharedHeading ? (
+                              <div className={styles.timeGroupHead}>
+                                <span className={styles.timeGroupLabel}>{group.label}</span>
+                              </div>
+                            ) : null}
+                            {group.sessions.map((s) => renderSessionRow(s, !sharedHeading))}
+                          </div>
+                        );
+                      })
+                    : folder.sessions.map((s) => renderSessionRow(s, true)))}
               </div>
             );
           })}
