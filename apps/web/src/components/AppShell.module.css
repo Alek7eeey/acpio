@@ -491,6 +491,19 @@
   color: var(--text);
 }
 
+/* The folder plus appears only while hovering the folder itself. */
+@media (hover: hover) and (pointer: fine) {
+  .folderAdd {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .folderHead:hover .folderAdd {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* Folder icon swaps to an expand/collapse chevron while hovered. */
 .folderIconWrap {
   position: relative;
