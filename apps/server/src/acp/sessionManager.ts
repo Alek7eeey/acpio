@@ -1,5 +1,4 @@
 import {
-  ensureAnswerFromThought,
   isModelAccessError,
   modelDisplayName,
   modelParamFamily,
@@ -911,33 +910,8 @@ export async function runPrompt(
       ["text", "thought", "tool_call", "error"].includes(p.type),
     );
 
-    // If the model put the answer into the thought channel, peel it into a text part.
-    // Always ensure a text part exists when the turn ends with thought-only content.
     if (lastAssistant) {
       const thoughtPart = lastAssistant.parts.find((p) => p.type === "thought");
-      const hasText = lastAssistant.parts.some(
-        (p) => p.type === "text" && String(p.payload.text ?? "").trim(),
-      );
-      if (thoughtPart && !hasText) {
-        const rawThought = String(thoughtPart.payload.text ?? "");
-        const ensured = ensureAnswerFromThought(rawThought);
-        const answer = ensured.answer.trim();
-        if (answer) {
-          // Append text only — never blank the thought part (that made the
-          // assistant bubble disappear for a frame before text arrived).
-          rt.openTextPartId = await appendTextChunk(
-            sessionId,
-            lastAssistant.id,
-            "text",
-            answer,
-            null,
-          );
-          const remain = ensured.thought.trim();
-          if (remain && remain !== answer) {
-            await updatePart(sessionId, thoughtPart.id, { text: remain });
-          }
-        }
-      }
       if (thoughtPart) {
         await updatePart(sessionId, thoughtPart.id, {
           durationMs: Math.max(0, Date.now() - agentStartedAt),

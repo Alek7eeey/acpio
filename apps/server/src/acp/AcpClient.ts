@@ -468,13 +468,6 @@ export function splitInlineThinking(raw: string): { thought: string; text: strin
   };
 }
 
-// Re-export shared peel helpers so server call sites keep working.
-export {
-  ensureAnswerFromThought,
-  looksLikeMetaReasoning,
-  peelAnswerFromThought,
-} from "@acprocess/shared";
-
 export class AcpClient extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;

@@ -1019,7 +1019,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    if (event.type === "messages.truncated") {
+    if (event.type === "messages.truncated" || event.type === "messages.replaced") {
       if (state.activeSession?.id !== event.sessionId) return;
       const replacedActive = {
         ...state.activeSession!,

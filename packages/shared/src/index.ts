@@ -431,6 +431,11 @@ export type WsServerEvent =
       sessionId: string;
       messages: MessageDto[];
     }
+  | {
+      type: "messages.replaced";
+      sessionId: string;
+      messages: MessageDto[];
+    }
   | { type: "error"; sessionId?: string; message: string }
   | { type: "pong" };
 
@@ -575,99 +580,9 @@ export function modelParamSectionName(paramId: string, name?: string): string {
   if (family === "context") return name?.trim() || "Context";
   if (name && name.trim()) {
     const n = name.trim();
-    if (/^effort$/i.test(n) || /^усилие$/i.test(n)) return "Effort";
     if (/^fast$/i.test(n)) return "Fast";
     return n;
   }
   return paramId;
 }
 
-/** True when text is agent meta/planning, not a user-facing answer. */
-export function looksLikeMetaReasoning(text: string): boolean {
-  const t = text.trim();
-  if (!t) return true;
-  if (
-    /^(the user|пользователь|let me|i (need|should|will|think|can)|okay|ok[,.]|hmm|рассужд|thinking|это (концептуальный|простой)|объясню|сейчас (я )?(расскажу|объясню)|i'?ll (explain|answer|help)|без необходимости)/i.test(
-      t,
-    )
-  ) {
-    return true;
-  }
-  if (
-    /(объясню понятие|без необходимости в инструментах|conceptual question|no need (for|to use) tools|i will explain)/i.test(
-      t,
-    )
-  ) {
-    return true;
-  }
-  // Entire blob is short planning prose with no definition-like substance.
-  if (t.length < 220 && /(спрашивает|asks about|объясню|i'?ll explain|let me)/i.test(t)) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * When the model dumps the final answer into the thought channel,
- * peel the user-facing answer away from short meta-reasoning.
- * Returns answer="" when nothing safe to show as the reply body.
- */
-export function peelAnswerFromThought(thought: string): { thought: string; answer: string } {
-  const trimmed = thought.trim();
-  if (!trimmed) return { thought: "", answer: "" };
-
-  const blocks = trimmed.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
-  if (blocks.length >= 2) {
-    const first = blocks[0]!;
-    const rest = blocks.slice(1).join("\n\n");
-    const meta =
-      looksLikeMetaReasoning(first) ||
-      (first.length < 280 && rest.length > first.length * 1.2);
-    if (meta && rest.length >= 24 && !looksLikeMetaReasoning(rest)) {
-      return { thought: first, answer: rest };
-    }
-    // All blocks are meta / incomplete — no peel.
-    if (blocks.every((b) => looksLikeMetaReasoning(b))) {
-      return { thought: trimmed, answer: "" };
-    }
-    // Last block looks like the real answer.
-    const last = blocks[blocks.length - 1]!;
-    const head = blocks.slice(0, -1).join("\n\n");
-    if (!looksLikeMetaReasoning(last) && looksLikeMetaReasoning(head)) {
-      return { thought: head, answer: last };
-    }
-    return { thought: trimmed, answer: "" };
-  }
-
-  const sentences = trimmed.split(/(?<=[.!?…])\s+/).map((s) => s.trim()).filter(Boolean);
-  if (sentences.length >= 2) {
-    const head = sentences.slice(0, -1).join(" ");
-    const last = sentences[sentences.length - 1] ?? "";
-    if (
-      looksLikeMetaReasoning(head) &&
-      !looksLikeMetaReasoning(last) &&
-      last.length >= 12 &&
-      head.length >= 16
-    ) {
-      return { thought: head, answer: last };
-    }
-  }
-
-  // Short non-meta thought-only replies — treat the whole thing as the answer.
-  if (trimmed.length <= 480 && !looksLikeMetaReasoning(trimmed)) {
-    return { thought: "", answer: trimmed };
-  }
-
-  return { thought: trimmed, answer: "" };
-}
-
-/** Visible reply when the turn only produced thought tokens. */
-export function ensureAnswerFromThought(thought: string): { thought: string; answer: string } {
-  const peeled = peelAnswerFromThought(thought);
-  if (peeled.answer.trim()) return peeled;
-  const raw = thought.trim();
-  if (!raw) return { thought: "", answer: "" };
-  // Keep the thought row intact; also surface the same text as the answer body
-  // so thought-only turns are never blank in the feed.
-  return { thought: raw, answer: raw };
-}

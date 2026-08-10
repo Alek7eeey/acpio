@@ -11,7 +11,6 @@ import {
 } from "react";
 import {
   migrateModelParamValues,
-  peelAnswerFromThought,
   usesCloudModelCatalog,
   type AgentMode,
   type MessageDto,
@@ -200,10 +199,7 @@ function UserMessageActions({ text, onEdit }: { text: string; onEdit: () => void
   );
 }
 
-function coalesceParts(
-  parts: MessagePartDto[],
-  opts?: { peelAnswer?: boolean },
-): MessagePartDto[] {
+function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
   const out: MessagePartDto[] = [];
   for (const part of parts) {
     const prev = out[out.length - 1];
@@ -236,35 +232,6 @@ function coalesceParts(
       }
     }
     out.push(part);
-  }
-
-  // Display-only peel for history: never destroy the thought row (that caused
-  // flicker when the server later sent the real text part).
-  const peelAnswer = opts?.peelAnswer !== false;
-  const hasText = out.some((p) => p.type === "text" && String(p.payload.text ?? "").trim());
-  if (peelAnswer && !hasText) {
-    const thoughtIdx = out.findIndex((p) => p.type === "thought");
-    if (thoughtIdx >= 0) {
-      const thought = out[thoughtIdx];
-      const peeled = peelAnswerFromThought(String(thought.payload.text ?? ""));
-      const answer = peeled.answer.trim();
-      const remain = peeled.thought.trim();
-      // Only split when we have a distinct answer — leave thought-only turns alone
-      // until the server appends a real text part.
-      if (answer && remain && answer !== remain) {
-        out[thoughtIdx] = {
-          ...thought,
-          payload: { ...thought.payload, text: remain },
-        };
-        out.splice(thoughtIdx + 1, 0, {
-          ...thought,
-          id: `${thought.id}-peeled-answer`,
-          type: "text",
-          order: thought.order + 0.5,
-          payload: { text: answer },
-        });
-      }
-    }
   }
 
   // Keep single thought near the top of assistant content
@@ -770,9 +737,8 @@ function isSubagentLike(part: MessagePartDto) {
 
 function coalesceAssistantParts(
   parts: MessagePartDto[],
-  opts?: { peelAnswer?: boolean },
 ): MessagePartDto[] {
-  const coalesced = coalesceParts(parts, opts);
+  const coalesced = coalesceParts(parts);
   const out: MessagePartDto[] = [];
   const subagentIndexByKey = new Map<string, number>();
 
@@ -832,10 +798,8 @@ function AssistantParts({
   }, [streaming]);
 
   const parts = useMemo(() => {
-    return coalesceAssistantParts(message.parts, {
-      peelAnswer: !streaming && !paintStreaming,
-    });
-  }, [message.parts, streaming, paintStreaming]);
+    return coalesceAssistantParts(message.parts);
+  }, [message.parts]);
 
   const thoughtParts = useMemo(
     () => parts.filter((p) => p.type === "thought" && Boolean(String(p.payload.text ?? "").trim())),
