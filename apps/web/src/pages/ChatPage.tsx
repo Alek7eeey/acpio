@@ -626,9 +626,32 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
   const output = busy ? "" : toolOutputText(part);
   const path = busy ? "" : toolPath(part);
   const metaExtra = busy ? "" : toolMetaExtra(part);
-  const expandable = !busy && output.length > 0;
-  const truncated = output.length > TOOL_OUTPUT_CAP;
-  const shown = truncated ? output.slice(0, TOOL_OUTPUT_CAP) : output;
+
+  // Normalize snippets for de-dup comparisons ("✎ " / "− " prefixes, "URL: " prefix).
+  const normSnippet = (s: string) =>
+    s.replace(/^[✎−]\s*/, "").trim().replace(/^URL:\s*/i, "");
+
+  const hintNorm = normSnippet(detail);
+  const pathNorm = normSnippet(path);
+
+  // Skip a leading output line that only restates the collapsed hint or the
+  // path (e.g. a search tool whose first result line is the same snippet as
+  // the brief info) — otherwise expanding just re-prints the same text.
+  let shown = output;
+  const firstNorm = normSnippet(shown.split("\n")[0] ?? "");
+  if (
+    (hintNorm && (firstNorm === hintNorm || firstNorm.startsWith(hintNorm))) ||
+    (pathNorm && (firstNorm === pathNorm || firstNorm.startsWith(pathNorm)))
+  ) {
+    shown = shown.split("\n").slice(1).join("\n").replace(/^\n+/, "");
+  }
+  const hintCoveredByMeta =
+    !!pathNorm &&
+    (pathNorm === hintNorm || pathNorm.startsWith(hintNorm) || hintNorm.startsWith(pathNorm));
+
+  const expandable = !busy && shown.trim().length > 0;
+  const truncated = shown.length > TOOL_OUTPUT_CAP;
+  const displayed = truncated ? shown.slice(0, TOOL_OUTPUT_CAP) : shown;
   const toggle = () => {
     if (expandable) setOpen((v) => !v);
   };
@@ -681,6 +704,15 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       </button>
       {open ? (
         <div className={styles.toolBody}>
+          {!hintCoveredByMeta && detail ? (
+            path ? (
+              <PathLink path={path} className={styles.toolDetail}>
+                {detail}
+              </PathLink>
+            ) : (
+              <span className={styles.toolDetail}>{detail}</span>
+            )
+          ) : null}
           {path || metaExtra ? (
             <div className={styles.toolMeta}>
               {path ? <PathLink path={path} /> : null}
@@ -689,7 +721,7 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
             </div>
           ) : null}
           <ToolOutputView
-            text={`${shown}${truncated ? `\n… ${t("common.outputTruncated")}` : ""}`}
+            text={`${displayed}${truncated ? `\n… ${t("common.outputTruncated")}` : ""}`}
           />
         </div>
       ) : null}
