@@ -672,6 +672,10 @@
   background: color-mix(in srgb, var(--text) 11%, transparent);
 }
 
+:global([data-theme="light"]) .sessionItem:hover {
+  background: #f2f4f8;
+}
+
 :global([data-theme="light"]) .sessionItem.active:hover {
   background: #dfeaff;
 }
