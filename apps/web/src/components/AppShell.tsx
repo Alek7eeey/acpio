@@ -24,7 +24,7 @@ import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acprocess.sidebarWidth.v2";
 const SIDEBAR_MIN = 300;
-const SIDEBAR_MAX = 520;
+const SIDEBAR_MAX = 760;
 const SIDEBAR_DEFAULT = 360;
 const SIDEBAR_COLLAPSE_AT = 240;
 
