@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   migrateModelParamValues,
-  modelDisplayName,
   providerCommand,
   usesCloudModelCatalog,
   type AgentProbeResult,
@@ -411,9 +410,6 @@ export function SettingsPage() {
                       >
                         <strong>{probe.ok ? t("common.connected") : t("common.error")}</strong>
                         <div>{probe.message}</div>
-                        {probe.currentModel && (
-                          <div>Model: {modelDisplayName(probe.currentModel)}</div>
-                        )}
                       </div>
                     )}
                   </div>
