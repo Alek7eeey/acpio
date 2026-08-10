@@ -104,11 +104,10 @@ export function AppShell() {
       if (window.innerWidth < 900) return;
       e.preventDefault();
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      dragRef.current = { startX: e.clientX, startWidth: sidebarOpen ? sidebarWidth : SIDEBAR_MIN };
+      dragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
       setDragging(true);
-      if (!sidebarOpen) setSidebarOpen(true);
     },
-    [sidebarOpen, sidebarWidth, setSidebarOpen],
+    [sidebarWidth],
   );
 
   const onSplitterDoubleClick = useCallback(() => {
@@ -338,18 +337,18 @@ export function AppShell() {
         </aside>
       )}
 
-      {showSidebar && (
+      {showSidebar && sidebarOpen && (
         <div
-          className={`${styles.splitter} ${!sidebarOpen ? styles.splitterCollapsed : ""}`}
+          className={styles.splitter}
           onPointerDown={onSplitterDown}
           onDoubleClick={onSplitterDoubleClick}
           role="separator"
           aria-orientation="vertical"
           aria-label={t("common.resizeTree")}
-          aria-valuenow={sidebarOpen ? sidebarWidth : 0}
+          aria-valuenow={sidebarWidth}
           aria-valuemin={0}
           aria-valuemax={SIDEBAR_MAX}
-          title={sidebarOpen ? t("common.resizeTreeHint") : t("common.resizeTreeCollapsed")}
+          title={t("common.resizeTreeHint")}
         />
       )}
 

@@ -112,7 +112,6 @@ export const en = {
     closeMenu: "Close menu",
     resizeTree: "Resize sidebar",
     resizeTreeHint: "Drag to resize · double-click to collapse",
-    resizeTreeCollapsed: "Drag or double-click to open sidebar",
     resizePlan: "Resize plan panel",
     resizePlanHint: "Drag to resize · double-click to reset width",
     settingsSections: "Settings sections",

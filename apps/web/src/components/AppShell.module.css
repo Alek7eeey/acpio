@@ -56,18 +56,6 @@
   transition: background 0.15s ease;
 }
 
-.splitterCollapsed {
-  left: 0;
-  margin-left: 0;
-  width: 10px;
-}
-
-.splitterCollapsed::before {
-  left: 2px;
-  transform: none;
-  background: color-mix(in srgb, var(--border) 90%, transparent);
-}
-
 .splitter:hover::before,
 .resizing .splitter::before {
   background: color-mix(in srgb, var(--accent) 55%, transparent);
