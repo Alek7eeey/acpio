@@ -9,7 +9,6 @@
   display: flex;
   flex-direction: column;
   z-index: 4;
-  border-left: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   background:
     linear-gradient(
       180deg,
@@ -50,18 +49,17 @@
 .splitter::before {
   content: "";
   position: absolute;
-  top: 12%;
-  bottom: 12%;
+  top: 0;
+  bottom: 0;
   left: 50%;
   width: 3px;
   transform: translateX(-50%);
-  border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 22%, var(--border));
   transition:
     background 0.15s ease,
     width 0.15s ease,
     opacity 0.15s ease;
-  opacity: 0.85;
+  opacity: 1;
 }
 
 .splitter:hover::before,
