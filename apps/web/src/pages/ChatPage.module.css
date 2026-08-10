@@ -526,13 +526,10 @@
 }
 
 .toolOutput {
-  margin: 4px 0 2px;
-  padding: 9px 12px;
+  margin: 2px 0;
   max-height: 320px;
   overflow: auto;
-  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  color: var(--text-secondary);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
   font-size: 0.76rem;
   line-height: 1.55;
