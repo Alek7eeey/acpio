@@ -136,6 +136,126 @@
   color: var(--accent);
 }
 
+.queueBar {
+  display: grid;
+  gap: 6px;
+  margin: 0 16px 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 85%, var(--bg));
+  box-shadow: var(--shadow-soft);
+  flex-shrink: 0;
+  animation: rise 0.18s ease;
+}
+
+.queueBarHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queueBarTitle {
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.queueBarCount {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.queueToggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.queueToggle svg {
+  display: block;
+}
+
+.queueToggleOn {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.queueList {
+  display: grid;
+  gap: 5px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.queueItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.queueItemText {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queueItemBtn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.queueItemBtn svg {
+  display: block;
+}
+
+.queueItemBtn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.queueEditInput {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 4px 8px;
+  outline: none;
+}
+
 .msg {
   max-width: min(720px, 100%);
   width: 100%;

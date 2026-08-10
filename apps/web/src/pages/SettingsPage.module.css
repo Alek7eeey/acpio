@@ -116,6 +116,30 @@
   gap: 8px;
 }
 
+.checkRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+.checkRow input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.checkRow span {
+  display: grid;
+  gap: 3px;
+}
+
+.checkRow strong {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
 .cwdPickRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

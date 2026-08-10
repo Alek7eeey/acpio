@@ -539,6 +539,19 @@ export function SettingsPage() {
                   <option value="allowlist">{t("settings.permissionAllowlist")}</option>
                 </select>
               </label>
+              {(settings.connectedProvider === "cursor" || settings.connectedProvider === "omp") && (
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.multitask)}
+                    onChange={(e) => patch("multitask", e.target.checked)}
+                  />
+                  <span>
+                    <strong>{t("settings.multitask")}</strong>
+                    <span className={styles.fieldHint}>{t("settings.multitaskHint")}</span>
+                  </span>
+                </label>
+              )}
             </div>
 
             <div className={styles.sectionBlock}>

@@ -52,6 +52,12 @@ export interface AppSettings {
   giteaRepo: string;
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
   diagnosticsDir: string;
+  /**
+   * Queue requests back-to-back (agent keeps working on the next one as soon
+   * as the previous reply is done). Only meaningful for agents that support
+   * multitasking (Cursor, OMP).
+   */
+  multitask: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -83,6 +89,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   giteaOwner: "acprocess",
   giteaRepo: "demo",
   diagnosticsDir: "",
+  multitask: false,
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {

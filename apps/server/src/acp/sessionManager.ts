@@ -10,6 +10,7 @@ import {
   usesCloudModelCatalog,
   type AgentMode,
   type AgentProvider,
+  type AppSettings,
   type ModelParamDto,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
@@ -214,6 +215,15 @@ type PendingRequest = {
   rpcId: string | number;
 };
 
+type TurnOpts = {
+  provider: AgentProvider;
+  cwd: string;
+  mode: AgentMode;
+  titleHint?: string;
+  /** Edit existing user message: truncate later turns and regenerate. */
+  editMessageId?: string;
+};
+
 class SessionRuntime {
   client: AcpClient | null = null;
   /** Resolves when client.start() has finished (or failed). */
@@ -230,6 +240,12 @@ class SessionRuntime {
   usage: import("@acprocess/shared").SessionUsageDto | null = null;
   pending = new Map<string, PendingRequest>();
   running = false;
+  /**
+   * Prompts accepted while a turn is already running (multitask burst).
+   * User messages are persisted immediately; the turns themselves run
+   * strictly one at a time in FIFO order, so streams never interleave.
+   */
+  turnQueue: Array<{ userMessageId: string; text: string; opts: TurnOpts }> = [];
   /**
    * Active prompt generation. Bumped when a prompt starts.
    * Stream chunks captured under an older gen (or while acceptingStream=false) are dropped.
@@ -796,24 +812,15 @@ function buildPriorTranscript(
 export async function runPrompt(
   sessionId: string,
   text: string,
-  opts: {
-    provider: AgentProvider;
-    cwd: string;
-    mode: AgentMode;
-    titleHint?: string;
-    /** Edit existing user message: truncate later turns and regenerate. */
-    editMessageId?: string;
-  },
+  opts: TurnOpts,
 ) {
   const settings = await getSettings();
   const locale = settings.locale ?? "ru";
   let rt = getRuntime(sessionId);
-  if (rt.running) {
-    throw Object.assign(new Error(errorMessage(locale, "sessionBusy")), { code: "sessionBusy" });
-  }
 
   let promptUserText = text;
   let priorTranscript = "";
+  let userMessageId: string | null = null;
 
   if (opts.editMessageId) {
     const detailBefore = await getSessionDetail(sessionId);
@@ -844,6 +851,7 @@ export async function runPrompt(
 
   if (!opts.editMessageId) {
     const userMsg = await createMessage(sessionId, "user");
+    userMessageId = userMsg.id;
     const trimmed = text.trim();
     const slashMatch = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)/i);
     await appendPart(sessionId, userMsg.id, "text", {
@@ -852,6 +860,8 @@ export async function runPrompt(
         ? { isSlashCommand: true, commandName: slashMatch[1] }
         : {}),
     });
+  } else {
+    userMessageId = opts.editMessageId;
   }
 
   if (opts.titleHint) {
@@ -860,6 +870,27 @@ export async function runPrompt(
     });
   }
 
+  if (rt.running) {
+    // A turn is already running (multitask burst): the user message above is
+    // persisted immediately; the agent turn itself runs FIFO once the current
+    // turn finishes, so streams never interleave.
+    rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, opts });
+    return { queued: true };
+  }
+
+  return runTurn(rt, sessionId, promptUserText, priorTranscript, opts, settings, acpReady);
+}
+
+async function runTurn(
+  rt: SessionRuntime,
+  sessionId: string,
+  promptUserText: string,
+  priorTranscript: string,
+  opts: TurnOpts,
+  settings: AppSettings,
+  acpReady: Promise<AcpClient>,
+) {
+  const locale = settings.locale ?? "ru";
   rt.running = true;
   rt.streamGen += 1;
   rt.acceptingStream = true;
@@ -952,6 +983,21 @@ export async function runPrompt(
   } finally {
     rt.running = false;
     rt.acceptingStream = false;
+    void dequeueTurn(rt);
+  }
+}
+
+/** Start the next FIFO-queued turn, if any (after the current turn finished). */
+async function dequeueTurn(rt: SessionRuntime) {
+  if (rt.running) return;
+  const next = rt.turnQueue.shift();
+  if (!next) return;
+  try {
+    const settings = await getSettings();
+    const acpReady = ensureAcp(rt.sessionId, next.opts);
+    await runTurn(rt, rt.sessionId, next.text, "", next.opts, settings, acpReady);
+  } catch (err) {
+    console.error(`[acp:${rt.sessionId}] queued turn failed`, err);
   }
 }
 
@@ -960,6 +1006,8 @@ export async function cancelPrompt(sessionId: string) {
   if (rt) {
     rt.acceptingStream = false;
     rt.running = false;
+    // Stop drops every queued turn too — the user asked to halt work.
+    rt.turnQueue = [];
     rt.openTextPartId = null;
     rt.openThoughtPartId = null;
     for (const [reqKey, p] of rt.pending) {

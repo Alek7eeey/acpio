@@ -84,6 +84,7 @@ const settingsSchema = z.object({
   giteaOwner: z.string().optional(),
   giteaRepo: z.string().optional(),
   diagnosticsDir: z.string().optional(),
+  multitask: z.boolean().optional(),
 });
 
 async function agentConnected(): Promise<AgentProvider | null> {

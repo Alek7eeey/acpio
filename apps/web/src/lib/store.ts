@@ -122,6 +122,14 @@ type AppState = {
   /** Bumped on each send; cancel stamps cancelledPromptEpoch to ignore late WS parts. */
   promptEpoch: number;
   cancelledPromptEpoch: number;
+  /**
+   * Requests the user sent while the agent was busy. Items leave the queue the
+   * moment they are handed to the server (the server FIFO-runs them), so
+   * everything still listed here can still be edited or deleted.
+   */
+  promptQueue: Array<{ id: string; text: string; editMessageId?: string | null }>;
+  /** Prompts handed to the server whose turns have not completed yet. */
+  inflight: number;
   loading: boolean;
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
@@ -139,6 +147,17 @@ type AppState = {
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
   sendPrompt: (text: string, opts?: { editMessageId?: string }) => Promise<void>;
+  /** Internal: actually hand one prompt to the server (optimistic pair optional). */
+  runSendPrompt: (
+    text: string,
+    opts?: { editMessageId?: string },
+    flags?: { optimistic?: boolean },
+  ) => Promise<void>;
+  removeQueuedPrompt: (id: string) => void;
+  updateQueuedPrompt: (id: string, text: string) => void;
+  drainPromptQueue: () => Promise<void>;
+  /** Optimistic local toggle; the save happens in the background. */
+  setMultitask: (value: boolean) => Promise<void>;
   cancelPrompt: () => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
@@ -479,6 +498,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingQuestion: null,
   promptEpoch: 0,
   cancelledPromptEpoch: -1,
+  promptQueue: [],
+  inflight: 0,
   loading: true,
   error: null,
 
@@ -756,7 +777,80 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  /**
+   * Send a prompt, or queue it when the agent is busy. Queued items stay in
+   * `promptQueue` (editable/deletable) until a slot frees up; the drain then
+   * hands them to the server one at a time (serial) or up to two at once when
+   * multitask is enabled.
+   */
   async sendPrompt(text, opts) {
+    const limit = get().settings.multitask ? 2 : 1;
+    const busy =
+      get().inflight >= limit ||
+      get().promptQueue.length > 0 ||
+      get().activeSession?.status === "running" ||
+      get().activeSession?.status === "waiting";
+    if (busy) {
+      set({
+        promptQueue: [
+          ...get().promptQueue,
+          {
+            id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            text,
+            editMessageId: opts?.editMessageId ?? null,
+          },
+        ],
+      });
+      void get().drainPromptQueue();
+      return;
+    }
+    await get().runSendPrompt(text, opts, { optimistic: true });
+  },
+
+  removeQueuedPrompt(id) {
+    set({ promptQueue: get().promptQueue.filter((item) => item.id !== id) });
+  },
+
+  updateQueuedPrompt(id, text) {
+    set({
+      promptQueue: get().promptQueue.map((item) => (item.id === id ? { ...item, text } : item)),
+    });
+  },
+
+  async setMultitask(value) {
+    set({ settings: { ...get().settings, multitask: value } });
+    try {
+      await api.updateSettings({ multitask: value });
+    } catch {
+      // keep the local toggle; a later form save persists it
+    }
+  },
+
+  async drainPromptQueue() {
+    const limit = get().settings.multitask ? 2 : 1;
+    if (get().inflight >= limit) return;
+    const q = get().promptQueue;
+    if (!q.length) return;
+    const [item, ...rest] = q;
+    set({ promptQueue: rest, inflight: get().inflight + 1 });
+    try {
+      await get().runSendPrompt(
+        item.text,
+        item.editMessageId ? { editMessageId: item.editMessageId } : undefined,
+        {
+          // The first slot reuses the optimistic pair; extra multitask slots
+          // stream their real messages in over WS instead.
+          optimistic: get().inflight <= 1,
+        },
+      );
+    } catch {
+      set({ inflight: Math.max(0, get().inflight - 1) });
+    }
+    // Fill the second multitask slot; serial mode is already at the limit.
+    void get().drainPromptQueue();
+  },
+
+  async runSendPrompt(text, opts, { optimistic = true } = {}) {
     const id = get().activeSessionId;
     set({ error: null });
 
@@ -884,7 +978,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const active = get().activeSession;
-    if (active?.id === id) {
+    if (active?.id === id && optimistic) {
       const pair = buildOptimisticPair(id, active.messages);
       pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId };
       commitRunning(id, pair.messages, pair.epoch);
@@ -900,6 +994,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
     set({
       cancelledPromptEpoch: state.promptEpoch,
+      promptQueue: [],
+      inflight: 0,
       pendingPermission:
         state.pendingPermission?.sessionId === id ? null : state.pendingPermission,
       permissionQueue: state.permissionQueue.filter((p) => p.sessionId !== id),
@@ -1003,6 +1099,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         !cancelled
       ) {
         reconcileFinishedTurn(event.sessionId, get, set);
+        // All in-flight turns are done — free the queue slots and send more.
+        if (get().inflight > 0) set({ inflight: 0 });
+        void get().drainPromptQueue();
       }
       return;
     }

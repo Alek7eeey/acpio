@@ -926,6 +926,12 @@ export function ChatPage() {
   const pendingPermission = useAppStore((s) => s.pendingPermission);
   const pendingQuestion = useAppStore((s) => s.pendingQuestion);
   const answerQuestion = useAppStore((s) => s.answerQuestion);
+  const promptQueue = useAppStore((s) => s.promptQueue);
+  const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
+  const updateQueuedPrompt = useAppStore((s) => s.updateQueuedPrompt);
+  const setMultitask = useAppStore((s) => s.setMultitask);
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+  const [editingQueueText, setEditingQueueText] = useState("");
   const [text, setText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
@@ -991,6 +997,13 @@ export function ChatPage() {
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
   const planPending = pendingQuestion?.kind === "create_plan";
+  // Cursor ships multitask in the CLI, OMP queues commands natively — both can
+  // take the next request as soon as the previous one is done.
+  const canMultitask =
+    settings.connectedProvider === "cursor" ||
+    settings.connectedProvider === "omp" ||
+    activeSession?.provider === "cursor" ||
+    activeSession?.provider === "omp";
   const activePlan = useMemo((): PlanPayload | null => {
     if (planPending && pendingQuestion) {
       return coercePlanPayload(pendingQuestion.payload) ?? null;
@@ -1164,7 +1177,7 @@ export function ChatPage() {
 
   const submitMessage = (raw: string) => {
     const value = raw.trim();
-    if (!value || composerLocked || streaming) return;
+    if (!value || composerLocked) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
@@ -1751,6 +1764,144 @@ export function ChatPage() {
       ) : null}
 
       {error && <div className={styles.banner}>{error}</div>}
+
+      {promptQueue.length > 0 && (
+        <div className={styles.queueBar}>
+          <div className={styles.queueBarHeader}>
+            <span className={styles.queueBarTitle}>{t("chat.promptQueue")}</span>
+            <span className={styles.queueBarCount}>
+              {t("chat.queueCount", { count: promptQueue.length })}
+            </span>
+            {canMultitask && (
+              <button
+                type="button"
+                className={`${styles.queueToggle} ${
+                  settings.multitask ? styles.queueToggleOn : ""
+                }`}
+                title={t("chat.multitaskHint")}
+                aria-pressed={settings.multitask}
+                onClick={() => void setMultitask(!settings.multitask)}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {t("chat.multitask")}
+              </button>
+            )}
+          </div>
+          <div className={styles.queueList}>
+            {promptQueue.map((item) => (
+              <div key={item.id} className={styles.queueItem}>
+                {editingQueueId === item.id ? (
+                  <>
+                    <input
+                      className={styles.queueEditInput}
+                      value={editingQueueText}
+                      onChange={(e) => setEditingQueueText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          updateQueuedPrompt(item.id, editingQueueText.trim() || item.text);
+                          setEditingQueueId(null);
+                        } else if (e.key === "Escape") {
+                          setEditingQueueId(null);
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className={styles.queueItemBtn}
+                      title={t("common.save")}
+                      onClick={() => {
+                        updateQueuedPrompt(item.id, editingQueueText.trim() || item.text);
+                        setEditingQueueId(null);
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M5 13l4 4L19 7"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.queueItemBtn}
+                      title={t("common.cancel")}
+                      onClick={() => setEditingQueueId(null)}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M6 6l12 12M18 6 6 18"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className={styles.queueItemText} title={item.text}>
+                      {item.text}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.queueItemBtn}
+                      title={t("common.edit")}
+                      aria-label={t("common.edit")}
+                      onClick={() => {
+                        setEditingQueueId(item.id);
+                        setEditingQueueText(item.text);
+                      }}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="M12.8 6.8 17.2 11.2"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.queueItemBtn}
+                      title={t("common.delete")}
+                      aria-label={t("common.delete")}
+                      onClick={() => removeQueuedPrompt(item.id)}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <form className={styles.composer} onSubmit={onSubmit}>
         {scrolledAway && activeSession ? (
