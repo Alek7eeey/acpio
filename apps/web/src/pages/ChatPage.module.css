@@ -168,32 +168,6 @@
   color: var(--text-secondary);
 }
 
-.queueToggle {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 2px 9px;
-  font: inherit;
-  font-size: 0.72rem;
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.queueToggle svg {
-  display: block;
-}
-
-.queueToggleOn {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
 .queueList {
   display: grid;
   gap: 4px;

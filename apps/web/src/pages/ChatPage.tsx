@@ -928,7 +928,6 @@ export function ChatPage() {
   const answerQuestion = useAppStore((s) => s.answerQuestion);
   const promptQueue = useAppStore((s) => s.promptQueue);
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
-  const setMultitask = useAppStore((s) => s.setMultitask);
   const [text, setText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
@@ -994,13 +993,6 @@ export function ChatPage() {
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
   const planPending = pendingQuestion?.kind === "create_plan";
-  // Cursor ships multitask in the CLI, OMP queues commands natively — both can
-  // take the next request as soon as the previous one is done.
-  const canMultitask =
-    settings.connectedProvider === "cursor" ||
-    settings.connectedProvider === "omp" ||
-    activeSession?.provider === "cursor" ||
-    activeSession?.provider === "omp";
   const activePlan = useMemo((): PlanPayload | null => {
     if (planPending && pendingQuestion) {
       return coercePlanPayload(pendingQuestion.payload) ?? null;
@@ -1530,6 +1522,16 @@ export function ChatPage() {
     });
   };
 
+  // The queue bar pushes the composer down and can cover the last messages —
+  // jump to the very bottom whenever a new item is queued.
+  const prevQueueLenRef = useRef(0);
+  useEffect(() => {
+    if (promptQueue.length > prevQueueLenRef.current) {
+      scrollThreadToEnd();
+    }
+    prevQueueLenRef.current = promptQueue.length;
+  }, [promptQueue.length]);
+
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
@@ -1766,27 +1768,6 @@ export function ChatPage() {
             <span className={styles.queueBarCount}>
               {t("chat.queueCount", { count: promptQueue.length })}
             </span>
-            {canMultitask && (
-              <button
-                type="button"
-                className={`${styles.queueToggle} ${
-                  settings.multitask ? styles.queueToggleOn : ""
-                }`}
-                title={t("chat.multitaskHint")}
-                aria-pressed={settings.multitask}
-                onClick={() => void setMultitask(!settings.multitask)}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                {t("chat.multitask")}
-              </button>
-            )}
           </div>
           <div className={styles.queueList}>
             {promptQueue.map((item) => (

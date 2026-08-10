@@ -587,50 +587,48 @@
   color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
 }
 
-/* "Working" indicator: a pulsing dot with a ping ring — deliberately not the
-   classic spinner, so it reads as "a process is still running" at a glance. */
+/* "Working" indicator: three staggered bouncing bars (mini equalizer) —
+   deliberately not a spinner, so it reads as "a process is still running". */
 .sessionRunning {
-  position: relative;
-  width: 12px;
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
   height: 12px;
   flex-shrink: 0;
 }
 
-.sessionRunningDot {
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
+.sessionRunningBar {
+  width: 2.5px;
+  border-radius: 1px;
   background: var(--accent);
-  animation: sessionDotPulse 1.4s ease-in-out infinite;
+  transform-origin: bottom;
+  animation: sessionBarBounce 1.15s ease-in-out infinite;
 }
 
-.sessionRunning::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 1.5px solid var(--accent);
-  animation: sessionPing 1.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+.sessionRunningBar:nth-child(1) {
+  height: 5px;
+  animation-delay: 0s;
 }
 
-@keyframes sessionDotPulse {
+.sessionRunningBar:nth-child(2) {
+  height: 9px;
+  animation-delay: 0.18s;
+}
+
+.sessionRunningBar:nth-child(3) {
+  height: 6px;
+  animation-delay: 0.36s;
+}
+
+@keyframes sessionBarBounce {
   0%,
   100% {
-    opacity: 1;
+    transform: scaleY(0.45);
+    opacity: 0.55;
   }
   50% {
-    opacity: 0.4;
-  }
-}
-
-@keyframes sessionPing {
-  from {
-    transform: scale(0.7);
-    opacity: 0.8;
-  }
-  to {
-    transform: scale(2.1);
-    opacity: 0;
+    transform: scaleY(1);
+    opacity: 1;
   }
 }
 

@@ -401,15 +401,18 @@ export function ChatSidebar() {
             >
               <span className={styles.sessionTitle}>
                 <span className={styles.sessionTitleText}>{s.title}</span>
-                {(s.status === "running" || s.status === "waiting") && (
-                  <span
-                    className={styles.sessionRunning}
-                    title={t("chat.sessionRunning")}
-                    aria-label={t("chat.sessionRunning")}
-                  >
-                    <span className={styles.sessionRunningDot} />
-                  </span>
-                )}
+                {(s.status === "running" || s.status === "waiting") &&
+                  s.id !== activeSessionId && (
+                    <span
+                      className={styles.sessionRunning}
+                      title={t("chat.sessionRunning")}
+                      aria-label={t("chat.sessionRunning")}
+                    >
+                      <span className={styles.sessionRunningBar} />
+                      <span className={styles.sessionRunningBar} />
+                      <span className={styles.sessionRunningBar} />
+                    </span>
+                  )}
               </span>
               {activity ? (
                 <span
