@@ -771,11 +771,10 @@ function preferSubagentPart(a: MessagePartDto, b: MessagePartDto): MessagePartDt
 function isSubagentLike(part: MessagePartDto) {
   if (part.type === "subagent") return true;
   if (part.type !== "tool_call") return false;
-  const title = String(part.payload.title ?? part.payload.description ?? "");
   const kind = String(
     (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
   );
-  return isSubagentToolCall(title, kind);
+  return isSubagentToolCall(kind);
 }
 
 function coalesceAssistantParts(

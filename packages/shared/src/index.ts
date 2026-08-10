@@ -600,16 +600,12 @@ const SUBAGENT_TOOL_KINDS = new Set([
 ]);
 
 /**
- * Decide whether an ACP tool call runs a nested agent. The structured `kind`
- * field is authoritative; the free-text title is only consulted when the agent
- * omits `kind` entirely. Kept in one place so server and client agree.
+ * Decide whether an ACP tool call runs a nested agent. Only the structured
+ * `kind` field is consulted — never the free-text title. Kinds are per-agent:
+ * Cursor reports its documented subagent tool kinds and OpenCode reports
+ * `task`; agents that omit `kind` (e.g. OMP) render as plain tool calls.
  */
-export function isSubagentToolCall(title: string, kind: string): boolean {
-  const k = kind.trim().toLowerCase();
-  if (k) return SUBAGENT_TOOL_KINDS.has(k);
-  const t = String(title ?? "").trim();
-  return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
-    t,
-  );
+export function isSubagentToolCall(kind: string): boolean {
+  return SUBAGENT_TOOL_KINDS.has(kind.trim().toLowerCase());
 }
 

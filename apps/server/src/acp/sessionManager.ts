@@ -543,7 +543,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     rt.openTextPartId = null; // next text starts a new segment after tool
     const title = update.title ?? "Tool";
     const kind = String((update.raw.kind as string) ?? "");
-    const isSubagent = isSubagentToolCall(title, kind);
+    const isSubagent = isSubagentToolCall(kind);
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
     const payload: Record<string, unknown> = {
       toolCallId: update.toolCallId,
@@ -586,7 +586,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const title = (update.raw.title as string) ?? "Tool";
     const status = update.status ?? "in_progress";
     const kind = String((update.raw.kind as string) ?? "");
-    const isSubagent = isSubagentToolCall(title, kind);
+    const isSubagent = isSubagentToolCall(kind);
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
     if (!partId) {
       const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
