@@ -256,6 +256,26 @@
   justify-items: stretch;
 }
 
+/* One request + its replies. With multitask enabled, each segment becomes a
+   distinct card so concurrent requests read as separate workspaces. */
+.turnSegment {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.turnSegmentMultitask {
+  width: 100%;
+  max-width: min(840px, 100%);
+  margin: 0 auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
 /* Tighter pair: user bubble → assistant reply */
 .msg.user + .msg.assistant {
   margin-top: -7px; /* thread gap 12px → effective 5px */

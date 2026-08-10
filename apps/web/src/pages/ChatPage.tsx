@@ -1471,6 +1471,23 @@ export function ChatPage() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
+  // Each user message starts a new turn segment (one request + its replies) —
+  // with multitask on, segments get distinct cards so concurrent requests
+  // read as separate workspaces instead of one interleaved feed.
+  const segments = useMemo(() => {
+    const msgs = activeSession?.messages ?? [];
+    const out: MessageDto[][] = [];
+    let current: MessageDto[] = [];
+    for (const m of msgs) {
+      if (m.role === "user" && current.length > 0) {
+        out.push(current);
+        current = [];
+      }
+      current.push(m);
+    }
+    if (current.length > 0) out.push(current);
+    return out;
+  }, [activeSession?.messages]);
   const activeSessionId = activeSession?.id ?? null;
   const streamDigest = useMemo(() => {
     if (!activeSession?.messages.length) return `${activeSession?.status ?? ""}`;
@@ -1693,60 +1710,71 @@ export function ChatPage() {
           </div>
         )}
 
-        {(activeSession?.messages ?? []).map((msg, index) => {
-          const isLiveAssistant =
-            streaming &&
-            msg.role === "assistant" &&
-            index === (activeSession?.messages.length ?? 0) - 1;
-          if (
-            msg.role === "assistant" &&
-            !hasRenderableAssistantContent(msg.parts) &&
-            !isLiveAssistant
-          ) {
-            return null;
-          }
-          return (
-            <article
-              key={msg.id}
-              className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
-              onMouseDown={(e) => {
-                if (!keepComposerFocus.current) return;
-                const target = e.target as HTMLElement;
-                if (target.closest("button,a,input,textarea")) return;
-                e.preventDefault();
-              }}
-            >
-              {msg.role === "user" ? (
-                <UserMessage
-                  message={msg}
-                  slashCommands={slashCommands}
-                  onEdit={(messageId, value) => {
-                    setEditingMessageId(messageId);
-                    setText(value);
-                    window.requestAnimationFrame(() => {
-                      const el = textareaRef.current;
-                      if (!el) return;
-                      el.focus();
-                      syncComposerSize(el);
-                      const end = value.length;
-                      el.setSelectionRange(end, end);
-                    });
+        {segments.map((segment, segIndex) => (
+          <div
+            key={segment[0]?.id ?? `seg-${segIndex}`}
+            className={`${styles.turnSegment}${
+              settings.multitask ? ` ${styles.turnSegmentMultitask}` : ""
+            }`}
+          >
+            {segment.map((msg, index) => {
+              const globalIndex =
+                activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
+              const isLiveAssistant =
+                streaming &&
+                msg.role === "assistant" &&
+                globalIndex === (activeSession?.messages.length ?? 0) - 1;
+              if (
+                msg.role === "assistant" &&
+                !hasRenderableAssistantContent(msg.parts) &&
+                !isLiveAssistant
+              ) {
+                return null;
+              }
+              return (
+                <article
+                  key={msg.id}
+                  className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
+                  onMouseDown={(e) => {
+                    if (!keepComposerFocus.current) return;
+                    const target = e.target as HTMLElement;
+                    if (target.closest("button,a,input,textarea")) return;
+                    e.preventDefault();
                   }}
-                />
-              ) : (
-                <AssistantParts
-                  message={msg}
-                  streaming={!!isLiveAssistant}
-                  autoExpandSteps={
-                    isLiveAssistant
-                      ? autoExpandSteps
-                      : thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
-                  }
-                />
-              )}
-            </article>
-          );
-        })}
+                >
+                  {msg.role === "user" ? (
+                    <UserMessage
+                      message={msg}
+                      slashCommands={slashCommands}
+                      onEdit={(messageId, value) => {
+                        setEditingMessageId(messageId);
+                        setText(value);
+                        window.requestAnimationFrame(() => {
+                          const el = textareaRef.current;
+                          if (!el) return;
+                          el.focus();
+                          syncComposerSize(el);
+                          const end = value.length;
+                          el.setSelectionRange(end, end);
+                        });
+                      }}
+                    />
+                  ) : (
+                    <AssistantParts
+                      message={msg}
+                      streaming={!!isLiveAssistant}
+                      autoExpandSteps={
+                        isLiveAssistant
+                          ? autoExpandSteps
+                          : thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
+                      }
+                    />
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ))}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
         </div>
       </div>
