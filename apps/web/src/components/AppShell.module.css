@@ -463,24 +463,34 @@
   display: grid;
   place-items: center;
   margin-left: auto;
-  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  color: var(--accent);
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--accent) 88%, #fff),
+    var(--accent) 70%
+  );
+  color: #fff;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 35%, transparent);
   opacity: 1;
   pointer-events: auto;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
 }
 
 .folderAdd svg {
   display: block;
+  stroke-width: 2.2;
 }
 
 .folderAdd:hover {
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  color: var(--accent);
+  transform: scale(1.12);
+  filter: brightness(1.06);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.folderAdd:active {
+  transform: scale(0.96);
 }
 
 .archiveGroup {
@@ -554,17 +564,6 @@
     opacity: 1;
     pointer-events: auto;
   }
-
-  .sessionRowAction {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .sessionItem:hover .sessionRowAction,
-  .sessionItem.active .sessionRowAction {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 .sessionItem.active .sessionMore {
@@ -603,11 +602,46 @@
 
 .sessionRowAction svg {
   display: block;
+  transition: transform 0.18s ease, color 0.18s ease;
 }
 
 .sessionRowAction:hover {
   background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
+}
+
+/* Light "pop" as the icons appear on row hover. */
+.sessionItem:hover .sessionRowAction svg {
+  animation: sessionActionPop 0.24s ease both;
+}
+
+.sessionRowAction:hover svg {
+  transform: scale(1.22);
+}
+
+/* Hide by default on hover-capable devices (must come after the base rule so
+   the opacity actually applies), reveal only while the chat row is hovered. */
+@media (hover: hover) and (pointer: fine) {
+  .sessionRowAction {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sessionItem:hover .sessionRowAction {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@keyframes sessionActionPop {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .chatThemeBody {
