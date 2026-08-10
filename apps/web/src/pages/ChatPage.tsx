@@ -1468,13 +1468,10 @@ export function ChatPage() {
 
   useEffect(() => {
     if (streaming) {
-      if (shouldAutoFocusComposer()) {
-        keepComposerFocus.current = true;
-        focusComposer();
-      } else {
-        keepComposerFocus.current = false;
-        textareaRef.current?.blur();
-      }
+      // Keep focus if the user is typing, but never yank the caret into the
+      // input just because a stream started (queued turns chain streams and
+      // would otherwise flash a blinking cursor on every new reply).
+      keepComposerFocus.current = shouldAutoFocusComposer();
       return;
     }
     const t = window.setTimeout(() => {

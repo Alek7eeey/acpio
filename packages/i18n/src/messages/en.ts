@@ -256,6 +256,7 @@ export const en = {
     permissionPrompt: "Ask",
     permissionAllowlist: "Allowlist",
     permissionAlways: "Always allow",
+    agentUnavailable: "Agent unavailable — check CLI install and login",
     multitask: "Multitask (parallel requests)",
     multitaskHint: "Send the next request as soon as the previous one finishes, without waiting for full completion. Only for agents with multitasking support (Cursor, OMP).",
     apiKeys: "API keys",

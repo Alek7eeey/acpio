@@ -434,6 +434,11 @@ export type WsServerEvent =
       usage: SessionUsageDto;
     }
   | {
+      type: "agent.availability";
+      provider: AgentProvider;
+      available: boolean;
+    }
+  | {
       type: "messages.truncated";
       sessionId: string;
       messages: MessageDto[];

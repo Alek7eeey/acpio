@@ -51,7 +51,7 @@ export function AppShell() {
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
   const theme = useAppStore((s) => s.settings.theme);
   const setTheme = useAppStore((s) => s.setTheme);
-  const connected = useAppStore((s) => s.connected);
+  const agentAvailable = useAppStore((s) => s.agentAvailable);
   const settings = useAppStore((s) => s.settings);
   const usageSupported = useAppStore((s) => s.usageSupported);
   const settingsTree = useMemo(
@@ -60,7 +60,9 @@ export function AppShell() {
   );
 
   const hasAgent = Boolean(settings.connectedProvider);
-  const agentOnline = hasAgent && connected;
+  // Green only when the agent was actually verified (probe/prompt succeeded),
+  // not merely because "Connect" was pressed.
+  const agentOnline = hasAgent && agentAvailable;
 
   const agentStatusTitle = useMemo(() => {
     const provider = settings.connectedProvider;

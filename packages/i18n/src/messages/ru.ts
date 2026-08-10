@@ -280,6 +280,7 @@ export const ru = {
     permissionPrompt: "Спрашивать",
     permissionAllowlist: "Allowlist",
     permissionAlways: "Всегда разрешать",
+    agentUnavailable: "Агент недоступен — проверьте установку и авторизацию CLI",
     multitask: "Мультизадача (параллельные запросы)",
     multitaskHint: "Следующий запрос уходит агенту сразу после предыдущего, не дожидаясь полного завершения. Только для агентов с поддержкой мультизадачности (Cursor, OMP).",
     apiKeys: "API-ключи",

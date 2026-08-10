@@ -115,6 +115,8 @@ type AppState = {
   sessionUsage: SessionUsageDto | null;
   sidebarOpen: boolean;
   connected: boolean;
+  /** True only when the connected agent was actually verified (probe/prompt OK). */
+  agentAvailable: boolean;
   pendingPermission: PendingPermission | null;
   /** Extra permission prompts waiting behind the one shown in the UI. */
   permissionQueue: PendingPermission[];
@@ -161,6 +163,7 @@ type AppState = {
   cancelPrompt: () => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
+  setAgentAvailable: (available: boolean) => void;
   handleWsEvent: (event: WsServerEvent) => void;
   answerPermission: (optionId: string) => Promise<void>;
   answerQuestion: (result: Record<string, unknown>) => Promise<void>;
@@ -447,6 +450,12 @@ async function loadAppData(
   if (provider) {
     void get().ensureModels(provider);
     void get().refreshAgentUsage();
+    // Verify the agent is really reachable — the header dot must reflect
+    // actual availability, not just a saved "connected" flag.
+    void api
+      .probeAgent(provider)
+      .then((result) => get().setAgentAvailable(result.ok))
+      .catch(() => get().setAgentAvailable(false));
   } else {
     set({ modelsCatalog: null, modelsLoading: false, usageSupported: false, sessionUsage: null });
   }
@@ -493,6 +502,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionUsage: null,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
+  agentAvailable: false,
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestion: null,
@@ -804,6 +814,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().drainPromptQueue();
       return;
     }
+    // Reserve a slot so a second send while this turn is running actually
+    // queues instead of being drained instantly (inflight only drops on idle).
+    set({ inflight: get().inflight + 1 });
     await get().runSendPrompt(text, opts, { optimistic: true });
   },
 
@@ -829,6 +842,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   async drainPromptQueue() {
     const limit = get().settings.multitask ? 2 : 1;
     if (get().inflight >= limit) return;
+    // Serial mode: never start the next turn while the agent is still working
+    // (inflight can read 0 after a page reload mid-turn).
+    const status = get().activeSession?.status;
+    if (limit === 1 && (status === "running" || status === "waiting")) return;
     const q = get().promptQueue;
     if (!q.length) return;
     const [item, ...rest] = q;
@@ -1021,6 +1038,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ connected });
   },
 
+  setAgentAvailable(available) {
+    set({ agentAvailable: available });
+  },
+
   handleWsEvent(event) {
     if (event.type !== "part.appended" && event.type !== "part.updated") {
       if (pendingPartRaf) {
@@ -1209,6 +1230,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         usageSupported: true,
         sessionUsage: event.usage,
       });
+      return;
+    }
+
+    if (event.type === "agent.availability") {
+      if (event.provider === state.settings.connectedProvider) {
+        set({ agentAvailable: event.available });
+      }
       return;
     }
 

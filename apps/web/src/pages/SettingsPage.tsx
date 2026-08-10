@@ -183,6 +183,14 @@ export function SettingsPage() {
   const connectProvider = async (provider: AgentProvider) => {
     setConnectingId(provider);
     try {
+      // Verify the agent is actually reachable before committing the connection.
+      const probe = await api.probeAgent(provider);
+      setProbes((prev) => ({ ...prev, [provider]: probe }));
+      useAppStore.getState().setAgentAvailable(probe.ok);
+      if (!probe.ok) {
+        setModelsError(probe.message || t("settings.agentUnavailable"));
+        return;
+      }
       const same = form.connectedProvider === provider;
       const next: AppSettings = {
         ...form,
@@ -220,6 +228,7 @@ export function SettingsPage() {
     try {
       const result = await api.probeAgent(provider);
       setProbes((prev) => ({ ...prev, [provider]: result }));
+      useAppStore.getState().setAgentAvailable(result.ok);
       if (result.ok && result.currentModel && form.defaultProvider === provider && !form.defaultModel) {
         const defaultModelParams = Object.fromEntries(
           (result.modelParams ?? [])

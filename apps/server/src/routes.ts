@@ -32,6 +32,7 @@ import {
   setSessionModel,
   setSessionMode,
   getAgentUsage,
+  getAgentAvailability,
   syncSessionAgent,
   warmAcp,
 } from "./acp/sessionManager.js";
@@ -160,6 +161,16 @@ export async function registerRoutes(app: FastifyInstance) {
         : undefined;
     const sessionId = typeof q.sessionId === "string" && q.sessionId ? q.sessionId : undefined;
     return getAgentUsage({ provider, sessionId });
+  });
+
+  app.get("/api/agent/status", async () => {
+    const settings = await getSettings();
+    return {
+      provider: settings.connectedProvider,
+      available: settings.connectedProvider
+        ? getAgentAvailability(settings.connectedProvider)
+        : false,
+    };
   });
 
   app.get("/api/agent/model-params", async (req, reply) => {

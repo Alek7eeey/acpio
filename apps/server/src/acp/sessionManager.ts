@@ -350,8 +350,9 @@ export async function ensureAcp(
     rt.provider = null;
     rt.running = false;
     rt.toolsHintSent = false;
-    // Don't flip the chat to "closed" when we dispose ACP to regenerate after edit.
+    // An unexpected agent exit means the agent is not available right now.
     if (!intentional) {
+      setAgentAvailable(opts.provider, false);
       await updateSession(sessionId, { status: "closed" });
     }
   });
@@ -920,6 +921,7 @@ async function runTurn(
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     const agentStartedAt = Date.now();
     const result = await client.prompt(promptText);
+    setAgentAvailable(opts.provider, true);
     // Stop was pressed — don't peel/append more content for this turn.
     if (!rt.acceptingStream || result.stopReason === "cancelled") {
       await updateSession(sessionId, { status: "idle" });
@@ -1063,6 +1065,7 @@ export async function probeAgent(
       rememberModels(selected, currentModel, models, modelParams, modes);
     }
     client.dispose();
+    setAgentAvailable(selected, true);
     const paramSummary = modelParams
       .map((p) => `${p.name}: ${modelParamLabel(p.id, p.currentValue ?? "", undefined)}`)
       .filter((s) => !s.endsWith(": "))
@@ -1083,6 +1086,7 @@ export async function probeAgent(
     };
   } catch (err) {
     client.dispose();
+    setAgentAvailable(selected, false);
     return {
       ok: false,
       provider: selected,
@@ -1150,6 +1154,29 @@ const usageByProvider = new Map<
   AgentProvider,
   import("@acprocess/shared").SessionUsageDto
 >();
+
+/**
+ * Last known real availability per provider: true only after a successful ACP
+ * probe or a completed prompt turn; false on spawn/exit failures. Drives the
+ * header indicator — a connected provider is not the same as a working agent.
+ */
+const agentAvailability = new Map<AgentProvider, boolean>();
+
+function setAgentAvailable(provider: AgentProvider | null | undefined, available: boolean) {
+  if (!provider) return;
+  const prev = agentAvailability.get(provider);
+  if (prev === available) return;
+  agentAvailability.set(provider, available);
+  broadcastToSession(provider, {
+    type: "agent.availability",
+    provider,
+    available,
+  });
+}
+
+export function getAgentAvailability(provider?: AgentProvider | null): boolean {
+  return provider ? Boolean(agentAvailability.get(provider)) : false;
+}
 
 function rememberProviderUsage(
   provider: AgentProvider | null | undefined,
