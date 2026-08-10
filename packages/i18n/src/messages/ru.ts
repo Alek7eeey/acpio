@@ -201,7 +201,7 @@ export const ru = {
   dashboard: {
     brand: "ACProcess",
     tagline:
-      "Харнесс для Cursor, OpenCode, OMP и PI. Рассуждение идёт одним блоком, ответ стримится в ленте.",
+      "Ваш хаб для ИИ-агентов. Задайте вопрос Cursor, OpenCode, OMP или PI — рассуждения и ответ появятся прямо в ленте.",
     chatTitle: "AI-чат",
     chatSubtitle: "Harness",
     chatDescription: "Чат с агентом: рассуждения и ответы в одной ленте.",
@@ -216,7 +216,7 @@ export const ru = {
   chat: {
     emptyTitle: "ACProcess",
     emptyDescription:
-      "Харнесс для Cursor, OpenCode, OMP и PI. Рассуждение идёт одним блоком, ответ стримится в ленте.",
+      "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются Cursor, OpenCode, OMP и PI.",
     connectAgent: "Подключить агента",
     newSession: "Новый чат",
     deleteThemeTitle: "Удалить тему?",

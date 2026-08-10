@@ -177,7 +177,7 @@ export const en = {
   dashboard: {
     brand: "ACProcess",
     tagline:
-      "Harness for Cursor, OpenCode, OMP and PI. Reasoning streams in one block, the answer in the feed.",
+      "Your hub for AI agents. Ask Cursor, OpenCode, OMP or PI anything — reasoning and the answer land right in the feed.",
     chatTitle: "AI chat",
     chatSubtitle: "Harness",
     chatDescription: "Chat with the agent: reasoning and answers in one feed.",
@@ -192,7 +192,7 @@ export const en = {
   chat: {
     emptyTitle: "ACProcess",
     emptyDescription:
-      "Harness for Cursor, OpenCode, OMP and PI. Reasoning in one block, answers stream in the feed.",
+      "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor, OpenCode, OMP and PI.",
     connectAgent: "Connect agent",
     newSession: "New session",
     deleteThemeTitle: "Delete theme?",
