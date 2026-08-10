@@ -465,7 +465,7 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       }`}
     >
       {busy ? (
-        <span className={styles.pulseDot} aria-hidden />
+        <span className={styles.toolLoader} aria-hidden />
       ) : failed ? (
         <span className={styles.toolFail} aria-hidden>
           ✕

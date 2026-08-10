@@ -561,6 +561,23 @@
   animation: pulse 1.1s ease infinite;
 }
 
+/* Small spinner shown while a tool is running (instead of a blinking dot). */
+.toolLoader {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: toolSpin 0.8s linear infinite;
+}
+
+@keyframes toolSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .thinkingPlaceholder {
   display: inline-flex;
   align-items: center;
