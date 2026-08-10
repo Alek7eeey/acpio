@@ -1,19 +1,19 @@
 # ACProcess
 
-Self-hosted веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode / OMP / PI).  
-Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META, обёртка Gitea.
+Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode / OMP / PI).
+Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme, Gitea wrapper.
 
-## Стек
+## Stack
 
 - `apps/web` — React + Vite + TypeScript
 - `apps/server` — Fastify + WebSocket + ACP stdio bridge
-- `packages/shared` — общие типы
+- `packages/shared` — shared types
 - PostgreSQL (Docker)
 
-## Быстрый старт
+## Quick start
 
 ```bash
-# 1. Postgres (порт хоста 5433, чтобы не конфликтовать с локальным PG)
+# 1. Postgres (host port 5433, so it doesn't clash with a local PG)
 docker compose up -d
 
 # 2. Env
@@ -30,58 +30,58 @@ npm run db:push
 npm run dev
 ```
 
-- Web: [http://localhost:5173](http://localhost:5173)  
-- API: [http://localhost:3001](http://localhost:3001)  
+- Web: [http://localhost:5173](http://localhost:5173)
+- API: [http://localhost:3001](http://localhost:3001)
 - Postgres: `localhost:5433`
 
-## Телефон и VPN
+## Phone and VPN
 
-Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN.
+The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI from a phone via the PC's IP on the same network or VPN.
 
-1. На ПК запустите `npm run dev`.
-2. Подключите телефон к тому же VPN/LAN, что и ПК (WireGuard, Tailscale и т.п.).
-3. Узнайте IP ПК в VPN/LAN (не `0.0.0.0` и не `localhost`) и откройте на телефоне `http://IP_ПК:5173`.
-4. При необходимости разрешите входящий TCP **5173** (и **3001**) в файрволе Windows.
-5. В UI: **Настройки → Телефон и VPN** — краткая шпаргалка и копирование текущего адреса. Кнопка **Установить** в тулбаре добавляет сайт на домашний экран.
+1. Start `npm run dev` on the PC.
+2. Connect the phone to the same VPN/LAN as the PC (WireGuard, Tailscale, etc.).
+3. Find the PC's IP in the VPN/LAN (not `0.0.0.0` and not `localhost`) and open `http://PC_IP:5173` on the phone.
+4. If needed, allow inbound TCP **5173** (and **3001**) in the Windows firewall.
+5. In the UI: **Settings → Phone and VPN** — a short cheat sheet and a copy button for the current address. The **Install** button in the toolbar adds the site to the home screen.
 
-`http://0.0.0.0:5173` в браузере не работает — это только адрес прослушивания сервера.
+`http://0.0.0.0:5173` won't work in a browser — it's only the server's listening address.
 
 ## Cursor / OpenCode / OMP / PI
 
-1. Установите [Cursor CLI](https://cursor.com/docs/cli), OpenCode, OMP и/или PI (`pi` + `npm i -g pi-acp`).
-2. Авторизуйтесь: `agent login` (или задайте `CURSOR_API_KEY` в настройках).
-3. Проверьте ACP: `agent acp` (процесс должен стартовать и ждать JSON-RPC на stdin).
-4. В UI → **Настройки** укажите command/args и `default cwd`.
-5. Создайте чат и отправьте сообщение.
+1. Install [Cursor CLI](https://cursor.com/docs/cli), OpenCode, OMP and/or PI (`pi` + `npm i -g pi-acp`).
+2. Sign in: `agent login` (or set `CURSOR_API_KEY` in settings).
+3. Check ACP: `agent acp` (the process should start and wait for JSON-RPC on stdin).
+4. In the UI → **Settings** set command/args and the `default cwd`.
+5. Create a chat and send a message.
 
 - OpenCode: `opencode auth login`, command `opencode`, args `acp`
 - OMP: command `omp`, args `acp`
-- PI: command `pi-acp`, args пустые (нужен также `pi` CLI)
+- PI: command `pi-acp`, args empty (the `pi` CLI is also required)
 
-## Gitea (локально)
+## Gitea (local)
 
 ```bash
 docker compose up -d
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-gitea.ps1
 ```
 
-Скрипт создаст пользователя `acprocess` / `acprocess`, репо `demo` и выведет token.  
-Вставьте token в **Настройки → Gitea**. UI: [http://localhost:3000](http://localhost:3000)
+The script creates the `acprocess` / `acprocess` user, the `demo` repo and prints a token.
+Paste the token into **Settings → Gitea**. UI: [http://localhost:3000](http://localhost:3000)
 
-## Подключение агента
+## Connecting an agent
 
-1. В **Настройки** выберите провайдер (OpenCode / Cursor / OMP / PI).
-2. Укажите API key в правильном поле (если нужно):
-  - OpenCode → `OPENCODE_API_KEY` (+ опционально Anthropic/OpenAI)
-  - Cursor → `CURSOR_API_KEY`
-3. Нажмите **Проверить подключение агента**.
-4. Permission policy для локалки: `Всегда разрешать`.
-5. Создайте чат и отправьте сообщение.
+1. In **Settings** pick a provider (OpenCode / Cursor / OMP / PI).
+2. Set the API key in the right field (if needed):
+   - OpenCode → `OPENCODE_API_KEY` (+ optionally Anthropic/OpenAI)
+   - Cursor → `CURSOR_API_KEY`
+3. Click **Test agent connection**.
+4. Permission policy for local: `Always allow`.
+5. Create a chat and send a message.
 
-Если чат «завис» — нажмите **Стоп** и отправьте снова.
+If a chat seems stuck — press **Stop** and send again.
 
-## Архитектура
+## Architecture
 
-Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `opencode acp` / `omp acp` / `pi-acp` (JSON-RPC NDJSON) ↔ Postgres.
+Browser ↔ REST/WS server ↔ spawn `agent acp` / `opencode acp` / `omp acp` / `pi-acp` (JSON-RPC NDJSON) ↔ Postgres.
 
-События `session/update`, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` отображаются в ленте чата.
+`session/update` events, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` are rendered in the chat feed.

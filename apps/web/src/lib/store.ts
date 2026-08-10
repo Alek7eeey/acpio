@@ -504,7 +504,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const missingParams = (existing?.modelParams?.length ?? 0) === 0;
     const missingModes = provider === "cursor" && (existing?.modes?.length ?? 0) === 0;
 
-    // Instantly show the last catalog for this agent (Fast/Усилие) when switching.
+    // Instantly show the last catalog for this agent (Fast/Effort) when switching.
     if (providerMismatch) {
       set({
         modelsCatalog:
@@ -567,7 +567,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const hasModels = Boolean(existing?.models?.length);
     const agentBusy =
       get().activeSession?.status === "running" || get().activeSession?.status === "waiting";
-    // Keep prior catalog for this provider while reloading so Усилие doesn't blink away.
+    // Keep prior catalog for this provider while reloading so Effort doesn't blink away.
     // If the agent is already answering (or we already have models), don't block the UI.
     // Drop stale Cursor mode chips immediately when switching to OMP/etc.
     set({

@@ -540,7 +540,7 @@ function StepsSpoiler({
   // Show one stable thinking row for the whole turn (including empty pending).
   if (thoughts.length === 0 && !streaming) return null;
 
-  // Same title while live — don't flip «Думаю…» ↔ «Размышления».
+  // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
   const label = streaming
     ? t("common.steps")
     : (agentDurationSec || elapsedSec) > 0

@@ -280,7 +280,7 @@ export async function updatePart(
 
 function appendStreamText(prev: string, next: string): string {
   // Stream deltas already include their own spaces — never invent ones between
-  // letter chunks or subword tokens turn into "От ли чно".
+  // letters or subword tokens, or words get split like "Ex ce llen t".
   return prev + next;
 }
 

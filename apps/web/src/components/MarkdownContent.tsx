@@ -242,7 +242,7 @@ function childrenToPlainText(children: ReactNode): string {
   return "";
 }
 
-/** Newspaper «Коммерсантъ» is often cited as «Ъ» — expand so it doesn't look like a broken glyph. */
+/** The Kommersant newspaper is often cited as "Ъ" — expand so it doesn't look like a broken glyph. */
 function friendlyLinkLabel(href: string | undefined, children: ReactNode): ReactNode {
   const plain = childrenToPlainText(children).trim();
   if (plain === "Ъ" || plain === "ъ") return "Коммерсантъ";

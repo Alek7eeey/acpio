@@ -462,8 +462,8 @@ export function splitInlineThinking(raw: string): { thought: string; text: strin
     });
   return {
     thought: thoughts.filter(Boolean).join("\n\n"),
-    // Keep leading spaces — stream tokens often arrive as " слово", and stripping
-    // them glues words: "Привет!Всёхорошо".
+    // Keep leading spaces — stream tokens often arrive as " word", and stripping
+    // them glues words together: "Hi!Everythingfine".
     text,
   };
 }

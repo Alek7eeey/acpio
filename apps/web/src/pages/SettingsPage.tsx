@@ -200,7 +200,7 @@ export function SettingsPage() {
         defaultModel: next.defaultModel,
         defaultModelParams: next.defaultModelParams,
       });
-      // Pull Fast/Усилие for the new agent immediately (uses per-provider cache).
+      // Pull Fast/Effort for the new agent immediately (uses per-provider cache).
       const catalog = await useAppStore.getState().ensureModels(provider, { force: true });
       setModels(catalog?.models ?? []);
       setModelParams(catalog?.modelParams ?? []);
@@ -315,7 +315,7 @@ export function SettingsPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Never send defaultProvider from the form submit — only «Подключить» binds an agent.
+    // Never send defaultProvider from the form submit — only "Connect" binds an agent.
     const { defaultProvider: _provider, ...rest } = form;
     await saveSettings(rest);
     setSaved(true);

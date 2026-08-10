@@ -137,7 +137,7 @@ function toModelParams(options: ConfigOption[]): ModelParamDto[] {
           : [],
   }));
 
-  // Prefer a stable Fast → Усилие → Context order in the picker.
+  // Prefer a stable Fast → Effort → Context order in the picker.
   const rank = (id: string) => {
     const family = modelParamFamily(id);
     if (family === "fast") return 0;
@@ -875,7 +875,7 @@ export async function runPrompt(
   rt.turnThoughtPartId = null;
   rt.toolPartByCallId.clear();
   await updateSession(sessionId, { status: "running" });
-  // Create the assistant bubble immediately so the UI can show «Думаю…» without waiting
+  // Create the assistant bubble immediately so the UI can show "Thinking…" without waiting
   // for the first ACP token (spawn/prompt can take a while).
   await ensureAssistantMessage(rt);
 
