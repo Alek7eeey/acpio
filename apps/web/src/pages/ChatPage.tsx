@@ -341,7 +341,7 @@ function PartView({
       <MarkdownContent
         text={text}
         streaming={streaming}
-        className={streaming ? styles.streaming : undefined}
+        className={embedded ? styles.textEmbedded : streaming ? styles.streaming : undefined}
       />
     );
   }
@@ -853,7 +853,7 @@ function StepsSpoiler({
                 <PartView
                   key={part.id}
                   part={part}
-                  embedded={part.type === "thought"}
+                  embedded
                   streaming={isLast}
                 />
               );
