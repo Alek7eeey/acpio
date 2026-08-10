@@ -928,6 +928,7 @@ export function ChatPage() {
   const pendingQuestion = useAppStore((s) => s.pendingQuestion);
   const answerQuestion = useAppStore((s) => s.answerQuestion);
   const promptQueue = useAppStore((s) => s.promptQueue);
+  const inflight = useAppStore((s) => s.inflight);
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const [text, setText] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -1713,7 +1714,7 @@ export function ChatPage() {
 
         {segments.map((segment, segIndex) => (
           <Fragment key={segment[0]?.id ?? `seg-${segIndex}`}>
-            {settings.multitask && segIndex > 0 && (
+            {settings.multitask && inflight >= 2 && segIndex === segments.length - 1 && (
               <div className={styles.turnDivider} aria-hidden>
                 <span className={styles.turnDividerLabel}>
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
@@ -1879,7 +1880,13 @@ export function ChatPage() {
           <button
             type="button"
             className={styles.jumpLatest}
-            onClick={() => scrollThreadToEnd()}
+            onMouseDown={(e) => {
+              // The release can land on the thread content beneath the button
+              // (it floats over the scroll area), which suppresses `click` in
+              // some browsers — act on the press, which always hits the button.
+              e.preventDefault();
+              scrollThreadToEnd();
+            }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
               <path

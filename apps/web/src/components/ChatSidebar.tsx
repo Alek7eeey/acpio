@@ -417,24 +417,10 @@ export function ChatSidebar() {
                     </span>
                   )}
               </span>
-              {activity ? (
-                <span
-                  className={styles.sessionActivity}
-                  title={new Intl.DateTimeFormat(dateLocale, {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }).format(new Date(s.lastMessageAt || s.createdAt))}
-                >
-                  {activity}
-                </span>
-              ) : null}
             </button>
             <button
               type="button"
-              className={`${styles.sessionRowAction}${s.pinned ? ` ${styles.sessionRowActionOn}` : ""}`}
+              className={styles.sessionRowAction}
               title={s.pinned ? t("chat.unpin") : t("chat.pin")}
               aria-label={s.pinned ? t("chat.unpin") : t("chat.pin")}
               onClick={(e) => {
@@ -442,14 +428,21 @@ export function ChatSidebar() {
                 void setSessionFlags(s.id, { pinned: !s.pinned });
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+                className={s.pinned ? styles.sessionActionFilled : undefined}
+              >
                 <path
                   d="M9 4h6l.5 5 3 2.5V14H5.5v-2.5l3-2.5L9 4Z"
                   stroke="currentColor"
-                  strokeWidth="1.7"
+                  strokeWidth="1.8"
                   strokeLinejoin="round"
                 />
-                <path d="M12 14v6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path d="M12 14v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
             </button>
             <button
@@ -463,38 +456,52 @@ export function ChatSidebar() {
               }}
             >
               {inArchive ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
                   <path
                     d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v5m0 0-2-2m2 2 2-2"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="1.8"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
               ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
                   <path
                     d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v4"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="1.8"
                     strokeLinecap="round"
                   />
                 </svg>
               )}
             </button>
+            {activity ? (
+              <span
+                className={styles.sessionActivity}
+                title={new Intl.DateTimeFormat(dateLocale, {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                }).format(new Date(s.lastMessageAt || s.createdAt))}
+              >
+                {activity}
+              </span>
+            ) : null}
             <button
               type="button"
               className={styles.sessionMore}

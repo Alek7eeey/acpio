@@ -463,14 +463,14 @@
   display: grid;
   place-items: center;
   margin-left: auto;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
   opacity: 1;
   pointer-events: auto;
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .folderAdd svg {
@@ -478,20 +478,9 @@
 }
 
 .folderAdd:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
   color: var(--accent);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .folderAdd {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .folderHead:hover .folderAdd {
-    opacity: 1;
-    pointer-events: auto;
-  }
 }
 
 .archiveGroup {
@@ -556,15 +545,23 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .themeMore,
-  .sessionMore {
+  .themeMore {
     opacity: 0;
     pointer-events: none;
   }
 
-  .chatThemeHead:hover .themeMore,
-  .sessionItem:hover .sessionMore,
-  .sessionItem.active .sessionMore {
+  .chatThemeHead:hover .themeMore {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .sessionRowAction {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sessionItem:hover .sessionRowAction,
+  .sessionItem.active .sessionRowAction {
     opacity: 1;
     pointer-events: auto;
   }
@@ -573,6 +570,11 @@
 .sessionItem.active .sessionMore {
   opacity: 1;
   pointer-events: auto;
+}
+
+.sessionActionFilled {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
 }
 
 .themeMore:hover,
@@ -584,8 +586,8 @@
 /* Pin / archive actions — revealed only on row hover. */
 .sessionRowAction {
   flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border: none;
@@ -608,24 +610,6 @@
   color: var(--text);
 }
 
-.sessionRowActionOn {
-  color: var(--accent);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .sessionRowAction {
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .sessionItem:hover .sessionRowAction,
-  .sessionItem.active .sessionRowAction,
-  .sessionRowActionOn {
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
-
 .chatThemeBody {
   display: flex;
   flex-direction: column;
@@ -638,7 +622,7 @@
 
 .sessionItem {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   border-radius: 10px;
   border: none;

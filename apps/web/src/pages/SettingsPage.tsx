@@ -537,16 +537,18 @@ export function SettingsPage() {
               <p className={styles.fieldHint}>{t("settings.defaultFolder")}</p>
               <label>
                 {t("settings.permissionPolicy")}
-                <select
+                <OptionPicker
+                  variant="quiet"
+                  placement="down"
+                  menuTitle={t("settings.permissionPolicy")}
                   value={form.permissionPolicy}
-                  onChange={(e) =>
-                    patch("permissionPolicy", e.target.value as AppSettings["permissionPolicy"])
-                  }
-                >
-                  <option value="always">{t("settings.permissionAlways")}</option>
-                  <option value="prompt">{t("settings.permissionPrompt")}</option>
-                  <option value="allowlist">{t("settings.permissionAllowlist")}</option>
-                </select>
+                  onChange={(v) => patch("permissionPolicy", v as AppSettings["permissionPolicy"])}
+                  options={[
+                    { value: "always", label: t("settings.permissionAlways") },
+                    { value: "prompt", label: t("settings.permissionPrompt") },
+                    { value: "allowlist", label: t("settings.permissionAllowlist") },
+                  ]}
+                />
               </label>
               {(settings.connectedProvider === "cursor" || settings.connectedProvider === "omp") && (
                 <label className={`${styles.multitaskCard} ${form.multitask ? styles.multitaskCardOn : ""}`}>
