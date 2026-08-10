@@ -491,26 +491,126 @@ function toolOutputDetail(part: MessagePartDto): string {
   return text.split("\n")[0]?.slice(0, 90) ?? "";
 }
 
-/** Location/meta line shown above the expanded output. */
-function toolMetaLine(part: MessagePartDto): string {
+/** Absolute path (file/dir/URL) a tool worked on, when the agent reported it. */
+function toolPath(part: MessagePartDto): string {
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const details = ((raw.rawOutput ?? {}) as Record<string, unknown>).details as
+    | Record<string, unknown>
+    | undefined;
+  if (!details) return "";
+  if (typeof details.resolvedPath === "string" && details.resolvedPath) {
+    return details.resolvedPath;
+  }
+  if (typeof details.url === "string" && details.url) {
+    return details.url;
+  }
+  return "";
+}
+
+/** Extra meta bits (method, line count) shown next to the tool path. */
+function toolMetaExtra(part: MessagePartDto): string {
   const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
   const details = ((raw.rawOutput ?? {}) as Record<string, unknown>).details as
     | Record<string, unknown>
     | undefined;
   if (!details) return "";
   const bits: string[] = [];
-  if (typeof details.resolvedPath === "string" && details.resolvedPath) {
-    bits.push(details.resolvedPath);
-  }
-  if (typeof details.url === "string" && details.url) {
-    bits.push(details.url);
-  } else if (typeof details.method === "string" && details.method) {
+  if (typeof details.method === "string" && details.method) {
     bits.push(details.method);
   }
   if (typeof details.totalLines === "number") {
     bits.push(`${details.totalLines} lines`);
   }
   return bits.join(" · ");
+}
+
+/** Clickable local path — opens with the OS default handler via the server. */
+function PathLink({
+  path,
+  children,
+  className,
+}: {
+  path: string;
+  children?: ReactNode;
+  className?: string;
+}) {
+  const open = () => {
+    void api.openPath(path).catch(() => {});
+  };
+  return (
+    <span
+      className={`${styles.pathLink}${className ? ` ${className}` : ""}`}
+      title={path}
+      role="link"
+      tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation();
+        open();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          open();
+        }
+      }}
+    >
+      {children ?? path}
+    </span>
+  );
+}
+
+/** Windows absolute paths (`C:\…` / `C:/…`) inside free text. */
+const ABS_PATH_RE = /([A-Za-z]:[\\/][^\s"<>|?*]+)/g;
+
+function splitPathText(text: string, keyPrefix: string): ReactNode[] {
+  const parts = text.split(ABS_PATH_RE);
+  const out: ReactNode[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    if (i % 2 === 1) {
+      // Trailing punctuation (`, . : ) ] }`) belongs to the sentence, not the path.
+      const openTarget = part.replace(/[.,;:)\]}]+$/, "");
+      if (openTarget) {
+        out.push(
+          <PathLink key={`${keyPrefix}-p${i}`} path={openTarget}>
+            {part}
+          </PathLink>,
+        );
+      } else {
+        out.push(<Fragment key={`${keyPrefix}-t${i}`}>{part}</Fragment>);
+      }
+    } else {
+      out.push(<Fragment key={`${keyPrefix}-t${i}`}>{part}</Fragment>);
+    }
+  }
+  return out;
+}
+
+/** Renders tool output as plain text; paths become links, diffs get +/- coloring. */
+function ToolOutputView({ text }: { text: string }) {
+  const isDiff = /^(diff --git |--- |\+\+\+ |@@ )/m.test(text);
+  if (!isDiff) {
+    return <pre className={styles.toolOutput}>{splitPathText(text, "o")}</pre>;
+  }
+  const lines = text.split("\n");
+  return (
+    <pre className={`${styles.toolOutput} ${styles.toolDiff}`}>
+      {lines.map((line, idx) => {
+        let cls = "";
+        if (line.startsWith("+++") || line.startsWith("---")) cls = styles.diffFile;
+        else if (line.startsWith("@@")) cls = styles.diffHunk;
+        else if (line.startsWith("+")) cls = styles.diffAdd;
+        else if (line.startsWith("-")) cls = styles.diffDel;
+        return (
+          <div key={idx} className={cls}>
+            {line === "" ? "\u00A0" : splitPathText(line, `l${idx}`)}
+          </div>
+        );
+      })}
+    </pre>
+  );
 }
 
 const TOOL_OUTPUT_CAP = 20000;
@@ -524,7 +624,8 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
     streaming || status === "in_progress" || status === "pending" || status === "running";
   const detail = busy ? "" : toolOutputDetail(part);
   const output = busy ? "" : toolOutputText(part);
-  const meta = busy ? "" : toolMetaLine(part);
+  const path = busy ? "" : toolPath(part);
+  const metaExtra = busy ? "" : toolMetaExtra(part);
   const expandable = !busy && output.length > 0;
   const truncated = output.length > TOOL_OUTPUT_CAP;
   const shown = truncated ? output.slice(0, TOOL_OUTPUT_CAP) : output;
@@ -580,14 +681,27 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       </button>
       {open ? (
         <div className={styles.toolBody}>
-          {meta ? <div className={styles.toolMeta}>{meta}</div> : null}
-          <pre className={styles.toolOutput}>
-            {shown}
-            {truncated ? `\n… ${t("common.outputTruncated")}` : ""}
-          </pre>
+          {path || metaExtra ? (
+            <div className={styles.toolMeta}>
+              {path ? <PathLink path={path} /> : null}
+              {path && metaExtra ? <span aria-hidden> · </span> : null}
+              {metaExtra ? <span>{metaExtra}</span> : null}
+            </div>
+          ) : null}
+          <ToolOutputView
+            text={`${shown}${truncated ? `\n… ${t("common.outputTruncated")}` : ""}`}
+          />
         </div>
       ) : null}
-      {!open && detail ? <span className={styles.toolDetail}>{detail}</span> : null}
+      {!open && detail ? (
+        path ? (
+          <PathLink path={path} className={styles.toolDetail}>
+            {detail}
+          </PathLink>
+        ) : (
+          <span className={styles.toolDetail}>{detail}</span>
+        )
+      ) : null}
     </div>
   );
 }

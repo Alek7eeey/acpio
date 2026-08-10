@@ -525,6 +525,43 @@
   white-space: nowrap;
 }
 
+/* Clickable local path: dotted underline, accent on hover. */
+.pathLink {
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, var(--text) 40%, transparent);
+  text-underline-offset: 3px;
+}
+
+.pathLink:hover,
+.pathLink:focus-visible {
+  color: var(--accent);
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+
+.toolDiff .diffAdd {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, transparent);
+}
+
+.toolDiff .diffDel {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+.toolDiff .diffHunk {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+
+.toolDiff .diffFile {
+  color: var(--accent);
+}
+
 .toolOutput {
   margin: 2px 0;
   max-height: 320px;

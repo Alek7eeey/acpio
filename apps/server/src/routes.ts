@@ -45,6 +45,7 @@ import {
 } from "./services/gitea.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
+import { openPath } from "./services/openPath.js";
 import {
   defaultDiagnosticsDir,
   deleteDiagnosticsDump,
@@ -128,6 +129,15 @@ export async function registerRoutes(app: FastifyInstance) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
     }
+  });
+
+  app.post("/api/fs/open", async (req, reply) => {
+    const body = z.object({ path: z.string().min(1).max(4096) }).parse(req.body ?? {});
+    const result = openPath(body.path);
+    if (!result.ok) {
+      return reply.code(400).send({ error: result.error });
+    }
+    return result;
   });
 
   app.post("/api/agent/probe", async (req) => {

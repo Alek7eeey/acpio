@@ -233,6 +233,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body ?? {}),
     }),
+  openPath: (path: string) =>
+    request<{ ok: boolean; opened: string; kind: "file" | "directory" | null }>(
+      "/api/fs/open",
+      {
+        method: "POST",
+        body: JSON.stringify({ path }),
+      },
+    ),
   getDiagnosticsDump: (id: string) =>
     request<DiagnosticsDumpDto>(`/api/diagnostics/${encodeURIComponent(id)}`),
   deleteDiagnosticsDump: (id: string) =>
