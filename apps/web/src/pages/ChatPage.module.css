@@ -451,26 +451,12 @@
 }
 
 .stepsToolsDivider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.stepsToolsDivider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: color-mix(in srgb, var(--text) 14%, transparent);
+  display: none;
 }
 
 .toolRow {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 7px;
   max-width: 100%;
@@ -515,6 +501,19 @@
   color: var(--text-secondary);
   font-size: 0.72rem;
   white-space: nowrap;
+}
+
+/* Outcome of the tool (file path / output snippet) on its own line. */
+.toolDetail {
+  grid-column: 2 / -1;
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
 }
 
 .thoughtLabel {

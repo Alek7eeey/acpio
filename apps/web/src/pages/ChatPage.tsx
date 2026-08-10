@@ -451,6 +451,36 @@ function isThoughtPart(part: MessagePartDto) {
   return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
 }
 
+/** Short human-readable outcome of a tool: written/read path or output first line. */
+function toolOutputDetail(part: MessagePartDto): string {
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const rawOutput = (raw.rawOutput ?? {}) as Record<string, unknown>;
+  const resolvedPath =
+    (rawOutput.details as { resolvedPath?: string } | undefined)?.resolvedPath ?? "";
+  const content = raw.content ?? rawOutput.content;
+  let text = "";
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      const b = (block ?? {}) as Record<string, unknown>;
+      const inner = b.content as Record<string, unknown> | undefined;
+      const t = typeof inner?.text === "string" ? inner.text : typeof b.text === "string" ? b.text : "";
+      if (t.trim()) {
+        text = t.trim();
+        break;
+      }
+    }
+  } else if (typeof content === "string") {
+    text = content.trim();
+  }
+  if (resolvedPath) {
+    const short = resolvedPath.split(/[\\/]/).slice(-2).join("/");
+    if (text.includes("Successfully wrote")) return `✎ ${short}`;
+    if (text.includes("Successfully deleted")) return `✕ ${short}`;
+    return short;
+  }
+  return text.split("\n")[0]?.slice(0, 90) ?? "";
+}
+
 function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: boolean }) {
   const t = useT();
   const title = String(part.payload.title ?? part.payload.description ?? "Tool").trim();
@@ -458,6 +488,7 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
   const busy =
     streaming || status === "in_progress" || status === "pending" || status === "running";
   const failed = status === "error" || status === "failed";
+  const detail = busy || failed ? "" : toolOutputDetail(part);
   return (
     <div
       className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""} ${
@@ -477,6 +508,7 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       )}
       <span className={styles.toolName}>{title}</span>
       {busy ? <span className={styles.toolStatus}>{t("common.toolWorking")}</span> : null}
+      {detail ? <span className={styles.toolDetail}>{detail}</span> : null}
     </div>
   );
 }
@@ -541,6 +573,8 @@ function StepsSpoiler({
   // Show one stable thinking row for the whole turn (including empty pending).
   if (thoughts.length === 0 && tools.length === 0 && !streaming) return null;
 
+  const stepsLength = thoughts.length + tools.length;
+
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
   const label = streaming
     ? t("common.steps")
@@ -585,26 +619,24 @@ function StepsSpoiler({
       </button>
       {open && (thoughts.length > 0 || tools.length > 0) && (
         <div className={styles.stepsBody}>
-          {thoughts.map((part, idx) => (
-            <PartView
-              key={part.id}
-              part={part}
-              embedded
-              streaming={streaming && idx === thoughts.length - 1}
-            />
-          ))}
-          {tools.length > 0 && (
-            <>
-              <div className={styles.stepsToolsDivider}>{t("common.tools")}</div>
-              {tools.map((part, idx) => (
+          {[...thoughts, ...tools]
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map((part, idx) =>
+              part.type === "thought" ? (
+                <PartView
+                  key={part.id}
+                  part={part}
+                  embedded
+                  streaming={streaming && idx === stepsLength - 1}
+                />
+              ) : (
                 <ToolCallRow
                   key={part.id}
                   part={part}
-                  streaming={streaming && idx === tools.length - 1}
+                  streaming={streaming && idx === stepsLength - 1}
                 />
-              ))}
-            </>
-          )}
+              ),
+            )}
         </div>
       )}
     </div>
