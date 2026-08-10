@@ -582,44 +582,42 @@ export function ChatSidebar() {
             return (
               <div key={folder.cwd || "__no_folder__"} className={styles.folderGroup}>
                 {showFolderHeaders && (
-                  <div className={styles.folderHead} title={folder.cwd || undefined}>
-                    <button
-                      type="button"
-                      className={`${styles.folderChevron} ${
-                        collapsedFolders.has(folder.cwd || "__no_folder__")
-                          ? ""
-                          : styles.folderChevronOpen
-                      }`}
-                      title={collapsedFolders.has(folder.cwd || "__no_folder__") ? t("chat.expandFolder") : t("chat.collapseFolder")}
-                      aria-label={collapsedFolders.has(folder.cwd || "__no_folder__") ? t("chat.expandFolder") : t("chat.collapseFolder")}
-                      onClick={() => toggleFolder(folder.cwd || "__no_folder__")}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M6 9l6 6 6-6"
-                          stroke="currentColor"
-                          strokeWidth="2.2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </button>
-                    <span className={styles.folderIcon} aria-hidden>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                        <path
-                          d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                          stroke="currentColor"
-                          strokeWidth="1.6"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                  <div
+                    className={`${styles.folderHead} ${
+                      collapsedFolders.has(folder.cwd || "__no_folder__") ? "" : styles.folderHeadOpen
+                    }`}
+                    title={folder.cwd || undefined}
+                    onClick={() => toggleFolder(folder.cwd || "__no_folder__")}
+                  >
+                    <span className={styles.folderIconWrap} aria-hidden>
+                      <span className={styles.folderIcon}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                          <path
+                            d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                      <span className={styles.folderChevronIcon}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M6 9l6 6 6-6"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
                     </span>
                     <span className={styles.folderLabel}>
                       {folderLabel(folder.cwd, t("common.noFolder"))}
@@ -629,7 +627,8 @@ export function ChatSidebar() {
                       className={styles.folderAdd}
                       title={t("chat.newInFolder")}
                       aria-label={t("chat.newInFolder")}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation();
                         void createSession(folder.cwd || undefined).then(() => goToChat());
                       }}
                     >

@@ -394,6 +394,12 @@
   min-width: 0;
 }
 
+/* Chats inside a folder start slightly indented from the folder label. */
+.folderGroup > .timeGroup,
+.folderGroup > .sessionItem {
+  margin-left: 10px;
+}
+
 .timeGroup {
   display: flex;
   flex-direction: column;
@@ -450,11 +456,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.96rem;
-  font-weight: 650;
+  font-size: 0.88rem;
+  font-weight: 500;
   line-height: 1.25;
   letter-spacing: -0.012em;
-  color: color-mix(in srgb, var(--text) 85%, var(--text-secondary));
 }
 
 .folderAdd {
@@ -485,7 +490,45 @@
   color: var(--text);
 }
 
-.folderChevron,
+/* Folder icon swaps to an expand/collapse chevron while hovered. */
+.folderIconWrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: color-mix(in srgb, var(--text) 70%, var(--text-secondary));
+}
+
+.folderIcon,
+.folderChevronIcon {
+  display: grid;
+  place-items: center;
+}
+
+.folderChevronIcon {
+  display: none;
+}
+
+.folderChevronIcon svg {
+  display: block;
+  transition: transform 0.2s ease;
+}
+
+.folderHead:hover .folderIcon {
+  display: none;
+}
+
+.folderHead:hover .folderChevronIcon {
+  display: grid;
+  color: var(--text);
+}
+
+.folderHead:not(.folderHeadOpen) .folderChevronIcon svg {
+  transform: rotate(-90deg);
+}
+
 .archiveChevron {
   flex: 0 0 auto;
   width: 20px;
@@ -501,18 +544,15 @@
   transition: color 0.15s ease, background 0.15s ease;
 }
 
-.folderChevron svg,
 .archiveChevron svg {
   display: block;
   transition: transform 0.2s ease;
 }
 
-.folderChevron:not(.folderChevronOpen) svg,
 .archiveChevron:not(.folderChevronOpen) svg {
   transform: rotate(-90deg);
 }
 
-.folderChevron:hover,
 .archiveChevron:hover {
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--text);
@@ -742,7 +782,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   line-height: 1.25;
   letter-spacing: -0.015em;
   color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
