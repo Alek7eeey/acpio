@@ -429,20 +429,20 @@ export function ChatSidebar() {
               }}
             >
               <svg
-                width="15"
-                height="15"
+                width="17"
+                height="17"
                 viewBox="0 0 24 24"
                 fill="none"
                 aria-hidden
                 className={s.pinned ? styles.sessionActionFilled : undefined}
               >
                 <path
-                  d="M9 4h6l.5 5 3 2.5V14H5.5v-2.5l3-2.5L9 4Z"
+                  d="M9.2 4h5.6l.6 4.8 2.6 2.2v2.6H6v-2.6l2.6-2.2.6-4.8Z"
                   stroke="currentColor"
-                  strokeWidth="1.8"
+                  strokeWidth="1.5"
                   strokeLinejoin="round"
                 />
-                <path d="M12 14v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <path d="M12 13.6V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
               </svg>
             </button>
             <button
@@ -456,33 +456,33 @@ export function ChatSidebar() {
               }}
             >
               {inArchive ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
-                    d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
+                    d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
                     stroke="currentColor"
-                    strokeWidth="1.8"
+                    strokeWidth="1.5"
                     strokeLinejoin="round"
                   />
                   <path
-                    d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v5m0 0-2-2m2 2 2-2"
+                    d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
                     stroke="currentColor"
-                    strokeWidth="1.8"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
               ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
-                    d="M4 7h16v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z"
+                    d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
                     stroke="currentColor"
-                    strokeWidth="1.8"
+                    strokeWidth="1.5"
                     strokeLinejoin="round"
                   />
                   <path
-                    d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2M12 12v4"
+                    d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v3.5"
                     stroke="currentColor"
-                    strokeWidth="1.8"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                   />
                 </svg>
@@ -509,9 +509,9 @@ export function ChatSidebar() {
               onClick={(e) => openSessionMenu(e, s.id)}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <circle cx="5" cy="12" r="1.8" />
-                <circle cx="12" cy="12" r="1.8" />
-                <circle cx="19" cy="12" r="1.8" />
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
               </svg>
             </button>
           </>
