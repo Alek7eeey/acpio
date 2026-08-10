@@ -386,7 +386,6 @@ export function AppShell() {
                 <span
                   key={`${ch}-${i}`}
                   className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
-                  style={{ "--i": i } as CSSProperties}
                 >
                   {ch}
                 </span>
