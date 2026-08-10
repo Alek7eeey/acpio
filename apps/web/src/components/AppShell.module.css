@@ -462,6 +462,7 @@
   height: 22px;
   display: grid;
   place-items: center;
+  padding: 0;
   margin-left: auto;
   border: none;
   border-radius: 6px;
