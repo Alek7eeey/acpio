@@ -58,16 +58,6 @@ The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI fro
 - OMP: command `omp`, args `acp`
 - PI: command `pi-acp`, args empty (the `pi` CLI is also required)
 
-## Gitea (local)
-
-```bash
-docker compose up -d
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-gitea.ps1
-```
-
-The script creates the `acprocess` / `acprocess` user, the `demo` repo and prints a token.
-Paste the token into **Settings → Gitea**. UI: [http://localhost:3000](http://localhost:3000)
-
 ## Connecting an agent
 
 1. In **Settings** pick a provider (OpenCode / Cursor / OMP / PI).
