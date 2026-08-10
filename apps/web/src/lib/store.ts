@@ -444,6 +444,18 @@ async function loadAppData(
   }
 }
 
+// Theme-scoped CSS lives under [data-theme=...] — set it synchronously at
+// module load so the first paint (and any failed settings fetch) still shows
+// the persisted theme instead of falling back to base variables.
+if (typeof document !== "undefined") {
+  try {
+    const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
+    document.documentElement.setAttribute("data-theme", storedTheme === "dark" ? "dark" : "light");
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   sessions: [],
@@ -470,6 +482,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: true,
   error: null,
 
+  // Apply the persisted theme before the first paint: theme-scoped rules
+  // (e.g. the sidebar "New chat" button) must be correct even when the
+  // settings fetch fails or races, which would otherwise leave the app on
+  // default (light) variables with no data-theme attribute.
   applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("acprocess.theme", theme);

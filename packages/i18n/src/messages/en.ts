@@ -195,6 +195,7 @@ export const en = {
       "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor, OpenCode, OMP and PI.",
     connectAgent: "Connect agent",
     newSession: "New session",
+    jumpToLatest: "Jump to latest",
     deleteThemeTitle: "Delete theme?",
     deleteThemeBody: "Chats in this theme will be moved to «No theme».",
     deleteSessionTitle: "Delete chat?",

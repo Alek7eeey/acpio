@@ -1440,6 +1440,7 @@ export function ChatPage() {
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
+  const [scrolledAway, setScrolledAway] = useState(false);
   const scrollRafRef = useRef(0);
   const threadInnerRef = useRef<HTMLDivElement>(null);
   const streamingRef = useRef(streaming);
@@ -1450,6 +1451,7 @@ export function ChatPage() {
     if (!thread) return;
     suppressScrollWatchRef.current = true;
     stickToBottomRef.current = true;
+    setScrolledAway(false);
     thread.scrollTop = thread.scrollHeight;
     window.requestAnimationFrame(() => {
       const node = threadRef.current;
@@ -1478,10 +1480,13 @@ export function ChatPage() {
       // Growth during stream can temporarily look like "scrolled away" before we catch up.
       if (streamingRef.current || userJustSentRef.current) {
         stickToBottomRef.current = true;
+        setScrolledAway(false);
         return;
       }
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-      stickToBottomRef.current = gap < 140;
+      const stuck = gap < 140;
+      stickToBottomRef.current = stuck;
+      setScrolledAway(!stuck);
     };
     thread.addEventListener("scroll", onScroll, { passive: true });
     return () => thread.removeEventListener("scroll", onScroll);
@@ -1697,6 +1702,24 @@ export function ChatPage() {
       {error && <div className={styles.banner}>{error}</div>}
 
       <form className={styles.composer} onSubmit={onSubmit}>
+        {scrolledAway && activeSession ? (
+          <button
+            type="button"
+            className={styles.jumpLatest}
+            onClick={() => scrollThreadToEnd()}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 4v14m0 0 5-5m-5 5-5-5"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {t("chat.jumpToLatest")}
+          </button>
+        ) : null}
         <div className={styles.composerInner}>
           <div className={styles.composerStatusSlot} aria-live="polite">
             {editingMessageId && (

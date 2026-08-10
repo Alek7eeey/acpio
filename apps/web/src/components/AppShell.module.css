@@ -252,7 +252,7 @@
   padding: 0 18px;
   font: inherit;
   font-size: 0.9rem;
-  font-weight: 600;
+  font-weight: 400;
   letter-spacing: -0.015em;
   box-shadow: none;
   cursor: pointer;
@@ -263,7 +263,7 @@
   border: 1px solid #e5e7eb;
   background: #fff;
   color: #18181b;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 5%), 0 2px 7px rgb(15 23 42 / 3%);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 14%), 0 2px 6px rgb(15 23 42 / 7%);
 }
 
 :global([data-theme="dark"]) .newChat {

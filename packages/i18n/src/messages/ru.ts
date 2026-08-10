@@ -219,6 +219,7 @@ export const ru = {
       "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются Cursor, OpenCode, OMP и PI.",
     connectAgent: "Подключить агента",
     newSession: "Новый чат",
+    jumpToLatest: "Перейти к последним сообщениям",
     deleteThemeTitle: "Удалить тему?",
     deleteThemeBody: "Чаты этой темы будут перемещены в «Без темы».",
     deleteSessionTitle: "Удалить чат?",
