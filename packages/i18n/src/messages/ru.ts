@@ -287,7 +287,7 @@ export const ru = {
     cliAndPermissions: "CLI и права",
     permissionPolicy: "Политика разрешений",
     permissionPrompt: "Спрашивать",
-    permissionAllowlist: "Allowlist",
+    permissionAllowlist: "Белый список",
     permissionAlways: "Всегда разрешать",
     agentUnavailable: "Агент недоступен — проверьте установку и авторизацию CLI",
     multitask: "Мультизадача (параллельные запросы)",

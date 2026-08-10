@@ -538,11 +538,12 @@ export function SettingsPage() {
               <label>
                 {t("settings.permissionPolicy")}
                 <OptionPicker
-                  variant="quiet"
+                  variant="block"
                   placement="down"
                   menuTitle={t("settings.permissionPolicy")}
                   value={form.permissionPolicy}
                   onChange={(v) => patch("permissionPolicy", v as AppSettings["permissionPolicy"])}
+                  className={styles.permissionPicker}
                   options={[
                     { value: "always", label: t("settings.permissionAlways") },
                     { value: "prompt", label: t("settings.permissionPrompt") },
