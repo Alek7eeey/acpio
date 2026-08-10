@@ -586,3 +586,30 @@ export function modelParamSectionName(paramId: string, name?: string): string {
   return paramId;
 }
 
+/** ACP tool `kind` values that denote a nested agent (subagent) invocation. */
+const SUBAGENT_TOOL_KINDS = new Set([
+  "task",
+  "subagent",
+  "explore",
+  "browser",
+  "generalPurpose",
+  "ci-investigator",
+  "bugbot",
+  "security-review",
+  "best-of-n",
+]);
+
+/**
+ * Decide whether an ACP tool call runs a nested agent. The structured `kind`
+ * field is authoritative; the free-text title is only consulted when the agent
+ * omits `kind` entirely. Kept in one place so server and client agree.
+ */
+export function isSubagentToolCall(title: string, kind: string): boolean {
+  const k = kind.trim().toLowerCase();
+  if (k) return SUBAGENT_TOOL_KINDS.has(k);
+  const t = String(title ?? "").trim();
+  return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
+    t,
+  );
+}
+

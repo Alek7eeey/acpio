@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  isSubagentToolCall,
   migrateModelParamValues,
   usesCloudModelCatalog,
   type AgentMode,
@@ -774,9 +775,7 @@ function isSubagentLike(part: MessagePartDto) {
   const kind = String(
     (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
   );
-  return /task|subagent|explore|browser|generalPurpose|ci-investigator|bugbot|security-review|best-of-n/i.test(
-    `${title} ${kind}`,
-  );
+  return isSubagentToolCall(title, kind);
 }
 
 function coalesceAssistantParts(
