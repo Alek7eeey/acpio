@@ -10,3 +10,4 @@ coverage
 *.tsbuildinfo
 .vite
 diagnostics/
+dev-dist/
