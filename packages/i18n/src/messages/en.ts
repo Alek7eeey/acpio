@@ -124,7 +124,7 @@ export const en = {
     commands: "Commands",
     steps: "Thinking",
     autoSteps: "Thinking",
-    autoStepsHint: "Show agent thinking in new replies only",
+    autoStepsHint: "Expand agent thinking",
     thoughtWhile: "Thinking…",
     thoughtFor: "Thought for {{seconds}} seconds",
     reasoning: "Reasoning",

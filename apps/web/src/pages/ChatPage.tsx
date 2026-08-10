@@ -769,8 +769,9 @@ function StepsSpoiler({
   });
 
   useEffect(() => {
-    // Only the explicit auto-expand preference opens the spoiler.
-    if (autoExpand) setOpen(true);
+    // The toggle is the global switch: on → open, off → collapse.
+    // Manual per-block toggles survive until the switch value changes.
+    setOpen(autoExpand);
   }, [autoExpand]);
 
   useEffect(() => {
@@ -1211,10 +1212,6 @@ export function ChatPage() {
       return true;
     }
   });
-  /** Assistant message ids that already existed when the toggle was turned on — skip them. */
-  const [thoughtsSkipIds, setThoughtsSkipIds] = useState<Set<string>>(() => new Set());
-  /** True after skip-set is snapshotted so old messages don't flash open. */
-  const [thoughtsArmed, setThoughtsArmed] = useState(false);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1231,24 +1228,6 @@ export function ChatPage() {
       // ignore
     }
   }, [autoExpandSteps]);
-
-  // When enabling (incl. restored from localStorage) or switching chat — only future replies open.
-  useEffect(() => {
-    if (!autoExpandSteps) {
-      setThoughtsSkipIds(new Set());
-      setThoughtsArmed(false);
-      return;
-    }
-    const ids = new Set(
-      (activeSession?.messages ?? [])
-        .filter((m) => m.role === "assistant")
-        .map((m) => m.id),
-    );
-    setThoughtsSkipIds(ids);
-    setThoughtsArmed(true);
-    // Snapshot once per toggle/session — not on every streamed part.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoExpandSteps, activeSession?.id]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
 
   const planPending = pendingQuestion?.kind === "create_plan";
@@ -2033,11 +2012,7 @@ export function ChatPage() {
                     <AssistantParts
                       message={msg}
                       streaming={!!isLiveAssistant}
-                      autoExpandSteps={
-                        isLiveAssistant
-                          ? autoExpandSteps
-                          : thoughtsArmed && autoExpandSteps && !thoughtsSkipIds.has(msg.id)
-                      }
+                      autoExpandSteps={autoExpandSteps}
                     />
                   )}
                 </article>

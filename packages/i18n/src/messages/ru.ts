@@ -142,7 +142,7 @@ export const ru = {
     commands: "Команды",
     steps: "Размышления",
     autoSteps: "Размышления",
-    autoStepsHint: "Показывать размышления агента только в новых ответах",
+    autoStepsHint: "Раскрывать размышления агента",
     thoughtWhile: "Думаю…",
     thoughtFor: "Думал {{seconds}} сек",
     thoughtFor_one: "Думал {{seconds}} секунду",
