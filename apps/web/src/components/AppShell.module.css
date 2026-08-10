@@ -762,10 +762,13 @@
 .sessionActivity {
   justify-self: end;
   align-self: center;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
   margin: 0;
-  padding: 3px 7px;
+  padding: 0 6px;
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
@@ -774,6 +777,7 @@
   background: color-mix(in srgb, var(--text) 5%, transparent);
   white-space: nowrap;
   max-width: 7.5rem;
+  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
 }
