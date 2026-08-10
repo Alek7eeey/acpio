@@ -740,13 +740,11 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
 
 function StepsSpoiler({
   parts,
-  tools,
   streaming,
   autoExpand,
   startedAt,
 }: {
   parts: MessagePartDto[];
-  tools: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   startedAt: string;
@@ -797,9 +795,9 @@ function StepsSpoiler({
   }, [startedAt, streaming]);
 
   // Show one stable thinking row for the whole turn (including empty pending).
-  if (thoughts.length === 0 && tools.length === 0 && !streaming) return null;
+  if (parts.length === 0 && !streaming) return null;
 
-  const stepsLength = thoughts.length + tools.length;
+  const stepsLength = parts.length;
 
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
   const label = streaming
@@ -843,26 +841,23 @@ function StepsSpoiler({
           </svg>
         </span>
       </button>
-      {open && (thoughts.length > 0 || tools.length > 0) && (
+      {open && parts.length > 0 && (
         <div className={styles.stepsBody}>
-          {[...thoughts, ...tools]
+          {[...parts]
             .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((part, idx) =>
-              part.type === "thought" ? (
+            .map((part, idx) => {
+              const isLast = streaming && idx === stepsLength - 1;
+              return part.type === "tool_call" ? (
+                <ToolCallRow key={part.id} part={part} streaming={isLast} />
+              ) : (
                 <PartView
                   key={part.id}
                   part={part}
-                  embedded
-                  streaming={streaming && idx === stepsLength - 1}
+                  embedded={part.type === "thought"}
+                  streaming={isLast}
                 />
-              ) : (
-                <ToolCallRow
-                  key={part.id}
-                  part={part}
-                  streaming={streaming && idx === stepsLength - 1}
-                />
-              ),
-            )}
+              );
+            })}
         </div>
       )}
     </div>
@@ -1081,6 +1076,14 @@ function coalesceAssistantParts(
   return out;
 }
 
+/** Last text part in emission order — the final answer of the turn. */
+function lastTextPart(parts: MessagePartDto[]): MessagePartDto | null {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (parts[i]?.type === "text") return parts[i];
+  }
+  return null;
+}
+
 function AssistantParts({
   message,
   streaming,
@@ -1106,18 +1109,19 @@ function AssistantParts({
     return coalesceAssistantParts(message.parts);
   }, [message.parts]);
 
-  const thoughtParts = useMemo(
-    () => parts.filter((p) => p.type === "thought" && Boolean(String(p.payload.text ?? "").trim())),
-    [parts],
-  );
-  const toolParts = useMemo(
-    () => parts.filter((p) => p.type === "tool_call"),
-    [parts],
-  );
-  const mainParts = useMemo(
-    () => parts.filter((p) => p.type === "text" || p.type === "error" || p.type === "subagent"),
-    [parts],
-  );
+  // The final answer (last text part in emission order) stays outside the
+  // steps block; intermediate texts interleave with tools inside it, in the
+  // order the agent emitted them.
+  const stepsParts = useMemo(() => {
+    const finalText = lastTextPart(parts);
+    return finalText ? parts.filter((p) => p !== finalText) : parts;
+  }, [parts]);
+  const mainParts = useMemo(() => {
+    const finalText = lastTextPart(parts);
+    return parts.filter(
+      (p) => p === finalText || p.type === "error" || p.type === "subagent",
+    );
+  }, [parts]);
   const plain = useMemo(() => {
     return mainParts
       .filter((p) => p.type === "text")
@@ -1129,8 +1133,7 @@ function AssistantParts({
   return (
     <div className={styles.parts}>
       <StepsSpoiler
-        parts={thoughtParts}
-        tools={toolParts}
+        parts={stepsParts}
         streaming={streaming}
         autoExpand={autoExpandSteps}
         startedAt={message.createdAt}
