@@ -150,6 +150,8 @@ export const ru = {
     thoughtFor_many: "Думал {{seconds}} секунд",
     thoughtFor_other: "Думал {{seconds}} секунд",
     reasoning: "Рассуждение",
+    tools: "Инструменты",
+    toolWorking: "выполняется…",
     subagent: "Субагент",
     subagentWorking: " · работает",
     subagentFailed: " · ошибка",

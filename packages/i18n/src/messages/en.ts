@@ -128,6 +128,8 @@ export const en = {
     thoughtWhile: "Thinking…",
     thoughtFor: "Thought for {{seconds}} seconds",
     reasoning: "Reasoning",
+    tools: "Tools",
+    toolWorking: "running…",
     subagent: "Subagent",
     subagentWorking: " · running",
     subagentFailed: " · failed",

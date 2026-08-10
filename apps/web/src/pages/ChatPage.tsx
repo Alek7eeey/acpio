@@ -449,13 +449,45 @@ function isThoughtPart(part: MessagePartDto) {
   return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
 }
 
+function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: boolean }) {
+  const t = useT();
+  const title = String(part.payload.title ?? part.payload.description ?? "Tool").trim();
+  const status = String(part.payload.status ?? "").toLowerCase();
+  const busy =
+    streaming || status === "in_progress" || status === "pending" || status === "running";
+  const failed = status === "error" || status === "failed";
+  return (
+    <div
+      className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""} ${
+        failed ? styles.toolRowError : ""
+      }`}
+    >
+      {busy ? (
+        <span className={styles.pulseDot} aria-hidden />
+      ) : failed ? (
+        <span className={styles.toolFail} aria-hidden>
+          ✕
+        </span>
+      ) : (
+        <span className={styles.toolCheck} aria-hidden>
+          ✓
+        </span>
+      )}
+      <span className={styles.toolName}>{title}</span>
+      {busy ? <span className={styles.toolStatus}>{t("common.toolWorking")}</span> : null}
+    </div>
+  );
+}
+
 function StepsSpoiler({
   parts,
+  tools,
   streaming,
   autoExpand,
   startedAt,
 }: {
   parts: MessagePartDto[];
+  tools: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   startedAt: string;
@@ -505,7 +537,7 @@ function StepsSpoiler({
   }, [startedAt, streaming]);
 
   // Show one stable thinking row for the whole turn (including empty pending).
-  if (thoughts.length === 0 && !streaming) return null;
+  if (thoughts.length === 0 && tools.length === 0 && !streaming) return null;
 
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
   const label = streaming
@@ -549,7 +581,7 @@ function StepsSpoiler({
           </svg>
         </span>
       </button>
-      {open && thoughts.length > 0 && (
+      {open && (thoughts.length > 0 || tools.length > 0) && (
         <div className={styles.stepsBody}>
           {thoughts.map((part, idx) => (
             <PartView
@@ -559,6 +591,18 @@ function StepsSpoiler({
               streaming={streaming && idx === thoughts.length - 1}
             />
           ))}
+          {tools.length > 0 && (
+            <>
+              <div className={styles.stepsToolsDivider}>{t("common.tools")}</div>
+              {tools.map((part, idx) => (
+                <ToolCallRow
+                  key={part.id}
+                  part={part}
+                  streaming={streaming && idx === tools.length - 1}
+                />
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -748,7 +792,11 @@ function coalesceAssistantParts(
       continue;
     }
 
-    if (!isSubagentLike(part)) continue;
+    // Regular tool calls surface inside the thinking block.
+    if (!isSubagentLike(part)) {
+      out.push(part);
+      continue;
+    }
 
     const asSubagent: MessagePartDto =
       part.type === "tool_call" ? { ...part, type: "subagent" } : part;
@@ -805,6 +853,10 @@ function AssistantParts({
     () => parts.filter((p) => p.type === "thought" && Boolean(String(p.payload.text ?? "").trim())),
     [parts],
   );
+  const toolParts = useMemo(
+    () => parts.filter((p) => p.type === "tool_call"),
+    [parts],
+  );
   const mainParts = useMemo(
     () => parts.filter((p) => p.type === "text" || p.type === "error" || p.type === "subagent"),
     [parts],
@@ -821,6 +873,7 @@ function AssistantParts({
     <div className={styles.parts}>
       <StepsSpoiler
         parts={thoughtParts}
+        tools={toolParts}
         streaming={streaming}
         autoExpand={autoExpandSteps}
         startedAt={message.createdAt}

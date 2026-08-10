@@ -309,6 +309,73 @@
   display: none;
 }
 
+.stepsToolsDivider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.stepsToolsDivider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.toolRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  min-width: 0;
+  justify-self: start;
+  padding: 3px 11px;
+  border: 1px solid color-mix(in srgb, var(--text) 16%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.toolRowBusy {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+.toolRowError {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.toolName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolCheck {
+  color: var(--success);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.toolFail {
+  color: var(--danger);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.toolStatus {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 .thoughtLabel {
   display: inline-flex;
   align-items: center;
