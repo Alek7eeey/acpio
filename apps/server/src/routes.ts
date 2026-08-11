@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import fsp from "node:fs/promises";
 import { z } from "zod";
 import { defaultSessionTitle, errorMessage } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "./services/settings.js";
@@ -139,6 +140,17 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(400).send({ error: result.error });
     }
     return result;
+  });
+
+  app.post("/api/fs/mkdir", async (req, reply) => {
+    const body = z.object({ path: z.string().min(1).max(4096) }).parse(req.body ?? {});
+    try {
+      await fsp.mkdir(body.path, { recursive: true });
+      return { ok: true, path: body.path };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
+    }
   });
 
   app.post("/api/agent/probe", async (req) => {

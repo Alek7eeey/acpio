@@ -241,6 +241,11 @@ export const api = {
         body: JSON.stringify({ path }),
       },
     ),
+  createFolder: (path: string) =>
+    request<{ ok: boolean; path: string }>("/api/fs/mkdir", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    }),
   getDiagnosticsDump: (id: string) =>
     request<DiagnosticsDumpDto>(`/api/diagnostics/${encodeURIComponent(id)}`),
   deleteDiagnosticsDump: (id: string) =>

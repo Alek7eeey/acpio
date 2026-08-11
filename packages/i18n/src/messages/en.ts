@@ -109,6 +109,8 @@ export const en = {
     recentFolders: "Recent folders",
     useExistingFolder: "Use Existing…",
     newFolder: "New Folder",
+    newFolderPlaceholder: "Folder name…",
+    create: "Create",
     pickerSearchPlaceholder: "Search folders…",
     collapseTree: "Collapse sidebar",
     openTree: "Open sidebar",

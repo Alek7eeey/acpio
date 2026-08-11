@@ -127,6 +127,8 @@ export const ru = {
     recentFolders: "Недавние папки",
     useExistingFolder: "Использовать существующую…",
     newFolder: "Новая папка",
+    newFolderPlaceholder: "Имя папки…",
+    create: "Создать",
     pickerSearchPlaceholder: "Поиск папок…",
     collapseTree: "Свернуть дерево",
     openTree: "Открыть дерево",
