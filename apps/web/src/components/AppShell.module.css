@@ -1774,6 +1774,190 @@
   line-height: 1.35;
 }
 
+/* ── New folder picker (search + recents + actions) ─────────────────── */
+
+.pickerPanel {
+  position: fixed;
+  z-index: 311;
+  min-width: 260px;
+  max-width: min(380px, calc(100vw - 16px));
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 6px;
+  animation: rise 0.16s ease;
+}
+
+.pickerSearch {
+  position: relative;
+  padding: 4px 4px 6px;
+}
+
+.pickerSearchIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.pickerSearchInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 30px 8px 32px;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.pickerSearchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.pickerSearchInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.pickerSearchClear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pickerSearchClear:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.pickerSearchClear svg {
+  display: block;
+}
+
+.pickerHead {
+  padding: 7px 10px 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.pickerList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pickerItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.pickerItem:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.pickerItemIcon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.pickerItemIcon svg {
+  display: block;
+}
+
+.pickerItemPath {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.pickerEmpty {
+  margin: 0;
+  padding: 12px 10px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.pickerDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.pickerAction {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.pickerAction:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.pickerActionLabel {
+  flex: 1;
+  min-width: 0;
+}
+
+.pickerActionChevron {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.pickerActionChevron svg {
+  display: block;
+}
+
 .folderPickerPopover form {
   display: grid;
   gap: 10px;

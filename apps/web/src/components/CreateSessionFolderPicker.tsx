@@ -102,22 +102,26 @@ export function CreateSessionFolderPicker({
   onConfirm,
 }: CreateSessionFolderPickerProps) {
   const t = useT();
-  const [cwd, setCwd] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [browseDialogOpen, setBrowseDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const mobileSheet = useMobileFolderSheet();
 
   const fallback = defaultCwd.trim();
-  const resolved = cwd.trim() || fallback;
-  const usingDefault = !cwd.trim() && !!fallback;
-  const suggestions = useMemo(() => {
-    const fallbackKey = normalizeCwd(fallback).toLowerCase();
-    if (!fallbackKey) return recentCwds;
-    return recentCwds.filter((path) => normalizeCwd(path).toLowerCase() !== fallbackKey);
-  }, [recentCwds, fallback]);
   const dialogBlocked = browseDialogOpen;
+
+  const filteredRecents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return recentCwds;
+    return recentCwds.filter((p) => p.toLowerCase().includes(q));
+  }, [recentCwds, searchQuery]);
+
+  useEffect(() => {
+    if (!mobileSheet) searchRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -138,12 +142,12 @@ export function CreateSessionFolderPicker({
     };
   }, [onClose, dialogBlocked, mobileSheet]);
 
-  const submit = async () => {
-    if (!resolved || busy || dialogBlocked) return;
+  const confirmPath = async (path: string) => {
+    if (busy || dialogBlocked) return;
     setBusy(true);
     setError(null);
     try {
-      await onConfirm(resolved);
+      await onConfirm(path);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
@@ -155,7 +159,7 @@ export function CreateSessionFolderPicker({
   const pickerPanel = (
     <div
       ref={panelRef}
-      className={`${styles.actionPopover} ${styles.folderPickerPopover}${
+      className={`${styles.pickerPanel}${
         mobileSheet ? ` ${styles.folderPickerModal}` : ""
       }`}
       style={pos ? { left: pos.left, top: pos.top, width: pos.width } : undefined}
@@ -164,116 +168,88 @@ export function CreateSessionFolderPicker({
       aria-label={t("common.workingDir")}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className={styles.popoverTitle}>{t("common.workingDir")}</div>
-      <p className={styles.popoverText}>{t("errors.folderPickerPrompt")}</p>
-
-      {fallback ? (
-        <section className={styles.folderSection} aria-label={t("settings.defaultFolder")}>
-          <div className={styles.folderSectionHead}>
-            <span className={styles.folderSectionBadge}>{t("common.default")}</span>
-          </div>
+      {/* Search */}
+      <div className={styles.pickerSearch}>
+        <svg className={styles.pickerSearchIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+        <input
+          ref={searchRef}
+          className={styles.pickerSearchInput}
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder={t("common.pickerSearchPlaceholder")}
+          aria-label={t("common.pickerSearchPlaceholder")}
+        />
+        {searchQuery ? (
           <button
             type="button"
-            className={`${styles.folderPickSelected} ${styles.folderPickDefaultCard}${
-              usingDefault || normalizeCwd(cwd).toLowerCase() === normalizeCwd(fallback).toLowerCase()
-                ? ` ${styles.folderPickDefaultCardActive}`
-                : ""
-            }`}
-            title={fallback}
-            disabled={busy || dialogBlocked}
-            onClick={() => setCwd(fallback)}
+            className={styles.pickerSearchClear}
+            aria-label={t("chat.clearSearch")}
+            onClick={() => { setSearchQuery(""); searchRef.current?.focus(); }}
           >
-            <span className={styles.folderPickSelectedIcon}>{folderIcon}</span>
-            <span className={styles.folderPickSelectedMeta}>
-              <span className={styles.folderPickSelectedName}>
-                {folderName(fallback, t("common.folder"))}
-              </span>
-              <span className={`${styles.folderPickSelectedPath} ${styles.folderPickPathWrap}`}>
-                {fallback}
-              </span>
-            </span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
           </button>
-        </section>
-      ) : null}
+        ) : null}
+      </div>
 
+      {/* Recents */}
+      <div className={styles.pickerHead}>{t("common.recentFolders")}</div>
+      {filteredRecents.length > 0 ? (
+        <div className={styles.pickerList}>
+          {filteredRecents.map((path) => (
+            <button
+              key={path}
+              type="button"
+              className={styles.pickerItem}
+              title={path}
+              disabled={busy}
+              onClick={() => void confirmPath(path)}
+            >
+              <span className={styles.pickerItemIcon} aria-hidden>{folderIcon}</span>
+              <span className={styles.pickerItemPath}>{path}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className={styles.pickerEmpty}>{t("common.railNoRecents")}</p>
+      )}
+
+      {/* Actions */}
+      <div className={styles.pickerDivider} />
       <button
         type="button"
-        className={styles.folderPickBtn}
+        className={styles.pickerAction}
+        disabled={busy}
         onClick={() => setBrowseDialogOpen(true)}
-        disabled={busy || dialogBlocked}
       >
-        {t("common.selectFolder")}
+        <span className={styles.pickerItemIcon} aria-hidden>{folderIcon}</span>
+        <span className={styles.pickerActionLabel}>{t("common.useExistingFolder")}</span>
+        <span className={styles.pickerActionChevron} aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </button>
+      <button
+        type="button"
+        className={styles.pickerAction}
+        disabled={busy}
+        onClick={() => void confirmPath(fallback || "")}
+      >
+        <span className={styles.pickerItemIcon} aria-hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className={styles.pickerActionLabel}>{t("common.newFolder")}</span>
       </button>
 
-      {cwd.trim() &&
-      normalizeCwd(cwd).toLowerCase() !== normalizeCwd(fallback).toLowerCase() ? (
-        <div className={styles.folderPickSelected} title={cwd}>
-          <span className={styles.folderPickSelectedIcon}>{folderIcon}</span>
-          <span className={styles.folderPickSelectedMeta}>
-            <span className={styles.folderPickSelectedName}>
-              {folderName(cwd, t("common.folder"))}
-            </span>
-            <span className={`${styles.folderPickSelectedPath} ${styles.folderPickPathWrap}`}>
-              {cwd}
-            </span>
-          </span>
-        </div>
-      ) : !fallback && !cwd.trim() ? (
-        <p className={styles.folderPickEmpty}>{t("common.selectFolder")}</p>
-      ) : null}
-
-      {suggestions.length > 0 ? (
-        <section className={styles.folderSection} aria-label={t("common.recentFolders")}>
-          <div className={styles.folderSectionHead}>
-            <span className={`${styles.folderSectionBadge} ${styles.folderSectionBadgeMuted}`}>
-              {t("common.recentFolders")}
-            </span>
-          </div>
-          <div className={styles.recentFoldersList} role="listbox">
-            {suggestions.map((path) => {
-              const active = normalizeCwd(path).toLowerCase() === normalizeCwd(cwd).toLowerCase();
-              return (
-                <button
-                  key={path}
-                  type="button"
-                  role="option"
-                  aria-selected={active}
-                  className={`${styles.recentFolderItem} ${active ? styles.recentFolderItemActive : ""}`}
-                  title={path}
-                  disabled={busy}
-                  onClick={() => setCwd(path)}
-                >
-                  <span className={styles.recentFolderIcon} aria-hidden>
-                    {folderIcon}
-                  </span>
-                  <span className={styles.recentFolderMeta}>
-                    <span className={styles.recentFolderName}>
-                      {folderName(path, t("common.folder"))}
-                    </span>
-                    <span className={styles.recentFolderPath}>{parentPath(path) || path}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
       {error ? <p className={styles.popoverError}>{error}</p> : null}
-
-      <div className={styles.popoverActions}>
-        <button type="button" onClick={onClose} disabled={busy || dialogBlocked}>
-          {t("common.cancel")}
-        </button>
-        <button
-          type="button"
-          className={styles.popoverPrimary}
-          disabled={!resolved || busy || dialogBlocked}
-          onClick={() => void submit()}
-        >
-          {t("chat.newSession")}
-        </button>
-      </div>
     </div>
   );
 
@@ -298,9 +274,9 @@ export function CreateSessionFolderPicker({
 
       <ServerFolderBrowseDialog
         open={browseDialogOpen}
-        initialPath={cwd.trim() || dialogStartPath.trim() || fallback || undefined}
+        initialPath={dialogStartPath.trim() || fallback || undefined}
         onClose={() => setBrowseDialogOpen(false)}
-        onSelect={setCwd}
+        onSelect={(path) => { setBrowseDialogOpen(false); void confirmPath(path); }}
       />
     </>,
     document.body,
