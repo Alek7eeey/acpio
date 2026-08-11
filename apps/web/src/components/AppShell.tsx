@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
@@ -12,6 +13,7 @@ import {
   type SettingsLeaf,
 } from "../lib/settingsNav";
 import { ChatSidebar } from "./ChatSidebar";
+import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
@@ -24,9 +26,11 @@ import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acprocess.sidebarWidth.v2";
 const SIDEBAR_MIN = 300;
-const SIDEBAR_MAX = 760;
+const SIDEBAR_MAX = 1200;
 const SIDEBAR_DEFAULT = 360;
 const SIDEBAR_COLLAPSE_AT = 240;
+/** Keep at least this much room for the chat column. */
+const SIDEBAR_VIEWPORT_MARGIN = 320;
 
 function readStoredWidth() {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT;
@@ -49,6 +53,9 @@ export function AppShell() {
   const navigate = useNavigate();
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const sessions = useAppStore((s) => s.sessions);
+  const selectSession = useAppStore((s) => s.selectSession);
+  const createSession = useAppStore((s) => s.createSession);
   const theme = useAppStore((s) => s.settings.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const agentAvailable = useAppStore((s) => s.agentAvailable);
@@ -96,6 +103,64 @@ export function AppShell() {
   const [sidebarWidth, setSidebarWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [railRecentsPos, setRailRecentsPos] = useState<{ x: number; y: number } | null>(null);
+  const [railFolderPicker, setRailFolderPicker] = useState<{ x: number; y: number } | null>(null);
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const railRecentsRef = useRef<HTMLDivElement>(null);
+
+  const railMode = showSidebar && !sidebarOpen && settings.sidebarCollapse === "rail";
+
+  const recentSessions = useMemo(() => {
+    const sorted = [...sessions].sort((a, b) =>
+      b.lastMessageAt.localeCompare(a.lastMessageAt),
+    );
+    return sorted.slice(0, 8);
+  }, [sessions]);
+
+  const recentCwds = useMemo(
+    () => collectRecentCwds(sessions, settings.defaultCwd),
+    [sessions, settings.defaultCwd],
+  );
+
+  useEffect(() => {
+    if (!railRecentsPos) return;
+    const onDown = (e: MouseEvent) => {
+      if (railRecentsRef.current?.contains(e.target as Node)) return;
+      setRailRecentsPos(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRailRecentsPos(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [railRecentsPos]);
+
+  const openRailRecents = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRailFolderPicker(null);
+    setRailRecentsPos({
+      x: Math.min(rect.right + 8, window.innerWidth - 300),
+      y: Math.min(rect.top, window.innerHeight - 360),
+    });
+  };
+
+  const openRailNewChat = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRailRecentsPos(null);
+    setRailFolderPicker({ x: rect.right + 8, y: rect.top });
+  };
+
+  const openRailFind = () => {
+    setRailRecentsPos(null);
+    setRailFolderPicker(null);
+    setSidebarOpen(true);
+    if (!isChat) navigate("/chat");
+    setSearchFocusToken((n) => n + 1);
+  };
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
@@ -128,7 +193,8 @@ export function AppShell() {
         return;
       }
       if (!sidebarOpen) setSidebarOpen(true);
-      setSidebarWidth(Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, next)));
+      const viewportMax = Math.max(SIDEBAR_MIN, window.innerWidth - SIDEBAR_VIEWPORT_MARGIN);
+      setSidebarWidth(Math.min(SIDEBAR_MAX, viewportMax, Math.max(SIDEBAR_MIN, next)));
     };
     const onUp = () => {
       dragRef.current = null;
@@ -186,7 +252,7 @@ export function AppShell() {
     <div
       className={`${styles.shell} ${showSidebar ? styles.withSidebar : styles.fullBleed} ${
         showSidebar && !sidebarOpen ? styles.sidebarCollapsed : ""
-      } ${dragging ? styles.resizing : ""}`}
+      } ${railMode ? styles.railCollapsed : ""} ${dragging ? styles.resizing : ""}`}
       style={shellStyle}
     >
       {showSidebar && (
@@ -226,7 +292,7 @@ export function AppShell() {
 
           <div className={styles.moduleTitle}>{title}</div>
 
-          {isChat && <ChatSidebar />}
+          {isChat && <ChatSidebar focusSearchSignal={searchFocusToken} />}
 
           {isGitea && (
             <div className={styles.modulePanel}>
@@ -337,6 +403,147 @@ export function AppShell() {
             </nav>
           )}
         </aside>
+      )}
+
+      {railMode && (
+        <div className={styles.rail} role="toolbar" aria-label={t("common.sidebarRail")}>
+          <button
+            type="button"
+            className={styles.railBtn}
+            title={t("common.openTree")}
+            aria-label={t("common.openTree")}
+            onClick={() => {
+              setRailRecentsPos(null);
+              setRailFolderPicker(null);
+              setSidebarOpen(true);
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <rect
+                x="3.5"
+                y="4.5"
+                width="17"
+                height="15"
+                rx="3"
+                stroke="currentColor"
+                strokeWidth="1.7"
+              />
+              <path d="M14.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M9.8 9.2 12.5 12l-2.7 2.8"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={styles.railBtn}
+            title={t("common.newChat")}
+            aria-label={t("common.newChat")}
+            onClick={openRailNewChat}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={styles.railBtn}
+            title={t("common.railRecents")}
+            aria-label={t("common.railRecents")}
+            onClick={openRailRecents}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M12 7.4V12l3 2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={styles.railBtn}
+            title={t("common.railFind")}
+            aria-label={t("common.railFind")}
+            onClick={openRailFind}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M16 16l4.5 4.5"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <div className={styles.railSpacer} />
+
+          {railRecentsPos &&
+            createPortal(
+              <div
+                ref={railRecentsRef}
+                className={styles.railMenu}
+                style={{ left: railRecentsPos.x, top: railRecentsPos.y }}
+                role="menu"
+                aria-label={t("common.railRecents")}
+              >
+                <div className={styles.railMenuHead}>{t("common.railRecents")}</div>
+                {recentSessions.length === 0 ? (
+                  <p className={styles.railMenuEmpty}>{t("common.railNoRecents")}</p>
+                ) : (
+                  recentSessions.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      role="menuitem"
+                      className={styles.railMenuItem}
+                      onClick={() => {
+                        setRailRecentsPos(null);
+                        void selectSession(s.id);
+                        navigate("/chat");
+                      }}
+                    >
+                      <span className={styles.railMenuItemText}>{s.title}</span>
+                    </button>
+                  ))
+                )}
+              </div>,
+              document.body,
+            )}
+
+          {railFolderPicker && (
+            <CreateSessionFolderPicker
+              x={railFolderPicker.x}
+              y={railFolderPicker.y}
+              defaultCwd={settings.defaultCwd ?? ""}
+              dialogStartPath={settings.defaultCwd ?? ""}
+              recentCwds={recentCwds}
+              onClose={() => setRailFolderPicker(null)}
+              onConfirm={async (cwd) => {
+                setRailFolderPicker(null);
+                await createSession(cwd);
+                navigate("/chat");
+              }}
+            />
+          )}
+        </div>
       )}
 
       {showSidebar && sidebarOpen && (

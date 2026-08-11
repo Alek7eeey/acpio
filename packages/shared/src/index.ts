@@ -58,6 +58,12 @@ export interface AppSettings {
    * multitasking (Cursor, OMP).
    */
   multitask: boolean;
+  /**
+   * How the sidebar tree behaves when collapsed:
+   * "full" — hides completely (previous behavior);
+   * "rail" — leaves a narrow icon rail (new chat, recents, find, expand).
+   */
+  sidebarCollapse: "full" | "rail";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -90,6 +96,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   giteaRepo: "demo",
   diagnosticsDir: "",
   multitask: false,
+  sidebarCollapse: "full",
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {

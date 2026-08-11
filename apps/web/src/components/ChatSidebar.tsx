@@ -189,7 +189,7 @@ function MenuIcon({ children }: { children: ReactNode }) {
   );
 }
 
-export function ChatSidebar() {
+export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: number }) {
   const t = useT();
   const navigate = useNavigate();
   const sessions = useAppStore((s) => s.sessions);
@@ -208,6 +208,12 @@ export function ChatSidebar() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (focusSearchSignal > 0) searchInputRef.current?.focus();
+  }, [focusSearchSignal]);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem("acprocess.collapsedFolders.v1");
@@ -244,8 +250,24 @@ export function ChatSidebar() {
     [sessions, settings.defaultCwd],
   );
 
-  const archivedSessions = useMemo(() => sortSessions(sessions.filter((s) => s.archived)), [sessions]);
-  const folders = useMemo(() => groupByFolder(sessions.filter((s) => !s.archived)), [sessions]);
+  const query = searchQuery.trim().toLowerCase();
+  const visibleSessions = useMemo(() => {
+    if (!query) return sessions;
+    return sessions.filter(
+      (s) =>
+        s.title.toLowerCase().includes(query) ||
+        (s.cwd ?? "").toLowerCase().includes(query),
+    );
+  }, [sessions, query]);
+
+  const archivedSessions = useMemo(
+    () => sortSessions(visibleSessions.filter((s) => s.archived)),
+    [visibleSessions],
+  );
+  const folders = useMemo(
+    () => groupByFolder(visibleSessions.filter((s) => !s.archived)),
+    [visibleSessions],
+  );
 
   const closeMobile = () => {
     if (window.innerWidth < 900) setSidebarOpen(false);
@@ -572,6 +594,55 @@ export function ChatSidebar() {
           </button>
         </div>
 
+        <div className={styles.chatSearch}>
+          <svg
+            className={styles.chatSearchIcon}
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden
+          >
+            <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+            <path
+              d="M16 16l4.5 4.5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </svg>
+          <input
+            ref={searchInputRef}
+            className={styles.chatSearchInput}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t("chat.searchPlaceholder")}
+            aria-label={t("chat.searchPlaceholder")}
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              className={styles.chatSearchClear}
+              aria-label={t("chat.clearSearch")}
+              title={t("chat.clearSearch")}
+              onClick={() => {
+                setSearchQuery("");
+                searchInputRef.current?.focus();
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6 6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
+
         <div className={styles.sessionList}>
           {folders.map((folder) => {
             const useTimeGroups = folder.sessions.length > 1;
@@ -699,7 +770,11 @@ export function ChatSidebar() {
                 archivedSessions.map((s) => renderSessionRow(s, true, true))}
             </div>
           )}
-          {sessions.length === 0 && <p className={styles.emptyHint}>{t("chat.emptyDescription")}</p>}
+          {visibleSessions.length === 0 && (
+            <p className={styles.emptyHint}>
+              {query ? t("chat.searchEmpty") : t("chat.emptyDescription")}
+            </p>
+          )}
         </div>
       </div>
 

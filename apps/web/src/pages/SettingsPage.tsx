@@ -342,32 +342,36 @@ export function SettingsPage() {
   };
 
   const title =
-    section === "agent"
-      ? leaf === "connect"
-        ? t("settings.agentConnectTitle")
-        : leaf === "model"
-          ? t("settings.agentModelTitle")
-          : leaf === "remote"
-            ? t("settings.remoteAccessTitle")
-            : leaf === "diagnostics"
-              ? t("settings.diagnosticsTitle")
-              : leaf === "usage"
-                ? t("settings.usageTitle")
-                : t("settings.agentAdvancedTitle")
-      : t("settings.agentConnectTitle");
+    section === "interface"
+      ? t("settings.appearance")
+      : section === "agent"
+        ? leaf === "connect"
+          ? t("settings.agentConnectTitle")
+          : leaf === "model"
+            ? t("settings.agentModelTitle")
+            : leaf === "remote"
+              ? t("settings.remoteAccessTitle")
+              : leaf === "diagnostics"
+                ? t("settings.diagnosticsTitle")
+                : leaf === "usage"
+                  ? t("settings.usageTitle")
+                  : t("settings.agentAdvancedTitle")
+        : t("settings.agentConnectTitle");
 
   const subtitle =
-    section === "agent" && leaf === "advanced"
-      ? t("settings.agentAdvancedDesc")
-      : section === "agent" && leaf === "remote"
-        ? t("settings.remoteAccessDesc")
-        : section === "agent" && leaf === "diagnostics"
-          ? t("settings.diagnosticsDesc")
-          : section === "agent" && leaf === "usage"
-            ? t("settings.usageDesc")
-            : t("settings.agentConnectDesc");
+    section === "interface"
+      ? t("settings.sidebarCollapseHint")
+      : section === "agent" && leaf === "advanced"
+        ? t("settings.agentAdvancedDesc")
+        : section === "agent" && leaf === "remote"
+          ? t("settings.remoteAccessDesc")
+          : section === "agent" && leaf === "diagnostics"
+            ? t("settings.diagnosticsDesc")
+            : section === "agent" && leaf === "usage"
+              ? t("settings.usageDesc")
+              : t("settings.agentConnectDesc");
 
-  const eyebrow = t("settings.agents");
+  const eyebrow = section === "interface" ? t("settings.interface") : t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const copyUrl = async () => {
@@ -446,6 +450,31 @@ export function SettingsPage() {
             {saved && leaf === "connect" && (
               <span className={styles.ok}>{t("settings.profileSaved")}</span>
             )}
+          </section>
+        )}
+
+        {section === "interface" && leaf === "appearance" && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <label>
+                {t("settings.sidebarCollapse")}
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.sidebarCollapse")}
+                  value={form.sidebarCollapse}
+                  onChange={(v) =>
+                    patch("sidebarCollapse", v as AppSettings["sidebarCollapse"])
+                  }
+                  className={styles.permissionPicker}
+                  options={[
+                    { value: "full", label: t("settings.sidebarCollapseFull") },
+                    { value: "rail", label: t("settings.sidebarCollapseRail") },
+                  ]}
+                />
+              </label>
+              <p className={styles.fieldHint}>{t("settings.sidebarCollapseHint")}</p>
+            </div>
           </section>
         )}
 
@@ -1040,13 +1069,14 @@ export function SettingsPage() {
           </section>
         )}
 
-        {section === "agent" &&
-          leaf !== "connect" &&
-          leaf !== "remote" &&
-          leaf !== "usage" && (
+        {(section === "interface" ||
+          (section === "agent" &&
+            leaf !== "connect" &&
+            leaf !== "remote" &&
+            leaf !== "usage")) && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>
-            {saved && <span className={styles.ok}>{t("settings.profileSaved")}</span>}
+            {saved && <span className={styles.ok}>{t("settings.saved")}</span>}
           </div>
         )}
       </form>

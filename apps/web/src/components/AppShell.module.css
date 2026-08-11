@@ -20,6 +20,11 @@
   grid-template-columns: 0 1fr;
 }
 
+/* Rail collapse keeps a narrow icon strip instead of hiding the tree fully. */
+.withSidebar.sidebarCollapsed.railCollapsed {
+  grid-template-columns: 0 var(--rail-width, 60px) 1fr;
+}
+
 .resizing {
   cursor: col-resize;
   user-select: none;
@@ -156,6 +161,113 @@
   display: block;
 }
 
+/* Narrow icon rail shown when the tree collapses in "rail" mode. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(16px);
+  border-right: 1px solid var(--border);
+  z-index: 20;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.railBtn {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 12px;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    background var(--motion),
+    color var(--motion);
+}
+
+.railBtn:hover {
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  color: var(--text);
+}
+
+.railBtn svg {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+
+.railSpacer {
+  flex: 1;
+  min-height: 8px;
+}
+
+.railMenu {
+  position: fixed;
+  z-index: 300;
+  min-width: 230px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: rise 0.16s ease;
+}
+
+.railMenuHead {
+  padding: 7px 10px 5px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.railMenuEmpty {
+  margin: 0;
+  padding: 10px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.railMenuItem {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 550;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.railMenuItem:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.railMenuItemText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .moduleTitle {
   font-weight: 750;
   font-size: 1.05rem;
@@ -235,6 +347,71 @@
   align-items: stretch;
   flex: 0 0 auto;
   padding: 2px 0 8px;
+}
+
+/* Session search box below the "New chat" toolbar button. */
+.chatSearch {
+  position: relative;
+  flex: 0 0 auto;
+  /* Gap as margin so the wrapper height matches the input and the icon
+     (positioned at 50%) stays centered on the text. */
+  margin-bottom: 10px;
+}
+
+.chatSearchIcon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.chatSearchInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 8px 34px 8px 34px;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.chatSearchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.chatSearchInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.chatSearchClear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.chatSearchClear:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.chatSearchClear svg {
+  display: block;
 }
 
 .newChat {
@@ -2232,6 +2409,11 @@
     display: none;
   }
 
+  /* Mobile uses the off-canvas drawer + header hamburger instead of the rail. */
+  .rail {
+    display: none;
+  }
+
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
@@ -2392,6 +2574,11 @@
     border-right: none;
     padding: 0;
     pointer-events: none;
+  }
+
+  /* The rail already has an expand button, so the header hamburger is redundant. */
+  .railCollapsed .iconBtn {
+    display: none;
   }
 
   .sessionTitle {

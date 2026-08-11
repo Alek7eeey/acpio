@@ -1,6 +1,6 @@
 import type { TranslateFn } from "@acprocess/i18n";
 
-export type SettingsSection = "agent" | "gitea";
+export type SettingsSection = "agent" | "gitea" | "interface";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
@@ -8,7 +8,8 @@ export type SettingsAgentLeaf =
   | "remote"
   | "diagnostics"
   | "usage";
-export type SettingsLeaf = SettingsAgentLeaf;
+export type SettingsInterfaceLeaf = "appearance";
+export type SettingsLeaf = SettingsAgentLeaf | SettingsInterfaceLeaf;
 
 type TreeBranch =
   | {
@@ -20,6 +21,11 @@ type TreeBranch =
       id: "gitea";
       label: string;
       children: Array<{ id: SettingsLeaf; label: string }>;
+    }
+  | {
+      id: "interface";
+      label: string;
+      children: Array<{ id: SettingsInterfaceLeaf; label: string }>;
     };
 
 export function getSettingsTree(
@@ -49,6 +55,11 @@ export function getSettingsTree(
       label: t("common.gitea"),
       children: [],
     },
+    {
+      id: "interface",
+      label: t("settings.interface"),
+      children: [{ id: "appearance", label: t("settings.appearance") }],
+    },
   ];
 }
 
@@ -58,6 +69,9 @@ export function parseSettingsSearch(search: string): {
 } {
   const params = new URLSearchParams(search);
   const rawSection = params.get("section");
+  if (rawSection === "interface") {
+    return { section: "interface", leaf: "appearance" };
+  }
   if (rawSection === "account" || rawSection === "appearance") {
     return { section: "agent", leaf: "connect" };
   }
@@ -79,11 +93,12 @@ export function settingsPath(section: SettingsSection, leaf?: SettingsLeaf) {
   const safeSection = section === "gitea" ? "agent" : section;
   const params = new URLSearchParams();
   params.set("section", safeSection);
-  if (safeSection === "agent") params.set("leaf", leaf ?? "connect");
+  params.set("leaf", leaf ?? defaultLeafFor(safeSection) ?? "connect");
   return `/settings?${params.toString()}`;
 }
 
 export function defaultLeafFor(section: SettingsSection): SettingsLeaf | undefined {
   if (section === "agent") return "connect";
+  if (section === "interface") return "appearance";
   return undefined;
 }
