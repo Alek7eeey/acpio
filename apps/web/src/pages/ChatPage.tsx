@@ -238,41 +238,21 @@ function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
   const out: MessagePartDto[] = [];
   for (const part of parts) {
     const prev = out[out.length - 1];
+    // Merge consecutive parts of the same type (thought, text)
     if (
       prev &&
       part.type === prev.type &&
       (part.type === "thought" || part.type === "text")
     ) {
-      const prevText = String(prev.payload.text ?? "");
-      const nextText = String(part.payload.text ?? "");
       out[out.length - 1] = {
         ...prev,
-        payload: { ...prev.payload, text: prevText + nextText },
+        payload: { ...prev.payload, text: String(prev.payload.text ?? "") + String(part.payload.text ?? "") },
       };
       continue;
     }
-    // Merge any later thought into the first thought block of the message
-    if (part.type === "thought") {
-      const thoughtIdx = out.findIndex((p) => p.type === "thought");
-      if (thoughtIdx >= 0) {
-        const existing = out[thoughtIdx];
-        out[thoughtIdx] = {
-          ...existing,
-          payload: {
-            ...existing.payload,
-            text: String(existing.payload.text ?? "") + String(part.payload.text ?? ""),
-          },
-        };
-        continue;
-      }
-    }
     out.push(part);
   }
-
-  // Keep single thought near the top of assistant content
-  const thought = out.find((p) => p.type === "thought");
-  const rest = out.filter((p) => p.type !== "thought");
-  return thought ? [thought, ...rest] : out;
+  return out;
 }
 
 function extractStructuredText(value: unknown): string {
@@ -557,7 +537,7 @@ function toolMetaExtra(part: MessagePartDto): string {
   return bits.join(" · ");
 }
 
-/** Clickable local path — opens with the OS default handler via the server. */
+/** Clickable local path — opens folder in explorer, URLs in browser. */
 function PathLink({
   path,
   children,
@@ -572,7 +552,13 @@ function PathLink({
     if (isUrl) {
       window.open(path, "_blank", "noopener,noreferrer");
     } else {
-      void api.openPath(path).catch(() => {});
+      // For files, open the parent folder so the user can see the file
+      // in Explorer instead of opening the file in its default editor.
+      const sep = path.includes("\\") ? "\\" : "/";
+      const lastPart = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+      const isFile = lastPart.includes(".");
+      const target = isFile ? path.substring(0, path.lastIndexOf(sep)) : path;
+      void api.openPath(target).catch(() => {});
     }
   };
   return (
@@ -597,7 +583,6 @@ function PathLink({
     </span>
   );
 }
-
 /** Windows absolute paths (`C:\…` / `C:/…`) inside free text. */
 const ABS_PATH_RE = /([A-Za-z]:[\\/][^\s"<>|?*]+)/g;
 
@@ -626,11 +611,65 @@ function splitPathText(text: string, keyPrefix: string): ReactNode[] {
   return out;
 }
 
-/** Renders tool output as plain text; paths become links, diffs get +/- coloring. */
+/** Like splitPathText but also renders URLs as clickable links. */
+function splitToolText(text: string, keyPrefix: string): ReactNode[] {
+  const pathParts = text.split(ABS_PATH_RE);
+  const out: ReactNode[] = [];
+  for (let i = 0; i < pathParts.length; i++) {
+    const part = pathParts[i];
+    if (!part) continue;
+    if (i % 2 === 1) {
+      // Path match
+      const openTarget = part.replace(/[.,;:)\]}]+$/, "");
+      if (openTarget) {
+        out.push(<PathLink key={`${keyPrefix}-p${i}`} path={openTarget}>{part}</PathLink>);
+      } else {
+        out.push(<Fragment key={`${keyPrefix}-t${i}`}>{part}</Fragment>);
+      }
+    } else {
+      // Plain text — detect URLs
+      out.push(...renderToolText(part, keyPrefix, i));
+    }
+  }
+  return out;
+}
+
+/** Render plain text with clickable URLs. */
+function renderToolText(text: string, keyPrefix: string, partIdx: number): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  URL_RE.lastIndex = 0;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(text.slice(lastIdx, match.index));
+    }
+    const url = match[0];
+    parts.push(
+      <span
+        key={`${keyPrefix}-u${partIdx}-${match.index}`}
+        role="link"
+        tabIndex={0}
+        style={{ color: "var(--accent)", textDecoration: "underline", cursor: "pointer", textUnderlineOffset: "2px" }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener,noreferrer"); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); window.open(url, "_blank", "noopener,noreferrer"); } }}
+      >
+        {url}
+      </span>,
+    );
+    lastIdx = match.index + url.length;
+  }
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+  return parts;
+}
+
+/** Renders tool output text: paths become PathLink, URLs become clickable links. */
 function ToolOutputView({ text }: { text: string }) {
   const isDiff = /^(diff --git |--- |\+\+\+ |@@ )/m.test(text);
   if (!isDiff) {
-    return <div className={styles.toolOutput}>{splitPathText(text, "o")}</div>;
+    return <div className={styles.toolOutput}>{splitToolText(text, "o")}</div>;
   }
   const lines = text.split("\n");
   return (
@@ -643,7 +682,7 @@ function ToolOutputView({ text }: { text: string }) {
         else if (line.startsWith("-")) cls = styles.diffDel;
         return (
           <div key={idx} className={cls}>
-            {line === "" ? "\u00A0" : splitPathText(line, `l${idx}`)}
+            {line === "" ? "\u00A0" : splitToolText(line, `l${idx}`)}
           </div>
         );
       })}
