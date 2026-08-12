@@ -611,6 +611,43 @@ export function SettingsPage() {
                   ]}
                 />
               </label>
+              {form.permissionPolicy === "allowlist" && (
+                <div className={styles.allowlistSection}>
+                  <p className={styles.fieldHint}>{t("settings.allowlistHint")}</p>
+                  {(form.permissionAllowlist ?? []).map((entry, i) => (
+                    <div key={i} className={styles.allowlistRow}>
+                      <input
+                        className={styles.allowlistInput}
+                        type="text"
+                        value={entry}
+                        placeholder="e.g. read_file, execute_command"
+                        onChange={(e) => {
+                          const next = [...(form.permissionAllowlist ?? [])];
+                          next[i] = e.target.value;
+                          patch("permissionAllowlist", next);
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        onClick={() => {
+                          const next = (form.permissionAllowlist ?? []).filter((_, j) => j !== i);
+                          patch("permissionAllowlist", next);
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => patch("permissionAllowlist", [...(form.permissionAllowlist ?? []), ""])}
+                  >
+                    + {t("common.add")}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className={styles.sectionBlock}>

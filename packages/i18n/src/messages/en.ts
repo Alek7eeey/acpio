@@ -281,6 +281,7 @@ export const en = {
     permissionPrompt: "Ask",
     permissionAllowlist: "Allowlist",
     permissionAlways: "Always allow",
+    allowlistHint: "Tool name patterns (substring match). Matching tools are auto-approved without prompting.",
     agentUnavailable: "Agent unavailable — check CLI install and login",
     multitask: "Multitask (parallel requests)",
     multitaskHint: "Send the next request as soon as the previous one finishes, without waiting for full completion. Only for agents with multitasking support (Cursor, OMP).",
