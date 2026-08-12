@@ -107,11 +107,8 @@ export function CreateSessionFolderPicker({
   const [browseDialogOpen, setBrowseDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [newFolderMode, setNewFolderMode] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  const newFolderRef = useRef<HTMLInputElement>(null);
   const mobileSheet = useMobileFolderSheet();
 
   const fallback = defaultCwd.trim();
@@ -126,10 +123,6 @@ export function CreateSessionFolderPicker({
   useEffect(() => {
     if (!mobileSheet) searchRef.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (newFolderMode) newFolderRef.current?.focus();
-  }, [newFolderMode]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -156,22 +149,6 @@ export function CreateSessionFolderPicker({
     setError(null);
     try {
       await onConfirm(path);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
-  };
-
-  const createNewFolder = async () => {
-    const name = newFolderName.trim();
-    if (!name || busy) return;
-    const parent = fallback || "";
-    const fullPath = parent ? `${parent}\\${name}` : name;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.createFolder(fullPath);
-      await confirmPath(fullPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
@@ -259,55 +236,24 @@ export function CreateSessionFolderPicker({
           </svg>
         </span>
       </button>
-      {newFolderMode ? (
-        <div className={styles.pickerNewFolder}>
-          <input
-            ref={newFolderRef}
-            className={styles.pickerNewFolderInput}
-            type="text"
-            value={newFolderName}
-            onChange={(e) => setNewFolderName(e.target.value)}
-            placeholder={t("common.newFolderPlaceholder")}
-            aria-label={t("common.newFolderPlaceholder")}
-            disabled={busy}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void createNewFolder();
-              if (e.key === "Escape") { setNewFolderMode(false); setNewFolderName(""); setError(null); }
-            }}
-          />
-          <div className={styles.pickerNewFolderActions}>
-            <button
-              type="button"
-              className={styles.pickerNewFolderCancel}
-              disabled={busy}
-              onClick={() => { setNewFolderMode(false); setNewFolderName(""); setError(null); }}
-            >
-              {t("common.cancel")}
-            </button>
-            <button
-              type="button"
-              className={styles.pickerNewFolderCreate}
-              disabled={busy || !newFolderName.trim()}
-              onClick={() => void createNewFolder()}
-            >
-              {t("common.create")}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          className={styles.pickerAction}
-          disabled={busy}
-          onClick={() => setNewFolderMode(true)}
-        >
-          <span className={styles.pickerItemIcon} aria-hidden>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className={styles.pickerActionLabel}>{t("common.newFolder")}</span>
-        </button>
+      <button
+        type="button"
+        className={styles.pickerAction}
+        disabled={busy}
+        onClick={() => setBrowseDialogOpen(true)}
+      >
+        <span className={styles.pickerItemIcon} aria-hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className={styles.pickerActionLabel}>{t("common.newFolder")}</span>
+        <span className={styles.pickerActionChevron} aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </span>
+      </button>
       )}
 
       {error ? <p className={styles.popoverError}>{error}</p> : null}
