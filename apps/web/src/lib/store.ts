@@ -840,6 +840,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           },
         ],
       });
+      // Small delay so the queue bar renders before drain picks up the item.
+      await new Promise((r) => setTimeout(r, 80));
       void get().drainPromptQueue();
       return;
     }
