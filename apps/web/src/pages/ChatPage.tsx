@@ -60,15 +60,16 @@ function renderThoughtText(text: string): ReactNode[] {
     }
     const url = match[0];
     parts.push(
-      <a
+      <span
         key={match.index}
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener"); }}
+        role="link"
+        tabIndex={0}
+        style={{ color: "var(--accent)", textDecoration: "underline", cursor: "pointer", textUnderlineOffset: "2px" }}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener,noreferrer"); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); window.open(url, "_blank", "noopener,noreferrer"); } }}
       >
         {url}
-      </a>,
+      </span>,
     );
     lastIdx = match.index + url.length;
   }
