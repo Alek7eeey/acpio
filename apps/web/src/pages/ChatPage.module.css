@@ -569,7 +569,8 @@
   font-size: 0.76rem;
   line-height: 1.55;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .toolName {
@@ -930,8 +931,8 @@
   padding: 2px 10px;
   max-width: 100%;
   box-sizing: border-box;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: break-word;
+  word-break: normal;
   width: fit-content;
 }
 
