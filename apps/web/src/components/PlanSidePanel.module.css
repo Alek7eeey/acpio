@@ -141,8 +141,8 @@
   grid-template-columns: 1fr 1.15fr;
   gap: 10px;
   padding: 12px 14px 14px;
-  border-top: 1px solid color-mix(in srgb, var(--accent) 12%, var(--border-soft));
-  background: color-mix(in srgb, var(--accent) 4%, var(--surface));
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
   flex-shrink: 0;
 }
 
@@ -175,34 +175,47 @@
 .primary {
   background: var(--accent);
   color: #fff;
+  border-radius: 999px;
   box-shadow:
     0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
-    0 8px 18px color-mix(in srgb, var(--accent) 28%, transparent);
+    0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+:global([data-theme="light"]) .primary {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 30%, transparent) inset,
+    0 1px 3px rgb(15 23 42 / 10%), 0 4px 12px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .primary:hover {
-  filter: brightness(1.05);
+  filter: brightness(1.06);
   transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+    0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .primary:active {
   transform: translateY(0);
-  filter: brightness(0.98);
+  filter: brightness(0.97);
 }
 
 .danger {
   background: transparent;
   color: color-mix(in srgb, var(--danger, #c44) 82%, var(--text));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #c44) 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--danger, #c44) 28%, var(--border));
+  border-radius: 999px;
 }
 
 .danger:hover {
-  background: color-mix(in srgb, var(--danger, #c44) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #c44) 48%, var(--border));
+  background: color-mix(in srgb, var(--danger, #c44) 8%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #c44) 45%, var(--border));
+  transform: translateY(-1px);
 }
 
 .danger:active {
-  background: color-mix(in srgb, var(--danger, #c44) 14%, transparent);
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  transform: translateY(0);
 }
 
 .tab {
