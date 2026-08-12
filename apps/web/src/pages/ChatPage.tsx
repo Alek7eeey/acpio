@@ -584,7 +584,7 @@ function PathLink({
   );
 }
 /** Windows absolute paths (`C:\…` / `C:/…`) inside free text. */
-const ABS_PATH_RE = /([A-Za-z]:[\\/][^\s"<>|?*]+)/g;
+const ABS_PATH_RE = /\b([A-Za-z]:[\\/][^\s"<>|?*]+)/g;
 
 function splitPathText(text: string, keyPrefix: string): ReactNode[] {
   const parts = text.split(ABS_PATH_RE);
