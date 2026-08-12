@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { exec } from "node:child_process";
 import path from "node:path";
 
 export interface OpenPathResult {
@@ -30,14 +30,14 @@ export function openPath(rawPath: string): OpenPathResult {
   if (process.platform !== "win32") {
     return { ok: false, opened: trimmed, kind, error: "opening paths is supported on Windows only" };
   }
-  // `explorer.exe` works reliably from background processes unlike `start`.
+  // `start \"\"` with empty title opens the path with the default handler.
+  // `exec` uses the shell and handles quoting correctly.
   const winPath = trimmed.replace(/\//g, "\\");
-  const args = kind === "directory" ? [winPath] : ["/select," + winPath];
-  const child = spawn("explorer.exe", args, {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
+  const cmd = kind === "directory"
+    ? `start "" explorer "${winPath}"`
+    : `start "" explorer /select,"${winPath}"`;
+  exec(cmd, (err) => {
+    if (err) console.error("openPath exec error:", err.message);
   });
-  child.unref();
   return { ok: true, opened: trimmed, kind };
 }

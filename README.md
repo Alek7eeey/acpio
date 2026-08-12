@@ -30,6 +30,9 @@ npm run db:push
 npm run dev
 ```
 
+> **После обновления кода** (`git pull`) сделай **hard refresh** в браузере (`Ctrl+Shift+R`).
+> Браузер кеширует старые CSS/JS модули, и без hard refresh новые правки могут не примениться.
+
 - Web: [http://localhost:5173](http://localhost:5173)
 - API: [http://localhost:3001](http://localhost:3001)
 - Postgres: `localhost:5433`
