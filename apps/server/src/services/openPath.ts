@@ -30,8 +30,10 @@ export function openPath(rawPath: string): OpenPathResult {
   if (process.platform !== "win32") {
     return { ok: false, opened: trimmed, kind, error: "opening paths is supported on Windows only" };
   }
-  // `start "" "path"` opens with the default handler, detached from the server.
-  const child = spawn("cmd", ["/c", "start", "", trimmed], {
+  // `explorer.exe` works reliably from background processes unlike `start`.
+  const winPath = trimmed.replace(/\//g, "\\");
+  const args = kind === "directory" ? [winPath] : ["/select," + winPath];
+  const child = spawn("explorer.exe", args, {
     detached: true,
     stdio: "ignore",
     windowsHide: true,
