@@ -192,7 +192,9 @@ export function ServerFolderBrowseDialog({
   const isDrivesView = browse?.kind === "drives" || browse?.path === DRIVES_ROOT;
   const canConfirm = Boolean(browse?.path && browse.path !== DRIVES_ROOT);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (newFolderMode) newFolderRef.current?.focus();
+  }, [newFolderMode]);
 
   const confirm = () => {
     if (!browse?.path || browse.path === DRIVES_ROOT) return;
@@ -203,10 +205,6 @@ export function ServerFolderBrowseDialog({
   const navigate = (path: string) => {
     void loadBrowse(path);
   };
-
-  useEffect(() => {
-    if (newFolderMode) newFolderRef.current?.focus();
-  }, [newFolderMode]);
 
   const createNewFolder = async () => {
     const name = newFolderName.trim();

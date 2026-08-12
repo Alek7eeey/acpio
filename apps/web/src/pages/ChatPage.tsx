@@ -65,7 +65,7 @@ function renderThoughtText(text: string): ReactNode[] {
         href={url}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); window.open(url, "_blank", "noopener"); }}
       >
         {url}
       </a>,
