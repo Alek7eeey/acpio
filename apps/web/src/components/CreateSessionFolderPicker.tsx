@@ -254,7 +254,6 @@ export function CreateSessionFolderPicker({
           </svg>
         </span>
       </button>
-      )}
 
       {error ? <p className={styles.popoverError}>{error}</p> : null}
     </div>
