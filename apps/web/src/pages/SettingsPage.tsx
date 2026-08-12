@@ -469,7 +469,6 @@ export function SettingsPage() {
                   onChange={(v) =>
                     patch("sidebarCollapse", v as AppSettings["sidebarCollapse"])
                   }
-                  className={styles.permissionPicker}
                   options={[
                     { value: "full", label: t("settings.sidebarCollapseFull") },
                     { value: "rail", label: t("settings.sidebarCollapseRail") },
@@ -603,7 +602,6 @@ export function SettingsPage() {
                   menuTitle={t("settings.permissionPolicy")}
                   value={form.permissionPolicy}
                   onChange={(v) => patch("permissionPolicy", v as AppSettings["permissionPolicy"])}
-                  className={styles.permissionPicker}
                   options={[
                     { value: "always", label: t("settings.permissionAlways") },
                     { value: "prompt", label: t("settings.permissionPrompt") },

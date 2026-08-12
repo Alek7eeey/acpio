@@ -127,41 +127,6 @@
   color: inherit;
 }
 
-.permissionPicker {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-  align-self: stretch;
-}
-
-.permissionPicker button {
-  width: 100%;
-  max-width: none;
-  justify-content: flex-start;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.permissionPicker button:hover {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-
-.permissionPicker button span:first-child {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  max-width: none;
-  flex: 1;
-  text-align: left;
-  color: var(--text);
-  font-weight: 500;
-}
-
 .allowlistSection {
   display: flex;
   flex-direction: column;
