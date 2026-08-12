@@ -557,7 +557,7 @@ function toolMetaExtra(part: MessagePartDto): string {
   return bits.join(" · ");
 }
 
-/** Clickable local path — opens folder in explorer, URLs in browser. */
+/** Clickable local path — opens with the OS default handler via the server. */
 function PathLink({
   path,
   children,
@@ -568,21 +568,11 @@ function PathLink({
   className?: string;
 }) {
   const isUrl = /^https?:\/\//i.test(path);
-  /** Parent directory of a file path. */
-  const parentDir = (p: string) => {
-    const sep = p.includes("\\") ? "\\" : "/";
-    const parts = p.replace(/[\\/]+$/, "").split(/[\\/]/);
-    parts.pop();
-    return parts.join(sep);
-  };
   const open = () => {
     if (isUrl) {
       window.open(path, "_blank", "noopener,noreferrer");
     } else {
-      // Open the containing folder in the OS file explorer,
-      // not the file itself (which would open in the default editor).
-      const dir = parentDir(path) || path;
-      void api.openPath(dir).catch(() => {});
+      void api.openPath(path).catch(() => {});
     }
   };
   return (
