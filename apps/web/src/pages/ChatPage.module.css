@@ -638,6 +638,18 @@
   word-break: break-word;
 }
 
+.thoughtBody a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.thoughtBody a:hover {
+  text-decoration-color: var(--accent);
+}
+
 .thoughtMeta {
   font-weight: 550;
   font-size: 0.72rem;

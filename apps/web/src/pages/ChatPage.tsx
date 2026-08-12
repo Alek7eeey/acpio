@@ -46,6 +46,38 @@ import {
 } from "../lib/slashCommands";
 import styles from "./ChatPage.module.css";
 
+const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
+
+/** Split text into text and link segments, making URLs clickable. */
+function renderThoughtText(text: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+  URL_RE.lastIndex = 0;
+  while ((match = URL_RE.exec(text)) !== null) {
+    if (match.index > lastIdx) {
+      parts.push(text.slice(lastIdx, match.index));
+    }
+    const url = match[0];
+    parts.push(
+      <a
+        key={match.index}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {url}
+      </a>,
+    );
+    lastIdx = match.index + url.length;
+  }
+  if (lastIdx < text.length) {
+    parts.push(text.slice(lastIdx));
+  }
+  return parts;
+}
+
 /** Desktop-only: avoid popping the mobile keyboard during stream / scroll updates. */
 function shouldAutoFocusComposer() {
   if (typeof window === "undefined") return true;
@@ -349,7 +381,7 @@ function PartView({
   if (part.type === "thought") {
     const text = String(part.payload.text ?? "").trim();
     if (!text) return null;
-    const body = <pre className={styles.thoughtBody}>{text}</pre>;
+    const body = <pre className={styles.thoughtBody}>{renderThoughtText(text)}</pre>;
     if (embedded) {
       return (
         <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
