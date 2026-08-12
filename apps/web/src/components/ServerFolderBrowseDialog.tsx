@@ -131,8 +131,12 @@ export function ServerFolderBrowseDialog({
   const [browse, setBrowse] = useState<BrowseState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newFolderMode, setNewFolderMode] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderBusy, setNewFolderBusy] = useState(false);
   const loadSeq = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const newFolderRef = useRef<HTMLInputElement>(null);
 
   const loadBrowse = async (path?: string) => {
     const seq = ++loadSeq.current;
@@ -198,6 +202,29 @@ export function ServerFolderBrowseDialog({
 
   const navigate = (path: string) => {
     void loadBrowse(path);
+  };
+
+  useEffect(() => {
+    if (newFolderMode) newFolderRef.current?.focus();
+  }, [newFolderMode]);
+
+  const createNewFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name || !browse?.path || browse.path === DRIVES_ROOT || newFolderBusy) return;
+    const sep = browse.path.includes("\\") ? "\\" : "/";
+    const fullPath = `${browse.path}${sep}${name}`;
+    setNewFolderBusy(true);
+    setError(null);
+    try {
+      await api.createFolder(fullPath);
+      setNewFolderMode(false);
+      setNewFolderName("");
+      await loadBrowse(fullPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setNewFolderBusy(false);
+    }
   };
 
   return createPortal(
@@ -292,15 +319,51 @@ export function ServerFolderBrowseDialog({
               title={browse?.path && browse.path !== DRIVES_ROOT ? browse.path : ""}
             />
           </label>
+          {newFolderMode && !isDrivesView ? (
+            <div className={styles.newFolderRow}>
+              <input
+                ref={newFolderRef}
+                className={styles.folderInput}
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                placeholder={t("common.newFolderPlaceholder")}
+                aria-label={t("common.newFolderPlaceholder")}
+                disabled={newFolderBusy}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createNewFolder();
+                  if (e.key === "Escape") { setNewFolderMode(false); setNewFolderName(""); setError(null); }
+                }}
+              />
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                disabled={newFolderBusy || !newFolderName.trim()}
+                onClick={() => void createNewFolder()}
+              >
+                {t("common.create")}
+              </button>
+            </div>
+          ) : null}
           {error ? <p className={styles.error}>{error}</p> : null}
           <div className={styles.actions}>
+            {!isDrivesView ? (
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                disabled={loading || newFolderBusy}
+                onClick={() => { setNewFolderMode(!newFolderMode); setNewFolderName(""); setError(null); }}
+              >
+                {newFolderMode ? t("common.cancel") : t("common.newFolder")}
+              </button>
+            ) : null}
             <button type="button" className={styles.secondaryBtn} onClick={onClose}>
               {t("common.cancel")}
             </button>
             <button
               type="button"
               className={styles.primaryBtn}
-              disabled={loading || !canConfirm}
+              disabled={loading || !canConfirm || newFolderBusy}
               onClick={confirm}
             >
               {t("common.selectFolder")}

@@ -294,6 +294,17 @@
   gap: 8px;
 }
 
+.newFolderRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.newFolderRow .folderInput {
+  flex: 1;
+  min-width: 0;
+}
+
 .secondaryBtn,
 .primaryBtn {
   border: none;
