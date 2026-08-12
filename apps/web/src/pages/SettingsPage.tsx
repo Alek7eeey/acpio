@@ -611,33 +611,6 @@ export function SettingsPage() {
                   ]}
                 />
               </label>
-              {(settings.connectedProvider === "cursor" || settings.connectedProvider === "omp") && (
-                <label className={`${styles.multitaskCard} ${form.multitask ? styles.multitaskCardOn : ""}`}>
-                  <input
-                    type="checkbox"
-                    className={styles.multitaskInput}
-                    checked={Boolean(form.multitask)}
-                    onChange={(e) => patch("multitask", e.target.checked)}
-                  />
-                  <span className={styles.multitaskIcon} aria-hidden>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className={styles.multitaskBody}>
-                    <strong>{t("settings.multitask")}</strong>
-                    <span>{t("settings.multitaskHint")}</span>
-                  </span>
-                  <span className={styles.multitaskSwitch} aria-hidden>
-                    <span />
-                  </span>
-                </label>
-              )}
             </div>
 
             <div className={styles.sectionBlock}>
