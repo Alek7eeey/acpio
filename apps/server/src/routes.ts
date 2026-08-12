@@ -89,6 +89,7 @@ const settingsSchema = z.object({
   diagnosticsDir: z.string().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
+  showBootSplash: z.boolean().optional(),
 });
 
 async function agentConnected(): Promise<AgentProvider | null> {
