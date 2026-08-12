@@ -287,6 +287,8 @@ export const en = {
     apiKeys: "API keys",
     interface: "Interface",
     appearance: "Appearance",
+    showBootSplash: "Show boot animation",
+    showBootSplashHint: "Animated splash screen on app start",
     interfaceLanguage: "Interface language",
     sidebarCollapse: "Sidebar collapse",
     sidebarCollapseHint:

@@ -311,6 +311,8 @@ export const ru = {
     apiKeys: "API-ключи",
     interface: "Интерфейс",
     appearance: "Оформление",
+    showBootSplash: "Анимация при запуске",
+    showBootSplashHint: "Анимированный экран при старте приложения",
     interfaceLanguage: "Язык интерфейса",
     sidebarCollapse: "Сворачивание дерева",
     sidebarCollapseHint:

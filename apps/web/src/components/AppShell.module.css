@@ -378,6 +378,11 @@
   font-size: 0.88rem;
 }
 
+:global([data-theme="light"]) .chatSearchInput {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+}
+
 .chatSearchInput::placeholder {
   color: var(--text-secondary);
 }

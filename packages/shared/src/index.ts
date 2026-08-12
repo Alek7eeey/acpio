@@ -64,6 +64,8 @@ export interface AppSettings {
    * "rail" — leaves a narrow icon rail (new chat, recents, find, expand).
    */
   sidebarCollapse: "full" | "rail";
+  /** Show the animated boot splash on app start. */
+  showBootSplash: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -97,6 +99,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   diagnosticsDir: "",
   multitask: false,
   sidebarCollapse: "full",
+  showBootSplash: true,
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {

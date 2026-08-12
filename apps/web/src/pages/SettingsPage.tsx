@@ -96,9 +96,12 @@ export function SettingsPage() {
   const [diagCopyId, setDiagCopyId] = useState<string | null>(null);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
 
-  useEffect(() => {
-    setForm(settings);
-  }, [settings]);
+  // NOTE: removed the `useEffect(() => setForm(settings), [settings])` that
+  // was here — it overwrites the local form state every time the store's
+  // settings change (e.g. after saveSettings), which causes toggles like
+  // showBootSplash to visually revert. The form is already kept in sync
+  // by the explicit setForm calls in patch(), connectAgent(), clearApiKey(),
+  // and the model-param handlers.
 
   useEffect(() => {
     if (leaf !== "diagnostics") return;
@@ -474,6 +477,34 @@ export function SettingsPage() {
                 />
               </label>
               <p className={styles.fieldHint}>{t("settings.sidebarCollapseHint")}</p>
+            </div>
+
+            <div className={styles.sectionBlock}>
+              <label className={`${styles.multitaskCard} ${form.showBootSplash ? styles.multitaskCardOn : ""}`}>
+                <input
+                  type="checkbox"
+                  className={styles.multitaskInput}
+                  checked={Boolean(form.showBootSplash)}
+                  onChange={(e) => patch("showBootSplash", e.target.checked)}
+                />
+                <span className={styles.multitaskIcon} aria-hidden>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className={styles.multitaskBody}>
+                  <strong>{t("settings.showBootSplash")}</strong>
+                  <span>{t("settings.showBootSplashHint")}</span>
+                </span>
+                <span className={styles.multitaskSwitch} aria-hidden>
+                  <span />
+                </span>
+              </label>
             </div>
           </section>
         )}

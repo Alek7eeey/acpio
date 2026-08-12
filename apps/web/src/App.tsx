@@ -14,6 +14,7 @@ export function App() {
   const loadBootstrap = useAppStore((s) => s.loadBootstrap);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const loading = useAppStore((s) => s.loading);
+  const showBootSplash = useAppStore((s) => s.settings.showBootSplash);
   const [splashVisible, setSplashVisible] = useState(true);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export function App() {
   const onSplashDone = useCallback(() => setSplashVisible(false), []);
 
   const app =
-    loading && splashVisible ? null : (
+    loading && splashVisible && showBootSplash ? null : (
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
@@ -40,7 +41,7 @@ export function App() {
   return (
     <I18nProvider>
       {app}
-      {splashVisible && <BootSplash ready={!loading} onDone={onSplashDone} />}
+      {splashVisible && showBootSplash && <BootSplash ready={!loading} onDone={onSplashDone} />}
     </I18nProvider>
   );
 }

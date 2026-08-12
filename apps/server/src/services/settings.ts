@@ -46,6 +46,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.diagnosticsDir !== "string") {
     merged.diagnosticsDir = DEFAULT_SETTINGS.diagnosticsDir;
   }
+  if (typeof merged.showBootSplash !== "boolean") {
+    merged.showBootSplash = DEFAULT_SETTINGS.showBootSplash;
+  }
   return merged;
 }
 
