@@ -630,11 +630,11 @@ function splitPathText(text: string, keyPrefix: string): ReactNode[] {
 function ToolOutputView({ text }: { text: string }) {
   const isDiff = /^(diff --git |--- |\+\+\+ |@@ )/m.test(text);
   if (!isDiff) {
-    return <pre className={styles.toolOutput}>{splitPathText(text, "o")}</pre>;
+    return <div className={styles.toolOutput}>{splitPathText(text, "o")}</div>;
   }
   const lines = text.split("\n");
   return (
-    <pre className={`${styles.toolOutput} ${styles.toolDiff}`}>
+    <div className={`${styles.toolOutput} ${styles.toolDiff}`}>
       {lines.map((line, idx) => {
         let cls = "";
         if (line.startsWith("+++") || line.startsWith("---")) cls = styles.diffFile;
@@ -647,7 +647,7 @@ function ToolOutputView({ text }: { text: string }) {
           </div>
         );
       })}
-    </pre>
+    </div>
   );
 }
 
