@@ -246,8 +246,6 @@
   caret-color: transparent;
   min-width: 0;
   box-sizing: border-box;
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .msgEnter {
@@ -430,9 +428,9 @@
 .thoughtEmbedded {
   display: grid;
   gap: 0;
-  min-width: 0;
   position: relative;
   padding-left: 0.9em;
+  overflow: visible;
 }
 
 .thoughtEmbedded::before {
@@ -636,6 +634,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  overflow: visible;
 }
 
 .thoughtBody a {
