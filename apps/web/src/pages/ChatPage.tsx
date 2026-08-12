@@ -567,8 +567,13 @@ function PathLink({
   children?: ReactNode;
   className?: string;
 }) {
+  const isUrl = /^https?:\/\//i.test(path);
   const open = () => {
-    void api.openPath(path).catch(() => {});
+    if (isUrl) {
+      window.open(path, "_blank", "noopener,noreferrer");
+    } else {
+      void api.openPath(path).catch(() => {});
+    }
   };
   return (
     <span

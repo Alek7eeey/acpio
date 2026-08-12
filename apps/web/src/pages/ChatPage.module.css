@@ -630,11 +630,9 @@
   font-family: inherit;
   font-size: 0.88rem;
   font-weight: 400;
-  max-width: 100%;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  overflow: visible;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .thoughtMeta {
