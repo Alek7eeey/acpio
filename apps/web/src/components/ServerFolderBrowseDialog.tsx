@@ -225,6 +225,8 @@ export function ServerFolderBrowseDialog({
     }
   };
 
+  if (!open) return null;
+
   return createPortal(
     <div className={styles.overlay}>
       <button type="button" className={styles.backdrop} aria-label={t("common.cancel")} onClick={onClose} />
