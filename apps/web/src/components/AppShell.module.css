@@ -198,6 +198,11 @@
   color: var(--text);
 }
 
+.railBtnActive {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 .railBtn svg {
   display: block;
   width: 22px;

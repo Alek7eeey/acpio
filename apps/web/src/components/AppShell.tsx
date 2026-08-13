@@ -476,61 +476,147 @@ export function AppShell() {
               />
             </svg>
           </button>
-          <button
-            type="button"
-            className={styles.railBtn}
-            title={t("common.newChat")}
-            aria-label={t("common.newChat")}
-            onClick={openRailNewChat}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
-                fill="currentColor"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={styles.railBtn}
-            title={t("common.railRecents")}
-            aria-label={t("common.railRecents")}
-            onClick={openRailRecents}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.7" />
-              <path
-                d="M12 7.4V12l3 2"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={styles.railBtn}
-            title={t("common.railFind")}
-            aria-label={t("common.railFind")}
-            onClick={openRailFind}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
-              <path
-                d="M16 16l4.5 4.5"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+          {isSettings ? (
+            settingsTree.map((branch) => {
+              const hasChildren = branch.children.length > 0;
+              const active = settingsNav.section === branch.id;
+              return (
+                <button
+                  key={branch.id}
+                  type="button"
+                  className={`${styles.railBtn}${active ? ` ${styles.railBtnActive}` : ""}`}
+                  title={branch.label}
+                  aria-label={branch.label}
+                  onClick={() => {
+                    setRailRecentsPos(null);
+                    setRailFolderPicker(null);
+                    if (hasChildren) {
+                      setOpenBranches((prev) => ({ ...prev, [branch.id]: true }));
+                      goSettings(branch.id, defaultLeafFor(branch.id));
+                    } else {
+                      goSettings(branch.id);
+                    }
+                  }}
+                >
+                  {branch.id === "agent" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M12 3.2v2.8"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                      <rect
+                        x="4.5"
+                        y="6.5"
+                        width="15"
+                        height="11.5"
+                        rx="3"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                      <circle cx="9.5" cy="12" r="1.3" fill="currentColor" />
+                      <circle cx="14.5" cy="12" r="1.3" fill="currentColor" />
+                      <path
+                        d="M9.5 15.5h5"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  ) : branch.id === "gitea" ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <circle cx="6" cy="6" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+                      <path d="M6 3.4v9.2" stroke="currentColor" strokeWidth="1.7" />
+                      <circle cx="18" cy="18" r="2.6" stroke="currentColor" strokeWidth="1.7" />
+                      <path
+                        d="M18 9.2a8.8 8.8 0 0 1-8.8 8.8"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <rect
+                        x="2.8"
+                        y="4.5"
+                        width="18.4"
+                        height="12.5"
+                        rx="2.5"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                      <path
+                        d="M9.5 21h5M12 17v4"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              );
+            })
+          ) : (
+            <>
+              <button
+                type="button"
+                className={styles.railBtn}
+                title={t("common.newChat")}
+                aria-label={t("common.newChat")}
+                onClick={openRailNewChat}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.railBtn}
+                title={t("common.railRecents")}
+                aria-label={t("common.railRecents")}
+                onClick={openRailRecents}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M12 7.4V12l3 2"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.railBtn}
+                title={t("common.railFind")}
+                aria-label={t("common.railFind")}
+                onClick={openRailFind}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M16 16l4.5 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </>
+          )}
           <div className={styles.railSpacer} />
 
           {railRecentsPos &&
