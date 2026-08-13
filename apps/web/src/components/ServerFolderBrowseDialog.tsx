@@ -7,6 +7,8 @@ import styles from "./ServerFolderBrowseDialog.module.css";
 type ServerFolderBrowseDialogProps = {
   open: boolean;
   initialPath?: string;
+  /** "select" — confirm the browsed folder; "create" — primary button creates a new folder and selects it. */
+  mode?: "select" | "create";
   onClose: () => void;
   onSelect: (path: string) => void;
 };
@@ -123,6 +125,7 @@ function splitPathSegments(
 export function ServerFolderBrowseDialog({
   open,
   initialPath,
+  mode = "select",
   onClose,
   onSelect,
 }: ServerFolderBrowseDialogProps) {
@@ -131,7 +134,6 @@ export function ServerFolderBrowseDialog({
   const [browse, setBrowse] = useState<BrowseState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [newFolderMode, setNewFolderMode] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderBusy, setNewFolderBusy] = useState(false);
   const loadSeq = useRef(0);
@@ -163,6 +165,7 @@ export function ServerFolderBrowseDialog({
       setBrowse(null);
       setLoading(false);
       setError(null);
+      setNewFolderName("");
       return;
     }
     void loadBrowse(initialPath);
@@ -175,13 +178,13 @@ export function ServerFolderBrowseDialog({
       if (e.key === "Escape") onClose();
       if (e.key === "Enter" && browse?.path && browse.path !== DRIVES_ROOT) {
         e.preventDefault();
-        confirm();
+        submit();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, onClose, browse?.path]);
+  }, [open, onClose, browse?.path, newFolderName]);
 
   const breadcrumbs = useMemo(
     () => (browse?.path ? splitPathSegments(browse.path, drivesLabel) : []),
@@ -193,11 +196,33 @@ export function ServerFolderBrowseDialog({
   const canConfirm = Boolean(browse?.path && browse.path !== DRIVES_ROOT);
 
   useEffect(() => {
-    if (newFolderMode) newFolderRef.current?.focus();
-  }, [newFolderMode]);
+    if (open && mode === "create") newFolderRef.current?.focus();
+  }, [open, mode]);
 
-  const confirm = () => {
-    if (!browse?.path || browse.path === DRIVES_ROOT) return;
+  const submit = () => {
+    if (!browse?.path || browse.path === DRIVES_ROOT || newFolderBusy) return;
+    if (mode === "create") {
+      const name = newFolderName.trim();
+      if (!name) return;
+      // Drive roots (E:\) already end with a separator — strip it so the
+      // joined path has exactly one (E:\new instead of E:\\new).
+      const sep = browse.path.includes("\\") ? "\\" : "/";
+      const base = browse.path.replace(/[\\/]+$/, "");
+      const fullPath = `${base}${sep}${name}`;
+      setNewFolderBusy(true);
+      setError(null);
+      void api
+        .createFolder(fullPath)
+        .then(() => {
+          onSelect(fullPath);
+          onClose();
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+          setNewFolderBusy(false);
+        });
+      return;
+    }
     onSelect(browse.path);
     onClose();
   };
@@ -206,35 +231,23 @@ export function ServerFolderBrowseDialog({
     void loadBrowse(path);
   };
 
-  const createNewFolder = async () => {
-    const name = newFolderName.trim();
-    if (!name || !browse?.path || browse.path === DRIVES_ROOT || newFolderBusy) return;
-    const sep = browse.path.includes("\\") ? "\\" : "/";
-    const fullPath = `${browse.path}${sep}${name}`;
-    setNewFolderBusy(true);
-    setError(null);
-    try {
-      await api.createFolder(fullPath);
-      setNewFolderMode(false);
-      setNewFolderName("");
-      await loadBrowse(fullPath);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setNewFolderBusy(false);
-    }
-  };
-
   if (!open) return null;
 
   return createPortal(
     <div className={styles.overlay}>
       <button type="button" className={styles.backdrop} aria-label={t("common.cancel")} onClick={onClose} />
-      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label={t("common.selectFolder")}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={mode === "create" ? t("common.newFolder") : t("common.selectFolder")}
+      >
         <div className={styles.titleBar}>
           <div className={styles.titleLeft}>
             <span className={styles.titleIcon}>{folderIcon}</span>
-            <h2 className={styles.title}>{t("common.selectFolder")}</h2>
+            <h2 className={styles.title}>
+              {mode === "create" ? t("common.newFolder") : t("common.selectFolder")}
+            </h2>
           </div>
           <button type="button" className={styles.closeBtn} aria-label={t("common.cancel")} onClick={onClose}>
             ×
@@ -319,7 +332,7 @@ export function ServerFolderBrowseDialog({
               title={browse?.path && browse.path !== DRIVES_ROOT ? browse.path : ""}
             />
           </label>
-          {newFolderMode && !isDrivesView ? (
+          {mode === "create" && !isDrivesView ? (
             <div className={styles.newFolderRow}>
               <input
                 ref={newFolderRef}
@@ -331,42 +344,29 @@ export function ServerFolderBrowseDialog({
                 aria-label={t("common.newFolderPlaceholder")}
                 disabled={newFolderBusy}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void createNewFolder();
-                  if (e.key === "Escape") { setNewFolderMode(false); setNewFolderName(""); setError(null); }
+                  if (e.key === "Enter") void submit();
+                  if (e.key === "Escape") { setNewFolderName(""); setError(null); }
                 }}
               />
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                disabled={newFolderBusy || !newFolderName.trim()}
-                onClick={() => void createNewFolder()}
-              >
-                {t("common.create")}
-              </button>
             </div>
           ) : null}
           {error ? <p className={styles.error}>{error}</p> : null}
           <div className={styles.actions}>
-            {!isDrivesView ? (
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                disabled={loading || newFolderBusy}
-                onClick={() => { setNewFolderMode(!newFolderMode); setNewFolderName(""); setError(null); }}
-              >
-                {newFolderMode ? t("common.cancel") : t("common.newFolder")}
-              </button>
-            ) : null}
             <button type="button" className={styles.secondaryBtn} onClick={onClose}>
               {t("common.cancel")}
             </button>
             <button
               type="button"
               className={styles.primaryBtn}
-              disabled={loading || !canConfirm || newFolderBusy}
-              onClick={confirm}
+              disabled={
+                loading ||
+                !canConfirm ||
+                newFolderBusy ||
+                (mode === "create" && !newFolderName.trim())
+              }
+              onClick={submit}
             >
-              {t("common.selectFolder")}
+              {mode === "create" ? t("common.create") : t("common.selectFolder")}
             </button>
           </div>
         </div>
