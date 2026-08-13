@@ -61,10 +61,6 @@ export async function getSettings(): Promise<AppSettings> {
       opencodeApiKey: process.env.OPENCODE_API_KEY ?? "",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
       openaiApiKey: process.env.OPENAI_API_KEY ?? "",
-      giteaBaseUrl: process.env.GITEA_BASE_URL ?? "http://localhost:3000",
-      giteaToken: process.env.GITEA_TOKEN ?? "",
-      giteaOwner: process.env.GITEA_OWNER ?? "acprocess",
-      giteaRepo: process.env.GITEA_REPO ?? "demo",
     });
     await db.insert(settings).values({ key: SETTINGS_KEY, value: seeded });
     return seeded;

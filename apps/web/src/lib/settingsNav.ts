@@ -1,6 +1,6 @@
 import type { TranslateFn } from "@acprocess/i18n";
 
-export type SettingsSection = "agent" | "gitea" | "interface";
+export type SettingsSection = "agent" | "interface";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
@@ -16,11 +16,6 @@ type TreeBranch =
       id: "agent";
       label: string;
       children: Array<{ id: SettingsAgentLeaf; label: string }>;
-    }
-  | {
-      id: "gitea";
-      label: string;
-      children: Array<{ id: SettingsLeaf; label: string }>;
     }
   | {
       id: "interface";
@@ -49,11 +44,6 @@ export function getSettingsTree(
       id: "agent",
       label: t("settings.agents"),
       children,
-    },
-    {
-      id: "gitea",
-      label: t("common.gitea"),
-      children: [],
     },
     {
       id: "interface",
@@ -90,10 +80,9 @@ export function parseSettingsSearch(search: string): {
 }
 
 export function settingsPath(section: SettingsSection, leaf?: SettingsLeaf) {
-  const safeSection = section === "gitea" ? "agent" : section;
   const params = new URLSearchParams();
-  params.set("section", safeSection);
-  params.set("leaf", leaf ?? defaultLeafFor(safeSection) ?? "connect");
+  params.set("section", section);
+  params.set("leaf", leaf ?? defaultLeafFor(section) ?? "connect");
   return `/settings?${params.toString()}`;
 }
 

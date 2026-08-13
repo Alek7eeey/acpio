@@ -60,16 +60,6 @@ export const messageParts = pgTable("message_parts", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const giteaJobs = pgTable("gitea_jobs", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  kind: text("kind").notNull(),
-  status: text("status").notNull().default("pending"),
-  result: jsonb("result"),
-  error: text("error"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
-
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   username: text("username").notNull().unique(),

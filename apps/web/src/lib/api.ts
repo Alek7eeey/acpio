@@ -5,8 +5,6 @@ import type {
   ChatThemeDto,
   DiagnosticsDumpDto,
   DiagnosticsDumpMeta,
-  GiteaJobDto,
-  GiteaStatusDto,
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
@@ -203,23 +201,6 @@ export const api = {
     request<{ ok: boolean }>(`/api/sessions/${id}/answers/${encodeURIComponent(requestId)}`, {
       method: "POST",
       body: JSON.stringify({ result, requestId }),
-    }),
-  giteaStatus: () => request<GiteaStatusDto>("/api/gitea/status"),
-  giteaJobs: () => request<GiteaJobDto[]>("/api/gitea/jobs"),
-  giteaCommit: (message?: string) =>
-    request<GiteaJobDto>("/api/gitea/commit", {
-      method: "POST",
-      body: JSON.stringify({ message }),
-    }),
-  giteaPr: (body?: { title?: string; body?: string; base?: string }) =>
-    request<GiteaJobDto>("/api/gitea/pr", {
-      method: "POST",
-      body: JSON.stringify(body ?? {}),
-    }),
-  giteaConflicts: () =>
-    request<GiteaJobDto>("/api/gitea/conflicts", {
-      method: "POST",
-      body: JSON.stringify({}),
     }),
   listDiagnostics: () =>
     request<{ dir: string; defaultDir: string; items: DiagnosticsDumpMeta[] }>("/api/diagnostics"),

@@ -22,15 +22,6 @@ export function DashboardPage() {
       cta: t("common.openChat"),
     },
     {
-      id: "gitea",
-      to: "/gitea",
-      title: t("dashboard.giteaTitle"),
-      subtitle: t("dashboard.giteaSubtitle"),
-      description: t("dashboard.giteaDescription"),
-      status: "soon" as const,
-      cta: t("common.soon"),
-    },
-    {
       id: "processes",
       to: "#",
       title: t("dashboard.processesTitle"),

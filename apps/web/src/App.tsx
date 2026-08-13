@@ -8,7 +8,6 @@ import { BootSplash } from "./components/BootSplash";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { GiteaPage } from "./pages/GiteaPage";
 
 export function App() {
   const loadBootstrap = useAppStore((s) => s.loadBootstrap);
@@ -31,7 +30,6 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
           <Route path="chat" element={<ChatPage />} />
-          <Route path="gitea" element={<GiteaPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

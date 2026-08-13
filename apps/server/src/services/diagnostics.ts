@@ -31,7 +31,6 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     opencodeApiKey,
     anthropicApiKey,
     openaiApiKey,
-    giteaToken,
     ...rest
   } = settings;
   return {
@@ -40,7 +39,6 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     opencodeApiKey: opencodeApiKey ? "[set]" : "",
     anthropicApiKey: anthropicApiKey ? "[set]" : "",
     openaiApiKey: openaiApiKey ? "[set]" : "",
-    giteaToken: giteaToken ? "[set]" : "",
   };
 }
 

@@ -37,13 +37,6 @@ import {
   syncSessionAgent,
   warmAcp,
 } from "./acp/sessionManager.js";
-import {
-  aiCommit,
-  createPullRequest,
-  getGiteaStatus,
-  listGiteaJobs,
-  resolveConflicts,
-} from "./services/gitea.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import { openPath } from "./services/openPath.js";
@@ -82,10 +75,6 @@ const settingsSchema = z.object({
   openaiApiKey: z.string().optional(),
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
   permissionAllowlist: z.array(z.string()).optional(),
-  giteaBaseUrl: z.string().optional(),
-  giteaToken: z.string().optional(),
-  giteaOwner: z.string().optional(),
-  giteaRepo: z.string().optional(),
   diagnosticsDir: z.string().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
@@ -463,28 +452,6 @@ export async function registerRoutes(app: FastifyInstance) {
     answerQuestion(id, requestId, body.result);
     return { ok: true };
   });
-
-  app.get("/api/gitea/status", async () => getGiteaStatus());
-  app.get("/api/gitea/jobs", async () => listGiteaJobs());
-
-  app.post("/api/gitea/commit", async (req) => {
-    const body = z.object({ message: z.string().optional() }).parse(req.body ?? {});
-    return aiCommit(body.message);
-  });
-
-  app.post("/api/gitea/pr", async (req) => {
-    const body = z
-      .object({
-        title: z.string().optional(),
-        body: z.string().optional(),
-        head: z.string().optional(),
-        base: z.string().optional(),
-      })
-      .parse(req.body ?? {});
-    return createPullRequest(body);
-  });
-
-  app.post("/api/gitea/conflicts", async () => resolveConflicts());
 
   app.get("/api/diagnostics", async () => listDiagnosticsDumps());
   app.get("/api/diagnostics/default-dir", async () => ({

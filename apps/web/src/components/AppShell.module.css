@@ -280,37 +280,6 @@
   padding: 2px 4px 0;
 }
 
-.modulePanel {
-  display: grid;
-  gap: 10px;
-  padding: 4px;
-  flex: 1;
-}
-
-.metaRow {
-  display: grid;
-  gap: 2px;
-  padding: 10px 12px;
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  min-width: 0;
-}
-
-.metaRow span {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
-.metaRow strong {
-  font-size: 0.9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .emptyHint {
   margin: 8px 4px;
   color: var(--text-secondary);
@@ -2217,15 +2186,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.settingsItemDisabled {
-  opacity: 0.48;
-  color: var(--text-secondary);
-}
-
-.settingsItemDisabled:hover {
-  background: transparent;
 }
 
 .settingsLeaves {

@@ -93,7 +93,6 @@ function redactClientSettings(settings: AppSettings) {
     opencodeApiKey: settings.opencodeApiKey ? "[set]" : "",
     anthropicApiKey: settings.anthropicApiKey ? "[set]" : "",
     openaiApiKey: settings.openaiApiKey ? "[set]" : "",
-    giteaToken: settings.giteaToken ? "[set]" : "",
   };
 }
 

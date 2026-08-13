@@ -21,7 +21,6 @@ import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
 import { DashboardPage } from "../pages/DashboardPage";
 import { ChatPage } from "../pages/ChatPage";
-import { GiteaPage } from "../pages/GiteaPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import styles from "./AppShell.module.css";
 
@@ -43,7 +42,6 @@ function readStoredWidth() {
 function ShellPage({ pathname }: { pathname: string }) {
   if (pathname === "/" || pathname === "") return <DashboardPage />;
   if (pathname.startsWith("/chat")) return <ChatPage />;
-  if (pathname.startsWith("/gitea")) return <GiteaPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
   return <DashboardPage />;
 }
@@ -121,14 +119,12 @@ export function AppShell() {
   }, [agentTipOpen]);
 
   const isChat = pathname.startsWith("/chat");
-  const isGitea = pathname.startsWith("/gitea");
   const isSettings = pathname.startsWith("/settings");
-  const showSidebar = isChat || isGitea || isSettings;
+  const showSidebar = isChat || isSettings;
 
   const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
     agent: true,
-    gitea: true,
   });
   const [sidebarWidth, setSidebarWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
@@ -258,13 +254,11 @@ export function AppShell() {
     [settings.defaultModel, t],
   );
 
-  const title = isGitea
-    ? t("common.gitea")
-    : isSettings
-      ? t("common.settings")
-      : isChat
-        ? t("common.chat")
-        : t("common.dashboard");
+  const title = isSettings
+    ? t("common.settings")
+    : isChat
+      ? t("common.chat")
+      : t("common.dashboard");
 
   const goDashboard = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
@@ -332,42 +326,12 @@ export function AppShell() {
 
           {isChat && <ChatSidebar focusSearchSignal={searchFocusToken} />}
 
-          {isGitea && (
-            <div className={styles.modulePanel}>
-              <div className={styles.metaRow}>
-                <span>URL</span>
-                <strong>{settings.giteaBaseUrl || "—"}</strong>
-              </div>
-              <div className={styles.metaRow}>
-                <span>Repo</span>
-                <strong>
-                  {settings.giteaOwner || "—"}/{settings.giteaRepo || "—"}
-                </strong>
-              </div>
-              <p className={styles.emptyHint}>{t("common.giteaSidebarHint")}</p>
-            </div>
-          )}
-
           {isSettings && (
             <nav className={styles.settingsTree} aria-label={t("common.settingsSections")}>
               {settingsTree.map((branch) => {
                 const open = openBranches[branch.id] ?? true;
                 const activeBranch = settingsNav.section === branch.id;
                 const hasChildren = branch.children.length > 0;
-                const disabled = branch.id === "gitea";
-
-                if (disabled) {
-                  return (
-                    <div key={branch.id} className={styles.settingsBranch}>
-                      <HoverTip
-                        className={`${styles.settingsItem} ${styles.settingsItemDisabled}`}
-                        aria-disabled="true"
-                      >
-                        <span className={styles.settingsItemLabel}>{branch.label}</span>
-                      </HoverTip>
-                    </div>
-                  );
-                }
 
                 return (
                   <div key={branch.id} className={styles.settingsBranch}>
@@ -519,18 +483,6 @@ export function AppShell() {
                       <circle cx="14.5" cy="12" r="1.3" fill="currentColor" />
                       <path
                         d="M9.5 15.5h5"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  ) : branch.id === "gitea" ? (
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <circle cx="6" cy="6" r="2.6" stroke="currentColor" strokeWidth="1.7" />
-                      <path d="M6 3.4v9.2" stroke="currentColor" strokeWidth="1.7" />
-                      <circle cx="18" cy="18" r="2.6" stroke="currentColor" strokeWidth="1.7" />
-                      <path
-                        d="M18 9.2a8.8 8.8 0 0 1-8.8 8.8"
                         stroke="currentColor"
                         strokeWidth="1.7"
                         strokeLinecap="round"

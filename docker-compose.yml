@@ -17,36 +17,5 @@ services:
       timeout: 5s
       retries: 10
 
-  gitea:
-    image: gitea/gitea:1.22.3
-    container_name: acprocess-gitea
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-      - "2222:22"
-    environment:
-      USER_UID: "1000"
-      USER_GID: "1000"
-      GITEA__server__DOMAIN: localhost
-      GITEA__server__ROOT_URL: http://localhost:3000/
-      GITEA__server__HTTP_PORT: "3000"
-      GITEA__server__DISABLE_SSH: "false"
-      GITEA__server__SSH_DOMAIN: localhost
-      GITEA__server__SSH_PORT: "2222"
-      GITEA__database__DB_TYPE: sqlite3
-      GITEA__database__PATH: /data/gitea/gitea.db
-      GITEA__security__INSTALL_LOCK: "true"
-      GITEA__service__DISABLE_REGISTRATION: "false"
-      GITEA__service__REQUIRE_SIGNIN_VIEW: "false"
-      GITEA__webhook__ALLOWED_HOST_LIST: "*"
-    volumes:
-      - gitea_data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/v1/version || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
 volumes:
   acprocess_pg:
-  gitea_data:

@@ -46,10 +46,6 @@ export interface AppSettings {
   openaiApiKey: string;
   permissionPolicy: PermissionPolicy;
   permissionAllowlist: string[];
-  giteaBaseUrl: string;
-  giteaToken: string;
-  giteaOwner: string;
-  giteaRepo: string;
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
   diagnosticsDir: string;
   /**
@@ -92,10 +88,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openaiApiKey: "",
   permissionPolicy: "always",
   permissionAllowlist: [],
-  giteaBaseUrl: "http://localhost:3000",
-  giteaToken: "",
-  giteaOwner: "acprocess",
-  giteaRepo: "demo",
   diagnosticsDir: "",
   multitask: false,
   sidebarCollapse: "full",
@@ -478,30 +470,6 @@ export type WsClientEvent =
   | { type: "ping" }
   | { type: "subscribe"; sessionId: string }
   | { type: "unsubscribe"; sessionId: string };
-
-export interface GiteaStatusDto {
-  configured: boolean;
-  baseUrl: string;
-  owner: string;
-  repo: string;
-  branch: string | null;
-  dirty: boolean;
-  ahead: number;
-  behind: number;
-  conflicted: string[];
-  diffStat: string;
-  error?: string;
-}
-
-export interface GiteaJobDto {
-  id: string;
-  kind: "commit" | "pr" | "conflicts";
-  status: "pending" | "running" | "done" | "error";
-  result: Record<string, unknown> | null;
-  error: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface ModelParamDto {
   id: string;

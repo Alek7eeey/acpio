@@ -1,7 +1,7 @@
 # ACProcess
 
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode / OMP / PI).
-Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme, Gitea wrapper.
+Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
 ## Stack
 
