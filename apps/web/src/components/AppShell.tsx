@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { modelDisplayName } from "@acprocess/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
@@ -89,6 +90,35 @@ export function AppShell() {
       status: agentOnline ? t("common.online") : t("common.offline"),
     });
   }, [settings.connectedProvider, agentOnline, t]);
+
+  // Popover on the header agent chip: hover (desktop) / tap (touch) shows
+  // agent name, default model and connection status.
+  const [agentTipOpen, setAgentTipOpen] = useState(false);
+  const agentChipRef = useRef<HTMLDivElement>(null);
+  const agentTipTimer = useRef<number | null>(null);
+
+  const openAgentTip = () => {
+    if (agentTipTimer.current) window.clearTimeout(agentTipTimer.current);
+    agentTipTimer.current = null;
+    setAgentTipOpen(true);
+  };
+  const closeAgentTip = () => {
+    if (agentTipTimer.current) window.clearTimeout(agentTipTimer.current);
+    agentTipTimer.current = window.setTimeout(() => setAgentTipOpen(false), 200);
+  };
+
+  useEffect(() => {
+    if (!agentTipOpen) return;
+    const onDocPointerDown = (e: globalThis.PointerEvent) => {
+      if (agentChipRef.current && !agentChipRef.current.contains(e.target as Node)) {
+        if (agentTipTimer.current) window.clearTimeout(agentTipTimer.current);
+        agentTipTimer.current = null;
+        setAgentTipOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [agentTipOpen]);
 
   const isChat = pathname.startsWith("/chat");
   const isGitea = pathname.startsWith("/gitea");
@@ -219,6 +249,14 @@ export function AppShell() {
     if (provider === "pi") return "PI";
     return provider;
   }, [settings.connectedProvider, t]);
+
+  const modelName = useMemo(
+    () =>
+      settings.defaultModel
+        ? modelDisplayName(settings.defaultModel, undefined, t("models.default"))
+        : "—",
+    [settings.defaultModel, t],
+  );
 
   const title = isGitea
     ? t("common.gitea")
@@ -604,14 +642,58 @@ export function AppShell() {
           <div className={styles.headerSpacer} />
           <div className={styles.headerActions}>
             <div
-              className={`${styles.agentChip}${hasAgent ? "" : ` ${styles.agentChipUnset}`}`}
-              title={agentStatusTitle}
+              ref={agentChipRef}
+              className={styles.agentChipWrap}
             >
-              <span
-                className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
-                aria-hidden
-              />
-              <span className={styles.agentChipText}>{agentLabel}</span>
+              <button
+                type="button"
+                className={styles.agentChip}
+                aria-haspopup="true"
+                aria-expanded={agentTipOpen}
+                aria-label={agentStatusTitle}
+                onPointerEnter={(e) => {
+                  if (e.pointerType === "mouse") openAgentTip();
+                }}
+                onPointerLeave={(e) => {
+                  if (e.pointerType === "mouse") closeAgentTip();
+                }}
+                onPointerDown={(e) => {
+                  if (e.pointerType !== "mouse") setAgentTipOpen((v) => !v);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setAgentTipOpen((v) => !v);
+                  }
+                }}
+              >
+                <span
+                  className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
+                  aria-hidden
+                />
+                <span className={styles.agentChipModel}>{modelName}</span>
+              </button>
+              {agentTipOpen ? (
+                <div className={styles.agentTip} role="tooltip">
+                  <div className={styles.agentTipRow}>
+                    <span
+                      className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
+                      aria-hidden
+                    />
+                    <span className={styles.agentTipName}>{agentLabel}</span>
+                  </div>
+                  <div className={styles.agentTipLine}>
+                    <span className={styles.agentTipLabel}>{t("settings.modelSection")}</span>
+                    <span className={styles.agentTipValue}>{settings.defaultModel || "—"}</span>
+                  </div>
+                  <div className={styles.agentTipLine}>
+                    <span className={styles.agentTipLabel}>{t("common.status")}</span>
+                    <span className={agentOnline ? styles.agentTipOk : styles.agentTipBad}>
+                      {agentOnline ? t("common.connected") : t("common.notConnected")}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div className={styles.toolCluster} role="group" aria-label={t("common.toolbar")}>
               <LocaleToggle triggerClassName={styles.toolClusterLocale} compact />

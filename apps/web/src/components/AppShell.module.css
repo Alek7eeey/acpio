@@ -2302,13 +2302,20 @@
   margin-left: auto;
 }
 
+/* Agent status chip — a status dot + the default model name. On mobile it
+   collapses to the bare dot (the model name lives in the tap popup). */
+.agentChipWrap {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
 .agentChip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  max-width: min(168px, 32vw);
-  height: 38px;
-  padding: 0 12px;
+  gap: 7px;
+  height: 30px;
+  max-width: min(180px, 34vw);
+  padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -2316,18 +2323,13 @@
   font-size: 0.78rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: border-color var(--motion), color var(--motion);
 }
 
-.agentChipText {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.agentChipUnset {
-  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
-  color: color-mix(in srgb, var(--danger) 78%, var(--text-secondary));
+.agentChip:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 
 .agentChip .dot {
@@ -2344,6 +2346,92 @@
 .agentChip .dot.on {
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.agentChipModel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.agentTip {
+  /* Anchored to the header (position: relative, spans the viewport), so the
+     popup always sits at the top-right and never overflows on narrow screens. */
+  position: absolute;
+  top: calc(100% + 8px);
+  right: max(12px, env(safe-area-inset-right, 0px));
+  z-index: 300;
+  width: max-content;
+  min-width: min(210px, calc(100vw - 24px));
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 11px 13px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.agentTipRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentTip .dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.agentTip .dot.off {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+.agentTip .dot.on {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.agentTipName {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.agentTipLine {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.agentTipLabel {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.agentTipValue {
+  color: var(--text);
+  text-align: right;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.agentTipOk {
+  color: var(--success);
+  font-weight: 650;
+}
+
+.agentTipBad {
+  color: var(--danger);
+  font-weight: 650;
 }
 
 .toolCluster {
@@ -2586,7 +2674,8 @@
 
 @media (max-width: 899px) {
   .withSidebar,
-  .withSidebar.sidebarCollapsed {
+  .withSidebar.sidebarCollapsed,
+  .withSidebar.sidebarCollapsed.railCollapsed {
     grid-template-columns: 1fr;
   }
 
@@ -2723,33 +2812,20 @@
     gap: 0 !important;
   }
 
-  .agentChipText {
-    display: none;
-  }
-
+  /* Mobile: collapse the agent chip to a bare status dot. */
   .agentChip {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
     max-width: none;
-    width: 22px;
-    height: 22px;
-    min-width: 22px;
     padding: 0;
     justify-content: center;
-    flex-shrink: 0;
-    border-radius: 999px;
     gap: 0;
+    flex-shrink: 0;
   }
 
-  .agentChip .dot {
-    width: 5px;
-    height: 5px;
-  }
-
-  .agentChip .dot.off {
-    box-shadow: 0 0 0 1.5px var(--danger-soft);
-  }
-
-  .agentChip .dot.on {
-    box-shadow: 0 0 0 1.5px var(--success-soft);
+  .agentChipModel {
+    display: none;
   }
 
   .collapseBtn {

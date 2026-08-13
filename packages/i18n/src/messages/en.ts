@@ -72,6 +72,7 @@ export const en = {
     default: "Default",
     notSet: "Not set",
     connected: "Connected",
+    status: "Status",
     connect: "Connect",
     check: "Check",
     checking: "Checking…",

@@ -90,6 +90,7 @@ export const ru = {
     default: "По умолчанию",
     notSet: "Не задана",
     connected: "Подключён",
+    status: "Статус",
     connect: "Подключить",
     check: "Проверить",
     checking: "Проверяю…",
