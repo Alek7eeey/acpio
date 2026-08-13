@@ -1828,8 +1828,6 @@ export function ChatPage() {
   const [scrolledAway, setScrolledAway] = useState(false);
   const scrollRafRef = useRef(0);
   const threadInnerRef = useRef<HTMLDivElement>(null);
-  const streamingRef = useRef(streaming);
-  streamingRef.current = streaming;
 
   const scrollThreadToEnd = () => {
     const thread = threadRef.current;
@@ -1847,11 +1845,11 @@ export function ChatPage() {
   };
 
   const scheduleScrollToEnd = () => {
-    if (!stickToBottomRef.current && !streamingRef.current && !userJustSentRef.current) return;
+    if (!stickToBottomRef.current && !userJustSentRef.current) return;
     if (scrollRafRef.current) return;
     scrollRafRef.current = window.requestAnimationFrame(() => {
       scrollRafRef.current = 0;
-      if (stickToBottomRef.current || streamingRef.current || userJustSentRef.current) {
+      if (stickToBottomRef.current || userJustSentRef.current) {
         scrollThreadToEnd();
       }
     });
@@ -1873,11 +1871,6 @@ export function ChatPage() {
     const onScroll = () => {
       if (suppressScrollWatchRef.current) return;
       // Growth during stream can temporarily look like "scrolled away" before we catch up.
-      if (streamingRef.current || userJustSentRef.current) {
-        stickToBottomRef.current = true;
-        setScrolledAway(false);
-        return;
-      }
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
       const stuck = gap < 140;
       stickToBottomRef.current = stuck;
@@ -1891,7 +1884,7 @@ export function ChatPage() {
     const inner = threadInnerRef.current;
     if (!inner || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (stickToBottomRef.current || streamingRef.current || userJustSentRef.current) {
+      if (stickToBottomRef.current || userJustSentRef.current) {
         scrollThreadToEnd();
       }
     });
@@ -1930,11 +1923,10 @@ export function ChatPage() {
       scrollThreadToEnd();
       return;
     }
-    // Follow while streaming; when the turn ends, don't hard-jump (composer
-    // chrome changes would otherwise look like a full remount).
+    // Follow while streaming — but only when the user is already at the
+    // bottom; scrolled-away readers keep their place while thoughts grow.
     if (streaming) {
-      stickToBottomRef.current = true;
-      scrollThreadToEnd();
+      if (stickToBottomRef.current) scrollThreadToEnd();
       return;
     }
     if (!stickToBottomRef.current) return;
