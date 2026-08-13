@@ -18,9 +18,38 @@ import { ModelPicker } from "../components/ModelPicker";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
+import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "opencode", "omp", "pi"] as const satisfies readonly AgentProvider[];
+
+function SchemeCard({
+  active,
+  name,
+  colors,
+  onClick,
+}: {
+  active: boolean;
+  name: string;
+  colors: string[];
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`${styles.schemeCard}${active ? ` ${styles.schemeCardActive}` : ""}`}
+      aria-pressed={active}
+      onClick={onClick}
+    >
+      <span className={styles.schemeDots} aria-hidden>
+        {colors.map((c, i) => (
+          <span key={i} className={styles.schemeDot} style={{ background: c }} />
+        ))}
+      </span>
+      <span className={styles.schemeCardName}>{name}</span>
+    </button>
+  );
+}
 
 function formatTokenCount(n: number) {
   if (!Number.isFinite(n)) return "—";
@@ -326,8 +355,10 @@ export function SettingsPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Never send defaultProvider from the form submit — only "Connect" binds an agent.
-    const { defaultProvider: _provider, ...rest } = form;
+    // Never send defaultProvider or theme from the form submit — the agent is
+    // bound via "Connect", and the theme is toggled only from the toolbar, so
+    // a stale form value must not flip the interface on a settings save.
+    const { defaultProvider: _provider, theme: _theme, ...rest } = form;
     await saveSettings(rest);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
@@ -338,7 +369,7 @@ export function SettingsPage() {
   ) => {
     const next = { ...form, [key]: "" };
     setForm(next);
-    const { defaultProvider: _provider, ...rest } = next;
+    const { defaultProvider: _provider, theme: _theme, ...rest } = next;
     await saveSettings(rest);
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
@@ -479,6 +510,43 @@ export function SettingsPage() {
             </div>
 
             <div className={styles.sectionBlock}>
+              <label>
+                {t("settings.fontFamily")}
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.fontFamily")}
+                  value={form.fontFamily ?? ""}
+                  onChange={(v) => patch("fontFamily", v)}
+                  options={[
+                    { value: "", label: t("common.default") },
+                    { value: "figtree", label: "Figtree" },
+                    { value: "inter", label: "Inter" },
+                    { value: "system", label: t("settings.fontSystem") },
+                  ]}
+                />
+              </label>
+              <p className={styles.fieldHint}>{t("settings.fontFamilyHint")}</p>
+
+              <label>
+                {t("settings.fontSize")}
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.fontSize")}
+                  value={form.fontSize ?? ""}
+                  onChange={(v) => patch("fontSize", v)}
+                  options={[
+                    { value: "", label: t("common.default") },
+                    { value: "sm", label: t("settings.fontSizeSmall") },
+                    { value: "lg", label: t("settings.fontSizeLarge") },
+                  ]}
+                />
+              </label>
+              <p className={styles.fieldHint}>{t("settings.fontSizeHint")}</p>
+            </div>
+
+            <div className={styles.sectionBlock}>
               <label className={`${styles.switchCard} ${form.showBootSplash ? styles.switchCardOn : ""}`}>
                 <input
                   type="checkbox"
@@ -504,6 +572,62 @@ export function SettingsPage() {
                   <span />
                 </span>
               </label>
+            </div>
+          </section>
+        )}
+
+        {section === "interface" && leaf === "colors" && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <h2 className={styles.sectionHeading}>{t("settings.lightScheme")}</h2>
+              <p className={styles.fieldHint}>{t("settings.lightSchemeHint")}</p>
+              <div className={styles.schemeGrid}>
+                <SchemeCard
+                  active={!form.lightScheme}
+                  name={t("common.default")}
+                  colors={[
+                    SYSTEM_SWATCH.light.accent,
+                    SYSTEM_SWATCH.light.bg,
+                    SYSTEM_SWATCH.light.surface,
+                  ]}
+                  onClick={() => patch("lightScheme", "")}
+                />
+                {LIGHT_SCHEMES.map((s) => (
+                  <SchemeCard
+                    key={s.id}
+                    active={form.lightScheme === s.id}
+                    name={s.name}
+                    colors={[s.vars["--accent"], s.vars["--bg"], s.vars["--surface"]]}
+                    onClick={() => patch("lightScheme", s.id)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.sectionBlock}>
+              <h2 className={styles.sectionHeading}>{t("settings.darkScheme")}</h2>
+              <p className={styles.fieldHint}>{t("settings.darkSchemeHint")}</p>
+              <div className={styles.schemeGrid}>
+                <SchemeCard
+                  active={!form.darkScheme}
+                  name={t("common.default")}
+                  colors={[
+                    SYSTEM_SWATCH.dark.accent,
+                    SYSTEM_SWATCH.dark.bg,
+                    SYSTEM_SWATCH.dark.surface,
+                  ]}
+                  onClick={() => patch("darkScheme", "")}
+                />
+                {DARK_SCHEMES.map((s) => (
+                  <SchemeCard
+                    key={s.id}
+                    active={form.darkScheme === s.id}
+                    name={s.name}
+                    colors={[s.vars["--accent"], s.vars["--bg"], s.vars["--surface"]]}
+                    onClick={() => patch("darkScheme", s.id)}
+                  />
+                ))}
+              </div>
             </div>
           </section>
         )}

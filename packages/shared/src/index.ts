@@ -62,6 +62,14 @@ export interface AppSettings {
   sidebarCollapse: "full" | "rail";
   /** Show the animated boot splash on app start. */
   showBootSplash: boolean;
+  /** Font family id ("" = default). */
+  fontFamily: string;
+  /** Root font-size id ("" = default). */
+  fontSize: string;
+  /** Light theme palette id ("" = default system palette). */
+  lightScheme: string;
+  /** Dark theme palette id ("" = default system palette). */
+  darkScheme: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -92,6 +100,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   multitask: false,
   sidebarCollapse: "full",
   showBootSplash: true,
+  fontFamily: "",
+  fontSize: "",
+  lightScheme: "",
+  darkScheme: "",
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {

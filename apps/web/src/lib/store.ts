@@ -15,6 +15,7 @@ import type {
 } from "@acprocess/shared";
 import { DEFAULT_SETTINGS, isModelAccessError, usesCloudModelCatalog } from "@acprocess/shared";
 import { api } from "./api";
+import { applyAppearance } from "./appearance";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
@@ -449,6 +450,7 @@ async function loadAppData(
     storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "ru";
   get().applyTheme(theme);
   get().applyLocale(locale);
+  applyAppearance(settings);
   const sessions = await api.listSessions();
   set({ settings: { ...settings, theme, locale }, sessions, themes: [] });
   const provider = get().settings.connectedProvider;
@@ -665,6 +667,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().applyTheme(theme);
     const settings = await api.updateSettings({ theme });
     set({ settings });
+    applyAppearance(settings);
   },
 
   async setLocale(locale) {
@@ -1363,6 +1366,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings });
+    applyAppearance(settings);
     const providerToLoad =
       nextPatch.connectedProvider ?? (providerChanged ? settings.defaultProvider : null);
     if (providerToLoad) {

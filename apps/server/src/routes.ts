@@ -79,6 +79,10 @@ const settingsSchema = z.object({
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   showBootSplash: z.boolean().optional(),
+  fontFamily: z.string().optional(),
+  fontSize: z.string().optional(),
+  lightScheme: z.string().optional(),
+  darkScheme: z.string().optional(),
 });
 
 async function agentConnected(): Promise<AgentProvider | null> {

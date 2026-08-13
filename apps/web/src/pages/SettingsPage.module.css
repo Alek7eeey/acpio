@@ -318,6 +318,53 @@
   color: var(--text);
 }
 
+.schemeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.schemeCard {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  border-radius: 12px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color var(--motion);
+}
+
+.schemeCard:hover {
+  border-color: var(--text-secondary);
+}
+
+.schemeCardActive,
+.schemeCardActive:hover {
+  border-color: var(--accent);
+}
+
+.schemeDots {
+  display: flex;
+  gap: 5px;
+}
+
+.schemeDot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.schemeCardName {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .remoteTips {
   margin: 8px 0 0;
   padding-left: 1.2em;

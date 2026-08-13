@@ -125,7 +125,7 @@ export function OptionPicker({
 
   return (
     <div
-      className={`${styles.modelPicker} ${compact ? "" : styles.block} ${quiet ? styles.quiet : ""} ${className ?? ""}`}
+      className={`${styles.modelPicker} ${compact ? "" : styles.block} ${quiet ? styles.quiet : ""} ${open ? styles.modelPickerOpen : ""} ${className ?? ""}`}
       ref={rootRef}
     >
       <button

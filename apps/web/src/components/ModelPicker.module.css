@@ -7,6 +7,13 @@
   isolation: isolate;
 }
 
+/* The menu is inside the picker's stacking context (isolation: isolate), so
+   raise the whole picker when open — otherwise the next picker (same z-index,
+   later in DOM) paints over the dropdown. */
+.modelPickerOpen {
+  z-index: 150;
+}
+
 .block {
   width: 100%;
   align-self: stretch;
