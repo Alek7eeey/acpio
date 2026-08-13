@@ -116,7 +116,7 @@
   gap: 8px;
 }
 
-.card label.multitaskCard {
+.card label.switchCard {
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -157,7 +157,7 @@
   opacity: 0.6;
 }
 
-.multitaskInput {
+.switchInput {
   position: absolute;
   opacity: 0;
   width: 0;
@@ -165,7 +165,7 @@
   pointer-events: none;
 }
 
-.multitaskIcon {
+.switchIcon {
   display: grid;
   place-items: center;
   width: 16px;
@@ -175,35 +175,35 @@
   color: var(--text-secondary);
 }
 
-.multitaskIcon svg {
+.switchIcon svg {
   display: block;
 }
 
-.multitaskCardOn .multitaskIcon {
+.switchCardOn .switchIcon {
   color: var(--accent);
 }
 
-.multitaskBody {
+.switchBody {
   flex: 1;
   min-width: 0;
   display: grid;
   gap: 3px;
 }
 
-.multitaskBody strong {
+.switchBody strong {
   font-size: 0.9rem;
   font-weight: 650;
   color: var(--text);
   line-height: 1.3;
 }
 
-.multitaskBody span {
+.switchBody span {
   font-size: 0.78rem;
   line-height: 1.4;
   color: var(--text-secondary);
 }
 
-.multitaskSwitch {
+.switchSwitch {
   margin-left: auto;
   margin-top: 1px;
   position: relative;
@@ -215,7 +215,7 @@
   transition: background 0.18s ease;
 }
 
-.multitaskSwitch span {
+.switchSwitch span {
   position: absolute;
   top: 3px;
   left: 3px;
@@ -227,19 +227,33 @@
   transition: transform 0.18s ease;
 }
 
-.multitaskCardOn .multitaskSwitch {
+.switchCardOn .switchSwitch {
   background: var(--accent);
 }
 
-.multitaskCardOn .multitaskSwitch span {
+.switchCardOn .switchSwitch span {
   transform: translateX(17px);
+}
+
+/* The multitask toggle sits between dense field blocks in Agent → Advanced;
+   give it breathing room so it reads as its own group. */
+.sectionBlock.switchSection {
+  margin: 16px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+}
+
+.sectionBlock.switchSection label.switchCard {
+  margin-top: 0;
 }
 
 .cwdPickRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
-  align-items: start;
+  align-items: center;
 }
 
 .cwdPath {
@@ -248,13 +262,16 @@
   border: 1px solid var(--border);
   background: var(--bg);
   border-radius: 12px;
-  padding: 11px 12px;
+  padding: 10px 12px;
+  font-family: inherit;
   font-weight: 500;
   font-size: 0.88rem;
   color: var(--text);
   word-break: break-all;
   overflow-wrap: anywhere;
-  line-height: 1.45;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
 }
 
 @media (max-width: 700px) {

@@ -479,14 +479,14 @@ export function SettingsPage() {
             </div>
 
             <div className={styles.sectionBlock}>
-              <label className={`${styles.multitaskCard} ${form.showBootSplash ? styles.multitaskCardOn : ""}`}>
+              <label className={`${styles.switchCard} ${form.showBootSplash ? styles.switchCardOn : ""}`}>
                 <input
                   type="checkbox"
-                  className={styles.multitaskInput}
+                  className={styles.switchInput}
                   checked={Boolean(form.showBootSplash)}
                   onChange={(e) => patch("showBootSplash", e.target.checked)}
                 />
-                <span className={styles.multitaskIcon} aria-hidden>
+                <span className={styles.switchIcon} aria-hidden>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
                     <path
                       d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
@@ -496,11 +496,11 @@ export function SettingsPage() {
                     />
                   </svg>
                 </span>
-                <span className={styles.multitaskBody}>
+                <span className={styles.switchBody}>
                   <strong>{t("settings.showBootSplash")}</strong>
                   <span>{t("settings.showBootSplashHint")}</span>
                 </span>
-                <span className={styles.multitaskSwitch} aria-hidden>
+                <span className={styles.switchSwitch} aria-hidden>
                   <span />
                 </span>
               </label>
@@ -566,12 +566,17 @@ export function SettingsPage() {
               <label>
                 {t("settings.defaultFolder")}
                 <div className={styles.cwdPickRow}>
-                  <span
+                  <button
+                    type="button"
                     className={styles.cwdPath}
                     title={form.defaultCwd || undefined}
+                    onClick={() => {
+                      setFolderBrowseTarget("defaultCwd");
+                      setFolderBrowseOpen(true);
+                    }}
                   >
                     {form.defaultCwd || t("common.notSet")}
-                  </span>
+                  </button>
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -646,6 +651,34 @@ export function SettingsPage() {
                   </button>
                 </div>
               )}
+            </div>
+
+            <div className={`${styles.sectionBlock} ${styles.switchSection}`}>
+              <label className={`${styles.switchCard} ${form.multitask ? styles.switchCardOn : ""}`}>
+                <input
+                  type="checkbox"
+                  className={styles.switchInput}
+                  checked={Boolean(form.multitask)}
+                  onChange={(e) => patch("multitask", e.target.checked)}
+                />
+                <span className={styles.switchIcon} aria-hidden>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
+                      stroke="currentColor"
+                      strokeWidth="1.9"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className={styles.switchBody}>
+                  <strong>{t("settings.multitask")}</strong>
+                  <span>{t("settings.multitaskHint")}</span>
+                </span>
+                <span className={styles.switchSwitch} aria-hidden>
+                  <span />
+                </span>
+              </label>
             </div>
 
             <div className={styles.sectionBlock}>
