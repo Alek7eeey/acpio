@@ -305,6 +305,28 @@
   display: inline-block;
 }
 
+/* Product-suffix mark: this app is the chat part of a larger product —
+   a vertical divider, then "chat" in the brand accent (same as ACP). */
+.brandDivider {
+  width: 1.5px;
+  height: 1em;
+  margin-left: 9px;
+  background: var(--text-secondary);
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+
+.brandChatMark {
+  margin-left: 8px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-style: normal;
+  letter-spacing: -0.01em;
+  color: var(--accent);
+  white-space: nowrap;
+  user-select: none;
+}
+
 .chatPanel {
   flex: 1;
   min-height: 0;
@@ -2727,6 +2749,7 @@
     padding: 4px 6px;
     overflow: visible;
     align-self: center;
+    position: relative;
   }
 
   .brandLetters {
@@ -2734,6 +2757,30 @@
     text-overflow: unset;
     white-space: nowrap;
     max-width: none;
+  }
+
+  /* Mobile: "Chat" becomes a blue badge under the brand's right edge,
+     sticking slightly past the inscription. */
+  .brandDivider {
+    display: none;
+  }
+
+  .brandChatMark {
+    position: absolute;
+    right: -4px;
+    /* Button padding-bottom is 4px, so the letters' bottom sits 4px above
+       the button edge — start just below them, not over them. */
+    top: calc(100% - 3px);
+    margin: 0;
+    font-size: 0.58rem;
+    font-weight: 700;
+    font-style: normal;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    color: #fff;
+    background: var(--accent);
+    padding: 2px 5px;
+    border-radius: 5px;
   }
 
   .headerActions {
@@ -2758,8 +2805,6 @@
     display: grid;
     place-items: center;
     padding: 0;
-    font-size: 1.3rem;
-    line-height: 1;
     align-self: center;
   }
 
