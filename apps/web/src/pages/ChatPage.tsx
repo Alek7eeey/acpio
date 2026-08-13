@@ -2184,10 +2184,12 @@ export function ChatPage() {
           <button
             type="button"
             className={styles.jumpLatest}
-            onMouseDown={(e) => {
-              // The release can land on the thread content beneath the button
-              // (it floats over the scroll area), which suppresses `click` in
-              // some browsers — act on the press, which always hits the button.
+            onPointerDown={(e) => {
+              // Act on the press, not the release: the button floats over the
+              // scroll area, so the synthesized mouse/click events can land on
+              // the thread content beneath it (especially the left part after
+              // the composer shifts focus). pointerdown carries the correct
+              // target; preventDefault also suppresses the compat mouse events.
               e.preventDefault();
               scrollThreadToEnd();
             }}
