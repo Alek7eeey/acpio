@@ -153,6 +153,34 @@
   pointer-events: none;
 }
 
+.jumpLatestLabel {
+  white-space: nowrap;
+}
+
+/* Mobile: collapse the pill to a round arrow button — the text wraps and the
+   14px arrow is too small on narrow screens. Desktop keeps the pill. */
+@media (max-width: 899px) {
+  .jumpLatest {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+    box-shadow:
+      0 2px 4px rgb(15 23 42 / 14%),
+      0 6px 18px rgb(15 23 42 / 12%);
+  }
+
+  .jumpLatestLabel {
+    display: none;
+  }
+
+  .jumpLatest svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
 .queueBar {
   display: grid;
   gap: 6px;

@@ -2201,7 +2201,7 @@ export function ChatPage() {
                 strokeLinejoin="round"
               />
             </svg>
-            {t("chat.jumpToLatest")}
+            <span className={styles.jumpLatestLabel}>{t("chat.jumpToLatest")}</span>
           </button>
         ) : null}
         <div className={styles.composerInner}>
