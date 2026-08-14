@@ -262,6 +262,7 @@ export const ru = {
     voiceListening: "Говорите… Нажмите, чтобы остановить",
     voiceUnsupported: "Голосовой ввод не поддерживается этим браузером",
     voiceBlocked: "Доступ к микрофону запрещён — разрешите его в браузере",
+    loadingChat: "Загружаем чат…",
   },
   settings: {
     agents: "Агенты",
@@ -330,6 +331,7 @@ export const ru = {
     interface: "Интерфейс",
     appearance: "Оформление",
     colors: "Цвета",
+    colorsDesc: "Палитры светлой и тёмной темы.",
     showBootSplash: "Анимация при запуске",
     showBootSplashHint: "Анимированный экран при старте приложения",
     fontFamily: "Шрифт",

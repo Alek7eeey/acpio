@@ -238,6 +238,7 @@ export const en = {
     voiceListening: "Listening… Tap to stop",
     voiceUnsupported: "Voice input is not supported by this browser",
     voiceBlocked: "Microphone access is blocked — allow it in the browser",
+    loadingChat: "Loading chat…",
   },
   settings: {
     agents: "Agents",
@@ -305,6 +306,7 @@ export const en = {
     interface: "Interface",
     appearance: "Appearance",
     colors: "Colors",
+    colorsDesc: "Palettes for the light and dark themes.",
     showBootSplash: "Show boot animation",
     showBootSplashHint: "Animated splash screen on app start",
     fontFamily: "Font",

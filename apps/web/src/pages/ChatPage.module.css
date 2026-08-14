@@ -104,6 +104,70 @@
   font-weight: 650;
 }
 
+/* Chat skeleton while the conversation is being fetched: mirrors the real
+   thread layout (assistant lines left, user bubbles right) and fills the
+   full chat height. */
+.threadSkeleton {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 22px;
+  width: min(840px, 100%);
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.skeletonTurn {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
+}
+
+.skeletonTurnUser {
+  justify-items: end;
+}
+
+.skeletonLine {
+  height: 15px;
+  width: var(--w, 50%);
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 25%,
+    color-mix(in srgb, var(--text) 14%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.3s ease-in-out infinite;
+}
+
+.skeletonBubble {
+  height: 38px;
+  min-width: 72px;
+  width: var(--w, 40%);
+  border-radius: 18px 18px 4px 18px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--surface) 45%, var(--text) 5%) 25%,
+    color-mix(in srgb, var(--surface) 30%, var(--text) 12%) 50%,
+    color-mix(in srgb, var(--surface) 45%, var(--text) 5%) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.3s ease-in-out infinite;
+}
+
+@keyframes skeletonShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
 .jumpLatest {
   position: absolute;
   bottom: calc(100% + 10px);

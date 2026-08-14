@@ -400,9 +400,11 @@ export function SettingsPage() {
 
   const title =
     section === "interface"
-      ? leaf === "voice"
-        ? t("settings.voiceTitle")
-        : t("settings.appearance")
+      ? leaf === "colors"
+        ? t("settings.colors")
+        : leaf === "voice"
+          ? t("settings.voiceTitle")
+          : t("settings.appearance")
       : section === "agent"
         ? leaf === "connect"
           ? t("settings.agentConnectTitle")
@@ -417,9 +419,11 @@ export function SettingsPage() {
 
   const subtitle =
     section === "interface"
-      ? leaf === "voice"
-        ? t("settings.voiceDesc")
-        : t("settings.sidebarCollapseHint")
+      ? leaf === "colors"
+        ? t("settings.colorsDesc")
+        : leaf === "voice"
+          ? t("settings.voiceDesc")
+          : t("settings.sidebarCollapseHint")
       : section === "agent" && leaf === "advanced"
         ? t("settings.agentAdvancedDesc")
         : section === "agent" && leaf === "remote"

@@ -10,6 +10,7 @@ import {
   type FormEvent,
   type MouseEvent,
   type ReactNode,
+  type CSSProperties,
 } from "react";
 import {
   isSubagentToolCall,
@@ -1607,12 +1608,31 @@ export function ChatPage() {
   const navigate = useNavigate();
   const { search } = useBrowserLocation();
   const activeSession = useAppStore((s) => s.activeSession);
+  const loading = useAppStore((s) => s.loading);
+  const sessionLoading = useAppStore((s) => s.sessionLoading);
   const selectSession = useAppStore((s) => s.selectSession);
   const focusMessageId = useAppStore((s) => s.focusMessageId);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
   const speakingMessageId = useAppStore((s) => s.speakingMessageId);
   const ttsLoading = useAppStore((s) => s.ttsLoading);
   const sessions = useAppStore((s) => s.sessions);
+  // Keep the skeleton visible for at least a moment so fast loads don't
+  // flash a blank thread. The timer runs once per appearance and survives
+  // the data arriving early (no cleanup on showSkeleton flip).
+  const [skeletonHold, setSkeletonHold] = useState(false);
+  const skeletonTimerRef = useRef<number | null>(null);
+  const showSkeleton =
+    sessionLoading || (!activeSession && (loading || sessions.length > 0));
+  useEffect(() => {
+    if (!showSkeleton) return;
+    setSkeletonHold(true);
+    if (skeletonTimerRef.current !== null) return;
+    skeletonTimerRef.current = window.setTimeout(() => {
+      skeletonTimerRef.current = null;
+      setSkeletonHold(false);
+    }, 350);
+  }, [showSkeleton]);
+  const renderSkeleton = showSkeleton || skeletonHold;
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
@@ -2490,8 +2510,39 @@ export function ChatPage() {
     <div className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""}`}>
       <div className={styles.mainColumn}>
       <div className={styles.thread} ref={threadRef}>
+        {renderSkeleton && (
+          <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
+            <div className={styles.skeletonTurn}>
+              <div className={styles.skeletonLine} style={{ "--w": "64%" } as CSSProperties} />
+              <div className={styles.skeletonLine} style={{ "--w": "86%" } as CSSProperties} />
+              <div className={styles.skeletonLine} style={{ "--w": "48%" } as CSSProperties} />
+            </div>
+            <div className={`${styles.skeletonTurn} ${styles.skeletonTurnUser}`}>
+              <div className={styles.skeletonBubble} style={{ "--w": "46%" } as CSSProperties} />
+            </div>
+            <div className={styles.skeletonTurn}>
+              <div className={styles.skeletonLine} style={{ "--w": "58%" } as CSSProperties} />
+              <div className={styles.skeletonLine} style={{ "--w": "74%" } as CSSProperties} />
+            </div>
+            <div className={`${styles.skeletonTurn} ${styles.skeletonTurnUser}`}>
+              <div className={styles.skeletonBubble} style={{ "--w": "34%" } as CSSProperties} />
+            </div>
+            <div className={styles.skeletonTurn}>
+              <div className={styles.skeletonLine} style={{ "--w": "70%" } as CSSProperties} />
+              <div className={styles.skeletonLine} style={{ "--w": "52%" } as CSSProperties} />
+            </div>
+            <div className={`${styles.skeletonTurn} ${styles.skeletonTurnUser}`}>
+              <div className={styles.skeletonBubble} style={{ "--w": "40%" } as CSSProperties} />
+            </div>
+            <div className={styles.skeletonTurn}>
+              <div className={styles.skeletonLine} style={{ "--w": "60%" } as CSSProperties} />
+              <div className={styles.skeletonLine} style={{ "--w": "80%" } as CSSProperties} />
+            </div>
+          </div>
+        )}
         <div className={styles.threadInner} ref={threadInnerRef}>
-        {!activeSession && (
+
+        {!activeSession && !sessionLoading && !loading && sessions.length === 0 && (
           <div className={styles.empty}>
             <h1>
               <span>ACP</span>rocess

@@ -88,6 +88,8 @@ type AppState = {
   activeSession: SessionDetailDto | null;
   /** Transient: message to scroll to/highlight once its session renders. */
   focusMessageId: string | null;
+  /** True while a session detail is being fetched (skeleton shown). */
+  sessionLoading: boolean;
   /** Message currently being read aloud ("" = silent). Drives the stop button. */
   speakingMessageId: string | null;
   /** True while the TTS engine is generating audio (stop button shows a spinner). */
@@ -479,6 +481,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeSessionId: null,
   activeSession: null,
   focusMessageId: null,
+  sessionLoading: false,
   speakingMessageId: null,
   ttsLoading: false,
   modelsCatalog: typeof window !== "undefined" ? readStoredModelsCatalog() : null,
@@ -697,6 +700,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         activeSessionId: null,
         activeSession: null,
+        sessionLoading: false,
         pendingPermission: null,
         permissionQueue: [],
         pendingQuestion: null,
@@ -724,6 +728,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       activeSessionId: id,
       activeSession: optimistic,
+      // Stay in "loading" while the same session is still being fetched
+      // (StrictMode double-mount re-selects it before the first fetch lands).
+      sessionLoading:
+        !cached && !(current?.id === id && (current.messages?.length ?? 0) > 0),
       pendingPermission: null,
       permissionQueue: [],
       pendingQuestion: null,
@@ -733,12 +741,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       const detail = await api.getSession(id);
       rememberSessionDetail(detail);
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
-      // Don't clobber an in-flight optimistic turn with a stale GET snapshot.
-      if (get().activeSession?.status === "running") return;
-      set({ activeSession: detail });
+      // Don't clobber an in-flight optimistic turn with a stale GET snapshot —
+      // but still deliver the fetched messages so a fresh load of a running
+      // session isn't left with an empty thread (skeleton would vanish first).
+      if (get().activeSession?.status === "running") {
+        const current = get().activeSession!;
+        set({
+          sessionLoading: false,
+          activeSession: {
+            ...current,
+            ...detail,
+            status: "running",
+            messages: current.messages.length ? current.messages : detail.messages,
+          },
+        });
+        return;
+      }
+      set({ activeSession: detail, sessionLoading: false });
     } catch (err) {
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
-      set({ error: err instanceof Error ? err.message : String(err) });
+      set({
+        error: err instanceof Error ? err.message : String(err),
+        sessionLoading: false,
+      });
     }
   },
 
