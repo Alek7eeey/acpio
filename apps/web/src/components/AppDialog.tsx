@@ -12,19 +12,26 @@ type AppDialogProps = {
 export function AppDialog({ title, description, children, onClose, actions }: AppDialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
+  // Mount-only: focus the first focusable field once when the dialog opens.
+  // Re-running per render (e.g. on every keystroke) would steal focus from a
+  // textarea back to a button.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     const prev = document.activeElement as HTMLElement | null;
-    panelRef.current?.querySelector<HTMLElement>("input,button")?.focus();
+    panelRef.current?.querySelector<HTMLElement>("input,button,textarea")?.focus();
     return () => {
       document.removeEventListener("keydown", onKey);
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div

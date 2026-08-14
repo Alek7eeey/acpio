@@ -86,6 +86,12 @@ type AppState = {
   themes: ChatThemeDto[];
   activeSessionId: string | null;
   activeSession: SessionDetailDto | null;
+  /** Transient: message to scroll to/highlight once its session renders. */
+  focusMessageId: string | null;
+  /** Message currently being read aloud ("" = silent). Drives the stop button. */
+  speakingMessageId: string | null;
+  /** True while the TTS engine is generating audio (stop button shows a spinner). */
+  ttsLoading: boolean;
   modelsCatalog: ModelsCatalog | null;
   modelsLoading: boolean;
   sidebarOpen: boolean;
@@ -117,6 +123,9 @@ type AppState = {
   refreshSessions: () => Promise<void>;
   refreshThemes: () => Promise<void>;
   selectSession: (id: string | null) => Promise<void>;
+  setFocusMessageId: (id: string | null) => void;
+  setSpeakingMessageId: (id: string | null) => void;
+  setTtsLoading: (loading: boolean) => void;
   createSession: (cwd?: string) => Promise<SessionDto>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
@@ -469,6 +478,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   themes: [],
   activeSessionId: null,
   activeSession: null,
+  focusMessageId: null,
+  speakingMessageId: null,
+  ttsLoading: false,
   modelsCatalog: typeof window !== "undefined" ? readStoredModelsCatalog() : null,
   modelsLoading:
     typeof window !== "undefined"
@@ -664,6 +676,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshThemes() {
     const themes = await api.listThemes();
     set({ themes });
+  },
+
+  setFocusMessageId(id) {
+    set({ focusMessageId: id });
+  },
+
+  setSpeakingMessageId(id) {
+    set({ speakingMessageId: id });
+  },
+
+  setTtsLoading(loading) {
+    set({ ttsLoading: loading });
   },
 
   async selectSession(id) {

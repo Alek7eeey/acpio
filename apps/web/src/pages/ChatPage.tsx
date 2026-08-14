@@ -1,4 +1,5 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { createPortal } from "react-dom";
 import {
   Fragment,
   useEffect,
@@ -18,11 +19,22 @@ import {
   type MessageDto,
   type MessagePartDto,
   type ModelParamDto,
+  type SessionDetailDto,
   type SlashCommandDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { useBrowserLocation } from "../lib/usePathname";
 import { sanitizeCatalogModes, useAppStore } from "../lib/store";
+import { submitDiagnosticsDump } from "../lib/diagnostics";
+import {
+  dominantLanguage,
+  startReadAloud,
+  stopReadAloud,
+  stripMarkdownForSpeech,
+} from "../lib/tts";
+import { removeLikedMessage, saveLikedMessage } from "../lib/likedMessages";
+import { AppDialog } from "../components/AppDialog";
 import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
 import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
@@ -85,6 +97,41 @@ function shouldAutoFocusComposer() {
   return window.matchMedia("(pointer: fine)").matches;
 }
 
+const MSG_RATING_KEY = "acprocess.msgRating.v1";
+type MsgRating = "like" | "dislike";
+
+function readMessageRating(messageId: string): MsgRating | null {
+  try {
+    const raw = localStorage.getItem(MSG_RATING_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, MsgRating>;
+    return map[messageId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeMessageRating(messageId: string, rating: MsgRating | null) {
+  try {
+    const raw = localStorage.getItem(MSG_RATING_KEY);
+    const map: Record<string, MsgRating> = raw ? JSON.parse(raw) : {};
+    if (rating === null) delete map[messageId];
+    else map[messageId] = rating;
+    localStorage.setItem(MSG_RATING_KEY, JSON.stringify(map));
+  } catch {
+    // ignore
+  }
+}
+
+/** Plain text of a message (text parts only) — shared by render + actions. */
+function messagePlainText(message: MessageDto): string {
+  return message.parts
+    .filter((p) => p.type === "text")
+    .map((p) => String(p.payload.text ?? ""))
+    .join("\n")
+    .trim();
+}
+
 function UserMessage({
   message,
   slashCommands,
@@ -95,11 +142,7 @@ function UserMessage({
   onEdit: (messageId: string, text: string) => void;
 }) {
   const t = useT();
-  const text = message.parts
-    .filter((p) => p.type === "text")
-    .map((p) => String(p.payload.text ?? ""))
-    .join("\n")
-    .trim();
+  const text = messagePlainText(message);
   const explicitCommand = message.parts.some(
     (p) => p.type === "text" && Boolean(p.payload.isSlashCommand),
   );
@@ -964,9 +1007,34 @@ function assistantPlainText(message: MessageDto) {
     .trim();
 }
 
-function MessageActions({ text, hidden = false }: { text: string; hidden?: boolean }) {
+function MessageActions({
+  message,
+  session,
+  onRegenerate,
+  hidden = false,
+}: {
+  message: MessageDto;
+  session: SessionDetailDto | null;
+  onRegenerate: () => void;
+  hidden?: boolean;
+}) {
   const t = useT();
+  const settings = useAppStore((s) => s.settings);
+  const speakingMessageId = useAppStore((s) => s.speakingMessageId);
+  const setSpeakingMessageId = useAppStore((s) => s.setSpeakingMessageId);
+  const setTtsLoading = useAppStore((s) => s.setTtsLoading);
+  const text = messagePlainText(message);
   const [copied, setCopied] = useState(false);
+  const [rating, setRatingState] = useState<MsgRating | null>(() => readMessageRating(message.id));
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [shareTip, setShareTip] = useState<{ x: number; y: number; link: string } | null>(null);
+  const [dislikeOpen, setDislikeOpen] = useState(false);
+  const [dislikeText, setDislikeText] = useState("");
+  const [dislikeBusy, setDislikeBusy] = useState(false);
+  const [dislikeDone, setDislikeDone] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const shareTipTimer = useRef<number | null>(null);
+  const speaking = speakingMessageId === message.id;
 
   const copy = async () => {
     if (!text) return;
@@ -979,6 +1047,127 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
     }
   };
 
+  /** Share a deep link to this message: open the same chat, jump to it. */
+  const share = async (e: MouseEvent<HTMLButtonElement>) => {
+    if (!text) return;
+    const base = typeof window !== "undefined" ? window.location.origin : "";
+    const link = `${base}/chat?session=${encodeURIComponent(session?.id ?? "")}&message=${encodeURIComponent(message.id)}`;
+    const rect = e.currentTarget.getBoundingClientRect();
+    try {
+      await navigator.clipboard.writeText(link);
+      setShareTip({
+        x: Math.min(rect.right - 224, window.innerWidth - 240),
+        y: rect.bottom + 6,
+        link,
+      });
+      if (shareTipTimer.current) window.clearTimeout(shareTipTimer.current);
+      shareTipTimer.current = window.setTimeout(() => setShareTip(null), 2600);
+    } catch {
+      // ignore
+    }
+  };
+
+  const setRating = (next: MsgRating | null) => {
+    writeMessageRating(message.id, next);
+    setRatingState(next);
+    // Keep the "liked" collection in sync: like → add, unlike/dislike → drop.
+    if (next === "like") {
+      saveLikedMessage({
+        messageId: message.id,
+        sessionId: session?.id ?? "",
+        sessionTitle: session?.title ?? "",
+        text,
+        at: new Date().toISOString(),
+      });
+    } else {
+      removeLikedMessage(message.id);
+    }
+  };
+
+  useEffect(() => {
+    // Stop read-aloud if this message unmounts (session switch, regeneration…).
+    return () => {
+      if (useAppStore.getState().speakingMessageId === message.id) stopReadAloud();
+      if (shareTipTimer.current) window.clearTimeout(shareTipTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message.id]);
+
+  const toggleSpeak = () => {
+    setMenuPos(null);
+    if (speaking) {
+      stopReadAloud();
+      return;
+    }
+    const clean = stripMarkdownForSpeech(text);
+    if (!clean) return;
+    // Flip the stop button immediately; the spinner shows while the engine
+    // generates the audio.
+    setSpeakingMessageId(message.id);
+    setTtsLoading(true);
+    startReadAloud(clean, dominantLanguage(clean), settings.ttsVoiceGender ?? "", {
+      onPlaying: () => setTtsLoading(false),
+      onEnd: () => {
+        setSpeakingMessageId(null);
+        setTtsLoading(false);
+      },
+    });
+  };
+
+  useEffect(() => {
+    if (!menuPos) return;
+    const onDown = (e: Event) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuPos(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuPos(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuPos]);
+
+  const openMenu = (e: MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMenuPos({
+      x: Math.min(rect.right - 184, window.innerWidth - 200),
+      y: rect.bottom + 6,
+    });
+  };
+
+  const submitDislike = async () => {
+    const comment = dislikeText.trim();
+    if (!comment || dislikeBusy) return;
+    setDislikeBusy(true);
+    try {
+      await submitDiagnosticsDump({
+        reason: "dislike",
+        note: comment,
+        sessionId: session?.id,
+        dislike: { messageId: message.id, role: message.role, text, comment },
+      });
+      setRating("dislike");
+      setDislikeDone(true);
+      window.setTimeout(() => {
+        setDislikeOpen(false);
+        setDislikeDone(false);
+        setDislikeText("");
+        setDislikeBusy(false);
+      }, 1400);
+    } catch {
+      setDislikeBusy(false);
+    }
+  };
+
+  const tabIndex = hidden ? -1 : undefined;
+  const likeActive = rating === "like";
+  const dislikeActive = rating === "dislike";
+
   return (
     <div
       className={`${styles.msgActions}${hidden ? ` ${styles.msgActionsHidden}` : ""}`}
@@ -990,12 +1179,20 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
         className={styles.msgAction}
         title={copied ? t("common.copied") : t("common.copy")}
         aria-label={t("common.copy")}
-        tabIndex={hidden ? -1 : undefined}
+        tabIndex={tabIndex}
         onClick={() => void copy()}
       >
         <IconCopy done={copied} />
       </button>
-      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.like")} text={t("common.soon")}>
+      <button
+        type="button"
+        className={`${styles.msgAction}${likeActive ? ` ${styles.msgActionActive}` : ""}`}
+        title={likeActive ? t("chat.liked") : t("common.like")}
+        aria-label={likeActive ? t("chat.liked") : t("common.like")}
+        aria-pressed={likeActive}
+        tabIndex={tabIndex}
+        onClick={() => setRating(likeActive ? null : "like")}
+      >
         <MsgIcon>
           <path
             d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
@@ -1004,8 +1201,16 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
             strokeLinejoin="round"
           />
         </MsgIcon>
-      </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.dislike")} text={t("common.soon")}>
+      </button>
+      <button
+        type="button"
+        className={`${styles.msgAction}${dislikeActive ? ` ${styles.msgActionActive}` : ""}`}
+        title={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+        aria-label={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+        aria-pressed={dislikeActive}
+        tabIndex={tabIndex}
+        onClick={() => setDislikeOpen(true)}
+      >
         <MsgIcon>
           <path
             d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
@@ -1014,8 +1219,15 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
             strokeLinejoin="round"
           />
         </MsgIcon>
-      </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.share")} text={t("common.soon")}>
+      </button>
+      <button
+        type="button"
+        className={styles.msgAction}
+        title={t("common.share")}
+        aria-label={t("common.share")}
+        tabIndex={tabIndex}
+        onClick={(e) => void share(e)}
+      >
         <MsgIcon>
           <path
             d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
@@ -1025,8 +1237,16 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
             strokeLinejoin="round"
           />
         </MsgIcon>
-      </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.retry")} text={t("common.soon")}>
+      </button>
+      <button
+        type="button"
+        className={styles.msgAction}
+        title={t("chat.regenerate")}
+        aria-label={t("chat.regenerate")}
+        disabled={!session}
+        tabIndex={tabIndex}
+        onClick={onRegenerate}
+      >
         <MsgIcon>
           <path
             d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
@@ -1036,14 +1256,116 @@ function MessageActions({ text, hidden = false }: { text: string; hidden?: boole
             strokeLinejoin="round"
           />
         </MsgIcon>
-      </HoverTip>
-      <HoverTip as="button" className={styles.msgAction} aria-label={t("common.more")} text={t("common.soon")}>
+      </button>
+      <button
+        type="button"
+        className={styles.msgAction}
+        title={t("common.more")}
+        aria-label={t("common.more")}
+        aria-haspopup="menu"
+        aria-expanded={Boolean(menuPos)}
+        tabIndex={tabIndex}
+        onClick={openMenu}
+      >
         <MsgIcon>
           <circle cx="5" cy="12" r="1.7" fill="currentColor" />
           <circle cx="12" cy="12" r="1.7" fill="currentColor" />
           <circle cx="19" cy="12" r="1.7" fill="currentColor" />
         </MsgIcon>
-      </HoverTip>
+      </button>
+
+      {menuPos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={styles.msgActionMenu}
+            style={{ left: menuPos.x, top: menuPos.y }}
+            role="menu"
+            aria-label={t("common.more")}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.msgActionMenuItem}
+              onClick={toggleSpeak}
+            >
+              <MsgIcon>
+                <path
+                  d="M4 9v6h3l5 4V5L7 9H4Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M16 8.5a4.5 4.5 0 0 1 0 7"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </MsgIcon>
+              {speaking ? t("chat.stopReading") : t("chat.readAloud")}
+            </button>
+          </div>,
+          document.body,
+        )}
+
+      {shareTip &&
+        createPortal(
+          <div
+            className={styles.msgShareTip}
+            style={{ left: shareTip.x, top: shareTip.y }}
+            role="status"
+          >
+            <span className={styles.msgShareTipLabel}>{t("chat.shareCopied")}</span>
+            <code className={styles.msgShareTipLink}>{shareTip.link}</code>
+          </div>,
+          document.body,
+        )}
+
+      {dislikeOpen &&
+        createPortal(
+          <AppDialog
+            title={t("chat.dislikeTitle")}
+            description={t("chat.dislikeDesc")}
+            onClose={() => {
+              if (!dislikeBusy) setDislikeOpen(false);
+            }}
+            actions={
+              dislikeDone ? (
+                <span className={styles.dislikeDone}>{t("chat.dislikeSent")}</span>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={styles.dialogGhost}
+                    disabled={dislikeBusy}
+                    onClick={() => setDislikeOpen(false)}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.dialogPrimary}
+                    disabled={!dislikeText.trim() || dislikeBusy}
+                    onClick={() => void submitDislike()}
+                  >
+                    {dislikeBusy ? t("chat.dislikeSending") : t("chat.dislikeSubmit")}
+                  </button>
+                </>
+              )
+            }
+          >
+            <textarea
+              className={styles.dislikeField}
+              value={dislikeText}
+              onChange={(e) => setDislikeText(e.target.value)}
+              placeholder={t("chat.dislikePlaceholder")}
+              rows={4}
+              autoFocus
+            />
+          </AppDialog>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -1163,10 +1485,14 @@ function lastTextPart(parts: MessagePartDto[]): MessagePartDto | null {
 
 function AssistantParts({
   message,
+  session,
+  onRegenerate,
   streaming,
   autoExpandSteps,
 }: {
   message: MessageDto;
+  session: SessionDetailDto | null;
+  onRegenerate: () => void;
   streaming: boolean;
   autoExpandSteps: boolean;
 }) {
@@ -1227,7 +1553,14 @@ function AssistantParts({
           />
         );
       })}
-      {plain ? <MessageActions text={plain} hidden={paintStreaming} /> : null}
+      {plain ? (
+        <MessageActions
+          message={message}
+          session={session}
+          onRegenerate={onRegenerate}
+          hidden={paintStreaming}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1250,7 +1583,14 @@ function findLatestPlan(session: { messages: MessageDto[] } | null): PlanPayload
 
 export function ChatPage() {
   const t = useT();
+  const navigate = useNavigate();
+  const { search } = useBrowserLocation();
   const activeSession = useAppStore((s) => s.activeSession);
+  const selectSession = useAppStore((s) => s.selectSession);
+  const focusMessageId = useAppStore((s) => s.focusMessageId);
+  const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
+  const speakingMessageId = useAppStore((s) => s.speakingMessageId);
+  const ttsLoading = useAppStore((s) => s.ttsLoading);
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
@@ -1524,6 +1864,78 @@ export function ChatPage() {
       void sendPrompt(value, editId ? { editMessageId: editId } : undefined);
     }
   };
+
+  /** Regenerate an assistant reply: resend its user prompt as an edit. */
+  const regenerate = (msg: MessageDto) => {
+    const messages = activeSession?.messages ?? [];
+    const idx = messages.findIndex((m) => m.id === msg.id);
+    for (let i = idx - 1; i >= 0; i -= 1) {
+      const prev = messages[i];
+      if (!prev || prev.role !== "user") continue;
+      const value = messagePlainText(prev);
+      if (!value.trim()) return;
+      // Same housekeeping as submitMessage: clear the composer, resend as an
+      // edit (the server truncates the old reply and regenerates it).
+      userJustSentRef.current = true;
+      setText("");
+      setEditingMessageId(null);
+      setCursorPos(0);
+      setComposerMultilineIfNeeded(false);
+      setSlashMenuDismissed(true);
+      const el = textareaRef.current;
+      if (el) el.style.height = "auto";
+      const send = () => sendPrompt(value, { editMessageId: prev.id });
+      if (shouldAutoFocusComposer()) {
+        focusComposer();
+        send().finally(() => {
+          requestAnimationFrame(focusComposer);
+          window.setTimeout(focusComposer, 0);
+          window.setTimeout(focusComposer, 100);
+        });
+      } else {
+        textareaRef.current?.blur();
+        void send();
+      }
+      return;
+    }
+  };
+
+  // Deep link ?session=<id>&message=<id> (share links, liked messages):
+  // open the chat and jump to the message, then clean the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const targetSession = params.get("session");
+    const targetMessage = params.get("message");
+    if (!targetSession && !targetMessage) return;
+    if (targetSession && targetSession !== useAppStore.getState().activeSessionId) {
+      void selectSession(targetSession);
+    }
+    if (targetMessage) setFocusMessageId(targetMessage);
+    navigate("/chat", { replace: true });
+  }, [search, navigate, selectSession, setFocusMessageId]);
+
+  // Scroll to + highlight the focused message once its session has rendered.
+  useEffect(() => {
+    if (!focusMessageId) return;
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      const el = document.querySelector(
+        `[data-message-id="${CSS.escape(focusMessageId)}"]`,
+      );
+      if (el) {
+        window.clearInterval(timer);
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add(styles.msgFocus);
+        window.setTimeout(() => el.classList.remove(styles.msgFocus), 2400);
+        setFocusMessageId(null);
+      } else if (tries >= 25) {
+        window.clearInterval(timer);
+        setFocusMessageId(null);
+      }
+    }, 120);
+    return () => window.clearInterval(timer);
+  }, [focusMessageId, setFocusMessageId]);
 
   const recentCwds = useMemo(
     () => collectRecentCwds(sessions, settings.defaultCwd),
@@ -2055,6 +2467,7 @@ export function ChatPage() {
               return (
                 <article
                   key={msg.id}
+                  data-message-id={msg.id}
                   className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
                   onMouseDown={(e) => {
                     if (!keepComposerFocus.current) return;
@@ -2083,6 +2496,8 @@ export function ChatPage() {
                   ) : (
                     <AssistantParts
                       message={msg}
+                      session={activeSession}
+                      onRegenerate={() => regenerate(msg)}
                       streaming={!!isLiveAssistant}
                       autoExpandSteps={autoExpandSteps}
                     />
@@ -2507,13 +2922,32 @@ export function ChatPage() {
       )}
       </div>
 
+      {speakingMessageId && (
+        <button
+          type="button"
+          className={styles.ttsStopFab}
+          title={ttsLoading ? t("chat.ttsGenerating") : t("chat.stopReading")}
+          aria-label={ttsLoading ? t("chat.ttsGenerating") : t("chat.stopReading")}
+          onClick={() => stopReadAloud()}
+        >
+          {ttsLoading ? (
+            <span className={styles.ttsStopSpin} aria-hidden />
+          ) : (
+            <span className={styles.ttsStopBars} aria-hidden>
+              <span />
+              <span />
+              <span />
+              <span />
+            </span>
+          )}
+        </button>
+      )}
       <PlanTabButton
         visible={Boolean(activePlan) && !planPanelOpen}
         open={planPanelOpen}
         pending={planPending}
         onClick={() => setPlanPanelOpen(true)}
-      />
-      <PlanSidePanel
+      />      <PlanSidePanel
         plan={activePlan}
         open={planPanelOpen}
         pending={planPending}

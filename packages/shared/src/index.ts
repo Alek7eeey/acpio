@@ -70,6 +70,8 @@ export interface AppSettings {
   lightScheme: string;
   /** Dark theme palette id ("" = default system palette). */
   darkScheme: string;
+  /** Preferred read-aloud voice gender ("" = browser default). */
+  ttsVoiceGender: "" | "female" | "male";
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -104,6 +106,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: "",
   lightScheme: "",
   darkScheme: "",
+  ttsVoiceGender: "",
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {

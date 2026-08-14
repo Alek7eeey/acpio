@@ -113,6 +113,8 @@ export function buildClientDiagnosticsPayload(opts?: {
   note?: string;
   includeSession?: boolean;
   session?: SessionDetailDto | null;
+  /** Dislike feedback: the rated message + the user's comment. */
+  dislike?: { messageId: string; role: string; text: string; comment: string } | null;
 }) {
   const state = useAppStore.getState();
   const catalog = state.modelsCatalog;
@@ -160,6 +162,7 @@ export function buildClientDiagnosticsPayload(opts?: {
     session,
     recentErrors: readRecentErrors(),
     note: opts?.note,
+    dislike: opts?.dislike ?? undefined,
   };
 }
 
@@ -169,6 +172,8 @@ export async function submitDiagnosticsDump(opts?: {
   includeSession?: boolean;
   /** Chat to include; omit = active session; null/"" = app state only. */
   sessionId?: string | null;
+  /** Dislike feedback: the rated message + the user's comment. */
+  dislike?: { messageId: string; role: string; text: string; comment: string } | null;
 }): Promise<DiagnosticsDumpMeta> {
   const includeSession = opts?.includeSession !== false && opts?.sessionId !== "";
   const session =
@@ -181,6 +186,7 @@ export async function submitDiagnosticsDump(opts?: {
     note: opts?.note,
     includeSession,
     session,
+    dislike: opts?.dislike,
   });
   const res = await api.createDiagnosticsDump({
     reason: opts?.reason ?? "manual",

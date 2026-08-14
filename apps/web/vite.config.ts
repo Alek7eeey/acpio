@@ -47,10 +47,11 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api/, /^\/ws/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
       },
+      // Dev SW is disabled: its fetch interception intermittently corrupts
+      // binary API responses (e.g. TTS audio). Production still gets a proper
+      // SW that never touches /api.
       devOptions: {
-        enabled: true,
-        type: "module",
-        navigateFallback: "index.html",
+        enabled: false,
       },
     }),
   ],

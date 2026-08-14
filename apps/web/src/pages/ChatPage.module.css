@@ -930,7 +930,7 @@
   margin: 6px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  word-break: break-all;
+  word-break: normal;
   font-size: 0.8rem;
   max-height: 320px;
   max-width: 100%;
@@ -1029,6 +1029,222 @@
   width: 17px;
   height: 17px;
   flex-shrink: 0;
+}
+
+.msgAction:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.msgActionActive {
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.msgActionMenu {
+  position: fixed;
+  z-index: 120;
+  min-width: 184px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16);
+}
+
+.msgActionMenuItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.msgActionMenuItem:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.msgActionMenuItem svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.dislikeField {
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.dislikeField:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.dislikeDone {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.dialogPrimary {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+.dialogPrimary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dialogGhost {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+.msgFocus {
+  animation: msgFocusFlash 2.4s ease;
+}
+
+@keyframes msgFocusFlash {
+  0%,
+  30% {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-radius: 12px;
+    /* Halo gives the highlight breathing room without shifting the layout. */
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+.msgShareTip {
+  position: fixed;
+  z-index: 120;
+  max-width: 420px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16);
+}
+
+.msgShareTipLabel {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.msgShareTipLink {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.ttsStopFab {
+  position: fixed;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 130;
+  width: 52px;
+  height: 52px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.ttsStopFab:hover {
+  filter: brightness(1.1);
+  transform: translateY(-50%) scale(1.05);
+}
+
+.ttsStopFab:active {
+  transform: translateY(-50%) scale(0.96);
+}
+
+.ttsStopBars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+}
+
+.ttsStopBars span {
+  width: 3.5px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: ttsBarPulse 0.9s ease-in-out infinite;
+}
+
+.ttsStopBars span:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.ttsStopBars span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.ttsStopBars span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.ttsStopBars span:nth-child(4) {
+  animation-delay: 0.45s;
+}
+
+.ttsStopSpin {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, #fff 35%, transparent);
+  border-top-color: #fff;
+  animation: ttsSpin 0.8s linear infinite;
+}
+
+@keyframes ttsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ttsBarPulse {
+  0%,
+  100% {
+    height: 6px;
+  }
+  50% {
+    height: 22px;
+  }
 }
 
 .subagentBody {

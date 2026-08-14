@@ -54,6 +54,9 @@ function mergeSettings(raw: unknown): AppSettings {
       merged[key] = "";
     }
   }
+  if (merged.ttsVoiceGender !== "female" && merged.ttsVoiceGender !== "male") {
+    merged.ttsVoiceGender = "";
+  }
   return merged;
 }
 

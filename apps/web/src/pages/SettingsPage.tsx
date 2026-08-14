@@ -18,6 +18,7 @@ import { ModelPicker } from "../components/ModelPicker";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
+import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import styles from "./SettingsPage.module.css";
 
@@ -88,6 +89,13 @@ export function SettingsPage() {
   );
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
+  const [ttsHasNatural, setTtsHasNatural] = useState(false);
+  const [ttsEngine, setTtsEngine] = useState<"unknown" | "piper" | "browser">("unknown");
+  const [ttsVoicesByGender, setTtsVoicesByGender] = useState<{
+    female: { ru: string | null; en: string | null };
+    male: { ru: string | null; en: string | null };
+  } | null>(null);
+  const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "piper" | "browser">("idle");
   const [models, setModels] = useState<Array<{ value: string; name: string }>>([]);
   const [modelParams, setModelParams] = useState<ModelParamDto[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -153,6 +161,48 @@ export function SettingsPage() {
     void refreshDiagnostics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaf]);
+
+  useEffect(() => {
+    if (section !== "interface" || leaf !== "voice") return;
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const check = () => {
+      setTtsHasNatural(synth.getVoices().some((v) => /natural|neural|premium/i.test(v.name)));
+    };
+    check();
+    const onChanged = () => check();
+    synth.addEventListener?.("voiceschanged", onChanged);
+    synth.onvoiceschanged = onChanged;
+    return () => {
+      synth.removeEventListener?.("voiceschanged", onChanged);
+      synth.onvoiceschanged = null;
+    };
+  }, [section, leaf]);
+
+  useEffect(() => {
+    if (section !== "interface" || leaf !== "voice") return;
+    let cancelled = false;
+    fetch("/api/tts/ping")
+      .then((r) => r.json())
+      .then((d: { available?: boolean; voicesByGender?: unknown }) => {
+        if (cancelled) return;
+        setTtsEngine(d.available ? "piper" : "browser");
+        if (d.voicesByGender) {
+          setTtsVoicesByGender(
+            d.voicesByGender as {
+              female: { ru: string | null; en: string | null };
+              male: { ru: string | null; en: string | null };
+            },
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setTtsEngine("browser");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [section, leaf]);
 
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -350,7 +400,9 @@ export function SettingsPage() {
 
   const title =
     section === "interface"
-      ? t("settings.appearance")
+      ? leaf === "voice"
+        ? t("settings.voiceTitle")
+        : t("settings.appearance")
       : section === "agent"
         ? leaf === "connect"
           ? t("settings.agentConnectTitle")
@@ -365,7 +417,9 @@ export function SettingsPage() {
 
   const subtitle =
     section === "interface"
-      ? t("settings.sidebarCollapseHint")
+      ? leaf === "voice"
+        ? t("settings.voiceDesc")
+        : t("settings.sidebarCollapseHint")
       : section === "agent" && leaf === "advanced"
         ? t("settings.agentAdvancedDesc")
         : section === "agent" && leaf === "remote"
@@ -597,6 +651,100 @@ export function SettingsPage() {
                   />
                 ))}
               </div>
+            </div>
+          </section>
+        )}
+
+        {section === "interface" && leaf === "voice" && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <label>
+                {t("settings.ttsVoiceGender")}
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.ttsVoiceGender")}
+                  value={form.ttsVoiceGender ?? ""}
+                  onChange={(v) => patch("ttsVoiceGender", v as AppSettings["ttsVoiceGender"])}
+                  options={[
+                    { value: "", label: t("common.default") },
+                    { value: "female", label: t("settings.ttsGenderFemale") },
+                    { value: "male", label: t("settings.ttsGenderMale") },
+                  ]}
+                />
+              </label>
+              <p className={styles.fieldHint}>{t("settings.ttsVoiceGenderHint")}</p>
+
+              <div className={styles.ttsTestRow}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    stopReadAloud();
+                    setTtsTestEngine("idle");
+                    startReadAloud(
+                      "Hello! Привет! This is a voice test. Отличный день сегодня.",
+                      "ru",
+                      form.ttsVoiceGender ?? "",
+                      {
+                        onEnd: () => setTtsTestEngine("idle"),
+                        onEngine: (engine) => setTtsTestEngine(engine),
+                      },
+                    );
+                  }}
+                >
+                  {t("settings.ttsTest")}
+                </button>
+                {ttsTestEngine !== "idle" && (
+                  <span className={styles.ttsTestStatus}>
+                    {ttsTestEngine === "piper"
+                      ? t("settings.ttsTestPiper")
+                      : t("settings.ttsTestBrowser")}
+                  </span>
+                )}
+              </div>
+
+              {ttsEngine !== "unknown" && (
+                <p className={styles.fieldHint}>
+                  {ttsEngine === "piper" ? t("settings.ttsEnginePiper") : t("settings.ttsEngineBrowser")}
+                </p>
+              )}
+
+              {ttsVoicesByGender && (
+                <div className={styles.ttsVoicesGrid}>
+                  {(form.ttsVoiceGender === "" || form.ttsVoiceGender === "female") && (
+                    <p className={styles.fieldHint}>
+                      {t("settings.ttsGenderFemale")}:{" "}
+                      {t("settings.ttsResolvedVoices", {
+                        ru: ttsVoicesByGender.female.ru ?? "—",
+                        en: ttsVoicesByGender.female.en ?? "—",
+                      })}
+                    </p>
+                  )}
+                  {(form.ttsVoiceGender === "" || form.ttsVoiceGender === "male") && (
+                    <p className={styles.fieldHint}>
+                      {t("settings.ttsGenderMale")}:{" "}
+                      {t("settings.ttsResolvedVoices", {
+                        ru: ttsVoicesByGender.male.ru ?? "—",
+                        en: ttsVoicesByGender.male.en ?? "—",
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {!ttsHasNatural && (
+                <div className={styles.ttsNaturalWarn}>
+                  <p className={styles.fieldHint}>{t("settings.ttsNaturalHint")}</p>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => window.open("ms-settings:speech", "_self")}
+                  >
+                    {t("settings.ttsOpenWindowsSpeech")}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
         )}

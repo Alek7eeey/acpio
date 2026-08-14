@@ -814,6 +814,34 @@
   font-weight: 650;
 }
 
+.ttsNaturalWarn {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--border) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+}
+
+.ttsVoicesGrid {
+  display: grid;
+  gap: 4px;
+}
+
+.ttsTestRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ttsTestStatus {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--success);
+}
+
 .probeOk,
 .probeFail {
   border-radius: 12px;

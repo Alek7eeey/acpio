@@ -5,6 +5,11 @@ import type { SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import {
+  listLikedMessages,
+  subscribeLikedMessages,
+  type LikedMessage,
+} from "../lib/likedMessages";
+import {
   collectRecentCwds,
   CreateSessionFolderPicker,
 } from "./CreateSessionFolderPicker";
@@ -201,6 +206,10 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
   const renameSession = useAppStore((s) => s.renameSession);
   const setSessionFlags = useAppStore((s) => s.setSessionFlags);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
+
+  const [liked, setLiked] = useState<LikedMessage[]>(() => listLikedMessages());
+  useEffect(() => subscribeLikedMessages(() => setLiked(listLikedMessages())), []);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -768,6 +777,64 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
               </div>
               {!collapsedFolders.has("__archive__") &&
                 archivedSessions.map((s) => renderSessionRow(s, true, true))}
+            </div>
+          )}
+          {liked.length > 0 && (
+            <div className={styles.likedGroup}>
+              <div className={styles.archiveHead}>
+                <button
+                  type="button"
+                  className={`${styles.archiveChevron} ${
+                    collapsedFolders.has("__liked__") ? "" : styles.folderChevronOpen
+                  }`}
+                  title={
+                    collapsedFolders.has("__liked__")
+                      ? t("chat.expandFolder")
+                      : t("chat.collapseFolder")
+                  }
+                  aria-label={
+                    collapsedFolders.has("__liked__")
+                      ? t("chat.expandFolder")
+                      : t("chat.collapseFolder")
+                  }
+                  onClick={() => toggleFolder("__liked__")}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M6 9l6 6 6-6"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <span className={styles.archiveLabel}>{t("chat.likedSection")}</span>
+                <span className={styles.archiveCount}>{liked.length}</span>
+              </div>
+              {!collapsedFolders.has("__liked__") && (
+                <div className={styles.likedList}>
+                  {liked.map((item) => (
+                    <button
+                      key={item.messageId}
+                      type="button"
+                      className={styles.likedItem}
+                      title={item.sessionTitle || undefined}
+                      onClick={() => {
+                        void selectSession(item.sessionId).then(() => {
+                          setFocusMessageId(item.messageId);
+                          goToChat();
+                        });
+                      }}
+                    >
+                      <span className={styles.likedText}>{item.text}</span>
+                      <span className={styles.likedMeta}>
+                        {item.sessionTitle || t("chat.likedUnknownSession")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {visibleSessions.length === 0 && (

@@ -12,3 +12,4 @@ coverage
 diagnostics/
 dev-dist/
 _temp/
+piper/
