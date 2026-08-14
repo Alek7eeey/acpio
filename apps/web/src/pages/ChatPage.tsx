@@ -100,6 +100,27 @@ function shouldAutoFocusComposer() {
 const MSG_RATING_KEY = "acprocess.msgRating.v1";
 type MsgRating = "like" | "dislike";
 
+type SpeechRecognitionResultItem = { transcript: string };
+type SpeechRecognitionResult = {
+  isFinal: boolean;
+  0: SpeechRecognitionResultItem;
+};
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: { resultIndex: number; results: ArrayLike<SpeechRecognitionResult> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+type SpeechRecognitionWindow = Window & {
+  SpeechRecognition?: new () => SpeechRecognitionLike;
+  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
+};
+
 function readMessageRating(messageId: string): MsgRating | null {
   try {
     const raw = localStorage.getItem(MSG_RATING_KEY);
@@ -1609,6 +1630,7 @@ export function ChatPage() {
   const inflight = useAppStore((s) => s.inflight);
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const [text, setText] = useState("");
+  const hasText = text.trim().length > 0;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const composerMultilineRef = useRef(false);
@@ -1640,6 +1662,82 @@ export function ChatPage() {
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
+  const [listening, setListening] = useState(false);
+  const [voiceHint, setVoiceHint] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+
+  const voiceSupported = useMemo(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(
+        (window as SpeechRecognitionWindow).SpeechRecognition ??
+          (window as SpeechRecognitionWindow).webkitSpeechRecognition,
+      ),
+    [],
+  );
+
+  const toggleVoiceInput = () => {
+    if (listening) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const Ctor =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
+      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
+    if (!Ctor) {
+      setVoiceHint(t("chat.voiceUnsupported"));
+      window.setTimeout(() => setVoiceHint(null), 3000);
+      return;
+    }
+    try {
+      const rec = new Ctor();
+      rec.lang = settings.locale === "en" ? "en-US" : "ru-RU";
+      rec.interimResults = true;
+      rec.continuous = false;
+      let finalText = "";
+      rec.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const result = event.results[i];
+          if (result.isFinal) finalText += result[0].transcript;
+          else interim += result[0].transcript;
+        }
+        const next = (finalText + interim).trim();
+        setText(next);
+        setCursorPos(next.length);
+        setComposerMultilineIfNeeded(next.includes("\n"));
+        requestAnimationFrame(() => {
+          const el = textareaRef.current;
+          if (el) syncComposerSize(el);
+        });
+      };
+      rec.onend = () => {
+        setListening(false);
+        recognitionRef.current = null;
+        focusComposer();
+      };
+      rec.onerror = (event) => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setVoiceHint(t("chat.voiceBlocked"));
+          window.setTimeout(() => setVoiceHint(null), 3000);
+        }
+        setListening(false);
+        recognitionRef.current = null;
+      };
+      recognitionRef.current = rec;
+      setListening(true);
+      rec.start();
+    } catch {
+      setVoiceHint(t("chat.voiceUnsupported"));
+      window.setTimeout(() => setVoiceHint(null), 3000);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -2808,6 +2906,8 @@ export function ChatPage() {
                 </svg>
               </HoverTip>
 
+              {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
+
               <div className={styles.pillFooterEnd}>
                 <ModelPicker
                   className={styles.composerModel}
@@ -2876,29 +2976,69 @@ export function ChatPage() {
                     </svg>
                   </button>
                 ) : (
-                  <button
-                    type="submit"
-                    className={styles.sendBtn}
-                    disabled={composerLocked || !text.trim()}
-                    title={
-                      agentMissing
-                        ? t("common.connectAgentFirst")
-                        : composerLocked
-                          ? t("common.loadingModels")
-                          : t("common.send")
-                    }
-                    aria-label={t("common.send")}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path
-                        d="M12 19V5M12 5l-6 6M12 5l6 6"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={`${styles.micBtn} ${
+                        hasText ? styles.micBtnGhost : styles.micBtnSendSlot
+                      }${listening ? ` ${styles.micBtnActive}` : ""}`}
+                      title={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
+                      aria-label={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
+                      aria-pressed={listening}
+                      disabled={composerLocked || !voiceSupported}
+                      onClick={toggleVoiceInput}
+                    >
+                      <svg
+                        className={hasText ? styles.micIconStroke : undefined}
+                        width="17"
+                        height="17"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        aria-hidden
+                      >
+                        <rect
+                          x="9"
+                          y="3"
+                          width="6"
+                          height="11"
+                          rx="3"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        />
+                        <path
+                          d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                    {hasText && (
+                      <button
+                        type="submit"
+                        className={styles.sendBtn}
+                        disabled={composerLocked || !text.trim()}
+                        title={
+                          agentMissing
+                            ? t("common.connectAgentFirst")
+                            : composerLocked
+                              ? t("common.loadingModels")
+                              : t("common.send")
+                        }
+                        aria-label={t("common.send")}
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M12 19V5M12 5l-6 6M12 5l6 6"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </div>

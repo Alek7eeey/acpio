@@ -234,6 +234,10 @@ export const en = {
     likedUnknownSession: "Chat deleted",
     shareCopied: "Message link copied",
     ttsGenerating: "Generating speech…",
+    voiceInput: "Voice input",
+    voiceListening: "Listening… Tap to stop",
+    voiceUnsupported: "Voice input is not supported by this browser",
+    voiceBlocked: "Microphone access is blocked — allow it in the browser",
   },
   settings: {
     agents: "Agents",

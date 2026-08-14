@@ -258,6 +258,10 @@ export const ru = {
     likedUnknownSession: "Чат удалён",
     shareCopied: "Ссылка на сообщение скопирована",
     ttsGenerating: "Генерация озвучки…",
+    voiceInput: "Голосовой ввод",
+    voiceListening: "Говорите… Нажмите, чтобы остановить",
+    voiceUnsupported: "Голосовой ввод не поддерживается этим браузером",
+    voiceBlocked: "Доступ к микрофону запрещён — разрешите его в браузере",
   },
   settings: {
     agents: "Агенты",

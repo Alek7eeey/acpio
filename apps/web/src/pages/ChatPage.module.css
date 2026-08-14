@@ -1527,13 +1527,11 @@
 
 .composerMode {
   flex: 0 0 auto;
-  margin-left: auto;
   max-width: 7rem;
 }
 
 .composerModeMobile {
   display: none;
-  margin-left: 0;
   max-width: min(110px, 30vw);
 }
 
@@ -1610,7 +1608,7 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 8px 8px 8px 10px;
   border-radius: 28px;
   background: color-mix(in srgb, var(--surface) 88%, var(--bg));
@@ -1678,6 +1676,7 @@
 }
 
 .attachBtn,
+.micBtn,
 .sendBtn,
 .stopBtn {
   flex: 0 0 auto;
@@ -1693,6 +1692,68 @@
 
 .attachBtn {
   order: 1;
+}
+
+.micBtn {
+  order: 3;
+}
+
+/* Empty composer: mic sits in the send-button slot with the regular filled style. */
+.micBtnSendSlot {
+  order: 4;
+}
+
+/* Typing: mic moves left of the send button, ghost style — transparent until
+   hover, with the icon filled in the accent color. */
+.micBtnGhost {
+  background: transparent;
+}
+
+.micBtnGhost:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* Typing-state mic: outline icon (transparent inside). Blue stroke in the
+   light theme, neutral text color in the dark one. */
+.micIconStroke {
+  color: var(--accent);
+}
+
+[data-theme="dark"] .micIconStroke {
+  color: var(--text);
+}
+
+.micBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* While recording the button is red — the icon inherits the white button
+   color, no per-theme overrides needed. */
+.micBtnActive {
+  color: #fff;
+  background: var(--danger, #c44);
+  animation: micPulse 1.1s ease-in-out infinite;
+}
+
+@keyframes micPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger, #c44) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 8px color-mix(in srgb, var(--danger, #c44) 0%, transparent);
+  }
+}
+
+.voiceHint {
+  order: 2;
+  align-self: center;
+  font-size: 0.78rem;
+  color: var(--danger, #c44);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composerModel {
@@ -1780,11 +1841,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
   min-width: 0;
 }
 
 .pillMultiline .composerModel,
+.pillMultiline .micBtn,
 .pillMultiline .sendBtn,
 .pillMultiline .stopBtn {
   order: unset;
@@ -1852,7 +1913,6 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-left: auto;
     min-width: 0;
     flex: 0 0 auto;
     position: relative;

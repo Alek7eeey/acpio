@@ -249,8 +249,6 @@ export function AppShell() {
     [settings.defaultModel, t],
   );
 
-  const title = isSettings ? t("common.settings") : t("common.chat");
-
   const goChat = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     if (window.innerWidth < 900) setSidebarOpen(false);
@@ -314,8 +312,6 @@ export function AppShell() {
               </svg>
             </button>
           </div>
-
-          <div className={styles.moduleTitle}>{title}</div>
 
           {isChat && <ChatSidebar focusSearchSignal={searchFocusToken} />}
 
