@@ -245,6 +245,23 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
       return next;
     });
   };
+
+  /** Collapse a section key and persist (newly appearing sections start collapsed). */
+  const collapseFolder = (key: string) => {
+    setCollapsedFolders((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      try {
+        localStorage.setItem("acprocess.collapsedFolders.v1", JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+  const prevArchiveCount = useRef(0);
+  const prevLikedCount = useRef(0);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
@@ -277,6 +294,22 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
     () => groupByFolder(visibleSessions.filter((s) => !s.archived)),
     [visibleSessions],
   );
+
+  // Newly created sections (archive, liked) appear collapsed by default;
+  // the user can expand them afterwards as usual.
+  useEffect(() => {
+    if (archivedSessions.length > 0 && prevArchiveCount.current === 0) {
+      collapseFolder("__archive__");
+    }
+    prevArchiveCount.current = archivedSessions.length;
+  }, [archivedSessions.length]);
+
+  useEffect(() => {
+    if (liked.length > 0 && prevLikedCount.current === 0) {
+      collapseFolder("__liked__");
+    }
+    prevLikedCount.current = liked.length;
+  }, [liked.length]);
 
   const closeMobile = () => {
     if (window.innerWidth < 900) setSidebarOpen(false);
