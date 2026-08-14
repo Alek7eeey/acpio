@@ -237,7 +237,6 @@ class SessionRuntime {
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
-  usage: import("@acprocess/shared").SessionUsageDto | null = null;
   pending = new Map<string, PendingRequest>();
   running = false;
   /**
@@ -467,24 +466,6 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     if (modeOpt?.currentValue) {
       await applyAgentReportedMode(rt, String(modeOpt.currentValue));
     }
-    return;
-  }
-
-  if (update.kind === "usage") {
-    const usage: import("@acprocess/shared").SessionUsageDto = {
-      used: update.used,
-      size: update.size,
-      cost: update.cost,
-      updatedAt: new Date().toISOString(),
-      provider: rt.provider ?? undefined,
-    };
-    rt.usage = usage;
-    rememberProviderUsage(rt.provider, usage);
-    broadcastToSession(rt.sessionId, {
-      type: "usage.updated",
-      sessionId: rt.sessionId,
-      usage,
-    });
     return;
   }
 
@@ -1143,17 +1124,11 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.provider = null;
   rt.toolsHintSent = false;
   rt.availableCommands = [];
-  // Keep rt.usage — proves the agent emitted usage_update at least once.
 }
 
 export function getSessionSlashCommands(sessionId: string) {
   return runtimes.get(sessionId)?.availableCommands ?? [];
 }
-
-const usageByProvider = new Map<
-  AgentProvider,
-  import("@acprocess/shared").SessionUsageDto
->();
 
 /**
  * Last known real availability per provider: true only after a successful ACP
@@ -1176,48 +1151,6 @@ function setAgentAvailable(provider: AgentProvider | null | undefined, available
 
 export function getAgentAvailability(provider?: AgentProvider | null): boolean {
   return provider ? Boolean(agentAvailability.get(provider)) : false;
-}
-
-function rememberProviderUsage(
-  provider: AgentProvider | null | undefined,
-  usage: import("@acprocess/shared").SessionUsageDto,
-) {
-  if (!provider) return;
-  usageByProvider.set(provider, { ...usage, provider });
-}
-
-/** Latest ACP usage_update for a provider (or active session), if the agent reports it. */
-export function getAgentUsage(opts?: { provider?: AgentProvider; sessionId?: string }) {
-  if (opts?.sessionId) {
-    const rt = runtimes.get(opts.sessionId);
-    if (rt?.usage) {
-      return {
-        supported: true as const,
-        usage: rt.usage,
-        sessionId: opts.sessionId,
-      };
-    }
-  }
-  const provider = opts?.provider;
-  if (provider && usageByProvider.has(provider)) {
-    return {
-      supported: true as const,
-      usage: usageByProvider.get(provider)!,
-      sessionId: null as string | null,
-    };
-  }
-  // Any known usage for connected agents?
-  if (!provider && usageByProvider.size > 0) {
-    const first = [...usageByProvider.values()][0]!;
-    return { supported: true as const, usage: first, sessionId: null as string | null };
-  }
-  // Live runtimes that have usage even if provider map empty
-  for (const [sessionId, rt] of runtimes) {
-    if (!rt.usage) continue;
-    if (provider && rt.provider && rt.provider !== provider) continue;
-    return { supported: true as const, usage: rt.usage, sessionId };
-  }
-  return { supported: false as const, usage: null, sessionId: null as string | null };
 }
 
 /** Align chat row + ACP with the user's connected agent (if any). */

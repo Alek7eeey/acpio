@@ -8,7 +8,6 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
-  SessionUsageDto,
 } from "@acprocess/shared";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -61,17 +60,6 @@ export const api = {
       cached?: boolean;
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
-  },
-  getAgentUsage: (opts?: { provider?: AgentProvider; sessionId?: string }) => {
-    const q = new URLSearchParams();
-    if (opts?.provider) q.set("provider", opts.provider);
-    if (opts?.sessionId) q.set("sessionId", opts.sessionId);
-    const qs = q.toString();
-    return request<{
-      supported: boolean;
-      usage: SessionUsageDto | null;
-      sessionId: string | null;
-    }>(`/api/agent/usage${qs ? `?${qs}` : ""}`);
   },
   getModelParams: (
     provider: AgentProvider,

@@ -59,11 +59,7 @@ export function AppShell() {
   const setTheme = useAppStore((s) => s.setTheme);
   const agentAvailable = useAppStore((s) => s.agentAvailable);
   const settings = useAppStore((s) => s.settings);
-  const usageSupported = useAppStore((s) => s.usageSupported);
-  const settingsTree = useMemo(
-    () => getSettingsTree(t, { showUsage: usageSupported }),
-    [t, usageSupported],
-  );
+  const settingsTree = useMemo(() => getSettingsTree(t), [t]);
 
   const hasAgent = Boolean(settings.connectedProvider);
   // Green only when the agent was actually verified (probe/prompt succeeded),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import {
   migrateModelParamValues,
   providerCommand,
@@ -11,7 +11,7 @@ import {
   type ModelParamDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
-import { parseSettingsSearch, settingsPath } from "../lib/settingsNav";
+import { parseSettingsSearch } from "../lib/settingsNav";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
@@ -51,24 +51,8 @@ function SchemeCard({
   );
 }
 
-function formatTokenCount(n: number) {
-  if (!Number.isFinite(n)) return "—";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
-  if (n >= 10_000) return `${Math.round(n / 1000)}K`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
-
-function formatCostAmount(n: number) {
-  if (!Number.isFinite(n)) return "—";
-  if (n >= 1) return n.toFixed(2);
-  if (n >= 0.01) return n.toFixed(3);
-  return n.toFixed(4);
-}
-
 export function SettingsPage() {
   const t = useT();
-  const navigate = useNavigate();
   const providers = useMemo(
     () =>
       PROVIDER_IDS.map((id) => ({
@@ -92,9 +76,6 @@ export function SettingsPage() {
   );
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
-  const usageSupported = useAppStore((s) => s.usageSupported);
-  const sessionUsage = useAppStore((s) => s.sessionUsage);
-  const refreshAgentUsage = useAppStore((s) => s.refreshAgentUsage);
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const [form, setForm] = useState<AppSettings>(settings);
@@ -172,14 +153,6 @@ export function SettingsPage() {
     void refreshDiagnostics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaf]);
-
-  useEffect(() => {
-    if (leaf === "usage" && !usageSupported) {
-      navigate(settingsPath("agent", "connect"), { replace: true });
-      return;
-    }
-    if (leaf === "usage") void refreshAgentUsage();
-  }, [leaf, usageSupported, navigate, refreshAgentUsage]);
 
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -387,9 +360,7 @@ export function SettingsPage() {
               ? t("settings.remoteAccessTitle")
               : leaf === "diagnostics"
                 ? t("settings.diagnosticsTitle")
-                : leaf === "usage"
-                  ? t("settings.usageTitle")
-                  : t("settings.agentAdvancedTitle")
+                : t("settings.agentAdvancedTitle")
         : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -401,9 +372,7 @@ export function SettingsPage() {
           ? t("settings.remoteAccessDesc")
           : section === "agent" && leaf === "diagnostics"
             ? t("settings.diagnosticsDesc")
-            : section === "agent" && leaf === "usage"
-              ? t("settings.usageDesc")
-              : t("settings.agentConnectDesc");
+            : t("settings.agentConnectDesc");
 
   const eyebrow = section === "interface" ? t("settings.interface") : t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -1133,86 +1102,6 @@ export function SettingsPage() {
           </section>
         )}
 
-        {section === "agent" && leaf === "usage" && usageSupported && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <div className={styles.diagActions}>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => void refreshAgentUsage()}
-                >
-                  {t("usage.refresh")}
-                </button>
-              </div>
-              <p className={styles.fieldHint}>{t("usage.periodNote")}</p>
-            </div>
-
-            {sessionUsage ? (
-              <>
-                <div className={styles.sectionBlock}>
-                  <h2 className={styles.sectionHeading}>{t("usage.context")}</h2>
-                  <p className={styles.fieldHint}>{t("usage.contextHint")}</p>
-                  <div className={styles.usageMeter}>
-                    <div className={styles.usageMeterTrack} aria-hidden>
-                      <div
-                        className={styles.usageMeterFill}
-                        style={{
-                          width: `${Math.min(
-                            100,
-                            Math.max(0, (sessionUsage.used / sessionUsage.size) * 100),
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    <div className={styles.usageStats}>
-                      <strong>
-                        {t("usage.percent", {
-                          percent: Math.round((sessionUsage.used / sessionUsage.size) * 100),
-                        })}
-                      </strong>
-                      <span>
-                        {t("usage.usedOfSize", {
-                          used: formatTokenCount(sessionUsage.used),
-                          size: formatTokenCount(sessionUsage.size),
-                        })}
-                      </span>
-                      <span>
-                        {t("usage.remaining", {
-                          remaining: formatTokenCount(
-                            Math.max(0, sessionUsage.size - sessionUsage.used),
-                          ),
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {sessionUsage.cost ? (
-                  <div className={styles.sectionBlock}>
-                    <h2 className={styles.sectionHeading}>{t("usage.cost")}</h2>
-                    <p className={styles.fieldHint}>{t("usage.costHint")}</p>
-                    <p className={styles.usageCost}>
-                      {t("usage.costValue", {
-                        amount: formatCostAmount(sessionUsage.cost.amount),
-                        currency: sessionUsage.cost.currency,
-                      })}
-                    </p>
-                  </div>
-                ) : null}
-
-                <p className={styles.hint}>
-                  {t("usage.updatedAt", {
-                    time: new Date(sessionUsage.updatedAt).toLocaleString(),
-                  })}
-                </p>
-              </>
-            ) : (
-              <p className={styles.hint}>{t("usage.empty")}</p>
-            )}
-          </section>
-        )}
-
         {section === "agent" && leaf === "remote" && (
           <section className={`${styles.card} ${styles.remoteCard}`}>
             <div className={styles.remoteStep}>
@@ -1266,10 +1155,7 @@ export function SettingsPage() {
         )}
 
         {(section === "interface" ||
-          (section === "agent" &&
-            leaf !== "connect" &&
-            leaf !== "remote" &&
-            leaf !== "usage")) && (
+          (section === "agent" && leaf !== "connect" && leaf !== "remote")) && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>
             {saved && <span className={styles.ok}>{t("settings.saved")}</span>}

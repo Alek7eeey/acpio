@@ -447,11 +447,6 @@ export type WsServerEvent =
       commands: SlashCommandDto[];
     }
   | {
-      type: "usage.updated";
-      sessionId: string;
-      usage: SessionUsageDto;
-    }
-  | {
       type: "agent.availability";
       provider: AgentProvider;
       available: boolean;
@@ -468,15 +463,6 @@ export type WsServerEvent =
     }
   | { type: "error"; sessionId?: string; message: string }
   | { type: "pong" };
-
-/** ACP `usage_update` — context window + optional session cost (not period quotas). */
-export interface SessionUsageDto {
-  used: number;
-  size: number;
-  cost?: { amount: number; currency: string } | null;
-  updatedAt: string;
-  provider?: AgentProvider;
-}
 
 export type WsClientEvent =
   | { type: "ping" }

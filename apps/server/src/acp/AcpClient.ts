@@ -52,13 +52,6 @@ export type AcpUpdate =
   | { kind: "current_mode"; modeId: string; raw: Record<string, unknown> }
   | { kind: "config_options"; configOptions: ConfigOption[]; raw: Record<string, unknown> }
   | { kind: "available_commands"; raw: Record<string, unknown> }
-  | {
-      kind: "usage";
-      used: number;
-      size: number;
-      cost?: { amount: number; currency: string } | null;
-      raw: Record<string, unknown>;
-    }
   | { kind: "mixed_chunks"; thought?: string; text?: string }
   | { kind: "other"; sessionUpdate: string; raw: Record<string, unknown> };
 
@@ -1238,26 +1231,6 @@ export class AcpClient extends EventEmitter {
     }
     if (sessionUpdate === "available_commands_update") {
       return { kind: "available_commands", raw: update };
-    }
-    if (sessionUpdate === "usage_update") {
-      const used = Number(update.used);
-      const size = Number(update.size);
-      if (!Number.isFinite(used) || !Number.isFinite(size) || size <= 0) {
-        return { kind: "other", sessionUpdate, raw: update };
-      }
-      let cost: { amount: number; currency: string } | null | undefined;
-      const rawCost = update.cost;
-      if (rawCost && typeof rawCost === "object" && !Array.isArray(rawCost)) {
-        const c = rawCost as { amount?: unknown; currency?: unknown };
-        const amount = Number(c.amount);
-        const currency = typeof c.currency === "string" ? c.currency : "";
-        if (Number.isFinite(amount) && currency) {
-          cost = { amount, currency };
-        } else {
-          cost = null;
-        }
-      }
-      return { kind: "usage", used, size, cost, raw: update };
     }
     return { kind: "other", sessionUpdate, raw: update };
   }

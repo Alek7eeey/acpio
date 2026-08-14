@@ -6,8 +6,7 @@ export type SettingsAgentLeaf =
   | "model"
   | "advanced"
   | "remote"
-  | "diagnostics"
-  | "usage";
+  | "diagnostics";
 export type SettingsInterfaceLeaf = "appearance" | "colors";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsInterfaceLeaf;
 
@@ -23,21 +22,14 @@ type TreeBranch =
       children: Array<{ id: SettingsInterfaceLeaf; label: string }>;
     };
 
-export function getSettingsTree(
-  t: TranslateFn,
-  opts?: { showUsage?: boolean },
-): TreeBranch[] {
+export function getSettingsTree(t: TranslateFn): TreeBranch[] {
   const children: Array<{ id: SettingsAgentLeaf; label: string }> = [
     { id: "connect", label: t("settings.connection") },
     { id: "model", label: t("settings.modelSection") },
     { id: "advanced", label: t("settings.advanced") },
     { id: "diagnostics", label: t("settings.diagnostics") },
+    { id: "remote", label: t("settings.remoteAccess") },
   ];
-  // Only when the connected agent has emitted ACP usage_update.
-  if (opts?.showUsage) {
-    children.push({ id: "usage", label: t("settings.usage") });
-  }
-  children.push({ id: "remote", label: t("settings.remoteAccess") });
 
   return [
     {
@@ -76,8 +68,7 @@ export function parseSettingsSearch(search: string): {
     rawLeaf === "advanced" ||
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||
-    rawLeaf === "diagnostics" ||
-    rawLeaf === "usage"
+    rawLeaf === "diagnostics"
       ? rawLeaf
       : "connect";
   return { section: "agent", leaf };

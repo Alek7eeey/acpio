@@ -9,7 +9,6 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
-  SessionUsageDto,
   Theme,
   WsServerEvent,
 } from "@acprocess/shared";
@@ -20,7 +19,6 @@ import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
-const USAGE_SUPPORT_KEY = "acprocess.usageSupported.v1";
 const ACTIVE_SESSION_KEY = "acprocess.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
@@ -69,27 +67,6 @@ export function sanitizeCatalogModes(
 
 type ModelsCatalogMap = Partial<Record<AgentProvider, ModelsCatalog>>;
 
-function readUsageSupportMap(): Partial<Record<AgentProvider, boolean>> {
-  try {
-    const raw = localStorage.getItem(USAGE_SUPPORT_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as Partial<Record<AgentProvider, boolean>>;
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeUsageSupport(provider: AgentProvider, supported: boolean) {
-  try {
-    const map = readUsageSupportMap();
-    map[provider] = supported;
-    localStorage.setItem(USAGE_SUPPORT_KEY, JSON.stringify(map));
-  } catch {
-    // ignore
-  }
-}
-
 type PendingPermission = {
   sessionId: string;
   requestId: string;
@@ -111,9 +88,6 @@ type AppState = {
   activeSession: SessionDetailDto | null;
   modelsCatalog: ModelsCatalog | null;
   modelsLoading: boolean;
-  /** Agent reported ACP usage_update at least once (session context / cost). */
-  usageSupported: boolean;
-  sessionUsage: SessionUsageDto | null;
   sidebarOpen: boolean;
   connected: boolean;
   /** True only when the connected agent was actually verified (probe/prompt OK). */
@@ -179,7 +153,6 @@ type AppState = {
     provider: AgentProvider,
     opts?: { force?: boolean },
   ) => Promise<ModelsCatalog | null>;
-  refreshAgentUsage: () => Promise<void>;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -456,7 +429,6 @@ async function loadAppData(
   const provider = get().settings.connectedProvider;
   if (provider) {
     void get().ensureModels(provider);
-    void get().refreshAgentUsage();
     // Verify the agent is really reachable — the header dot must reflect
     // actual availability, not just a saved "connected" flag.
     void api
@@ -464,7 +436,7 @@ async function loadAppData(
       .then((result) => get().setAgentAvailable(result.ok))
       .catch(() => get().setAgentAvailable(false));
   } else {
-    set({ modelsCatalog: null, modelsLoading: false, usageSupported: false, sessionUsage: null });
+    set({ modelsCatalog: null, modelsLoading: false });
   }
   const storedId =
     typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
@@ -502,11 +474,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     typeof window !== "undefined"
       ? !(readStoredModelsCatalog()?.models?.length)
       : true,
-  usageSupported:
-    typeof window !== "undefined"
-      ? Object.values(readUsageSupportMap()).some(Boolean)
-      : false,
-  sessionUsage: null,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
   agentAvailable: false,
@@ -1254,19 +1221,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    if (event.type === "usage.updated") {
-      const provider =
-        event.usage.provider ??
-        state.settings.connectedProvider ??
-        state.activeSession?.provider;
-      if (provider) writeUsageSupport(provider, true);
-      set({
-        usageSupported: true,
-        sessionUsage: event.usage,
-      });
-      return;
-    }
-
     if (event.type === "agent.availability") {
       if (event.provider === state.settings.connectedProvider) {
         set({ agentAvailable: event.available });
@@ -1373,34 +1327,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().ensureModels(providerToLoad, {
         force: nextPatch.connectedProvider != null || providerChanged,
       });
-      void get().refreshAgentUsage();
       const activeId = get().activeSessionId;
       if (activeId) void get().selectSession(activeId);
     } else if (providerChanged) {
       void get().ensureModels(settings.defaultProvider, { force: true });
-      void get().refreshAgentUsage();
       const activeId = get().activeSessionId;
       if (activeId) void get().selectSession(activeId);
-    }
-  },
-
-  async refreshAgentUsage() {
-    const provider = get().settings.connectedProvider ?? undefined;
-    const sessionId = get().activeSessionId ?? undefined;
-    const cached = provider ? readUsageSupportMap()[provider] === true : false;
-    try {
-      const res = await api.getAgentUsage({ provider, sessionId: sessionId ?? undefined });
-      if (res.supported && res.usage) {
-        if (provider) writeUsageSupport(provider, true);
-        set({ usageSupported: true, sessionUsage: res.usage });
-        return;
-      }
-      set({
-        usageSupported: cached,
-        sessionUsage: null,
-      });
-    } catch {
-      set({ usageSupported: cached });
     }
   },
 }));

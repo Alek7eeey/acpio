@@ -32,7 +32,6 @@ import {
   runPrompt,
   setSessionModel,
   setSessionMode,
-  getAgentUsage,
   getAgentAvailability,
   syncSessionAgent,
   warmAcp,
@@ -165,19 +164,6 @@ export async function registerRoutes(app: FastifyInstance) {
         : undefined;
     const force = q.force === "1" || q.force === "true";
     return listModels(provider, { force });
-  });
-
-  app.get("/api/agent/usage", async (req) => {
-    const q = req.query as { provider?: string; sessionId?: string };
-    const provider =
-      q.provider === "cursor" ||
-      q.provider === "opencode" ||
-      q.provider === "omp" ||
-      q.provider === "pi"
-        ? q.provider
-        : undefined;
-    const sessionId = typeof q.sessionId === "string" && q.sessionId ? q.sessionId : undefined;
-    return getAgentUsage({ provider, sessionId });
   });
 
   app.get("/api/agent/status", async () => {
