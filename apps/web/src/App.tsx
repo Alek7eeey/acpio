@@ -5,7 +5,6 @@ import { I18nProvider } from "./lib/i18n";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
 import { BootSplash } from "./components/BootSplash";
-import { DashboardPage } from "./pages/DashboardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -28,10 +27,10 @@ export function App() {
     loading && splashVisible && showBootSplash ? null : (
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<ChatPage />} />
           <Route path="chat" element={<ChatPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/chat" replace />} />
         </Route>
       </Routes>
     );

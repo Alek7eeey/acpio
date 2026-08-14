@@ -19,7 +19,6 @@ import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
 import { ThemeToggle } from "./ThemeToggle";
-import { DashboardPage } from "../pages/DashboardPage";
 import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import styles from "./AppShell.module.css";
@@ -40,10 +39,10 @@ function readStoredWidth() {
 }
 
 function ShellPage({ pathname }: { pathname: string }) {
-  if (pathname === "/" || pathname === "") return <DashboardPage />;
+  if (pathname === "/" || pathname === "") return <ChatPage />;
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
-  return <DashboardPage />;
+  return <ChatPage />;
 }
 
 export function AppShell() {
@@ -79,7 +78,7 @@ export function AppShell() {
             : provider === "pi"
               ? "PI"
               : provider;
-    return t("dashboard.agentStatus", {
+    return t("common.agentStatus", {
       agent,
       status: agentOnline ? t("common.online") : t("common.offline"),
     });
@@ -114,7 +113,7 @@ export function AppShell() {
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, [agentTipOpen]);
 
-  const isChat = pathname.startsWith("/chat");
+  const isChat = pathname === "/" || pathname.startsWith("/chat");
   const isSettings = pathname.startsWith("/settings");
   const showSidebar = isChat || isSettings;
 
@@ -250,16 +249,12 @@ export function AppShell() {
     [settings.defaultModel, t],
   );
 
-  const title = isSettings
-    ? t("common.settings")
-    : isChat
-      ? t("common.chat")
-      : t("common.dashboard");
+  const title = isSettings ? t("common.settings") : t("common.chat");
 
-  const goDashboard = useCallback(() => {
+  const goChat = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     if (window.innerWidth < 900) setSidebarOpen(false);
-    navigate("/");
+    navigate("/chat");
   }, [navigate, setSidebarOpen]);
 
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
@@ -286,9 +281,11 @@ export function AppShell() {
       {showSidebar && (
         <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""}`}>
           <div className={styles.brandRow}>
-            <button type="button" className={styles.backBtn} onClick={goDashboard}>
-              {t("common.backToDashboard")}
-            </button>
+            {isSettings && (
+              <button type="button" className={styles.backBtn} onClick={goChat}>
+                {t("common.backToChat")}
+              </button>
+            )}
             <button
               type="button"
               className={styles.collapseBtn}
@@ -665,8 +662,8 @@ export function AppShell() {
           <button
             type="button"
             className={styles.headerBrand}
-            onClick={goDashboard}
-            title={t("common.goToDashboard")}
+            onClick={goChat}
+            title={t("common.goToChat")}
             aria-label="ACProcess chat"
           >
             <span className={styles.brandLetters} aria-hidden>
