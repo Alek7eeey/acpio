@@ -682,9 +682,12 @@ export function SettingsPage() {
                   onClick={() => {
                     stopReadAloud();
                     setTtsTestEngine("idle");
+                    // Test in the user's own language only (single voice,
+                    // no mixing) — phrase comes from i18n.
+                    const testText = t("settings.ttsTestText");
                     startReadAloud(
-                      "Hello! Привет! This is a voice test. Отличный день сегодня.",
-                      "ru",
+                      testText,
+                      settings.locale === "en" ? "en" : "ru",
                       form.ttsVoiceGender ?? "",
                       {
                         onEnd: () => setTtsTestEngine("idle"),

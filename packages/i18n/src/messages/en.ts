@@ -265,6 +265,7 @@ export const en = {
     ttsEngineBrowser: "Local Piper engine is not installed — browser speech is used instead.",
     ttsResolvedVoices: "Russian — {{ru}}, English — {{en}}",
     ttsTest: "Test voice",
+    ttsTestText: "This is a voice test. Have a nice day!",
     ttsTestPiper: "Engine: Piper (local)",
     ttsTestBrowser: "Engine: browser speech",
     profileDesc: "Account name and password",

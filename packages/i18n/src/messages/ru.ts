@@ -290,6 +290,7 @@ export const ru = {
     ttsEngineBrowser: "Локальный движок Piper не установлен — используется браузерная озвучка.",
     ttsResolvedVoices: "русский — {{ru}}, английский — {{en}}",
     ttsTest: "Проверить голос",
+    ttsTestText: "Отличный день сегодня. Как у тебя дела?",
     ttsTestPiper: "Движок: Piper (локальный)",
     ttsTestBrowser: "Движок: браузерная озвучка",
     profileDesc: "Имя и пароль аккаунта",
