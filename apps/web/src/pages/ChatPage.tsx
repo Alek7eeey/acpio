@@ -2414,8 +2414,16 @@ export function ChatPage() {
       ),
     [segments, settings.multitask, inflight, lastMessageId],
   );
-  const CHAT_VIRT_THRESHOLD = 60;
-  const chatVirtual = messageRows.length > CHAT_VIRT_THRESHOLD;
+  // Window sooner than the tree: reply messages can be huge (long texts, many
+  // tool parts), so a session with a few dozen messages is already expensive.
+  // Trigger on message count OR estimated total height (~px, from the same
+  // heuristic the virtualizer seeds unmeasured rows with).
+  const CHAT_VIRT_MIN_MESSAGES = 25;
+  const CHAT_VIRT_MAX_ESTIMATED_PX = 8000;
+  const chatVirtual =
+    messageRows.length > CHAT_VIRT_MIN_MESSAGES ||
+    messageRows.reduce((acc, r) => acc + estimateMessageRowHeight(r.msg), 0) >
+      CHAT_VIRT_MAX_ESTIMATED_PX;
   const chatVirtualizer = useVirtualizer({
     count: chatVirtual ? messageRows.length : 0,
     getScrollElement: () => threadRef.current,
