@@ -45,7 +45,7 @@ export type ModelsCatalog = {
   at: number;
 };
 
-/** Cursor trio must not stick to OMP/OpenCode catalogs after an agent switch. */
+/** Cursor trio must not stick to OMP catalogs after an agent switch. */
 export function sanitizeCatalogModes(
   provider: AgentProvider,
   modes: Array<{ value: string; name: string }> | undefined | null,
@@ -56,13 +56,8 @@ export function sanitizeCatalogModes(
       (m) => m.value === "agent" || m.value === "plan" || m.value === "ask",
     );
   }
-  // OMP (and similar) only advertise a lone "default" — never a switcher.
-  if (provider === "omp" || provider === "pi") return [];
-  return list.filter((m) => {
-    if (m.value === "agent" || m.value === "plan" || m.value === "ask") return false;
-    if (/^(default|normal|standard)$/i.test(m.value)) return false;
-    return Boolean(m.value);
-  });
+  // OMP only advertises a lone "default" — never a switcher.
+  return [];
 }
 
 type ModelsCatalogMap = Partial<Record<AgentProvider, ModelsCatalog>>;
@@ -554,7 +549,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
 
-    // Don't keep Cursor Agent/Plan/Ask chips on OMP/OpenCode after a switch.
+    // Don't keep Cursor Agent/Plan/Ask chips on OMP after a switch.
     const staleCursorModes =
       provider !== "cursor" &&
       (existing?.modes?.some(

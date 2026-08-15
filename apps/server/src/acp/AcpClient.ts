@@ -199,7 +199,7 @@ export function listModelParamOptions(options: ConfigOption[]): ConfigOption[] {
     // Known picker params always win (even if type is unusual).
     if (known) return true;
 
-    // Do not invent Fast/Effort for OMP/OpenCode — only discrete extras with select/boolean.
+    // Do not invent Fast/Effort for OMP — only discrete extras with select/boolean.
     if (o.type && o.type !== "select" && o.type !== "boolean") return false;
     // Avoid treating unrelated session knobs as model params unless categorized.
     return o.category === "model_config" || o.category === "thought_level";
@@ -246,22 +246,15 @@ function winKnownBins(command: string): string[] {
   const names =
     command === "agent" || command === "cursor-agent"
       ? ["agent.exe", "agent.cmd", "cursor-agent.exe", "cursor-agent.cmd"]
-      : command === "opencode"
-        ? ["opencode.exe", "opencode.cmd"]
-        : command === "omp" || command === "omp-acp"
-          ? ["omp.exe", "omp.cmd", "omp-acp.exe", "omp-acp.cmd"]
-          : command === "pi" || command === "pi-acp"
-            ? ["pi-acp.exe", "pi-acp.cmd", "pi.exe", "pi.cmd"]
-            : [`${command}.exe`, `${command}.cmd`];
+      : command === "omp" || command === "omp-acp"
+        ? ["omp.exe", "omp.cmd", "omp-acp.exe", "omp-acp.cmd"]
+        : [`${command}.exe`, `${command}.cmd`];
 
   const dirs = [
     local ? path.join(local, "cursor-agent") : "",
     local ? path.join(local, "omp") : "",
     home ? path.join(home, ".local", "bin") : "",
     appData ? path.join(appData, "npm") : "",
-    appData ? path.join(appData, "npm", "node_modules", "opencode-ai", "bin") : "",
-    appData ? path.join(appData, "npm", "node_modules", "pi-acp", "bin") : "",
-    appData ? path.join(appData, "npm", "node_modules", "@mariozechner", "pi-coding-agent", "dist") : "",
   ].filter(Boolean);
 
   const out: string[] = [];
@@ -334,15 +327,10 @@ function commandNotFoundHint(provider: AgentProvider, command: string): string {
       `(или поставьте omp-acp и укажите его в «CLI и права»).`
     );
   }
-  if (provider === "pi") {
-    return (
-      `Команда "${command}" не найдена. Установите Pi ACP-адаптер: npm i -g pi-acp ` +
-      `(нужен также pi CLI), либо укажите полный путь / npx в «CLI и права».`
-    );
-  }
   return (
-    `Команда "${command}" не найдена. Установите OpenCode и проверьте PATH, ` +
-    `или укажите полный путь в «CLI и права».`
+    `Команда "${command}" не найдена. Cursor IDE ≠ Cursor CLI. ` +
+    `Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex ` +
+    `затем выполните agent login. Или укажите полный путь в «CLI и права».`
   );
 }
 
@@ -361,8 +349,6 @@ function looksLikeCommandNotFound(text: string): boolean {
 export function buildAgentEnv(provider: AgentProvider, settings: AppSettings): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   if (settings.cursorApiKey) env.CURSOR_API_KEY = settings.cursorApiKey;
-  const openKey = settings.opencodeApiKey || (provider === "opencode" ? settings.cursorApiKey : "");
-  if (openKey) env.OPENCODE_API_KEY = openKey;
   if (settings.anthropicApiKey) env.ANTHROPIC_API_KEY = settings.anthropicApiKey;
   if (settings.openaiApiKey) env.OPENAI_API_KEY = settings.openaiApiKey;
   if (process.platform === "win32") {
@@ -563,10 +549,9 @@ export class AcpClient extends EventEmitter {
         clientInfo: { name: "acprocess", version: "0.1.0" },
       });
 
-      if (this.provider === "cursor" || this.provider === "opencode") {
-        const authMethod = this.provider === "cursor" ? "cursor_login" : "opencode-login";
+      if (this.provider === "cursor") {
         try {
-          await this.send("authenticate", { methodId: authMethod });
+          await this.send("authenticate", { methodId: "cursor_login" });
         } catch (err) {
           this.emit("log", `authenticate skipped/failed: ${String(err)}`);
         }
@@ -574,7 +559,17 @@ export class AcpClient extends EventEmitter {
 
       const result = (await this.send("session/new", {
         cwd,
-        mcpServers: [],
+        mcpServers: (this.settings.mcpServers ?? [])
+          .filter((s) => s.enabled && s.url?.trim())
+          .map((s) => ({
+            name: s.name,
+            type: "http",
+            url: s.url!.trim(),
+            headers:
+              s.type === "remote" && s.token?.trim()
+                ? [{ name: "Authorization", value: `Bearer ${s.token.trim()}` }]
+                : [],
+          })),
       })) as {
         sessionId?: string;
         configOptions?: ConfigOption[];
@@ -986,6 +981,13 @@ export class AcpClient extends EventEmitter {
     return this.request(method, params).promise;
   }
 
+  /**
+   * Ceiling for any single ACP request (prompt, tool call, config change, …).
+   * A wedged agent — e.g. an MCP tool server that never answers — would
+   * otherwise keep the session "running" forever and lock the whole chat.
+   */
+  private static readonly REQUEST_TIMEOUT_MS = 5 * 60_000;
+
   private request(
     method: string,
     params: unknown,
@@ -999,7 +1001,24 @@ export class AcpClient extends EventEmitter {
     const id = this.nextId++;
     this.write({ jsonrpc: "2.0", id, method, params });
     const promise = new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        if (this.promptRequestId === id) this.promptRequestId = null;
+        const msg = `Таймаут ответа ACP (${AcpClient.REQUEST_TIMEOUT_MS / 1000}с) на "${method}". ` +
+          `Агент не отвечает — возможно, завис внешний MCP-сервер или CLI.`;
+        this.emit("log", msg);
+        reject(new Error(msg));
+      }, AcpClient.REQUEST_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
     });
     return { id, promise };
   }

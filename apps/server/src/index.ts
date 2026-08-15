@@ -6,6 +6,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
+import { reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
 import { ensureSchema } from "./db/ensureSchema.js";
 import { piperStatus, warmPiper } from "./services/piper.js";
@@ -36,6 +37,26 @@ async function main() {
   await app.register(websocket);
   await registerRoutes(app);
 
+  const host = process.env.HOST ?? "0.0.0.0";
+  await app.listen({ port, host });
+  console.log(`ACProcess server on http://${host}:${port}`);
+
+  // Sessions left "running"/"waiting" by the previous process (crash, kill,
+  // hung MCP tool call) have no live runtime — unlock them and stop their
+  // pending tool calls from spinning forever. Runs after listen so startup
+  // is not blocked by the sweep.
+  try {
+    const recovered = await reconcileStaleSessions();
+    if (recovered.sessions > 0 || recovered.parts > 0) {
+      console.log(
+        `[sessions] recovered ${recovered.sessions} stale session(s), ` +
+          `${recovered.parts} pending tool call(s) reset`,
+      );
+    }
+  } catch (err) {
+    console.error("[sessions] reconcile failed", err);
+  }
+
   const tts = piperStatus();
   if (tts.available) {
     console.log(`Piper TTS ready (${tts.voices.length} voices) — read-aloud uses the local engine.`);
@@ -55,10 +76,6 @@ async function main() {
       }
     });
   }
-
-  const host = process.env.HOST ?? "0.0.0.0";
-  await app.listen({ port, host });
-  console.log(`ACProcess server on http://${host}:${port}`);
 }
 
 main().catch((err) => {

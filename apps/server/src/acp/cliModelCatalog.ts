@@ -14,10 +14,9 @@ const execFileAsync = promisify(execFile);
 
 export type ModelOption = { value: string; name: string };
 
-/** OMP/OpenCode model lists must match the CLI without injected BYOK keys. */
+/** OMP model lists must match the CLI without injected BYOK keys. */
 function buildCliCatalogEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
-  delete env.OPENCODE_API_KEY;
   delete env.ANTHROPIC_API_KEY;
   delete env.OPENAI_API_KEY;
   delete env.CURSOR_API_KEY;
@@ -80,19 +79,7 @@ async function fetchOmpModels(settings: AppSettings): Promise<ModelOption[]> {
     .filter((m): m is ModelOption => m != null);
 }
 
-async function fetchOpencodeModels(settings: AppSettings): Promise<ModelOption[]> {
-  const stdout = await runAgentCli("opencode", settings, ["models"]);
-  return stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((value) => ({
-      value,
-      name: modelDisplayName(value),
-    }));
-}
-
-/** OMP/OpenCode ACP can expose a broader catalog than their CLI `models` command. */
+/** OMP ACP can expose a broader catalog than the CLI `models` command. */
 export async function fetchAuthoritativeModelCatalog(
   provider: AgentProvider,
   settings: AppSettings,
@@ -100,7 +87,6 @@ export async function fetchAuthoritativeModelCatalog(
   if (!usesCloudModelCatalog(provider)) return null;
   try {
     if (provider === "omp") return await fetchOmpModels(settings);
-    if (provider === "opencode") return await fetchOpencodeModels(settings);
   } catch (err) {
     console.warn(`[models] CLI catalog failed for ${provider}:`, err);
   }

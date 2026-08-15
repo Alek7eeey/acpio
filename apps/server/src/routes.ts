@@ -55,22 +55,17 @@ const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
   locale: z.enum(["ru", "en"]).optional(),
   displayName: z.string().max(80).optional(),
-  connectedProvider: z.enum(["cursor", "opencode", "omp", "pi"]).nullable().optional(),
-  defaultProvider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
+  connectedProvider: z.enum(["cursor", "omp"]).nullable().optional(),
+  defaultProvider: z.enum(["cursor", "omp"]).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
   defaultModelParams: z.record(z.string()).optional(),
   cursorCommand: z.string().optional(),
   cursorArgs: z.array(z.string()).optional(),
-  opencodeCommand: z.string().optional(),
-  opencodeArgs: z.array(z.string()).optional(),
   ompCommand: z.string().optional(),
   ompArgs: z.array(z.string()).optional(),
-  piCommand: z.string().optional(),
-  piArgs: z.array(z.string()).optional(),
   cursorApiKey: z.string().optional(),
-  opencodeApiKey: z.string().optional(),
   anthropicApiKey: z.string().optional(),
   openaiApiKey: z.string().optional(),
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
@@ -84,6 +79,20 @@ const settingsSchema = z.object({
   lightScheme: z.string().optional(),
   darkScheme: z.string().optional(),
   ttsVoiceGender: z.enum(["", "female", "male"]).optional(),
+  mcpServers: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().min(1).max(80),
+        enabled: z.boolean(),
+        type: z.enum(["local", "remote"]),
+        command: z.string().max(300).optional(),
+        args: z.array(z.string().max(300)).optional(),
+        url: z.string().max(500).optional(),
+        token: z.string().max(500).optional(),
+      }),
+    )
+    .optional(),
 });
 
 async function agentConnected(): Promise<AgentProvider | null> {
@@ -190,7 +199,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/agent/probe", async (req) => {
     const body = z
-      .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
+      .object({ provider: z.enum(["cursor", "omp"]).optional() })
       .parse(req.body ?? {});
     return probeAgent(body.provider);
   });
@@ -198,12 +207,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/agent/models", async (req) => {
     const q = req.query as { provider?: string; force?: string };
     const provider =
-      q.provider === "cursor" ||
-      q.provider === "opencode" ||
-      q.provider === "omp" ||
-      q.provider === "pi"
-        ? q.provider
-        : undefined;
+      q.provider === "cursor" || q.provider === "omp" ? q.provider : undefined;
     const force = q.force === "1" || q.force === "true";
     return listModels(provider, { force });
   });
@@ -221,12 +225,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/agent/model-params", async (req, reply) => {
     const q = req.query as { provider?: string; model?: string; sessionId?: string; force?: string };
     const provider =
-      q.provider === "cursor" ||
-      q.provider === "opencode" ||
-      q.provider === "omp" ||
-      q.provider === "pi"
-        ? q.provider
-        : undefined;
+      q.provider === "cursor" || q.provider === "omp" ? q.provider : undefined;
     const model = typeof q.model === "string" ? q.model.trim() : "";
     if (!provider || !model) {
       return reply.code(400).send({ error: "provider and model required" });
@@ -238,7 +237,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/agent/warm-params", async (req) => {
     const body = z
-      .object({ provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional() })
+      .object({ provider: z.enum(["cursor", "omp"]).optional() })
       .parse(req.body ?? {});
     warmModelParamsProbe(body.provider);
     return { ok: true };
@@ -304,7 +303,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().optional(),
-        provider: z.enum(["cursor", "opencode", "omp", "pi"]).optional(),
+        provider: z.enum(["cursor", "omp"]).optional(),
         cwd: z.string().optional(),
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),

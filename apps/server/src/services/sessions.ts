@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, max } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, max, or, sql } from "drizzle-orm";
 import type {
   MessageDto,
   MessagePartDto,
@@ -361,4 +361,83 @@ export async function replaceUserMessageText(
     broadcastToSession(sessionId, { type: "session.updated", sessionId, session });
   }
   return updated;
+}
+
+const STUCK_TOOL_STATUSES = new Set(["pending", "in_progress", "running"]);
+
+const INTERRUPT_NOTE =
+  "Сервер был перезапущен — этот ход прерван. Отправьте сообщение ещё раз.";
+
+/**
+ * After a server restart no ACP runtime survives. Two stale things remain in
+ * the DB and would lock the UI forever:
+ *  - sessions left in "running"/"waiting" (composer blocked);
+ *  - tool_call parts with a non-terminal status (spinner + "выполняется…").
+ * Reset both, and leave a visible note in the last assistant message.
+ * Safe to call at boot: the runtime map is empty, so every such part/session
+ * is stale by definition.
+ */
+export async function reconcileStaleSessions(): Promise<{
+  sessions: number;
+  parts: number;
+}> {
+  const stale = await db
+    .select()
+    .from(sessions)
+    .where(or(eq(sessions.status, "running"), eq(sessions.status, "waiting")));
+  let fixedSessions = 0;
+  let fixedParts = 0;
+
+  for (const row of stale) {
+    await updateSession(row.id, { status: "idle" });
+    fixedSessions++;
+  }
+
+  // Flip stuck tool parts in every session (idle ones included — warm-up can
+  // mask the session status while the part keeps spinning).
+  const allParts = await db
+    .select({ part: messageParts, sessionId: messages.sessionId })
+    .from(messageParts)
+    .innerJoin(messages, eq(messageParts.messageId, messages.id));
+  const touchedSessions = new Set<string>();
+  for (const { part: p, sessionId } of allParts) {
+    const payload = p.payload as { status?: unknown } | null;
+    const status = payload ? String(payload.status ?? "") : "";
+    if (p.type === "tool_call" && STUCK_TOOL_STATUSES.has(status)) {
+      await updatePart(sessionId, p.id, { status: "error", interrupted: true });
+      fixedParts++;
+      touchedSessions.add(sessionId);
+    }
+  }
+
+  // One explanatory note per touched session (idempotent across restarts).
+  for (const sessionId of touchedSessions) {
+    const alreadyNoted = await db
+      .select({ id: messageParts.id })
+      .from(messageParts)
+      .innerJoin(messages, eq(messageParts.messageId, messages.id))
+      .where(
+        and(
+          eq(messages.sessionId, sessionId),
+          eq(messageParts.type, "error"),
+          eq(sql`(${messageParts.payload}->>'interrupted')`, "true"),
+        ),
+      )
+      .limit(1);
+    if (alreadyNoted[0]) continue;
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(eq(messages.sessionId, sessionId))
+      .orderBy(asc(messages.createdAt));
+    const lastAssistant = rows.filter((m) => m.role === "assistant").at(-1);
+    if (lastAssistant) {
+      await appendPart(sessionId, lastAssistant.id, "error", {
+        message: INTERRUPT_NOTE,
+        interrupted: true,
+      });
+    }
+  }
+
+  return { sessions: fixedSessions, parts: fixedParts };
 }

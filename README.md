@@ -1,6 +1,6 @@
 # ACProcess
 
-Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode / OMP / PI).
+Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
 ## Stack
@@ -49,23 +49,21 @@ The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI fro
 
 `http://0.0.0.0:5173` won't work in a browser — it's only the server's listening address.
 
-## Cursor / OpenCode / OMP / PI
+## Cursor / OMP
 
-1. Install [Cursor CLI](https://cursor.com/docs/cli), OpenCode, OMP and/or PI (`pi` + `npm i -g pi-acp`).
+1. Install [Cursor CLI](https://cursor.com/docs/cli) and/or OMP.
 2. Sign in: `agent login` (or set `CURSOR_API_KEY` in settings).
 3. Check ACP: `agent acp` (the process should start and wait for JSON-RPC on stdin).
 4. In the UI → **Settings** set command/args and the `default cwd`.
 5. Create a chat and send a message.
 
-- OpenCode: `opencode auth login`, command `opencode`, args `acp`
+- Cursor: command `agent`, args `acp`
 - OMP: command `omp`, args `acp`
-- PI: command `pi-acp`, args empty (the `pi` CLI is also required)
 
 ## Connecting an agent
 
-1. In **Settings** pick a provider (OpenCode / Cursor / OMP / PI).
+1. In **Settings** pick a provider (Cursor / OMP).
 2. Set the API key in the right field (if needed):
-   - OpenCode → `OPENCODE_API_KEY` (+ optionally Anthropic/OpenAI)
    - Cursor → `CURSOR_API_KEY`
 3. Click **Test agent connection**.
 4. Permission policy for local: `Always allow`.
@@ -75,6 +73,6 @@ If a chat seems stuck — press **Stop** and send again.
 
 ## Architecture
 
-Browser ↔ REST/WS server ↔ spawn `agent acp` / `opencode acp` / `omp acp` / `pi-acp` (JSON-RPC NDJSON) ↔ Postgres.
+Browser ↔ REST/WS server ↔ spawn `agent acp` / `omp acp` (JSON-RPC NDJSON) ↔ Postgres.
 
 `session/update` events, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` are rendered in the chat feed.

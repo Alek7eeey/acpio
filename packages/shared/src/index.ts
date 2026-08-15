@@ -1,4 +1,21 @@
-export type AgentProvider = "cursor" | "opencode" | "omp" | "pi";
+export type AgentProvider = "cursor" | "omp";
+
+/** MCP server connection defined in Settings → Connections. */
+export type McpServerConfig = {
+  /** Stable unique id. */
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** "local" — same-network HTTP endpoint (URL only); "remote" — external endpoint with token. */
+  type: "local" | "remote";
+  /** Endpoint URL (both types). */
+  url?: string;
+  /** Bearer token for remote servers (never displayed in full). */
+  token?: string;
+  /** @deprecated Local stdio servers are no longer configured in the UI. */
+  command?: string;
+  args?: string[];
+};
 
 export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
@@ -34,14 +51,9 @@ export interface AppSettings {
   defaultModelParams: Record<string, string>;
   cursorCommand: string;
   cursorArgs: string[];
-  opencodeCommand: string;
-  opencodeArgs: string[];
   ompCommand: string;
   ompArgs: string[];
-  piCommand: string;
-  piArgs: string[];
   cursorApiKey: string;
-  opencodeApiKey: string;
   anthropicApiKey: string;
   openaiApiKey: string;
   permissionPolicy: PermissionPolicy;
@@ -72,6 +84,8 @@ export interface AppSettings {
   darkScheme: string;
   /** Preferred read-aloud voice gender ("" = browser default). */
   ttsVoiceGender: "" | "female" | "male";
+  /** MCP servers attached to the agent (local stdio + remote endpoints). */
+  mcpServers: McpServerConfig[];
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -79,21 +93,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   locale: "ru",
   displayName: "",
   connectedProvider: null,
-  defaultProvider: "opencode",
+  defaultProvider: "cursor",
   defaultMode: "agent",
   defaultCwd: "",
   defaultModel: "",
   defaultModelParams: {},
   cursorCommand: "agent",
   cursorArgs: ["acp"],
-  opencodeCommand: "opencode",
-  opencodeArgs: ["acp"],
   ompCommand: "omp",
   ompArgs: ["acp"],
-  piCommand: "pi-acp",
-  piArgs: [],
   cursorApiKey: "",
-  opencodeApiKey: "",
   anthropicApiKey: "",
   openaiApiKey: "",
   permissionPolicy: "always",
@@ -107,28 +116,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lightScheme: "",
   darkScheme: "",
   ttsVoiceGender: "",
+  mcpServers: [],
 };
 
 export function providerCommand(settings: AppSettings, provider: AgentProvider): string {
   if (provider === "cursor") return settings.cursorCommand;
-  if (provider === "omp") return settings.ompCommand;
-  if (provider === "pi") return settings.piCommand;
-  return settings.opencodeCommand;
+  return settings.ompCommand;
 }
 
 export function providerArgs(settings: AppSettings, provider: AgentProvider): string[] {
   if (provider === "cursor") return settings.cursorArgs;
-  if (provider === "omp") return settings.ompArgs;
-  if (provider === "pi") return settings.piArgs;
-  return settings.opencodeArgs;
+  return settings.ompArgs;
 }
 
-/** OpenCode / OMP catalogs depend on account balance and change often. */
+/** OMP catalogs depend on account balance and change often. */
 export function usesCloudModelCatalog(provider: AgentProvider): boolean {
-  return provider === "opencode" || provider === "omp";
+  return provider === "omp";
 }
 
-/** Billing / credits failure from OpenCode or OMP when a model cannot be used. */
+/** Billing / credits failure from OMP when a model cannot be used. */
 export function isModelAccessError(message: string): boolean {
   return /Insufficient balance|CreditsError|insufficient.?credits|payment required|billing/i.test(
     message,
@@ -597,8 +603,8 @@ const SUBAGENT_TOOL_KINDS = new Set([
 /**
  * Decide whether an ACP tool call runs a nested agent. Only the structured
  * `kind` field is consulted — never the free-text title. Kinds are per-agent:
- * Cursor reports its documented subagent tool kinds and OpenCode reports
- * `task`; agents that omit `kind` (e.g. OMP) render as plain tool calls.
+ * Cursor reports its documented subagent tool kinds; agents that omit `kind`
+ * (e.g. OMP) render as plain tool calls.
  */
 export function isSubagentToolCall(kind: string): boolean {
   return SUBAGENT_TOOL_KINDS.has(kind.trim().toLowerCase());

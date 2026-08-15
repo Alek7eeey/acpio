@@ -212,7 +212,7 @@ export const ru = {
   chat: {
     emptyTitle: "ACProcess",
     emptyDescription:
-      "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются Cursor, OpenCode, OMP и PI.",
+      "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются Cursor и OMP.",
     connectAgent: "Подключить агента",
     newSession: "Новый чат",
     jumpToLatest: "Перейти к последним сообщениям",
@@ -298,11 +298,23 @@ export const ru = {
     ttsTestText: "Отличный день сегодня. Как у тебя дела?",
     ttsTestPiper: "Движок: Piper (локальный)",
     ttsTestBrowser: "Движок: браузерная озвучка",
+    mcpTitle: "MCP-серверы",
+    mcpHint:
+      "Подключите внешние инструменты по Model Context Protocol. Локальный — HTTP-эндпоинт в вашей сети (только URL); Удалённый — внешний эндпоинт, опционально с bearer-токеном.",
+    mcpLocal: "Локальный",
+    mcpRemote: "Удалённый",
+    mcpAdd: "Добавить MCP-сервер",
+    mcpType: "Тип подключения",
+    mcpName: "Название",
+    mcpUrl: "URL сервера",
+    mcpToken: "Токен (необязательно)",
+    mcpTokenSet: "токен задан",
+    mcpNone: "Нет",
+    enabled: "Включено",
+    disabled: "Выключено",
     profileDesc: "Имя и пароль аккаунта",
-    opencodeDesc: "Локальный OpenCode CLI через ACP",
     cursorDesc: "Cursor CLI через ACP",
     ompDesc: "OMP CLI через ACP",
-    piDesc: "Pi ACP-адаптер",
     profileSaved: "Имя сохранено",
     saved: "Сохранено",
     passwordUpdated: "Пароль обновлён",
@@ -449,10 +461,6 @@ export const ru = {
       "Команда \"{{command}}\" не найдена. Cursor IDE ≠ Cursor CLI. Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex затем выполните agent login. Или укажите полный путь в «CLI и права».",
     commandNotFoundOmp:
       "Команда \"{{command}}\" не найдена. Убедитесь, что omp в PATH",
-    commandNotFoundPi:
-      "Команда \"{{command}}\" не найдена. Установите Pi ACP-адаптер: npm i -g pi-acp",
-    commandNotFoundOpencode:
-      "Команда \"{{command}}\" не найдена. Установите OpenCode и проверьте PATH, или укажите полный путь в «CLI и права».",
   },
   agent: {
     toolsHint:

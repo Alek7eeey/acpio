@@ -188,7 +188,7 @@ export const en = {
   chat: {
     emptyTitle: "ACProcess",
     emptyDescription:
-      "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor, OpenCode, OMP and PI.",
+      "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor and OMP.",
     connectAgent: "Connect agent",
     newSession: "New session",
     jumpToLatest: "Jump to latest",
@@ -273,11 +273,23 @@ export const en = {
     ttsTestText: "This is a voice test. Have a nice day!",
     ttsTestPiper: "Engine: Piper (local)",
     ttsTestBrowser: "Engine: browser speech",
+    mcpTitle: "MCP servers",
+    mcpHint:
+      "Attach external tools via the Model Context Protocol. Local — same-network HTTP endpoint (URL only); Remote — external endpoint, optionally with a bearer token.",
+    mcpLocal: "Local",
+    mcpRemote: "Remote",
+    mcpAdd: "Add MCP server",
+    mcpType: "Connection type",
+    mcpName: "Name",
+    mcpUrl: "Server URL",
+    mcpToken: "Token (optional)",
+    mcpTokenSet: "token set",
+    mcpNone: "None",
+    enabled: "Enabled",
+    disabled: "Disabled",
     profileDesc: "Account name and password",
-    opencodeDesc: "Local OpenCode CLI via ACP",
     cursorDesc: "Cursor CLI via ACP",
     ompDesc: "OMP CLI via ACP",
-    piDesc: "Pi ACP adapter",
     profileSaved: "Name saved",
     saved: "Saved",
     passwordUpdated: "Password updated",
@@ -424,10 +436,6 @@ export const en = {
       'Command "{{command}}" not found. Cursor IDE ≠ Cursor CLI. Install CLI (PowerShell): irm \'https://cursor.com/install?win32=true\' | iex then run agent login. Or set the full path in CLI & permissions.',
     commandNotFoundOmp:
       'Command "{{command}}" not found. Make sure omp is in PATH.',
-    commandNotFoundPi:
-      'Command "{{command}}" not found. Install Pi ACP adapter: npm i -g pi-acp',
-    commandNotFoundOpencode:
-      'Command "{{command}}" not found. Install OpenCode and check PATH, or set the full path in CLI & permissions.',
   },
   agent: {
     toolsHint:

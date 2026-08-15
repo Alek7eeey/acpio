@@ -6,7 +6,8 @@ export type SettingsAgentLeaf =
   | "model"
   | "advanced"
   | "remote"
-  | "diagnostics";
+  | "diagnostics"
+  | "mcp";
 export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsInterfaceLeaf;
 
@@ -27,6 +28,7 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
     { id: "connect", label: t("settings.connection") },
     { id: "model", label: t("settings.modelSection") },
     { id: "advanced", label: t("settings.advanced") },
+    { id: "mcp", label: t("settings.mcpTitle") },
     { id: "diagnostics", label: t("settings.diagnostics") },
     { id: "remote", label: t("settings.remoteAccess") },
   ];
@@ -71,7 +73,8 @@ export function parseSettingsSearch(search: string): {
     rawLeaf === "advanced" ||
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||
-    rawLeaf === "diagnostics"
+    rawLeaf === "diagnostics" ||
+    rawLeaf === "mcp"
       ? rawLeaf
       : "connect";
   return { section: "agent", leaf };

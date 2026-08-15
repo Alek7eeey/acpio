@@ -326,7 +326,7 @@ export async function ensureAcp(
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
-  // Switching Cursor ↔ OpenCode must replace the live process, not reuse it.
+  // Switching Cursor ↔ OMP must replace the live process, not reuse it.
   if (rt.provider && rt.provider !== opts.provider) {
     resetAcpClient(rt);
   }
@@ -1186,7 +1186,7 @@ export async function setSessionModel(
 
   const detail = await syncSessionAgent(sessionId);
   const rt = runtimes.get(sessionId);
-  // Mid-session set_config_option often leaves OpenCode/Cursor in a broken state
+  // Mid-session set_config_option often leaves OMP/Cursor in a broken state
   // ("Model is unavailable"). Restart ACP so the new model applies like a new chat.
   if (rt) resetAcpClient(rt);
 

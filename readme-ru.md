@@ -1,6 +1,6 @@
 # ACProcess
 
-Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OpenCode / OMP / PI).
+Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
 ## Стек
@@ -46,23 +46,21 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 
 `http://0.0.0.0:5173` в браузере не работает — это только адрес прослушивания сервера.
 
-## Cursor / OpenCode / OMP / PI
+## Cursor / OMP
 
-1. Установите [Cursor CLI](https://cursor.com/docs/cli), OpenCode, OMP и/или PI (`pi` + `npm i -g pi-acp`).
+1. Установите [Cursor CLI](https://cursor.com/docs/cli) и/или OMP.
 2. Авторизуйтесь: `agent login` (или задайте `CURSOR_API_KEY` в настройках).
 3. Проверьте ACP: `agent acp` (процесс должен стартовать и ждать JSON-RPC на stdin).
 4. В UI → **Настройки** укажите command/args и `default cwd`.
 5. Создайте чат и отправьте сообщение.
 
-- OpenCode: `opencode auth login`, command `opencode`, args `acp`
+- Cursor: command `agent`, args `acp`
 - OMP: command `omp`, args `acp`
-- PI: command `pi-acp`, args пустые (нужен также `pi` CLI)
 
 ## Подключение агента
 
-1. В **Настройки** выберите провайдера (OpenCode / Cursor / OMP / PI).
+1. В **Настройки** выберите провайдера (Cursor / OMP).
 2. Укажите API key в правильном поле (если нужно):
-   - OpenCode → `OPENCODE_API_KEY` (+ опционально Anthropic/OpenAI)
    - Cursor → `CURSOR_API_KEY`
 3. Нажмите **Проверить подключение агента**.
 4. Permission policy для локалки: `Всегда разрешать`.
@@ -72,6 +70,6 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 
 ## Архитектура
 
-Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `opencode acp` / `omp acp` / `pi-acp` (JSON-RPC NDJSON) ↔ Postgres.
+Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `omp acp` (JSON-RPC NDJSON) ↔ Postgres.
 
 События `session/update`, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` отображаются в ленте чата.

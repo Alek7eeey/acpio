@@ -28,7 +28,6 @@ export async function resolveDiagnosticsDir(settings?: AppSettings): Promise<str
 function redactSettings(settings: AppSettings): Record<string, unknown> {
   const {
     cursorApiKey,
-    opencodeApiKey,
     anthropicApiKey,
     openaiApiKey,
     ...rest
@@ -36,7 +35,6 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
   return {
     ...rest,
     cursorApiKey: cursorApiKey ? "[set]" : "",
-    opencodeApiKey: opencodeApiKey ? "[set]" : "",
     anthropicApiKey: anthropicApiKey ? "[set]" : "",
     openaiApiKey: openaiApiKey ? "[set]" : "",
   };

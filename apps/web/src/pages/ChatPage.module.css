@@ -668,17 +668,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  align-self: center;
 }
 
 .toolCheck {
   color: var(--success);
   font-size: 0.68rem;
   line-height: 1;
+  align-self: center;
 }
 
 .toolStatus {
   color: var(--text-secondary);
   font-size: 0.72rem;
+  line-height: 1;
+  align-self: center;
+  /* Glyph ink of the Cyrillic text sits ~0.7px above the line-box center in
+     Segoe UI (asymmetric baseline); nudge it down so the label reads level
+     with the spinner on the left. */
+  position: relative;
+  top: 0.7px;
   white-space: nowrap;
 }
 
@@ -745,6 +754,7 @@
   width: 11px;
   height: 11px;
   flex-shrink: 0;
+  align-self: center;
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
   border-top-color: var(--accent);

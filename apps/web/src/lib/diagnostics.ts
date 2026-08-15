@@ -90,7 +90,6 @@ function redactClientSettings(settings: AppSettings) {
   return {
     ...settings,
     cursorApiKey: settings.cursorApiKey ? "[set]" : "",
-    opencodeApiKey: settings.opencodeApiKey ? "[set]" : "",
     anthropicApiKey: settings.anthropicApiKey ? "[set]" : "",
     openaiApiKey: settings.openaiApiKey ? "[set]" : "",
   };

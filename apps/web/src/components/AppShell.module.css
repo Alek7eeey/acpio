@@ -2470,6 +2470,41 @@
   font-weight: 650;
 }
 
+.agentTipMcpList {
+  display: grid;
+  gap: 4px;
+  text-align: right;
+  min-width: 0;
+}
+
+.agentTipMcpRow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agentTipMcpName {
+  color: var(--text);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.agentTipMcpType {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agentTipMuted {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+
 .toolCluster {
   display: inline-flex;
   align-items: center;

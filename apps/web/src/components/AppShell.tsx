@@ -71,13 +71,9 @@ export function AppShell() {
       ? t("common.noAgent")
       : provider === "cursor"
         ? "Cursor"
-        : provider === "opencode"
-          ? "OpenCode"
-          : provider === "omp"
-            ? "OMP"
-            : provider === "pi"
-              ? "PI"
-              : provider;
+        : provider === "omp"
+          ? "OMP"
+          : provider;
     return t("common.agentStatus", {
       agent,
       status: agentOnline ? t("common.online") : t("common.offline"),
@@ -235,9 +231,7 @@ export function AppShell() {
     const provider = settings.connectedProvider;
     if (!provider) return t("common.noAgent");
     if (provider === "cursor") return "Cursor";
-    if (provider === "opencode") return "OpenCode";
     if (provider === "omp") return "OMP";
-    if (provider === "pi") return "PI";
     return provider;
   }, [settings.connectedProvider, t]);
 
@@ -247,6 +241,12 @@ export function AppShell() {
         ? modelDisplayName(settings.defaultModel, undefined, t("models.default"))
         : "—",
     [settings.defaultModel, t],
+  );
+
+  // MCP servers actually handed to the agent (enabled + has an endpoint URL).
+  const enabledMcpServers = useMemo(
+    () => (settings.mcpServers ?? []).filter((s) => s.enabled && s.url?.trim()),
+    [settings.mcpServers],
   );
 
   const goChat = useCallback(() => {
@@ -729,6 +729,23 @@ export function AppShell() {
                     <span className={agentOnline ? styles.agentTipOk : styles.agentTipBad}>
                       {agentOnline ? t("common.connected") : t("common.notConnected")}
                     </span>
+                  </div>
+                  <div className={styles.agentTipLine}>
+                    <span className={styles.agentTipLabel}>{t("settings.mcpTitle")}</span>
+                    {enabledMcpServers.length === 0 ? (
+                      <span className={styles.agentTipMuted}>{t("settings.mcpNone")}</span>
+                    ) : (
+                      <span className={styles.agentTipMcpList}>
+                        {enabledMcpServers.map((s) => (
+                          <span key={s.id} className={styles.agentTipMcpRow}>
+                            <span className={styles.agentTipMcpName}>{s.name}</span>
+                            <span className={styles.agentTipMcpType}>
+                              {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </div>
                 </div>
               ) : null}

@@ -8,6 +8,7 @@ import {
   type AgentProvider,
   type AppSettings,
   type DiagnosticsDumpMeta,
+  type McpServerConfig,
   type ModelParamDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
@@ -22,7 +23,7 @@ import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import styles from "./SettingsPage.module.css";
 
-const PROVIDER_IDS = ["cursor", "opencode", "omp", "pi"] as const satisfies readonly AgentProvider[];
+const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
 function SchemeCard({
   active,
@@ -58,15 +59,8 @@ export function SettingsPage() {
     () =>
       PROVIDER_IDS.map((id) => ({
         id,
-        title: id === "cursor" ? "Cursor" : id === "opencode" ? "OpenCode" : id === "omp" ? "OMP" : "PI",
-        description:
-          id === "cursor"
-            ? t("settings.cursorDesc")
-            : id === "opencode"
-              ? t("settings.opencodeDesc")
-              : id === "omp"
-                ? t("settings.ompDesc")
-                : t("settings.piDesc"),
+        title: id === "cursor" ? "Cursor" : "OMP",
+        description: id === "cursor" ? t("settings.cursorDesc") : t("settings.ompDesc"),
       })),
     [t],
   );
@@ -89,6 +83,7 @@ export function SettingsPage() {
   );
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
+  const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsEngine, setTtsEngine] = useState<"unknown" | "piper" | "browser">("unknown");
   const [ttsVoicesByGender, setTtsVoicesByGender] = useState<{
@@ -206,6 +201,47 @@ export function SettingsPage() {
 
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const mcpServers = form.mcpServers ?? [];
+
+  const updateMcp = (id: string, change: Partial<McpServerConfig>) => {
+    patch(
+      "mcpServers",
+      mcpServers.map((s) => (s.id === id ? { ...s, ...change } : s)),
+    );
+  };
+
+  const removeMcp = (id: string) => {
+    patch(
+      "mcpServers",
+      mcpServers.filter((s) => s.id !== id),
+    );
+  };
+
+  const saveMcp = () => {
+    if (!mcpDraft) return;
+    const name = mcpDraft.name.trim();
+    const url = (mcpDraft.url ?? "").trim();
+    const token = (mcpDraft.token ?? "").trim();
+    if (!name || !url) return;
+    const id = mcpDraft.id || `mcp-${Date.now().toString(36)}`;
+    const next: McpServerConfig = {
+      ...mcpDraft,
+      id,
+      name,
+      url,
+      token: mcpDraft.type === "remote" && token ? token : undefined,
+      command: undefined,
+      args: undefined,
+    };
+    patch(
+      "mcpServers",
+      mcpServers.some((s) => s.id === id)
+        ? mcpServers.map((s) => (s.id === id ? next : s))
+        : [...mcpServers, next],
+    );
+    setMcpDraft(null);
   };
 
   const loadParamsForModel = async (nextModel: string) => {
@@ -388,7 +424,7 @@ export function SettingsPage() {
   };
 
   const clearApiKey = async (
-    key: "cursorApiKey" | "opencodeApiKey" | "anthropicApiKey" | "openaiApiKey",
+    key: "cursorApiKey" | "anthropicApiKey" | "openaiApiKey",
   ) => {
     const next = { ...form, [key]: "" };
     setForm(next);
@@ -414,7 +450,9 @@ export function SettingsPage() {
               ? t("settings.remoteAccessTitle")
               : leaf === "diagnostics"
                 ? t("settings.diagnosticsTitle")
-                : t("settings.agentAdvancedTitle")
+                : leaf === "mcp"
+                  ? t("settings.mcpTitle")
+                  : t("settings.agentAdvancedTitle")
         : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -424,7 +462,9 @@ export function SettingsPage() {
         : leaf === "voice"
           ? t("settings.voiceDesc")
           : t("settings.sidebarCollapseHint")
-      : section === "agent" && leaf === "advanced"
+      : section === "agent" && leaf === "mcp"
+        ? t("settings.mcpHint")
+        : section === "agent" && leaf === "advanced"
         ? t("settings.agentAdvancedDesc")
         : section === "agent" && leaf === "remote"
           ? t("settings.remoteAccessDesc")
@@ -909,16 +949,6 @@ export function SettingsPage() {
                   checked={Boolean(form.multitask)}
                   onChange={(e) => patch("multitask", e.target.checked)}
                 />
-                <span className={styles.switchIcon} aria-hidden>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-                      stroke="currentColor"
-                      strokeWidth="1.9"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
                 <span className={styles.switchBody}>
                   <strong>{t("settings.multitask")}</strong>
                   <span>{t("settings.multitaskHint")}</span>
@@ -938,12 +968,6 @@ export function SettingsPage() {
                     key: "cursorApiKey" as const,
                     label: `Cursor ${t("settings.apiKeys")}`,
                     env: "CURSOR_API_KEY",
-                    placeholder: "",
-                  },
-                  {
-                    key: "opencodeApiKey" as const,
-                    label: `OpenCode ${t("settings.apiKeys")}`,
-                    env: "OPENCODE_API_KEY",
                     placeholder: "",
                   },
                   {
@@ -1015,26 +1039,6 @@ export function SettingsPage() {
                   </div>
                 </label>
                 <label>
-                  OpenCode
-                  <div className={styles.row}>
-                    <input
-                      value={form.opencodeCommand}
-                      onChange={(e) => patch("opencodeCommand", e.target.value)}
-                      placeholder="opencode"
-                    />
-                    <input
-                      value={(form.opencodeArgs ?? []).join(" ")}
-                      onChange={(e) =>
-                        patch(
-                          "opencodeArgs",
-                          e.target.value.split(/\s+/).filter(Boolean),
-                        )
-                      }
-                      placeholder="acp"
-                    />
-                  </div>
-                </label>
-                <label>
                   OMP
                   <div className={styles.row}>
                     <input
@@ -1054,28 +1058,133 @@ export function SettingsPage() {
                     />
                   </div>
                 </label>
-                <label>
-                  PI
-                  <div className={styles.row}>
-                    <input
-                      value={form.piCommand ?? "pi-acp"}
-                      onChange={(e) => patch("piCommand", e.target.value)}
-                      placeholder="pi-acp"
-                    />
-                    <input
-                      value={(form.piArgs ?? []).join(" ")}
-                      onChange={(e) =>
-                        patch(
-                          "piArgs",
-                          e.target.value.split(/\s+/).filter(Boolean),
-                        )
-                      }
-                      placeholder="(пусто) или -y pi-acp для npx"
-                    />
-                  </div>
-                </label>
               </div>
             </details>
+          </section>
+        )}
+
+        {section === "agent" && leaf === "mcp" && (
+          <section className={styles.card}>
+            <div className={styles.sectionBlock}>
+              <p className={styles.fieldHint}>{t("settings.mcpHint")}</p>
+
+              {mcpServers.map((server) => (
+                <div key={server.id} className={styles.mcpRow}>
+                  <div className={styles.mcpRowMeta}>
+                    <strong>{server.name}</strong>
+                    <span className={styles.mcpRowType}>
+                      {server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                    </span>
+                    <span className={styles.mcpRowDetail}>
+                      {server.url}
+                      {server.type === "remote" && server.token ? (
+                        <span className={styles.mcpRowToken}> · {t("settings.mcpTokenSet")}</span>
+                      ) : null}
+                    </span>
+                  </div>
+                  <label
+                    className={styles.mcpToggle}
+                    title={server.enabled ? t("settings.enabled") : t("settings.disabled")}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(server.enabled)}
+                      onChange={(e) => updateMcp(server.id, { enabled: e.target.checked })}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => setMcpDraft({ ...server })}
+                  >
+                    {t("common.edit")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => removeMcp(server.id)}
+                  >
+                    {t("common.delete")}
+                  </button>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={() =>
+                  setMcpDraft({
+                    id: "",
+                    name: "",
+                    enabled: true,
+                    type: "local",
+                    url: "",
+                    token: "",
+                  })
+                }
+              >
+                + {t("settings.mcpAdd")}
+              </button>
+
+              {mcpDraft && (
+                <div className={styles.mcpForm}>
+                  <input
+                    className={styles.mcpInput}
+                    placeholder={t("settings.mcpName")}
+                    value={mcpDraft.name}
+                    onChange={(e) => setMcpDraft({ ...mcpDraft, name: e.target.value })}
+                  />
+                  <OptionPicker
+                    variant="block"
+                    placement="down"
+                    menuTitle={t("settings.mcpType")}
+                    value={mcpDraft.type}
+                    onChange={(v) =>
+                      setMcpDraft({
+                        ...mcpDraft,
+                        type: v === "remote" ? "remote" : "local",
+                      })
+                    }
+                    options={[
+                      { value: "local", label: t("settings.mcpLocal") },
+                      { value: "remote", label: t("settings.mcpRemote") },
+                    ]}
+                  />
+                  <input
+                    className={styles.mcpInput}
+                    placeholder={t("settings.mcpUrl")}
+                    value={mcpDraft.url ?? ""}
+                    onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
+                  />
+                  {mcpDraft.type === "remote" && (
+                    <input
+                      className={styles.mcpInput}
+                      type="password"
+                      placeholder={t("settings.mcpToken")}
+                      value={mcpDraft.token ?? ""}
+                      onChange={(e) => setMcpDraft({ ...mcpDraft, token: e.target.value })}
+                    />
+                  )}
+                  <div className={styles.mcpFormActions}>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => setMcpDraft(null)}
+                    >
+                      {t("common.cancel")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.primaryBtn}
+                      disabled={!mcpDraft.name.trim() || !mcpDraft.url?.trim()}
+                      onClick={saveMcp}
+                    >
+                      {t("common.save")}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </section>
         )}
 

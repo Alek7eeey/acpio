@@ -2100,7 +2100,7 @@ export function ChatPage() {
       setModelParamValues(settings.defaultModelParams ?? {});
       return;
     }
-    // Drop a defaultModel that belongs to another agent (e.g. Cursor id in OpenCode chat).
+    // Drop a defaultModel that belongs to another agent (e.g. Cursor id in OMP chat).
     const preferred = settings.defaultModel || catalog.currentModel || "";
     const nextModel =
       preferred && catalog.models.some((m) => m.value === preferred)

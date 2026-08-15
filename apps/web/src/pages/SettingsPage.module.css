@@ -235,18 +235,20 @@
   transform: translateX(17px);
 }
 
-/* The multitask toggle sits between dense field blocks in Agent → Advanced;
-   give it breathing room so it reads as its own group. */
+/* The multitask toggle sits between dense field blocks in Agent → Advanced:
+   no card frame and no separators around it, label spans the full width. */
 .sectionBlock.switchSection {
-  margin: 16px 0 14px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  background: var(--bg-secondary);
+  margin: 14px 0;
+  border-top: none;
 }
 
 .sectionBlock.switchSection label.switchCard {
   margin-top: 0;
+  width: 100%;
+}
+
+.sectionBlock.switchSection + .sectionBlock {
+  border-top: none;
 }
 
 .cwdPickRow {
@@ -758,6 +760,90 @@
 .secondaryBtn {
   background: var(--bg-tertiary);
   color: var(--text);
+}
+
+.mcpRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 50%, transparent);
+  margin-top: 6px;
+}
+
+.mcpRowMeta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.mcpRowType {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.mcpRowDetail {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Consolas, monospace);
+}
+
+.mcpRowToken {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-style: italic;
+}
+
+.mcpToggle {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+
+.mcpToggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}
+
+.mcpForm {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
+.mcpInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.88rem;
+}
+
+.mcpInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.mcpFormActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .primaryBtn {

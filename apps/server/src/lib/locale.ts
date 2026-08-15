@@ -63,8 +63,6 @@ export function isErrorCode(code: string): code is ErrorCode {
     "agentEmptyResponse",
     "commandNotFoundCursor",
     "commandNotFoundOmp",
-    "commandNotFoundPi",
-    "commandNotFoundOpencode",
   ].includes(code);
 }
 
