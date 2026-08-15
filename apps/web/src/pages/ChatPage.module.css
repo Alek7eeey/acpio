@@ -1788,14 +1788,16 @@
 }
 
 .userFileItem {
-  /* Column, not grid: a grid's auto column stretches to the widest child
-     (the chip with a long filename), leaving the 160px preview left-aligned
-     with a visible gap on the right. Flex keeps every child its own width. */
+  /* Column with children right-aligned: the item is as wide as its widest
+     child (the chip), and the preview must sit flush with the right edge —
+     flex-start would leave a visible gap on the image's right. */
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 6px;
   min-width: 0;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .userFilePreviewWrap {
@@ -1824,7 +1826,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: min(220px, 100%);
+  max-width: 100%;
   min-width: 0;
   padding: 4px 8px;
   border-radius: 10px;
