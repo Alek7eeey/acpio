@@ -14,6 +14,8 @@ export type BrowseDirectoryResult = {
   entries: BrowseDirectoryEntry[];
   /** Virtual Windows “This PC” view with drive letters. */
   kind?: "drives" | "directory";
+  /** Standard user folders (Desktop, Downloads, …) for quick access. */
+  quick?: BrowseDirectoryEntry[];
 };
 
 /** Virtual root for Windows drive list (This PC). */
@@ -66,6 +68,25 @@ function isDrivesRootRequest(raw?: string): boolean {
   );
 }
 
+/** Standard per-user folders for quick access (Desktop, Downloads, …). */
+function quickAccessFolders(): BrowseDirectoryEntry[] {
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+  if (!home) return [];
+  const names = ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"];
+  const out: BrowseDirectoryEntry[] = [];
+  for (const name of names) {
+    const full = path.join(home, name);
+    try {
+      if (fs.existsSync(full) && fs.statSync(full).isDirectory()) {
+        out.push({ name, path: full, isDir: true });
+      }
+    } catch {
+      // skip unreadable
+    }
+  }
+  return out;
+}
+
 /** List subdirectories (and optionally files) for in-browser picking (mobile / remote). */
 export function browseDirectory(
   raw?: string,
@@ -77,6 +98,7 @@ export function browseDirectory(
       parent: null,
       kind: "drives",
       entries: listWindowsDrives(),
+      quick: quickAccessFolders(),
     };
   }
 
@@ -116,5 +138,5 @@ export function browseDirectory(
 
   entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
-  return { path: current, parent, kind: "directory", entries };
+  return { path: current, parent, kind: "directory", entries, quick: quickAccessFolders() };
 }

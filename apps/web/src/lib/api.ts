@@ -117,6 +117,7 @@ export const api = {
       parent: string | null;
       kind?: "drives" | "directory";
       entries: Array<{ name: string; path: string; isDir?: boolean }>;
+      quick?: Array<{ name: string; path: string; isDir?: boolean }>;
     }>("/api/fs/browse", {
       method: "POST",
       body: JSON.stringify({ path: path || undefined, files: opts?.files === true }),

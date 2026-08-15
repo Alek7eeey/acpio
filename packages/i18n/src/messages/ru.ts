@@ -118,6 +118,7 @@ export const ru = {
     installAppIosStep3: "Подтвердите — иконка ACProcess появится на домашнем экране.",
     installAppDesktop: "Chrome/Edge на ПК: иконка установки в адресной строке или эта кнопка, если браузер предлагает.",
     thisPc: "Этот компьютер",
+    quickAccess: "Быстро",
     browseFolders: "Обзор папок на сервере",
     parentFolder: "Родительская папка",
     useThisFolder: "Выбрать эту папку",

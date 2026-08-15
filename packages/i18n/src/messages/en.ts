@@ -100,6 +100,7 @@ export const en = {
     installAppIosStep3: "Confirm — the ACProcess icon will appear on the Home Screen.",
     installAppDesktop: "Desktop Chrome/Edge: install icon in the address bar, or this button when available.",
     thisPc: "This PC",
+    quickAccess: "Quick access",
     browseFolders: "Browse server folders",
     parentFolder: "Parent folder",
     useThisFolder: "Use this folder",

@@ -20,6 +20,7 @@ type BrowseState = {
   parent: string | null;
   kind?: "drives" | "directory";
   entries: Array<{ name: string; path: string; isDir?: boolean }>;
+  quick?: Array<{ name: string; path: string; isDir?: boolean }>;
 };
 
 const fileIcon = (
@@ -87,6 +88,9 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
 
   if (!open) return null;
 
+  const drivesRoot = browse?.kind === "drives" || browse?.path === DRIVES_ROOT;
+  const currentLabel = drivesRoot ? t("common.thisPc") : browse?.path;
+
   return createPortal(
     <div className={styles.overlay}>
       <button
@@ -128,9 +132,27 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
             </svg>
           </button>
           <span className={styles.path} title={browse?.path}>
-            {browse?.path ?? (loading ? t("common.loading") : t("common.thisPc"))}
+            {currentLabel ?? (loading ? t("common.loading") : t("common.thisPc"))}
           </span>
         </div>
+
+        {browse?.quick && browse.quick.length > 0 ? (
+          <div className={styles.quick}>
+            <span className={styles.quickLabel}>{t("common.quickAccess")}</span>
+            <div className={styles.quickList}>
+              {browse.quick.map((q) => (
+                <button
+                  key={q.path}
+                  type="button"
+                  className={styles.quickItem}
+                  onClick={() => void loadBrowse(q.path)}
+                >
+                  {q.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className={styles.list} role="listbox" aria-label={t("chat.attachServer")}>
           {!browse && loading ? (

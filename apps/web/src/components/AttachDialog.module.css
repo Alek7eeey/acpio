@@ -146,6 +146,44 @@
   align-content: start;
 }
 
+.quick {
+  display: grid;
+  gap: 5px;
+  margin: 0 14px 8px;
+}
+
+.quickLabel {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
+.quickList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.quickItem {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.quickItem:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+
 .empty {
   margin: auto;
   color: var(--text-secondary);
