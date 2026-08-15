@@ -150,6 +150,28 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadSeq = useRef(0);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const resizeDrag = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    const dlg = e.currentTarget.parentElement;
+    if (!dlg) return;
+    const rect = dlg.getBoundingClientRect();
+    resizeDrag.current = { x: e.clientX, y: e.clientY, w: rect.width, h: rect.height };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handleResizeMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const start = resizeDrag.current;
+    if (!start) return;
+    const w = Math.min(Math.max(start.w + e.clientX - start.x, 360), window.innerWidth - 32);
+    const h = Math.min(Math.max(start.h + e.clientY - start.y, 420), window.innerHeight - 32);
+    setSize({ w, h });
+  };
+
+  const handleResizeEnd = () => {
+    resizeDrag.current = null;
+  };
 
   const loadBrowse = async (path?: string) => {
     const seq = ++loadSeq.current;
@@ -208,7 +230,13 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
         aria-label={t("common.cancel")}
         onClick={onClose}
       />
-      <div className={styles.dialog} role="dialog" aria-modal="true" aria-label={t("chat.attachFiles")}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={t("chat.attachFiles")}
+        style={size ? { width: size.w, height: size.h, maxHeight: size.h } : undefined}
+      >
         <div className={styles.titleBar}>
           <h2 className={styles.title}>{t("chat.attachFiles")}</h2>
           <button
@@ -238,7 +266,7 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
             <button
               type="button"
               className={`${styles.sidebarItem}${drivesRoot ? ` ${styles.sidebarItemActive}` : ""}`}
-              onClick={() => void loadBrowse()}
+              onClick={() => void loadBrowse(DRIVES_ROOT)}
             >
               <span className={styles.sidebarItemIcon}>{pcIcon}</span>
               <span className={styles.sidebarItemName}>{t("common.thisPc")}</span>
@@ -331,6 +359,26 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
               </button>
             </div>
           </div>
+        </div>
+
+        <div
+          className={styles.resizeHandle}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Изменить размер"
+          onPointerDown={handleResizeStart}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeEnd}
+          onPointerCancel={handleResizeEnd}
+        >
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden>
+            <path
+              d="M10.5 1v9.5H1M10.5 5.5V10H6M10.5 8.5V10H9"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+          </svg>
         </div>
       </div>
     </div>,
