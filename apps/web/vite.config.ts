@@ -59,11 +59,19 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "src"),
       "@acprocess/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@acprocess/i18n": path.resolve(__dirname, "../../packages/i18n/src/index.ts"),
     },
   },
   server: {
     host: "0.0.0.0",
     port: 5173,
+    // Dev module responses carry an etag + "no-cache" (revalidate), and a bad
+    // 304 path makes browsers keep STALE module bodies for unchanged URLs —
+    // freshly added keys/strings never show up until the cache is cleared.
+    // no-store forces a full fetch every time in dev.
+    headers: {
+      "Cache-Control": "no-store",
+    },
     // TEMPORARY: allow Cloudflare quick tunnels (*.trycloudflare.com) and other Host headers.
     allowedHosts: true,
     proxy: {
