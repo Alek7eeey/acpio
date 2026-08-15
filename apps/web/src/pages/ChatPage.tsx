@@ -2429,6 +2429,13 @@ export function ChatPage() {
     getScrollElement: () => threadRef.current,
     estimateSize: (index) => estimateMessageRowHeight(messageRows[index]?.msg),
     overscan: 6,
+    // Glue the viewport to the true bottom: when near the end, any measured
+    // height delta (estimate→actual, streaming growth) shifts the scroll by
+    // exactly that delta, so the landing converges to the real bottom even
+    // when the last reply measures far taller than its estimate.
+    anchorTo: "end",
+    // New messages while at the end auto-scroll to the bottom.
+    followOnAppend: true,
   });
 
   const renderArticle = (msg: MessageDto, isLiveAssistant: boolean) => {
@@ -2582,18 +2589,6 @@ export function ChatPage() {
     ro.observe(inner);
     return () => ro.disconnect();
   }, [activeSessionId]);
-
-  // Virtual mode, cold open: the initial "scroll to end" lands on ESTIMATED
-  // heights, and a giant last message (long reply) measures far taller than
-  // its estimate. The async measure→re-pin cycle can miss on slow machines,
-  // parking the viewport at the previous message. Force a synchronous measure
-  // of the rendered window after mount, then land on the true bottom.
-  useEffect(() => {
-    if (!chatVirtual) return;
-    if (!stickToBottomRef.current && !userJustSentRef.current) return;
-    chatVirtualizer.measure();
-    scrollThreadToEnd();
-  }, [chatVirtual, activeSessionId, lastMessageId]);
 
   useEffect(() => {
     return () => {
