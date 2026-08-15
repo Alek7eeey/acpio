@@ -84,6 +84,7 @@ export function SettingsPage() {
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
   const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
+  const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsEngine, setTtsEngine] = useState<"unknown" | "piper" | "browser">("unknown");
   const [ttsVoicesByGender, setTtsVoicesByGender] = useState<{
@@ -204,6 +205,25 @@ export function SettingsPage() {
   };
 
   const mcpServers = form.mcpServers ?? [];
+  const mcpKey = mcpServers
+    .map((s) => `${s.id}:${s.enabled ? 1 : 0}:${s.url ?? ""}`)
+    .join("|");
+
+  // Live probe status for enabled MCP servers (dot next to each row).
+  useEffect(() => {
+    let alive = true;
+    void api
+      .mcpStatus()
+      .then((s) => {
+        if (alive) setMcpStatus(s);
+      })
+      .catch(() => {
+        // server offline — keep previous dots
+      });
+    return () => {
+      alive = false;
+    };
+  }, [mcpKey]);
 
   const updateMcp = (id: string, change: Partial<McpServerConfig>) => {
     patch(
@@ -1071,6 +1091,19 @@ export function SettingsPage() {
               {mcpServers.map((server) => (
                 <div key={server.id} className={styles.mcpRow}>
                   <div className={styles.mcpRowMeta}>
+                    {server.enabled ? (
+                      <span
+                        className={`${styles.mcpStatusDot} ${
+                          mcpStatus[server.id] ? styles.mcpStatusDotOk : styles.mcpStatusDotBad
+                        }`}
+                        title={
+                          mcpStatus[server.id]
+                            ? t("common.connected")
+                            : t("common.notConnected")
+                        }
+                        aria-hidden
+                      />
+                    ) : null}
                     <strong>{server.name}</strong>
                     <span className={styles.mcpRowType}>
                       {server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}

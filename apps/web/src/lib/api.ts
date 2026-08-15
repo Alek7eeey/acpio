@@ -35,6 +35,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getSettings: () => request<AppSettings>("/api/settings"),
+  mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
   updateSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {
       method: "PUT",

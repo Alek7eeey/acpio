@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { modelDisplayName } from "@acprocess/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
+import { api } from "../lib/api";
 import { useBrowserLocation } from "../lib/usePathname";
 import {
   getSettingsTree,
@@ -165,19 +166,48 @@ export function AppShell() {
     });
   };
 
+  const openRailNewChatAt = useCallback((x: number, y: number) => {
+    setRailRecentsPos(null);
+    setRailFolderPicker({ x, y });
+  }, []);
+
   const openRailNewChat = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setRailRecentsPos(null);
-    setRailFolderPicker({ x: rect.right + 8, y: rect.top });
+    openRailNewChatAt(rect.right + 8, rect.top);
   };
 
-  const openRailFind = () => {
+  const openRailFind = useCallback(() => {
     setRailRecentsPos(null);
     setRailFolderPicker(null);
     setSidebarOpen(true);
     if (!isChat) navigate("/chat");
     setSearchFocusToken((n) => n + 1);
-  };
+  }, [isChat, navigate]);
+
+  // Global hotkeys: Ctrl/Cmd+N or Ctrl/Cmd+K — new chat; Ctrl/Cmd+F — sidebar search.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const typing =
+        !!target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable);
+      const key = e.key.toLowerCase();
+      if (key === "n" || key === "k") {
+        e.preventDefault();
+        const x = Math.max(16, Math.round(window.innerWidth / 2 - 200));
+        const y = Math.max(16, Math.round(window.innerHeight / 2 - 160));
+        openRailNewChatAt(x, y);
+      } else if (key === "f" && !typing) {
+        e.preventDefault();
+        openRailFind();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openRailFind, openRailNewChatAt]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
@@ -248,6 +278,22 @@ export function AppShell() {
     () => (settings.mcpServers ?? []).filter((s) => s.enabled && s.url?.trim()),
     [settings.mcpServers],
   );
+
+  // Live MCP server status (probed by the server), shown as dots in the tooltip.
+  const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
+  const mcpStatusSeq = useRef(0);
+  useEffect(() => {
+    if (!agentTipOpen) return;
+    const seq = ++mcpStatusSeq.current;
+    api
+      .mcpStatus()
+      .then((s) => {
+        if (seq === mcpStatusSeq.current) setMcpStatus(s);
+      })
+      .catch(() => {
+        // offline server or transient failure — keep previous dots
+      });
+  }, [agentTipOpen, enabledMcpServers]);
 
   const goChat = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
@@ -592,23 +638,25 @@ export function AppShell() {
               </div>,
               document.body,
             )}
-
-          {railFolderPicker && (
-            <CreateSessionFolderPicker
-              x={railFolderPicker.x}
-              y={railFolderPicker.y}
-              defaultCwd={settings.defaultCwd ?? ""}
-              dialogStartPath={settings.defaultCwd ?? ""}
-              recentCwds={recentCwds}
-              onClose={() => setRailFolderPicker(null)}
-              onConfirm={async (cwd) => {
-                setRailFolderPicker(null);
-                await createSession(cwd);
-                navigate("/chat");
-              }}
-            />
-          )}
         </div>
+      )}
+
+      {/* New-chat picker is rendered at the shell root (not only in rail mode)
+          so the Ctrl/Cmd+N hotkey works regardless of sidebar state. */}
+      {railFolderPicker && (
+        <CreateSessionFolderPicker
+          x={railFolderPicker.x}
+          y={railFolderPicker.y}
+          defaultCwd={settings.defaultCwd ?? ""}
+          dialogStartPath={settings.defaultCwd ?? ""}
+          recentCwds={recentCwds}
+          onClose={() => setRailFolderPicker(null)}
+          onConfirm={async (cwd) => {
+            setRailFolderPicker(null);
+            await createSession(cwd);
+            navigate("/chat");
+          }}
+        />
       )}
 
       {showSidebar && sidebarOpen && (
@@ -741,16 +789,26 @@ export function AppShell() {
                       <span className={styles.agentTipMuted}>{t("settings.mcpNone")}</span>
                     ) : (
                       <div className={styles.agentTipMcpList}>
-                        {enabledMcpServers.map((s) => (
-                          <div key={s.id} className={styles.agentTipMcpRow}>
-                            <span className={styles.agentTipMcpName} title={s.url}>
-                              {s.name}
-                            </span>
-                            <span className={styles.agentTipMcpType}>
-                              {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
-                            </span>
-                          </div>
-                        ))}
+                        {enabledMcpServers.map((s) => {
+                          const ok = mcpStatus[s.id];
+                          return (
+                            <div key={s.id} className={styles.agentTipMcpRow}>
+                              <span
+                                className={`${styles.agentTipMcpDot} ${
+                                  ok ? styles.agentTipMcpDotOk : styles.agentTipMcpDotBad
+                                }`}
+                                title={ok ? t("common.connected") : t("common.notConnected")}
+                                aria-hidden
+                              />
+                              <span className={styles.agentTipMcpName} title={s.url}>
+                                {s.name}
+                              </span>
+                              <span className={styles.agentTipMcpType}>
+                                {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

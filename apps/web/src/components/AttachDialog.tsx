@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
-import { DRIVES_ROOT, isWindowsPath, splitPathSegments } from "../lib/pathSegments";
+import { DRIVES_ROOT, isImageFile, isWindowsPath, splitPathSegments } from "../lib/pathSegments";
 import type { PendingAttachment } from "../lib/store";
 import styles from "./AttachDialog.module.css";
 
@@ -35,7 +35,6 @@ function formatBytes(bytes: number): string {
 
 type FileKind = "image" | "code" | "doc" | "archive" | "file";
 
-const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
 const CODE_EXT = new Set([
   "ts", "tsx", "js", "jsx", "py", "go", "rs", "java", "c", "cpp", "h", "cs",
   "json", "html", "css", "scss", "sql", "sh", "bat", "ps1", "yml", "yaml",
@@ -47,8 +46,8 @@ const DOC_EXT = new Set([
 const ARCHIVE_EXT = new Set(["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz"]);
 
 function fileKind(name: string): FileKind {
+  if (isImageFile(name)) return "image";
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (IMAGE_EXT.has(ext)) return "image";
   if (CODE_EXT.has(ext)) return "code";
   if (DOC_EXT.has(ext)) return "doc";
   if (ARCHIVE_EXT.has(ext)) return "archive";

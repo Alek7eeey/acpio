@@ -43,6 +43,7 @@ import {
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
+import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { openPath } from "./services/openPath.js";
 import { piperSpeakMixed, piperStatus, resolvePiperVoice } from "./services/piper.js";
 import {
@@ -55,6 +56,19 @@ import {
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import type { AgentProvider } from "@acprocess/shared";
+
+/** Content types for inline image previews of attached files (?inline=1). */
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  svg: "image/svg+xml",
+  bmp: "image/bmp",
+  ico: "image/x-icon",
+  avif: "image/avif",
+};
 
 const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
@@ -250,6 +264,8 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  app.get("/api/mcp/status", async () => getMcpStatus());
+
   app.get("/api/settings", async () => getSettings());
   app.put("/api/settings", async (req) => {
     const patch = settingsSchema.parse(req.body);
@@ -261,6 +277,8 @@ export async function registerRoutes(app: FastifyInstance) {
       // The agent protocol snapshots MCP servers at session/new — restart live
       // sessions so a disabled/edited server stops being visible in the chat.
       void restartSessionsForMcpChange();
+      // Warm the status cache so the indicator reflects the new list quickly.
+      void refreshMcpStatus();
     }
     return updateSettings(patch);
   });
@@ -474,6 +492,17 @@ export async function registerRoutes(app: FastifyInstance) {
       await fsp.access(filePath);
     } catch {
       return reply.code(404).send({ error: "Not found" });
+    }
+    // ?inline=1 lets <img> previews render in the browser: serve known image
+    // types with their real content-type and no attachment disposition.
+    // Restricted to images only — inlining arbitrary HTML/JS would run in our
+    // origin; SVG is safe here because scripts do not execute in <img>.
+    const q = req.query as { inline?: string };
+    const inline = q.inline === "1";
+    const ext = path.extname(fileId).slice(1).toLowerCase();
+    const imageMime = IMAGE_MIME[ext];
+    if (inline && imageMime) {
+      return reply.type(imageMime).send(await fsp.readFile(filePath));
     }
     reply.header(
       "Content-Disposition",

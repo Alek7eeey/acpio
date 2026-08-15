@@ -2,6 +2,24 @@
 
 export const DRIVES_ROOT = "Computer";
 
+/** Extensions rendered as inline image previews (see IMAGE_MIME on the server). */
+export const IMAGE_EXT = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "svg",
+  "bmp",
+  "ico",
+  "avif",
+]);
+
+export function isImageFile(name: string): boolean {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return IMAGE_EXT.has(ext);
+}
+
 export function isWindowsPath(path: string) {
   return path === DRIVES_ROOT || /^[a-zA-Z]:/.test(path) || path.includes("\\");
 }

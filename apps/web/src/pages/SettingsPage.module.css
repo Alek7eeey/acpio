@@ -780,7 +780,36 @@
   flex: 1 1 auto;
 }
 
+.mcpRowMeta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.mcpStatusDot {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.mcpStatusDotOk {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.mcpStatusDotBad {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
 .mcpRowType {
+  grid-column: 2;
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -789,6 +818,7 @@
 }
 
 .mcpRowDetail {
+  grid-column: 2;
   font-size: 0.76rem;
   color: var(--text-secondary);
   white-space: nowrap;

@@ -1776,6 +1776,7 @@
   flex-wrap: wrap;
   gap: 6px;
   max-width: 100%;
+  align-items: flex-start;
 }
 
 .pendingFiles {
@@ -1784,6 +1785,33 @@
 
 .userFiles {
   margin-top: 6px;
+}
+
+.userFileItem {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.userFilePreviewWrap {
+  display: block;
+  max-width: min(280px, 100%);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  line-height: 0;
+}
+
+.userFilePreviewWrap:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.userFilePreview {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
 }
 
 .pendingFileChip,

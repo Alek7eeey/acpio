@@ -50,6 +50,8 @@ import {
 } from "../components/CreateSessionFolderPicker";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
+import { notifyTurnComplete, requestNotificationPermission } from "../lib/notify";
+import { isImageFile } from "../lib/pathSegments";
 import {
   buildSlashInsertion,
   filterSlashCommands,
@@ -244,20 +246,37 @@ function UserMessage({
                 </span>
               </>
             );
-            return href ? (
-              <a
-                key={p.id}
-                className={styles.userFileChip}
-                href={href}
-                download={name}
-                title={name}
-              >
-                {chip}
-              </a>
-            ) : (
-              <span key={p.id} className={styles.userFileChip}>
-                {chip}
-              </span>
+            return (
+              <div key={p.id} className={styles.userFileItem}>
+                {href && isImageFile(name) ? (
+                  <a
+                    className={styles.userFilePreviewWrap}
+                    href={`${href}?inline=1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={name}
+                  >
+                    <img
+                      className={styles.userFilePreview}
+                      src={`${href}?inline=1`}
+                      alt={name}
+                      loading="lazy"
+                    />
+                  </a>
+                ) : null}
+                {href ? (
+                  <a
+                    className={styles.userFileChip}
+                    href={href}
+                    download={name}
+                    title={name}
+                  >
+                    {chip}
+                  </a>
+                ) : (
+                  <span className={styles.userFileChip}>{chip}</span>
+                )}
+              </div>
             );
           })}
         </div>
@@ -1881,6 +1900,20 @@ export function ChatPage() {
     }
   }, [autoExpandSteps]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
+  const promptEpoch = useAppStore((s) => s.promptEpoch);
+  const cancelledPromptEpoch = useAppStore((s) => s.cancelledPromptEpoch);
+
+  // Notify when a turn finishes while the tab is hidden (skips cancelled turns).
+  const prevStreaming = useRef(streaming);
+  useEffect(() => {
+    const wasStreaming = prevStreaming.current;
+    prevStreaming.current = streaming;
+    if (!wasStreaming || streaming) return;
+    if (cancelledPromptEpoch === promptEpoch) return; // user hit Stop
+    if (document.hidden) {
+      notifyTurnComplete(activeSession?.title);
+    }
+  }, [streaming, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
 
   const planPending = pendingQuestion?.kind === "create_plan";
   const activePlan = useMemo((): PlanPayload | null => {
@@ -2057,6 +2090,7 @@ export function ChatPage() {
   const submitMessage = (raw: string) => {
     const value = raw.trim();
     if (!value || composerLocked) return;
+    requestNotificationPermission();
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
@@ -3204,6 +3238,11 @@ export function ChatPage() {
                     setSlashMenuDismissed(true);
                     return;
                   }
+                }
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  onSubmit(e);
+                  return;
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
