@@ -1,5 +1,5 @@
 import path from "node:path";
-import { access, copyFile, mkdir, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, stat } from "node:fs/promises";
 import {
   isModelAccessError,
   isSubagentToolCall,
@@ -228,14 +228,11 @@ type TurnOpts = {
   attachments?: AttachmentInput[];
 };
 
-/** Raw upload from the browser; the server saves it under the session cwd. */
+/** Attachment chosen from the server machine — referenced or staged into the cwd. */
 export type AttachmentInput = {
   name: string;
-  mime?: string;
-  /** base64 payload uploaded from the device. */
-  data?: string;
-  /** absolute path of a file already on the server machine — copied into the cwd. */
-  path?: string;
+  /** Absolute path of the file on the server machine. */
+  path: string;
 };
 
 /** Folder under the session cwd where attached files land (agent-readable). */
@@ -269,23 +266,16 @@ async function saveAttachments(
   const used = new Set<string>();
   const out: SavedAttachment[] = [];
   for (const att of attachments) {
-    const source = att.path?.trim();
-    let name = sanitizeFileName(source ? path.basename(source) : att.name);
-    const buf = att.data ? Buffer.from(att.data, "base64") : null;
-    if (!source && !buf) continue;
-    // Hard cap for uploaded payloads (client also enforces 15 MB).
-    if (buf && buf.length > 15 * 1024 * 1024) continue;
+    const source = att.path.trim();
+    let name = sanitizeFileName(path.basename(source));
 
     // A file already inside the session cwd (picked from the server browser)
     // is agent-readable as-is — reference it directly instead of copying it.
-    // Device uploads have no server path, and out-of-cwd files must land
-    // inside the cwd for the agent to read them — those are staged below.
+    // Out-of-cwd files must land inside the cwd for the agent to read them.
     const cwdRoot = path.resolve(cwd);
-    const inCwd =
-      source != null &&
-      (source === cwdRoot || source.startsWith(cwdRoot + path.sep));
-    const isOwnCopy = source != null && source.includes(path.join(ATTACH_DIR, sessionId));
-    if (source && inCwd && !isOwnCopy) {
+    const inCwd = source === cwdRoot || source.startsWith(cwdRoot + path.sep);
+    const isOwnCopy = source.includes(path.join(ATTACH_DIR, sessionId));
+    if (inCwd && !isOwnCopy) {
       const abs = path.resolve(source);
       try {
         const size = (await stat(abs)).size;
@@ -296,7 +286,7 @@ async function saveAttachments(
           absPath: abs,
           relPath: path.relative(cwdRoot, abs),
           size,
-          mime: att.mime || "application/octet-stream",
+          mime: "application/octet-stream",
           inPlace: true,
         });
       } catch {
@@ -314,24 +304,20 @@ async function saveAttachments(
     }
     used.add(fileId);
     const dest = path.join(dir, fileId);
-    if (source) {
-      try {
-        await access(source);
-        await copyFile(source, dest);
-      } catch {
-        continue; // unreadable source — skip
-      }
-    } else if (buf) {
-      await writeFile(dest, buf);
+    try {
+      await access(source);
+      await copyFile(source, dest);
+    } catch {
+      continue; // unreadable source — skip
     }
-    const size = buf ? buf.length : (await stat(dest)).size;
+    const size = (await stat(dest)).size;
     out.push({
       name,
       fileId,
       absPath: dest,
       relPath: path.join(ATTACH_DIR, sessionId, fileId),
       size,
-      mime: att.mime || "application/octet-stream",
+      mime: "application/octet-stream",
       inPlace: false,
     });
   }

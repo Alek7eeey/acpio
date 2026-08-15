@@ -168,7 +168,7 @@ export const api = {
     text: string,
     opts?: {
       editMessageId?: string;
-      attachments?: Array<{ name: string; mime?: string; data?: string; path?: string }>;
+      attachments?: Array<{ name: string; path: string }>;
     },
   ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {

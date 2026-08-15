@@ -397,17 +397,10 @@ export async function registerRoutes(app: FastifyInstance) {
         editMessageId: z.string().uuid().optional(),
         attachments: z
           .array(
-            z.union([
-              z.object({
-                name: z.string().min(1).max(255),
-                mime: z.string().max(200),
-                data: z.string().min(1),
-              }),
-              z.object({
-                name: z.string().min(1).max(255),
-                path: z.string().min(1).max(4096),
-              }),
-            ]),
+            z.object({
+              name: z.string().min(1).max(255),
+              path: z.string().min(1).max(4096),
+            }),
           )
           .max(8)
           .optional(),

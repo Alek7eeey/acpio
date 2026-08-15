@@ -65,36 +65,6 @@
   color: var(--text);
 }
 
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.tab {
-  flex: 1;
-  padding: 8px 10px 9px;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  margin-bottom: -1px;
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tabActive {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
 .body {
   flex: 1;
   min-height: 0;
@@ -105,29 +75,6 @@
   gap: 8px;
 }
 
-.dropZone {
-  display: grid;
-  place-items: center;
-  gap: 10px;
-  padding: 30px 16px;
-  text-align: center;
-  border: 1.5px dashed var(--border);
-  border-radius: 14px;
-  color: var(--text-secondary);
-}
-
-.dropHint {
-  margin: 0;
-  font-size: 0.84rem;
-}
-
-.limit {
-  margin: 0;
-  font-size: 0.72rem;
-  opacity: 0.65;
-}
-
-.primaryBtn,
 .secondaryBtn {
   border: none;
   border-radius: 9px;
@@ -136,18 +83,6 @@
   font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
-}
-
-.primaryBtn {
-  background: var(--accent);
-  color: #fff;
-}
-
-.primaryBtn:hover {
-  filter: brightness(1.08);
-}
-
-.secondaryBtn {
   background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
   color: var(--text);
 }
@@ -161,6 +96,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  padding: 10px 14px 0;
 }
 
 .upBtn {

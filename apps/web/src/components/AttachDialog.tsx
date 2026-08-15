@@ -7,14 +7,13 @@ import styles from "./AttachDialog.module.css";
 
 type AttachDialogProps = {
   open: boolean;
-  /** Session cwd — the server browser starts here (files there are agent-readable). */
+  /** Session cwd — the browser starts here (files there are agent-readable). */
   initialDir?: string;
   onClose: () => void;
   onAttach: (files: PendingAttachment[]) => void;
 };
 
 const DRIVES_ROOT = "Computer";
-const MAX_BATCH = 8;
 
 type BrowseState = {
   path: string;
@@ -48,9 +47,6 @@ const folderIcon = (
 
 export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDialogProps) {
   const t = useT();
-  const [tab, setTab] = useState<"upload" | "server">("upload");
-  const uploadInputRef = useRef<HTMLInputElement>(null);
-
   const [browse, setBrowse] = useState<BrowseState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,37 +74,11 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
       setBrowse(null);
       setLoading(false);
       setError(null);
-      setTab("upload");
       return;
     }
     void loadBrowse(initialDir && initialDir !== DRIVES_ROOT ? initialDir : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDir]);
-
-  const readUpload = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    const MAX = 15 * 1024 * 1024;
-    const files = [...list].filter((f) => f.size <= MAX).slice(0, MAX_BATCH);
-    if (files.length === 0) {
-      onClose();
-      return;
-    }
-    const out: PendingAttachment[] = [];
-    let pending = files.length;
-    for (const f of files) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const data = String(reader.result ?? "").split(",")[1] ?? "";
-        pending--;
-        if (data) out.push({ name: f.name, mime: f.type || "application/octet-stream", data });
-        if (pending === 0) {
-          onAttach(out);
-          onClose();
-        }
-      };
-      reader.readAsDataURL(f);
-    }
-  };
 
   const pickServerFile = (entry: { name: string; path: string }) => {
     onAttach([{ name: entry.name, path: entry.path }]);
@@ -138,132 +108,66 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
           </button>
         </div>
 
-        <div className={styles.tabs} role="tablist">
+        <div className={styles.navBar}>
           <button
             type="button"
-            role="tab"
-            aria-selected={tab === "upload"}
-            className={`${styles.tab}${tab === "upload" ? ` ${styles.tabActive}` : ""}`}
-            onClick={() => setTab("upload")}
+            className={styles.upBtn}
+            disabled={!browse?.parent || loading}
+            aria-label={t("common.parentFolder")}
+            title={t("common.parentFolder")}
+            onClick={() => browse?.parent && void loadBrowse(browse.parent)}
           >
-            {t("chat.attachUpload")}
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 19V5M12 5l-6 6M12 5l6 6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "server"}
-            className={`${styles.tab}${tab === "server" ? ` ${styles.tabActive}` : ""}`}
-            onClick={() => setTab("server")}
-          >
-            {t("chat.attachServer")}
-          </button>
+          <span className={styles.path} title={browse?.path}>
+            {browse?.path ?? (loading ? t("common.loading") : t("common.thisPc"))}
+          </span>
         </div>
 
-        <div className={styles.body}>
-          {tab === "upload" ? (
-            <div
-              className={styles.dropZone}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "copy";
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                readUpload(e.dataTransfer.files);
-              }}
-            >
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <p className={styles.dropHint}>{t("chat.attachDropHint")}</p>
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                onClick={() => uploadInputRef.current?.click()}
-              >
-                {t("chat.attachChoose")}
-              </button>
-              <p className={styles.limit}>{t("chat.attachLimit")}</p>
-              <input
-                ref={uploadInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => {
-                  readUpload(e.target.files);
-                  e.target.value = "";
-                }}
-              />
-            </div>
+        <div className={styles.list} role="listbox" aria-label={t("chat.attachServer")}>
+          {!browse && loading ? (
+            <p className={styles.empty}>{t("common.loading")}</p>
+          ) : browse && browse.entries.length === 0 ? (
+            <p className={styles.empty}>{t("chat.attachServerEmpty")}</p>
           ) : (
-            <>
-              <div className={styles.navBar}>
+            browse?.entries.map((entry) =>
+              entry.isDir !== false ? (
                 <button
+                  key={entry.path}
                   type="button"
-                  className={styles.upBtn}
-                  disabled={!browse?.parent || loading}
-                  aria-label={t("common.parentFolder")}
-                  title={t("common.parentFolder")}
-                  onClick={() => browse?.parent && void loadBrowse(browse.parent)}
+                  role="option"
+                  className={styles.row}
+                  onClick={() => void loadBrowse(entry.path)}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M12 19V5M12 5l-6 6M12 5l6 6"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  <span className={styles.rowIcon}>{folderIcon}</span>
+                  <span className={styles.rowName}>{entry.name}</span>
                 </button>
-                <span className={styles.path} title={browse?.path}>
-                  {browse?.path ?? (loading ? t("common.loading") : t("common.thisPc"))}
-                </span>
-              </div>
-              <div className={styles.list} role="listbox" aria-label={t("chat.attachServer")}>
-                {!browse && loading ? (
-                  <p className={styles.empty}>{t("common.loading")}</p>
-                ) : browse && browse.entries.length === 0 ? (
-                  <p className={styles.empty}>{t("chat.attachServerEmpty")}</p>
-                ) : (
-                  browse?.entries.map((entry) =>
-                    entry.isDir !== false ? (
-                      <button
-                        key={entry.path}
-                        type="button"
-                        role="option"
-                        className={styles.row}
-                        onClick={() => void loadBrowse(entry.path)}
-                      >
-                        <span className={styles.rowIcon}>{folderIcon}</span>
-                        <span className={styles.rowName}>{entry.name}</span>
-                      </button>
-                    ) : (
-                      <button
-                        key={entry.path}
-                        type="button"
-                        role="option"
-                        className={styles.row}
-                        onClick={() => pickServerFile(entry)}
-                      >
-                        <span className={styles.rowIcon}>{fileIcon}</span>
-                        <span className={styles.rowName}>{entry.name}</span>
-                      </button>
-                    ),
-                  )
-                )}
-              </div>
-              <p className={styles.hint}>{t("chat.attachServerHint")}</p>
-            </>
+              ) : (
+                <button
+                  key={entry.path}
+                  type="button"
+                  role="option"
+                  className={styles.row}
+                  onClick={() => pickServerFile(entry)}
+                >
+                  <span className={styles.rowIcon}>{fileIcon}</span>
+                  <span className={styles.rowName}>{entry.name}</span>
+                </button>
+              ),
+            )
           )}
-          {error ? <p className={styles.error}>{error}</p> : null}
         </div>
+
+        {error ? <p className={styles.error}>{error}</p> : null}
+        <p className={styles.hint}>{t("chat.attachServerHint")}</p>
 
         <div className={styles.footer}>
           <button type="button" className={styles.secondaryBtn} onClick={onClose}>

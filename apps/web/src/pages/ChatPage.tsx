@@ -3118,11 +3118,6 @@ export function ChatPage() {
                   </svg>
                   <span className={styles.pendingFileMeta}>
                     <span className={styles.pendingFileName}>{f.name}</span>
-                    {f.data ? (
-                      <span className={styles.pendingFileSize}>
-                        {formatBytes(Math.floor((f.data.length * 3) / 4))}
-                      </span>
-                    ) : null}
                   </span>
                   <button
                     type="button"
