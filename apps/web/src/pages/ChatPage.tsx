@@ -28,6 +28,7 @@ import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
+import { AttachDialog } from "../components/AttachDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
 import {
   dominantLanguage,
@@ -1792,9 +1793,9 @@ export function ChatPage() {
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -2051,35 +2052,6 @@ export function ChatPage() {
       return;
     }
     submitMessage(`/${cmd.name}`);
-  };
-
-  const MAX_ATTACH_SIZE = 15 * 1024 * 1024;
-  const MAX_ATTACH_COUNT = 8;
-
-  const pickFiles = (list: FileList | null) => {
-    if (!list || list.length === 0) return;
-    const files = [...list];
-    if (files.length + pendingFiles.length > MAX_ATTACH_COUNT) {
-      setAttachError(t("chat.tooManyFiles"));
-      return;
-    }
-    const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
-    if (oversized) {
-      setAttachError(t("chat.fileTooLarge", { name: oversized.name }));
-    }
-    const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
-    for (const f of ok) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const data = String(reader.result ?? "").split(",")[1] ?? "";
-        if (!data) return;
-        setPendingFiles((prev) => [
-          ...prev,
-          { name: f.name, mime: f.type || "application/octet-stream", data },
-        ]);
-      };
-      reader.readAsDataURL(f);
-    }
   };
 
   const submitMessage = (raw: string) => {
@@ -3146,9 +3118,11 @@ export function ChatPage() {
                   </svg>
                   <span className={styles.pendingFileMeta}>
                     <span className={styles.pendingFileName}>{f.name}</span>
-                    <span className={styles.pendingFileSize}>
-                      {formatBytes(Math.floor((f.data.length * 3) / 4))}
-                    </span>
+                    {f.data ? (
+                      <span className={styles.pendingFileSize}>
+                        {formatBytes(Math.floor((f.data.length * 3) / 4))}
+                      </span>
+                    ) : null}
                   </span>
                   <button
                     type="button"
@@ -3250,7 +3224,7 @@ export function ChatPage() {
                 aria-label={t("chat.attachFiles")}
                 title={t("chat.attachFiles")}
                 disabled={composerLocked || editingMessageId !== null || streaming}
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => setAttachDialogOpen(true)}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
@@ -3262,16 +3236,6 @@ export function ChatPage() {
                   />
                 </svg>
               </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                hidden
-                onChange={(e) => {
-                  pickFiles(e.target.files);
-                  e.target.value = "";
-                }}
-              />
 
               {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
 
@@ -3427,6 +3391,21 @@ export function ChatPage() {
           }}
         />
       )}
+      <AttachDialog
+        open={attachDialogOpen}
+        initialDir={activeSession?.cwd}
+        onClose={() => setAttachDialogOpen(false)}
+        onAttach={(files) => {
+          setPendingFiles((prev) => {
+            if (prev.length + files.length > 8) {
+              setAttachError(t("chat.tooManyFiles"));
+              return prev;
+            }
+            setAttachError(null);
+            return [...prev, ...files];
+          });
+        }}
+      />
       </div>
 
       {speakingMessageId && (

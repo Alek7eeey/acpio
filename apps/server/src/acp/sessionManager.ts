@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import {
   isModelAccessError,
   isSubagentToolCall,
@@ -231,8 +231,11 @@ type TurnOpts = {
 /** Raw upload from the browser; the server saves it under the session cwd. */
 export type AttachmentInput = {
   name: string;
-  mime: string;
-  data: string; // base64
+  mime?: string;
+  /** base64 payload uploaded from the device. */
+  data?: string;
+  /** absolute path of a file already on the server machine — copied into the cwd. */
+  path?: string;
 };
 
 /** Folder under the session cwd where attached files land (agent-readable). */
@@ -256,22 +259,37 @@ async function saveAttachments(
   const out: Array<{ name: string; fileId: string; relPath: string; size: number; mime: string }> =
     [];
   for (const att of attachments) {
-    const base = sanitizeFileName(att.name);
-    const ext = path.extname(base);
-    let fileId = base;
+    const source = att.path?.trim();
+    let name = sanitizeFileName(source ? path.basename(source) : att.name);
+    const buf = att.data ? Buffer.from(att.data, "base64") : null;
+    if (!source && !buf) continue;
+    // Hard cap for uploaded payloads (client also enforces 15 MB).
+    if (buf && buf.length > 15 * 1024 * 1024) continue;
+    const ext = path.extname(name);
+    let fileId = name;
     let n = 2;
     while (used.has(fileId)) {
-      fileId = `${path.basename(base, ext)}-${n}${ext}`;
+      fileId = `${path.basename(name, ext)}-${n}${ext}`;
       n++;
     }
     used.add(fileId);
-    const buf = Buffer.from(att.data, "base64");
-    await writeFile(path.join(dir, fileId), buf);
+    const dest = path.join(dir, fileId);
+    if (source) {
+      try {
+        await access(source);
+        await copyFile(source, dest);
+      } catch {
+        continue; // unreadable source — skip
+      }
+    } else if (buf) {
+      await writeFile(dest, buf);
+    }
+    const size = buf ? buf.length : (await stat(dest)).size;
     out.push({
-      name: att.name,
+      name,
       fileId,
       relPath: path.join(ATTACH_DIR, sessionId, fileId),
-      size: buf.length,
+      size,
       mime: att.mime || "application/octet-stream",
     });
   }

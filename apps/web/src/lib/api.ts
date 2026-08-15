@@ -111,15 +111,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ initialPath: initialPath || undefined }),
     }),
-  browseDirectory: (path?: string) =>
+  browseDirectory: (path?: string, opts?: { files?: boolean }) =>
     request<{
       path: string;
       parent: string | null;
       kind?: "drives" | "directory";
-      entries: Array<{ name: string; path: string }>;
+      entries: Array<{ name: string; path: string; isDir?: boolean }>;
     }>("/api/fs/browse", {
       method: "POST",
-      body: JSON.stringify({ path: path || undefined }),
+      body: JSON.stringify({ path: path || undefined, files: opts?.files === true }),
     }),
   listSessions: () => request<SessionDto[]>("/api/sessions"),
   createSession: (body?: Partial<SessionDto>) =>
@@ -166,7 +166,10 @@ export const api = {
   prompt: (
     id: string,
     text: string,
-    opts?: { editMessageId?: string; attachments?: Array<{ name: string; mime: string; data: string }> },
+    opts?: {
+      editMessageId?: string;
+      attachments?: Array<{ name: string; mime?: string; data?: string; path?: string }>;
+    },
   ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {
       method: "POST",

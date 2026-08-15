@@ -1,0 +1,52 @@
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.tab {
+  flex: 1;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 9px 9px 0 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tabActive {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.dropZone {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  margin: 10px 12px 0;
+  text-align: center;
+  border: 1.5px dashed var(--border);
+  border-radius: 14px;
+  color: var(--text-secondary);
+}
+
+.dropZone p {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.limit {
+  opacity: 0.65;
+  font-size: 0.72rem;
+}
+
+.serverHint {
+  margin: 8px 14px 0;
+  font-size: 0.72rem;
+  color: var(--text-tertiary, var(--text-secondary));
+}

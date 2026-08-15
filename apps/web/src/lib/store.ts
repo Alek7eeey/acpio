@@ -75,8 +75,14 @@ type PendingQuestion = {
   payload: Record<string, unknown>;
 };
 
-/** File picked in the composer, base64 payload, sent with the prompt. */
-export type PendingAttachment = { name: string; mime: string; data: string };
+/** File pending in the composer. `data` = base64 upload from the device;
+ *  `path` = file already on the server machine (copied into the session cwd). */
+export type PendingAttachment = {
+  name: string;
+  mime?: string;
+  data?: string;
+  path?: string;
+};
 
 type AppState = {
   settings: AppSettings;
@@ -957,6 +963,18 @@ export const useAppStore = create<AppState>((set, get) => ({
             },
             createdAt: now,
           },
+          ...(opts?.attachments ?? []).map((a, i) => ({
+            id: `${userId}-file-${i}`,
+            messageId: userId,
+            type: "file" as const,
+            order: i + 1,
+            payload: {
+              name: a.name,
+              mime: a.mime ?? "",
+              size: a.data ? Math.floor((a.data.length * 3) / 4) : 0,
+            },
+            createdAt: now,
+          })),
         ],
       };
       const assistantMsg: MessageDto = {

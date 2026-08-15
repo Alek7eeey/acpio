@@ -159,10 +159,10 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/fs/browse", async (req, reply) => {
-    const q = req.query as { path?: string };
+    const q = req.query as { path?: string; files?: string };
     const rawPath = typeof q.path === "string" ? q.path : undefined;
     try {
-      return browseDirectory(rawPath);
+      return browseDirectory(rawPath, { includeFiles: q.files === "1" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
@@ -170,9 +170,11 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/fs/browse", async (req, reply) => {
-    const body = z.object({ path: z.string().optional() }).parse(req.body ?? {});
+    const body = z
+      .object({ path: z.string().optional(), files: z.boolean().optional() })
+      .parse(req.body ?? {});
     try {
-      return browseDirectory(body.path);
+      return browseDirectory(body.path, { includeFiles: body.files === true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
@@ -392,11 +394,17 @@ export async function registerRoutes(app: FastifyInstance) {
         editMessageId: z.string().uuid().optional(),
         attachments: z
           .array(
-            z.object({
-              name: z.string().min(1).max(255),
-              mime: z.string().max(200),
-              data: z.string().min(1),
-            }),
+            z.union([
+              z.object({
+                name: z.string().min(1).max(255),
+                mime: z.string().max(200),
+                data: z.string().min(1),
+              }),
+              z.object({
+                name: z.string().min(1).max(255),
+                path: z.string().min(1).max(4096),
+              }),
+            ]),
           )
           .max(8)
           .optional(),

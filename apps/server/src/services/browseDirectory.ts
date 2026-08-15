@@ -5,6 +5,7 @@ import { defaultPickerPath } from "./pickDirectory.js";
 export type BrowseDirectoryEntry = {
   name: string;
   path: string;
+  isDir?: boolean;
 };
 
 export type BrowseDirectoryResult = {
@@ -65,8 +66,11 @@ function isDrivesRootRequest(raw?: string): boolean {
   );
 }
 
-/** List subdirectories for in-browser folder picking (mobile / remote). */
-export function browseDirectory(raw?: string): BrowseDirectoryResult {
+/** List subdirectories (and optionally files) for in-browser picking (mobile / remote). */
+export function browseDirectory(
+  raw?: string,
+  opts?: { includeFiles?: boolean },
+): BrowseDirectoryResult {
   if (isDrivesRootRequest(raw)) {
     return {
       path: WINDOWS_DRIVES_ROOT,
@@ -100,8 +104,11 @@ export function browseDirectory(raw?: string): BrowseDirectoryResult {
     if (name.startsWith(".")) continue;
     const full = path.join(current, name);
     try {
-      if (!fs.statSync(full).isDirectory()) continue;
-      entries.push({ name, path: full });
+      if (fs.statSync(full).isDirectory()) {
+        entries.push({ name, path: full, isDir: true });
+      } else if (opts?.includeFiles) {
+        entries.push({ name, path: full, isDir: false });
+      }
     } catch {
       // skip unreadable entries
     }
