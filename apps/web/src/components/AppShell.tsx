@@ -588,17 +588,29 @@ export function AppShell() {
                 onClick={() => setMessageSearchOpen(true)}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
                   <path
-                    d="M16 16l4.5 4.5"
+                    d="M7 3.5h7.2L18.5 7.8V19a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z"
                     stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
                   />
                   <path
-                    d="M8.2 8.8h5.6M8.2 11.4h5.6M8.2 14h3.4"
+                    d="M14.2 3.5V7.8h4.3"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M8.5 12.5h5M8.5 15.5h5"
                     stroke="currentColor"
                     strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                  <circle cx="16" cy="17.5" r="2.9" stroke="currentColor" strokeWidth="1.6" />
+                  <path
+                    d="M18.2 19.7 20.5 22"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
                     strokeLinecap="round"
                   />
                 </svg>
