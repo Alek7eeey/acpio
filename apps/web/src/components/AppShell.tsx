@@ -730,21 +730,28 @@ export function AppShell() {
                       {agentOnline ? t("common.connected") : t("common.notConnected")}
                     </span>
                   </div>
-                  <div className={styles.agentTipLine}>
-                    <span className={styles.agentTipLabel}>{t("settings.mcpTitle")}</span>
+                  <div className={styles.agentTipMcp}>
+                    <div className={styles.agentTipMcpHead}>
+                      <span className={styles.agentTipLabel}>{t("settings.mcpTitle")}</span>
+                      {enabledMcpServers.length > 0 ? (
+                        <span className={styles.agentTipMcpCount}>{enabledMcpServers.length}</span>
+                      ) : null}
+                    </div>
                     {enabledMcpServers.length === 0 ? (
                       <span className={styles.agentTipMuted}>{t("settings.mcpNone")}</span>
                     ) : (
-                      <span className={styles.agentTipMcpList}>
+                      <div className={styles.agentTipMcpList}>
                         {enabledMcpServers.map((s) => (
-                          <span key={s.id} className={styles.agentTipMcpRow}>
-                            <span className={styles.agentTipMcpName}>{s.name}</span>
+                          <div key={s.id} className={styles.agentTipMcpRow}>
+                            <span className={styles.agentTipMcpName} title={s.url}>
+                              {s.name}
+                            </span>
                             <span className={styles.agentTipMcpType}>
                               {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
                             </span>
-                          </span>
+                          </div>
                         ))}
-                      </span>
+                      </div>
                     )}
                   </div>
                 </div>

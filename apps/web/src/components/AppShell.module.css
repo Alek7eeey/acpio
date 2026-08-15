@@ -2479,34 +2479,75 @@
   font-weight: 650;
 }
 
+.agentTipMcp {
+  display: grid;
+  gap: 7px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-soft);
+  min-width: 0;
+}
+
+.agentTipMcpHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agentTipMcpCount {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-tertiary, var(--text-secondary));
+  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  line-height: 1.4;
+}
+
 .agentTipMcpList {
   display: grid;
   gap: 4px;
-  text-align: right;
   min-width: 0;
 }
 
 .agentTipMcpRow {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  border: 1px solid transparent;
+}
+
+.agentTipMcpRow:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
 .agentTipMcpName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
   font-weight: 600;
-  overflow-wrap: anywhere;
+  font-size: 0.78rem;
 }
 
 .agentTipMcpType {
-  color: var(--text-tertiary, var(--text-secondary));
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 2px 7px;
 }
 
 .agentTipMuted {

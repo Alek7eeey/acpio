@@ -331,6 +331,8 @@ class SessionRuntime {
   toolsHintSent = false;
   /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
   disposing = false;
+  /** MCP config changed while a turn was running — restart the agent when it idles. */
+  restartOnIdle = false;
   private chain: Promise<void> = Promise.resolve();
 
   constructor(public readonly sessionId: string) {}
@@ -1077,6 +1079,27 @@ async function runTurn(
 /** Start the next FIFO-queued turn, if any (after the current turn finished). */
 async function dequeueTurn(rt: SessionRuntime) {
   if (rt.running) return;
+  // MCP servers were re-configured while the previous turn was running — the
+  // OMP/Cursor protocol only accepts mcpServers at session/new, so swap in a
+  // fresh agent before the next queued turn picks up the old MCP list.
+  if (rt.restartOnIdle) {
+    rt.restartOnIdle = false;
+    try {
+      const detail = await import("../services/sessions.js").then((m) =>
+        m.getSessionDetail(rt.sessionId),
+      );
+      if (detail?.provider && detail.status !== "closed") {
+        resetAcpClient(rt);
+        await ensureAcp(rt.sessionId, {
+          provider: detail.provider,
+          cwd: detail.cwd,
+          mode: detail.mode,
+        });
+      }
+    } catch (err) {
+      console.error(`[acp:${rt.sessionId}] restart after MCP change failed`, err);
+    }
+  }
   const next = rt.turnQueue.shift();
   if (!next) return;
   try {
@@ -1126,6 +1149,9 @@ export async function cancelPrompt(sessionId: string) {
     } catch {
       // ignore
     }
+    // A deferred MCP restart (restartOnIdle) still needs to run even though
+    // the queue was cleared — otherwise the old MCP list survives Stop.
+    void dequeueTurn(rt);
   }
   await updateSession(sessionId, { status: "idle" });
 }
@@ -1237,6 +1263,54 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.provider = null;
   rt.toolsHintSent = false;
   rt.availableCommands = [];
+}
+
+/** Last MCP server list we already applied to live sessions (name-keyed). */
+let lastMcpSnapshot = "";
+
+/**
+ * Restart live ACP sessions so a changed MCP server list actually takes
+ * effect. The OMP/Cursor protocol only accepts mcpServers at session/new —
+ * there is no runtime update — so a running agent keeps its old MCP tools
+ * until its process is re-created. Sessions mid-turn are restarted when they
+ * idle (their current turn finishes against the old agent, which is safer
+ * than killing a running prompt). Idempotent: no-op unless the effective
+ * list changed.
+ */
+export async function restartSessionsForMcpChange(): Promise<void> {
+  const settings = await getSettings();
+  const desired = (settings.mcpServers ?? [])
+    .filter((s) => s.enabled && s.url?.trim())
+    .map((s) => `${s.name}|${s.type}|${s.url!.trim()}|${s.token ?? ""}`)
+    .sort()
+    .join("\u0000");
+  if (desired === lastMcpSnapshot) return;
+  lastMcpSnapshot = desired;
+
+  let restarted = 0;
+  for (const [sessionId, rt] of runtimes) {
+    if (!rt.client && !rt.clientReady) continue; // no live agent
+    if (rt.running) {
+      rt.restartOnIdle = true;
+      continue;
+    }
+    const detail = await import("../services/sessions.js").then((m) =>
+      m.getSessionDetail(sessionId),
+    );
+    if (!detail?.provider || detail.status === "closed") continue;
+    resetAcpClient(rt);
+    try {
+      await ensureAcp(sessionId, {
+        provider: detail.provider,
+        cwd: detail.cwd,
+        mode: detail.mode,
+      });
+      restarted += 1;
+    } catch (err) {
+      console.error(`[acp:${sessionId}] restart after MCP change failed`, err);
+    }
+  }
+  console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
 }
 
 export function getSessionSlashCommands(sessionId: string) {

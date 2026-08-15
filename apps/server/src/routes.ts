@@ -39,6 +39,7 @@ import {
   getAgentAvailability,
   syncSessionAgent,
   warmAcp,
+  restartSessionsForMcpChange,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -255,6 +256,11 @@ export async function registerRoutes(app: FastifyInstance) {
     const current = await getSettings();
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
+    }
+    if (patch.mcpServers) {
+      // The agent protocol snapshots MCP servers at session/new — restart live
+      // sessions so a disabled/edited server stops being visible in the chat.
+      void restartSessionsForMcpChange();
     }
     return updateSettings(patch);
   });
