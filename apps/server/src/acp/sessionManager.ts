@@ -246,18 +246,28 @@ function sanitizeFileName(name: string): string {
   return (base || "file").slice(0, 120);
 }
 
+type SavedAttachment = {
+  name: string;
+  fileId: string;
+  /** Absolute path on the server (original for in-cwd files, staged copy otherwise). */
+  absPath: string;
+  /** Path relative to the session cwd — what the agent sees in the hint. */
+  relPath: string;
+  size: number;
+  mime: string;
+  /** true — the original file in the cwd is referenced directly (no copy). */
+  inPlace: boolean;
+};
+
 async function saveAttachments(
   sessionId: string,
   cwd: string,
   attachments: AttachmentInput[],
-): Promise<
-  Array<{ name: string; fileId: string; relPath: string; size: number; mime: string }>
-> {
+): Promise<SavedAttachment[]> {
   const dir = path.join(cwd, ATTACH_DIR, sessionId);
   await mkdir(dir, { recursive: true });
   const used = new Set<string>();
-  const out: Array<{ name: string; fileId: string; relPath: string; size: number; mime: string }> =
-    [];
+  const out: SavedAttachment[] = [];
   for (const att of attachments) {
     const source = att.path?.trim();
     let name = sanitizeFileName(source ? path.basename(source) : att.name);
@@ -265,6 +275,36 @@ async function saveAttachments(
     if (!source && !buf) continue;
     // Hard cap for uploaded payloads (client also enforces 15 MB).
     if (buf && buf.length > 15 * 1024 * 1024) continue;
+
+    // A file already inside the session cwd (picked from the server browser)
+    // is agent-readable as-is — reference it directly instead of copying it.
+    // Device uploads have no server path, and out-of-cwd files must land
+    // inside the cwd for the agent to read them — those are staged below.
+    const cwdRoot = path.resolve(cwd);
+    const inCwd =
+      source != null &&
+      (source === cwdRoot || source.startsWith(cwdRoot + path.sep));
+    const isOwnCopy = source != null && source.includes(path.join(ATTACH_DIR, sessionId));
+    if (source && inCwd && !isOwnCopy) {
+      const abs = path.resolve(source);
+      try {
+        const size = (await stat(abs)).size;
+        used.add(name);
+        out.push({
+          name,
+          fileId: name,
+          absPath: abs,
+          relPath: path.relative(cwdRoot, abs),
+          size,
+          mime: att.mime || "application/octet-stream",
+          inPlace: true,
+        });
+      } catch {
+        continue; // unreadable source — skip
+      }
+      continue;
+    }
+
     const ext = path.extname(name);
     let fileId = name;
     let n = 2;
@@ -288,9 +328,11 @@ async function saveAttachments(
     out.push({
       name,
       fileId,
+      absPath: dest,
       relPath: path.join(ATTACH_DIR, sessionId, fileId),
       size,
       mime: att.mime || "application/octet-stream",
+      inPlace: false,
     });
   }
   return out;
@@ -925,6 +967,9 @@ export async function runPrompt(
           relPath: f.relPath,
           size: f.size,
           mime: f.mime,
+          // In-place (in-cwd) files carry their absolute path for download;
+          // staged copies are resolved via the attachment dir instead.
+          ...(f.inPlace ? { path: f.absPath, inPlace: true } : {}),
         });
       }
       // The agent-facing text gets the file hint; the UI text part stays raw

@@ -2,6 +2,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { and, eq } from "drizzle-orm";
+import { db } from "./db/client.js";
+import { messages, messageParts } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "./services/settings.js";
 import {
@@ -445,11 +448,37 @@ export async function registerRoutes(app: FastifyInstance) {
     }
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    const dir = path.join(detail.cwd, ATTACH_DIR, id);
-    const filePath = path.join(dir, fileId);
-    const rel = path.relative(dir, filePath);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) {
-      return reply.code(400).send({ error: "Invalid path" });
+    const cwdRoot = path.resolve(detail.cwd);
+
+    // In-place (in-cwd) attachments store their absolute path in the part
+    // payload; staged copies resolve under the attachment dir by fileId.
+    let filePath: string | null = null;
+    try {
+      const rows = await db
+        .select({ payload: messageParts.payload })
+        .from(messageParts)
+        .innerJoin(messages, eq(messageParts.messageId, messages.id))
+        .where(and(eq(messages.sessionId, id), eq(messageParts.type, "file")));
+      const part = rows.find(
+        (r) => (r.payload as { fileId?: string } | null)?.fileId === fileId,
+      );
+      const inPlacePath = (part?.payload as { path?: string } | null)?.path;
+      if (inPlacePath && typeof inPlacePath === "string") {
+        filePath = path.resolve(inPlacePath);
+      } else {
+        const staged = path.resolve(cwdRoot, ATTACH_DIR, id, fileId);
+        const rel = path.relative(path.resolve(cwdRoot, ATTACH_DIR, id), staged);
+        if (!rel.startsWith("..") && !path.isAbsolute(rel)) filePath = staged;
+      }
+    } catch {
+      // DB read failure — fall through to a 404
+    }
+    // The agent can only read inside the session cwd — serve only such files.
+    if (
+      !filePath ||
+      (filePath !== cwdRoot && !filePath.startsWith(cwdRoot + path.sep))
+    ) {
+      return reply.code(404).send({ error: "Not found" });
     }
     try {
       await fsp.access(filePath);
