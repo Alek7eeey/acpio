@@ -524,7 +524,6 @@ export function SettingsPage() {
 
         {section === "agent" && leaf === "connect" && (
           <section className={styles.providerList}>
-            <p className={styles.hint}>{t("settings.agentConnectDesc")}</p>
             {providers.map((item) => {
               const active = settings.connectedProvider === item.id;
               const probe = probes[item.id];
