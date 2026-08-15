@@ -479,6 +479,11 @@ export class AcpClient extends EventEmitter {
     const resolved = await resolveCommand(commandName);
     const env = buildAgentEnv(this.provider, this.settings);
     const cwd = this.cwd || process.cwd();
+    // A missing cwd makes the child die with a generic "cannot find the path"
+    // error that reads like a missing command — fail fast with a clear message.
+    if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+      throw new Error(`Рабочая папка не существует: ${cwd}. Выберите другую папку в настройках.`);
+    }
 
     const resolvedExists =
       resolved.cmd.includes("/") ||
@@ -750,6 +755,9 @@ export class AcpClient extends EventEmitter {
   async cancel(): Promise<void> {
     if (!this.sessionId || !this.proc) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
+    // Child tools must stop too: host-side terminals spawned for this session
+    // would otherwise keep running even after the agent's prompt is cancelled.
+    this.killAllTerminals();
     // Unblock session/prompt immediately — agents may keep streaming briefly,
     // but the host must not stay stuck waiting for the prompt RPC.
     const id = this.promptRequestId;

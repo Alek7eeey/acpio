@@ -1054,6 +1054,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     const id = get().activeSessionId;
     if (!id) return;
     const state = get();
+    // In-flight tool/subagent calls become "cancelled" right away so their
+    // spinners stop — the WS epoch filter below drops the server's late
+    // part.updated events after Stop, so we can't wait for them.
+    const STUCK = new Set(["pending", "in_progress", "running"]);
+    const messages = (state.activeSession?.messages ?? []).map((m) => ({
+      ...m,
+      parts: m.parts.map((p) =>
+        (p.type === "tool_call" || p.type === "subagent") &&
+        STUCK.has(String(p.payload.status ?? ""))
+          ? { ...p, payload: { ...p.payload, status: "cancelled", interrupted: true } }
+          : p,
+      ),
+    }));
     set({
       cancelledPromptEpoch: state.promptEpoch,
       promptQueue: [],
@@ -1065,7 +1078,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessions: state.sessions.map((s) => (s.id === id ? { ...s, status: "idle" as const } : s)),
       activeSession:
         state.activeSession?.id === id
-          ? { ...state.activeSession, status: "idle" as const }
+          ? { ...state.activeSession, status: "idle" as const, messages }
           : state.activeSession,
     });
     try {

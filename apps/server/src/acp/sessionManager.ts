@@ -537,6 +537,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "tool_call") {
+    if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     rt.openTextPartId = null; // next text starts a new segment after tool
     const title = update.title ?? "Tool";
@@ -579,6 +580,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "tool_call_update") {
+    if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     const partId = rt.toolPartByCallId.get(update.toolCallId);
     const title = (update.raw.title as string) ?? "Tool";
@@ -993,6 +995,15 @@ export async function cancelPrompt(sessionId: string) {
     rt.turnQueue = [];
     rt.openTextPartId = null;
     rt.openThoughtPartId = null;
+    // Mark in-flight tool/subagent calls as cancelled so their spinners stop
+    // (the agent won't send final statuses for calls it was interrupted on).
+    for (const [, partId] of rt.toolPartByCallId) {
+      try {
+        await updatePart(sessionId, partId, { status: "cancelled", interrupted: true });
+      } catch {
+        // ignore secondary failures
+      }
+    }
     for (const [reqKey, p] of rt.pending) {
       const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
       try {
