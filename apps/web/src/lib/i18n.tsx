@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import type { AppLocale } from "@acprocess/shared";
-import { createTranslator, type TranslateFn } from "@acprocess/i18n";
+import type { TranslateFn } from "@acprocess/i18n";
+import { createTranslator } from "./translator";
 import { useAppStore } from "./store";
 
 type I18nContextValue = {
