@@ -948,26 +948,14 @@ export function ChatSidebar({
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
-                  d="M7 3.5h7.2L18.5 7.8V19a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5Z"
+                  d="M7 3h10a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 17 16h-7.5l-3.5 3.4v-3.4H7A2.5 2.5 0 0 1 4.5 13.5v-8A2.5 2.5 0 0 1 7 3Z"
                   stroke="currentColor"
                   strokeWidth="1.6"
                   strokeLinejoin="round"
                 />
+                <circle cx="16.3" cy="15.7" r="2.7" stroke="currentColor" strokeWidth="1.6" />
                 <path
-                  d="M14.2 3.5V7.8h4.3"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M8.5 12.5h5M8.5 15.5h5"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <circle cx="16" cy="17.5" r="2.9" stroke="currentColor" strokeWidth="1.6" />
-                <path
-                  d="M18.2 19.7 20.5 22"
+                  d="M18.4 17.8l2.2 2.2"
                   stroke="currentColor"
                   strokeWidth="1.6"
                   strokeLinecap="round"
