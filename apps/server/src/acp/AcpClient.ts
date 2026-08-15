@@ -469,6 +469,13 @@ export class AcpClient extends EventEmitter {
     super();
   }
 
+  /** Exact file paths (outside the cwd) the agent may READ — user-attached files. */
+  private extraReadFiles = new Set<string>();
+
+  allowReadFile(absPath: string) {
+    this.extraReadFiles.add(path.resolve(absPath));
+  }
+
   get lastStderr() {
     return this.stderrBuf.slice(-4000);
   }
@@ -808,6 +815,19 @@ export class AcpClient extends EventEmitter {
     return resolved;
   }
 
+  /** Reads may also target user-attached files outside the cwd (exact paths). */
+  private assertReadablePath(targetPath: string) {
+    const resolved = path.resolve(this.rootCwd(), targetPath);
+    const rel = path.relative(this.rootCwd(), resolved);
+    if (!rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
+    const norm = (p: string) =>
+      process.platform === "win32" ? p.toLowerCase() : p;
+    if ([...this.extraReadFiles].some((f) => norm(f) === norm(resolved))) {
+      return resolved;
+    }
+    throw new Error(`Path outside session cwd: ${resolved}`);
+  }
+
   private killAllTerminals() {
     for (const [, t] of this.terminals) {
       try {
@@ -828,7 +848,7 @@ export class AcpClient extends EventEmitter {
   }
 
   private async handleFsRead(params: Record<string, unknown>) {
-    const filePath = this.assertInsideCwd(String(params.path ?? ""));
+    const filePath = this.assertReadablePath(String(params.path ?? ""));
     const raw = await fsp.readFile(filePath, "utf8");
     const lines = raw.split(/\r?\n/);
     const start = Math.max(0, Number(params.line ?? 1) - 1);

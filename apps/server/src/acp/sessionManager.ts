@@ -1,5 +1,5 @@
 import path from "node:path";
-import { access, copyFile, mkdir, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import {
   isModelAccessError,
   isSubagentToolCall,
@@ -235,9 +235,7 @@ export type AttachmentInput = {
   path: string;
 };
 
-/** Folder under the session cwd where attached files land (agent-readable). */
-export const ATTACH_DIR = ".acprocess-attachments";
-
+/** Attachments are read in place from their server paths — no staging dir. */
 function sanitizeFileName(name: string): string {
   const base = path.basename(name).replace(/[\\/:*?"<>|]/g, "_").trim();
   return (base || "file").slice(0, 120);
@@ -246,80 +244,56 @@ function sanitizeFileName(name: string): string {
 type SavedAttachment = {
   name: string;
   fileId: string;
-  /** Absolute path on the server (original for in-cwd files, staged copy otherwise). */
+  /** Absolute path on the server — the file is read in place, never copied. */
   absPath: string;
-  /** Path relative to the session cwd — what the agent sees in the hint. */
+  /** Path shown to the agent: relative when inside the cwd, absolute otherwise. */
   relPath: string;
   size: number;
   mime: string;
-  /** true — the original file in the cwd is referenced directly (no copy). */
-  inPlace: boolean;
 };
 
+/**
+ * Resolve user-attached files (server paths). No copies are made: files
+ * inside the session cwd are read via their relative path, files anywhere
+ * else on the machine are added to the runtime's read-allowlist so the ACP
+ * client lets the agent read the exact file (like attaching any file in
+ * Cursor). Returns the list and records every path in `allowedFiles`.
+ */
 async function saveAttachments(
   sessionId: string,
   cwd: string,
   attachments: AttachmentInput[],
+  allowedFiles: Set<string>,
 ): Promise<SavedAttachment[]> {
-  const dir = path.join(cwd, ATTACH_DIR, sessionId);
-  await mkdir(dir, { recursive: true });
   const used = new Set<string>();
   const out: SavedAttachment[] = [];
   for (const att of attachments) {
     const source = att.path.trim();
-    let name = sanitizeFileName(path.basename(source));
-
-    // A file already inside the session cwd (picked from the server browser)
-    // is agent-readable as-is — reference it directly instead of copying it.
-    // Out-of-cwd files must land inside the cwd for the agent to read them.
-    const cwdRoot = path.resolve(cwd);
-    const inCwd = source === cwdRoot || source.startsWith(cwdRoot + path.sep);
-    const isOwnCopy = source.includes(path.join(ATTACH_DIR, sessionId));
-    if (inCwd && !isOwnCopy) {
-      const abs = path.resolve(source);
-      try {
-        const size = (await stat(abs)).size;
-        used.add(name);
-        out.push({
-          name,
-          fileId: name,
-          absPath: abs,
-          relPath: path.relative(cwdRoot, abs),
-          size,
-          mime: "application/octet-stream",
-          inPlace: true,
-        });
-      } catch {
-        continue; // unreadable source — skip
-      }
-      continue;
-    }
-
-    const ext = path.extname(name);
-    let fileId = name;
-    let n = 2;
-    while (used.has(fileId)) {
-      fileId = `${path.basename(name, ext)}-${n}${ext}`;
-      n++;
-    }
-    used.add(fileId);
-    const dest = path.join(dir, fileId);
+    const abs = path.resolve(source);
     try {
-      await access(source);
-      await copyFile(source, dest);
+      const size = (await stat(abs)).size;
+      const name = sanitizeFileName(path.basename(abs));
+      let fileId = name;
+      let n = 2;
+      while (used.has(fileId)) {
+        fileId = `${path.basename(name, path.extname(name))}-${n}${path.extname(name)}`;
+        n++;
+      }
+      used.add(fileId);
+      const cwdRoot = path.resolve(cwd);
+      const inCwd = abs === cwdRoot || abs.startsWith(cwdRoot + path.sep);
+      allowedFiles.add(abs);
+      out.push({
+        name,
+        fileId,
+        absPath: abs,
+        relPath: inCwd ? path.relative(cwdRoot, abs) : abs,
+        size,
+        mime: "application/octet-stream",
+      });
     } catch {
       continue; // unreadable source — skip
     }
-    const size = (await stat(dest)).size;
-    out.push({
-      name,
-      fileId,
-      absPath: dest,
-      relPath: path.join(ATTACH_DIR, sessionId, fileId),
-      size,
-      mime: "application/octet-stream",
-      inPlace: false,
-    });
   }
   return out;
 }
@@ -330,6 +304,8 @@ class SessionRuntime {
   clientReady: Promise<AcpClient> | null = null;
   /** Provider the live ACP process was started with. */
   provider: AgentProvider | null = null;
+  /** Exact absolute paths of user-attached files the agent may read outside the cwd. */
+  allowedAttachmentFiles = new Set<string>();
   assistantMessageId: string | null = null;
   openTextPartId: string | null = null;
   /** One thought block for the whole turn */
@@ -437,6 +413,7 @@ export async function ensureAcp(
   const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
   rt.client = client;
   rt.provider = opts.provider;
+  for (const f of rt.allowedAttachmentFiles) client.allowReadFile(f);
 
   client.on("log", (line: string) => {
     console.log(`[acp:${sessionId}]`, line.trim());
@@ -945,7 +922,14 @@ export async function runPrompt(
         : {}),
     });
     if (opts.attachments?.length) {
-      const saved = await saveAttachments(sessionId, opts.cwd, opts.attachments);
+      const saved = await saveAttachments(
+        sessionId,
+        opts.cwd,
+        opts.attachments,
+        rt.allowedAttachmentFiles,
+      );
+      // The live ACP client (and any future one) may read the exact file paths.
+      for (const f of saved) rt.client?.allowReadFile(f.absPath);
       for (const f of saved) {
         await appendPart(sessionId, userMsg.id, "file", {
           name: f.name,
@@ -953,9 +937,7 @@ export async function runPrompt(
           relPath: f.relPath,
           size: f.size,
           mime: f.mime,
-          // In-place (in-cwd) files carry their absolute path for download;
-          // staged copies are resolved via the attachment dir instead.
-          ...(f.inPlace ? { path: f.absPath, inPlace: true } : {}),
+          path: f.absPath,
         });
       }
       // The agent-facing text gets the file hint; the UI text part stays raw

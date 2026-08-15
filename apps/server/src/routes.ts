@@ -39,7 +39,6 @@ import {
   getAgentAvailability,
   syncSessionAgent,
   warmAcp,
-  ATTACH_DIR,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -443,8 +442,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!detail) return reply.code(404).send({ error: "Not found" });
     const cwdRoot = path.resolve(detail.cwd);
 
-    // In-place (in-cwd) attachments store their absolute path in the part
-    // payload; staged copies resolve under the attachment dir by fileId.
+    // Attachments are read in place: the file part stores the absolute path.
     let filePath: string | null = null;
     try {
       const rows = await db
@@ -455,22 +453,15 @@ export async function registerRoutes(app: FastifyInstance) {
       const part = rows.find(
         (r) => (r.payload as { fileId?: string } | null)?.fileId === fileId,
       );
-      const inPlacePath = (part?.payload as { path?: string } | null)?.path;
-      if (inPlacePath && typeof inPlacePath === "string") {
-        filePath = path.resolve(inPlacePath);
-      } else {
-        const staged = path.resolve(cwdRoot, ATTACH_DIR, id, fileId);
-        const rel = path.relative(path.resolve(cwdRoot, ATTACH_DIR, id), staged);
-        if (!rel.startsWith("..") && !path.isAbsolute(rel)) filePath = staged;
+      const p = part?.payload as { path?: unknown } | null;
+      if (typeof p?.path === "string" && p.path.trim()) {
+        filePath = path.resolve(p.path);
       }
     } catch {
       // DB read failure — fall through to a 404
     }
-    // The agent can only read inside the session cwd — serve only such files.
-    if (
-      !filePath ||
-      (filePath !== cwdRoot && !filePath.startsWith(cwdRoot + path.sep))
-    ) {
+    // Files were attached by the user; serve only absolute paths on this machine.
+    if (!filePath || !path.isAbsolute(filePath)) {
       return reply.code(404).send({ error: "Not found" });
     }
     try {

@@ -190,7 +190,7 @@ export const en = {
     attachServer: "From computer",
     attachServerEmpty: "Folder is empty",
     attachServerHint:
-      "The file becomes readable by the agent: from the session folder directly, from elsewhere — copied into it.",
+      "The agent reads the file at its path on this machine — no copies are made.",
     pendingFiles: "Attached files",
     removeFile: "Remove file",
     fileTooLarge: "File «{{name}}» exceeds 15 MB — skipped",
