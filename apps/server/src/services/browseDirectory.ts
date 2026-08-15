@@ -6,6 +6,7 @@ export type BrowseDirectoryEntry = {
   name: string;
   path: string;
   isDir?: boolean;
+  size?: number;
 };
 
 export type BrowseDirectoryResult = {
@@ -129,7 +130,7 @@ export function browseDirectory(
       if (fs.statSync(full).isDirectory()) {
         entries.push({ name, path: full, isDir: true });
       } else if (opts?.includeFiles) {
-        entries.push({ name, path: full, isDir: false });
+        entries.push({ name, path: full, isDir: false, size: fs.statSync(full).size });
       }
     } catch {
       // skip unreadable entries

@@ -148,7 +148,7 @@
 
 .quick {
   display: grid;
-  gap: 5px;
+  gap: 6px;
   margin: 0 14px 8px;
 }
 
@@ -161,27 +161,52 @@
   opacity: 0.8;
 }
 
-.quickList {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+.quickGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
 }
 
-.quickItem {
+.quickCard {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-height: 52px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
   color: var(--text);
   font: inherit;
-  font-size: 0.76rem;
-  font-weight: 600;
-  padding: 4px 10px;
   cursor: pointer;
 }
 
-.quickItem:hover {
+.quickCard:hover {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.quickCardIcon {
+  display: grid;
+  place-items: center;
   color: var(--accent);
+}
+
+.quickCardName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.rowSize {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 0.68rem;
+  color: var(--text-tertiary, var(--text-secondary));
 }
 
 .empty {

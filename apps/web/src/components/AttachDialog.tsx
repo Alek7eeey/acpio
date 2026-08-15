@@ -19,21 +19,43 @@ type BrowseState = {
   path: string;
   parent: string | null;
   kind?: "drives" | "directory";
-  entries: Array<{ name: string; path: string; isDir?: boolean }>;
+  entries: Array<{ name: string; path: string; isDir?: boolean; size?: number }>;
   quick?: Array<{ name: string; path: string; isDir?: boolean }>;
 };
 
-const fileIcon = (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
-    <path
-      d="M13.5 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8.5L13.5 3Z"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinejoin="round"
-    />
-    <path d="M13.5 3v5.5H19" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
-  </svg>
-);
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? Math.round(v) : Math.round(v * 10) / 10} ${units[i]}`;
+}
+
+type FileKind = "image" | "code" | "doc" | "archive" | "file";
+
+const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"]);
+const CODE_EXT = new Set([
+  "ts", "tsx", "js", "jsx", "py", "go", "rs", "java", "c", "cpp", "h", "cs",
+  "json", "html", "css", "scss", "sql", "sh", "bat", "ps1", "yml", "yaml",
+  "xml", "toml", "rb", "php", "swift", "kt",
+]);
+const DOC_EXT = new Set([
+  "pdf", "doc", "docx", "txt", "md", "rtf", "odt", "xls", "xlsx", "ppt", "pptx", "csv",
+]);
+const ARCHIVE_EXT = new Set(["zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz"]);
+
+function fileKind(name: string): FileKind {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  if (IMAGE_EXT.has(ext)) return "image";
+  if (CODE_EXT.has(ext)) return "code";
+  if (DOC_EXT.has(ext)) return "doc";
+  if (ARCHIVE_EXT.has(ext)) return "archive";
+  return "file";
+}
 
 const folderIcon = (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -45,6 +67,75 @@ const folderIcon = (
     />
   </svg>
 );
+
+const genericFileIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M13.5 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8.5L13.5 3Z"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <path d="M13.5 3v5.5H19" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+  </svg>
+);
+
+const imageIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+    <circle cx="8.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M21 15.5 16 10.5 6 20.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const codeIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <polyline points="8 8 4.5 12 8 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <polyline points="16 8 19.5 12 16 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <line x1="13.2" y1="6" x2="10.8" y2="18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const docIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8L14 3Z"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    <path d="M8.5 13h7M8.5 16h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const archiveIcon = (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <path
+      d="M3.5 8.5V7a2 2 0 0 1 2-2h3l1.5 1.7h6.5a2 2 0 0 1 2 2v1.3"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    />
+    <rect x="3.5" y="8.5" width="17" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M12 11.5v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+function fileIconFor(name: string) {
+  switch (fileKind(name)) {
+    case "image":
+      return imageIcon;
+    case "code":
+      return codeIcon;
+    case "doc":
+      return docIcon;
+    case "archive":
+      return archiveIcon;
+    default:
+      return genericFileIcon;
+  }
+}
 
 export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDialogProps) {
   const t = useT();
@@ -139,15 +230,16 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
         {browse?.quick && browse.quick.length > 0 ? (
           <div className={styles.quick}>
             <span className={styles.quickLabel}>{t("common.quickAccess")}</span>
-            <div className={styles.quickList}>
+            <div className={styles.quickGrid}>
               {browse.quick.map((q) => (
                 <button
                   key={q.path}
                   type="button"
-                  className={styles.quickItem}
+                  className={styles.quickCard}
                   onClick={() => void loadBrowse(q.path)}
                 >
-                  {q.name}
+                  <span className={styles.quickCardIcon}>{folderIcon}</span>
+                  <span className={styles.quickCardName}>{q.name}</span>
                 </button>
               ))}
             </div>
@@ -180,8 +272,11 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
                   className={styles.row}
                   onClick={() => pickServerFile(entry)}
                 >
-                  <span className={styles.rowIcon}>{fileIcon}</span>
+                  <span className={styles.rowIcon}>{fileIconFor(entry.name)}</span>
                   <span className={styles.rowName}>{entry.name}</span>
+                  {entry.size != null && entry.size > 0 ? (
+                    <span className={styles.rowSize}>{formatBytes(entry.size)}</span>
+                  ) : null}
                 </button>
               ),
             )
