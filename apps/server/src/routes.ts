@@ -459,7 +459,8 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions/:id/attachments/:fileId", async (req, reply) => {
     const { id, fileId } = req.params as { id: string; fileId: string };
-    if (!/^[\w.\- ]{1,120}$/.test(fileId)) {
+    // \w is ASCII-only — fileIds from real filenames may contain Cyrillic etc.
+    if (!/^[\p{L}\p{N}_.\- ]{1,120}$/u.test(fileId)) {
       return reply.code(400).send({ error: "Invalid file id" });
     }
     const detail = await getSessionDetail(id);
