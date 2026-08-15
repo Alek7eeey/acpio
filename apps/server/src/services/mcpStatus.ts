@@ -1,7 +1,9 @@
 import type { McpServerConfig } from "@acprocess/shared";
 import { getSettings } from "./settings.js";
 
-const TTL_MS = 30_000;
+const OK_TTL_MS = 30_000;
+/** Failed probes expire fast so a temporarily-down server turns green shortly after recovery. */
+const FAIL_TTL_MS = 10_000;
 const PROBE_TIMEOUT_MS = 6_000;
 
 /** id → { ok, at } of the last probe, keyed by server id. */
@@ -97,7 +99,8 @@ export async function getMcpStatus(): Promise<Record<string, boolean>> {
   let stale = false;
   for (const s of servers) {
     const c = cache.get(s.id);
-    if (c && now - c.at < TTL_MS) {
+    const ttl = c?.ok ? OK_TTL_MS : FAIL_TTL_MS;
+    if (c && now - c.at < ttl) {
       result[s.id] = c.ok;
     } else {
       stale = true;

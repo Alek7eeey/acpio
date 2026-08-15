@@ -444,6 +444,14 @@ export function SettingsPage() {
     // a stale form value must not flip the interface on a settings save.
     const { defaultProvider: _provider, theme: _theme, ...rest } = form;
     await saveSettings(rest);
+    // The MCP probes fire server-side on save — fetch once so the dots turn
+    // green right away instead of waiting for the next poll tick.
+    api
+      .mcpStatus()
+      .then((s) => setMcpStatus(s))
+      .catch(() => {
+        // poll will retry
+      });
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1500);
   };
@@ -1098,12 +1106,18 @@ export function SettingsPage() {
                     {server.enabled ? (
                       <span
                         className={`${styles.mcpStatusDot} ${
-                          mcpStatus[server.id] ? styles.mcpStatusDotOk : styles.mcpStatusDotBad
+                          mcpStatus[server.id] === true
+                            ? styles.mcpStatusDotOk
+                            : mcpStatus[server.id] === false
+                              ? styles.mcpStatusDotBad
+                              : styles.mcpStatusDotPending
                         }`}
                         title={
-                          mcpStatus[server.id]
+                          mcpStatus[server.id] === true
                             ? t("common.connected")
-                            : t("common.notConnected")
+                            : mcpStatus[server.id] === false
+                              ? t("common.notConnected")
+                              : t("common.checking")
                         }
                         aria-hidden
                       />

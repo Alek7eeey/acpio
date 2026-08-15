@@ -789,14 +789,24 @@ export function AppShell() {
                     ) : (
                       <div className={styles.agentTipMcpList}>
                         {enabledMcpServers.map((s) => {
-                          const ok = mcpStatus[s.id];
+                          const st = mcpStatus[s.id];
+                          const dotCls =
+                            st === true
+                              ? styles.agentTipMcpDotOk
+                              : st === false
+                                ? styles.agentTipMcpDotBad
+                                : styles.agentTipMcpDotPending;
+                          const dotTitle =
+                            st === true
+                              ? t("common.connected")
+                              : st === false
+                                ? t("common.notConnected")
+                                : t("common.checking");
                           return (
                             <div key={s.id} className={styles.agentTipMcpRow}>
                               <span
-                                className={`${styles.agentTipMcpDot} ${
-                                  ok ? styles.agentTipMcpDotOk : styles.agentTipMcpDotBad
-                                }`}
-                                title={ok ? t("common.connected") : t("common.notConnected")}
+                                className={`${styles.agentTipMcpDot} ${dotCls}`}
+                                title={dotTitle}
                                 aria-hidden
                               />
                               <span className={styles.agentTipMcpName} title={s.url}>

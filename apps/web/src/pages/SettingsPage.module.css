@@ -808,6 +808,11 @@
   box-shadow: 0 0 0 3px var(--danger-soft);
 }
 
+.mcpStatusDotPending {
+  background: var(--text-tertiary, var(--text-secondary));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-tertiary) 20%, transparent);
+}
+
 .mcpRowType {
   grid-column: 2;
   font-size: 0.68rem;

@@ -396,10 +396,23 @@
   cursor: pointer;
 }
 
+:global([data-theme="light"]) .chatSearchMsgs {
+  /* Match the white inputs/buttons of the light theme (new chat, chats search). */
+  background: #fff;
+  border-color: #e5e7eb;
+  color: #18181b;
+}
+
 .chatSearchMsgs:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: var(--bg-tertiary);
+}
+
+:global([data-theme="light"]) .chatSearchMsgs:hover {
+  background: #f8fafc;
+  border-color: #d9dee7;
+  filter: none;
 }
 
 .chatSearchMsgs svg {
@@ -2585,6 +2598,11 @@
 .agentTipMcpDotBad {
   background: var(--danger);
   box-shadow: 0 0 0 2px var(--danger-soft);
+}
+
+.agentTipMcpDotPending {
+  background: var(--text-tertiary, var(--text-secondary));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--text-tertiary) 20%, transparent);
 }
 
 .agentTipMcpType {
