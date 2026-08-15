@@ -201,22 +201,91 @@
   cursor: not-allowed;
 }
 
-.path {
+.addressBar {
   flex: 1;
   min-width: 0;
-  height: 36px;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  gap: 0;
+  height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg);
-  font-size: 0.82rem;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  cursor: text;
+  scrollbar-gutter: stable;
+}
+
+.addressBar:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.crumbWrap {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.crumbSep {
+  margin: 0 2px;
   color: var(--text-secondary);
-  text-align: left;
+  font-size: 0.8rem;
+  user-select: none;
+}
+
+.crumb {
+  border: none;
+  background: transparent;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.crumbActive {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.crumbMuted {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.editGlyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
+.addressInput {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
 }
 
 /* Horizontal quick-access strip — shown only on narrow screens. */

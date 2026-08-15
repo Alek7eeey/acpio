@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { DRIVES_ROOT, isWindowsPath, splitPathSegments } from "../lib/pathSegments";
 import type { PendingAttachment } from "../lib/store";
 import styles from "./AttachDialog.module.css";
 
@@ -13,10 +14,7 @@ type AttachDialogProps = {
   onAttach: (files: PendingAttachment[]) => void;
 };
 
-const DRIVES_ROOT = "Computer";
-
-type BrowseState = {
-  path: string;
+type BrowseState = {  path: string;
   parent: string | null;
   kind?: "drives" | "directory";
   entries: Array<{ name: string; path: string; isDir?: boolean; size?: number }>;
@@ -152,6 +150,28 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
   const loadSeq = useRef(0);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const resizeDrag = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [editingPath, setEditingPath] = useState(false);
+  const [pathDraft, setPathDraft] = useState("");
+  const pathInputRef = useRef<HTMLInputElement>(null);
+
+  const startPathEdit = () => {
+    if (!browse?.path) return;
+    setPathDraft(browse.path);
+    setEditingPath(true);
+    requestAnimationFrame(() => pathInputRef.current?.select());
+  };
+
+  const commitPathEdit = async () => {
+    const target = pathDraft.trim();
+    if (!target) {
+      setEditingPath(false);
+      return;
+    }
+    const mapped =
+      target === DRIVES_ROOT || target === t("common.thisPc") ? DRIVES_ROOT : target;
+    const res = await loadBrowse(mapped);
+    if (res) setEditingPath(false);
+  };
 
   const handleResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
     const dlg = e.currentTarget.parentElement;
@@ -173,17 +193,19 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
     resizeDrag.current = null;
   };
 
-  const loadBrowse = async (path?: string) => {
+  const loadBrowse = async (path?: string): Promise<BrowseState | null> => {
     const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.browseDirectory(path, { files: true });
-      if (seq !== loadSeq.current) return;
+      if (seq !== loadSeq.current) return null;
       setBrowse(res);
+      return res;
     } catch (err) {
-      if (seq !== loadSeq.current) return;
+      if (seq !== loadSeq.current) return null;
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -209,7 +231,6 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
   if (!open) return null;
 
   const drivesRoot = browse?.kind === "drives" || browse?.path === DRIVES_ROOT;
-  const currentLabel = drivesRoot ? t("common.thisPc") : browse?.path;
   const isInside = (folderPath: string) => {
     const current = (browse?.path ?? "").toLowerCase();
     const folder = folderPath.toLowerCase();
@@ -221,6 +242,9 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
   };
 
   const quickRows = browse?.quick ?? [];
+  const breadcrumbs = browse?.path ? splitPathSegments(browse.path, t("common.thisPc")) : [];
+  const crumbSep =
+    browse?.path && isWindowsPath(browse.path) && browse.path !== DRIVES_ROOT ? "\\" : "/";
 
   return createPortal(
     <div className={styles.overlay}>
@@ -293,9 +317,64 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
                   />
                 </svg>
               </button>
-              <span className={styles.path} title={browse?.path}>
-                {currentLabel ?? (loading ? t("common.loading") : t("common.thisPc"))}
-              </span>
+              {editingPath ? (
+                <input
+                  ref={pathInputRef}
+                  className={styles.addressInput}
+                  value={pathDraft}
+                  placeholder={t("common.folderPath")}
+                  onChange={(e) => setPathDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void commitPathEdit();
+                    } else if (e.key === "Escape") {
+                      setEditingPath(false);
+                    }
+                  }}
+                  onBlur={() => setEditingPath(false)}
+                  autoFocus
+                />
+              ) : (
+                <div
+                  className={styles.addressBar}
+                  aria-label={t("common.folderPath")}
+                  title={t("chat.editPathHint")}
+                  onClick={startPathEdit}
+                >
+                  {breadcrumbs.length === 0 ? (
+                    <span className={styles.crumbMuted}>
+                      {loading ? t("common.loading") : "…"}
+                    </span>
+                  ) : (
+                    breadcrumbs.map((crumb, index) => (
+                      <span key={crumb.path} className={styles.crumbWrap}>
+                        {index > 0 ? <span className={styles.crumbSep}>{crumbSep}</span> : null}
+                        <button
+                          type="button"
+                          className={`${styles.crumb}${index === breadcrumbs.length - 1 ? ` ${styles.crumbActive}` : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void loadBrowse(crumb.path);
+                          }}
+                        >
+                          {crumb.label}
+                        </button>
+                      </span>
+                    ))
+                  )}
+                  <span className={styles.editGlyph} aria-hidden>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </div>
+              )}
             </div>
 
             {quickRows.length > 0 ? (

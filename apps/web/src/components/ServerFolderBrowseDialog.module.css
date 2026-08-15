@@ -129,6 +129,30 @@
   cursor: not-allowed;
 }
 
+.addressInput {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+.editGlyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
 .addressBar {
   flex: 1;
   min-width: 0;

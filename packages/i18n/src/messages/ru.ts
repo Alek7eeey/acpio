@@ -214,6 +214,7 @@ export const ru = {
     attachFilesHint: "Файл попадёт в папку сессии и агент сможет его прочитать",
     attachServer: "С компьютера",
     attachServerEmpty: "Папка пуста",
+    editPathHint: "Нажмите, чтобы скопировать или вставить путь",
     pendingFiles: "Прикреплённые файлы",
     removeFile: "Убрать файл",
     fileTooLarge: "Файл «{{name}}» больше 15 МБ — он пропущен",

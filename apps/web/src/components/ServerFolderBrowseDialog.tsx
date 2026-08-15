@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
+import { DRIVES_ROOT, isWindowsPath, splitPathSegments } from "../lib/pathSegments";
 import styles from "./ServerFolderBrowseDialog.module.css";
 
 type ServerFolderBrowseDialogProps = {
@@ -19,8 +20,6 @@ type BrowseState = {
   kind?: "drives" | "directory";
   entries: Array<{ name: string; path: string }>;
 };
-
-const DRIVES_ROOT = "Computer";
 
 const folderIcon = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -58,68 +57,12 @@ const upIcon = (
   </svg>
 );
 
-function isWindowsPath(path: string) {
-  return path === DRIVES_ROOT || /^[a-zA-Z]:/.test(path) || path.includes("\\");
-}
-
 function folderLeafName(pathValue: string, drivesLabel: string) {
   if (pathValue === DRIVES_ROOT) return drivesLabel;
   const trimmed = pathValue.trim().replace(/[\\/]+$/, "");
   if (!trimmed) return pathValue;
   const parts = trimmed.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || trimmed;
-}
-
-function splitPathSegments(
-  fullPath: string,
-  drivesLabel: string,
-): Array<{ label: string; path: string }> {
-  if (fullPath === DRIVES_ROOT) {
-    return [{ label: drivesLabel, path: DRIVES_ROOT }];
-  }
-
-  const trimmed = fullPath.trim();
-  if (!trimmed) return [];
-
-  // Filesystem root on Unix
-  if (trimmed === "/" || trimmed === "\\") {
-    return [{ label: "/", path: "/" }];
-  }
-
-  const winDrive = trimmed.match(/^([a-zA-Z]:)([\\/]|$)/);
-  const isUnixAbsolute = trimmed.startsWith("/");
-  const sep = trimmed.includes("\\") && !isUnixAbsolute ? "\\" : "/";
-  const rawParts = trimmed.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
-  const parts: string[] = [];
-
-  if (winDrive) {
-    parts.push(winDrive[1]);
-    parts.push(...rawParts.slice(1));
-  } else {
-    parts.push(...rawParts);
-  }
-
-  const segments: Array<{ label: string; path: string }> = [];
-  if (winDrive) {
-    segments.push({ label: drivesLabel, path: DRIVES_ROOT });
-  } else if (isUnixAbsolute) {
-    segments.push({ label: "/", path: "/" });
-  }
-
-  for (let i = 0; i < parts.length; i++) {
-    if (winDrive && i === 0) {
-      segments.push({ label: parts[i], path: `${parts[i]}\\` });
-      continue;
-    }
-    const slice = winDrive ? [winDrive[1], ...parts.slice(1, i + 1)] : parts.slice(0, i + 1);
-    const path = winDrive
-      ? `${slice[0]}\\${slice.slice(1).join("\\")}`
-      : isUnixAbsolute
-        ? `/${slice.join("/")}`.replace(/\/+/g, "/")
-        : slice.join(sep);
-    segments.push({ label: parts[i], path });
-  }
-  return segments;
 }
 
 export function ServerFolderBrowseDialog({
@@ -136,24 +79,48 @@ export function ServerFolderBrowseDialog({
   const [error, setError] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderBusy, setNewFolderBusy] = useState(false);
+  const [editingPath, setEditingPath] = useState(false);
+  const [pathDraft, setPathDraft] = useState("");
   const loadSeq = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const newFolderRef = useRef<HTMLInputElement>(null);
+  const pathInputRef = useRef<HTMLInputElement>(null);
 
-  const loadBrowse = async (path?: string) => {
+  const startPathEdit = () => {
+    if (!browse?.path) return;
+    setPathDraft(browse.path);
+    setEditingPath(true);
+    requestAnimationFrame(() => pathInputRef.current?.select());
+  };
+
+  const commitPathEdit = async () => {
+    const target = pathDraft.trim();
+    if (!target) {
+      setEditingPath(false);
+      return;
+    }
+    const mapped =
+      target === DRIVES_ROOT || target === t("common.thisPc") ? DRIVES_ROOT : target;
+    const res = await loadBrowse(mapped);
+    if (res) setEditingPath(false);
+  };
+
+  const loadBrowse = async (path?: string): Promise<BrowseState | null> => {
     const seq = ++loadSeq.current;
     setLoading(true);
     setError(null);
     try {
       const res = await api.browseDirectory(path);
-      if (seq !== loadSeq.current) return;
+      if (seq !== loadSeq.current) return null;
       setBrowse(res);
       requestAnimationFrame(() => {
         listRef.current?.scrollTo({ top: 0 });
       });
+      return res;
     } catch (err) {
-      if (seq !== loadSeq.current) return;
+      if (seq !== loadSeq.current) return null;
       setError(err instanceof Error ? err.message : String(err));
+      return null;
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
@@ -175,6 +142,7 @@ export function ServerFolderBrowseDialog({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (e.target === pathInputRef.current) return;
       if (e.key === "Escape") onClose();
       if (e.key === "Enter" && browse?.path && browse.path !== DRIVES_ROOT) {
         e.preventDefault();
@@ -265,24 +233,63 @@ export function ServerFolderBrowseDialog({
           >
             {upIcon}
           </button>
-          <div className={styles.addressBar} aria-label={t("common.folderPath")}>
-            {breadcrumbs.length === 0 ? (
-              <span className={styles.crumbMuted}>{loading ? t("common.loading") : "…"}</span>
-            ) : (
-              breadcrumbs.map((crumb, index) => (
-                <span key={crumb.path} className={styles.crumbWrap}>
-                  {index > 0 ? <span className={styles.crumbSep}>{crumbSep}</span> : null}
-                  <button
-                    type="button"
-                    className={`${styles.crumb}${index === breadcrumbs.length - 1 ? ` ${styles.crumbActive}` : ""}`}
-                    onClick={() => navigate(crumb.path)}
-                  >
-                    {crumb.label}
-                  </button>
-                </span>
-              ))
-            )}
-          </div>
+          {editingPath ? (
+            <input
+              ref={pathInputRef}
+              className={styles.addressInput}
+              value={pathDraft}
+              placeholder={t("common.folderPath")}
+              onChange={(e) => setPathDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void commitPathEdit();
+                } else if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setEditingPath(false);
+                }
+              }}
+              onBlur={() => setEditingPath(false)}
+              autoFocus
+            />
+          ) : (
+            <div
+              className={styles.addressBar}
+              aria-label={t("common.folderPath")}
+              title={t("chat.editPathHint")}
+              onClick={startPathEdit}
+            >
+              {breadcrumbs.length === 0 ? (
+                <span className={styles.crumbMuted}>{loading ? t("common.loading") : "…"}</span>
+              ) : (
+                breadcrumbs.map((crumb, index) => (
+                  <span key={crumb.path} className={styles.crumbWrap}>
+                    {index > 0 ? <span className={styles.crumbSep}>{crumbSep}</span> : null}
+                    <button
+                      type="button"
+                      className={`${styles.crumb}${index === breadcrumbs.length - 1 ? ` ${styles.crumbActive}` : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(crumb.path);
+                      }}
+                    >
+                      {crumb.label}
+                    </button>
+                  </span>
+                ))
+              )}
+              <span className={styles.editGlyph} aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+            </div>
+          )}
         </div>
 
         <div className={styles.listPane} ref={listRef} role="listbox" aria-label={t("common.browseFolders")}>
