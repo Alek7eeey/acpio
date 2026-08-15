@@ -21,7 +21,7 @@ const corsStrict = process.env.CORS_STRICT === "1";
 
 async function main() {
   await ensureSchema();
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, bodyLimit: 100 * 1024 * 1024 });
   await app.register(cors, {
     // TEMPORARY: reflect any browser Origin so LAN / alternate hostnames work.
     origin:

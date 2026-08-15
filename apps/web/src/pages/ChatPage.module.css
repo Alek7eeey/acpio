@@ -1768,6 +1768,93 @@
   order: 1;
 }
 
+/* Pending attachments above the pill (composer) and attached files inside a
+   user message — same chip look. */
+.pendingFiles,
+.userFiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.pendingFiles {
+  margin: 2px 4px 0;
+}
+
+.userFiles {
+  margin-top: 6px;
+}
+
+.pendingFileChip,
+.userFileChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  color: var(--text);
+  font-size: 0.74rem;
+  line-height: 1.3;
+  text-decoration: none;
+}
+
+.userFileChip:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.pendingFileMeta,
+.userFileMeta {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pendingFileName,
+.userFileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.pendingFileSize,
+.userFileSize {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 0.66rem;
+}
+
+.pendingFileRemove {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.pendingFileRemove:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.attachError {
+  flex-basis: 100%;
+  color: var(--danger);
+  font-size: 0.72rem;
+}
+
 .micBtn {
   order: 3;
 }

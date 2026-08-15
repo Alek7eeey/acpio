@@ -163,12 +163,17 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ ids }),
     }),
-  prompt: (id: string, text: string, opts?: { editMessageId?: string }) =>
+  prompt: (
+    id: string,
+    text: string,
+    opts?: { editMessageId?: string; attachments?: Array<{ name: string; mime: string; data: string }> },
+  ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
       body: JSON.stringify({
         text,
         ...(opts?.editMessageId ? { editMessageId: opts.editMessageId } : {}),
+        ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),
   cancel: (id: string) =>

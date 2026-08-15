@@ -1,3 +1,5 @@
+import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import {
   isModelAccessError,
   isSubagentToolCall,
@@ -222,7 +224,59 @@ type TurnOpts = {
   titleHint?: string;
   /** Edit existing user message: truncate later turns and regenerate. */
   editMessageId?: string;
+  /** Files to attach to a NEW user message (base64 payloads). */
+  attachments?: AttachmentInput[];
 };
+
+/** Raw upload from the browser; the server saves it under the session cwd. */
+export type AttachmentInput = {
+  name: string;
+  mime: string;
+  data: string; // base64
+};
+
+/** Folder under the session cwd where attached files land (agent-readable). */
+export const ATTACH_DIR = ".acprocess-attachments";
+
+function sanitizeFileName(name: string): string {
+  const base = path.basename(name).replace(/[\\/:*?"<>|]/g, "_").trim();
+  return (base || "file").slice(0, 120);
+}
+
+async function saveAttachments(
+  sessionId: string,
+  cwd: string,
+  attachments: AttachmentInput[],
+): Promise<
+  Array<{ name: string; fileId: string; relPath: string; size: number; mime: string }>
+> {
+  const dir = path.join(cwd, ATTACH_DIR, sessionId);
+  await mkdir(dir, { recursive: true });
+  const used = new Set<string>();
+  const out: Array<{ name: string; fileId: string; relPath: string; size: number; mime: string }> =
+    [];
+  for (const att of attachments) {
+    const base = sanitizeFileName(att.name);
+    const ext = path.extname(base);
+    let fileId = base;
+    let n = 2;
+    while (used.has(fileId)) {
+      fileId = `${path.basename(base, ext)}-${n}${ext}`;
+      n++;
+    }
+    used.add(fileId);
+    const buf = Buffer.from(att.data, "base64");
+    await writeFile(path.join(dir, fileId), buf);
+    out.push({
+      name: att.name,
+      fileId,
+      relPath: path.join(ATTACH_DIR, sessionId, fileId),
+      size: buf.length,
+      mime: att.mime || "application/octet-stream",
+    });
+  }
+  return out;
+}
 
 class SessionRuntime {
   client: AcpClient | null = null;
@@ -844,6 +898,23 @@ export async function runPrompt(
         ? { isSlashCommand: true, commandName: slashMatch[1] }
         : {}),
     });
+    if (opts.attachments?.length) {
+      const saved = await saveAttachments(sessionId, opts.cwd, opts.attachments);
+      for (const f of saved) {
+        await appendPart(sessionId, userMsg.id, "file", {
+          name: f.name,
+          fileId: f.fileId,
+          relPath: f.relPath,
+          size: f.size,
+          mime: f.mime,
+        });
+      }
+      // The agent-facing text gets the file hint; the UI text part stays raw
+      // (files render as separate chips).
+      promptUserText += `\n\n[Прикреплённые файлы: ${saved
+        .map((f) => f.relPath)
+        .join(", ")} — прочитайте их при необходимости.]`;
+    }
   } else {
     userMessageId = opts.editMessageId;
   }

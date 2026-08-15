@@ -27,7 +27,7 @@ import {
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
-import { sanitizeCatalogModes, useAppStore } from "../lib/store";
+import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
 import {
   dominantLanguage,
@@ -155,6 +155,18 @@ function messagePlainText(message: MessageDto): string {
     .trim();
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let i = 0;
+  let v = bytes;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 ? Math.round(v) : Math.round(v * 10) / 10} ${units[i]}`;
+}
+
 function UserMessage({
   message,
   slashCommands,
@@ -166,13 +178,14 @@ function UserMessage({
 }) {
   const t = useT();
   const text = messagePlainText(message);
+  const fileParts = message.parts.filter((p) => p.type === "file");
   const explicitCommand = message.parts.some(
     (p) => p.type === "text" && Boolean(p.payload.isSlashCommand),
   );
   const parsed = parseSlashCommandText(text);
   const isCommand = explicitCommand || Boolean(parsed);
 
-  if (!text) return null;
+  if (!text && fileParts.length === 0) return null;
 
   const body =
     isCommand && parsed ? (
@@ -202,6 +215,52 @@ function UserMessage({
   return (
     <div className={styles.userMsg}>
       {body}
+      {fileParts.length > 0 ? (
+        <div className={styles.userFiles}>
+          {fileParts.map((p) => {
+            const name = String(p.payload.name ?? "file");
+            const fileId = String(p.payload.fileId ?? "");
+            const size = Number(p.payload.size ?? 0);
+            const href = fileId
+              ? `/api/sessions/${message.sessionId}/attachments/${encodeURIComponent(fileId)}`
+              : undefined;
+            const chip = (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className={styles.userFileMeta}>
+                  <span className={styles.userFileName}>{name}</span>
+                  {size > 0 ? (
+                    <span className={styles.userFileSize}>{formatBytes(size)}</span>
+                  ) : null}
+                </span>
+              </>
+            );
+            return href ? (
+              <a
+                key={p.id}
+                className={styles.userFileChip}
+                href={href}
+                download={name}
+                title={name}
+              >
+                {chip}
+              </a>
+            ) : (
+              <span key={p.id} className={styles.userFileChip}>
+                {chip}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
       <UserMessageActions text={text} onEdit={() => onEdit(message.id, text)} />
     </div>
   );
@@ -1733,6 +1792,9 @@ export function ChatPage() {
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -1991,6 +2053,35 @@ export function ChatPage() {
     submitMessage(`/${cmd.name}`);
   };
 
+  const MAX_ATTACH_SIZE = 15 * 1024 * 1024;
+  const MAX_ATTACH_COUNT = 8;
+
+  const pickFiles = (list: FileList | null) => {
+    if (!list || list.length === 0) return;
+    const files = [...list];
+    if (files.length + pendingFiles.length > MAX_ATTACH_COUNT) {
+      setAttachError(t("chat.tooManyFiles"));
+      return;
+    }
+    const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
+    if (oversized) {
+      setAttachError(t("chat.fileTooLarge", { name: oversized.name }));
+    }
+    const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
+    for (const f of ok) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const data = String(reader.result ?? "").split(",")[1] ?? "";
+        if (!data) return;
+        setPendingFiles((prev) => [
+          ...prev,
+          { name: f.name, mime: f.type || "application/octet-stream", data },
+        ]);
+      };
+      reader.readAsDataURL(f);
+    }
+  };
+
   const submitMessage = (raw: string) => {
     const value = raw.trim();
     if (!value || composerLocked) return;
@@ -2012,25 +2103,33 @@ export function ChatPage() {
     }
     userJustSentRef.current = true;
     const editId = editingMessageId;
+    const attach = editId ? undefined : pendingFiles;
     setText("");
     setEditingMessageId(null);
     setCursorPos(0);
     setComposerMultilineIfNeeded(false);
     setSlashMenuDismissed(true);
+    setPendingFiles([]);
+    setAttachError(null);
     const el = textareaRef.current;
     if (el) {
       el.style.height = "auto";
     }
+    const sendOpts = editId
+      ? { editMessageId: editId }
+      : attach && attach.length > 0
+        ? { attachments: attach }
+        : undefined;
     if (shouldAutoFocusComposer()) {
       focusComposer();
-      void sendPrompt(value, editId ? { editMessageId: editId } : undefined).finally(() => {
+      void sendPrompt(value, sendOpts).finally(() => {
         requestAnimationFrame(focusComposer);
         window.setTimeout(focusComposer, 0);
         window.setTimeout(focusComposer, 100);
       });
     } else {
       textareaRef.current?.blur();
-      void sendPrompt(value, editId ? { editMessageId: editId } : undefined);
+      void sendPrompt(value, sendOpts);
     }
   };
 
@@ -3031,6 +3130,41 @@ export function ChatPage() {
               />
             ) : null}
           </div>
+          {(pendingFiles.length > 0 || attachError) && (
+            <div className={styles.pendingFiles}>
+              {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
+              {pendingFiles.map((f, i) => (
+                <span key={`${f.name}-${i}`} className={styles.pendingFileChip}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  <span className={styles.pendingFileMeta}>
+                    <span className={styles.pendingFileName}>{f.name}</span>
+                    <span className={styles.pendingFileSize}>
+                      {formatBytes(Math.floor((f.data.length * 3) / 4))}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.pendingFileRemove}
+                    aria-label={t("chat.removeFile")}
+                    title={t("chat.removeFile")}
+                    onClick={() =>
+                      setPendingFiles((prev) => prev.filter((_, j) => j !== i))
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               streaming ? styles.pillBusy : ""
@@ -3110,21 +3244,34 @@ export function ChatPage() {
             />
 
             <div className={styles.pillFooter}>
-              <HoverTip
-                as="button"
+              <button
+                type="button"
                 className={styles.attachBtn}
-                aria-label={t("common.attachNotImplemented")}
-                disabled={composerLocked}
+                aria-label={t("chat.attachFiles")}
+                title={t("chat.attachFiles")}
+                disabled={composerLocked || editingMessageId !== null || streaming}
+                onClick={() => fileInputRef.current?.click()}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
-                    d="M12 5v14M5 12h14"
+                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="1.7"
                     strokeLinecap="round"
+                    strokeLinejoin="round"
                   />
                 </svg>
-              </HoverTip>
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  pickFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
 
               {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
 

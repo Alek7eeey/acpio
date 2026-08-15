@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fsp from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import { defaultSessionTitle, errorMessage } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "./services/settings.js";
@@ -35,6 +36,7 @@ import {
   getAgentAvailability,
   syncSessionAgent,
   warmAcp,
+  ATTACH_DIR,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -388,6 +390,16 @@ export async function registerRoutes(app: FastifyInstance) {
       .object({
         text: z.string().min(1),
         editMessageId: z.string().uuid().optional(),
+        attachments: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(255),
+              mime: z.string().max(200),
+              data: z.string().min(1),
+            }),
+          )
+          .max(8)
+          .optional(),
       })
       .parse(req.body);
     const connected = await agentConnected();
@@ -406,6 +418,7 @@ export async function registerRoutes(app: FastifyInstance) {
       cwd: detail.cwd,
       mode: detail.mode,
       editMessageId: body.editMessageId,
+      attachments: body.attachments,
       titleHint:
         detail.title === defaultTitle || detail.title === "Новый чат" || detail.title === "New chat"
           ? body.text
@@ -415,6 +428,31 @@ export async function registerRoutes(app: FastifyInstance) {
     });
 
     return { ok: true, status: "running" };
+  });
+
+  app.get("/api/sessions/:id/attachments/:fileId", async (req, reply) => {
+    const { id, fileId } = req.params as { id: string; fileId: string };
+    if (!/^[\w.\- ]{1,120}$/.test(fileId)) {
+      return reply.code(400).send({ error: "Invalid file id" });
+    }
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const dir = path.join(detail.cwd, ATTACH_DIR, id);
+    const filePath = path.join(dir, fileId);
+    const rel = path.relative(dir, filePath);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
+      return reply.code(400).send({ error: "Invalid path" });
+    }
+    try {
+      await fsp.access(filePath);
+    } catch {
+      return reply.code(404).send({ error: "Not found" });
+    }
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(fileId)}`,
+    );
+    return reply.type("application/octet-stream").send(await fsp.readFile(filePath));
   });
 
   app.post("/api/sessions/:id/cancel", async (req) => {

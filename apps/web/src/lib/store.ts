@@ -75,6 +75,9 @@ type PendingQuestion = {
   payload: Record<string, unknown>;
 };
 
+/** File picked in the composer, base64 payload, sent with the prompt. */
+export type PendingAttachment = { name: string; mime: string; data: string };
+
 type AppState = {
   settings: AppSettings;
   sessions: SessionDto[];
@@ -107,7 +110,12 @@ type AppState = {
    * moment they are handed to the server (the server FIFO-runs them), so
    * everything still listed here can still be edited or deleted.
    */
-  promptQueue: Array<{ id: string; text: string; editMessageId?: string | null }>;
+  promptQueue: Array<{
+    id: string;
+    text: string;
+    editMessageId?: string | null;
+    attachments?: PendingAttachment[];
+  }>;
   /** Prompts handed to the server whose turns have not completed yet. */
   inflight: number;
   loading: boolean;
@@ -134,11 +142,14 @@ type AppState = {
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
-  sendPrompt: (text: string, opts?: { editMessageId?: string }) => Promise<void>;
+  sendPrompt: (
+    text: string,
+    opts?: { editMessageId?: string; attachments?: PendingAttachment[] },
+  ) => Promise<void>;
   /** Internal: actually hand one prompt to the server (optimistic pair optional). */
   runSendPrompt: (
     text: string,
-    opts?: { editMessageId?: string },
+    opts?: { editMessageId?: string; attachments?: PendingAttachment[] },
     flags?: { optimistic?: boolean },
   ) => Promise<void>;
   removeQueuedPrompt: (id: string) => void;
@@ -851,6 +862,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             text,
             editMessageId: opts?.editMessageId ?? null,
+            attachments: opts?.attachments,
           },
         ],
       });
@@ -898,7 +910,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await get().runSendPrompt(
         item.text,
-        item.editMessageId ? { editMessageId: item.editMessageId } : undefined,
+        {
+          ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
+          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        },
         {
           // The first slot reuses the optimistic pair; extra multitask slots
           // stream their real messages in over WS instead.
@@ -1047,7 +1062,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       commitRunning(id, null, get().promptEpoch + 1);
     }
-    await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : undefined);
+    await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
   },
 
   async cancelPrompt() {

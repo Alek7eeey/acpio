@@ -32,7 +32,8 @@ export type MessagePartType =
   | "permission"
   | "question"
   | "error"
-  | "status";
+  | "status"
+  | "file";
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
