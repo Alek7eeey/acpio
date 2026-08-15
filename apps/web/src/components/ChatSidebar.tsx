@@ -1,3 +1,4 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
@@ -406,6 +407,90 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
   const dateLocale = settings.locale === "en" ? "en-US" : "ru-RU";
 
+  // ── Tree virtualization ────────────────────────────────────────────────────
+  // The sidebar can accumulate hundreds of sessions; beyond a threshold the
+  // tree is flattened into rows and windowed with @tanstack/react-virtual.
+  // Small trees keep the plain render (no measurement/scroll subtleties).
+  type TreeRow =
+    | { kind: "folder-head"; key: string; folder: (typeof folders)[number] }
+    | { kind: "group-head"; key: string; label: string }
+    | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
+    | { kind: "archive-head"; key: string; count: number }
+    | { kind: "liked-head"; key: string; count: number }
+    | { kind: "liked"; key: string; item: LikedMessage };
+
+  const treeRows = useMemo<TreeRow[]>(() => {
+    const rows: TreeRow[] = [];
+    const noFolder = "__no_folder__";
+    for (const folder of folders) {
+      const fkey = folder.cwd || noFolder;
+      if (showFolderHeaders) {
+        rows.push({ kind: "folder-head", key: `fh:${fkey}`, folder });
+      }
+      if (collapsedFolders.has(fkey)) continue;
+      const useTimeGroups = folder.sessions.length > 1;
+      if (useTimeGroups) {
+        const timeGroups = groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs);
+        for (const group of timeGroups) {
+          const sharedHeading = group.sessions.length > 1 && !!group.label;
+          if (sharedHeading) {
+            rows.push({ kind: "group-head", key: `gh:${fkey}:${group.key}`, label: group.label });
+          }
+          for (const s of group.sessions) {
+            rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: !sharedHeading, inArchive: false, indent: true });
+          }
+        }
+      } else {
+        for (const s of folder.sessions) {
+          rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: true, inArchive: false, indent: true });
+        }
+      }
+    }
+    if (archivedSessions.length > 0) {
+      rows.push({ kind: "archive-head", key: "__archive__", count: archivedSessions.length });
+      if (!collapsedFolders.has("__archive__")) {
+        for (const s of archivedSessions) {
+          rows.push({ kind: "session", key: `a:${s.id}`, session: s, showActivity: true, inArchive: true, indent: false });
+        }
+      }
+    }
+    if (liked.length > 0) {
+      rows.push({ kind: "liked-head", key: "__liked__", count: liked.length });
+      if (!collapsedFolders.has("__liked__")) {
+        for (const item of liked) {
+          rows.push({ kind: "liked", key: `l:${item.messageId}`, item });
+        }
+      }
+    }
+    return rows;
+  }, [folders, archivedSessions, liked, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs]);
+
+  const TREE_VIRT_THRESHOLD = 80;
+  const treeVirtual = treeRows.length > TREE_VIRT_THRESHOLD;
+  const sessionListRef = useRef<HTMLDivElement>(null);
+  const treeVirtualizer = useVirtualizer({
+    count: treeVirtual ? treeRows.length : 0,
+    getScrollElement: () => sessionListRef.current,
+    estimateSize: (index) => {
+      const row = treeRows[index];
+      if (!row) return 40;
+      switch (row.kind) {
+        case "folder-head":
+          return 34;
+        case "group-head":
+          return 24;
+        case "session":
+          return 48;
+        case "archive-head":
+        case "liked-head":
+          return 32;
+        case "liked":
+          return 52;
+      }
+    },
+    overscan: 8,
+  });
+
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
     const isRenaming = renamingId === s.id;
@@ -606,6 +691,154 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
     );
   };
 
+  const noFolderKey = "__no_folder__";
+
+  const renderFolderHead = (folder: (typeof folders)[number]) => {
+    const fkey = folder.cwd || noFolderKey;
+    return (
+      <div
+        className={`${styles.folderHead} ${
+          collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
+        }`}
+        title={folder.cwd || undefined}
+        onClick={() => toggleFolder(fkey)}
+      >
+        <span className={styles.folderIconWrap} aria-hidden>
+          <span className={styles.folderIcon}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span className={styles.folderChevronIcon}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 9l6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </span>
+        <span className={styles.folderLabel}>
+          {folderLabel(folder.cwd, t("common.noFolder"))}
+        </span>
+        <button
+          type="button"
+          className={styles.folderAdd}
+          title={t("chat.newInFolder")}
+          aria-label={t("chat.newInFolder")}
+          onClick={(e) => {
+            e.stopPropagation();
+            void createSession(folder.cwd || undefined).then(() => goToChat());
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M12 5v14M5 12h14"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
+  const renderGroupHead = (label: string) => (
+    <div className={styles.timeGroupHead}>
+      <span className={styles.timeGroupLabel}>{label}</span>
+    </div>
+  );
+
+  const renderSectionHead = (
+    sectionKey: "__archive__" | "__liked__",
+    count: number,
+    label: string,
+  ) => (
+    <div className={styles.archiveHead}>
+      <button
+        type="button"
+        className={`${styles.archiveChevron} ${
+          collapsedFolders.has(sectionKey) ? "" : styles.folderChevronOpen
+        }`}
+        title={
+          collapsedFolders.has(sectionKey)
+            ? t("chat.expandFolder")
+            : t("chat.collapseFolder")
+        }
+        aria-label={
+          collapsedFolders.has(sectionKey)
+            ? t("chat.expandFolder")
+            : t("chat.collapseFolder")
+        }
+        onClick={() => toggleFolder(sectionKey)}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M6 9l6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      <span className={styles.archiveLabel}>{label}</span>
+      <span className={styles.archiveCount}>{count}</span>
+    </div>
+  );
+
+  const renderLikedItem = (item: LikedMessage) => (
+    <button
+      type="button"
+      className={styles.likedItem}
+      title={item.sessionTitle || undefined}
+      onClick={() => {
+        void selectSession(item.sessionId).then(() => {
+          setFocusMessageId(item.messageId);
+          goToChat();
+        });
+      }}
+    >
+      <span className={styles.likedText}>{item.text}</span>
+      <span className={styles.likedMeta}>
+        {item.sessionTitle || t("chat.likedUnknownSession")}
+      </span>
+    </button>
+  );
+
+  const renderTreeRow = (row: TreeRow): ReactNode => {
+    switch (row.kind) {
+      case "folder-head":
+        return renderFolderHead(row.folder);
+      case "group-head":
+        return renderGroupHead(row.label);
+      case "session":
+        return renderSessionRow(row.session, row.showActivity, row.inArchive);
+      case "archive-head":
+        return renderSectionHead("__archive__", row.count, t("chat.archiveSection"));
+      case "liked-head":
+        return renderSectionHead("__liked__", row.count, t("chat.likedSection"));
+      case "liked":
+        return renderLikedItem(row.item);
+    }
+  };
+
   return (
     <>
       <div className={styles.chatPanel}>
@@ -685,7 +918,44 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
           ) : null}
         </div>
 
-        <div className={styles.sessionList}>
+        <div className={styles.sessionList} ref={sessionListRef}>
+          {treeVirtual && (
+            <div
+              style={{
+                height: treeVirtualizer.getTotalSize(),
+                position: "relative",
+                width: "100%",
+                // Absolute children contribute no content height, so the flex
+                // column would shrink this container and cap the scroll area.
+                flexShrink: 0,
+              }}
+            >
+              {treeVirtualizer.getVirtualItems().map((vi) => {
+                const row = treeRows[vi.index];
+                if (!row) return null;
+                return (
+                  <div
+                    key={row.key}
+                    data-index={vi.index}
+                    ref={treeVirtualizer.measureElement}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      transform: `translateY(${vi.start}px)`,
+                      paddingBottom: row.kind === "session" && row.indent ? 4 : 8,
+                      ...(row.kind === "session" && row.indent ? { paddingLeft: 10 } : {}),
+                    }}
+                  >
+                    {renderTreeRow(row)}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!treeVirtual && (
+            <>
           {folders.map((folder) => {
             const useTimeGroups = folder.sessions.length > 1;
             const timeGroups = useTimeGroups
@@ -869,6 +1139,8 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
                 </div>
               )}
             </div>
+          )}
+            </>
           )}
           {visibleSessions.length === 0 && (
             <p className={styles.emptyHint}>

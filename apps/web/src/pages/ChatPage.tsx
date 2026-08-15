@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { createPortal } from "react-dom";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Fragment,
   useEffect,
@@ -403,7 +404,14 @@ function PartView({
   embedded?: boolean;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      expandedPartIds.set(part.id, value);
+      return value;
+    });
+  };
 
   const toggleProps = {
     type: "button" as const,
@@ -757,9 +765,35 @@ function ToolOutputView({ text }: { text: string }) {
 
 const TOOL_OUTPUT_CAP = 20000;
 
+// Expand/collapse state survives virtualization remounts: message rows unmount
+// when scrolled out of the virtual window, so local useState would lose which
+// tool outputs / thought spoilers / steps blocks the user opened.
+const expandedPartIds = new Map<string, boolean>();
+const expandedStepsByMessage = new Map<string, boolean>();
+
+/** Initial height guess for a virtualized message row; refined by measurement. */
+function estimateMessageRowHeight(msg: MessageDto | undefined): number {
+  if (!msg) return 60;
+  let chars = 0;
+  let parts = 0;
+  for (const p of msg.parts) {
+    parts++;
+    const text = p.payload?.text ?? p.payload?.message;
+    if (typeof text === "string") chars += text.length;
+  }
+  return Math.min(720, Math.max(56, 56 + parts * 22 + chars * 0.35));
+}
+
 function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: boolean }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      expandedPartIds.set(part.id, value);
+      return value;
+    });
+  };
   const title = String(part.payload.title ?? part.payload.description ?? "Tool").trim();
   const status = String(part.payload.status ?? "").toLowerCase();
   const busy =
@@ -885,14 +919,25 @@ function StepsSpoiler({
   streaming,
   autoExpand,
   startedAt,
+  messageId,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   startedAt: string;
+  messageId: string;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(autoExpand);
+  const [open, setOpenState] = useState(
+    () => expandedStepsByMessage.get(messageId) ?? autoExpand,
+  );
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      expandedStepsByMessage.set(messageId, value);
+      return value;
+    });
+  };
   const thoughts = parts.filter(isThoughtPart);
   const agentDurationSec = thoughts.reduce((max, part) => {
     const ms = Number(part.payload.durationMs);
@@ -908,11 +953,16 @@ function StepsSpoiler({
     return Number.isFinite(value) ? Math.max(1, Math.round((Date.now() - value) / 1000)) : 0;
   });
 
+  // The toggle is the global switch: on → open, off → collapse.
+  // Manual per-block toggles survive (incl. virtualization remounts) until the
+  // switch value actually changes — a plain `useEffect(setOpen(autoExpand))`
+  // would reset every manual toggle on every remount.
+  const prevAutoExpandRef = useRef(autoExpand);
   useEffect(() => {
-    // The toggle is the global switch: on → open, off → collapse.
-    // Manual per-block toggles survive until the switch value changes.
+    if (prevAutoExpandRef.current === autoExpand) return;
+    prevAutoExpandRef.current = autoExpand;
     setOpen(autoExpand);
-  }, [autoExpand]);
+  }, [autoExpand, setOpen]);
 
   useEffect(() => {
     if (!streaming) return;
@@ -1562,6 +1612,7 @@ function AssistantParts({
         streaming={streaming}
         autoExpand={autoExpandSteps}
         startedAt={message.createdAt}
+        messageId={message.id}
       />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
@@ -2035,6 +2086,12 @@ export function ChatPage() {
   // Scroll to + highlight the focused message once its session has rendered.
   useEffect(() => {
     if (!focusMessageId) return;
+    // In virtual mode the target may be windowed out — bring it into view
+    // first, then the DOM poll below finds and highlights it.
+    if (chatVirtual) {
+      const idx = messageRows.findIndex((r) => r.msg.id === focusMessageId);
+      if (idx >= 0) chatVirtualizer.scrollToIndex(idx, { align: "center" });
+    }
     let tries = 0;
     const timer = window.setInterval(() => {
       tries += 1;
@@ -2336,6 +2393,102 @@ export function ChatPage() {
     if (current.length > 0) out.push(current);
     return out;
   }, [activeSession?.messages]);
+
+  // ── Message virtualization ────────────────────────────────────────────────
+  // Beyond a threshold the flat message feed is windowed with
+  // @tanstack/react-virtual; small feeds keep the plain render untouched.
+  const messageRows = useMemo(
+    () =>
+      segments.flatMap((segment, segIndex) =>
+        segment
+          .filter(
+            (m) =>
+              m.role !== "assistant" || hasRenderableAssistantContent(m.parts) || m.id === lastMessageId,
+          )
+          .map((msg, idx) => ({
+            msg,
+            segStart: idx === 0,
+            showDivider:
+              settings.multitask && inflight >= 2 && segIndex === segments.length - 1 && idx === 0,
+          })),
+      ),
+    [segments, settings.multitask, inflight, lastMessageId],
+  );
+  const CHAT_VIRT_THRESHOLD = 60;
+  const chatVirtual = messageRows.length > CHAT_VIRT_THRESHOLD;
+  const chatVirtualizer = useVirtualizer({
+    count: chatVirtual ? messageRows.length : 0,
+    getScrollElement: () => threadRef.current,
+    estimateSize: (index) => estimateMessageRowHeight(messageRows[index]?.msg),
+    overscan: 6,
+  });
+
+  const renderArticle = (msg: MessageDto, isLiveAssistant: boolean) => {
+    if (msg.role === "assistant" && !hasRenderableAssistantContent(msg.parts) && !isLiveAssistant) {
+      return null;
+    }
+    return (
+      <article
+        key={msg.id}
+        data-message-id={msg.id}
+        className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
+        onMouseDown={(e) => {
+          if (!keepComposerFocus.current) return;
+          const target = e.target as HTMLElement;
+          if (target.closest("button,a,input,textarea")) return;
+          e.preventDefault();
+        }}
+      >
+        {msg.role === "user" ? (
+          <UserMessage
+            message={msg}
+            slashCommands={slashCommands}
+            onEdit={(messageId, value) => {
+              setEditingMessageId(messageId);
+              setText(value);
+              window.requestAnimationFrame(() => {
+                const el = textareaRef.current;
+                if (!el) return;
+                el.focus();
+                syncComposerSize(el);
+                const end = value.length;
+                el.setSelectionRange(end, end);
+              });
+            }}
+          />
+        ) : (
+          <AssistantParts
+            message={msg}
+            session={activeSession}
+            onRegenerate={() => regenerate(msg)}
+            streaming={!!isLiveAssistant}
+            autoExpandSteps={autoExpandSteps}
+          />
+        )}
+      </article>
+    );
+  };
+
+  const renderMessageRow = (row: (typeof messageRows)[number]) => (
+    <Fragment key={row.msg.id}>
+      {row.showDivider ? (
+        <div className={styles.turnDivider} aria-hidden>
+          <span className={styles.turnDividerLabel}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinejoin="round"
+              />
+            </svg>
+            {t("chat.parallelTurn")}
+          </span>
+        </div>
+      ) : null}
+      {renderArticle(row.msg, streaming && row.msg.role === "assistant" && row.msg.id === lastMessageId)}
+    </Fragment>
+  );
   const activeSessionId = activeSession?.id ?? null;
   const streamDigest = useMemo(() => {
     if (!activeSession?.messages.length) return `${activeSession?.status ?? ""}`;
@@ -2581,82 +2734,83 @@ export function ChatPage() {
           </div>
         )}
 
-        {segments.map((segment, segIndex) => (
-          <Fragment key={segment[0]?.id ?? `seg-${segIndex}`}>
-            {settings.multitask && inflight >= 2 && segIndex === segments.length - 1 && (
-              <div className={styles.turnDivider} aria-hidden>
-                <span className={styles.turnDividerLabel}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
-                      stroke="currentColor"
-                      strokeWidth="1.9"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {t("chat.parallelTurn")}
-                </span>
-              </div>
-            )}
-            <div className={styles.turnSegment}>
-              {segment.map((msg, index) => {
-              const globalIndex =
-                activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
-              const isLiveAssistant =
-                streaming &&
-                msg.role === "assistant" &&
-                globalIndex === (activeSession?.messages.length ?? 0) - 1;
-              if (
-                msg.role === "assistant" &&
-                !hasRenderableAssistantContent(msg.parts) &&
-                !isLiveAssistant
-              ) {
-                return null;
-              }
+        {chatVirtual ? (
+          <div
+            style={{
+              height: chatVirtualizer.getTotalSize(),
+              position: "relative",
+              width: "100%",
+              // Absolute children contribute no content height, so the flex
+              // column would shrink this container and cap the scroll area.
+              flexShrink: 0,
+            }}
+          >
+            {chatVirtualizer.getVirtualItems().map((vi) => {
+              const row = messageRows[vi.index];
+              if (!row) return null;
+              // Keep the tight user→assistant pairing the plain feed has
+              // (.msg.user + .msg.assistant { margin-top: -7px }) — the pull-up
+              // stays inside the previous row's padding zone.
+              const tight =
+                row.msg.role === "assistant" &&
+                messageRows[vi.index - 1]?.msg.role === "user";
               return (
-                <article
-                  key={msg.id}
-                  data-message-id={msg.id}
-                  className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
-                  onMouseDown={(e) => {
-                    if (!keepComposerFocus.current) return;
-                    const target = e.target as HTMLElement;
-                    if (target.closest("button,a,input,textarea")) return;
-                    e.preventDefault();
+                <div
+                  key={row.msg.id}
+                  data-index={vi.index}
+                  ref={chatVirtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vi.start}px)`,
+                    paddingBottom: 12,
                   }}
                 >
-                  {msg.role === "user" ? (
-                    <UserMessage
-                      message={msg}
-                      slashCommands={slashCommands}
-                      onEdit={(messageId, value) => {
-                        setEditingMessageId(messageId);
-                        setText(value);
-                        window.requestAnimationFrame(() => {
-                          const el = textareaRef.current;
-                          if (!el) return;
-                          el.focus();
-                          syncComposerSize(el);
-                          const end = value.length;
-                          el.setSelectionRange(end, end);
-                        });
-                      }}
-                    />
+                  {tight ? (
+                    <div style={{ marginTop: -7 }}>{renderMessageRow(row)}</div>
                   ) : (
-                    <AssistantParts
-                      message={msg}
-                      session={activeSession}
-                      onRegenerate={() => regenerate(msg)}
-                      streaming={!!isLiveAssistant}
-                      autoExpandSteps={autoExpandSteps}
-                    />
+                    renderMessageRow(row)
                   )}
-                </article>
+                </div>
               );
             })}
           </div>
-          </Fragment>
-        ))}
+        ) : (
+          <>
+            {segments.map((segment, segIndex) => (
+              <Fragment key={segment[0]?.id ?? `seg-${segIndex}`}>
+                {settings.multitask && inflight >= 2 && segIndex === segments.length - 1 && (
+                  <div className={styles.turnDivider} aria-hidden>
+                    <span className={styles.turnDividerLabel}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+                        <path
+                          d="M13 2 4.5 13.5H11L9.5 22 19 10h-6.5L13 2Z"
+                          stroke="currentColor"
+                          strokeWidth="1.9"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      {t("chat.parallelTurn")}
+                    </span>
+                  </div>
+                )}
+                <div className={styles.turnSegment}>
+                  {segment.map((msg, index) => {
+                    const globalIndex =
+                      activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
+                    const isLiveAssistant =
+                      streaming &&
+                      msg.role === "assistant" &&
+                      globalIndex === (activeSession?.messages.length ?? 0) - 1;
+                    return renderArticle(msg, isLiveAssistant);
+                  })}
+                </div>
+              </Fragment>
+            ))}
+          </>
+        )}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
         </div>
       </div>
