@@ -166,14 +166,10 @@ export function AppShell() {
     });
   };
 
-  const openRailNewChatAt = useCallback((x: number, y: number) => {
-    setRailRecentsPos(null);
-    setRailFolderPicker({ x, y });
-  }, []);
-
   const openRailNewChat = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    openRailNewChatAt(rect.right + 8, rect.top);
+    setRailRecentsPos(null);
+    setRailFolderPicker({ x: rect.right + 8, y: rect.top });
   };
 
   const openRailFind = useCallback(() => {
@@ -183,31 +179,6 @@ export function AppShell() {
     if (!isChat) navigate("/chat");
     setSearchFocusToken((n) => n + 1);
   }, [isChat, navigate]);
-
-  // Global hotkeys: Ctrl/Cmd+N or Ctrl/Cmd+K — new chat; Ctrl/Cmd+F — sidebar search.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      const target = e.target as HTMLElement | null;
-      const typing =
-        !!target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable);
-      const key = e.key.toLowerCase();
-      if (key === "n" || key === "k") {
-        e.preventDefault();
-        const x = Math.max(16, Math.round(window.innerWidth / 2 - 200));
-        const y = Math.max(16, Math.round(window.innerHeight / 2 - 160));
-        openRailNewChatAt(x, y);
-      } else if (key === "f" && !typing) {
-        e.preventDefault();
-        openRailFind();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [openRailFind, openRailNewChatAt]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
@@ -638,25 +609,23 @@ export function AppShell() {
               </div>,
               document.body,
             )}
-        </div>
-      )}
 
-      {/* New-chat picker is rendered at the shell root (not only in rail mode)
-          so the Ctrl/Cmd+N hotkey works regardless of sidebar state. */}
-      {railFolderPicker && (
-        <CreateSessionFolderPicker
-          x={railFolderPicker.x}
-          y={railFolderPicker.y}
-          defaultCwd={settings.defaultCwd ?? ""}
-          dialogStartPath={settings.defaultCwd ?? ""}
-          recentCwds={recentCwds}
-          onClose={() => setRailFolderPicker(null)}
-          onConfirm={async (cwd) => {
-            setRailFolderPicker(null);
-            await createSession(cwd);
-            navigate("/chat");
-          }}
-        />
+          {railFolderPicker && (
+            <CreateSessionFolderPicker
+              x={railFolderPicker.x}
+              y={railFolderPicker.y}
+              defaultCwd={settings.defaultCwd ?? ""}
+              dialogStartPath={settings.defaultCwd ?? ""}
+              recentCwds={recentCwds}
+              onClose={() => setRailFolderPicker(null)}
+              onConfirm={async (cwd) => {
+                setRailFolderPicker(null);
+                await createSession(cwd);
+                navigate("/chat");
+              }}
+            />
+          )}
+        </div>
       )}
 
       {showSidebar && sidebarOpen && (

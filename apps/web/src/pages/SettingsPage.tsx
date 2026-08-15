@@ -205,25 +205,30 @@ export function SettingsPage() {
   };
 
   const mcpServers = form.mcpServers ?? [];
-  const mcpKey = mcpServers
-    .map((s) => `${s.id}:${s.enabled ? 1 : 0}:${s.url ?? ""}`)
-    .join("|");
 
-  // Live probe status for enabled MCP servers (dot next to each row).
+  // Live probe status for enabled MCP servers. Polled while the MCP section
+  // is open: the server probes endpoints asynchronously and settings only
+  // reach it on save — a one-shot fetch right after a toggle/save would be
+  // stale (that's why a reload used to be required).
   useEffect(() => {
+    if (leaf !== "mcp") return;
     let alive = true;
-    void api
-      .mcpStatus()
-      .then((s) => {
-        if (alive) setMcpStatus(s);
-      })
-      .catch(() => {
-        // server offline — keep previous dots
-      });
+    const fetchStatus = () =>
+      api
+        .mcpStatus()
+        .then((s) => {
+          if (alive) setMcpStatus(s);
+        })
+        .catch(() => {
+          // server offline — keep previous dots
+        });
+    void fetchStatus();
+    const timer = window.setInterval(fetchStatus, 5000);
     return () => {
       alive = false;
+      window.clearInterval(timer);
     };
-  }, [mcpKey]);
+  }, [leaf]);
 
   const updateMcp = (id: string, change: Partial<McpServerConfig>) => {
     patch(

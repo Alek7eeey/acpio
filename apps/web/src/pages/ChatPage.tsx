@@ -3239,11 +3239,6 @@ export function ChatPage() {
                     return;
                   }
                 }
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                  e.preventDefault();
-                  onSubmit(e);
-                  return;
-                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   onSubmit(e);

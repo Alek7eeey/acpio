@@ -1795,7 +1795,7 @@
 
 .userFilePreviewWrap {
   display: block;
-  max-width: min(280px, 100%);
+  max-width: min(160px, 100%);
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1810,7 +1810,7 @@
 .userFilePreview {
   display: block;
   width: 100%;
-  max-height: 220px;
+  max-height: 120px;
   object-fit: cover;
 }
 
