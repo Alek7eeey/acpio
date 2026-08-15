@@ -1194,6 +1194,50 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
               </MenuIcon>
               {t("chat.newInFolder")}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                void setSessionFlags(menuSession.id, { pinned: !menuSession.pinned });
+                setMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M9.2 4h5.6l.6 4.8 2.6 2.2v2.6H6v-2.6l2.6-2.2.6-4.8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path d="M12 13.6V20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </MenuIcon>
+              {menuSession.pinned ? t("chat.unpin") : t("chat.pin")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                void setSessionFlags(menuSession.id, { archived: !menuSession.archived });
+                setMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {menuSession.archived ? t("chat.unarchive") : t("chat.archive")}
+            </button>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"

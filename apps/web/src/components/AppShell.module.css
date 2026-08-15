@@ -937,6 +937,15 @@
   }
 }
 
+/* Touch devices have no hover to reveal the inline pin/archive actions, so
+   every row would permanently show both icons. Hide them entirely there —
+   everything lives in the ⋮ menu, which stays always visible. */
+@media (hover: none), (pointer: coarse) {
+  .sessionRowAction {
+    display: none;
+  }
+}
+
 @keyframes sessionActionPop {
   from {
     opacity: 0;
