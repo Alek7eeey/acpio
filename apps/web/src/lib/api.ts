@@ -10,6 +10,16 @@ import type {
   SessionDto,
 } from "@acprocess/shared";
 
+export type MessageSearchHit = {
+  sessionId: string;
+  sessionTitle: string;
+  messageId: string;
+  partId: string;
+  role: string;
+  snippet: string;
+  createdAt: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const hasBody = init?.body !== undefined && init?.body !== null;
@@ -36,6 +46,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   getSettings: () => request<AppSettings>("/api/settings"),
   mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
+  searchMessages: (q: string, limit?: number) => {
+    const qs = new URLSearchParams({ q });
+    if (limit) qs.set("limit", String(limit));
+    return request<MessageSearchHit[]>(`/api/search?${qs.toString()}`);
+  },
   updateSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {
       method: "PUT",

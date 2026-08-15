@@ -19,6 +19,7 @@ import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFol
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
+import { MessageSearchDialog } from "./MessageSearchDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -253,6 +254,7 @@ export function AppShell() {
   // Live MCP server status (probed by the server), shown as dots in the tooltip.
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const mcpStatusSeq = useRef(0);
+  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
   useEffect(() => {
     if (!agentTipOpen) return;
     const seq = ++mcpStatusSeq.current;
@@ -330,7 +332,12 @@ export function AppShell() {
             </button>
           </div>
 
-          {isChat && <ChatSidebar focusSearchSignal={searchFocusToken} />}
+          {isChat && (
+            <ChatSidebar
+              focusSearchSignal={searchFocusToken}
+              onSearchMessages={() => setMessageSearchOpen(true)}
+            />
+          )}
 
           {isSettings && (
             <nav className={styles.settingsTree} aria-label={t("common.settingsSections")}>
@@ -569,6 +576,29 @@ export function AppShell() {
                     d="M16 16l4.5 4.5"
                     stroke="currentColor"
                     strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={styles.railBtn}
+                title={t("chat.searchMessages")}
+                aria-label={t("chat.searchMessages")}
+                onClick={() => setMessageSearchOpen(true)}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M16 16l4.5 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M8.2 8.8h5.6M8.2 11.4h5.6M8.2 14h3.4"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                   />
                 </svg>
@@ -827,6 +857,7 @@ export function AppShell() {
           <ShellPage pathname={pathname} />
         </div>
       </div>
+      <MessageSearchDialog open={messageSearchOpen} onClose={() => setMessageSearchOpen(false)} />
     </div>
   );
 }

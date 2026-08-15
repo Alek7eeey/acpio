@@ -44,6 +44,7 @@ import {
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
+import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import { piperSpeakMixed, piperStatus, resolvePiperVoice } from "./services/piper.js";
 import {
@@ -265,6 +266,16 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/mcp/status", async () => getMcpStatus());
+
+  app.get("/api/search", async (req) => {
+    const q = (req.query as { q?: unknown }).q;
+    const rawLimit = Number((req.query as { limit?: unknown }).limit ?? 50);
+    const needle = typeof q === "string" ? q : "";
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100)
+      : 50;
+    return searchMessages(needle, limit);
+  });
 
   app.get("/api/settings", async () => getSettings());
   app.put("/api/settings", async (req) => {

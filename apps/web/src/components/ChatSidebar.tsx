@@ -76,7 +76,7 @@ function stripDateDots(value: string) {
   return value.replace(/\./g, "").replace(/\s+/g, " ").trim();
 }
 
-function formatRelativeActivity(
+export function formatRelativeActivity(
   iso: string,
   locale: string,
   t: (key: string, vars?: Record<string, string | number>) => string,
@@ -195,7 +195,13 @@ function MenuIcon({ children }: { children: ReactNode }) {
   );
 }
 
-export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: number }) {
+export function ChatSidebar({
+  focusSearchSignal = 0,
+  onSearchMessages,
+}: {
+  focusSearchSignal?: number;
+  onSearchMessages?: () => void;
+}) {
   const t = useT();
   const navigate = useNavigate();
   const sessions = useAppStore((s) => s.sessions);
@@ -925,6 +931,31 @@ export function ChatSidebar({ focusSearchSignal = 0 }: { focusSearchSignal?: num
                   d="M6 6l12 12M18 6 6 18"
                   stroke="currentColor"
                   strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+          {onSearchMessages ? (
+            <button
+              type="button"
+              className={styles.chatSearchMsgs}
+              title={t("chat.searchMessages")}
+              aria-label={t("chat.searchMessages")}
+              onClick={onSearchMessages}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                <path
+                  d="M16 16l4.5 4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M8.2 8.8h5.6M8.2 11.4h5.6M8.2 14h3.4"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                 />
               </svg>
