@@ -248,7 +248,7 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
                     <p className={styles.empty}>{t("chat.attachServerEmpty")}</p>
                   ) : (
                     browse.entries.map((entry) =>
-                      entry.isDir ? (
+                      entry.isDir !== false ? (
                         <button
                           key={entry.path}
                           type="button"
