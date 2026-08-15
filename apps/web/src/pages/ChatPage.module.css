@@ -1784,7 +1784,10 @@
 }
 
 .userFiles {
-  margin-top: 6px;
+  /* Breathing room around the attached-files block: separation from the
+     text bubble above, an indent from the message's right edge, and a small
+     gap before the next element. */
+  margin: 8px 10px 4px 0;
 }
 
 .userFileItem {
