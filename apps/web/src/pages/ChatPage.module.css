@@ -1831,7 +1831,8 @@
   gap: 6px;
   max-width: 100%;
   min-width: 0;
-  padding: 4px 8px;
+  /* Comfortable internal padding — text and icon keep clear of the border. */
+  padding: 7px 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
