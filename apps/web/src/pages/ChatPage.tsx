@@ -2583,6 +2583,18 @@ export function ChatPage() {
     return () => ro.disconnect();
   }, [activeSessionId]);
 
+  // Virtual mode, cold open: the initial "scroll to end" lands on ESTIMATED
+  // heights, and a giant last message (long reply) measures far taller than
+  // its estimate. The async measure→re-pin cycle can miss on slow machines,
+  // parking the viewport at the previous message. Force a synchronous measure
+  // of the rendered window after mount, then land on the true bottom.
+  useEffect(() => {
+    if (!chatVirtual) return;
+    if (!stickToBottomRef.current && !userJustSentRef.current) return;
+    chatVirtualizer.measure();
+    scrollThreadToEnd();
+  }, [chatVirtual, activeSessionId, lastMessageId]);
+
   useEffect(() => {
     return () => {
       if (scrollRafRef.current) window.cancelAnimationFrame(scrollRafRef.current);
