@@ -347,11 +347,19 @@
 
 /* Session search box below the "New chat" toolbar button. */
 .chatSearch {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 0 auto;
   /* Gap as margin so the wrapper height matches the input and the icon
      (positioned at 50%) stays centered on the text. */
   margin-bottom: 10px;
+}
+
+.chatSearchField {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .chatSearchIcon {
@@ -369,30 +377,28 @@
   background: var(--bg-secondary);
   color: var(--text);
   border-radius: 10px;
-  padding: 8px 64px 8px 34px;
+  padding: 8px 34px 8px 34px;
   font: inherit;
   font-size: 0.88rem;
 }
 
 .chatSearchMsgs {
-  position: absolute;
-  right: 34px;
-  top: 50%;
-  transform: translateY(-50%);
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  border: none;
-  background: transparent;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
-  border-radius: 7px;
-  width: 22px;
-  height: 22px;
+  border-radius: 10px;
   padding: 0;
   cursor: pointer;
 }
 
 .chatSearchMsgs:hover {
   color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: var(--bg-tertiary);
 }
 

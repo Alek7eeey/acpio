@@ -890,8 +890,9 @@ export function ChatSidebar({
         </div>
 
         <div className={styles.chatSearch}>
-          <svg
-            className={styles.chatSearchIcon}
+          <div className={styles.chatSearchField}>
+            <svg
+              className={styles.chatSearchIcon}
             width="15"
             height="15"
             viewBox="0 0 24 24"
@@ -936,6 +937,7 @@ export function ChatSidebar({
               </svg>
             </button>
           ) : null}
+          </div>
           {onSearchMessages ? (
             <button
               type="button"
