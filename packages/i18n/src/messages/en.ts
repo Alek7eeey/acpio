@@ -190,8 +190,6 @@ export const en = {
     attachFilesHint: "The file lands in the session folder so the agent can read it",
     attachServer: "From computer",
     attachServerEmpty: "Folder is empty",
-    attachServerHint:
-      "The agent reads the file at its path on this machine — no copies are made.",
     pendingFiles: "Attached files",
     removeFile: "Remove file",
     fileTooLarge: "File «{{name}}» exceeds 15 MB — skipped",

@@ -69,17 +69,48 @@ function isDrivesRootRequest(raw?: string): boolean {
   );
 }
 
-/** Standard per-user folders for quick access (Desktop, Downloads, …). */
+/** Standard per-user folders for quick access (Desktop, Downloads, …).
+ *  On Linux/macOS the XDG user dirs are honored, so localized folder names
+ *  (e.g. ~/Загрузки) are found; only folders that exist are listed. */
 function quickAccessFolders(): BrowseDirectoryEntry[] {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   if (!home) return [];
-  const names = ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"];
-  const out: BrowseDirectoryEntry[] = [];
-  for (const name of names) {
-    const full = path.join(home, name);
+  const candidates: Array<{ name: string; path: string }> = [];
+  if (process.platform !== "win32") {
+    const dirsFile = path.join(home, ".config", "user-dirs.dirs");
+    const labels: Record<string, string> = {
+      DESKTOP: "Desktop",
+      DOWNLOAD: "Downloads",
+      DOCUMENTS: "Documents",
+      PICTURES: "Pictures",
+      MUSIC: "Music",
+      VIDEOS: "Videos",
+    };
     try {
-      if (fs.existsSync(full) && fs.statSync(full).isDirectory()) {
-        out.push({ name, path: full, isDir: true });
+      const text = fs.readFileSync(dirsFile, "utf8");
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^XDG_([A-Z_]+)_DIR="([^"]*)"/);
+        if (!m) continue;
+        const label = labels[m[1]];
+        if (!label) continue;
+        let dir = m[2].replace("$HOME", home);
+        if (!path.isAbsolute(dir)) dir = path.join(home, dir);
+        candidates.push({ name: label, path: dir });
+      }
+    } catch {
+      // no config — fall through to defaults
+    }
+  }
+  const seen = new Set(candidates.map((c) => c.path.toLowerCase()));
+  for (const name of ["Desktop", "Downloads", "Documents", "Pictures", "Music", "Videos"]) {
+    const full = path.join(home, name);
+    if (!seen.has(full.toLowerCase())) candidates.push({ name, path: full });
+  }
+  const out: BrowseDirectoryEntry[] = [];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c.path) && fs.statSync(c.path).isDirectory()) {
+        out.push({ name: c.name, path: c.path, isDir: true });
       }
     } catch {
       // skip unreadable

@@ -20,8 +20,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  width: min(520px, 100%);
-  max-height: min(78vh, 640px);
+  width: min(660px, 100%);
+  max-height: min(80vh, 660px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -34,7 +34,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
 }
 
 .title {
@@ -65,30 +66,82 @@
   color: var(--text);
 }
 
-.body {
+.main {
   flex: 1;
   min-height: 0;
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 12px 14px;
-  gap: 8px;
 }
 
-.secondaryBtn {
+/* Quick access sidebar — like the Windows file picker. Hidden on narrow
+   screens where the horizontal quick strip takes over. */
+.sidebar {
+  flex: 0 0 172px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+}
+
+.sidebarLabel {
+  padding: 2px 10px 6px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
   border: none;
-  border-radius: 9px;
-  padding: 8px 16px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 600;
+  text-align: left;
   cursor: pointer;
-  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+}
+
+.sidebarItem:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--text);
 }
 
-.secondaryBtn:hover {
-  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+.sidebarItemActive {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.sidebarItemIcon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+}
+
+.sidebarItemName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px 0;
 }
 
 .navBar {
@@ -96,7 +149,7 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  padding: 10px 14px 8px;
+  padding: 0 0 8px;
 }
 
 .upBtn {
@@ -134,6 +187,51 @@
   text-align: left;
 }
 
+/* Horizontal quick-access strip — shown only on narrow screens. */
+.quickStrip {
+  display: none;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 0 0 8px;
+}
+
+.quickStripItem {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.quickStripItemActive {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.quickStripIcon {
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .sidebar {
+    display: none;
+  }
+
+  .quickStrip {
+    display: flex;
+  }
+}
+
 .list {
   flex: 1;
   min-height: 140px;
@@ -141,72 +239,8 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 4px;
-  margin: 0 14px;
   display: grid;
   align-content: start;
-}
-
-.quick {
-  display: grid;
-  gap: 6px;
-  margin: 0 14px 8px;
-}
-
-.quickLabel {
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--text-tertiary, var(--text-secondary));
-  opacity: 0.8;
-}
-
-.quickGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 6px;
-}
-
-.quickCard {
-  display: grid;
-  place-items: center;
-  gap: 4px;
-  min-height: 52px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.quickCard:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-.quickCardIcon {
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-}
-
-.quickCardName {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-
-.rowSize {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding-left: 8px;
-  font-size: 0.68rem;
-  color: var(--text-tertiary, var(--text-secondary));
 }
 
 .empty {
@@ -251,14 +285,16 @@
   white-space: nowrap;
 }
 
-.hint {
-  margin: 8px 14px 0;
-  font-size: 0.72rem;
+.rowSize {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 0.68rem;
   color: var(--text-tertiary, var(--text-secondary));
 }
 
 .error {
-  margin: 8px 14px 0;
+  margin: 8px 0 0;
   font-size: 0.76rem;
   color: var(--danger);
 }
@@ -266,6 +302,21 @@
 .footer {
   display: flex;
   justify-content: flex-end;
-  padding: 10px 14px 14px;
-  border-top: 1px solid var(--border);
+  padding: 10px 0 12px;
+}
+
+.secondaryBtn {
+  border: none;
+  border-radius: 9px;
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  color: var(--text);
+}
+
+.secondaryBtn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
 }

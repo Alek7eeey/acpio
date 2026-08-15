@@ -58,13 +58,20 @@ function fileKind(name: string): FileKind {
 }
 
 const folderIcon = (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
     <path
       d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v8.3a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2V8.5Z"
       stroke="currentColor"
       strokeWidth="1.5"
       strokeLinejoin="round"
     />
+  </svg>
+);
+
+const pcIcon = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <rect x="3" y="5" width="18" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+    <path d="M9 20h6M12 17v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 );
 
@@ -181,6 +188,17 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
 
   const drivesRoot = browse?.kind === "drives" || browse?.path === DRIVES_ROOT;
   const currentLabel = drivesRoot ? t("common.thisPc") : browse?.path;
+  const isInside = (folderPath: string) => {
+    const current = (browse?.path ?? "").toLowerCase();
+    const folder = folderPath.toLowerCase();
+    return (
+      current === folder ||
+      current.startsWith(folder + "\\") ||
+      current.startsWith(folder + "/")
+    );
+  };
+
+  const quickRows = browse?.quick ?? [];
 
   return createPortal(
     <div className={styles.overlay}>
@@ -203,93 +221,116 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
           </button>
         </div>
 
-        <div className={styles.navBar}>
-          <button
-            type="button"
-            className={styles.upBtn}
-            disabled={!browse?.parent || loading}
-            aria-label={t("common.parentFolder")}
-            title={t("common.parentFolder")}
-            onClick={() => browse?.parent && void loadBrowse(browse.parent)}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M12 19V5M12 5l-6 6M12 5l6 6"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <span className={styles.path} title={browse?.path}>
-            {currentLabel ?? (loading ? t("common.loading") : t("common.thisPc"))}
-          </span>
-        </div>
+        <div className={styles.main}>
+          <div className={styles.sidebar}>
+            <span className={styles.sidebarLabel}>{t("common.quickAccess")}</span>
+            {quickRows.map((q) => (
+              <button
+                key={q.path}
+                type="button"
+                className={`${styles.sidebarItem}${isInside(q.path) ? ` ${styles.sidebarItemActive}` : ""}`}
+                onClick={() => void loadBrowse(q.path)}
+              >
+                <span className={styles.sidebarItemIcon}>{folderIcon}</span>
+                <span className={styles.sidebarItemName}>{q.name}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className={`${styles.sidebarItem}${drivesRoot ? ` ${styles.sidebarItemActive}` : ""}`}
+              onClick={() => void loadBrowse()}
+            >
+              <span className={styles.sidebarItemIcon}>{pcIcon}</span>
+              <span className={styles.sidebarItemName}>{t("common.thisPc")}</span>
+            </button>
+          </div>
 
-        {browse?.quick && browse.quick.length > 0 ? (
-          <div className={styles.quick}>
-            <span className={styles.quickLabel}>{t("common.quickAccess")}</span>
-            <div className={styles.quickGrid}>
-              {browse.quick.map((q) => (
-                <button
-                  key={q.path}
-                  type="button"
-                  className={styles.quickCard}
-                  onClick={() => void loadBrowse(q.path)}
-                >
-                  <span className={styles.quickCardIcon}>{folderIcon}</span>
-                  <span className={styles.quickCardName}>{q.name}</span>
-                </button>
-              ))}
+          <div className={styles.content}>
+            <div className={styles.navBar}>
+              <button
+                type="button"
+                className={styles.upBtn}
+                disabled={!browse?.parent || loading}
+                aria-label={t("common.parentFolder")}
+                title={t("common.parentFolder")}
+                onClick={() => browse?.parent && void loadBrowse(browse.parent)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 19V5M12 5l-6 6M12 5l6 6"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <span className={styles.path} title={browse?.path}>
+                {currentLabel ?? (loading ? t("common.loading") : t("common.thisPc"))}
+              </span>
+            </div>
+
+            {quickRows.length > 0 ? (
+              <div className={styles.quickStrip}>
+                {quickRows.map((q) => (
+                  <button
+                    key={q.path}
+                    type="button"
+                    className={`${styles.quickStripItem}${isInside(q.path) ? ` ${styles.quickStripItemActive}` : ""}`}
+                    onClick={() => void loadBrowse(q.path)}
+                  >
+                    <span className={styles.quickStripIcon}>{folderIcon}</span>
+                    {q.name}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className={styles.list} role="listbox" aria-label={t("chat.attachServer")}>
+              {!browse && loading ? (
+                <p className={styles.empty}>{t("common.loading")}</p>
+              ) : browse && browse.entries.length === 0 ? (
+                <p className={styles.empty}>{t("chat.attachServerEmpty")}</p>
+              ) : (
+                browse?.entries.map((entry) =>
+                  entry.isDir !== false ? (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      role="option"
+                      className={styles.row}
+                      onClick={() => void loadBrowse(entry.path)}
+                    >
+                      <span className={styles.rowIcon}>{folderIcon}</span>
+                      <span className={styles.rowName}>{entry.name}</span>
+                    </button>
+                  ) : (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      role="option"
+                      className={styles.row}
+                      onClick={() => pickServerFile(entry)}
+                    >
+                      <span className={styles.rowIcon}>{fileIconFor(entry.name)}</span>
+                      <span className={styles.rowName}>{entry.name}</span>
+                      {entry.size != null && entry.size > 0 ? (
+                        <span className={styles.rowSize}>{formatBytes(entry.size)}</span>
+                      ) : null}
+                    </button>
+                  ),
+                )
+              )}
+            </div>
+
+            {error ? <p className={styles.error}>{error}</p> : null}
+
+            <div className={styles.footer}>
+              <button type="button" className={styles.secondaryBtn} onClick={onClose}>
+                {t("common.cancel")}
+              </button>
             </div>
           </div>
-        ) : null}
-
-        <div className={styles.list} role="listbox" aria-label={t("chat.attachServer")}>
-          {!browse && loading ? (
-            <p className={styles.empty}>{t("common.loading")}</p>
-          ) : browse && browse.entries.length === 0 ? (
-            <p className={styles.empty}>{t("chat.attachServerEmpty")}</p>
-          ) : (
-            browse?.entries.map((entry) =>
-              entry.isDir !== false ? (
-                <button
-                  key={entry.path}
-                  type="button"
-                  role="option"
-                  className={styles.row}
-                  onClick={() => void loadBrowse(entry.path)}
-                >
-                  <span className={styles.rowIcon}>{folderIcon}</span>
-                  <span className={styles.rowName}>{entry.name}</span>
-                </button>
-              ) : (
-                <button
-                  key={entry.path}
-                  type="button"
-                  role="option"
-                  className={styles.row}
-                  onClick={() => pickServerFile(entry)}
-                >
-                  <span className={styles.rowIcon}>{fileIconFor(entry.name)}</span>
-                  <span className={styles.rowName}>{entry.name}</span>
-                  {entry.size != null && entry.size > 0 ? (
-                    <span className={styles.rowSize}>{formatBytes(entry.size)}</span>
-                  ) : null}
-                </button>
-              ),
-            )
-          )}
-        </div>
-
-        {error ? <p className={styles.error}>{error}</p> : null}
-        <p className={styles.hint}>{t("chat.attachServerHint")}</p>
-
-        <div className={styles.footer}>
-          <button type="button" className={styles.secondaryBtn} onClick={onClose}>
-            {t("common.cancel")}
-          </button>
         </div>
       </div>
     </div>,
