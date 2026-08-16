@@ -259,7 +259,9 @@
   "exportBusy": "Exporting…",
   "exportSavedTo": "Saved: {{path}}",
   "exportOpenFolder": "Open folder",
-  "exportEmpty": "No messages to export"
+  "exportEmpty": "No messages to export",
+  "mcpChipCount": "MCP · {{count}}",
+  "mcpChipTitle": "This chat's MCP servers: {{names}}"
 },
  "settings": {
   "agents": "Agents",

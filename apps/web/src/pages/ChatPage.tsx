@@ -51,6 +51,7 @@ import {
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete, requestNotificationPermission } from "../lib/notify";
+import { settingsPath } from "../lib/settingsNav";
 import { isImageFile } from "../lib/pathSegments";
 import {
   buildSlashInsertion,
@@ -1900,6 +1901,10 @@ export function ChatPage() {
     }
   }, [autoExpandSteps]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
+  // MCP servers this chat's agent session runs with (applied at session/new|resume|load).
+  const enabledMcp = (settings.mcpServers ?? []).filter(
+    (s) => s.enabled && s.url?.trim(),
+  );
   const promptEpoch = useAppStore((s) => s.promptEpoch);
   const cancelledPromptEpoch = useAppStore((s) => s.cancelledPromptEpoch);
 
@@ -3115,6 +3120,34 @@ export function ChatPage() {
                 </span>
                 <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
               </button>
+              {activeSession && enabledMcp.length > 0 ? (
+                <button
+                  type="button"
+                  className={styles.metaChip}
+                  aria-label={t("chat.mcpChipTitle", {
+                    names: enabledMcp.map((s) => s.name).join(", "),
+                  })}
+                  title={t("chat.mcpChipTitle", {
+                    names: enabledMcp.map((s) => s.name).join(", "),
+                  })}
+                  onClick={() => navigate(settingsPath("agent", "mcp"))}
+                >
+                  <span className={styles.metaChipIcon} aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M9 2v5M15 2v5M7 7h10v3a5 5 0 0 1-5 5 5 5 0 0 1-5-5V7ZM12 15v6"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className={styles.metaChipLabel}>
+                    {t("chat.mcpChipCount", { count: enabledMcp.length })}
+                  </span>
+                </button>
+              ) : null}
             </div>
             {modeSwitcher.length > 0 ? (
               <OptionPicker

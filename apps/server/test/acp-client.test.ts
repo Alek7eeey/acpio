@@ -308,3 +308,30 @@ describe("session restore (resume/load)", () => {
     ).rejects.toThrow("ACP session not found");
   });
 });
+
+describe("model preservation on restart", () => {
+  it("start with a model override applies it (MCP-change restart keeps the model)", async () => {
+    const client = makeClient();
+    try {
+      await client.start(120_000, { model: "other" });
+      const modelOpt = client.configOptions.find((o) => o.id === "model");
+      expect(modelOpt?.currentValue).toBe("other");
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it("resume boot with a model override keeps the session AND the model", async () => {
+    await withClientStart(
+      async (client) => {
+        expect(client.sessionId).toBe("fake-sess-1");
+        const modelOpt = client.configOptions.find((o) => o.id === "model");
+        expect(modelOpt?.currentValue).toBe("other");
+      },
+      {
+        resume: { sessionId: "fake-sess-1", mode: "resume" },
+        model: "other",
+      },
+    );
+  });
+});

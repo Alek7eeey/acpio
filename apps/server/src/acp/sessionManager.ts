@@ -459,7 +459,12 @@ async function resolveRestoreMode(
 export async function ensureAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
-  boot?: { preferResume?: boolean },
+  boot?: {
+    preferResume?: boolean;
+    /** Re-apply this exact model at boot (defaults to settings.defaultModel). */
+    model?: string;
+    modelParams?: Record<string, string>;
+  },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
   // Switching Cursor ↔ OMP must replace the live process, not reuse it.
@@ -542,8 +547,12 @@ export async function ensureAcp(
         await client.start(
           mode === "new" ? 45_000 : 120_000,
           mode === "new"
-            ? {}
-            : { resume: { sessionId: storedSessionId!, mode } },
+            ? { model: boot?.model, modelParams: boot?.modelParams }
+            : {
+                resume: { sessionId: storedSessionId!, mode },
+                model: boot?.model,
+                modelParams: boot?.modelParams,
+              },
         );
         const settings = await getSettings();
         const models = await finalizeModelList(
@@ -1187,12 +1196,13 @@ async function dequeueTurn(rt: SessionRuntime) {
         m.getSessionDetail(rt.sessionId),
       );
       if (detail?.provider && detail.status !== "closed") {
+        const snapshot = liveModelSnapshot(rt);
         resetAcpClient(rt);
-        await ensureAcp(rt.sessionId, {
-          provider: detail.provider,
-          cwd: detail.cwd,
-          mode: detail.mode,
-        });
+        await ensureAcp(
+          rt.sessionId,
+          { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
+          snapshot,
+        );
       }
     } catch (err) {
       console.error(`[acp:${rt.sessionId}] restart after MCP change failed`, err);
@@ -1375,6 +1385,34 @@ let lastMcpSnapshot = "";
  * than killing a running prompt). Idempotent: no-op unless the effective
  * list changed.
  */
+/** Model + params the runtime currently runs with — preserved across restarts. */
+function liveModelSnapshot(
+  rt: SessionRuntime,
+): { model?: string; modelParams?: Record<string, string> } {
+  const client = rt.client;
+  if (!client) return {};
+  const model = findModelConfigOption(client.configOptions)?.currentValue;
+  const modelParams: Record<string, string> = {};
+  for (const o of listModelParamOptions(client.configOptions)) {
+    if (o.currentValue != null && o.currentValue !== "") {
+      modelParams[o.id] = o.currentValue;
+    }
+  }
+  return {
+    ...(model ? { model } : {}),
+    ...(Object.keys(modelParams).length ? { modelParams } : {}),
+  };
+}
+
+/**
+ * The MCP list is only accepted at session/new|resume|load — a changed config
+ * forces a fresh agent process. The resumed session reconnects the new MCP
+ * servers, and the current model/params are re-applied verbatim so an MCP
+ * edit never silently resets the picker. Sessions mid-turn are restarted when
+ * they idle (their current turn finishes against the old agent, which is safer
+ * than killing a running prompt). Idempotent: no-op unless the effective
+ * list changed.
+ */
 export async function restartSessionsForMcpChange(): Promise<void> {
   const settings = await getSettings();
   const desired = (settings.mcpServers ?? [])
@@ -1396,13 +1434,14 @@ export async function restartSessionsForMcpChange(): Promise<void> {
       m.getSessionDetail(sessionId),
     );
     if (!detail?.provider || detail.status === "closed") continue;
+    const snapshot = liveModelSnapshot(rt);
     resetAcpClient(rt);
     try {
-      await ensureAcp(sessionId, {
-        provider: detail.provider,
-        cwd: detail.cwd,
-        mode: detail.mode,
-      });
+      await ensureAcp(
+        sessionId,
+        { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
+        snapshot,
+      );
       restarted += 1;
     } catch (err) {
       console.error(`[acp:${sessionId}] restart after MCP change failed`, err);

@@ -283,7 +283,9 @@
   "exportBusy": "Экспорт…",
   "exportSavedTo": "Сохранено: {{path}}",
   "exportOpenFolder": "Открыть папку",
-  "exportEmpty": "Нечего экспортировать — в чате нет сообщений"
+  "exportEmpty": "Нечего экспортировать — в чате нет сообщений",
+  "mcpChipCount": "MCP · {{count}}",
+  "mcpChipTitle": "MCP серверы этого чата: {{names}}"
 },
  "settings": {
   "agents": "Агенты",

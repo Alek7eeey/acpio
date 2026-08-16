@@ -503,6 +503,9 @@ export class AcpClient extends EventEmitter {
       catalogOnly?: boolean;
       /** Reattach an existing agent session instead of creating a new one. */
       resume?: { sessionId: string; mode: "resume" | "load" };
+      /** Model applied at boot (defaults to settings.defaultModel). */
+      model?: string;
+      modelParams?: Record<string, string>;
     },
   ): Promise<void> {
     const commandName = providerCommand(this.settings, this.provider);
@@ -674,7 +677,10 @@ export class AcpClient extends EventEmitter {
 
       try {
         if (!opts?.catalogOnly) {
-          await this.applyModelSelection(this.settings.defaultModel, this.settings.defaultModelParams);
+          await this.applyModelSelection(
+            opts?.model ?? this.settings.defaultModel,
+            opts?.modelParams ?? this.settings.defaultModelParams,
+          );
         }
       } catch (err) {
         this.emit("log", `set model failed: ${String(err)}`);
