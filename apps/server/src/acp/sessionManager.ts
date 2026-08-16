@@ -41,7 +41,7 @@ import {
 } from "./AcpClient.js";
 
 /** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
-function coerceUiMode(raw: string): AgentMode | null {
+export function coerceUiMode(raw: string): AgentMode | null {
   const v = String(raw ?? "").trim().toLowerCase();
   if (!v) return null;
   if (v === "agent" || v === "plan" || v === "ask") return v;
@@ -61,7 +61,7 @@ async function applyAgentReportedMode(rt: SessionRuntime, rawModeId: string) {
   await updateSession(rt.sessionId, { mode });
 }
 
-function textFromUnknown(value: unknown): string {
+export function textFromUnknown(value: unknown): string {
   if (!value) return "";
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -94,7 +94,7 @@ function textFromUnknown(value: unknown): string {
   return "";
 }
 
-function subagentFieldsFromRaw(raw: Record<string, unknown>) {
+export function subagentFieldsFromRaw(raw: Record<string, unknown>) {
   const prompt =
     textFromUnknown(raw.prompt) ||
     textFromUnknown((raw.rawInput as Record<string, unknown> | undefined)?.prompt) ||
@@ -355,18 +355,18 @@ function getRuntime(sessionId: string) {
   return rt;
 }
 
-function requestIdFor(sessionId: string, rpcId: string | number) {
+export function requestIdFor(sessionId: string, rpcId: string | number) {
   return `${sessionId}:${String(rpcId)}`;
 }
 
-function parseRpcId(requestId: string, sessionId: string): string | number {
+export function parseRpcId(requestId: string, sessionId: string): string | number {
   const rpcId = requestId.slice(sessionId.length + 1);
   const numericId = Number(rpcId);
   return Number.isFinite(numericId) && String(numericId) === rpcId ? numericId : rpcId;
 }
 
 /** Normalize ACP plan updates / create_plan payloads for the UI side panel. */
-function normalizePlanPartPayload(raw: Record<string, unknown>): Record<string, unknown> {
+export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<string, unknown> {
   const name = String(raw.name ?? raw.title ?? "").trim();
   const overview = String(raw.overview ?? "").trim();
   const plan = String(raw.plan ?? raw.content ?? "").trim();

@@ -21,7 +21,7 @@ export async function resolveExportDir(settings?: AppSettings): Promise<string> 
 }
 
 /** Title → filesystem-safe file base (no path separators, no reserved chars). */
-function safeFileBase(title: string): string {
+export function safeFileBase(title: string): string {
   const cleaned = title
     .replace(/[\u0000-\u001f]/g, "")
     .replace(/[\\/:*?"<>|]/g, " ")
@@ -136,7 +136,7 @@ function subagentTitle(part: MessageDto["parts"][number]): string {
 }
 
 /** Longest backtick run + 1, at least 3 — keeps fences inside tool output safe. */
-function fenceFor(text: string): string {
+export function fenceFor(text: string): string {
   let longest = 0;
   let run = 0;
   for (const ch of text) {
