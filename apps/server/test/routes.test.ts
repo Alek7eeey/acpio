@@ -145,14 +145,14 @@ describe("health & settings", () => {
     expect(get.json().displayName).toBe("Tester");
   });
 
-  it("PUT /api/settings rejects an invalid locale (zod throw → 500; the app has no zod error handler)", async () => {
+  it("PUT /api/settings rejects an invalid locale with 400 (zod → error handler)", async () => {
     const res = await app.inject({
       method: "PUT",
       url: "/api/settings",
       payload: { locale: "xx" },
     });
-    expect(res.statusCode).toBe(500);
-    expect(res.json().message).toContain("Invalid enum value");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Invalid enum value");
   });
 });
 
@@ -568,7 +568,7 @@ describe("export", () => {
     await fsp.access(b2.path);
   });
 
-  it("POST export with an invalid format is rejected (zod throw → 500; no zod error handler)", async () => {
+  it("POST export with an invalid format is rejected with 400 (zod → error handler)", async () => {
     const session = await seedExportSession();
     const dir = await newTempDir("acp-export-");
     const res = await app.inject({
@@ -576,8 +576,8 @@ describe("export", () => {
       url: `/api/sessions/${session.id}/export`,
       payload: { format: "docx", dir },
     });
-    expect(res.statusCode).toBe(500);
-    expect(res.json().message).toContain("Invalid enum value");
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("Invalid enum value");
   });
 });
 

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts } from "./db/schema.js";
@@ -123,6 +123,24 @@ async function agentConnected(): Promise<AgentProvider | null> {
 }
 
 export async function registerRoutes(app: FastifyInstance) {
+  // Validation failures are client errors, not server faults: turn zod
+  // .parse() throws into a 400 with the first issue(s) instead of a 500.
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof ZodError) {
+      const message = err.issues
+        .map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message))
+        .join("; ");
+      return reply.code(400).send({ error: message || "Invalid request" });
+    }
+    const statusCode =
+      err instanceof Error && "statusCode" in err && typeof err.statusCode === "number"
+        ? err.statusCode
+        : 500;
+    return reply
+      .code(statusCode)
+      .send({ error: err instanceof Error ? err.message : String(err) });
+  });
+
   app.get("/api/health", async () => ({ ok: true }));
 
   app.get("/api/tts/ping", async () => {
