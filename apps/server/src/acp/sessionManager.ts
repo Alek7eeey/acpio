@@ -947,8 +947,6 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
 
 const MAX_SUBAGENT_THINKING_BLOCKS = 30;
 const MAX_SUBAGENT_TRANSCRIPT_PAGES = 10;
-/** Byte size of one thinking block we render in a card (bounded). */
-const MAX_THINKING_BLOCK_CHARS = 2000;
 /** Live thinking poll cadence per running subagent. */
 const SUBAGENT_THINKING_POLL_MS = 1500;
 
@@ -1012,7 +1010,7 @@ async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: Subag
         for (const block of msg.content) {
           const b = block as { type?: string; thinking?: string };
           if (b.type !== "thinking" || typeof b.thinking !== "string" || !b.thinking.trim()) continue;
-          const text = b.thinking.trim().slice(0, MAX_THINKING_BLOCK_CHARS);
+          const text = b.thinking.trim();
           if (!blocks.includes(text)) blocks.push(text);
           if (blocks.length >= MAX_SUBAGENT_THINKING_BLOCKS) break;
         }
