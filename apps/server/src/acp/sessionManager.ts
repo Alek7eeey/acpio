@@ -323,10 +323,13 @@ class SessionRuntime {
   /** omp `_omp/agents/update` subagent cards, keyed by registry agent id. */
   subagentPartByAgentId = new Map<string, string>();
   /**
-   * Transcript fetch state per subagent id: "pending" = mid-flight snapshot
-   * pulled, "terminal" = final snapshot pulled after the agent finished.
+   * Live thinking stream per subagent id: an incremental transcript drain
+   * (`_omp/agents/messages`, byte-offset) that appends new thinking blocks
+   * to the card while the agent runs, then stops at its terminal state.
    */
-  subagentTranscriptFetch = new Map<string, "pending" | "terminal">();
+  subagentThinkingPoll = new Map<string, SubagentThinkingPoll>();
+  /** Subagents whose terminal transcript snapshot was already attached. */
+  subagentTranscriptDone = new Set<string>();
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
@@ -946,6 +949,8 @@ const MAX_SUBAGENT_THINKING_BLOCKS = 30;
 const MAX_SUBAGENT_TRANSCRIPT_PAGES = 10;
 /** Byte size of one thinking block we render in a card (bounded). */
 const MAX_THINKING_BLOCK_CHARS = 2000;
+/** Live thinking poll cadence per running subagent. */
+const SUBAGENT_THINKING_POLL_MS = 1500;
 
 interface SubagentMessagesResponse {
   fromByte?: number;
@@ -954,39 +959,110 @@ interface SubagentMessagesResponse {
   messages?: Array<{ role?: string; content?: unknown[] }>;
 }
 
+interface SubagentThinkingPoll {
+  timer: NodeJS.Timeout | undefined;
+  /** Byte offset of the next incremental transcript drain. */
+  lastByte: number;
+  /** Thinking blocks already attached to the card (deduped, capped). */
+  blocks: string[];
+  /** True while a drain is in flight — skip ticks instead of stacking. */
+  inFlight: boolean;
+  /** True once the first snapshot (from byte 0) has been applied. */
+  seeded: boolean;
+}
+
+function clearSubagentThinkingPoll(rt: SessionRuntime, id: string): void {
+  const poll = rt.subagentThinkingPoll.get(id);
+  if (!poll) return;
+  clearInterval(poll.timer);
+  rt.subagentThinkingPoll.delete(id);
+}
+
 /**
- * Pull a subagent's transcript via `_omp/agents/messages` (paginated) and
- * attach its assistant `thinking` blocks to the card payload. Runs detached
- * from the update queue; failures are logged, never thrown into the stream.
+ * One incremental drain of a subagent's transcript via `_omp/agents/messages`.
+ * Appends any new assistant `thinking` blocks to the card payload so the
+ * reasoning streams into the card while the agent runs. Runs detached from
+ * the update queue; failures are logged, never thrown into the stream.
  */
-async function fetchSubagentThinking(rt: SessionRuntime, id: string, sessionFile: string) {
+async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: SubagentThinkingPoll): Promise<void> {
   const client = rt.client;
-  if (!client) return;
-  let fromByte = 0;
-  const thinking: string[] = [];
-  for (let page = 0; page < MAX_SUBAGENT_TRANSCRIPT_PAGES; page++) {
-    const res = (await client.requestAgent<SubagentMessagesResponse | undefined>("_omp/agents/messages", {
-      agentId: id,
-      fromByte,
-    })) ?? {};
-    for (const msg of res.messages ?? []) {
-      if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
-      for (const block of msg.content) {
-        const b = block as { type?: string; thinking?: string };
-        if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
-          thinking.push(b.thinking.trim().slice(0, MAX_THINKING_BLOCK_CHARS));
+  if (!client) {
+    clearSubagentThinkingPoll(rt, id);
+    return;
+  }
+  if (poll.inFlight) return;
+  poll.inFlight = true;
+  try {
+    let { lastByte, blocks } = poll;
+    for (let page = 0; page < MAX_SUBAGENT_TRANSCRIPT_PAGES; page++) {
+      const res = (await client.requestAgent<SubagentMessagesResponse | undefined>("_omp/agents/messages", {
+        agentId: id,
+        fromByte: lastByte,
+      })) ?? {};
+      if (res.reset || !poll.seeded) {
+        // Transcript rewound (or first snapshot): rebuild the list from this
+        // response instead of appending to a stale one.
+        blocks = [];
+        lastByte = 0;
+        poll.seeded = true;
+      }
+      const from = res.fromByte ?? lastByte;
+      for (const msg of res.messages ?? []) {
+        if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+        for (const block of msg.content) {
+          const b = block as { type?: string; thinking?: string };
+          if (b.type !== "thinking" || typeof b.thinking !== "string" || !b.thinking.trim()) continue;
+          const text = b.thinking.trim().slice(0, MAX_THINKING_BLOCK_CHARS);
+          if (!blocks.includes(text)) blocks.push(text);
+          if (blocks.length >= MAX_SUBAGENT_THINKING_BLOCKS) break;
         }
       }
+      blocks = blocks.slice(0, MAX_SUBAGENT_THINKING_BLOCKS);
+      const next = res.nextByte ?? 0;
+      if (blocks.length >= MAX_SUBAGENT_THINKING_BLOCKS || res.reset || next <= from) break;
+      lastByte = next;
     }
-    if (thinking.length >= MAX_SUBAGENT_THINKING_BLOCKS) break;
-    const next = res.nextByte ?? 0;
-    if (res.reset || next <= (res.fromByte ?? fromByte)) break;
-    fromByte = next;
+    poll.blocks = blocks;
+    poll.lastByte = lastByte;
+    const partId = rt.subagentPartByAgentId.get(id);
+    if (!partId) return;
+    const updated = await updatePart(rt.sessionId, partId, { thinking: poll.blocks }, "subagent");
+    if (!updated) clearSubagentThinkingPoll(rt, id);
+  } catch (err) {
+    console.error(`[subagent] thinking drain failed for ${id}`, err);
+  } finally {
+    poll.inFlight = false;
   }
-  if (!thinking.length) return;
+}
+
+/**
+ * Start the live thinking stream for a running subagent: an immediate drain
+ * (full snapshot from byte 0), then an incremental drain every poll tick.
+ */
+function startSubagentThinkingPoll(rt: SessionRuntime, id: string): void {
+  if (rt.subagentThinkingPoll.has(id)) return;
+  const poll: SubagentThinkingPoll = { timer: undefined, lastByte: 0, blocks: [], inFlight: false, seeded: false };
+  rt.subagentThinkingPoll.set(id, poll);
+  void drainSubagentThinking(rt, id, poll);
+  poll.timer = setInterval(() => {
+    void drainSubagentThinking(rt, id, poll);
+  }, SUBAGENT_THINKING_POLL_MS);
+  poll.timer.unref?.();
+}
+
+/**
+ * Stop the live stream at a terminal state: one final drain catches any
+ * blocks that landed after the last tick. For an agent that was never polled
+ * while running (e.g. we joined mid-run) this is a single full snapshot.
+ */
+async function stopSubagentThinkingPoll(rt: SessionRuntime, id: string): Promise<void> {
+  if (rt.subagentTranscriptDone.has(id)) return;
+  const poll = rt.subagentThinkingPoll.get(id);
+  clearSubagentThinkingPoll(rt, id);
   const partId = rt.subagentPartByAgentId.get(id);
   if (!partId) return;
-  await updatePart(rt.sessionId, partId, { thinking: thinking.slice(0, MAX_SUBAGENT_THINKING_BLOCKS) }, "subagent");
+  rt.subagentTranscriptDone.add(id);
+  await drainSubagentThinking(rt, id, poll ?? { timer: undefined, lastByte: 0, blocks: [], inFlight: false, seeded: false });
 }
 
 async function handleExtension(
@@ -1105,17 +1181,12 @@ async function handleExtension(
         });
         rt.subagentPartByAgentId.set(id, part.id);
       }
-      // Pull the subagent's own transcript (thinking) into the card: once
-      // mid-flight and once more when it reaches a terminal state, so the
-      // final snapshot carries the full reasoning.
-      if (typeof agent.sessionFile === "string" && agent.sessionFile) {
-        const want = rawStatus === "idle" || rawStatus === "parked" || rawStatus === "aborted" ? "terminal" : "pending";
-        if (rt.subagentTranscriptFetch.get(id) !== "terminal") {
-          rt.subagentTranscriptFetch.set(id, want);
-          void fetchSubagentThinking(rt, id, agent.sessionFile).catch((err) => {
-            console.error(`[subagent] transcript fetch failed for ${id}`, err);
-          });
-        }
+      // Stream the subagent's own transcript (thinking) into the card: a
+      // live incremental drain while running, one final drain at terminal.
+      if (status === "running") {
+        startSubagentThinkingPoll(rt, id);
+      } else {
+        void stopSubagentThinkingPoll(rt, id);
       }
     }
     return;
@@ -1174,6 +1245,12 @@ async function handleExtension(
         ...payload,
       });
       rt.subagentPartByAgentId.set(id, part.id);
+    }
+    // Live thinking stream, same lifecycle as the update roster.
+    if (status === "running") {
+      startSubagentThinkingPoll(rt, id);
+    } else {
+      void stopSubagentThinkingPoll(rt, id);
     }
     return;
   }
@@ -2175,6 +2252,10 @@ export function disposeRuntime(sessionId: string) {
   if (rt) {
     rt.disposing = true;
     rt.clientReady = null;
+    for (const poll of rt.subagentThinkingPoll.values()) {
+      clearInterval(poll.timer);
+    }
+    rt.subagentThinkingPoll.clear();
     rt.client?.dispose();
   }
   runtimes.delete(sessionId);
