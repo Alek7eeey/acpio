@@ -398,6 +398,7 @@ export const en = {
   },
   models: {
     default: "Default",
+    auto: "auto",
     fast: "Fast",
     notFast: "Not Fast",
     effort: "Effort",

@@ -423,6 +423,7 @@ export const ru = {
   },
   models: {
     default: "По умолчанию",
+    auto: "auto",
     fast: "Fast",
     notFast: "Not Fast",
     effort: "Effort",

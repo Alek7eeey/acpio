@@ -241,7 +241,7 @@ export function AppShell() {
     () =>
       settings.defaultModel
         ? modelDisplayName(settings.defaultModel, undefined, t("models.default"))
-        : "—",
+        : t("models.auto"),
     [settings.defaultModel, t],
   );
 
@@ -769,7 +769,7 @@ export function AppShell() {
                   </div>
                   <div className={styles.agentTipLine}>
                     <span className={styles.agentTipLabel}>{t("settings.modelSection")}</span>
-                    <span className={styles.agentTipValue}>{settings.defaultModel || "—"}</span>
+                    <span className={styles.agentTipValue}>{settings.defaultModel || t("models.auto")}</span>
                   </div>
                   <div className={styles.agentTipLine}>
                     <span className={styles.agentTipLabel}>{t("common.status")}</span>
