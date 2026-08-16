@@ -3125,15 +3125,21 @@ export function ChatPage() {
                 </span>
                 <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
               </button>
-              {activeSession && chatMcp.length > 0 ? (
+              {activeSession && enabledMcp.length > 0 ? (
                 <button
                   type="button"
                   className={styles.metaChip}
                   aria-label={t("chat.mcpChipTitle", {
-                    names: chatMcp.map((s) => s.name).join(", "),
+                    names:
+                      chatMcp.length > 0
+                        ? chatMcp.map((s) => s.name).join(", ")
+                        : t("chat.mcpChipNone"),
                   })}
                   title={t("chat.mcpChipTitle", {
-                    names: chatMcp.map((s) => s.name).join(", "),
+                    names:
+                      chatMcp.length > 0
+                        ? chatMcp.map((s) => s.name).join(", ")
+                        : t("chat.mcpChipNone"),
                   })}
                   onClick={() => setMcpDialogOpen(true)}
                 >
