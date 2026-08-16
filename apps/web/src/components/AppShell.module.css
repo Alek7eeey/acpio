@@ -1169,6 +1169,24 @@
   background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
+/* Light theme: same recipe as the "New chat" button — black text, black
+   outline, transparent fill. */
+:global([data-theme="light"]) .sessionActivity {
+  color: rgba(24, 24, 27, 0.5);
+  border: 1px solid rgba(24, 24, 27, 0.16);
+  background: transparent;
+  font-weight: 400;
+}
+
+:global([data-theme="light"]) .sessionItem:hover .sessionActivity {
+  background: rgba(24, 24, 27, 0.03);
+}
+
+:global([data-theme="light"]) .sessionItem.active .sessionActivity {
+  color: rgba(24, 24, 27, 0.65);
+  background: rgba(24, 24, 27, 0.04);
+}
+
 .renameInput,
 .renameInputInline {
   width: 100%;
@@ -1217,7 +1235,7 @@
   color: var(--text);
   font: inherit;
   font-size: 0.9rem;
-  font-weight: 550;
+  font-weight: 400;
   display: flex;
   align-items: center;
   gap: 10px;
