@@ -1169,6 +1169,9 @@ export function SettingsPage() {
           <section className={styles.card}>
             <div className={styles.sectionBlock}>
               <p className={styles.fieldHint}>{t("settings.mcpHint")}</p>
+              <div className={styles.mcpApplyNote} role="note">
+                {t("settings.mcpApplyHint")}
+              </div>
 
               {mcpServers.map((server) => (
                 <div key={server.id} className={styles.mcpRow}>
