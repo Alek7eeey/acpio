@@ -464,7 +464,7 @@ function resolveSubagentTitle(part: MessagePartDto, body: string): string {
 
 function resolveSubagentBody(part: MessagePartDto): string {
   const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
-  return (
+  const body = (
     extractStructuredText(part.payload.result) ||
     extractStructuredText(raw.result) ||
     extractStructuredText(raw.content) ||
@@ -472,6 +472,15 @@ function resolveSubagentBody(part: MessagePartDto): string {
     extractStructuredText(part.payload.prompt) ||
     extractStructuredText(raw.prompt)
   ).trim();
+  const thinking = Array.isArray(part.payload.thinking) ? part.payload.thinking : [];
+  if (!thinking.length) return body;
+  const thoughts = thinking
+    .map((t) => (typeof t === "string" ? t.trim() : ""))
+    .filter(Boolean)
+    .join("\n\n");
+  if (!thoughts) return body;
+  // Subagent reasoning renders inside its own card, after the live work body.
+  return body ? `${body}\n\n${thoughts}` : thoughts;
 }
 
 function PartView({
@@ -548,15 +557,26 @@ function PartView({
     const body = resolveSubagentBody(part);
     const title = resolveSubagentTitle(part, body);
     const status = String(part.payload.status ?? "");
+    // Explicit per-card work indicator: "running" means the subagent is
+    // actively working, independent of the global turn streaming state.
+    const working = status === "running";
     const live = streaming && status !== "completed" && status !== "failed";
     const label = title ? `${t("agent.subagent")} · ${title}` : t("agent.subagent");
     return (
       <div className={styles.subagent}>
         <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className={styles.thoughtLabel}>
-            {live && <span className={styles.pulseDot} />}
+            {working ? (
+              <span className={styles.toolLoader} aria-hidden />
+            ) : live ? (
+              <span className={styles.pulseDot} />
+            ) : null}
             {label}
-            {status === "failed" ? t("common.subagentFailed") : live ? t("common.subagentWorking") : ""}
+            {status === "failed"
+              ? t("common.subagentFailed")
+              : working
+                ? t("common.subagentWorking")
+                : ""}
           </span>
           <span className={styles.thoughtChevron} aria-hidden>
             {open ? "▾" : "▸"}
@@ -1539,6 +1559,11 @@ function subagentKey(part: MessagePartDto): string | null {
       "",
   ).trim();
   if (taskId) return `task:${taskId}`;
+  // omp roster/progress cards carry the registry agent id; merge duplicate
+  // cards for the same agent (e.g. one from tool_call routing, one from
+  // _omp/agents/update) into a single card.
+  const agentId = String(part.payload.agentId ?? "").trim();
+  if (agentId) return `agent:${agentId}`;
   return null;
 }
 
@@ -1592,6 +1617,16 @@ function coalesceAssistantParts(
   for (const part of coalesced) {
     if (part.type === "thought" || part.type === "text" || part.type === "error") {
       out.push(part);
+      continue;
+    }
+
+    // omp task-tool spawns are represented by dedicated subagent cards
+    // (`_omp/agents/update` / `_omp/agents/progress`); drop the redundant tool
+    // rows so subagent work stays out of the thinking block.
+    if (
+      part.type === "tool_call" &&
+      (part.payload.raw as { toolName?: string } | undefined)?.toolName === "task"
+    ) {
       continue;
     }
 
@@ -1666,10 +1701,11 @@ function AssistantParts({
 
   // The final answer (last text part in emission order) stays outside the
   // steps block; intermediate texts interleave with tools inside it, in the
-  // order the agent emitted them.
+  // order the agent emitted them. Subagent cards never render inside the
+  // steps block — they have their own message-level representation.
   const stepsParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return finalText ? parts.filter((p) => p !== finalText) : parts;
+    return parts.filter((p) => p !== finalText && p.type !== "subagent");
   }, [parts]);
   const mainParts = useMemo(() => {
     const finalText = lastTextPart(parts);

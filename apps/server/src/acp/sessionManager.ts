@@ -314,6 +314,19 @@ class SessionRuntime {
   turnThoughtPartId: string | null = null;
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
+  /**
+   * toolCallIds that reached a terminal status (completed/failed). Async agent
+   * progress (omp task jobs) can stream late `in_progress` updates after the
+   * call finished — those must not clobber the terminal status.
+   */
+  terminalToolCallIds = new Set<string>();
+  /** omp `_omp/agents/update` subagent cards, keyed by registry agent id. */
+  subagentPartByAgentId = new Map<string, string>();
+  /**
+   * Transcript fetch state per subagent id: "pending" = mid-flight snapshot
+   * pulled, "terminal" = final snapshot pulled after the agent finished.
+   */
+  subagentTranscriptFetch = new Map<string, "pending" | "terminal">();
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
@@ -790,6 +803,12 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const kind = String((update.raw.kind as string) ?? "");
     const isSubagent = isSubagentToolCall(kind);
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
+    // Terminal status is final: late async progress must not reopen the card.
+    if (status === "completed" || status === "failed") {
+      if (update.toolCallId) rt.terminalToolCallIds.add(update.toolCallId);
+    } else if (update.toolCallId && rt.terminalToolCallIds.has(update.toolCallId)) {
+      return;
+    }
     if (!partId) {
       const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
         toolCallId: update.toolCallId,
@@ -923,6 +942,53 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
   });
 }
 
+const MAX_SUBAGENT_THINKING_BLOCKS = 30;
+const MAX_SUBAGENT_TRANSCRIPT_PAGES = 10;
+/** Byte size of one thinking block we render in a card (bounded). */
+const MAX_THINKING_BLOCK_CHARS = 2000;
+
+interface SubagentMessagesResponse {
+  fromByte?: number;
+  nextByte?: number;
+  reset?: boolean;
+  messages?: Array<{ role?: string; content?: unknown[] }>;
+}
+
+/**
+ * Pull a subagent's transcript via `_omp/agents/messages` (paginated) and
+ * attach its assistant `thinking` blocks to the card payload. Runs detached
+ * from the update queue; failures are logged, never thrown into the stream.
+ */
+async function fetchSubagentThinking(rt: SessionRuntime, id: string, sessionFile: string) {
+  const client = rt.client;
+  if (!client) return;
+  let fromByte = 0;
+  const thinking: string[] = [];
+  for (let page = 0; page < MAX_SUBAGENT_TRANSCRIPT_PAGES; page++) {
+    const res = (await client.requestAgent<SubagentMessagesResponse | undefined>("_omp/agents/messages", {
+      agentId: id,
+      fromByte,
+    })) ?? {};
+    for (const msg of res.messages ?? []) {
+      if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
+      for (const block of msg.content) {
+        const b = block as { type?: string; thinking?: string };
+        if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
+          thinking.push(b.thinking.trim().slice(0, MAX_THINKING_BLOCK_CHARS));
+        }
+      }
+    }
+    if (thinking.length >= MAX_SUBAGENT_THINKING_BLOCKS) break;
+    const next = res.nextByte ?? 0;
+    if (res.reset || next <= (res.fromByte ?? fromByte)) break;
+    fromByte = next;
+  }
+  if (!thinking.length) return;
+  const partId = rt.subagentPartByAgentId.get(id);
+  if (!partId) return;
+  await updatePart(rt.sessionId, partId, { thinking: thinking.slice(0, MAX_SUBAGENT_THINKING_BLOCKS) }, "subagent");
+}
+
 async function handleExtension(
   rt: SessionRuntime,
   method: string,
@@ -974,6 +1040,142 @@ async function handleExtension(
       kind: "image",
       ...params,
     });
+  }
+  if (method === "_omp/agents/update") {
+    // omp roster snapshot: upsert one subagent card per registry agent id.
+    const agents = Array.isArray(params.agents) ? (params.agents as Record<string, unknown>[]) : [];
+    for (const agent of agents) {
+      if (agent.kind !== "sub") continue;
+      const id = String(agent.id ?? "");
+      if (!id) continue;
+      const rawStatus = String(agent.status ?? "");
+      // Registry statuses are lifecycle states; the UI understands terminal
+      // statuses as completed/failed (stops the "working" pulse).
+      const status =
+        rawStatus === "aborted"
+          ? "failed"
+          : rawStatus === "running"
+            ? "running"
+            : "completed";
+      const activity = typeof agent.activity === "string" ? agent.activity.trim() : "";
+      // `displayName` is the agent *type* ("scout", "task"); the id is the
+      // intent-derived name ("SummaryPorting") — prefer it as the card title.
+      const name = String(agent.displayName ?? "");
+      const title = name && !/^(tool|task|scout|subagent|агент|субагент)$/i.test(name) ? name : id;
+      const metrics =
+        agent.metrics && typeof agent.metrics === "object"
+          ? (agent.metrics as Record<string, unknown>)
+          : undefined;
+      const bodyParts: string[] = [];
+      if (activity) bodyParts.push(activity);
+      if (rawStatus === "running") bodyParts.push("статус: выполняется");
+      if (metrics) {
+        const parts: string[] = [];
+        for (const key of ["tokens", "requests", "tools"] as const) {
+          if (typeof metrics[key] === "number") parts.push(`${key}: ${metrics[key]}`);
+        }
+        if (typeof metrics.durationMs === "number") parts.push(`время: ${Math.round(metrics.durationMs / 1000)} с`);
+        if (typeof metrics.cost === "number") parts.push(`стоимость: $${metrics.cost.toFixed(4)}`);
+        if (parts.length) bodyParts.push(`— ${parts.join(", ")} —`);
+      }
+      const payload: Record<string, unknown> = {
+        agentId: id,
+        ...(agent.parentId ? { parentId: String(agent.parentId) } : {}),
+        status,
+        ...(agent.resolvedModel ? { resolvedModel: String(agent.resolvedModel) } : {}),
+        ...(metrics ? { metrics } : {}),
+        // `resolveSubagentBody` renders payload.prompt as the card body.
+        ...(bodyParts.length ? { prompt: bodyParts.join("\n\n") } : {}),
+        description: activity || title,
+        raw: agent,
+      };
+      const existingId = rt.subagentPartByAgentId.get(id);
+      if (existingId) {
+        await updatePart(rt.sessionId, existingId, payload, "subagent");
+      } else {
+        // The roster snapshot is process-global and includes agents from
+        // earlier turns (idle/parked). Only spawn a card for an agent that is
+        // actually working (running); an idle-only sighting never re-creates
+        // an old agent's card in a new message.
+        if (status !== "running") continue;
+        const part = await appendPart(rt.sessionId, messageId, "subagent", {
+          title,
+          description: activity || title,
+          ...payload,
+        });
+        rt.subagentPartByAgentId.set(id, part.id);
+      }
+      // Pull the subagent's own transcript (thinking) into the card: once
+      // mid-flight and once more when it reaches a terminal state, so the
+      // final snapshot carries the full reasoning.
+      if (typeof agent.sessionFile === "string" && agent.sessionFile) {
+        const want = rawStatus === "idle" || rawStatus === "parked" || rawStatus === "aborted" ? "terminal" : "pending";
+        if (rt.subagentTranscriptFetch.get(id) !== "terminal") {
+          rt.subagentTranscriptFetch.set(id, want);
+          void fetchSubagentThinking(rt, id, agent.sessionFile).catch((err) => {
+            console.error(`[subagent] transcript fetch failed for ${id}`, err);
+          });
+        }
+      }
+    }
+    return;
+  }
+  if (method === "_omp/agents/progress") {
+    // omp live work stream: one subagent progress snapshot. Upserts the same
+    // per-agent card as `_omp/agents/update` and fills the body with the
+    // current intent, active tool, recent output, and spend.
+    const agent = (params.agent ?? {}) as Record<string, unknown>;
+    const id = String(agent.id ?? "");
+    if (!id) return;
+    const rawStatus = String(agent.status ?? "");
+    const status =
+      rawStatus === "completed"
+        ? "completed"
+        : rawStatus === "failed" || rawStatus === "aborted"
+          ? "failed"
+          : "running";
+    const title = id;
+    const intent = typeof agent.lastIntent === "string" ? agent.lastIntent.trim() : "";
+    const lines: string[] = [];
+    if (intent) lines.push(intent);
+    const tool = typeof agent.currentTool === "string" ? agent.currentTool : "";
+    const toolArgs = typeof agent.currentToolArgs === "string" ? agent.currentToolArgs : "";
+    if (tool) lines.push(`инструмент: \`${tool}\`${toolArgs ? ` (${toolArgs.slice(0, 120)})` : ""}`);
+    if (Array.isArray(agent.recentOutput)) {
+      for (const line of agent.recentOutput.slice(0, 5)) {
+        if (typeof line === "string" && line.trim()) lines.push(line.trim().slice(0, 300));
+      }
+    }
+    const metrics: string[] = [];
+    for (const key of ["toolCount", "requests", "tokens"] as const) {
+      const value = agent[key];
+      if (typeof value === "number") metrics.push(`${key === "toolCount" ? "tools" : key}: ${value}`);
+    }
+    if (typeof agent.durationMs === "number") metrics.push(`время: ${Math.round((agent.durationMs as number) / 1000)} с`);
+    if (typeof agent.cost === "number") metrics.push(`стоимость: $${(agent.cost as number).toFixed(4)}`);
+    if (metrics.length) lines.push(`— ${metrics.join(", ")} —`);
+    const payload: Record<string, unknown> = {
+      agentId: id,
+      status,
+      ...(agent.resolvedModel ? { resolvedModel: String(agent.resolvedModel) } : {}),
+      ...(lines.length ? { prompt: lines.join("\n\n") } : {}),
+      description: intent || title,
+      raw: agent,
+    };
+    const existingId = rt.subagentPartByAgentId.get(id);
+    if (existingId) {
+      await updatePart(rt.sessionId, existingId, payload, "subagent");
+    } else if (status === "running") {
+      // Progress for a terminal state without a known card means the agent
+      // was never sighted while working — never create a stale card.
+      const part = await appendPart(rt.sessionId, messageId, "subagent", {
+        title,
+        description: intent || title,
+        ...payload,
+      });
+      rt.subagentPartByAgentId.set(id, part.id);
+    }
+    return;
   }
 }
 

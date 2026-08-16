@@ -852,6 +852,11 @@ export class AcpClient extends EventEmitter {
     this.write({ jsonrpc: "2.0", id, result });
   }
 
+  /** Send an arbitrary ACP request to the agent (`_omp/*` extension methods). */
+  requestAgent<T = unknown>(method: string, params: unknown): Promise<T> {
+    return this.send(method, params) as Promise<T>;
+  }
+
   respondError(id: JsonRpcId, message: string, code = -32000) {
     this.write({ jsonrpc: "2.0", id, error: { code, message } });
   }
@@ -1231,6 +1236,16 @@ export class AcpClient extends EventEmitter {
           );
         }
       }
+      return;
+    }
+
+    // omp (`_omp/agents/update`): debounced full roster snapshot pushed on
+    // subagent lifecycle changes. Rendered like cursor/task subagent cards.
+    if (method === "_omp/agents/update" || method === "_omp/agents/progress") {
+      this.emit("extension", {
+        method,
+        params: (msg.params ?? {}) as Record<string, unknown>,
+      });
       return;
     }
 
