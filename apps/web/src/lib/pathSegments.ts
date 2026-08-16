@@ -2,6 +2,14 @@
 
 export const DRIVES_ROOT = "Computer";
 
+/**
+ * Canonical working-directory form: forward slashes, no trailing separator.
+ * `E:\proj` and `E:/proj/` must group as the same folder in the chat tree.
+ */
+export function normalizeCwd(cwd: string | null | undefined): string {
+  return (cwd ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 /** Extensions rendered as inline image previews (see IMAGE_MIME on the server). */
 export const IMAGE_EXT = new Set([
   "png",

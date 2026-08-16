@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
+import { normalizeCwd } from "../lib/pathSegments";
 import { useAppStore } from "../lib/store";
 import {
   listLikedMessages,
@@ -34,10 +35,6 @@ function sortSessions(list: SessionDto[]) {
   );
 }
 
-function normalizeCwd(cwd: string | null | undefined) {
-  return (cwd ?? "").trim().replace(/[\\/]+$/, "");
-}
-
 function folderLabel(cwd: string, noFolderLabel: string) {
   const normalized = normalizeCwd(cwd);
   if (!normalized) return noFolderLabel;
@@ -47,7 +44,7 @@ function folderLabel(cwd: string, noFolderLabel: string) {
   return leaf.length <= 36 ? leaf : `…${leaf.slice(-34)}`;
 }
 
-function groupByFolder(list: SessionDto[]) {
+export function groupByFolder(list: SessionDto[]) {
   const map = new Map<string, SessionDto[]>();
   for (const s of list) {
     const key = normalizeCwd(s.cwd);

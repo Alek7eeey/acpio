@@ -122,6 +122,15 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
   return { ...mapSession(rows[0], lastMessageAt), messages: result };
 }
 
+/**
+ * Canonical working-directory form: forward slashes, no trailing separator.
+ * `E:\proj` and `E:/proj/` are the same folder — the chat tree must not
+ * split them into two groups, so every write stores one canonical form.
+ */
+function normalizeCwd(cwd: string): string {
+  return cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
 export async function createSession(input: {
   title?: string;
   provider: AgentProvider;
@@ -137,7 +146,7 @@ export async function createSession(input: {
     .values({
       title: input.title ?? defaultSessionTitle(settings.locale),
       provider: input.provider,
-      cwd: input.cwd,
+      cwd: normalizeCwd(input.cwd),
       mode: input.mode,
       status: "idle",
       themeId: input.themeId ?? null,
@@ -163,6 +172,7 @@ export async function updateSession(
     mcpDisabledIds: string[];
   }>,
 ): Promise<SessionDto | null> {
+  if (patch.cwd !== undefined) patch.cwd = normalizeCwd(patch.cwd);
   const [row] = await db
     .update(sessions)
     .set({ ...patch, updatedAt: new Date() })

@@ -1,5 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { DRIVES_ROOT, isImageFile, splitPathSegments } from "./pathSegments";
+import { DRIVES_ROOT, isImageFile, normalizeCwd, splitPathSegments } from "./pathSegments";
+
+describe("normalizeCwd", () => {
+  it("canonicalizes backslashes to forward slashes", () => {
+    expect(normalizeCwd("E:\\testYura")).toBe("E:/testYura");
+  });
+
+  it("strips trailing separators in either style", () => {
+    expect(normalizeCwd("E:/testYura/")).toBe("E:/testYura");
+    expect(normalizeCwd("E:\\testYura\\")).toBe("E:/testYura");
+  });
+
+  it("treats mixed-slash spellings of the same folder identically", () => {
+    const forward = normalizeCwd("E:/testYura");
+    const backward = normalizeCwd("E:\\testYura");
+    expect(forward).toBe(backward);
+  });
+
+  it("keeps unix paths intact", () => {
+    expect(normalizeCwd("/home/user/proj/")).toBe("/home/user/proj");
+  });
+
+  it("returns an empty string for empty/nullish input", () => {
+    expect(normalizeCwd("")).toBe("");
+    expect(normalizeCwd("   ")).toBe("");
+    expect(normalizeCwd(null)).toBe("");
+    expect(normalizeCwd(undefined)).toBe("");
+  });
+});
 
 describe("isImageFile", () => {
   it.each(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif"])(

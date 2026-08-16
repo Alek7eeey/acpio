@@ -2,22 +2,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
+import { normalizeCwd } from "../lib/pathSegments";
 import { ServerFolderBrowseDialog } from "./ServerFolderBrowseDialog";
 import styles from "./AppShell.module.css";
 
-function normalizeCwd(cwd: string | null | undefined) {
-  return (cwd ?? "").trim().replace(/[\\/]+$/, "");
-}
-
 function folderName(pathValue: string, fallback: string) {
-  const normalized = normalizeCwd(pathValue).replace(/\\/g, "/");
+  const normalized = normalizeCwd(pathValue);
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || normalized || fallback;
 }
 
 function parentPath(pathValue: string) {
   const normalized = normalizeCwd(pathValue);
-  const cut = Math.max(normalized.lastIndexOf("\\"), normalized.lastIndexOf("/"));
+  const cut = normalized.lastIndexOf("/");
   if (cut <= 0) return "";
   const parent = normalized.slice(0, cut);
   if (parent.length <= 36) return parent;
