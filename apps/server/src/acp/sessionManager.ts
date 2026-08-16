@@ -1032,11 +1032,31 @@ export async function runPrompt(
     rt = getRuntime(sessionId);
   }
 
+  // A deferred MCP restart (mid-turn MCP edit) must land BEFORE the next turn:
+  // a direct prompt would otherwise run on the stale agent with the old MCP
+  // list (the same race dequeueTurn already guards for queued turns).
+  if (rt.restartOnIdle) {
+    rt.restartOnIdle = false;
+    const pendingDetail = await getSessionDetail(sessionId);
+    if (pendingDetail?.provider && pendingDetail.status !== "closed") {
+      const snapshot = liveModelSnapshot(rt);
+      resetAcpClient(rt);
+      try {
+        await ensureAcp(
+          sessionId,
+          { provider: pendingDetail.provider, cwd: pendingDetail.cwd, mode: pendingDetail.mode },
+          snapshot,
+        );
+      } catch (err) {
+        console.error(`[acp:${sessionId}] deferred MCP restart failed`, err);
+      }
+    }
+  }
+
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
   // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
   // OLD transcript (including the reply being replaced) — fresh context is correct.
   const acpReady = ensureAcp(sessionId, opts, { preferResume: !opts.editMessageId });
-
   if (!opts.editMessageId) {
     const userMsg = await createMessage(sessionId, "user");
     userMessageId = userMsg.id;
