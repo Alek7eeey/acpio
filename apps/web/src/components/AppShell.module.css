@@ -2636,8 +2636,18 @@
 }
 
 .agentTipMuted {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--text-tertiary, var(--text-secondary)) 45%, transparent);
+  font-size: 0.72rem;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
   color: var(--text-tertiary, var(--text-secondary));
-  font-style: italic;
+  font-style: normal;
 }
 
 .toolCluster {
