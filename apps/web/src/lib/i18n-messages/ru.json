@@ -350,6 +350,8 @@
   "defaultFolder": "Папка по умолчанию",
   "exportDir": "Папка экспорта",
   "exportDirHint": "Сюда сохраняются экспорты чатов. Пусто → по умолчанию: {{path}}",
+  "resumeAgentContext": "Возобновлять контекст агента",
+  "resumeAgentContextHint": "При перезапуске (смена модели/MCP, рестарт сервера) агент продолжает прошлую сессию вместо пустого контекста — OMP через session/resume, Cursor через session/load.",
   "cliAndPermissions": "CLI и права",
   "permissionPolicy": "Политика разрешений",
   "permissionPrompt": "Спрашивать",

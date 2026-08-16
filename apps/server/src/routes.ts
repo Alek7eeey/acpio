@@ -93,6 +93,7 @@ const settingsSchema = z.object({
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
   exportDir: z.string().optional(),
+  resumeAgentContext: z.boolean().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   showBootSplash: z.boolean().optional(),

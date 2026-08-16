@@ -49,6 +49,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.exportDir !== "string") {
     merged.exportDir = DEFAULT_SETTINGS.exportDir;
   }
+  if (typeof merged.resumeAgentContext !== "boolean") {
+    merged.resumeAgentContext = DEFAULT_SETTINGS.resumeAgentContext;
+  }
   if (typeof merged.showBootSplash !== "boolean") {
     merged.showBootSplash = DEFAULT_SETTINGS.showBootSplash;
   }

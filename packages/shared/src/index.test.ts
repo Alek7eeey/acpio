@@ -403,6 +403,7 @@ describe("DEFAULT_SETTINGS", () => {
     permissionAllowlist: [],
     diagnosticsDir: "",
     exportDir: "",
+    resumeAgentContext: true,
     multitask: false,
     sidebarCollapse: "full",
     showBootSplash: true,

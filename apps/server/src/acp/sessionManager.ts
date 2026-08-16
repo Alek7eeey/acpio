@@ -399,9 +399,67 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
   };
 }
 
+export type RestoreMode = "new" | "resume" | "load";
+
+/**
+ * Decide how a fresh ACP spawn should attach to the agent:
+ * - "new"    — session/new (blank context); used when the toggle is off, the
+ *              caller explicitly wants a fresh slate (edit/regenerate), the
+ *              provider switched, or no stored agent session exists.
+ * - "resume" — OMP: session/resume, silent context restore, no history replay.
+ * - "load"   — Cursor: session/load, context restore WITH history replay
+ *              (the client swallows the replay; our DB already has it).
+ */
+export function pickRestoreMode(input: {
+  provider: AgentProvider;
+  preferResume: boolean;
+  toggle: boolean;
+  hasStoredSession: boolean;
+  cwdMatches: boolean;
+}): RestoreMode {
+  if (
+    !input.preferResume ||
+    !input.toggle ||
+    !input.hasStoredSession ||
+    !input.cwdMatches
+  ) {
+    return "new";
+  }
+  if (input.provider === "omp") return "resume";
+  if (input.provider === "cursor") return "load";
+  return "new";
+}
+
+async function resolveRestoreMode(
+  sessionId: string,
+  opts: { provider: AgentProvider; cwd: string },
+  settings: AppSettings,
+  preferResume: boolean,
+): Promise<{ mode: RestoreMode; storedSessionId?: string }> {
+  if (preferResume === false || !settings.resumeAgentContext) {
+    return { mode: "new" };
+  }
+  if (opts.provider !== "omp" && opts.provider !== "cursor") {
+    return { mode: "new" };
+  }
+  const detail = await getSessionDetail(sessionId);
+  const hasStoredSession = Boolean(detail?.acpSessionId);
+  const mode = pickRestoreMode({
+    provider: opts.provider,
+    preferResume: true,
+    toggle: true,
+    hasStoredSession,
+    cwdMatches: Boolean(detail && detail.cwd === opts.cwd && detail.provider === opts.provider),
+  });
+  return mode === "new"
+    ? { mode }
+    : { mode, storedSessionId: detail!.acpSessionId! };
+}
+
 export async function ensureAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
+  boot?: { preferResume?: boolean },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
   // Switching Cursor ↔ OMP must replace the live process, not reuse it.
@@ -412,95 +470,133 @@ export async function ensureAcp(
   if (rt.client) return rt.client;
 
   const settings = await getSettings();
-  const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
-  rt.client = client;
-  rt.provider = opts.provider;
-  for (const f of rt.allowedAttachmentFiles) client.allowReadFile(f);
+  const { mode: restoreMode, storedSessionId } = await resolveRestoreMode(
+    sessionId,
+    opts,
+    settings,
+    boot?.preferResume ?? true,
+  );
 
-  client.on("log", (line: string) => {
-    console.log(`[acp:${sessionId}]`, line.trim());
-  });
+  const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
+    const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
+    rt.client = client;
+    rt.provider = opts.provider;
+    for (const f of rt.allowedAttachmentFiles) client.allowReadFile(f);
 
-  client.on("exit", async () => {
-    const intentional = rt.disposing;
-    rt.client = null;
-    rt.clientReady = null;
-    rt.provider = null;
-    rt.running = false;
-    rt.toolsHintSent = false;
-    // An unexpected agent exit means the agent is not available right now.
-    if (!intentional) {
-      setAgentAvailable(opts.provider, false);
-      await updateSession(sessionId, { status: "closed" });
-    }
-  });
+    client.on("log", (line: string) => {
+      console.log(`[acp:${sessionId}]`, line.trim());
+    });
 
-  client.on("update", (update) => {
-    const gen = rt.streamGen;
-    void rt.enqueue(async () => {
-      try {
-        const isStream =
-          update.kind === "agent_message_chunk" ||
-          update.kind === "agent_thought_chunk" ||
-          update.kind === "mixed_chunks";
-        // Drop tokens from a cancelled / superseded prompt (including chunks that
-        // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
-        if (isStream && (!rt.acceptingStream || rt.streamGen !== gen)) {
-          return;
+    client.on("exit", async () => {
+      const intentional = rt.disposing;
+      rt.client = null;
+      rt.clientReady = null;
+      rt.provider = null;
+      rt.running = false;
+      rt.toolsHintSent = false;
+      // An unexpected agent exit means the agent is not available right now.
+      if (!intentional) {
+        setAgentAvailable(opts.provider, false);
+        await updateSession(sessionId, { status: "closed" });
+      }
+    });
+
+    client.on("update", (update) => {
+      const gen = rt.streamGen;
+      void rt.enqueue(async () => {
+        try {
+          const isStream =
+            update.kind === "agent_message_chunk" ||
+            update.kind === "agent_thought_chunk" ||
+            update.kind === "mixed_chunks";
+          // Drop tokens from a cancelled / superseded prompt (including chunks that
+          // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
+          if (isStream && (!rt.acceptingStream || rt.streamGen !== gen)) {
+            return;
+          }
+          await handleUpdate(rt, update);
+        } catch (err) {
+          console.error("update handler error", err);
         }
-        await handleUpdate(rt, update);
-      } catch (err) {
-        console.error("update handler error", err);
-      }
-    });
-  });
-
-  // Permissions/questions must NOT hold the update queue while waiting for the user,
-  // otherwise streaming/tool updates stall and follow-ups look broken.
-  client.on("request", (req: AcpRequest) => {
-    void handleIncomingRequest(rt, req).catch((err) => {
-      console.error("request handler error", err);
-    });
-  });
-
-  client.on("extension", (ext: { method: string; params: unknown }) => {
-    void rt.enqueue(async () => {
-      await handleExtension(rt, ext.method, (ext.params ?? {}) as Record<string, unknown>);
-    });
-  });
-
-  rt.clientReady = (async () => {
-    try {
-      await client.start();
-      const settings = await getSettings();
-      const models = await finalizeModelList(
-        opts.provider,
-        settings,
-        toModelList(client.configOptions),
-      );
-      const modelParams = toModelParams(client.configOptions);
-      const modes = toModesList(client.configOptions, opts.provider, client.sessionModes);
-      const currentModel = pickCurrentModel(
-        models,
-        findModelConfigOption(client.configOptions)?.currentValue,
-      );
-      if (models.length || modelParams.length || modes.length) {
-        rememberModels(opts.provider, currentModel, models, modelParams, modes);
-      }
-      await updateSession(sessionId, {
-        acpSessionId: client.sessionId,
-        // Don't clobber an in-flight prompt if warm-up finishes during runPrompt.
-        ...(rt.running ? {} : { status: "idle" as const }),
       });
-      return client;
+    });
+
+    // Permissions/questions must NOT hold the update queue while waiting for the user,
+    // otherwise streaming/tool updates stall and follow-ups look broken.
+    client.on("request", (req: AcpRequest) => {
+      void handleIncomingRequest(rt, req).catch((err) => {
+        console.error("request handler error", err);
+      });
+    });
+
+    client.on("extension", (ext: { method: string; params: unknown }) => {
+      void rt.enqueue(async () => {
+        await handleExtension(rt, ext.method, (ext.params ?? {}) as Record<string, unknown>);
+      });
+    });
+
+    rt.clientReady = (async () => {
+      try {
+        // Restore boots get a bigger budget: Cursor's session/load replays the
+        // whole stored conversation before responding.
+        await client.start(
+          mode === "new" ? 45_000 : 120_000,
+          mode === "new"
+            ? {}
+            : { resume: { sessionId: storedSessionId!, mode } },
+        );
+        const settings = await getSettings();
+        const models = await finalizeModelList(
+          opts.provider,
+          settings,
+          toModelList(client.configOptions),
+        );
+        const modelParams = toModelParams(client.configOptions);
+        const modes = toModesList(client.configOptions, opts.provider, client.sessionModes);
+        const currentModel = pickCurrentModel(
+          models,
+          findModelConfigOption(client.configOptions)?.currentValue,
+        );
+        if (models.length || modelParams.length || modes.length) {
+          rememberModels(opts.provider, currentModel, models, modelParams, modes);
+        }
+        await updateSession(sessionId, {
+          acpSessionId: client.sessionId,
+          // Don't clobber an in-flight prompt if warm-up finishes during runPrompt.
+          ...(rt.running ? {} : { status: "idle" as const }),
+        });
+        return client;
+      } catch (err) {
+        rt.client = null;
+        rt.clientReady = null;
+        throw err;
+      }
+    })();
+
+    try {
+      return await rt.clientReady;
     } catch (err) {
       rt.client = null;
       rt.clientReady = null;
+      // Restore is best-effort: an unknown/removed agent session, a CLI build
+      // without the capability, or a broken replay must never brick the chat —
+      // dispose the failed process and fall back to a fresh session/new.
+      if (mode !== "new") {
+        try {
+          client.dispose();
+        } catch {
+          // process already gone
+        }
+        console.error(
+          `[acp:${sessionId}] ${mode} failed (${err instanceof Error ? err.message : String(err)}) — starting fresh`,
+        );
+        return startClient("new");
+      }
       throw err;
     }
-  })();
+  };
 
-  return rt.clientReady;
+  return startClient(restoreMode);
 }
 
 /** Pre-spawn ACP for a session so the first prompt isn't blocked on cold start. */
@@ -910,7 +1006,9 @@ export async function runPrompt(
   }
 
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
-  const acpReady = ensureAcp(sessionId, opts);
+  // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
+  // OLD transcript (including the reply being replaced) — fresh context is correct.
+  const acpReady = ensureAcp(sessionId, opts, { preferResume: !opts.editMessageId });
 
   if (!opts.editMessageId) {
     const userMsg = await createMessage(sessionId, "user");
@@ -1354,7 +1452,9 @@ export async function syncSessionAgent(
 
   const rt = runtimes.get(sessionId);
   if (rt) resetAcpClient(rt);
-  const updated = await updateSession(sessionId, { provider });
+  // The stored ACP session belongs to the old provider — a resume would load
+  // the wrong agent's context.
+  const updated = await updateSession(sessionId, { provider, acpSessionId: null });
   return updated
     ? { ...detail, ...updated, messages: detail.messages }
     : { ...detail, provider };

@@ -36,11 +36,19 @@ function makeClient(extra: Partial<AppSettings> = {}): AcpClient {
  * event loop a turn so the flush lands before the kill.
  */
 async function withClient<T>(run: (client: AcpClient) => Promise<T>): Promise<T> {
+  return withClientStart(run);
+}
+
+/** Like withClient, but boots with the given start opts (resume/load). */
+async function withClientStart<T>(
+  run: (client: AcpClient) => Promise<T>,
+  startOpts?: { resume?: { sessionId: string; mode: "resume" | "load" } },
+): Promise<T> {
   const client = makeClient();
   // `proc` is a TS-private field; the cast only reaches the real child stream.
   const acp = client as unknown as { proc: { stdin: NodeJS.WritableStream } | null };
   try {
-    await client.start();
+    await client.start(120_000, startOpts);
     acp.proc?.stdin.on("error", () => {
       // benign: teardown raced a pending stdin write
     });
@@ -243,5 +251,60 @@ describe("AcpClient against the fake agent", () => {
     } finally {
       client.dispose();
     }
+  });
+});
+
+describe("session restore (resume/load)", () => {
+  it("session/resume boot attaches to the requested session and keeps prompting", async () => {
+    await withClientStart(
+      async (client) => {
+        expect(client.sessionId).toBe("fake-sess-1");
+        expect(client.canResumeSession).toBe(true);
+        const updates: AcpUpdate[] = [];
+        client.on("update", (u) => updates.push(u));
+        const res = await client.prompt("hello after resume");
+        expect(res.stopReason).toBe("end_turn");
+        expect(updates.some((u) => u.kind === "agent_message_chunk")).toBe(true);
+      },
+      { resume: { sessionId: "fake-sess-1", mode: "resume" } },
+    );
+  });
+
+  it("session/load boot swallows the replayed history (no update events)", async () => {
+    const client = makeClient();
+    const updates: AcpUpdate[] = [];
+    client.on("update", (u) => updates.push(u));
+    try {
+      await client.start(120_000, {
+        resume: { sessionId: "fake-sess-1", mode: "load" },
+      });
+      expect(client.sessionId).toBe("fake-sess-1");
+      expect(client.canLoadSession).toBe(true);
+      // The fake replays two session/update notifications during session/load —
+      // they must never reach consumers (the history is already in our DB).
+      expect(updates).toHaveLength(0);
+      const res = await client.prompt("still works after load");
+      expect(res.stopReason).toBe("end_turn");
+    } finally {
+      client.dispose();
+    }
+  });
+
+  it("resume of an unknown session id rejects", async () => {
+    await expect(
+      withClientStart(
+        async () => {},
+        { resume: { sessionId: "unknown-id", mode: "resume" } },
+      ),
+    ).rejects.toThrow("ACP session not found");
+  });
+
+  it("load of an unknown session id rejects", async () => {
+    await expect(
+      withClientStart(
+        async () => {},
+        { resume: { sessionId: "unknown-id", mode: "load" } },
+      ),
+    ).rejects.toThrow("ACP session not found");
   });
 });

@@ -6,6 +6,7 @@ import {
   coerceUiMode,
   normalizePlanPartPayload,
   parseRpcId,
+  pickRestoreMode,
   requestIdFor,
   subagentFieldsFromRaw,
   textFromUnknown,
@@ -277,5 +278,37 @@ describe("requestIdFor / parseRpcId", () => {
     ["a:b:7", "a:b", 7],
   ])("parseRpcId(%j, %j) === %j", (requestId, sessionId, expected) => {
     expect(parseRpcId(requestId, sessionId)).toBe(expected);
+  });
+});
+
+describe("pickRestoreMode", () => {
+  const base = {
+    provider: "omp" as const,
+    preferResume: true,
+    toggle: true,
+    hasStoredSession: true,
+    cwdMatches: true,
+  };
+
+  it.each([
+    // caller explicitly wants a fresh slate (edit/regenerate)
+    [{ ...base, preferResume: false }, "new"],
+    // toggle off
+    [{ ...base, toggle: false }, "new"],
+    // no stored ACP session yet
+    [{ ...base, hasStoredSession: false }, "new"],
+    // cwd or provider changed since the session was created
+    [{ ...base, cwdMatches: false }, "new"],
+    // omp → silent resume
+    [{ ...base }, "resume"],
+    [{ ...base, provider: "omp" }, "resume"],
+    // cursor → load with history replay
+    [{ ...base, provider: "cursor" }, "load"],
+    // every combination of missing preconditions stays new
+    [{ ...base, preferResume: false, toggle: false }, "new"],
+    [{ ...base, hasStoredSession: false, cwdMatches: false }, "new"],
+    [{ ...base, provider: "cursor", preferResume: false }, "new"],
+  ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
+    expect(pickRestoreMode({ ...input })).toBe(expected);
   });
 });

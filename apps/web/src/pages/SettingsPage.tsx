@@ -1026,6 +1026,24 @@ export function SettingsPage() {
             </div>
 
             <div className={`${styles.sectionBlock} ${styles.switchSection}`}>
+              <label className={`${styles.switchCard} ${form.resumeAgentContext ? styles.switchCardOn : ""}`}>
+                <input
+                  type="checkbox"
+                  className={styles.switchInput}
+                  checked={Boolean(form.resumeAgentContext)}
+                  onChange={(e) => patch("resumeAgentContext", e.target.checked)}
+                />
+                <span className={styles.switchBody}>
+                  <strong>{t("settings.resumeAgentContext")}</strong>
+                  <span>{t("settings.resumeAgentContextHint")}</span>
+                </span>
+                <span className={styles.switchSwitch} aria-hidden>
+                  <span />
+                </span>
+              </label>
+            </div>
+
+            <div className={`${styles.sectionBlock} ${styles.switchSection}`}>
               <label className={`${styles.switchCard} ${form.multitask ? styles.switchCardOn : ""}`}>
                 <input
                   type="checkbox"

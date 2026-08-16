@@ -49,7 +49,7 @@ async function handle(method, params, id) {
           loadSession: true,
           mcpCapabilities: { http: true },
           promptCapabilities: { embeddedContext: true },
-          sessionCapabilities: { close: {} },
+          sessionCapabilities: { resume: {}, close: {} },
         },
         serverInfo: { name: "fake-agent", version: "1.0.0" },
       };
@@ -64,12 +64,17 @@ async function handle(method, params, id) {
         modes: { availableModes: [] },
       };
     }
-    case "session/resume":
+    case "session/resume": {
+      const sid = String(params.sessionId ?? "");
+      if (!sid.startsWith("fake-sess-")) throw new Error(`ACP session not found: ${sid}`);
       return { configOptions: structuredClone(CONFIG_OPTIONS) };
+    }
     case "session/load": {
+      const sid = String(params.sessionId ?? "");
+      if (!sid.startsWith("fake-sess-")) throw new Error(`ACP session not found: ${sid}`);
       // Per ACP: replay stored history via session/update before responding.
       notify("session/update", {
-        sessionId: params.sessionId,
+        sessionId: sid,
         update: {
           sessionUpdate: "user_message_chunk",
           messageId: "m1",
@@ -77,7 +82,7 @@ async function handle(method, params, id) {
         },
       });
       notify("session/update", {
-        sessionId: params.sessionId,
+        sessionId: sid,
         update: {
           sessionUpdate: "agent_message_chunk",
           messageId: "m2",

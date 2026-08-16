@@ -64,6 +64,12 @@ export interface AppSettings {
   /** Folder on the server where chat exports are written. Empty → default under repo. */
   exportDir: string;
   /**
+   * Reuse the agent's ACP session on restarts (model/MCP change, server
+   * restart): OMP via session/resume, Cursor via session/load. Keeps the
+   * agent's context instead of starting each spawn with a blank slate.
+   */
+  resumeAgentContext: boolean;
+  /**
    * Queue requests back-to-back (agent keeps working on the next one as soon
    * as the previous reply is done). Only meaningful for agents that support
    * multitasking (Cursor, OMP).
@@ -112,6 +118,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   permissionAllowlist: [],
   diagnosticsDir: "",
   exportDir: "",
+  resumeAgentContext: true,
   multitask: false,
   sidebarCollapse: "full",
   showBootSplash: true,

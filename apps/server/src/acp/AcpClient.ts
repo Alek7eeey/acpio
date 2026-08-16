@@ -459,6 +459,23 @@ export class AcpClient extends EventEmitter {
   configOptions: ConfigOption[] = [];
   /** From session/new `modes.availableModes` when the agent provides it. */
   sessionModes: AgentModeOption[] = [];
+  /** Capabilities advertised by the agent in `initialize`. */
+  private capabilities: {
+    loadSession?: boolean;
+    sessionCapabilities?: { resume?: Record<string, unknown> };
+  } = {};
+  /** While true (Cursor session/load replay), drop session/update notifications. */
+  private suppressUpdates = false;
+
+  /** OMP-style silent restore: agent supports `session/resume`. */
+  get canResumeSession(): boolean {
+    return Boolean(this.capabilities.sessionCapabilities?.resume);
+  }
+
+  /** Cursor-style restore: agent supports `session/load` (replays history). */
+  get canLoadSession(): boolean {
+    return this.capabilities.loadSession === true;
+  }
 
   constructor(
     private readonly provider: AgentProvider,
@@ -480,7 +497,14 @@ export class AcpClient extends EventEmitter {
     return this.stderrBuf.slice(-4000);
   }
 
-  async start(timeoutMs = 45000, opts?: { catalogOnly?: boolean }): Promise<void> {
+  async start(
+    timeoutMs = 45000,
+    opts?: {
+      catalogOnly?: boolean;
+      /** Reattach an existing agent session instead of creating a new one. */
+      resume?: { sessionId: string; mode: "resume" | "load" };
+    },
+  ): Promise<void> {
     const commandName = providerCommand(this.settings, this.provider);
     const args = [...providerArgs(this.settings, this.provider)];
     const resolved = await resolveCommand(commandName);
@@ -550,7 +574,7 @@ export class AcpClient extends EventEmitter {
     rl.on("line", (line) => this.onLine(line));
 
     const boot = async () => {
-      await this.send("initialize", {
+      const initResult = (await this.send("initialize", {
         protocolVersion: 1,
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: true },
@@ -559,7 +583,13 @@ export class AcpClient extends EventEmitter {
           _meta: { parameterizedModelPicker: true },
         },
         clientInfo: { name: "acprocess", version: "0.1.0" },
-      });
+      })) as {
+        agentCapabilities?: {
+          loadSession?: boolean;
+          sessionCapabilities?: { resume?: Record<string, unknown> };
+        };
+      };
+      this.capabilities = initResult?.agentCapabilities ?? {};
 
       if (this.provider === "cursor") {
         try {
@@ -569,29 +599,61 @@ export class AcpClient extends EventEmitter {
         }
       }
 
-      const result = (await this.send("session/new", {
-        cwd,
-        mcpServers: (this.settings.mcpServers ?? [])
-          .filter((s) => s.enabled && s.url?.trim())
-          .map((s) => ({
-            name: s.name,
-            type: "http",
-            url: s.url!.trim(),
-            headers:
-              s.type === "remote" && s.token?.trim()
-                ? [{ name: "Authorization", value: `Bearer ${s.token.trim()}` }]
-                : [],
-          })),
-      })) as {
-        sessionId?: string;
-        configOptions?: ConfigOption[];
-        modes?: unknown;
-      };
+      const mcpServers = (this.settings.mcpServers ?? [])
+        .filter((s) => s.enabled && s.url?.trim())
+        .map((s) => ({
+          name: s.name,
+          type: "http",
+          url: s.url!.trim(),
+          headers:
+            s.type === "remote" && s.token?.trim()
+              ? [{ name: "Authorization", value: `Bearer ${s.token.trim()}` }]
+              : [],
+        }));
 
-      if (!result?.sessionId) {
-        throw new Error("session/new did not return sessionId");
+      const resume = opts?.resume;
+      let result: { sessionId?: string; configOptions?: ConfigOption[]; modes?: unknown };
+      if (resume?.mode === "resume") {
+        if (!this.canResumeSession) {
+          throw new Error("Agent does not support session/resume");
+        }
+        this.sessionId = resume.sessionId;
+        this.emit("log", `resuming session ${resume.sessionId} (session/resume)`);
+        result = (await this.send("session/resume", {
+          sessionId: resume.sessionId,
+          cwd,
+          mcpServers,
+        })) as { configOptions?: ConfigOption[]; modes?: unknown };
+      } else if (resume?.mode === "load") {
+        if (!this.canLoadSession) {
+          throw new Error("Agent does not support session/load");
+        }
+        this.sessionId = resume.sessionId;
+        this.emit("log", `resuming session ${resume.sessionId} (session/load)`);
+        // Cursor replays the whole stored conversation here; we already have
+        // it in our DB, so swallow the notifications instead of double-writing.
+        this.suppressUpdates = true;
+        try {
+          result = (await this.send("session/load", {
+            sessionId: resume.sessionId,
+            cwd,
+            mcpServers,
+          })) as { configOptions?: ConfigOption[]; modes?: unknown };
+        } finally {
+          this.suppressUpdates = false;
+        }
+      } else {
+        result = (await this.send("session/new", { cwd, mcpServers })) as {
+          sessionId?: string;
+          configOptions?: ConfigOption[];
+          modes?: unknown;
+        };
+        if (!result?.sessionId) {
+          throw new Error("session/new did not return sessionId");
+        }
+        this.sessionId = result.sessionId;
       }
-      this.sessionId = result.sessionId;
+
       this.configOptions = normalizeConfigOptions(result.configOptions ?? []);
       this.sessionModes = modesFromSessionState(result.modes);
       this.emit(
@@ -1091,6 +1153,7 @@ export class AcpClient extends EventEmitter {
     if (!method) return;
 
     if (method === "session/update") {
+      if (this.suppressUpdates) return; // Cursor session/load replay — history is already in our DB
       const params = (msg.params ?? {}) as Record<string, unknown>;
       const update = (params.update ?? params) as Record<string, unknown>;
       const mapped = this.mapUpdate(update);

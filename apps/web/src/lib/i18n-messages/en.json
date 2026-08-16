@@ -326,6 +326,8 @@
   "defaultFolder": "Default folder",
   "exportDir": "Export folder",
   "exportDirHint": "Chat exports are saved here. Empty → default: {{path}}",
+  "resumeAgentContext": "Resume agent context",
+  "resumeAgentContextHint": "On restart (model/MCP change, server restart) the agent continues its previous session instead of starting blank — OMP via session/resume, Cursor via session/load.",
   "cliAndPermissions": "CLI & permissions",
   "permissionPolicy": "Permission policy",
   "permissionPrompt": "Ask",
