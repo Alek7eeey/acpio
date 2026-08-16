@@ -5,7 +5,8 @@
   display: grid;
   place-items: center;
   padding: 16px;
-  z-index: 90;
+  /* Above the app header (z-index 200) so modals dim/blur the whole screen. */
+  z-index: 500;
   backdrop-filter: blur(2px);
 }
 
