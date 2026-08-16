@@ -13,7 +13,9 @@ import {
   type AgentMode,
   type AgentProvider,
   type AppSettings,
+  type McpServerConfig,
   type ModelParamDto,
+  type SessionDetailDto,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
@@ -402,6 +404,20 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
 export type RestoreMode = "new" | "resume" | "load";
 
 /**
+ * MCP servers a chat's agent session actually gets: globally enabled ones
+ * minus the ids this chat disabled. Passed verbatim to session/new|resume|load.
+ */
+export function effectiveMcpServers(
+  settings: AppSettings,
+  disabledIds: string[] | null | undefined,
+): McpServerConfig[] {
+  const disabled = new Set(disabledIds ?? []);
+  return (settings.mcpServers ?? []).filter(
+    (s) => s.enabled && s.url?.trim() && !disabled.has(s.id),
+  );
+}
+
+/**
  * Decide how a fresh ACP spawn should attach to the agent:
  * - "new"    — session/new (blank context); used when the toggle is off, the
  *              caller explicitly wants a fresh slate (edit/regenerate), the
@@ -430,25 +446,23 @@ export function pickRestoreMode(input: {
   return "new";
 }
 
-async function resolveRestoreMode(
-  sessionId: string,
+function resolveRestoreMode(
   opts: { provider: AgentProvider; cwd: string },
   settings: AppSettings,
   preferResume: boolean,
-): Promise<{ mode: RestoreMode; storedSessionId?: string }> {
+  detail: SessionDetailDto | null,
+): { mode: RestoreMode; storedSessionId?: string } {
   if (preferResume === false || !settings.resumeAgentContext) {
     return { mode: "new" };
   }
   if (opts.provider !== "omp" && opts.provider !== "cursor") {
     return { mode: "new" };
   }
-  const detail = await getSessionDetail(sessionId);
-  const hasStoredSession = Boolean(detail?.acpSessionId);
   const mode = pickRestoreMode({
     provider: opts.provider,
     preferResume: true,
     toggle: true,
-    hasStoredSession,
+    hasStoredSession: Boolean(detail?.acpSessionId),
     cwdMatches: Boolean(detail && detail.cwd === opts.cwd && detail.provider === opts.provider),
   });
   return mode === "new"
@@ -475,12 +489,15 @@ export async function ensureAcp(
   if (rt.client) return rt.client;
 
   const settings = await getSettings();
-  const { mode: restoreMode, storedSessionId } = await resolveRestoreMode(
-    sessionId,
+  const detail = await getSessionDetail(sessionId);
+  const { mode: restoreMode, storedSessionId } = resolveRestoreMode(
     opts,
     settings,
     boot?.preferResume ?? true,
+    detail,
   );
+  // This chat's MCP list: globally enabled minus ids disabled for this chat.
+  const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds);
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
     const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
@@ -547,11 +564,12 @@ export async function ensureAcp(
         await client.start(
           mode === "new" ? 45_000 : 120_000,
           mode === "new"
-            ? { model: boot?.model, modelParams: boot?.modelParams }
+            ? { model: boot?.model, modelParams: boot?.modelParams, mcpServers }
             : {
                 resume: { sessionId: storedSessionId!, mode },
                 model: boot?.model,
                 modelParams: boot?.modelParams,
+                mcpServers,
               },
         );
         const settings = await getSettings();
@@ -1404,6 +1422,31 @@ function liveModelSnapshot(
   };
 }
 
+/** Restart one session's agent so it picks up a new MCP list (idle → now, mid-turn → on idle). Returns true when a restart was scheduled. */
+export async function restartSessionMcp(sessionId: string): Promise<boolean> {
+  const rt = runtimes.get(sessionId);
+  if (!rt?.client && !rt?.clientReady) return false; // no live agent
+  if (rt.running) {
+    rt.restartOnIdle = true;
+    return true;
+  }
+  const detail = await getSessionDetail(sessionId);
+  if (!detail?.provider || detail.status === "closed") return false;
+  const snapshot = liveModelSnapshot(rt);
+  resetAcpClient(rt);
+  try {
+    await ensureAcp(
+      sessionId,
+      { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
+      snapshot,
+    );
+    return true;
+  } catch (err) {
+    console.error(`[acp:${sessionId}] restart after MCP change failed`, err);
+    return false;
+  }
+}
+
 /**
  * The MCP list is only accepted at session/new|resume|load — a changed config
  * forces a fresh agent process. The resumed session reconnects the new MCP
@@ -1424,28 +1467,8 @@ export async function restartSessionsForMcpChange(): Promise<void> {
   lastMcpSnapshot = desired;
 
   let restarted = 0;
-  for (const [sessionId, rt] of runtimes) {
-    if (!rt.client && !rt.clientReady) continue; // no live agent
-    if (rt.running) {
-      rt.restartOnIdle = true;
-      continue;
-    }
-    const detail = await import("../services/sessions.js").then((m) =>
-      m.getSessionDetail(sessionId),
-    );
-    if (!detail?.provider || detail.status === "closed") continue;
-    const snapshot = liveModelSnapshot(rt);
-    resetAcpClient(rt);
-    try {
-      await ensureAcp(
-        sessionId,
-        { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
-        snapshot,
-      );
-      restarted += 1;
-    } catch (err) {
-      console.error(`[acp:${sessionId}] restart after MCP change failed`, err);
-    }
+  for (const sessionId of runtimes.keys()) {
+    if (await restartSessionMcp(sessionId)) restarted += 1;
   }
   console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
 }

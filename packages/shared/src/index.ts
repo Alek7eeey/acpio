@@ -405,6 +405,8 @@ export interface SessionDto {
   pinned: boolean;
   /** Archived sessions are hidden from the main tree (Архив section). */
   archived: boolean;
+  /** MCP server ids disabled for THIS chat only (global list still applies to others). */
+  mcpDisabledIds: string[];
   createdAt: string;
   updatedAt: string;
   /** Timestamp of the latest message in the session (falls back to createdAt). */

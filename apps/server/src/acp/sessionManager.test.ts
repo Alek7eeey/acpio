@@ -3,9 +3,14 @@
 // these tests never touch the database.
 import { describe, it, expect } from "vitest";
 import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+} from "@acprocess/shared";
+import {
   coerceUiMode,
   normalizePlanPartPayload,
   parseRpcId,
+  effectiveMcpServers,
   pickRestoreMode,
   requestIdFor,
   subagentFieldsFromRaw,
@@ -310,5 +315,35 @@ describe("pickRestoreMode", () => {
     [{ ...base, provider: "cursor", preferResume: false }, "new"],
   ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
     expect(pickRestoreMode({ ...input })).toBe(expected);
+  });
+});
+
+describe("effectiveMcpServers", () => {
+  const mcp = (id: string, enabled = true) => ({
+    id,
+    name: id,
+    enabled,
+    type: "local" as const,
+    url: `http://localhost/${id}`,
+  });
+  const settings = {
+    mcpServers: [mcp("a"), mcp("b"), mcp("c", false)],
+  } as never; // narrow: effectiveMcpServers only reads mcpServers
+
+  it.each([
+    ["no disabled ids → all enabled servers", undefined, ["a", "b"]],
+    ["empty disabled list", [], ["a", "b"]],
+    ["one disabled", ["a"], ["b"]],
+    ["all disabled", ["a", "b"], []],
+    ["unknown ids ignored", ["nope"], ["a", "b"]],
+    ["disabled applies to disabled server too (no-op)", ["c"], ["a", "b"]],
+  ] as const)("%s", (_name, disabledIds, expected) => {
+    const result = effectiveMcpServers(settings, disabledIds);
+    expect(result.map((s) => s.id)).toEqual(expected);
+  });
+
+  it("filters by enabled and url regardless of disabled list", () => {
+    const withEmptyUrl = { ...settings, mcpServers: [{ ...mcp("x"), url: "  " }] };
+    expect(effectiveMcpServers(withEmptyUrl, [])).toEqual([]);
   });
 });

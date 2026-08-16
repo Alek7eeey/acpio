@@ -140,7 +140,7 @@ type AppState = {
   /** Toggle pin/archive flags (optimistic PATCH). */
   setSessionFlags: (
     id: string,
-    patch: { pinned?: boolean; archived?: boolean },
+    patch: { pinned?: boolean; archived?: boolean; mcpDisabledIds?: string[] },
   ) => Promise<void>;
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,

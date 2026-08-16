@@ -20,6 +20,7 @@ import {
   type AgentMode,
   type AgentProvider,
   type AppSettings,
+  type McpServerConfig,
 } from "@acprocess/shared";
 
 const execFileAsync = promisify(execFile);
@@ -506,6 +507,8 @@ export class AcpClient extends EventEmitter {
       /** Model applied at boot (defaults to settings.defaultModel). */
       model?: string;
       modelParams?: Record<string, string>;
+      /** MCP servers for THIS session (global list filtered per chat). */
+      mcpServers?: McpServerConfig[];
     },
   ): Promise<void> {
     const commandName = providerCommand(this.settings, this.provider);
@@ -602,7 +605,7 @@ export class AcpClient extends EventEmitter {
         }
       }
 
-      const mcpServers = (this.settings.mcpServers ?? [])
+      const mcpServers = (opts?.mcpServers ?? this.settings.mcpServers ?? [])
         .filter((s) => s.enabled && s.url?.trim())
         .map((s) => ({
           name: s.name,

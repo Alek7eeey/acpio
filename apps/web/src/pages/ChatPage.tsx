@@ -29,6 +29,7 @@ import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
+import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
 import {
   dominantLanguage,
@@ -51,7 +52,6 @@ import {
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete, requestNotificationPermission } from "../lib/notify";
-import { settingsPath } from "../lib/settingsNav";
 import { isImageFile } from "../lib/pathSegments";
 import {
   buildSlashInsertion,
@@ -1816,6 +1816,7 @@ export function ChatPage() {
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -1901,10 +1902,14 @@ export function ChatPage() {
     }
   }, [autoExpandSteps]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
-  // MCP servers this chat's agent session runs with (applied at session/new|resume|load).
+  // MCP servers this chat's agent session runs with: globally enabled minus
+  // the ids this chat disabled in its MCP dialog.
   const enabledMcp = (settings.mcpServers ?? []).filter(
     (s) => s.enabled && s.url?.trim(),
   );
+  const chatMcp = activeSession
+    ? enabledMcp.filter((s) => !(activeSession.mcpDisabledIds ?? []).includes(s.id))
+    : [];
   const promptEpoch = useAppStore((s) => s.promptEpoch);
   const cancelledPromptEpoch = useAppStore((s) => s.cancelledPromptEpoch);
 
@@ -3120,17 +3125,17 @@ export function ChatPage() {
                 </span>
                 <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
               </button>
-              {activeSession && enabledMcp.length > 0 ? (
+              {activeSession && chatMcp.length > 0 ? (
                 <button
                   type="button"
                   className={styles.metaChip}
                   aria-label={t("chat.mcpChipTitle", {
-                    names: enabledMcp.map((s) => s.name).join(", "),
+                    names: chatMcp.map((s) => s.name).join(", "),
                   })}
                   title={t("chat.mcpChipTitle", {
-                    names: enabledMcp.map((s) => s.name).join(", "),
+                    names: chatMcp.map((s) => s.name).join(", "),
                   })}
-                  onClick={() => navigate(settingsPath("agent", "mcp"))}
+                  onClick={() => setMcpDialogOpen(true)}
                 >
                   <span className={styles.metaChipIcon} aria-hidden>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -3144,7 +3149,7 @@ export function ChatPage() {
                     </svg>
                   </span>
                   <span className={styles.metaChipLabel}>
-                    {t("chat.mcpChipCount", { count: enabledMcp.length })}
+                    {t("chat.mcpChipCount", { count: chatMcp.length })}
                   </span>
                 </button>
               ) : null}
@@ -3467,6 +3472,12 @@ export function ChatPage() {
             return [...prev, ...files];
           });
         }}
+      />
+      <McpChatDialog
+        open={mcpDialogOpen}
+        sessionId={activeSession?.id ?? null}
+        mcpDisabledIds={activeSession?.mcpDisabledIds}
+        onClose={() => setMcpDialogOpen(false)}
       />
       </div>
 

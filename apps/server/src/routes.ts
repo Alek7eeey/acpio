@@ -40,6 +40,7 @@ import {
   syncSessionAgent,
   warmAcp,
   restartSessionsForMcpChange,
+  restartSessionMcp,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -350,10 +351,13 @@ export async function registerRoutes(app: FastifyInstance) {
         sortOrder: z.number().int().optional(),
         pinned: z.boolean().optional(),
         archived: z.boolean().optional(),
+        mcpDisabledIds: z.array(z.string().min(1).max(64)).optional(),
       })
       .parse(req.body ?? {});
     const updated = await updateSession(id, body);
     if (!updated) return reply.code(404).send({ error: "Not found" });
+    // A chat-level MCP change needs a fresh agent attach, same as a global one.
+    if (body.mcpDisabledIds) void restartSessionMcp(id);
     return updated;
   });
 

@@ -17,6 +17,11 @@ export async function ensureSchema() {
 
   await db.execute(sql`
     ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS mcp_disabled_ids jsonb NOT NULL DEFAULT '[]'
+  `);
+
+  await db.execute(sql`
+    ALTER TABLE sessions
     ADD COLUMN IF NOT EXISTS theme_id uuid REFERENCES chat_themes(id) ON DELETE SET NULL
   `);
   await db.execute(sql`

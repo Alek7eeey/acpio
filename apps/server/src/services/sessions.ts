@@ -38,6 +38,9 @@ function mapSession(
     sortOrder: row.sortOrder ?? 0,
     pinned: row.pinned ?? false,
     archived: row.archived ?? false,
+    mcpDisabledIds: Array.isArray(row.mcpDisabledIds)
+      ? (row.mcpDisabledIds as string[])
+      : [],
     createdAt,
     updatedAt: row.updatedAt.toISOString(),
     lastMessageAt: lastAt,
@@ -157,6 +160,7 @@ export async function updateSession(
     sortOrder: number;
     pinned: boolean;
     archived: boolean;
+    mcpDisabledIds: string[];
   }>,
 ): Promise<SessionDto | null> {
   const [row] = await db

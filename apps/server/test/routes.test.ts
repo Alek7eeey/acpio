@@ -239,6 +239,28 @@ describe("sessions", () => {
     expect(res.statusCode).toBe(404);
   });
 
+  it("PATCH /api/sessions/:id persists per-chat MCP disabled ids", async () => {
+    const seeded = await seedSession({ title: "MCP chat" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${seeded.id}`,
+      payload: { mcpDisabledIds: ["mcp-a", "mcp-b"] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().mcpDisabledIds).toEqual(["mcp-a", "mcp-b"]);
+
+    const after = await app.inject({ method: "GET", url: `/api/sessions/${seeded.id}` });
+    expect(after.json().mcpDisabledIds).toEqual(["mcp-a", "mcp-b"]);
+
+    // clearing works too
+    const cleared = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${seeded.id}`,
+      payload: { mcpDisabledIds: [] },
+    });
+    expect(cleared.json().mcpDisabledIds).toEqual([]);
+  });
+
   it("DELETE /api/sessions/:id removes the session; re-fetch → 404", async () => {
     const seeded = await seedSession({ title: "Delete me" });
     const del = await app.inject({ method: "DELETE", url: `/api/sessions/${seeded.id}` });

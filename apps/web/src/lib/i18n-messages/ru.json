@@ -285,7 +285,11 @@
   "exportOpenFolder": "Открыть папку",
   "exportEmpty": "Нечего экспортировать — в чате нет сообщений",
   "mcpChipCount": "MCP · {{count}}",
-  "mcpChipTitle": "MCP серверы этого чата: {{names}}"
+  "mcpChipTitle": "MCP серверы этого чата: {{names}}",
+  "mcpDialogTitle": "MCP серверы чата",
+  "mcpDialogDesc": "Какие MCP серверы подключаются к агенту этого чата. Изменения перезапустят агента с новым списком — история сохранится.",
+  "mcpDialogNone": "Глобально не настроено ни одного MCP сервера.",
+  "mcpManage": "Управление списком — Настройки → MCP"
 },
  "settings": {
   "agents": "Агенты",

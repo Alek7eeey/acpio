@@ -146,7 +146,14 @@ export const api = {
     }),
   updateSession: (
     id: string,
-    patch: { title?: string; themeId?: string | null; sortOrder?: number; pinned?: boolean; archived?: boolean },
+    patch: {
+      title?: string;
+      themeId?: string | null;
+      sortOrder?: number;
+      pinned?: boolean;
+      archived?: boolean;
+      mcpDisabledIds?: string[];
+    },
   ) =>
     request<SessionDto>(`/api/sessions/${id}`, {
       method: "PATCH",

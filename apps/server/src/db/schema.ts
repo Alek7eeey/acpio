@@ -36,6 +36,8 @@ export const sessions = pgTable("sessions", {
   sortOrder: integer("sort_order").notNull().default(0),
   pinned: boolean("pinned").notNull().default(false),
   archived: boolean("archived").notNull().default(false),
+  /** MCP server ids disabled for this chat only. */
+  mcpDisabledIds: jsonb("mcp_disabled_ids").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

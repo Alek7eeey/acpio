@@ -261,7 +261,11 @@
   "exportOpenFolder": "Open folder",
   "exportEmpty": "No messages to export",
   "mcpChipCount": "MCP · {{count}}",
-  "mcpChipTitle": "This chat's MCP servers: {{names}}"
+  "mcpChipTitle": "This chat's MCP servers: {{names}}",
+  "mcpDialogTitle": "Chat MCP servers",
+  "mcpDialogDesc": "Which MCP servers attach to this chat's agent. Changes restart the chat's agent with the new list — history is preserved.",
+  "mcpDialogNone": "No MCP servers are configured globally.",
+  "mcpManage": "Manage the server list in Settings → MCP"
 },
  "settings": {
   "agents": "Agents",

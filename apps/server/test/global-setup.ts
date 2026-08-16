@@ -53,9 +53,14 @@ export default async function globalSetup() {
       sort_order integer NOT NULL DEFAULT 0,
       pinned boolean NOT NULL DEFAULT false,
       archived boolean NOT NULL DEFAULT false,
+      mcp_disabled_ids jsonb NOT NULL DEFAULT '[]',
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )`);
+    // Schema evolved after the test table was first created — keep old test
+    // databases in sync with ensureSchema-style additive patches.
+    await tolerant(() => sql`ALTER TABLE sessions
+      ADD COLUMN IF NOT EXISTS mcp_disabled_ids jsonb NOT NULL DEFAULT '[]'`);
 
     await tolerant(() => sql`CREATE TABLE IF NOT EXISTS messages (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
