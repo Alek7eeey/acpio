@@ -14,6 +14,7 @@ import {
   collectRecentCwds,
   CreateSessionFolderPicker,
 } from "./CreateSessionFolderPicker";
+import { ExportDialog } from "./ExportDialog";
 import styles from "./AppShell.module.css";
 
 type MenuState = { id: string; x: number; y: number } | null;
@@ -222,6 +223,7 @@ export function ChatSidebar({
   const [draft, setDraft] = useState("");
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [exportDialogId, setExportDialogId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [searchQuery, setSearchQuery] = useState("");
@@ -1289,6 +1291,25 @@ export function ChatSidebar({
                 </button>
               </>
             )}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(null);
+                setExportDialogId(menuSession.id);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.exportChat")}
+            </button>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"
@@ -1328,6 +1349,17 @@ export function ChatSidebar({
           }}
         />
       )}
+
+      {exportDialogId &&
+        createPortal(
+          <ExportDialog
+            open
+            sessionId={exportDialogId}
+            messageCount={undefined}
+            onClose={() => setExportDialogId(null)}
+          />,
+          document.body,
+        )}
     </>
   );
 }

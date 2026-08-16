@@ -78,9 +78,9 @@ export function SettingsPage() {
   const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
   const [probingId, setProbingId] = useState<AgentProvider | null>(null);
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
-  const [folderBrowseTarget, setFolderBrowseTarget] = useState<"defaultCwd" | "diagnosticsDir">(
-    "defaultCwd",
-  );
+  const [folderBrowseTarget, setFolderBrowseTarget] = useState<
+    "defaultCwd" | "diagnosticsDir" | "exportDir"
+  >("defaultCwd");
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
   const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
@@ -100,6 +100,7 @@ export function SettingsPage() {
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const [diagDirDefault, setDiagDirDefault] = useState("");
   const [diagDirResolved, setDiagDirResolved] = useState("");
+  const [exportDirDefault, setExportDirDefault] = useState("");
   const [diagItems, setDiagItems] = useState<DiagnosticsDumpMeta[]>([]);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagBusy, setDiagBusy] = useState(false);
@@ -156,6 +157,22 @@ export function SettingsPage() {
     if (leaf !== "diagnostics") return;
     void refreshDiagnostics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaf]);
+
+  useEffect(() => {
+    if (leaf !== "advanced") return;
+    let cancelled = false;
+    api
+      .getExportDefaultDir()
+      .then((res) => {
+        if (!cancelled) setExportDirDefault(res.path);
+      })
+      .catch(() => {
+        // leave default empty — hint shows nothing
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [leaf]);
 
   useEffect(() => {
@@ -920,6 +937,41 @@ export function SettingsPage() {
               </label>
               <p className={styles.fieldHint}>{t("settings.defaultFolder")}</p>
               <label>
+                {t("settings.exportDir")}
+                <div className={styles.cwdPickRow}>
+                  <span
+                    className={styles.cwdPath}
+                    title={form.exportDir || exportDirDefault || undefined}
+                  >
+                    {form.exportDir || exportDirDefault || t("common.notSet")}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      setFolderBrowseTarget("exportDir");
+                      setFolderBrowseOpen(true);
+                    }}
+                  >
+                    {t("common.selectFolder")}
+                  </button>
+                  {form.exportDir ? (
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => patch("exportDir", "")}
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  ) : null}
+                </div>
+              </label>
+              <p className={styles.fieldHint}>
+                {t("settings.exportDirHint", {
+                  path: form.exportDir || exportDirDefault || "…",
+                })}
+              </p>
+              <label>
                 {t("settings.permissionPolicy")}
                 <OptionPicker
                   variant="block"
@@ -1482,7 +1534,9 @@ export function SettingsPage() {
         initialPath={
           folderBrowseTarget === "diagnosticsDir"
             ? form.diagnosticsDir || diagDirDefault || undefined
-            : form.defaultCwd || undefined
+            : folderBrowseTarget === "exportDir"
+              ? form.exportDir || exportDirDefault || undefined
+              : form.defaultCwd || undefined
         }
         onClose={() => setFolderBrowseOpen(false)}
         onSelect={(path) => patch(folderBrowseTarget, path)}

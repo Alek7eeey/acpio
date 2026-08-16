@@ -55,6 +55,7 @@ import {
   writeDiagnosticsDump,
 } from "./services/diagnostics.js";
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
+import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import type { AgentProvider } from "@acprocess/shared";
 
@@ -91,6 +92,7 @@ const settingsSchema = z.object({
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
+  exportDir: z.string().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   showBootSplash: z.boolean().optional(),
@@ -162,6 +164,8 @@ export async function registerRoutes(app: FastifyInstance) {
       return reply.code(500).send({ error: message });
     }
   });
+
+  app.get("/api/export/default-dir", async () => ({ path: defaultExportDir() }));
 
   app.post("/api/fs/pick-directory", async (req, reply) => {
     const body = z
@@ -413,6 +417,41 @@ export async function registerRoutes(app: FastifyInstance) {
       });
     }
     return { ...detail, slashCommands: getSessionSlashCommands(id) };
+  });
+
+  /** Download the conversation as Markdown or JSON (?format=md|json). */
+  app.get("/api/sessions/:id/export", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { format?: string };
+    const format = q.format === "json" ? "json" : "md";
+    const built = await buildExport(id, format);
+    if (!built) return reply.code(404).send({ error: "Not found" });
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(built.fileName)}`,
+    );
+    return reply
+      .type(format === "json" ? "application/json; charset=utf-8" : "text/markdown; charset=utf-8")
+      .header("Cache-Control", "no-store")
+      .send(built.content);
+  });
+
+  /** Save the export as a file on the server machine (default: <repo>/exports). */
+  app.post("/api/sessions/:id/export", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        format: z.enum(["md", "json"]).default("md"),
+        dir: z.string().max(4096).optional(),
+      })
+      .parse(req.body ?? {});
+    try {
+      const saved = await saveExportToDisk(id, body.format, body.dir);
+      return { ok: true, ...saved };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(err instanceof Error && err.message === "Session not found" ? 404 : 500).send({ error: message });
+    }
   });
 
   app.delete("/api/sessions/:id", async (req, reply) => {

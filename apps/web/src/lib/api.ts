@@ -162,6 +162,52 @@ export const api = {
   getSession: (id: string) => request<SessionDetailDto>(`/api/sessions/${id}`),
   deleteSession: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
+  /**
+   * Fetch the conversation as Markdown/JSON and trigger a browser download.
+   * Content-Disposition supplies the filename (may be non-ASCII).
+   */
+  downloadSessionExport: async (id: string, format: "md" | "json") => {
+    const res = await fetch(`/api/sessions/${id}/export?format=${format}`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || res.statusText;
+      try {
+        const json = JSON.parse(text) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const content = await res.text();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const fileName = match
+      ? decodeURIComponent(match[1])
+      : `chat-export.${format === "json" ? "json" : "md"}`;
+    const blob = new Blob([content], {
+      type: res.headers.get("Content-Type") ?? "text/plain",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+  saveSessionExportToServer: (
+    id: string,
+    format: "md" | "json",
+    dir?: string,
+  ) =>
+    request<{ ok: boolean; path: string; fileName: string }>(`/api/sessions/${id}/export`, {
+      method: "POST",
+      body: JSON.stringify({ format, ...(dir ? { dir } : {}) }),
+    }),
   listThemes: () => request<ChatThemeDto[]>("/api/themes"),
   createTheme: (input?: { name?: string }) =>
     request<ChatThemeDto>("/api/themes", {
@@ -218,6 +264,7 @@ export const api = {
   listDiagnostics: () =>
     request<{ dir: string; defaultDir: string; items: DiagnosticsDumpMeta[] }>("/api/diagnostics"),
   getDiagnosticsDefaultDir: () => request<{ path: string }>("/api/diagnostics/default-dir"),
+  getExportDefaultDir: () => request<{ path: string }>("/api/export/default-dir"),
   createDiagnosticsDump: (body?: {
     reason?: string;
     note?: string;

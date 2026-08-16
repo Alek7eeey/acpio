@@ -61,6 +61,8 @@ export interface AppSettings {
   permissionAllowlist: string[];
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
   diagnosticsDir: string;
+  /** Folder on the server where chat exports are written. Empty → default under repo. */
+  exportDir: string;
   /**
    * Queue requests back-to-back (agent keeps working on the next one as soon
    * as the previous reply is done). Only meaningful for agents that support
@@ -109,6 +111,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   permissionPolicy: "always",
   permissionAllowlist: [],
   diagnosticsDir: "",
+  exportDir: "",
   multitask: false,
   sidebarCollapse: "full",
   showBootSplash: true,

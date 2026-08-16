@@ -10,6 +10,7 @@ coverage
 *.tsbuildinfo
 .vite
 diagnostics/
+exports/
 dev-dist/
 _temp/
 piper/

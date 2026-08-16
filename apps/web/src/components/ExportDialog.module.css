@@ -1,0 +1,67 @@
+.group {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.groupLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hint {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+
+.saved {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  display: grid;
+  gap: 8px;
+}
+
+.savedLabel {
+  font-size: 0.85rem;
+  line-height: 1.4;
+  word-break: break-all;
+  color: var(--text);
+}
+
+.savedActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.savedActions button {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.error {
+  margin: 10px 0 0;
+  font-size: 0.85rem;
+  color: var(--danger, #c44);
+}
