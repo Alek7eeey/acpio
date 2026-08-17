@@ -282,22 +282,37 @@ function isLocalAssistantId(id: string) {
   return id.startsWith("local-assistant-");
 }
 
-/** Server message ids → stable client ids so optimistic bubbles never remount. */
-const serverToClientMessageId = new Map<string, string>();
+/**
+ * Server message ids → stable client ids so optimistic bubbles never remount.
+ * Entries are session-scoped: an in-flight turn's bridge must survive the user
+ * switching chats (otherwise returning re-creates a duplicate assistant
+ * message from late WS parts next to the optimistic one).
+ */
+const serverToClientMessageId = new Map<string, { clientId: string; sessionId: string }>();
 /** One prompt may be active at a time. Map its server messages only to its pair. */
-let pendingOptimisticPair: { userId: string; assistantId: string } | null = null;
+let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: string } | null = null;
 
-function resolveClientMessageId(messageId: string) {
-  return serverToClientMessageId.get(messageId) ?? messageId;
+function resolveClientMessageId(messageId: string, sessionId?: string) {
+  const entry = serverToClientMessageId.get(messageId);
+  if (!entry) return messageId;
+  if (sessionId && entry.sessionId !== sessionId) return messageId;
+  return entry.clientId;
 }
 
-function clearMessageIdAliases() {
+function clearMessageIdAliases(sessionId?: string) {
+  if (sessionId) {
+    for (const [key, entry] of serverToClientMessageId) {
+      if (entry.sessionId === sessionId) serverToClientMessageId.delete(key);
+    }
+    if (pendingOptimisticPair?.sessionId === sessionId) pendingOptimisticPair = null;
+    return;
+  }
   serverToClientMessageId.clear();
   pendingOptimisticPair = null;
 }
 
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
-  const clientMessageId = resolveClientMessageId(message.id);
+  const clientMessageId = resolveClientMessageId(message.id, message.sessionId);
   const idx = messages.findIndex((m) => m.id === clientMessageId);
   if (idx >= 0) {
     const next = messages.slice();
@@ -311,14 +326,15 @@ function upsertMessage(messages: MessageDto[], message: MessageDto) {
     return next;
   }
 
+  const pair = pendingOptimisticPair?.sessionId === message.sessionId ? pendingOptimisticPair : null;
   const pendingId =
     message.role === "user"
-      ? pendingOptimisticPair?.userId
+      ? pair?.userId
       : message.role === "assistant"
-        ? pendingOptimisticPair?.assistantId
+        ? pair?.assistantId
         : null;
   if (pendingId && messages.some((item) => item.id === pendingId)) {
-    serverToClientMessageId.set(message.id, pendingId);
+    serverToClientMessageId.set(message.id, { clientId: pendingId, sessionId: message.sessionId });
     const next = messages.slice();
     const index = next.findIndex((item) => item.id === pendingId);
     const previous = next[index]!;
@@ -367,11 +383,15 @@ function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppS
   for (const event of batch) {
     if (active.id !== event.sessionId) continue;
     if (state.cancelledPromptEpoch === state.promptEpoch) continue;
-    let messageId = resolveClientMessageId(event.messageId);
+    let messageId = resolveClientMessageId(event.messageId, active.id);
     if (messageId === event.messageId) {
-      const optimisticId = pendingOptimisticPair?.assistantId;
+      const optimisticId =
+        pendingOptimisticPair?.sessionId === active.id ? pendingOptimisticPair.assistantId : null;
       if (optimisticId && messages.some((message) => message.id === optimisticId)) {
-        serverToClientMessageId.set(event.messageId, optimisticId);
+        serverToClientMessageId.set(event.messageId, {
+          clientId: optimisticId,
+          sessionId: active.id,
+        });
         messageId = optimisticId;
       }
     }
@@ -436,6 +456,9 @@ function reconcileFinishedTurn(
         // normal text; never gate the visible answer on a client animation.
         rememberSessionDetail(detail);
         set({ activeSession: detail });
+        // Server truth replaced the optimistic messages — drop this session's
+        // aliases so late WS parts never rebuild a duplicate message.
+        clearMessageIdAliases(sessionId);
       })
       .catch(() => {
         // The live WS already rendered what it could; a later selection retries.
@@ -731,7 +754,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectSession(id) {
     if (!id) {
       localStorage.removeItem(ACTIVE_SESSION_KEY);
-      clearMessageIdAliases();
       set({
         activeSessionId: null,
         activeSession: null,
@@ -758,7 +780,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...listItem, messages: [], slashCommands: [] }
           : null);
 
-    if (current?.id !== id) clearMessageIdAliases();
+    // Note: message-id aliases are deliberately NOT cleared here — an
+    // in-flight optimistic turn in another chat must keep its bridge so
+    // returning mid-stream never spawns a duplicate assistant message.
 
     set({
       activeSessionId: id,
@@ -793,6 +817,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         return;
       }
       set({ activeSession: detail, sessionLoading: false });
+      // The fetched detail is server-authoritative: the optimistic aliases for
+      // this session are obsolete (their local messages are gone).
+      clearMessageIdAliases(id);
     } catch (err) {
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
       set({
@@ -1037,7 +1064,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = await get().createSession();
       const active = get().activeSession;
       const pair = buildOptimisticPair(session.id, active?.id === session.id ? active.messages : []);
-      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId };
+      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId, sessionId: session.id };
       commitRunning(session.id, pair.messages, pair.epoch);
       await api.prompt(session.id, text);
       return;
@@ -1074,7 +1101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const now = new Date().toISOString();
         const assistantId = `local-assistant-${epoch}`;
         const userId = msgs[idx]!.id;
-        pendingOptimisticPair = { userId, assistantId };
+        pendingOptimisticPair = { userId, assistantId, sessionId: id };
         commitRunning(
           id,
           [
@@ -1097,7 +1124,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const active = get().activeSession;
     if (active?.id === id && optimistic) {
       const pair = buildOptimisticPair(id, active.messages);
-      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId };
+      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId, sessionId: id };
       commitRunning(id, pair.messages, pair.epoch);
     } else {
       commitRunning(id, null, get().promptEpoch + 1);
