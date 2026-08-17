@@ -774,14 +774,31 @@ export class AcpClient extends EventEmitter {
     const mergedParams = { ...parsed.params, ...(params ?? {}) };
     const modelId = modelOpt?.id ?? "model";
     const allowedModels = (modelOpt?.options ?? []).map((o) => o.value);
-    // Never send `composer-2.5[fast=true]` as a model id — always base (+ params separately).
     const base = parsed.base || wire;
-    const target =
-      !allowedModels.length ||
-      allowedModels.includes(base) ||
-      allowedModels.includes(wire)
-        ? base
-        : null;
+
+    // Cursor catalogs embed params in the model values ("composer-2.5[fast=true]")
+    // and accept ONLY exact listed values. Prefer the exact listed wire for the
+    // base with the user's params merged in; never send a bare base it rejects.
+    let target: string | null;
+    if (!allowedModels.length) {
+      target = base;
+    } else if (allowedModels.includes(wire)) {
+      target = wire;
+    } else if (allowedModels.includes(base)) {
+      target = base;
+    } else {
+      const sameBase = allowedModels.find((v) => parseModelWire(v).base === base);
+      if (sameBase) {
+        const listedParams = parseModelWire(sameBase).params;
+        const merged = { ...listedParams, ...mergedParams };
+        const rebuilt = `${base}[${Object.entries(merged)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(",")}]`;
+        target = allowedModels.includes(rebuilt) ? rebuilt : sameBase;
+      } else {
+        target = base;
+      }
+    }
     if (!target) {
       this.emit(
         "log",

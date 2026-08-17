@@ -16,6 +16,7 @@ import {
 import {
   isSubagentToolCall,
   migrateModelParamValues,
+  toolDisplayTitle,
   usesCloudModelCatalog,
   type AgentMode,
   type MessageDto,
@@ -894,7 +895,17 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       return value;
     });
   };
-  const title = String(part.payload.title ?? part.payload.description ?? "Tool").trim();
+  // Stored pre-fix parts can still carry a generic MCP label ("MCP: tool") —
+  // the real name lives in raw.toolName; Cursor MCP calls only carry the args,
+  // so the display falls back to the call's subject (query/path/…).
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const rawInput = raw.rawInput ?? raw.input ?? raw.arguments;
+  const title =
+    toolDisplayTitle(
+      String(part.payload.title ?? part.payload.description ?? ""),
+      typeof raw.toolName === "string" ? raw.toolName : undefined,
+      rawInput,
+    ) || "Tool";
   const status = String(part.payload.status ?? "").toLowerCase();
   const busy =
     streaming || status === "in_progress" || status === "pending" || status === "running";

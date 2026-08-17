@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AppLocale, AppSettings, MessageDto, SessionDetailDto } from "@acprocess/shared";
+import { toolDisplayTitle, type AppLocale, type AppSettings, type MessageDto, type SessionDetailDto } from "@acprocess/shared";
 import { t } from "@acprocess/i18n";
 import { REPO_ROOT } from "../db/client.js";
 import { getSettings } from "./settings.js";
@@ -194,7 +194,13 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
         break;
       }
       case "tool_call": {
-        const title = String(payload.title ?? payload.description ?? t(locale, "export.tool")).trim();
+        const raw = (payload.raw as Record<string, unknown> | undefined) ?? {};
+        const title =
+          toolDisplayTitle(
+            String(payload.title ?? payload.description ?? ""),
+            typeof raw.toolName === "string" ? raw.toolName : undefined,
+            raw.rawInput ?? raw.input ?? raw.arguments,
+          ) || t(locale, "export.tool");
         const output = truncate(toolOutputText(part), locale);
         lines.push(`**${t(locale, "export.tool")}: ${title}**`, "");
         if (output) {

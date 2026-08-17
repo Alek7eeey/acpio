@@ -9,6 +9,7 @@ import {
 import {
   coerceUiMode,
   normalizePlanPartPayload,
+  paramsFromModelWire,
   parseRpcId,
   effectiveMcpServers,
   pickRestoreMode,
@@ -315,6 +316,61 @@ describe("pickRestoreMode", () => {
     [{ ...base, provider: "cursor", preferResume: false }, "new"],
   ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
     expect(pickRestoreMode({ ...input })).toBe(expected);
+  });
+});
+
+describe("paramsFromModelWire", () => {
+  const modelOpt = (currentValue: string, values: string[]) => [
+    { id: "model", category: "model", type: "select", currentValue, options: values.map((value) => ({ value })) },
+  ];
+
+  it("synthesizes params from the current model's wire", () => {
+    const params = paramsFromModelWire(
+      modelOpt("composer-2.5[fast=true]", ["composer-2.5[fast=true]"]),
+    );
+    expect(params).toEqual([
+      { id: "fast", name: "Fast", currentValue: "true", options: [{ value: "true", name: "Fast" }] },
+    ]);
+  });
+
+  it("orders fast → effort and reads the current wire's values", () => {
+    const params = paramsFromModelWire(
+      modelOpt("grok-4.6[effort=high,fast=true]", [
+        "grok-4.6[effort=high,fast=true]",
+        "gpt-5.4[context=272k,reasoning=medium,fast=false]",
+      ]),
+    );
+    const ids = params.map((p) => p.id);
+    expect(ids).toEqual(["fast", "effort"]);
+    const effort = params.find((p) => p.id === "effort")!;
+    expect(effort.currentValue).toBe("high");
+    expect(effort.options).toEqual([{ value: "high", name: "High" }]);
+  });
+
+  it("offers only values listed for the current base — not a cross-model union", () => {
+    const params = paramsFromModelWire(
+      modelOpt("gpt-5.4[reasoning=medium,fast=false]", [
+        "grok-4.6[effort=high,fast=true]",
+        "gpt-5.4[reasoning=medium,fast=false]",
+        "composer-2.5[fast=true]",
+      ]),
+    );
+    const fast = params.find((p) => p.id === "fast")!;
+    // fast=false only: grok's fast=true and composer's fast=true belong to other bases.
+    expect(fast.options.map((o) => o.value)).toEqual(["false"]);
+    expect(params.find((p) => p.id === "effort")).toBeUndefined();
+  });
+
+  it("returns [] when no model option or the current base is unknown", () => {
+    expect(paramsFromModelWire([])).toEqual([]);
+    expect(paramsFromModelWire([{ id: "model", currentValue: "", options: [] }])).toEqual([]);
+  });
+
+  it("keeps defaults when the current model has no params", () => {
+    const params = paramsFromModelWire(
+      modelOpt("gemini-3.1-pro[]", ["gemini-3.1-pro[]", "glm-5.2[reasoning=high]"]),
+    );
+    expect(params).toEqual([]);
   });
 });
 

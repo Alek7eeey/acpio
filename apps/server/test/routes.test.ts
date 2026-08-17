@@ -9,6 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import fsp from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { buildApp, useResetDb } from "./test-utils.js";
 import { db, REPO_ROOT } from "../src/db/client.js";
@@ -18,6 +19,7 @@ import {
   messageParts as messagePartsTable,
 } from "../src/db/schema.js";
 import { disposeRuntime } from "../src/acp/sessionManager.js";
+import { appendPart, appendTextChunk, createMessage } from "../src/services/sessions.js";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
  *  connects to it instead of a real harness. */
@@ -298,6 +300,95 @@ describe("sessions", () => {
     expect(list[0].sortOrder).toBe(0);
     expect(list[1].id).toBe(a.id);
     expect(list[1].sortOrder).toBe(1);
+  });
+});
+
+describe("thought dedupe", () => {
+  // Long enough to pass the re-emission threshold (>= 40 chars).
+  const THINKING =
+    "Пользователь спрашивает, как расшифровывается AVS в контексте IPS. Это длинная мысль, которую агент повторяет целиком при возобновлении хода.";
+
+  async function partText(partId: string): Promise<string> {
+    const [row] = await db
+      .select()
+      .from(messagePartsTable)
+      .where(eq(messagePartsTable.id, partId));
+    return row ? String((row.payload as { text?: unknown }).text ?? "") : "";
+  }
+
+  it("skips a full-text re-emission appended to the same streamed thought part", async () => {
+    const seeded = await seedSession({ title: "suffix dedupe" });
+    const msg = await createMessage(seeded.id, "assistant");
+    const id = await appendTextChunk(seeded.id, msg.id, "thought", THINKING, null);
+    // Agent resumes reasoning after tools and re-emits the whole block.
+    const again = await appendTextChunk(seeded.id, msg.id, "thought", THINKING, id);
+    expect(again).toBe(id);
+    expect(await partText(id)).toBe(THINKING);
+  });
+
+  it("still appends real stream deltas after a skip", async () => {
+    const seeded = await seedSession({ title: "deltas after skip" });
+    const msg = await createMessage(seeded.id, "assistant");
+    const id = await appendTextChunk(seeded.id, msg.id, "thought", THINKING, null);
+    await appendTextChunk(seeded.id, msg.id, "thought", THINKING, id); // re-emission → skipped
+    await appendTextChunk(seeded.id, msg.id, "thought", " Продолжение", id);
+    expect(await partText(id)).toBe(`${THINKING} Продолжение`);
+  });
+
+  it("drops a repeated thought in a sibling message with no user input between", async () => {
+    const seeded = await seedSession({ title: "sibling dedupe" });
+    const msg1 = await createMessage(seeded.id, "assistant");
+    await appendTextChunk(seeded.id, msg1.id, "thought", THINKING, null);
+    // Replayed/resumed turn lands in a NEW assistant message, no user turn between.
+    const msg2 = await createMessage(seeded.id, "assistant");
+    await db
+      .update(messagesTable)
+      .set({ createdAt: new Date("2026-08-17T10:00:01.000Z") })
+      .where(eq(messagesTable.id, msg1.id));
+    await db
+      .update(messagesTable)
+      .set({ createdAt: new Date("2026-08-17T10:00:02.000Z") })
+      .where(eq(messagesTable.id, msg2.id));
+    const anchor = await appendTextChunk(seeded.id, msg2.id, "thought", THINKING, null);
+    expect(await partText(anchor)).toBe("");
+    const rows = await db
+      .select()
+      .from(messagePartsTable)
+      .where(eq(messagePartsTable.messageId, msg1.id));
+    expect(rows).toHaveLength(1);
+    expect(await partText(rows[0]!.id)).toBe(THINKING);
+  });
+
+  it("keeps a repeated thought when a user message separates the turns", async () => {
+    const seeded = await seedSession({ title: "across turns keep" });
+    const msg1 = await createMessage(seeded.id, "assistant");
+    await appendTextChunk(seeded.id, msg1.id, "thought", THINKING, null);
+    const userMsg = await createMessage(seeded.id, "user");
+    await appendPart(seeded.id, userMsg.id, "text", { text: "тот же вопрос снова" });
+    const msg2 = await createMessage(seeded.id, "assistant");
+    await db
+      .update(messagesTable)
+      .set({ createdAt: new Date("2026-08-17T10:00:01.000Z") })
+      .where(eq(messagesTable.id, msg1.id));
+    await db
+      .update(messagesTable)
+      .set({ createdAt: new Date("2026-08-17T10:00:02.000Z") })
+      .where(eq(messagesTable.id, userMsg.id));
+    await db
+      .update(messagesTable)
+      .set({ createdAt: new Date("2026-08-17T10:00:03.000Z") })
+      .where(eq(messagesTable.id, msg2.id));
+    const id = await appendTextChunk(seeded.id, msg2.id, "thought", THINKING, null);
+    expect(await partText(id)).toBe(THINKING);
+  });
+
+  it("does not dedupe short repeated thoughts", async () => {
+    const seeded = await seedSession({ title: "short keep" });
+    const msg1 = await createMessage(seeded.id, "assistant");
+    await appendTextChunk(seeded.id, msg1.id, "thought", "хм", null);
+    const msg2 = await createMessage(seeded.id, "assistant");
+    const id = await appendTextChunk(seeded.id, msg2.id, "thought", "хм", null);
+    expect(await partText(id)).toBe("хм");
   });
 });
 

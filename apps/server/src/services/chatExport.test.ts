@@ -277,6 +277,10 @@ describe("renderMarkdown", () => {
     [{ title: "T", description: "D" }, "T"],
     [{ description: "D" }, "D"],
     [{}, "Инструмент"],
+    // generic MCP placeholder falls back to the real tool name from raw
+    [{ title: "MCP: tool", raw: { toolName: "mcp__intermech_grep" } }, "intermech_grep"],
+    [{ title: "Tool", raw: { toolName: "bash" } }, "bash"],
+    [{ title: "MCP: tool" }, "Инструмент"],
   ])("tool title for payload %j is %s", (payload, title) => {
     const md = renderMarkdown(
       makeDetail({ messages: [makeMessage("assistant", [makePart("tool_call", payload)])] }),

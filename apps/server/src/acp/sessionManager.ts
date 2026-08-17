@@ -1,6 +1,7 @@
 import path from "node:path";
 import { stat } from "node:fs/promises";
 import {
+  isGenericToolTitle,
   isModelAccessError,
   isSubagentToolCall,
   modelDisplayName,
@@ -9,6 +10,7 @@ import {
   modelParamSectionName,
   parseModelWire,
   providerCommand,
+  toolDisplayTitle,
   usesCloudModelCatalog,
   type AgentMode,
   type AgentProvider,
@@ -96,6 +98,17 @@ export function textFromUnknown(value: unknown): string {
   return "";
 }
 
+/** Real tool name from an ACP tool update's raw payload (runtime-narrowed). */
+function toolNameFromRaw(raw: Record<string, unknown> | undefined): string | undefined {
+  const name = raw?.toolName;
+  return typeof name === "string" ? name : undefined;
+}
+
+/** Tool call arguments from an ACP update raw (Cursor: `rawInput`). */
+function argsFromRaw(raw: Record<string, unknown> | undefined): unknown {
+  return raw?.rawInput ?? raw?.input ?? raw?.arguments;
+}
+
 export function subagentFieldsFromRaw(raw: Record<string, unknown>) {
   const prompt =
     textFromUnknown(raw.prompt) ||
@@ -145,7 +158,69 @@ function toModelParams(options: ConfigOption[]): ModelParamDto[] {
     return 50;
   };
   params.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
-  return params;
+  return params.length ? params : paramsFromModelWire(options);
+}
+
+/**
+ * Cursor embeds per-model params directly in the model option values
+ * ("composer-2.5[fast=true]", "grok-4.6[effort=high,fast=true]") instead of
+ * exposing separate config options. Synthesize the picker entries from those
+ * wires when the agent offers no standalone param options (OMP path above).
+ *
+ * Cursor only accepts EXACT listed wires, so a param's choices are the values
+ * present in the wires of the current model's base — never a cross-model union
+ * (a choice that is not listed would be silently rejected on apply).
+ */
+export function paramsFromModelWire(options: ConfigOption[]): ModelParamDto[] {
+  const modelOpt = findModelConfigOption(options);
+  const values = (modelOpt?.options ?? []).map((o) => o.value);
+  const currentWire = String(modelOpt?.currentValue ?? "");
+  const currentBase = parseModelWire(currentWire).base;
+  if (!values.length || !currentBase) return [];
+
+  const baseWires = values.filter((v) => parseModelWire(v).base === currentBase);
+  if (!baseWires.length) return [];
+
+  // param id → values seen in the current base's wires, in order of appearance.
+  const byId = new Map<string, { seen: Map<string, number>; order: number }>();
+  let order = 0;
+  for (const value of baseWires) {
+    for (const [id, v] of Object.entries(parseModelWire(value).params)) {
+      let row = byId.get(id);
+      if (!row) {
+        row = { seen: new Map(), order: order++ };
+        byId.set(id, row);
+      }
+      row.seen.set(v, (row.seen.get(v) ?? 0) + 1);
+    }
+  }
+  if (!byId.size) return [];
+
+  const current = parseModelWire(currentWire).params;
+  const rank = (id: string) => {
+    const family = modelParamFamily(id);
+    if (family === "fast") return 0;
+    if (family === "effort") return 1;
+    if (family === "context") return 2;
+    return 50;
+  };
+  const out: ModelParamDto[] = [];
+  for (const [id, row] of [...byId.entries()].sort(
+    (a, b) => rank(a[0]) - rank(b[0]) || a[1].order - b[1].order,
+  )) {
+    const optionValues = [...row.seen.keys()];
+    if (!optionValues.length) continue;
+    out.push({
+      id,
+      name: modelParamSectionName(id, undefined),
+      currentValue: current[id] ?? optionValues[0],
+      options: optionValues.map((value) => ({
+        value,
+        name: modelParamLabel(id, value, undefined),
+      })),
+    });
+  }
+  return out;
 }
 
 type ModelOption = { value: string; name: string };
@@ -314,6 +389,12 @@ class SessionRuntime {
   turnThoughtPartId: string | null = null;
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
+  /**
+   * Raw payload of the first `tool_call` event per call id. Status updates
+   * omit the identifying fields (title/toolName/rawInput) — keep the start's
+   * fields so display can fall back to a real name or the call's subject.
+   */
+  toolStartRawByCallId = new Map<string, Record<string, unknown>>();
   /**
    * toolCallIds that reached a terminal status (completed/failed). Async agent
    * progress (omp task jobs) can stream late `in_progress` updates after the
@@ -758,7 +839,13 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     rt.openTextPartId = null; // next text starts a new segment after tool
-    const title = update.title ?? "Tool";
+    // OMP labels MCP tools generically ("MCP: tool"); the real name rides in
+    // `toolName`. Cursor sends neither — its MCP calls only carry the args, so
+    // the display falls back to the call's own subject (query/path/…).
+    if (update.toolCallId) rt.toolStartRawByCallId.set(update.toolCallId, update.raw);
+    const title =
+      toolDisplayTitle(update.title ?? "", toolNameFromRaw(update.raw), argsFromRaw(update.raw)) ||
+      "Tool";
     const kind = String((update.raw.kind as string) ?? "");
     const isSubagent = isSubagentToolCall(kind);
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
@@ -777,7 +864,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     if (existingId) {
       // cursor/task may have arrived first — enrich that one card without clobbering its title.
       const { title: _title, description: _description, ...rest } = payload;
-      const named = title && !/^tool$/i.test(title) ? { title, description: title } : {};
+      const named = title && !isGenericToolTitle(title) ? { title, description: title } : {};
       await updatePart(
         rt.sessionId,
         existingId,
@@ -801,11 +888,21 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     const partId = rt.toolPartByCallId.get(update.toolCallId);
-    const title = (update.raw.title as string) ?? "Tool";
+    // Merge with the start event so identifying fields (title/toolName/
+    // rawInput/kind) survive the status updates that omit them.
+    const startRaw = update.toolCallId ? rt.toolStartRawByCallId.get(update.toolCallId) : undefined;
+    const mergedRaw = { ...(startRaw ?? {}), ...update.raw };
+    if (update.toolCallId) rt.toolStartRawByCallId.set(update.toolCallId, mergedRaw);
+    const title =
+      toolDisplayTitle(
+        String(mergedRaw.title ?? ""),
+        toolNameFromRaw(mergedRaw),
+        argsFromRaw(mergedRaw),
+      ) || "Tool";
     const status = update.status ?? "in_progress";
-    const kind = String((update.raw.kind as string) ?? "");
+    const kind = String(mergedRaw.kind ?? "");
     const isSubagent = isSubagentToolCall(kind);
-    const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
+    const extra = isSubagent ? subagentFieldsFromRaw(mergedRaw) : {};
     // Terminal status is final: late async progress must not reopen the card.
     if (status === "completed" || status === "failed") {
       if (update.toolCallId) rt.terminalToolCallIds.add(update.toolCallId);
@@ -820,13 +917,13 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         subagentType: kind || (isSubagent ? "task" : undefined),
         status,
         kind,
-        raw: update.raw,
+        raw: mergedRaw,
         ...extra,
       });
       rt.toolPartByCallId.set(update.toolCallId, part.id);
       return;
     }
-    const named = title && !/^tool$/i.test(title) ? { title, description: title } : {};
+    const named = title && !isGenericToolTitle(title) ? { title, description: title } : {};
     await updatePart(
       rt.sessionId,
       partId,
@@ -834,7 +931,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         toolCallId: update.toolCallId,
         status,
         kind,
-        raw: update.raw,
+        raw: mergedRaw,
         ...extra,
         ...named,
       },
@@ -1409,6 +1506,7 @@ async function runTurn(
   rt.openThoughtPartId = null;
   rt.turnThoughtPartId = null;
   rt.toolPartByCallId.clear();
+  rt.toolStartRawByCallId.clear();
   await updateSession(sessionId, { status: "running" });
   // Create the assistant bubble immediately so the UI can show "Thinking…" without waiting
   // for the first ACP token (spawn/prompt can take a while).

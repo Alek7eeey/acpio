@@ -623,3 +623,44 @@ export function isSubagentToolCall(kind: string): boolean {
   return SUBAGENT_TOOL_KINDS.has(kind.trim().toLowerCase());
 }
 
+/**
+ * Titles that carry no tool identity: placeholders the agent emits when the
+ * real name is unavailable ("Tool", "task") or a generic MCP label ("MCP: tool").
+ * When the title is one of these the real tool name (`toolName`) must be shown
+ * instead — see `toolDisplayTitle`.
+ */
+export function isGenericToolTitle(title: string): boolean {
+  const value = title.trim();
+  if (!value) return true;
+  return /^(tool|task|subagent|агент|субагент|mcp\s*[:：]?\s*tool)$/i.test(value);
+}
+
+/** First meaningful subject from a tool call's args (Cursor sends no tool name). */
+function subjectFromToolArgs(args: unknown): string {
+  if (typeof args !== "object" || args === null) return "";
+  const row = args as Record<string, unknown>;
+  for (const key of ["query", "path", "command", "pattern", "text", "url", "searchText", "q"]) {
+    const v = row[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return "";
+}
+
+/**
+ * Best display name for a tool call: a meaningful agent-provided title wins;
+ * otherwise fall back to the real tool name (which for MCP tools comes as
+ * `mcp__<server>_<tool>` and loses its transport prefix), then to the call's
+ * own subject (query/path/… — Cursor never sends the tool name for MCP tools).
+ * Empty string when nothing carries a name — callers use their own "Tool" label.
+ */
+export function toolDisplayTitle(title: string, toolName?: string, args?: unknown): string {
+  if (!isGenericToolTitle(title)) return title.trim();
+  const name = (toolName ?? "").trim();
+  if (name && !isGenericToolTitle(name)) {
+    return name.startsWith("mcp__") ? name.slice("mcp__".length) : name;
+  }
+  const subject = subjectFromToolArgs(args);
+  if (subject) return subject;
+  return "";
+}
+

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SETTINGS,
+  isGenericToolTitle,
   isModelAccessError,
   isSubagentToolCall,
   mapEffortParamValue,
@@ -13,6 +14,7 @@ import {
   providerArgs,
   providerCommand,
   resolveModelParamValue,
+  toolDisplayTitle,
   usesCloudModelCatalog,
 } from "@acprocess/shared";
 
@@ -378,6 +380,54 @@ describe("isSubagentToolCall", () => {
     ["general purpose", false],
   ])("isSubagentToolCall(%j)", (kind, expected) => {
     expect(isSubagentToolCall(kind)).toBe(expected);
+  });
+});
+
+describe("isGenericToolTitle", () => {
+  it.each([
+    ["", true],
+    ["  ", true],
+    ["Tool", true],
+    ["tool", true],
+    ["task", true],
+    ["subagent", true],
+    ["субагент", true],
+    ["агент", true],
+    ["MCP: tool", true],
+    ["mcp:tool", true],
+    ["MCP : tool", true],
+    ["Web Search", false],
+    ["grep", false],
+    ["Запуск двух сабагентов", false],
+    ["mcp__intermech_grep", false],
+  ])("isGenericToolTitle(%j) -> %s", (title, expected) => {
+    expect(isGenericToolTitle(title)).toBe(expected);
+  });
+});
+
+describe("toolDisplayTitle", () => {
+  it.each([
+    // meaningful agent title wins
+    ["Web Search", "web_search", undefined, "Web Search"],
+    ["Поиск в интернете", "web_search", undefined, "Поиск в интернете"],
+    // generic placeholder falls back to the real tool name
+    ["MCP: tool", "mcp__intermech_grep", undefined, "intermech_grep"],
+    ["Tool", "bash", undefined, "bash"],
+    ["", "read", undefined, "read"],
+    // mcp__ transport prefix is stripped for display
+    ["", "mcp__Intermech_web_search", undefined, "Intermech_web_search"],
+    // nothing left → empty, callers use their own "Tool" label
+    ["", "", undefined, ""],
+    ["MCP: tool", "MCP: tool", undefined, ""],
+    ["Tool", "task", undefined, ""],
+    ["Task", undefined, undefined, ""],
+    // Cursor sends no tool name for MCP tools — fall back to the call's subject
+    ["Tool", undefined, { query: "AVS" }, "AVS"],
+    ["MCP: tool", undefined, { searchText: "спецификации" }, "спецификации"],
+    ["", undefined, { path: "C:/docs/ips" }, "C:/docs/ips"],
+    ["", undefined, { query: "" }, ""],
+  ])("toolDisplayTitle(%j, %j, %j) -> %j", (title, toolName, args, expected) => {
+    expect(toolDisplayTitle(title, toolName, args)).toBe(expected);
   });
 });
 

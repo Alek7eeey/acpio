@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, max, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, lte, max, or, sql } from "drizzle-orm";
 import type {
   MessageDto,
   MessagePartDto,
@@ -302,6 +302,58 @@ function appendStreamText(prev: string, next: string): string {
   return prev + next;
 }
 
+/** `text` field of a part payload, validated at read time. */
+function payloadText(payload: unknown): string {
+  if (typeof payload !== "object" || payload === null || !("text" in payload)) return "";
+  const text = payload.text;
+  return typeof text === "string" ? text : "";
+}
+
+/**
+ * Replayed or resumed turns re-emit an already-streamed thought verbatim
+ * (full text after streamed chunks, or a fresh part in a sibling message).
+ * Such re-emissions are long; short repeats can be legitimate thinking.
+ */
+const THOUGHT_DEDUPE_MIN_CHARS = 40;
+
+/** Last stored thought part of the session (any message), with its timing. */
+async function lastThoughtPartOfSession(
+  sessionId: string,
+): Promise<{ id: string; messageId: string; createdAt: Date; text: string } | null> {
+  const rows = await db
+    .select({
+      id: messageParts.id,
+      messageId: messageParts.messageId,
+      createdAt: messages.createdAt,
+      text: sql<string>`${messageParts.payload}->>'text'`,
+    })
+    .from(messageParts)
+    .innerJoin(messages, eq(messages.id, messageParts.messageId))
+    .where(and(eq(messages.sessionId, sessionId), eq(messageParts.type, "thought")))
+    .orderBy(desc(messages.createdAt), desc(messageParts.order))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return { id: row.id, messageId: row.messageId, createdAt: row.createdAt, text: row.text ?? "" };
+}
+
+/** True when a user message sits strictly between `after` and `beforeOrAt`. */
+async function userMessageBetween(sessionId: string, after: Date, beforeOrAt: Date): Promise<boolean> {
+  const rows = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.sessionId, sessionId),
+        eq(messages.role, "user"),
+        gt(messages.createdAt, after),
+        lte(messages.createdAt, beforeOrAt),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function appendTextChunk(
   sessionId: string,
   messageId: string,
@@ -315,13 +367,44 @@ export async function appendTextChunk(
   if (openPartId) {
     const rows = await db.select().from(messageParts).where(eq(messageParts.id, openPartId)).limit(1);
     if (rows[0] && rows[0].type === type && rows[0].messageId === messageId) {
-      const prev = (rows[0].payload as { text?: string })?.text ?? "";
+      const prev = payloadText(rows[0].payload);
+      // Full-text re-emission of an already-streamed thought (agent resumes
+      // reasoning after tools, replay) must not double the block.
+      if (
+        type === "thought" &&
+        text.trim().length >= THOUGHT_DEDUPE_MIN_CHARS &&
+        prev.trimEnd().endsWith(text.trim())
+      ) {
+        return openPartId;
+      }
       await updatePart(sessionId, openPartId, { text: appendStreamText(prev, text) });
       return openPartId;
     }
   }
+  // New thought part: drop it when the exact same thought was just stored in
+  // this turn (same message, or the previous assistant message with no user
+  // input in between) — a resumed/replayed turn must not duplicate it.
+  if (type === "thought" && text.trim().length >= THOUGHT_DEDUPE_MIN_CHARS) {
+    const last = await lastThoughtPartOfSession(sessionId);
+    if (last && last.text.trim() === text.trim()) {
+      const sameTurn =
+        last.messageId === messageId ||
+        !(await userMessageBetween(sessionId, last.createdAt, await messageCreatedAt(messageId)));
+      if (sameTurn) {
+        // Anchor the turn's thought slot to this message so later genuine
+        // chunks land here; the duplicate content itself is dropped.
+        const anchor = await appendPart(sessionId, messageId, type, { text: "" });
+        return anchor.id;
+      }
+    }
+  }
   const part = await appendPart(sessionId, messageId, type, { text });
   return part.id;
+}
+
+async function messageCreatedAt(messageId: string): Promise<Date> {
+  const rows = await db.select({ createdAt: messages.createdAt }).from(messages).where(eq(messages.id, messageId)).limit(1);
+  return rows[0]?.createdAt ?? new Date(0);
 }
 
 /** Keep `messageId`, delete every later message in the session (cascade parts). */
