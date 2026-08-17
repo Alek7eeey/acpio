@@ -5,8 +5,14 @@ import {
 } from "@acprocess/shared";
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
+import { adapters } from "../adapters/registry.js";
 
 const SETTINGS_KEY = "app";
+
+/** True when the provider is a registered harness adapter. */
+function isKnownProvider(provider: unknown): provider is string {
+  return typeof provider === "string" && adapters.ids().includes(provider);
+}
 
 function mergeSettings(raw: unknown): AppSettings {
   const base = { ...DEFAULT_SETTINGS };
@@ -27,7 +33,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.ompArgs)) {
     merged.ompArgs = [...DEFAULT_SETTINGS.ompArgs];
   }
-  if (merged.defaultProvider !== "cursor" && merged.defaultProvider !== "omp") {
+  if (!isKnownProvider(merged.defaultProvider)) {
     merged.defaultProvider = DEFAULT_SETTINGS.defaultProvider;
   }
   if (merged.locale !== "en" && merged.locale !== "ru") {
@@ -36,11 +42,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.displayName !== "string") {
     merged.displayName = DEFAULT_SETTINGS.displayName;
   }
-  if (
-    merged.connectedProvider !== null &&
-    merged.connectedProvider !== "cursor" &&
-    merged.connectedProvider !== "omp"
-  ) {
+  if (merged.connectedProvider !== null && !isKnownProvider(merged.connectedProvider)) {
     merged.connectedProvider = DEFAULT_SETTINGS.connectedProvider;
   }
   if (typeof merged.diagnosticsDir !== "string") {

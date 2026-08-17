@@ -71,11 +71,7 @@ export function AppShell() {
     const provider = settings.connectedProvider;
     const agent = !provider
       ? t("common.noAgent")
-      : provider === "cursor"
-        ? "Cursor"
-        : provider === "omp"
-          ? "OMP"
-          : provider;
+      : useAppStore.getState().adapters.find((a) => a.id === provider)?.label ?? provider;
     return t("common.agentStatus", {
       agent,
       status: agentOnline ? t("common.online") : t("common.offline"),

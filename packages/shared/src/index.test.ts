@@ -11,11 +11,8 @@ import {
   modelParamLabel,
   modelParamSectionName,
   parseModelWire,
-  providerArgs,
-  providerCommand,
   resolveModelParamValue,
   toolDisplayTitle,
-  usesCloudModelCatalog,
 } from "@acprocess/shared";
 
 describe("parseModelWire", () => {
@@ -210,54 +207,6 @@ describe("migrateModelParamValues", () => {
     ],
   ])("migrateModelParamValues(%j, %j)", (params, exposed, expected) => {
     expect(migrateModelParamValues(params, exposed)).toEqual(expected);
-  });
-});
-
-describe("providerCommand / providerArgs", () => {
-  it.each([
-    ["cursor", "cura", "omp"],
-    ["omp", "agent", "ompi"],
-  ])("providerCommand picks %s command", (provider, cursorCommand, ompCommand) => {
-    const settings = { ...DEFAULT_SETTINGS, cursorCommand, ompCommand };
-    expect(providerCommand(settings, provider as "cursor" | "omp")).toBe(
-      provider === "cursor" ? cursorCommand : ompCommand,
-    );
-  });
-
-  it("providerCommand defaults to agent for cursor", () => {
-    expect(providerCommand(DEFAULT_SETTINGS, "cursor")).toBe("agent");
-  });
-
-  it("providerCommand defaults to omp for omp", () => {
-    expect(providerCommand(DEFAULT_SETTINGS, "omp")).toBe("omp");
-  });
-
-  it.each([
-    ["cursor", ["cura", "--acp"], ["omp", "acp"]],
-    ["omp", ["agent", "acp"], ["ompi", "--verbose"]],
-  ])("providerArgs picks %s args", (provider, cursorArgs, ompArgs) => {
-    const settings = { ...DEFAULT_SETTINGS, cursorArgs, ompArgs };
-    expect(providerArgs(settings, provider as "cursor" | "omp")).toEqual(
-      provider === "cursor" ? cursorArgs : ompArgs,
-    );
-  });
-
-  it("providerArgs defaults to ['acp'] for cursor", () => {
-    expect(providerArgs(DEFAULT_SETTINGS, "cursor")).toEqual(["acp"]);
-  });
-
-  it("providerArgs defaults to ['acp'] for omp", () => {
-    expect(providerArgs(DEFAULT_SETTINGS, "omp")).toEqual(["acp"]);
-  });
-});
-
-describe("usesCloudModelCatalog", () => {
-  it("is true for omp", () => {
-    expect(usesCloudModelCatalog("omp")).toBe(true);
-  });
-
-  it("is false for cursor", () => {
-    expect(usesCloudModelCatalog("cursor")).toBe(false);
   });
 });
 

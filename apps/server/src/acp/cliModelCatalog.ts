@@ -1,49 +1,34 @@
 import { execFile } from "node:child_process";
-import path from "node:path";
 import { promisify } from "node:util";
 import {
   modelDisplayName,
-  providerCommand,
-  usesCloudModelCatalog,
   type AgentProvider,
   type AppSettings,
+  type ModelOption,
 } from "@acprocess/shared";
+import { adapterCommand, getAdapter } from "../adapters/registry.js";
 import { resolveCommand } from "./AcpClient.js";
 
 const execFileAsync = promisify(execFile);
 
-export type ModelOption = { value: string; name: string };
-
-/** OMP model lists must match the CLI without injected BYOK keys. */
+/** Model lists must match the CLI without injected BYOK keys. */
 function buildCliCatalogEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   delete env.OPENAI_API_KEY;
   delete env.CURSOR_API_KEY;
-  if (process.platform === "win32") {
-    const extras: string[] = [];
-    if (process.env.LOCALAPPDATA) {
-      extras.push(path.join(process.env.LOCALAPPDATA, "cursor-agent"));
-      extras.push(path.join(process.env.LOCALAPPDATA, "omp"));
-    }
-    if (process.env.USERPROFILE) {
-      extras.push(path.join(process.env.USERPROFILE, ".local", "bin"));
-    }
-    if (process.env.APPDATA) {
-      extras.push(path.join(process.env.APPDATA, "npm"));
-    }
-    env.PATH = `${extras.join(";")};${env.PATH ?? ""}`;
-  }
   return env;
 }
 
-async function runAgentCli(
+/** Run the harness's CLI with the given args; returns stdout. */
+export async function runAgentCli(
   provider: AgentProvider,
   settings: AppSettings,
   args: string[],
 ): Promise<string> {
-  const commandName = providerCommand(settings, provider);
-  const resolved = await resolveCommand(commandName);
+  const adapter = getAdapter(provider);
+  const commandName = adapterCommand(adapter, settings);
+  const resolved = await resolveCommand(commandName, adapter);
   const env = buildCliCatalogEnv();
   const { stdout } = await execFileAsync(resolved.cmd, args, {
     env,
@@ -54,43 +39,25 @@ async function runAgentCli(
   return stdout;
 }
 
-async function fetchOmpModels(settings: AppSettings): Promise<ModelOption[]> {
-  const stdout = await runAgentCli("omp", settings, ["models", "--json"]);
-  const parsed = JSON.parse(stdout) as {
-    models?: Array<{
-      selector?: string;
-      provider?: string;
-      id?: string;
-      name?: string;
-    }>;
-  };
-  const rows = parsed.models ?? [];
-  return rows
-    .map((row) => {
-      const value =
-        row.selector?.trim() ||
-        (row.provider && row.id ? `${row.provider}/${row.id}` : row.id?.trim() || "");
-      if (!value) return null;
-      return {
-        value,
-        name: row.name?.trim() || modelDisplayName(value),
-      };
-    })
-    .filter((m): m is ModelOption => m != null);
-}
-
-/** OMP ACP can expose a broader catalog than the CLI `models` command. */
+/**
+ * Broader catalog than the ACP option list — delegated to the harness adapter
+ * (OMP exposes a cloud-backed `models --json`; others return null).
+ */
 export async function fetchAuthoritativeModelCatalog(
   provider: AgentProvider,
   settings: AppSettings,
 ): Promise<ModelOption[] | null> {
-  if (!usesCloudModelCatalog(provider)) return null;
+  const adapter = getAdapter(provider);
+  if (!adapter.probeModels) return null;
   try {
-    if (provider === "omp") return await fetchOmpModels(settings);
+    return await adapter.probeModels({
+      settings,
+      runCli: (args) => runAgentCli(provider, settings, args),
+    });
   } catch (err) {
     console.warn(`[models] CLI catalog failed for ${provider}:`, err);
+    return null;
   }
-  return null;
 }
 
 export function preferAuthoritativeModels(

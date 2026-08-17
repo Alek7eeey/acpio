@@ -13,15 +13,15 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import {
   parseModelWire,
-  providerArgs,
-  providerCommand,
   resolveModelParamValue,
   modelParamFamily,
   type AgentMode,
   type AgentProvider,
   type AppSettings,
+  type HarnessAdapter,
   type McpServerConfig,
 } from "@acprocess/shared";
+import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -141,11 +141,11 @@ export function modesFromSessionState(raw: unknown): AgentModeOption[] {
 /**
  * Modes the agent exposes for session/set_mode.
  * Prefer explicit `modes.availableModes` from session/new; fall back to configOptions;
- * Cursor gets Agent/Plan/Ask when the agent omits the list.
+ * then to the harness adapter's advertised defaults (Cursor: Agent/Plan/Ask).
  */
 export function listAgentModes(
   options: ConfigOption[],
-  provider?: AgentProvider,
+  defaultModes: AgentModeOption[],
   sessionModes?: AgentModeOption[],
 ): AgentModeOption[] {
   if (sessionModes && sessionModes.length > 0) {
@@ -158,16 +158,7 @@ export function listAgentModes(
       name: (o.name || o.value).trim() || o.value,
     }));
   }
-  // Cursor ACP supports these even when configOptions omit the mode select.
-  if (provider === "cursor") {
-    return [
-      { value: "agent", name: "Agent" },
-      { value: "plan", name: "Plan" },
-      { value: "ask", name: "Ask" },
-    ];
-  }
-  // OMP (and similar) only advertise a single "default" mode — not a real switcher.
-  return [];
+  return [...defaultModes];
 }
 
 /** True when the agent exposes a real multi-mode switcher (not a lone default). */
@@ -240,20 +231,18 @@ export function mergeConfigOptions(prev: ConfigOption[], next: ConfigOption[]): 
   return next.map((o) => byId.get(o.id) ?? o);
 }
 
-function winKnownBins(command: string): string[] {
+function winKnownBins(command: string, adapter: HarnessAdapter): string[] {
   const home = process.env.USERPROFILE ?? "";
   const local = process.env.LOCALAPPDATA ?? "";
   const appData = process.env.APPDATA ?? "";
-  const names =
-    command === "agent" || command === "cursor-agent"
-      ? ["agent.exe", "agent.cmd", "cursor-agent.exe", "cursor-agent.cmd"]
-      : command === "omp" || command === "omp-acp"
-        ? ["omp.exe", "omp.cmd", "omp-acp.exe", "omp-acp.cmd"]
-        : [`${command}.exe`, `${command}.cmd`];
-
+  const names = [
+    ...adapter.binaryNames.map((n) => `${n}.exe`),
+    ...adapter.binaryNames.map((n) => `${n}.cmd`),
+    `${command}.exe`,
+    `${command}.cmd`,
+  ];
   const dirs = [
-    local ? path.join(local, "cursor-agent") : "",
-    local ? path.join(local, "omp") : "",
+    ...adapter.binaryDirs.map((d) => (local ? path.join(local, d) : "")),
     home ? path.join(home, ".local", "bin") : "",
     appData ? path.join(appData, "npm") : "",
   ].filter(Boolean);
@@ -268,13 +257,16 @@ function winKnownBins(command: string): string[] {
   return out;
 }
 
-export async function resolveCommand(command: string): Promise<{ cmd: string; shell: boolean }> {
+export async function resolveCommand(
+  command: string,
+  adapter?: HarnessAdapter,
+): Promise<{ cmd: string; shell: boolean }> {
   if (/\.(exe|cmd|bat)$/i.test(command) || command.includes("/") || command.includes("\\")) {
     return { cmd: command, shell: /\.(cmd|bat)$/i.test(command) };
   }
 
   if (process.platform === "win32") {
-    const known = winKnownBins(command);
+    const known = adapter ? winKnownBins(command, adapter) : [];
     if (known[0]) {
       return { cmd: known[0], shell: /\.(cmd|bat)$/i.test(known[0]) };
     }
@@ -314,25 +306,9 @@ function decodeProcessText(buf: Buffer): string {
   }
 }
 
-function commandNotFoundHint(provider: AgentProvider, command: string): string {
-  if (provider === "cursor") {
-    return (
-      `Команда "${command}" не найдена. Cursor IDE ≠ Cursor CLI. ` +
-      `Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex ` +
-      `затем выполните agent login. Или укажите полный путь в «CLI и права».`
-    );
-  }
-  if (provider === "omp") {
-    return (
-      `Команда "${command}" не найдена. Убедитесь, что omp в PATH ` +
-      `(или поставьте omp-acp и укажите его в «CLI и права»).`
-    );
-  }
-  return (
-    `Команда "${command}" не найдена. Cursor IDE ≠ Cursor CLI. ` +
-    `Установите CLI (PowerShell): irm 'https://cursor.com/install?win32=true' | iex ` +
-    `затем выполните agent login. Или укажите полный путь в «CLI и права».`
-  );
+/** Render a harness's install hint with the missing command interpolated. */
+function installHintFor(adapter: HarnessAdapter, command: string): string {
+  return adapter.installHint.replaceAll("{command}", command);
 }
 
 function looksLikeCommandNotFound(text: string): boolean {
@@ -347,16 +323,20 @@ function looksLikeCommandNotFound(text: string): boolean {
   );
 }
 
-export function buildAgentEnv(provider: AgentProvider, settings: AppSettings): NodeJS.ProcessEnv {
+export function buildAgentEnv(adapter: HarnessAdapter, settings: AppSettings): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
-  if (settings.cursorApiKey) env.CURSOR_API_KEY = settings.cursorApiKey;
+  const apiKey = adapter.apiKeyField ? adapterSetting(settings, adapter.apiKeyField) : undefined;
+  if (adapter.envApiKeyName && typeof apiKey === "string" && apiKey) {
+    env[adapter.envApiKeyName] = apiKey;
+  }
   if (settings.anthropicApiKey) env.ANTHROPIC_API_KEY = settings.anthropicApiKey;
   if (settings.openaiApiKey) env.OPENAI_API_KEY = settings.openaiApiKey;
   if (process.platform === "win32") {
     const extras: string[] = [];
     if (process.env.LOCALAPPDATA) {
-      extras.push(path.join(process.env.LOCALAPPDATA, "cursor-agent"));
-      extras.push(path.join(process.env.LOCALAPPDATA, "omp"));
+      for (const dir of adapter.binaryDirs) {
+        extras.push(path.join(process.env.LOCALAPPDATA, dir));
+      }
     }
     if (process.env.USERPROFILE) {
       extras.push(path.join(process.env.USERPROFILE, ".local", "bin"));
@@ -479,12 +459,17 @@ export class AcpClient extends EventEmitter {
   }
 
   constructor(
-    private readonly provider: AgentProvider,
+    private readonly adapter: HarnessAdapter,
     private readonly settings: AppSettings,
     private readonly cwd: string,
     private mode: AgentMode,
   ) {
     super();
+  }
+
+  /** Provider id (adapter id) — kept for logging/broadcast keys. */
+  get provider(): AgentProvider {
+    return this.adapter.id;
   }
 
   /** Exact file paths (outside the cwd) the agent may READ — user-attached files. */
@@ -511,10 +496,10 @@ export class AcpClient extends EventEmitter {
       mcpServers?: McpServerConfig[];
     },
   ): Promise<void> {
-    const commandName = providerCommand(this.settings, this.provider);
-    const args = [...providerArgs(this.settings, this.provider)];
-    const resolved = await resolveCommand(commandName);
-    const env = buildAgentEnv(this.provider, this.settings);
+    const commandName = adapterCommand(this.adapter, this.settings);
+    const args = adapterArgs(this.adapter, this.settings);
+    const resolved = await resolveCommand(commandName, this.adapter);
+    const env = buildAgentEnv(this.adapter, this.settings);
     const cwd = this.cwd || process.cwd();
     // A missing cwd makes the child die with a generic "cannot find the path"
     // error that reads like a missing command — fail fast with a clear message.
@@ -532,7 +517,7 @@ export class AcpClient extends EventEmitter {
       try {
         await execFileAsync("where.exe", [commandName], { windowsHide: true, env });
       } catch {
-        throw new Error(commandNotFoundHint(this.provider, commandName));
+        throw new Error(installHintFor(this.adapter, commandName));
       }
     }
 
@@ -549,7 +534,7 @@ export class AcpClient extends EventEmitter {
     this.proc.on("error", (err) => {
       const msg =
         (err as NodeJS.ErrnoException).code === "ENOENT"
-          ? commandNotFoundHint(this.provider, commandName)
+          ? installHintFor(this.adapter, commandName)
           : `spawn error: ${err.message}`;
       this.emit("log", msg);
       const wrapped = new Error(msg);
@@ -567,7 +552,7 @@ export class AcpClient extends EventEmitter {
       this.closed = true;
       const tail = this.stderrBuf.slice(-500);
       const message = looksLikeCommandNotFound(tail)
-          ? commandNotFoundHint(this.provider, commandName)
+          ? installHintFor(this.adapter, commandName)
           : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`;
       const err = new Error(message);
       for (const [, p] of this.pending) p.reject(err);
@@ -585,8 +570,9 @@ export class AcpClient extends EventEmitter {
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: true },
           terminal: true,
-          // Cursor: expose model + fast/effort as separate config options
-          _meta: { parameterizedModelPicker: true },
+          // Harnesses with a parameterized model picker expose model params
+          // (fast/effort/…) as separate config options.
+          _meta: { parameterizedModelPicker: this.adapter.parameterizedModelPicker },
         },
         clientInfo: { name: "acprocess", version: "0.1.0" },
       })) as {
@@ -597,9 +583,9 @@ export class AcpClient extends EventEmitter {
       };
       this.capabilities = initResult?.agentCapabilities ?? {};
 
-      if (this.provider === "cursor") {
+      if (this.adapter.authenticateMethodId) {
         try {
-          await this.send("authenticate", { methodId: "cursor_login" });
+          await this.send("authenticate", { methodId: this.adapter.authenticateMethodId });
         } catch (err) {
           this.emit("log", `authenticate skipped/failed: ${String(err)}`);
         }
@@ -636,9 +622,10 @@ export class AcpClient extends EventEmitter {
         }
         this.sessionId = resume.sessionId;
         this.emit("log", `resuming session ${resume.sessionId} (session/load)`);
-        // Cursor replays the whole stored conversation here; we already have
-        // it in our DB, so swallow the notifications instead of double-writing.
-        this.suppressUpdates = true;
+        // Load-style harnesses replay the whole stored conversation here; we
+        // already have it in our DB, so swallow the notifications instead of
+        // double-writing (adapter declares whether the replay must be muted).
+        this.suppressUpdates = this.adapter.suppressReplayOnLoad;
         try {
           result = (await this.send("session/load", {
             sessionId: resume.sessionId,
@@ -689,7 +676,7 @@ export class AcpClient extends EventEmitter {
         this.emit("log", `set model failed: ${String(err)}`);
       }
 
-      const modes = listAgentModes(this.configOptions, this.provider, this.sessionModes);
+      const modes = listAgentModes(this.configOptions, this.adapter.defaultModes, this.sessionModes);
       // Only apply when the agent actually supports this mode id (OMP has only "default").
       if (!opts?.catalogOnly && modes.some((m) => m.value === this.mode)) {
         try {
@@ -735,7 +722,7 @@ export class AcpClient extends EventEmitter {
 
   async setMode(modeId: string) {
     if (!this.sessionId) throw new Error("no session");
-    const modes = listAgentModes(this.configOptions, this.provider, this.sessionModes);
+    const modes = listAgentModes(this.configOptions, this.adapter.defaultModes, this.sessionModes);
     if (modes.length && !modes.some((m) => m.value === modeId)) {
       throw new Error(`Unsupported mode: ${modeId}`);
     }
@@ -1193,76 +1180,26 @@ export class AcpClient extends EventEmitter {
       return;
     }
 
-    if (method === "session/request_permission" && msg.id !== undefined) {
+    const requestKind = this.adapter.requestKinds[method];
+    if (requestKind && msg.id !== undefined) {
       this.emit("request", {
-        kind: "permission",
+        kind: requestKind,
         id: msg.id as JsonRpcId,
         params: (msg.params ?? {}) as Record<string, unknown>,
       } satisfies AcpRequest);
       return;
     }
 
-    if (method === "cursor/ask_question" && msg.id !== undefined) {
-      this.emit("request", {
-        kind: "ask_question",
-        id: msg.id as JsonRpcId,
-        params: (msg.params ?? {}) as Record<string, unknown>,
-      } satisfies AcpRequest);
-      return;
-    }
-
-    if (method === "cursor/create_plan" && msg.id !== undefined) {
-      this.emit("request", {
-        kind: "create_plan",
-        id: msg.id as JsonRpcId,
-        params: (msg.params ?? {}) as Record<string, unknown>,
-      } satisfies AcpRequest);
-      return;
-    }
-
-    if (
-      method === "cursor/update_todos" ||
-      method === "cursor/task" ||
-      method === "cursor/generate_image"
-    ) {
+    const extensionKind = this.adapter.extensionKinds[method];
+    if (extensionKind) {
       const params = (msg.params ?? {}) as Record<string, unknown>;
-      this.emit("extension", { method, params });
+      this.emit("extension", { method, kind: extensionKind, params });
+      // Request-style extensions expect a harness-specific reply envelope
+      // (Cursor `outcome`); notifications get none.
       if (msg.id !== undefined) {
-        // Cursor extension methods expect an `outcome` envelope. An empty `{}`
-        // makes the parent agent treat the Task as "no result" and retry.
-        if (method === "cursor/task") {
-          this.respond(msg.id as JsonRpcId, {
-            outcome: {
-              outcome: "completed",
-              ...(typeof params.agentId === "string" ? { agentId: params.agentId } : {}),
-              ...(typeof params.durationMs === "number" ? { durationMs: params.durationMs } : {}),
-            },
-          });
-        } else if (method === "cursor/update_todos") {
-          const todos = Array.isArray(params.todos) ? params.todos : [];
-          this.respond(msg.id as JsonRpcId, {
-            outcome: { outcome: "accepted", todos },
-          });
-        } else {
-          const filePath = typeof params.filePath === "string" ? params.filePath : "";
-          this.respond(
-            msg.id as JsonRpcId,
-            filePath
-              ? { outcome: { outcome: "generated", filePath } }
-              : { outcome: { outcome: "rejected", reason: "missing filePath" } },
-          );
-        }
+        const reply = this.adapter.extensionReply?.(method, params);
+        if (reply !== undefined) this.respond(msg.id as JsonRpcId, reply);
       }
-      return;
-    }
-
-    // omp (`_omp/agents/update`): debounced full roster snapshot pushed on
-    // subagent lifecycle changes. Rendered like cursor/task subagent cards.
-    if (method === "_omp/agents/update" || method === "_omp/agents/progress") {
-      this.emit("extension", {
-        method,
-        params: (msg.params ?? {}) as Record<string, unknown>,
-      });
       return;
     }
 

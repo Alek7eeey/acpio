@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "tts:install": "node scripts/install-piper.mjs",
-    "build": "npm run build -w @acprocess/shared && npm run build -w @acprocess/i18n && npm run build -w @acprocess/server && npm run build -w @acprocess/web",
+    "build": "npm run build -w @acprocess/shared && npm run build -w @acprocess/i18n && npm run build -w @acprocess/adapter-cursor && npm run build -w @acprocess/adapter-omp && npm run build -w @acprocess/server && npm run build -w @acprocess/web",
     "db:generate": "npm run db:generate -w @acprocess/server",
     "db:migrate": "npm run db:migrate -w @acprocess/server",
     "db:push": "npm run db:push -w @acprocess/server"

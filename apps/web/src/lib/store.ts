@@ -12,7 +12,11 @@ import type {
   Theme,
   WsServerEvent,
 } from "@acprocess/shared";
-import { DEFAULT_SETTINGS, isModelAccessError, usesCloudModelCatalog } from "@acprocess/shared";
+import {
+  DEFAULT_SETTINGS,
+  isModelAccessError,
+  type AdapterMetaDto,
+} from "@acprocess/shared";
 import { api } from "./api";
 import { applyAppearance } from "./appearance";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
@@ -27,12 +31,17 @@ const MODELS_CLOUD_SOFT_TTL_MS = 30_000;
 const MODELS_HARD_TTL_MS = 7 * 24 * 60_000;
 const MODELS_CLOUD_HARD_TTL_MS = 2 * 60_000;
 
+/** Meta of a registered adapter (falls back to cursor-like when not loaded). */
+export function adapterMeta(provider: AgentProvider): AdapterMetaDto | undefined {
+  return useAppStore.getState().adapters.find((a) => a.id === provider);
+}
+
 function modelsHardTtl(provider: AgentProvider): number {
-  return usesCloudModelCatalog(provider) ? MODELS_CLOUD_HARD_TTL_MS : MODELS_HARD_TTL_MS;
+  return adapterMeta(provider)?.cloudCatalog ? MODELS_CLOUD_HARD_TTL_MS : MODELS_HARD_TTL_MS;
 }
 
 function modelsSoftTtl(provider: AgentProvider): number {
-  return usesCloudModelCatalog(provider) ? MODELS_CLOUD_SOFT_TTL_MS : MODELS_SOFT_TTL_MS;
+  return adapterMeta(provider)?.cloudCatalog ? MODELS_CLOUD_SOFT_TTL_MS : MODELS_SOFT_TTL_MS;
 }
 
 export type ModelsCatalog = {
@@ -96,6 +105,9 @@ type AppState = {
   /** True while the TTS engine is generating audio (stop button shows a spinner). */
   ttsLoading: boolean;
   modelsCatalog: ModelsCatalog | null;
+  /** Registered harness adapters (from /api/adapters). */
+  adapters: AdapterMetaDto[];
+  loadAdapters: () => Promise<void>;
   modelsLoading: boolean;
   sidebarOpen: boolean;
   connected: boolean;
@@ -498,6 +510,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     typeof window !== "undefined"
       ? !(readStoredModelsCatalog()?.models?.length)
       : true,
+  adapters: [],
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
   agentAvailable: false,
@@ -523,6 +536,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   applyLocale(locale) {
     document.documentElement.lang = locale;
     localStorage.setItem("acprocess.locale", locale);
+  },
+
+  async loadAdapters() {
+    try {
+      const adapters = await api.fetchAdapters();
+      set({ adapters });
+    } catch {
+      // The static registry is served at boot; a failure leaves the UI with
+      // the default (cursor/omp) provider forms.
+    }
   },
 
   rememberModelsCatalog(catalog) {
@@ -670,6 +693,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   async loadBootstrap() {
     set({ loading: true, error: null });
     try {
+      // Harness adapter meta drives the provider list and catalog decisions —
+      // load it before any model/TTL logic runs.
+      void get().loadAdapters();
       await loadAppData(set, get);
     } catch (err) {
       set({

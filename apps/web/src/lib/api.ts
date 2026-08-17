@@ -1,4 +1,5 @@
 import type {
+  AdapterMetaDto,
   AgentProbeResult,
   AgentProvider,
   AppSettings,
@@ -98,6 +99,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ provider }),
     }),
+  fetchAdapters: () => request<AdapterMetaDto[]>("/api/adapters"),
   setSessionModel: (id: string, model: string, params?: Record<string, string>) =>
     request<{
       ok: boolean;

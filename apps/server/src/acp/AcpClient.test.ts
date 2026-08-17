@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
+import { getAdapter } from "../adapters/registry.js";
 import {
   splitInlineThinking,
   findModelConfigOption,
@@ -380,19 +381,23 @@ describe("listAgentModes", () => {
       { value: "plan", name: "Plan" },
     ],
   };
-
+  const CURSOR_DEFAULTS = [
+    { value: "agent", name: "Agent" },
+    { value: "plan", name: "Plan" },
+    { value: "ask", name: "Ask" },
+  ];
   it.each([
     {
       name: "session modes win over configOptions",
       options: [modeOpt],
-      provider: "cursor" as const,
+      defaultModes: CURSOR_DEFAULTS,
       sessionModes: [{ value: "x", name: "X" }],
       expected: [{ value: "x", name: "X" }],
     },
     {
       name: "empty session modes fall through to configOptions",
       options: [modeOpt],
-      provider: "cursor" as const,
+      defaultModes: CURSOR_DEFAULTS,
       sessionModes: [],
       expected: [
         { value: "agent", name: "Agent" },
@@ -402,7 +407,7 @@ describe("listAgentModes", () => {
     {
       name: "configOptions mode option mapped",
       options: [modeOpt],
-      provider: "omp" as const,
+      defaultModes: [],
       sessionModes: undefined,
       expected: [
         { value: "agent", name: "Agent" },
@@ -412,61 +417,47 @@ describe("listAgentModes", () => {
     {
       name: "name falls back to value when empty",
       options: [{ id: "mode", options: [{ value: "ask", name: "" }] }],
-      provider: "omp" as const,
+      defaultModes: [],
       expected: [{ value: "ask", name: "ask" }],
     },
     {
       name: "name is trimmed",
       options: [{ id: "mode", options: [{ value: "ask", name: "  Ask  " }] }],
-      provider: "omp" as const,
+      defaultModes: [],
       expected: [{ value: "ask", name: "Ask" }],
     },
     {
       name: "category mode option works",
       options: [{ id: "custom", category: "mode", options: [{ value: "agent", name: "Agent" }] }],
-      provider: "omp" as const,
+      defaultModes: [],
       expected: [{ value: "agent", name: "Agent" }],
     },
     {
       name: "session_mode id works",
       options: [{ id: "session_mode", options: [{ value: "plan", name: "Plan" }] }],
-      provider: "omp" as const,
+      defaultModes: [],
       expected: [{ value: "plan", name: "Plan" }],
     },
     {
-      name: "cursor fallback Agent/Plan/Ask when nothing else provides modes",
+      name: "adapter defaults (Cursor) when nothing else provides modes",
       options: [],
-      provider: "cursor" as const,
-      expected: [
-        { value: "agent", name: "Agent" },
-        { value: "plan", name: "Plan" },
-        { value: "ask", name: "Ask" },
-      ],
+      defaultModes: CURSOR_DEFAULTS,
+      expected: CURSOR_DEFAULTS,
     },
     {
-      name: "omp yields no modes without a switcher",
+      name: "no defaults (OMP) yield no modes without a switcher",
       options: [],
-      provider: "omp" as const,
+      defaultModes: [],
       expected: [],
     },
     {
-      name: "unknown provider yields no modes without a switcher",
-      options: [],
-      provider: undefined,
-      expected: [],
-    },
-    {
-      name: "mode option with empty choices falls through to cursor default",
+      name: "mode option with empty choices falls through to adapter defaults",
       options: [{ id: "mode", options: [] }],
-      provider: "cursor" as const,
-      expected: [
-        { value: "agent", name: "Agent" },
-        { value: "plan", name: "Plan" },
-        { value: "ask", name: "Ask" },
-      ],
+      defaultModes: CURSOR_DEFAULTS,
+      expected: CURSOR_DEFAULTS,
     },
-  ])("$name", ({ options, provider, sessionModes, expected }) => {
-    expect(listAgentModes(options, provider, sessionModes)).toEqual(expected);
+  ])("$name", ({ options, defaultModes, sessionModes, expected }) => {
+    expect(listAgentModes(options, defaultModes, sessionModes)).toEqual(expected);
   });
 });
 
@@ -521,7 +512,7 @@ describe("buildAgentEnv", () => {
       expected: {},
     },
   ])("$name", ({ settings, expected }) => {
-    const env = buildAgentEnv("cursor", settings);
+    const env = buildAgentEnv(getAdapter("cursor"), settings);
     for (const key of apiKeyEnvNames) {
       if (key in expected) {
         expect(env[key]).toBe(expected[key as keyof typeof expected]);
@@ -531,24 +522,27 @@ describe("buildAgentEnv", () => {
     }
   });
 
-  it("maps the same settings identically for both providers", () => {
+  it("exports each provider's own API key env var", () => {
     const settings = settingsWith({ cursorApiKey: "ck", anthropicApiKey: "ant", openaiApiKey: "oa" });
-    const cursorEnv = buildAgentEnv("cursor", settings);
-    const ompEnv = buildAgentEnv("omp", settings);
-    for (const key of apiKeyEnvNames) {
+    const cursorEnv = buildAgentEnv(getAdapter("cursor"), settings);
+    const ompEnv = buildAgentEnv(getAdapter("omp"), settings);
+    // Cursor's key is exported only for cursor; anthropic/openai keys are shared.
+    expect(cursorEnv.CURSOR_API_KEY).toBe("ck");
+    expect(ompEnv.CURSOR_API_KEY).toBeUndefined();
+    for (const key of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]) {
       expect(ompEnv[key]).toBe(cursorEnv[key]);
     }
   });
 
   it("never contains undefined values", () => {
-    const env = buildAgentEnv("cursor", settingsWith({ cursorApiKey: "ck", openaiApiKey: "oa" }));
+    const env = buildAgentEnv(getAdapter("cursor"), settingsWith({ cursorApiKey: "ck", openaiApiKey: "oa" }));
     for (const value of Object.values(env)) {
       expect(value).not.toBeUndefined();
     }
   });
 
   it("prepends known bin dirs to PATH on win32 and leaves PATH untouched elsewhere", () => {
-    const env = buildAgentEnv("cursor", settingsWith({}));
+    const env = buildAgentEnv(getAdapter("cursor"), settingsWith({}));
     if (process.platform === "win32") {
       expect(env.PATH).toBeDefined();
       const local = process.env.LOCALAPPDATA;

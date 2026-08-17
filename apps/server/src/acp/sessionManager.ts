@@ -3,21 +3,23 @@ import { stat } from "node:fs/promises";
 import {
   isGenericToolTitle,
   isModelAccessError,
-  isSubagentToolCall,
   modelDisplayName,
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
   parseModelWire,
-  providerCommand,
+  subagentFieldsFromRaw,
+  textFromUnknown,
   toolDisplayTitle,
-  usesCloudModelCatalog,
+  type AdapterExtensionKind,
   type AgentMode,
   type AgentProvider,
   type AppSettings,
+  type HarnessAdapter,
   type McpServerConfig,
   type ModelParamDto,
   type SessionDetailDto,
+  type SubagentCardUpdate,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
@@ -32,6 +34,7 @@ import {
   updateSession,
 } from "../services/sessions.js";
 import { broadcastToSession } from "../services/wsHub.js";
+import { adapterCommand, getAdapter } from "../adapters/registry.js";
 import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
@@ -65,37 +68,9 @@ async function applyAgentReportedMode(rt: SessionRuntime, rawModeId: string) {
   await updateSession(rt.sessionId, { mode });
 }
 
-export function textFromUnknown(value: unknown): string {
-  if (!value) return "";
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (
-      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
-      (trimmed.startsWith("{") && trimmed.endsWith("}"))
-    ) {
-      try {
-        return textFromUnknown(JSON.parse(trimmed));
-      } catch {
-        return value;
-      }
-    }
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => textFromUnknown(item))
-      .filter(Boolean)
-      .join("\n\n");
-  }
-  if (typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    if (typeof obj.text === "string") return obj.text;
-    if (typeof obj.prompt === "string") return obj.prompt;
-    if (typeof obj.output === "string") return obj.output;
-    if (obj.content !== undefined) return textFromUnknown(obj.content);
-    if (obj.result !== undefined) return textFromUnknown(obj.result);
-  }
-  return "";
+/** Whether an ACP tool `kind` denotes a nested agent for this harness. */
+function isSubagentToolKind(adapter: HarnessAdapter | null, kind: string): boolean {
+  return adapter ? adapter.subagentToolKinds.includes(kind.trim().toLowerCase()) : false;
 }
 
 /** Real tool name from an ACP tool update's raw payload (runtime-narrowed). */
@@ -107,27 +82,6 @@ function toolNameFromRaw(raw: Record<string, unknown> | undefined): string | und
 /** Tool call arguments from an ACP update raw (Cursor: `rawInput`). */
 function argsFromRaw(raw: Record<string, unknown> | undefined): unknown {
   return raw?.rawInput ?? raw?.input ?? raw?.arguments;
-}
-
-export function subagentFieldsFromRaw(raw: Record<string, unknown>) {
-  const prompt =
-    textFromUnknown(raw.prompt) ||
-    textFromUnknown((raw.rawInput as Record<string, unknown> | undefined)?.prompt) ||
-    textFromUnknown((raw.arguments as Record<string, unknown> | undefined)?.prompt) ||
-    textFromUnknown((raw.input as Record<string, unknown> | undefined)?.prompt);
-  const result = textFromUnknown(raw.result) || textFromUnknown(raw.content);
-  const titled = String(raw.title ?? raw.description ?? raw.name ?? raw.label ?? "").trim();
-  const fromBody =
-    result.match(/^###\s+([^\n\[]+?)(?:\s*\[|$)/m)?.[1]?.trim() ||
-    result.match(/^\s*Label:\s*(.+)$/m)?.[1]?.trim() ||
-    result.match(/<task-result\b[^>]*\bid="([^"]+)"/i)?.[1]?.trim() ||
-    "";
-  const niceTitle = [titled, fromBody].find((v) => v && !/^(tool|task|subagent|субагент)$/i.test(v));
-  return {
-    ...(prompt ? { prompt } : {}),
-    ...(result ? { result } : {}),
-    ...(niceTitle ? { title: niceTitle, description: niceTitle } : {}),
-  };
 }
 
 function toModelParams(options: ConfigOption[]): ModelParamDto[] {
@@ -234,8 +188,12 @@ function toModelList(options: ConfigOption[]): ModelOption[] {
   }));
 }
 
-function toModesList(options: ConfigOption[], provider: AgentProvider, sessionModes?: Array<{ value: string; name: string }>): ModeOption[] {
-  const modes = listAgentModes(options, provider, sessionModes);
+function toModesList(
+  options: ConfigOption[],
+  defaultModes: Array<{ value: string; name: string }>,
+  sessionModes?: Array<{ value: string; name: string }>,
+): ModeOption[] {
+  const modes = listAgentModes(options, defaultModes, sessionModes);
   // Hide non-switchable lists (OMP's lone "default") from the client catalog.
   return isSwitchableModeList(modes) ? modes : [];
 }
@@ -267,7 +225,8 @@ function denyModel(provider: AgentProvider, model: string) {
 }
 
 function modelsCacheTtlMs(provider: AgentProvider): number {
-  return usesCloudModelCatalog(provider) ? 2 * 60_000 : 24 * 60_000;
+  const adapter = getAdapter(provider);
+  return adapter.cloudCatalog ? 2 * 60_000 : 24 * 60_000;
 }
 
 async function finalizeModelList(
@@ -381,6 +340,8 @@ class SessionRuntime {
   clientReady: Promise<AcpClient> | null = null;
   /** Provider the live ACP process was started with. */
   provider: AgentProvider | null = null;
+  /** Harness adapter for the live ACP process. */
+  adapter: HarnessAdapter | null = null;
   /** Exact absolute paths of user-attached files the agent may read outside the cwd. */
   allowedAttachmentFiles = new Set<string>();
   assistantMessageId: string | null = null;
@@ -525,6 +486,7 @@ export function effectiveMcpServers(
  */
 export function pickRestoreMode(input: {
   provider: AgentProvider;
+  restoreMode: RestoreMode;
   preferResume: boolean;
   toggle: boolean;
   hasStoredSession: boolean;
@@ -538,9 +500,7 @@ export function pickRestoreMode(input: {
   ) {
     return "new";
   }
-  if (input.provider === "omp") return "resume";
-  if (input.provider === "cursor") return "load";
-  return "new";
+  return input.restoreMode;
 }
 
 function resolveRestoreMode(
@@ -552,11 +512,13 @@ function resolveRestoreMode(
   if (preferResume === false || !settings.resumeAgentContext) {
     return { mode: "new" };
   }
-  if (opts.provider !== "omp" && opts.provider !== "cursor") {
+  const adapter = getAdapter(opts.provider);
+  if (adapter.restoreMode === "new") {
     return { mode: "new" };
   }
   const mode = pickRestoreMode({
     provider: opts.provider,
+    restoreMode: adapter.restoreMode,
     preferResume: true,
     toggle: true,
     hasStoredSession: Boolean(detail?.acpSessionId),
@@ -597,9 +559,11 @@ export async function ensureAcp(
   const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds);
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
-    const client = new AcpClient(opts.provider, settings, opts.cwd, opts.mode);
+    const adapter = getAdapter(opts.provider);
+    const client = new AcpClient(adapter, settings, opts.cwd, opts.mode);
     rt.client = client;
     rt.provider = opts.provider;
+    rt.adapter = adapter;
     for (const f of rt.allowedAttachmentFiles) client.allowReadFile(f);
 
     client.on("log", (line: string) => {
@@ -648,11 +612,14 @@ export async function ensureAcp(
       });
     });
 
-    client.on("extension", (ext: { method: string; params: unknown }) => {
-      void rt.enqueue(async () => {
-        await handleExtension(rt, ext.method, (ext.params ?? {}) as Record<string, unknown>);
-      });
-    });
+    client.on(
+      "extension",
+      (ext: { method: string; kind: AdapterExtensionKind; params: Record<string, unknown> }) => {
+        void rt.enqueue(async () => {
+          await handleExtension(rt, ext);
+        });
+      },
+    );
 
     rt.clientReady = (async () => {
       try {
@@ -676,7 +643,7 @@ export async function ensureAcp(
           toModelList(client.configOptions),
         );
         const modelParams = toModelParams(client.configOptions);
-        const modes = toModesList(client.configOptions, opts.provider, client.sessionModes);
+        const modes = toModesList(client.configOptions, getAdapter(opts.provider).defaultModes, client.sessionModes);
         const currentModel = pickCurrentModel(
           models,
           findModelConfigOption(client.configOptions)?.currentValue,
@@ -852,7 +819,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       toolDisplayTitle(update.title ?? "", toolNameFromRaw(update.raw), argsFromRaw(update.raw)) ||
       "Tool";
     const kind = String((update.raw.kind as string) ?? "");
-    const isSubagent = isSubagentToolCall(kind);
+    const isSubagent = isSubagentToolKind(rt.adapter, kind);
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
     const payload: Record<string, unknown> = {
       toolCallId: update.toolCallId,
@@ -910,7 +877,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       ) || "Tool";
     const status = update.status ?? "in_progress";
     const kind = String(mergedRaw.kind ?? "");
-    const isSubagent = isSubagentToolCall(kind);
+    const isSubagent = isSubagentToolKind(rt.adapter, kind);
     const extra = isSubagent ? subagentFieldsFromRaw(mergedRaw) : {};
     // Terminal status is final: late async progress must not reopen the card.
     if (status === "completed" || status === "failed") {
@@ -1056,13 +1023,6 @@ const MAX_SUBAGENT_TRANSCRIPT_PAGES = 10;
 /** Live thinking poll cadence per running subagent. */
 const SUBAGENT_THINKING_POLL_MS = 1500;
 
-interface SubagentMessagesResponse {
-  fromByte?: number;
-  nextByte?: number;
-  reset?: boolean;
-  messages?: Array<{ role?: string; content?: unknown[] }>;
-}
-
 interface SubagentThinkingPoll {
   timer: NodeJS.Timeout | undefined;
   /** Byte offset of the next incremental transcript drain. */
@@ -1090,7 +1050,8 @@ function clearSubagentThinkingPoll(rt: SessionRuntime, id: string): void {
  */
 async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: SubagentThinkingPoll): Promise<void> {
   const client = rt.client;
-  if (!client) {
+  const readTranscript = rt.adapter?.readSubagentTranscript;
+  if (!client || !readTranscript) {
     clearSubagentThinkingPoll(rt, id);
     return;
   }
@@ -1099,10 +1060,7 @@ async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: Subag
   try {
     let { lastByte, blocks } = poll;
     for (let page = 0; page < MAX_SUBAGENT_TRANSCRIPT_PAGES; page++) {
-      const res = (await client.requestAgent<SubagentMessagesResponse | undefined>("_omp/agents/messages", {
-        agentId: id,
-        fromByte: lastByte,
-      })) ?? {};
+      const res = (await readTranscript(client, id, lastByte)) ?? {};
       if (res.reset || !poll.seeded) {
         // Transcript rewound (or first snapshot): rebuild the list from this
         // response instead of appending to a stale one.
@@ -1171,192 +1129,100 @@ async function stopSubagentThinkingPoll(rt: SessionRuntime, id: string): Promise
 
 async function handleExtension(
   rt: SessionRuntime,
-  method: string,
-  params: Record<string, unknown>,
+  ext: { method: string; kind: AdapterExtensionKind; params: Record<string, unknown> },
 ) {
   const messageId = await ensureAssistantMessage(rt);
-  if (method === "cursor/update_todos") {
-    await appendPart(rt.sessionId, messageId, "todo", params);
-    return;
-  }
-  if (method === "cursor/task") {
-    const toolCallId = String(
-      params.tool_call_id ?? params.toolCallId ?? params.toolCallID ?? "",
-    );
-    const title = String(
-      params.title ?? params.description ?? params.name ?? params.subtitle ?? "",
-    ).trim();
-    const status = String(params.status ?? "").trim();
-    const subagentType = String(
-      params.subagent_type ?? params.subagentType ?? params.kind ?? params.type ?? "",
-    ).trim();
-    const extra = subagentFieldsFromRaw(params);
-    const payload: Record<string, unknown> = {
-      ...(toolCallId ? { toolCallId } : {}),
-      ...(title ? { title, description: title } : {}),
-      ...(status ? { status } : {}),
-      ...(subagentType ? { subagentType } : {}),
-      raw: params,
-      ...extra,
-    };
-
-    // Same Task arrives as ACP tool_call + cursor/task — keep one card.
-    const existingId = toolCallId ? rt.toolPartByCallId.get(toolCallId) : undefined;
-    if (existingId) {
-      await updatePart(rt.sessionId, existingId, payload, "subagent");
+  const adapter = rt.adapter;
+  switch (ext.kind) {
+    case "todos": {
+      await appendPart(rt.sessionId, messageId, "todo", ext.params);
       return;
     }
+    case "image": {
+      await appendPart(rt.sessionId, messageId, "status", { kind: "image", ...ext.params });
+      return;
+    }
+    case "subagent_task": {
+      const mapped = adapter?.subagentTaskCard?.(ext.params);
+      if (!mapped) return;
+      await applySubagentCard(rt, messageId, mapped.card, mapped.toolCallId);
+      return;
+    }
+    case "subagent_roster": {
+      const agents = Array.isArray(ext.params.agents)
+        ? (ext.params.agents as Record<string, unknown>[])
+        : [];
+      for (const entry of agents) {
+        const card = adapter?.subagentCardFromRoster?.(entry);
+        if (!card) continue;
+        await applySubagentCard(rt, messageId, card);
+      }
+      return;
+    }
+    case "subagent_progress": {
+      const entry = (ext.params.agent ?? {}) as Record<string, unknown>;
+      const card = adapter?.subagentCardFromProgress?.(entry);
+      if (!card) return;
+      await applySubagentCard(rt, messageId, card);
+      return;
+    }
+  }
+}
 
+/** Card payload the core stores on a subagent part. */
+function subagentPayload(card: SubagentCardUpdate): Record<string, unknown> {
+  return {
+    agentId: card.agentId,
+    ...(card.parentId ? { parentId: card.parentId } : {}),
+    status: card.status,
+    title: card.title,
+    description: card.description ?? card.title,
+    // The UI renders the card body from payload.prompt (last fallback after result).
+    ...(card.body ? { prompt: card.body } : {}),
+    ...(card.subagentType ? { subagentType: card.subagentType } : {}),
+    ...(card.metrics ? { metrics: card.metrics } : {}),
+    ...(card.resolvedModel ? { resolvedModel: card.resolvedModel } : {}),
+    raw: card.raw,
+  };
+}
+
+/** Upsert one normalized subagent card, with the harness's card lifecycle. */
+async function applySubagentCard(
+  rt: SessionRuntime,
+  messageId: string,
+  card: SubagentCardUpdate,
+  toolCallId?: string,
+): Promise<void> {
+  // cursor/task and the parallel ACP tool_call share the toolCallId — one card.
+  if (toolCallId) {
+    const existingToolPart = rt.toolPartByCallId.get(toolCallId);
+    if (existingToolPart) {
+      await updatePart(rt.sessionId, existingToolPart, subagentPayload(card), "subagent");
+      return;
+    }
+  }
+  const existingId = rt.subagentPartByAgentId.get(card.agentId);
+  if (existingId) {
+    await updatePart(rt.sessionId, existingId, subagentPayload(card), "subagent");
+  } else if (card.status === "running" || toolCallId) {
+    // Roster snapshots are process-global and include agents from earlier
+    // turns (idle/parked) — an idle-only sighting never re-creates an old
+    // card in a new message; explicit task requests always spawn theirs.
     const part = await appendPart(rt.sessionId, messageId, "subagent", {
-      title: title || "Субагент",
-      description: title || "Субагент",
-      ...payload,
+      title: card.title,
+      description: card.description ?? card.title,
+      ...subagentPayload(card),
     });
     if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
-    return;
+    rt.subagentPartByAgentId.set(card.agentId, part.id);
   }
-  if (method === "cursor/generate_image") {
-    await appendPart(rt.sessionId, messageId, "status", {
-      kind: "image",
-      ...params,
-    });
-  }
-  if (method === "_omp/agents/update") {
-    // omp roster snapshot: upsert one subagent card per registry agent id.
-    const agents = Array.isArray(params.agents) ? (params.agents as Record<string, unknown>[]) : [];
-    for (const agent of agents) {
-      if (agent.kind !== "sub") continue;
-      const id = String(agent.id ?? "");
-      if (!id) continue;
-      const rawStatus = String(agent.status ?? "");
-      // Registry statuses are lifecycle states; the UI understands terminal
-      // statuses as completed/failed (stops the "working" pulse).
-      const status =
-        rawStatus === "aborted"
-          ? "failed"
-          : rawStatus === "running"
-            ? "running"
-            : "completed";
-      const activity = typeof agent.activity === "string" ? agent.activity.trim() : "";
-      // `displayName` is the agent *type* ("scout", "task"); the id is the
-      // intent-derived name ("SummaryPorting") — prefer it as the card title.
-      const name = String(agent.displayName ?? "");
-      const title = name && !/^(tool|task|scout|subagent|агент|субагент)$/i.test(name) ? name : id;
-      const metrics =
-        agent.metrics && typeof agent.metrics === "object"
-          ? (agent.metrics as Record<string, unknown>)
-          : undefined;
-      const bodyParts: string[] = [];
-      if (activity) bodyParts.push(activity);
-      if (rawStatus === "running") bodyParts.push("статус: выполняется");
-      if (metrics) {
-        const parts: string[] = [];
-        for (const key of ["tokens", "requests", "tools"] as const) {
-          if (typeof metrics[key] === "number") parts.push(`${key}: ${metrics[key]}`);
-        }
-        if (typeof metrics.durationMs === "number") parts.push(`время: ${Math.round(metrics.durationMs / 1000)} с`);
-        if (typeof metrics.cost === "number") parts.push(`стоимость: $${metrics.cost.toFixed(4)}`);
-        if (parts.length) bodyParts.push(`— ${parts.join(", ")} —`);
-      }
-      const payload: Record<string, unknown> = {
-        agentId: id,
-        ...(agent.parentId ? { parentId: String(agent.parentId) } : {}),
-        status,
-        ...(agent.resolvedModel ? { resolvedModel: String(agent.resolvedModel) } : {}),
-        ...(metrics ? { metrics } : {}),
-        // `resolveSubagentBody` renders payload.prompt as the card body.
-        ...(bodyParts.length ? { prompt: bodyParts.join("\n\n") } : {}),
-        description: activity || title,
-        raw: agent,
-      };
-      const existingId = rt.subagentPartByAgentId.get(id);
-      if (existingId) {
-        await updatePart(rt.sessionId, existingId, payload, "subagent");
-      } else {
-        // The roster snapshot is process-global and includes agents from
-        // earlier turns (idle/parked). Only spawn a card for an agent that is
-        // actually working (running); an idle-only sighting never re-creates
-        // an old agent's card in a new message.
-        if (status !== "running") continue;
-        const part = await appendPart(rt.sessionId, messageId, "subagent", {
-          title,
-          description: activity || title,
-          ...payload,
-        });
-        rt.subagentPartByAgentId.set(id, part.id);
-      }
-      // Stream the subagent's own transcript (thinking) into the card: a
-      // live incremental drain while running, one final drain at terminal.
-      if (status === "running") {
-        startSubagentThinkingPoll(rt, id);
-      } else {
-        void stopSubagentThinkingPoll(rt, id);
-      }
-    }
-    return;
-  }
-  if (method === "_omp/agents/progress") {
-    // omp live work stream: one subagent progress snapshot. Upserts the same
-    // per-agent card as `_omp/agents/update` and fills the body with the
-    // current intent, active tool, recent output, and spend.
-    const agent = (params.agent ?? {}) as Record<string, unknown>;
-    const id = String(agent.id ?? "");
-    if (!id) return;
-    const rawStatus = String(agent.status ?? "");
-    const status =
-      rawStatus === "completed"
-        ? "completed"
-        : rawStatus === "failed" || rawStatus === "aborted"
-          ? "failed"
-          : "running";
-    const title = id;
-    const intent = typeof agent.lastIntent === "string" ? agent.lastIntent.trim() : "";
-    const lines: string[] = [];
-    if (intent) lines.push(intent);
-    const tool = typeof agent.currentTool === "string" ? agent.currentTool : "";
-    const toolArgs = typeof agent.currentToolArgs === "string" ? agent.currentToolArgs : "";
-    if (tool) lines.push(`инструмент: \`${tool}\`${toolArgs ? ` (${toolArgs.slice(0, 120)})` : ""}`);
-    if (Array.isArray(agent.recentOutput)) {
-      for (const line of agent.recentOutput.slice(0, 5)) {
-        if (typeof line === "string" && line.trim()) lines.push(line.trim().slice(0, 300));
-      }
-    }
-    const metrics: string[] = [];
-    for (const key of ["toolCount", "requests", "tokens"] as const) {
-      const value = agent[key];
-      if (typeof value === "number") metrics.push(`${key === "toolCount" ? "tools" : key}: ${value}`);
-    }
-    if (typeof agent.durationMs === "number") metrics.push(`время: ${Math.round((agent.durationMs as number) / 1000)} с`);
-    if (typeof agent.cost === "number") metrics.push(`стоимость: $${(agent.cost as number).toFixed(4)}`);
-    if (metrics.length) lines.push(`— ${metrics.join(", ")} —`);
-    const payload: Record<string, unknown> = {
-      agentId: id,
-      status,
-      ...(agent.resolvedModel ? { resolvedModel: String(agent.resolvedModel) } : {}),
-      ...(lines.length ? { prompt: lines.join("\n\n") } : {}),
-      description: intent || title,
-      raw: agent,
-    };
-    const existingId = rt.subagentPartByAgentId.get(id);
-    if (existingId) {
-      await updatePart(rt.sessionId, existingId, payload, "subagent");
-    } else if (status === "running") {
-      // Progress for a terminal state without a known card means the agent
-      // was never sighted while working — never create a stale card.
-      const part = await appendPart(rt.sessionId, messageId, "subagent", {
-        title,
-        description: intent || title,
-        ...payload,
-      });
-      rt.subagentPartByAgentId.set(id, part.id);
-    }
-    // Live thinking stream, same lifecycle as the update roster.
-    if (status === "running") {
-      startSubagentThinkingPoll(rt, id);
+  // Live thinking stream: drain while running, one final snapshot at terminal.
+  if (rt.adapter?.subagentStreaming) {
+    if (card.status === "running") {
+      startSubagentThinkingPoll(rt, card.agentId);
     } else {
-      void stopSubagentThinkingPoll(rt, id);
+      void stopSubagentThinkingPoll(rt, card.agentId);
     }
-    return;
   }
 }
 
@@ -1693,7 +1559,7 @@ export async function probeAgent(
   const settings = await getSettings();
   const selected = provider ?? settings.defaultProvider;
   const client = new AcpClient(
-    selected,
+    getAdapter(selected),
     settings,
     settings.defaultCwd || process.cwd(),
     settings.defaultMode,
@@ -1707,7 +1573,7 @@ export async function probeAgent(
     const acpModels = toModelList(client.configOptions);
     const models = await finalizeModelList(selected, settings, acpModels);
     const modelParams = toModelParams(client.configOptions);
-    const modes = toModesList(client.configOptions, selected, client.sessionModes);
+    const modes = toModesList(client.configOptions, getAdapter(selected).defaultModes, client.sessionModes);
     const sessionId = client.sessionId ?? undefined;
     const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
     const currentModel = pickCurrentModel(models, rawCurrent);
@@ -1723,7 +1589,7 @@ export async function probeAgent(
     return {
       ok: true,
       provider: selected,
-      command: providerCommand(settings, selected),
+      command: adapterCommand(getAdapter(selected), settings),
       message: currentModel
         ? `ACP OK. Model: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
         : `ACP OK — session ${sessionId}`,
@@ -1740,7 +1606,7 @@ export async function probeAgent(
     return {
       ok: false,
       provider: selected,
-      command: providerCommand(settings, selected),
+      command: adapterCommand(getAdapter(selected), settings),
       message: err instanceof Error ? err.message : String(err),
       details: `${logs.join("\n")}\n${client.lastStderr}`.slice(-2000),
     };
@@ -1960,7 +1826,7 @@ export async function setSessionModel(
       toModelList(client.configOptions),
     );
     const modelParams = toModelParams(client.configOptions);
-    const modes = toModesList(client.configOptions, detail.provider, client.sessionModes);
+    const modes = toModesList(client.configOptions, getAdapter(detail.provider).defaultModes, client.sessionModes);
     const currentModel = pickCurrentModel(
       models,
       findModelConfigOption(client.configOptions)?.currentValue ?? model,
@@ -2070,7 +1936,7 @@ async function warmParamsProbeClient(provider: AgentProvider): Promise<AcpClient
 
   const settings = await getSettings();
   const client = new AcpClient(
-    provider,
+    getAdapter(provider),
     settings,
     settings.defaultCwd || process.cwd(),
     settings.defaultMode,

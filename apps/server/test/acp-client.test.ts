@@ -13,19 +13,21 @@ import {
   type AcpRequest,
   type AcpUpdate,
 } from "../src/acp/AcpClient.js";
+import { getAdapter } from "../src/adapters/registry.js";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
 
 const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
 
-function makeClient(extra: Partial<AppSettings> = {}): AcpClient {
+function makeClient(extra: Partial<AppSettings> = {}, provider: "cursor" | "omp" = "omp"): AcpClient {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "acp-client-test-"));
   const settings: AppSettings = {
     ...DEFAULT_SETTINGS,
-    ompCommand: process.execPath,
-    ompArgs: [FAKE_AGENT],
+    ...(provider === "omp"
+      ? { ompCommand: process.execPath, ompArgs: [FAKE_AGENT] }
+      : { cursorCommand: process.execPath, cursorArgs: [FAKE_AGENT] }),
     ...extra,
   };
-  return new AcpClient("omp", settings, cwd, "agent");
+  return new AcpClient(getAdapter(provider), settings, cwd, "agent");
 }
 
 /**
@@ -271,7 +273,8 @@ describe("session restore (resume/load)", () => {
   });
 
   it("session/load boot swallows the replayed history (no update events)", async () => {
-    const client = makeClient();
+    // Cursor's adapter declares suppressReplayOnLoad — history already stored.
+    const client = makeClient({}, "cursor");
     const updates: AcpUpdate[] = [];
     client.on("update", (u) => updates.push(u));
     try {

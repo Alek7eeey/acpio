@@ -14,9 +14,8 @@ import {
   effectiveMcpServers,
   pickRestoreMode,
   requestIdFor,
-  subagentFieldsFromRaw,
-  textFromUnknown,
 } from "./sessionManager.js";
+import { subagentFieldsFromRaw, textFromUnknown } from "@acprocess/shared";
 
 describe("coerceUiMode", () => {
   it.each([
@@ -290,6 +289,7 @@ describe("requestIdFor / parseRpcId", () => {
 describe("pickRestoreMode", () => {
   const base = {
     provider: "omp" as const,
+    restoreMode: "resume" as const,
     preferResume: true,
     toggle: true,
     hasStoredSession: true,
@@ -305,15 +305,16 @@ describe("pickRestoreMode", () => {
     [{ ...base, hasStoredSession: false }, "new"],
     // cwd or provider changed since the session was created
     [{ ...base, cwdMatches: false }, "new"],
-    // omp → silent resume
+    // adapter-declared silent resume (OMP)
     [{ ...base }, "resume"],
-    [{ ...base, provider: "omp" }, "resume"],
-    // cursor → load with history replay
-    [{ ...base, provider: "cursor" }, "load"],
+    // adapter-declared load with history replay (Cursor)
+    [{ ...base, provider: "cursor", restoreMode: "load" }, "load"],
+    // adapter that never restores stays new
+    [{ ...base, restoreMode: "new" }, "new"],
     // every combination of missing preconditions stays new
     [{ ...base, preferResume: false, toggle: false }, "new"],
     [{ ...base, hasStoredSession: false, cwdMatches: false }, "new"],
-    [{ ...base, provider: "cursor", preferResume: false }, "new"],
+    [{ ...base, provider: "cursor", restoreMode: "load", preferResume: false }, "new"],
   ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
     expect(pickRestoreMode({ ...input })).toBe(expected);
   });

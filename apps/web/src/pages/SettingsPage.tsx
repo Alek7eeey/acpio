@@ -2,8 +2,6 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation } from "react-router-dom";
 import {
   migrateModelParamValues,
-  providerCommand,
-  usesCloudModelCatalog,
   type AgentProbeResult,
   type AgentProvider,
   type AppSettings,
@@ -14,7 +12,7 @@ import {
 import { api } from "../lib/api";
 import { parseSettingsSearch } from "../lib/settingsNav";
 import { useT } from "../lib/i18n";
-import { useAppStore } from "../lib/store";
+import { adapterMeta, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
@@ -24,6 +22,14 @@ import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes"
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
+
+/** Command value a provider's settings form carries (adapter-declared field). */
+function adapterCommandFor(form: AppSettings, provider: AgentProvider): string {
+  const meta = adapterMeta(provider);
+  if (!meta) return provider === "cursor" ? form.cursorCommand ?? "agent" : form.ompCommand ?? "omp";
+  const stored = (form as unknown as Record<string, unknown>)[meta.commandField];
+  return typeof stored === "string" && stored.trim() ? stored.trim() : meta.defaultCommand;
+}
 
 function SchemeCard({
   active,
@@ -55,15 +61,21 @@ function SchemeCard({
 
 export function SettingsPage() {
   const t = useT();
-  const providers = useMemo(
-    () =>
-      PROVIDER_IDS.map((id) => ({
-        id,
-        title: id === "cursor" ? "Cursor" : "OMP",
-        description: id === "cursor" ? t("settings.cursorDesc") : t("settings.ompDesc"),
-      })),
-    [t],
-  );
+  const adapters = useAppStore((s) => s.adapters);
+  const providers = useMemo(() => {
+    const registered = adapters.length
+      ? adapters.map((a) => ({
+          id: a.id,
+          title: a.label,
+          description: t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
+        }))
+      : PROVIDER_IDS.map((id) => ({
+          id,
+          title: id === "cursor" ? "Cursor" : "OMP",
+          description: id === "cursor" ? t("settings.cursorDesc") : t("settings.ompDesc"),
+        }));
+    return registered;
+  }, [adapters, t]);
   const location = useLocation();
   const { section, leaf } = useMemo(
     () => parseSettingsSearch(location.search),
@@ -388,7 +400,7 @@ export function SettingsPage() {
         [provider]: {
           ok: false,
           provider,
-          command: providerCommand(form, provider),
+          command: adapterCommandFor(form, provider),
           message: err instanceof Error ? err.message : String(err),
         },
       }));
@@ -414,7 +426,7 @@ export function SettingsPage() {
     setModelsLoading(true);
     setModelsError(null);
     void ensureModels(provider, {
-      force: usesCloudModelCatalog(provider),
+      force: adapterMeta(provider)?.cloudCatalog === true,
     })
       .then((catalog) => {
         if (cancelled || !catalog) return;
@@ -873,7 +885,7 @@ export function SettingsPage() {
                   const provider = settings.connectedProvider;
                   if (!provider) return;
                   void ensureModels(provider, {
-                    force: usesCloudModelCatalog(provider) || modelParams.length === 0,
+                    force: adapterMeta(provider)?.cloudCatalog === true || modelParams.length === 0,
                   }).then((catalog) => {
                     if (!catalog) return;
                     setModels(catalog.models ?? []);

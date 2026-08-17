@@ -17,7 +17,6 @@ import {
   isSubagentToolCall,
   migrateModelParamValues,
   toolDisplayTitle,
-  usesCloudModelCatalog,
   type AgentMode,
   type MessageDto,
   type MessagePartDto,
@@ -28,7 +27,7 @@ import {
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
-import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
+import { adapterMeta, sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
@@ -1615,7 +1614,9 @@ function isSubagentLike(part: MessagePartDto) {
   const kind = String(
     (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
   );
-  return isSubagentToolCall(kind);
+  // Registered adapters' subagent tool kinds + the built-in heuristic fallback.
+  const metaKinds = useAppStore.getState().adapters.flatMap((a) => a.subagentToolKinds);
+  return isSubagentToolCall(kind) || metaKinds.includes(kind.toLowerCase());
 }
 
 function coalesceAssistantParts(
@@ -2281,9 +2282,15 @@ export function ChatPage() {
   useEffect(() => {
     if (!agentProvider) return;
     const cached = useAppStore.getState().modelsCatalog;
-    const needForce =
-      !cached || cached.provider !== agentProvider || usesCloudModelCatalog(agentProvider);
-    void ensureModels(agentProvider, { force: needForce });
+    const cloudCatalog = adapterMeta(agentProvider)?.cloudCatalog === true;
+    const needForce = !cached || cached.provider !== agentProvider || cloudCatalog;
+    // Adapter meta drives TTL/force decisions — load it before the catalog.
+    void useAppStore.getState().loadAdapters().then(() => {
+      const meta = adapterMeta(agentProvider);
+      const refreshed =
+        !cached || cached.provider !== agentProvider || meta?.cloudCatalog === true;
+      void ensureModels(agentProvider, { force: refreshed });
+    });
     void api.warmModelParams(agentProvider);
   }, [agentProvider, ensureModels]);
 
@@ -3377,7 +3384,7 @@ export function ChatPage() {
                       !cached ||
                       cached.provider !== agentProvider ||
                       (cached.modelParams?.length ?? 0) === 0 ||
-                      usesCloudModelCatalog(agentProvider);
+                      adapterMeta(agentProvider)?.cloudCatalog === true;
                     void ensureModels(agentProvider, { force: stale });
                     if (model) {
                       void api.getModelParams(agentProvider, model, {

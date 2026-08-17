@@ -1,4 +1,91 @@
-export type AgentProvider = "cursor" | "omp";
+import type {
+  AgentMode,
+  AgentModeOption,
+  AgentProvider,
+  ModelOption,
+} from "./adapters.js";
+
+export type {
+  AdapterExtensionKind,
+  AdapterMetaDto,
+  AdapterProbeContext,
+  AdapterRegistry,
+  AdapterRestoreMode,
+  AdapterTranscriptClient,
+  AgentModeOption,
+  AgentProvider,
+  AgentMode,
+  HarnessAdapter,
+  ModelOption,
+  SubagentCardUpdate,
+  SubagentProgressUpdate,
+  SubagentTranscriptPage,
+} from "./adapters.js";
+
+/** Extract the first readable text from an unknown tool/subagent payload. */
+export function textFromUnknown(value: unknown): string {
+  if (!value) return "";
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    ) {
+      try {
+        return textFromUnknown(JSON.parse(trimmed));
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => textFromUnknown(item))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.text === "string") return obj.text;
+    if (typeof obj.prompt === "string") return obj.prompt;
+    if (typeof obj.output === "string") return obj.output;
+    if (obj.content !== undefined) return textFromUnknown(obj.content);
+    if (obj.result !== undefined) return textFromUnknown(obj.result);
+  }
+  return "";
+}
+
+/**
+ * Normalized fields of a subagent request/roster entry: prompt, result and a
+ * meaningful title (explicit field or `### Heading` / `Label:` / task-result
+ * id from the body).
+ */
+export function subagentFieldsFromRaw(raw: Record<string, unknown>): {
+  prompt?: string;
+  result?: string;
+  title?: string;
+  description?: string;
+} {
+  const prompt =
+    textFromUnknown(raw.prompt) ||
+    textFromUnknown((raw.rawInput as Record<string, unknown> | undefined)?.prompt) ||
+    textFromUnknown((raw.arguments as Record<string, unknown> | undefined)?.prompt) ||
+    textFromUnknown((raw.input as Record<string, unknown> | undefined)?.prompt);
+  const result = textFromUnknown(raw.result) || textFromUnknown(raw.content);
+  const titled = String(raw.title ?? raw.description ?? raw.name ?? raw.label ?? "").trim();
+  const fromBody =
+    result.match(/^###\s+([^\n\[]+?)(?:\s*\[|$)/m)?.[1]?.trim() ||
+    result.match(/^\s*Label:\s*(.+)$/m)?.[1]?.trim() ||
+    result.match(/<task-result\b[^>]*\bid="([^"]+)"/i)?.[1]?.trim() ||
+    "";
+  const niceTitle = [titled, fromBody].find((v) => v && !/^(tool|task|subagent|субагент)$/i.test(v));
+  return {
+    ...(prompt ? { prompt } : {}),
+    ...(result ? { result } : {}),
+    ...(niceTitle ? { title: niceTitle, description: niceTitle } : {}),
+  };
+}
 
 /** MCP server connection defined in Settings → Connections. */
 export type McpServerConfig = {
@@ -17,7 +104,6 @@ export type McpServerConfig = {
   args?: string[];
 };
 
-export type AgentMode = "agent" | "plan" | "ask";
 export type Theme = "light" | "dark";
 export type AppLocale = "ru" | "en";
 export type PermissionPolicy = "prompt" | "allowlist" | "always";
@@ -129,21 +215,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsVoiceGender: "",
   mcpServers: [],
 };
-
-export function providerCommand(settings: AppSettings, provider: AgentProvider): string {
-  if (provider === "cursor") return settings.cursorCommand;
-  return settings.ompCommand;
-}
-
-export function providerArgs(settings: AppSettings, provider: AgentProvider): string[] {
-  if (provider === "cursor") return settings.cursorArgs;
-  return settings.ompArgs;
-}
-
-/** OMP catalogs depend on account balance and change often. */
-export function usesCloudModelCatalog(provider: AgentProvider): boolean {
-  return provider === "omp";
-}
 
 /** Billing / credits failure from OMP when a model cannot be used. */
 export function isModelAccessError(message: string): boolean {

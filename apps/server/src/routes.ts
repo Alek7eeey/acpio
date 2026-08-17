@@ -58,6 +58,7 @@ import {
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
+import { adapters } from "./adapters/registry.js";
 import type { AgentProvider } from "@acprocess/shared";
 
 /** Content types for inline image previews of attached files (?inline=1). */
@@ -243,17 +244,38 @@ export async function registerRoutes(app: FastifyInstance) {
     }
   });
 
+  // Registered harness adapters — drives the web's provider list and forms.
+  app.get("/api/adapters", async () => {
+    return adapters.list().map((a) => ({
+      id: a.id,
+      label: a.label,
+      descriptionKey: a.descriptionKey,
+      commandField: a.commandField,
+      argsField: a.argsField,
+      apiKeyField: a.apiKeyField,
+      envApiKeyName: a.envApiKeyName,
+      defaultCommand: a.defaultCommand,
+      defaultArgs: a.defaultArgs,
+      installHint: a.installHint,
+      restoreMode: a.restoreMode,
+      parameterizedModelPicker: a.parameterizedModelPicker,
+      subagentStreaming: a.subagentStreaming,
+      cloudCatalog: a.cloudCatalog,
+      defaultModes: a.defaultModes,
+      subagentToolKinds: [...a.subagentToolKinds],
+    }));
+  });
+
   app.post("/api/agent/probe", async (req) => {
     const body = z
-      .object({ provider: z.enum(["cursor", "omp"]).optional() })
+      .object({ provider: z.enum(adapters.ids() as [string, ...string[]]).optional() })
       .parse(req.body ?? {});
     return probeAgent(body.provider);
   });
 
   app.get("/api/agent/models", async (req) => {
     const q = req.query as { provider?: string; force?: string };
-    const provider =
-      q.provider === "cursor" || q.provider === "omp" ? q.provider : undefined;
+    const provider = adapters.ids().includes(q.provider ?? "") ? q.provider : undefined;
     const force = q.force === "1" || q.force === "true";
     return listModels(provider, { force });
   });
@@ -270,8 +292,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/agent/model-params", async (req, reply) => {
     const q = req.query as { provider?: string; model?: string; sessionId?: string; force?: string };
-    const provider =
-      q.provider === "cursor" || q.provider === "omp" ? q.provider : undefined;
+    const provider = adapters.ids().includes(q.provider ?? "") ? q.provider : undefined;
     const model = typeof q.model === "string" ? q.model.trim() : "";
     if (!provider || !model) {
       return reply.code(400).send({ error: "provider and model required" });
@@ -283,7 +304,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/agent/warm-params", async (req) => {
     const body = z
-      .object({ provider: z.enum(["cursor", "omp"]).optional() })
+      .object({ provider: z.enum(adapters.ids() as [string, ...string[]]).optional() })
       .parse(req.body ?? {});
     warmModelParamsProbe(body.provider);
     return { ok: true };
