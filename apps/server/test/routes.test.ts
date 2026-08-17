@@ -18,7 +18,7 @@ import {
   messages as messagesTable,
   messageParts as messagePartsTable,
 } from "../src/db/schema.js";
-import { disposeRuntime } from "../src/acp/sessionManager.js";
+import { disposeRuntime, setAgentAvailable } from "../src/acp/sessionManager.js";
 import { appendPart, appendTextChunk, createMessage } from "../src/services/sessions.js";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
@@ -184,6 +184,51 @@ describe("sessions", () => {
     expect(detail.acpSessionId).toMatch(/^fake-sess-/);
     expect(detail.messages).toEqual([]);
     expect(detail.slashCommands).toEqual([]);
+  });
+
+  it("keeps reasoning phases as separate thought parts interleaved with tools", async () => {
+    const conn = await connectAgent();
+    expect(conn.statusCode).toBe(200);
+    const res = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const session = res.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    const prompt = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "PHASED: разбей рассуждения" },
+    });
+    expect(prompt.statusCode).toBe(200);
+
+    // Fake agent answers instantly — wait for the turn to finish (real child
+    // process, so poll like waitForAcpSessionId instead of fake timers).
+    const deadline = Date.now() + 5000;
+    let detail;
+    while (Date.now() < deadline) {
+      const d = await app.inject({ method: "GET", url: `/api/sessions/${session.id}` });
+      detail = d.json();
+      if (detail.status === "idle" && detail.messages.some((m: { role: string }) => m.role === "assistant")) break;
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, 50);
+      await promise;
+    }
+    const assistant = detail!.messages.find((m: { role: string }) => m.role === "assistant");
+    const parts = assistant!.parts;
+    const thoughts = parts.filter((p: { type: string }) => p.type === "thought");
+    const tools = parts.filter((p: { type: string }) => p.type === "tool_call");
+    expect(thoughts.map((p: { payload: { text?: string } }) => p.payload.text)).toEqual([
+      "phase one thinking",
+      "phase two thinking",
+    ]);
+    expect(tools).toHaveLength(1);
+    const order = parts.map((p: { type: string }) => p.type);
+    // thought → tool → thought: the second phase is NOT merged into the first.
+    expect(order.indexOf("thought")).toBeLessThan(order.lastIndexOf("tool_call"));
+    expect(order.lastIndexOf("tool_call")).toBeLessThan(order.lastIndexOf("thought"));
+    // A completed prompt marks the provider available process-wide; restore the
+    // suite's "no prompt yet" state for the agent status tests.
+    setAgentAvailable("omp", false);
   });
 
   it("GET /api/sessions lists seeded sessions", async () => {

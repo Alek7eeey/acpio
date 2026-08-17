@@ -839,6 +839,11 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
     rt.openTextPartId = null; // next text starts a new segment after tool
+    // Reasoning phases are separate blocks: close the current thought part so
+    // thinking emitted after this tool renders as its own "Мысли" block after
+    // the tool row, not appended to the pre-tool blob.
+    rt.turnThoughtPartId = null;
+    rt.openThoughtPartId = null;
     // OMP labels MCP tools generically ("MCP: tool"); the real name rides in
     // `toolName`. Cursor sends neither — its MCP calls only carry the args, so
     // the display falls back to the call's own subject (query/path/…).
@@ -887,6 +892,10 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   if (update.kind === "tool_call_update") {
     if (!rt.acceptingStream) return;
     const messageId = await ensureAssistantMessage(rt);
+    // Tool boundary — same reasoning-phase split as `tool_call` (idempotent;
+    // consecutive thought parts still coalesce on the client).
+    rt.turnThoughtPartId = null;
+    rt.openThoughtPartId = null;
     const partId = rt.toolPartByCallId.get(update.toolCallId);
     // Merge with the start event so identifying fields (title/toolName/
     // rawInput/kind) survive the status updates that omit them.
@@ -1879,7 +1888,7 @@ export function getSessionSlashCommands(sessionId: string) {
  */
 const agentAvailability = new Map<AgentProvider, boolean>();
 
-function setAgentAvailable(provider: AgentProvider | null | undefined, available: boolean) {
+export function setAgentAvailable(provider: AgentProvider | null | undefined, available: boolean) {
   if (!provider) return;
   const prev = agentAvailability.get(provider);
   if (prev === available) return;

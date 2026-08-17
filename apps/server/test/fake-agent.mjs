@@ -113,6 +113,55 @@ async function handle(method, params, id) {
         const decision = await waitForResponse(requestId);
         return { stopReason: "end_turn", permissionDecision: decision };
       }
+      if (text.includes("PHASED")) {
+        // thought → tool → thought → text: reasoning phases must stay
+        // separate blocks interleaved with the tool row.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            messageId: "am1",
+            content: { type: "text", text: "phase one thinking" },
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-phased-1",
+            title: "search_files",
+            toolName: "search_files",
+            kind: "other",
+            status: "pending",
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool-phased-1",
+            status: "completed",
+            rawOutput: { ok: true },
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            messageId: "am2",
+            content: { type: "text", text: "phase two thinking" },
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "am3",
+            content: { type: "text", text: "phased answer" },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
       notify("session/update", {
         sessionId: params.sessionId,
         update: {
