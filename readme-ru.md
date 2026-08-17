@@ -68,8 +68,18 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 
 Если чат «завис» — нажмите **Стоп** и отправьте снова.
 
+## Плагины харнессов
+
+Ядро харнесс-агностично: Cursor и OMP — это **адаптеры-плагины**, зарегистрированные в
+`apps/server/src/adapters/registry.ts`. Сторонний харнесс добавляется пакетом
+`packages/adapter-*`, реализующим `HarnessAdapter`, — интерфейс подхватит его сам
+(список провайдеров, поля CLI/API-ключа, модели) из `GET /api/adapters`.
+
+- Документация: [docs/usage-ru.md](docs/usage-ru.md) — как пользоваться харнессами и плагинами
+- [docs/adapters-ru.md](docs/adapters-ru.md) — как написать плагин под харнесс
+
 ## Архитектура
 
-Браузер ↔ REST/WS сервер ↔ spawn `agent acp` / `omp acp` (JSON-RPC NDJSON) ↔ Postgres.
+Браузер ↔ REST/WS сервер ↔ запуск CLI харнесса через реестр адаптеров (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ Postgres.
 
-События `session/update`, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` отображаются в ленте чата.
+События `session/update`, permissions, вопросы, планы и карточки субагентов отображаются в ленте чата через нормализованные события адаптеров.

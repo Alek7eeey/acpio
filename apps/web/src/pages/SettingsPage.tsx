@@ -62,6 +62,30 @@ function SchemeCard({
 export function SettingsPage() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
+  /** CLI/args form rows: every registered adapter, with built-in fallback. */
+  const cliFormAdapters = useMemo(() => {
+    if (adapters.length) return adapters;
+    return [
+      {
+        id: "cursor",
+        label: "Cursor",
+        commandField: "cursorCommand",
+        argsField: "cursorArgs",
+        apiKeyField: "cursorApiKey",
+        envApiKeyName: "CURSOR_API_KEY",
+        defaultCommand: "agent",
+        defaultArgs: ["acp"],
+      },
+      {
+        id: "omp",
+        label: "OMP",
+        commandField: "ompCommand",
+        argsField: "ompArgs",
+        defaultCommand: "omp",
+        defaultArgs: ["acp"],
+      },
+    ];
+  }, [adapters]);
   const providers = useMemo(() => {
     const registered = adapters.length
       ? adapters.map((a) => ({
@@ -230,6 +254,10 @@ export function SettingsPage() {
   }, [section, leaf]);
 
   const patch = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
+  /** Adapter-declared settings fields (command/args/apiKey) — not in AppSettings. */
+  const patchAny = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -1132,46 +1160,42 @@ export function SettingsPage() {
               <summary>{t("settings.cliAndPermissions")}</summary>
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>{t("settings.agentAdvancedDesc")}</p>
-                <label>
-                  Cursor
-                  <div className={styles.row}>
-                    <input
-                      value={form.cursorCommand}
-                      onChange={(e) => patch("cursorCommand", e.target.value)}
-                      placeholder="agent"
-                    />
-                    <input
-                      value={(form.cursorArgs ?? []).join(" ")}
-                      onChange={(e) =>
-                        patch(
-                          "cursorArgs",
-                          e.target.value.split(/\s+/).filter(Boolean),
-                        )
-                      }
-                      placeholder="acp"
-                    />
-                  </div>
-                </label>
-                <label>
-                  OMP
-                  <div className={styles.row}>
-                    <input
-                      value={form.ompCommand ?? "omp"}
-                      onChange={(e) => patch("ompCommand", e.target.value)}
-                      placeholder="omp"
-                    />
-                    <input
-                      value={(form.ompArgs ?? ["acp"]).join(" ")}
-                      onChange={(e) =>
-                        patch(
-                          "ompArgs",
-                          e.target.value.split(/\s+/).filter(Boolean),
-                        )
-                      }
-                      placeholder="acp"
-                    />
-                  </div>
-                </label>
+                {cliFormAdapters.map((a) => {
+                  const command = String(
+                    (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
+                  );
+                  const args = (form as unknown as Record<string, unknown>)[a.argsField];
+                  const apiKeyField = a.apiKeyField;
+                  const apiKey = apiKeyField
+                    ? String((form as unknown as Record<string, unknown>)[apiKeyField] ?? "")
+                    : "";
+                  return (
+                    <label key={a.id}>
+                      {a.label}
+                      <div className={styles.row}>
+                        <input
+                          value={command}
+                          onChange={(e) => patchAny(a.commandField, e.target.value)}
+                          placeholder={a.defaultCommand}
+                        />
+                        <input
+                          value={Array.isArray(args) ? args.join(" ") : ""}
+                          onChange={(e) =>
+                            patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
+                          }
+                          placeholder={a.defaultArgs.join(" ")}
+                        />
+                      </div>
+                      {apiKeyField ? (
+                        <input
+                          value={apiKey}
+                          onChange={(e) => patchAny(apiKeyField, e.target.value)}
+                          placeholder={a.envApiKeyName ?? "API key"}
+                        />
+                      ) : null}
+                    </label>
+                  );
+                })}
               </div>
             </details>
           </section>

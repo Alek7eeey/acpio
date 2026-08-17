@@ -71,8 +71,18 @@ The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI fro
 
 If a chat seems stuck — press **Stop** and send again.
 
+## Harness plugins
+
+The core is harness-agnostic: Cursor and OMP are **adapter plugins** registered in
+`apps/server/src/adapters/registry.ts`. A third-party harness is added as a
+`packages/adapter-*` package implementing `HarnessAdapter` — the UI picks it up
+automatically (provider list, CLI/API-key fields, models) from `GET /api/adapters`.
+
+- Docs: [docs/usage.md](docs/usage.md) — how to use harnesses and plugins
+- [docs/adapters.md](docs/adapters.md) — how to write a harness plugin
+
 ## Architecture
 
-Browser ↔ REST/WS server ↔ spawn `agent acp` / `omp acp` (JSON-RPC NDJSON) ↔ Postgres.
+Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ Postgres.
 
-`session/update` events, permissions, `cursor/ask_question`, `cursor/create_plan`, `cursor/task` are rendered in the chat feed.
+`session/update` events, permissions, questions, plans and subagent cards are rendered in the chat feed via normalized adapter events.
