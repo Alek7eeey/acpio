@@ -27,12 +27,63 @@ npm run dev
 > The DB schema is created automatically at server boot (idempotent
 > `ensureSchema`). Optional: `npm run db:push` to (re)generate it via drizzle-kit.
 
-> **После обновления кода** (`git pull`) сделай **hard refresh** в браузере (`Ctrl+Shift+R`).
-> Браузер кеширует старые CSS/JS модули, и без hard refresh новые правки могут не примениться.
+> **After pulling code updates** (`git pull`) do a **hard refresh** in the browser
+> (`Ctrl+Shift+R`). Browsers cache old CSS/JS modules, and without a hard refresh
+> new changes may not show up.
 
 - Web: [http://localhost:5173](http://localhost:5173)
 - API: [http://localhost:3001](http://localhost:3001)
 - DB file: `data/acprocess.db` (override with `DATABASE_PATH` in `.env`)
+
+## Screenshots
+
+| Chat (light) | Chat (dark) | Settings |
+|---|---|---|
+| ![Chat light](docs/screens/chat-light.webp) | ![Chat dark](docs/screens/chat-dark.webp) | ![Settings](docs/screens/settings.webp) |
+
+## Production build
+
+`npm run build` compiles everything; the server then serves the web UI itself,
+so production is a **single port**:
+
+```bash
+npm run build
+npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+```
+
+### Portable bundle (Windows)
+
+```bash
+npm run dist
+```
+
+produces `dist-app/acprocess-win-x64.zip` — the compiled server, the web UI,
+the workspace packages and production `node_modules` (native better-sqlite3
+included). Unzip anywhere and run `start.cmd` (Node >= 20 required).
+
+> The zip embeds the native better-sqlite3 binary, so build it on the OS/arch
+> you distribute to (currently Windows x64).
+
+### One-click install
+
+Attach `dist-app/acprocess-win-x64.zip` to a
+[GitHub release](https://github.com/Alek7eeey/acprocess/releases) named
+`acprocess-win-x64.zip`, then on a fresh Windows machine:
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+```
+
+The script checks/installs Node 20+, downloads the release bundle, unpacks it
+to `%LOCALAPPDATA%\acprocess` and starts the app (data goes to
+`%LOCALAPPDATA%\acprocess\data`). For a local bundle instead of a download:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acprocess-win-x64.zip
+```
+
+Production env vars: `PORT` (default 3001), `HOST` (default `0.0.0.0`),
+`DATABASE_PATH` (default `<app dir>/data/acprocess.db`).
 
 ## Phone and VPN
 

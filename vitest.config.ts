@@ -27,7 +27,9 @@ export default defineConfig({
     // Components need jsdom; the @vitest-environment comment opts in per file.
   },
   resolve: {
-    // Keep the shared/i18n workspace exports (raw TS sources) reachable.
-    conditions: ["module", "import", "node"],
+    // Workspace packages export built dist by default (prod/Node) and raw TS
+    // sources under the "development" condition — keep tests on the freshest
+    // sources, like the tsx/vite dev servers do.
+    conditions: ["development", "module", "import", "node"],
   },
 });

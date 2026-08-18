@@ -31,6 +31,56 @@ npm run dev
 - API: [http://localhost:3001](http://localhost:3001)
 - Файл БД: `data/acprocess.db` (переопределяется через `DATABASE_PATH` в `.env`)
 
+## Скриншоты
+
+| Чат (светлая тема) | Чат (тёмная тема) | Настройки |
+|---|---|---|
+| ![Чат светлая](docs/screens/chat-light.webp) | ![Чат тёмная](docs/screens/chat-dark.webp) | ![Настройки](docs/screens/settings.webp) |
+
+## Прод-сборка
+
+`npm run build` собирает всё, дальше сервер сам отдаёт веб-UI — в проде
+**один порт**:
+
+```bash
+npm run build
+npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+```
+
+### Портативный дистрибутив (Windows)
+
+```bash
+npm run dist
+```
+
+создаёт `dist-app/acprocess-win-x64.zip` — скомпилированный сервер, веб-UI,
+пакеты воркспейсов и production `node_modules` (нативный better-sqlite3
+внутри). Распакуйте куда угодно и запустите `start.cmd` (нужен Node >= 20).
+
+> В zip зашит нативный бинарник better-sqlite3, поэтому собирайте его на той
+> ОС/архитектуре, под которую распространяете (сейчас — Windows x64).
+
+### Установка в один клик
+
+Прикрепите `dist-app/acprocess-win-x64.zip` к
+[GitHub release](https://github.com/Alek7eeey/acprocess/releases) с именем
+`acprocess-win-x64.zip`, затем на чистой Windows-машине:
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+```
+
+Скрипт проверит/установит Node 20+, скачает релиз, распакует в
+`%LOCALAPPDATA%\acprocess` и запустит приложение (данные — в
+`%LOCALAPPDATA%\acprocess\data`). Локальный бандл вместо скачивания:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acprocess-win-x64.zip
+```
+
+Переменные окружения прода: `PORT` (по умолчанию 3001), `HOST` (по умолчанию
+`0.0.0.0`), `DATABASE_PATH` (по умолчанию `<каталог приложения>/data/acprocess.db`).
+
 ## Телефон и VPN
 
 Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN.

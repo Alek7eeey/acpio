@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
+import fastifyStatic from "@fastify/static";
 import { reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
 import { ensureSchema } from "./db/ensureSchema.js";
@@ -36,6 +38,28 @@ async function main() {
   await app.register(cookie);
   await app.register(websocket);
   await registerRoutes(app);
+
+  // Single-port prod: serve the built web UI (API + WS + static on :3001).
+  // Dev layout: apps/web/dist; packaged layout: web/dist.
+  const webDist =
+    [path.join(rootDir, "apps", "web", "dist"), path.join(rootDir, "web", "dist")].find((p) =>
+      fs.existsSync(p),
+    ) ?? null;
+  if (webDist) {
+    await app.register(fastifyStatic, { root: webDist });
+    // SPA fallback: unknown GET paths render the app shell; /api and /ws stay JSON/WS.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method === "GET" && !req.url.startsWith("/api") && !req.url.startsWith("/ws")) {
+        return reply.sendFile("index.html");
+      }
+      return reply.code(404).send({ error: "Not Found", message: "Not Found", statusCode: 404 });
+    });
+    console.log(`Serving web UI from ${webDist}`);
+  } else {
+    console.log(
+      "Web UI build not found — API-only on :" + port + ". Build it with: npm run build -w @acprocess/web",
+    );
+  }
 
   const host = process.env.HOST ?? "0.0.0.0";
   await app.listen({ port, host });
