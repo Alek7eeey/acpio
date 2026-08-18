@@ -411,6 +411,12 @@ describe("DEFAULT_SETTINGS", () => {
     lightScheme: "",
     darkScheme: "",
     ttsVoiceGender: "",
+    chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
+    chatMetaChips: ["folder", "thoughts", "mcp"],
+    chatReadAloud: true,
+    chatEnterToSend: true,
+    chatShowMessageTime: false,
+    chatVoiceInput: true,
     mcpServers: [],
   };
 

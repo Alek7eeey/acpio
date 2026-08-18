@@ -65,6 +65,24 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.ttsVoiceGender !== "female" && merged.ttsVoiceGender !== "male") {
     merged.ttsVoiceGender = "";
   }
+  if (!Array.isArray(merged.chatActions)) {
+    merged.chatActions = [...DEFAULT_SETTINGS.chatActions];
+  }
+  if (!Array.isArray(merged.chatMetaChips)) {
+    merged.chatMetaChips = [...DEFAULT_SETTINGS.chatMetaChips];
+  }
+  if (typeof merged.chatReadAloud !== "boolean") {
+    merged.chatReadAloud = DEFAULT_SETTINGS.chatReadAloud;
+  }
+  if (typeof merged.chatEnterToSend !== "boolean") {
+    merged.chatEnterToSend = DEFAULT_SETTINGS.chatEnterToSend;
+  }
+  if (typeof merged.chatShowMessageTime !== "boolean") {
+    merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
+  }
+  if (typeof merged.chatVoiceInput !== "boolean") {
+    merged.chatVoiceInput = DEFAULT_SETTINGS.chatVoiceInput;
+  }
   if (!Array.isArray(merged.mcpServers)) {
     merged.mcpServers = [];
   } else {

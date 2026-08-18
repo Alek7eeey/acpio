@@ -282,7 +282,11 @@ function UserMessage({
           })}
         </div>
       ) : null}
-      <UserMessageActions text={text} onEdit={() => onEdit(message.id, text)} />
+      <UserMessageActions
+        text={text}
+        createdAt={message.createdAt}
+        onEdit={() => onEdit(message.id, text)}
+      />
     </div>
   );
 }
@@ -341,8 +345,17 @@ function IconEdit() {
   );
 }
 
-function UserMessageActions({ text, onEdit }: { text: string; onEdit: () => void }) {
+function UserMessageActions({
+  text,
+  createdAt,
+  onEdit,
+}: {
+  text: string;
+  createdAt: string;
+  onEdit: () => void;
+}) {
   const t = useT();
+  const settings = useAppStore((s) => s.settings);
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -356,26 +369,43 @@ function UserMessageActions({ text, onEdit }: { text: string; onEdit: () => void
     }
   };
 
+  const chatActions = settings.chatActions ?? [];
+  const showCopy = chatActions.includes("copy");
+  const showEdit = chatActions.includes("edit");
+  if (!showCopy && !showEdit && !settings.chatShowMessageTime) return null;
+
   return (
     <div className={`${styles.msgActions} ${styles.userMsgActions}`} aria-label={t("common.actions")}>
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={copied ? t("common.copied") : t("common.copy")}
-        aria-label={t("common.copy")}
-        onClick={() => void copy()}
-      >
-        <IconCopy done={copied} />
-      </button>
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={t("common.edit")}
-        aria-label={t("common.edit")}
-        onClick={() => onEdit()}
-      >
-        <IconEdit />
-      </button>
+      {showCopy && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={copied ? t("common.copied") : t("common.copy")}
+          aria-label={t("common.copy")}
+          onClick={() => void copy()}
+        >
+          <IconCopy done={copied} />
+        </button>
+      )}
+      {showEdit && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={t("common.edit")}
+          aria-label={t("common.edit")}
+          onClick={() => onEdit()}
+        >
+          <IconEdit />
+        </button>
+      )}
+      {settings.chatShowMessageTime ? (
+        <span className={styles.msgTime} aria-hidden>
+          {new Date(createdAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -1350,111 +1380,142 @@ function MessageActions({
   const likeActive = rating === "like";
   const dislikeActive = rating === "dislike";
 
+  // Configurable actions, canonical order; the first 5 render as icons and
+  // the rest hide behind the "⋯" menu. Read-aloud additionally needs the
+  // master audio switch; "edit" lives on user messages only.
+  const chatActions = settings.chatActions ?? [];
+  const enabledActions = chatActions.filter(
+    (a) => a !== "edit" && (a !== "readAloud" || settings.chatReadAloud),
+  );
+  const iconActions = enabledActions.slice(0, 5);
+  const overflowActions = enabledActions.slice(5);
+
   return (
     <div
       className={`${styles.msgActions}${hidden ? ` ${styles.msgActionsHidden}` : ""}`}
       aria-label={t("common.actions")}
       aria-hidden={hidden}
     >
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={copied ? t("common.copied") : t("common.copy")}
-        aria-label={t("common.copy")}
-        tabIndex={tabIndex}
-        onClick={() => void copy()}
-      >
-        <IconCopy done={copied} />
-      </button>
-      <button
-        type="button"
-        className={`${styles.msgAction}${likeActive ? ` ${styles.msgActionActive}` : ""}`}
-        title={likeActive ? t("chat.liked") : t("common.like")}
-        aria-label={likeActive ? t("chat.liked") : t("common.like")}
-        aria-pressed={likeActive}
-        tabIndex={tabIndex}
-        onClick={() => setRating(likeActive ? null : "like")}
-      >
-        <MsgIcon>
-          <path
-            d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
-            stroke="currentColor"
-            strokeWidth="1.85"
-            strokeLinejoin="round"
-          />
-        </MsgIcon>
-      </button>
-      <button
-        type="button"
-        className={`${styles.msgAction}${dislikeActive ? ` ${styles.msgActionActive}` : ""}`}
-        title={dislikeActive ? t("chat.disliked") : t("common.dislike")}
-        aria-label={dislikeActive ? t("chat.disliked") : t("common.dislike")}
-        aria-pressed={dislikeActive}
-        tabIndex={tabIndex}
-        onClick={() => setDislikeOpen(true)}
-      >
-        <MsgIcon>
-          <path
-            d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
-            stroke="currentColor"
-            strokeWidth="1.85"
-            strokeLinejoin="round"
-          />
-        </MsgIcon>
-      </button>
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={t("common.share")}
-        aria-label={t("common.share")}
-        tabIndex={tabIndex}
-        onClick={(e) => void share(e)}
-      >
-        <MsgIcon>
-          <path
-            d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
-            stroke="currentColor"
-            strokeWidth="1.85"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </MsgIcon>
-      </button>
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={t("chat.regenerate")}
-        aria-label={t("chat.regenerate")}
-        disabled={!session}
-        tabIndex={tabIndex}
-        onClick={onRegenerate}
-      >
-        <MsgIcon>
-          <path
-            d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
-            stroke="currentColor"
-            strokeWidth="1.85"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </MsgIcon>
-      </button>
-      <button
-        type="button"
-        className={styles.msgAction}
-        title={t("common.more")}
-        aria-label={t("common.more")}
-        aria-haspopup="menu"
-        aria-expanded={Boolean(menuPos)}
-        tabIndex={tabIndex}
-        onClick={openMenu}
-      >
-        <MsgIcon>
-          <circle cx="5" cy="12" r="1.7" fill="currentColor" />
-          <circle cx="12" cy="12" r="1.7" fill="currentColor" />
-          <circle cx="19" cy="12" r="1.7" fill="currentColor" />
-        </MsgIcon>
-      </button>
+      {iconActions.includes("copy") && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={copied ? t("common.copied") : t("common.copy")}
+          aria-label={t("common.copy")}
+          tabIndex={tabIndex}
+          onClick={() => void copy()}
+        >
+          <IconCopy done={copied} />
+        </button>
+      )}
+      {iconActions.includes("like") && (
+        <button
+          type="button"
+          className={`${styles.msgAction}${likeActive ? ` ${styles.msgActionActive}` : ""}`}
+          title={likeActive ? t("chat.liked") : t("common.like")}
+          aria-label={likeActive ? t("chat.liked") : t("common.like")}
+          aria-pressed={likeActive}
+          tabIndex={tabIndex}
+          onClick={() => setRating(likeActive ? null : "like")}
+        >
+          <MsgIcon>
+            <path
+              d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
+              stroke="currentColor"
+              strokeWidth="1.85"
+              strokeLinejoin="round"
+            />
+          </MsgIcon>
+        </button>
+      )}
+      {iconActions.includes("dislike") && (
+        <button
+          type="button"
+          className={`${styles.msgAction}${dislikeActive ? ` ${styles.msgActionActive}` : ""}`}
+          title={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+          aria-label={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+          aria-pressed={dislikeActive}
+          tabIndex={tabIndex}
+          onClick={() => setDislikeOpen(true)}
+        >
+          <MsgIcon>
+            <path
+              d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
+              stroke="currentColor"
+              strokeWidth="1.85"
+              strokeLinejoin="round"
+            />
+          </MsgIcon>
+        </button>
+      )}
+      {iconActions.includes("share") && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={t("common.share")}
+          aria-label={t("common.share")}
+          tabIndex={tabIndex}
+          onClick={(e) => void share(e)}
+        >
+          <MsgIcon>
+            <path
+              d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+              stroke="currentColor"
+              strokeWidth="1.85"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </MsgIcon>
+        </button>
+      )}
+      {iconActions.includes("regenerate") && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={t("chat.regenerate")}
+          aria-label={t("chat.regenerate")}
+          disabled={!session}
+          tabIndex={tabIndex}
+          onClick={onRegenerate}
+        >
+          <MsgIcon>
+            <path
+              d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
+              stroke="currentColor"
+              strokeWidth="1.85"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </MsgIcon>
+        </button>
+      )}
+      {overflowActions.length > 0 && (
+        <button
+          type="button"
+          className={styles.msgAction}
+          title={t("common.more")}
+          aria-label={t("common.more")}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(menuPos)}
+          tabIndex={tabIndex}
+          onClick={openMenu}
+        >
+          <MsgIcon>
+            <circle cx="5" cy="12" r="1.7" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+            <circle cx="19" cy="12" r="1.7" fill="currentColor" />
+          </MsgIcon>
+        </button>
+      )}
+
+      {settings.chatShowMessageTime ? (
+        <span className={styles.msgTime} aria-hidden>
+          {new Date(message.createdAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      ) : null}
 
       {menuPos &&
         createPortal(
@@ -1465,28 +1526,33 @@ function MessageActions({
             role="menu"
             aria-label={t("common.more")}
           >
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.msgActionMenuItem}
-              onClick={toggleSpeak}
-            >
-              <MsgIcon>
-                <path
-                  d="M4 9v6h3l5 4V5L7 9H4Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M16 8.5a4.5 4.5 0 0 1 0 7"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
-              </MsgIcon>
-              {speaking ? t("chat.stopReading") : t("chat.readAloud")}
-            </button>
+            {overflowActions.map((id) =>
+              id === "readAloud" ? (
+                <button
+                  key={id}
+                  type="button"
+                  role="menuitem"
+                  className={styles.msgActionMenuItem}
+                  onClick={toggleSpeak}
+                >
+                  <MsgIcon>
+                    <path
+                      d="M4 9v6h3l5 4V5L7 9H4Z"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M16 8.5a4.5 4.5 0 0 1 0 7"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                    />
+                  </MsgIcon>
+                  {speaking ? t("chat.stopReading") : t("chat.readAloud")}
+                </button>
+              ) : null,
+            )}
           </div>,
           document.body,
         )}
@@ -3144,7 +3210,7 @@ export function ChatPage() {
           </div>
           <div className={styles.composerMeta}>
             <div className={styles.composerMetaStart}>
-              {activeSession?.cwd?.trim() ? (
+              {settings.chatMetaChips.includes("folder") && activeSession?.cwd?.trim() ? (
                 <div className={styles.sessionCwd} title={activeSession.cwd}>
                   <span className={styles.sessionCwdIcon} aria-hidden>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -3166,6 +3232,7 @@ export function ChatPage() {
                   <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
                 </div>
               ) : null}
+              {settings.chatMetaChips.includes("thoughts") ? (
               <button
                 type="button"
                 className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}`}
@@ -3179,7 +3246,8 @@ export function ChatPage() {
                 </span>
                 <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
               </button>
-              {activeSession && enabledMcp.length > 0 ? (
+              ) : null}
+              {settings.chatMetaChips.includes("mcp") && activeSession && enabledMcp.length > 0 ? (
                 <button
                   type="button"
                   className={styles.metaChip}
@@ -3338,8 +3406,17 @@ export function ChatPage() {
                   }
                 }
                 if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onSubmit(e);
+                  // Enter-to-send (default): Enter submits, Ctrl/Shift+Enter
+                  // is a newline. Off: Enter inserts a newline and Ctrl+Enter
+                  // submits.
+                  const submitKey =
+                    settings.chatEnterToSend !== false
+                      ? !e.ctrlKey && !e.metaKey
+                      : e.ctrlKey || e.metaKey;
+                  if (submitKey) {
+                    e.preventDefault();
+                    onSubmit(e);
+                  }
                 }
               }}
             />
@@ -3435,6 +3512,7 @@ export function ChatPage() {
                   </button>
                 ) : (
                   <>
+                    {settings.chatVoiceInput && (
                     <button
                       type="button"
                       className={`${styles.micBtn} ${
@@ -3471,6 +3549,7 @@ export function ChatPage() {
                         />
                       </svg>
                     </button>
+                    )}
                     {hasText && (
                       <button
                         type="submit"

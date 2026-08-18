@@ -103,6 +103,14 @@ const settingsSchema = z.object({
   lightScheme: z.string().optional(),
   darkScheme: z.string().optional(),
   ttsVoiceGender: z.enum(["", "female", "male"]).optional(),
+  chatActions: z
+    .array(z.enum(["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"]))
+    .optional(),
+  chatMetaChips: z.array(z.enum(["folder", "thoughts", "mcp"])).optional(),
+  chatReadAloud: z.boolean().optional(),
+  chatEnterToSend: z.boolean().optional(),
+  chatShowMessageTime: z.boolean().optional(),
+  chatVoiceInput: z.boolean().optional(),
   mcpServers: z
     .array(
       z.object({

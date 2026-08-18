@@ -5,6 +5,8 @@ import {
   type AgentProbeResult,
   type AgentProvider,
   type AppSettings,
+  type ChatActionId,
+  type ChatMetaChipId,
   type DiagnosticsDumpMeta,
   type McpServerConfig,
   type ModelParamDto,
@@ -16,12 +18,32 @@ import { adapterMeta, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
+import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
+import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
+
+/** Canonical display order for message actions and composer chips. */
+const CHAT_ACTION_ORDER: ChatActionId[] = [
+  "copy",
+  "edit",
+  "like",
+  "dislike",
+  "share",
+  "regenerate",
+  "readAloud",
+];
+const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
+
+/** Toggle a value in a canonical-ordered array (re-adds in the right slot). */
+function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
+  const next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id];
+  return order.filter((v) => next.includes(v));
+}
 
 /** Command value a provider's settings form carries (adapter-declared field). */
 function adapterCommandFor(form: AppSettings, provider: AgentProvider): string {
@@ -500,7 +522,9 @@ export function SettingsPage() {
         ? t("settings.colors")
         : leaf === "voice"
           ? t("settings.voiceTitle")
-          : t("settings.appearance")
+          : leaf === "chat"
+            ? t("settings.chatTitle")
+            : t("settings.appearance")
       : section === "agent"
         ? leaf === "connect"
           ? t("settings.agentConnectTitle")
@@ -521,7 +545,9 @@ export function SettingsPage() {
         ? t("settings.colorsDesc")
         : leaf === "voice"
           ? t("settings.voiceDesc")
-          : t("settings.sidebarCollapseHint")
+          : leaf === "chat"
+            ? t("settings.chatDesc")
+            : t("settings.sidebarCollapseHint")
       : section === "agent" && leaf === "mcp"
         ? t("settings.mcpHint")
         : section === "agent" && leaf === "advanced"
@@ -558,35 +584,38 @@ export function SettingsPage() {
         </header>
 
         {section === "agent" && leaf === "connect" && (
-          <section className={styles.providerList}>
-            {providers.map((item) => {
-              const active = settings.connectedProvider === item.id;
-              const probe = probes[item.id];
-              const probing = probingId === item.id;
-              const connecting = connectingId === item.id;
-              return (
-                <div
-                  key={item.id}
-                  className={`${styles.providerRow} ${active ? styles.providerRowActive : ""}`}
-                >
-                  <div className={styles.providerMeta}>
-                    <div className={styles.providerTitleRow}>
-                      <span className={styles.providerTitle}>{item.title}</span>
-                      {active && <span className={styles.providerBadge}>{t("common.connected")}</span>}
-                    </div>
-                    <p className={styles.providerDesc}>{item.description}</p>
-                    {probe && (
-                      <div
-                        className={`${styles.providerProbe} ${
-                          probe.ok ? styles.probeOk : styles.probeFail
-                        }`}
-                      >
-                        <strong>{probe.ok ? t("common.connected") : t("common.error")}</strong>
-                        <div>{probe.message}</div>
-                      </div>
-                    )}
-                  </div>
-                  <div className={styles.providerActions}>
+          <>
+            <SettingTable>
+              {providers.map((item) => {
+                const active = settings.connectedProvider === item.id;
+                const probe = probes[item.id];
+                const probing = probingId === item.id;
+                const connecting = connectingId === item.id;
+                return (
+                  <SettingRow
+                    key={item.id}
+                    label={
+                      <span className={styles.providerTitleRow}>
+                        <span className={styles.providerTitle}>{item.title}</span>
+                        {active && <span className={styles.providerBadge}>{t("common.connected")}</span>}
+                      </span>
+                    }
+                    hint={
+                      <>
+                        {item.description}
+                        {probe ? (
+                          <span
+                            className={`${styles.providerProbeInline} ${
+                              probe.ok ? styles.probeOk : styles.probeFail
+                            }`}
+                          >
+                            <strong>{probe.ok ? t("common.connected") : t("common.error")}</strong>
+                            <span>{probe.message}</span>
+                          </span>
+                        ) : null}
+                      </>
+                    }
+                  >
                     <button
                       type="button"
                       className={styles.ghostBtn}
@@ -603,111 +632,77 @@ export function SettingsPage() {
                     >
                       {connecting ? "…" : active ? t("common.connected") : t("common.connect")}
                     </button>
-                  </div>
-                </div>
-              );
-            })}
+                  </SettingRow>
+                );
+              })}
+            </SettingTable>
             {saved && leaf === "connect" && (
               <span className={styles.ok}>{t("settings.profileSaved")}</span>
             )}
-          </section>
+          </>
         )}
 
         {section === "interface" && leaf === "appearance" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <label>
-                {t("settings.sidebarCollapse")}
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.sidebarCollapse")}
-                  value={form.sidebarCollapse}
-                  onChange={(v) =>
-                    patch("sidebarCollapse", v as AppSettings["sidebarCollapse"])
-                  }
-                  options={[
-                    { value: "full", label: t("settings.sidebarCollapseFull") },
-                    { value: "rail", label: t("settings.sidebarCollapseRail") },
-                  ]}
-                />
-              </label>
-              <p className={styles.fieldHint}>{t("settings.sidebarCollapseHint")}</p>
-            </div>
+          <SettingTable>
+            <SettingRow label={t("settings.sidebarCollapse")} hint={t("settings.sidebarCollapseHint")}>
+              <OptionPicker
+                variant="block"
+                placement="down"
+                menuTitle={t("settings.sidebarCollapse")}
+                value={form.sidebarCollapse}
+                onChange={(v) => patch("sidebarCollapse", v as AppSettings["sidebarCollapse"])}
+                options={[
+                  { value: "full", label: t("settings.sidebarCollapseFull") },
+                  { value: "rail", label: t("settings.sidebarCollapseRail") },
+                ]}
+              />
+            </SettingRow>
 
-            <div className={styles.sectionBlock}>
-              <label>
-                {t("settings.fontFamily")}
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.fontFamily")}
-                  value={form.fontFamily ?? ""}
-                  onChange={(v) => patch("fontFamily", v)}
-                  options={[
-                    { value: "", label: t("common.default") },
-                    { value: "figtree", label: "Figtree" },
-                    { value: "inter", label: "Inter" },
-                    { value: "system", label: t("settings.fontSystem") },
-                  ]}
-                />
-              </label>
-              <p className={styles.fieldHint}>{t("settings.fontFamilyHint")}</p>
+            <SettingRow label={t("settings.fontFamily")} hint={t("settings.fontFamilyHint")}>
+              <OptionPicker
+                variant="block"
+                placement="down"
+                menuTitle={t("settings.fontFamily")}
+                value={form.fontFamily ?? ""}
+                onChange={(v) => patch("fontFamily", v)}
+                options={[
+                  { value: "", label: t("common.default") },
+                  { value: "figtree", label: "Figtree" },
+                  { value: "inter", label: "Inter" },
+                  { value: "system", label: t("settings.fontSystem") },
+                ]}
+              />
+            </SettingRow>
 
-              <label>
-                {t("settings.fontSize")}
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.fontSize")}
-                  value={form.fontSize ?? ""}
-                  onChange={(v) => patch("fontSize", v)}
-                  options={[
-                    { value: "", label: t("common.default") },
-                    { value: "sm", label: t("settings.fontSizeSmall") },
-                    { value: "lg", label: t("settings.fontSizeLarge") },
-                  ]}
-                />
-              </label>
-              <p className={styles.fieldHint}>{t("settings.fontSizeHint")}</p>
-            </div>
+            <SettingRow label={t("settings.fontSize")} hint={t("settings.fontSizeHint")}>
+              <OptionPicker
+                variant="block"
+                placement="down"
+                menuTitle={t("settings.fontSize")}
+                value={form.fontSize ?? ""}
+                onChange={(v) => patch("fontSize", v)}
+                options={[
+                  { value: "", label: t("common.default") },
+                  { value: "sm", label: t("settings.fontSizeSmall") },
+                  { value: "lg", label: t("settings.fontSizeLarge") },
+                ]}
+              />
+            </SettingRow>
 
-            <div className={styles.sectionBlock}>
-              <label className={`${styles.switchCard} ${form.showBootSplash ? styles.switchCardOn : ""}`}>
-                <input
-                  type="checkbox"
-                  className={styles.switchInput}
-                  checked={Boolean(form.showBootSplash)}
-                  onChange={(e) => patch("showBootSplash", e.target.checked)}
-                />
-                <span className={styles.switchIcon} aria-hidden>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-                <span className={styles.switchBody}>
-                  <strong>{t("settings.showBootSplash")}</strong>
-                  <span>{t("settings.showBootSplashHint")}</span>
-                </span>
-                <span className={styles.switchSwitch} aria-hidden>
-                  <span />
-                </span>
-              </label>
-            </div>
-          </section>
+            <SettingRow label={t("settings.showBootSplash")} hint={t("settings.showBootSplashHint")}>
+              <Toggle
+                checked={Boolean(form.showBootSplash)}
+                onChange={(v) => patch("showBootSplash", v)}
+                label={t("settings.showBootSplash")}
+              />
+            </SettingRow>
+          </SettingTable>
         )}
 
         {section === "interface" && leaf === "colors" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>{t("settings.lightScheme")}</h2>
-              <p className={styles.fieldHint}>{t("settings.lightSchemeHint")}</p>
-              <div className={styles.schemeGrid}>
+          <SettingTable>
+            <SettingRow label={t("settings.lightScheme")} hint={t("settings.lightSchemeHint")}>
+              <div className={styles.schemeGridInline}>
                 <SchemeCard
                   active={!form.lightScheme}
                   name={t("common.default")}
@@ -728,12 +723,10 @@ export function SettingsPage() {
                   />
                 ))}
               </div>
-            </div>
+            </SettingRow>
 
-            <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>{t("settings.darkScheme")}</h2>
-              <p className={styles.fieldHint}>{t("settings.darkSchemeHint")}</p>
-              <div className={styles.schemeGrid}>
+            <SettingRow label={t("settings.darkScheme")} hint={t("settings.darkSchemeHint")}>
+              <div className={styles.schemeGridInline}>
                 <SchemeCard
                   active={!form.darkScheme}
                   name={t("common.default")}
@@ -754,15 +747,14 @@ export function SettingsPage() {
                   />
                 ))}
               </div>
-            </div>
-          </section>
+            </SettingRow>
+          </SettingTable>
         )}
 
         {section === "interface" && leaf === "voice" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <label>
-                {t("settings.ttsVoiceGender")}
+          <>
+            <SettingTable>
+              <SettingRow label={t("settings.ttsVoiceGender")} hint={t("settings.ttsVoiceGenderHint")}>
                 <OptionPicker
                   variant="block"
                   placement="down"
@@ -775,10 +767,8 @@ export function SettingsPage() {
                     { value: "male", label: t("settings.ttsGenderMale") },
                   ]}
                 />
-              </label>
-              <p className={styles.fieldHint}>{t("settings.ttsVoiceGenderHint")}</p>
-
-              <div className={styles.ttsTestRow}>
+              </SettingRow>
+              <SettingRow label={t("settings.ttsTest")}>
                 <button
                   type="button"
                   className={styles.secondaryBtn}
@@ -804,81 +794,186 @@ export function SettingsPage() {
                 {ttsTestEngine !== "idle" && (
                   <span className={styles.ttsTestStatus}>{t("settings.ttsTestBrowser")}</span>
                 )}
-              </div>
+              </SettingRow>
+            </SettingTable>
 
-              {!ttsHasNatural && (
-                <div className={styles.ttsNaturalWarn}>
-                  <p className={styles.fieldHint}>{t("settings.ttsNaturalHint")}</p>
-                  <button
-                    type="button"
-                    className={styles.secondaryBtn}
-                    onClick={() => window.open("ms-settings:speech", "_self")}
-                  >
-                    {t("settings.ttsOpenWindowsSpeech")}
-                  </button>
+            {!ttsHasNatural && (
+              <div className={styles.ttsNaturalWarn}>
+                <p className={styles.fieldHint}>{t("settings.ttsNaturalHint")}</p>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => window.open("ms-settings:speech", "_self")}
+                >
+                  {t("settings.ttsOpenWindowsSpeech")}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {section === "interface" && leaf === "chat" && (
+          <>
+            <ChatSettingsPreview
+              actions={form.chatActions ?? []}
+              chips={form.chatMetaChips ?? []}
+              readAloud={Boolean(form.chatReadAloud)}
+              voiceInput={Boolean(form.chatVoiceInput)}
+              showTime={Boolean(form.chatShowMessageTime)}
+              onToggleAction={(id) =>
+                patch("chatActions", toggleInOrder(form.chatActions ?? [], id, CHAT_ACTION_ORDER))
+              }
+              onToggleChip={(id) =>
+                patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
+              }
+            />
+            <SettingTable>
+              <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsHint")}>
+                <div className={styles.actionChips}>
+                  {(
+                    [
+                      ["copy", t("settings.chatActionCopy")],
+                      ["edit", t("settings.chatActionEdit")],
+                      ["like", t("settings.chatActionLike")],
+                      ["dislike", t("settings.chatActionDislike")],
+                      ["share", t("settings.chatActionShare")],
+                      ["regenerate", t("settings.chatActionRegenerate")],
+                      ["readAloud", t("settings.chatActionReadAloud")],
+                    ] as Array<[ChatActionId, string]>
+                  ).map(([id, label]) => {
+                    const on = (form.chatActions ?? []).includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                        aria-pressed={on}
+                        onClick={() =>
+                          patch(
+                            "chatActions",
+                            toggleInOrder(form.chatActions ?? [], id, CHAT_ACTION_ORDER),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
-          </section>
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatMetaChips")} hint={t("settings.chatMetaChipsHint")}>
+                <div className={styles.actionChips}>
+                  {(
+                    [
+                      ["folder", t("settings.chatMetaChipFolder")],
+                      ["thoughts", t("settings.chatMetaChipThoughts")],
+                      ["mcp", t("settings.chatMetaChipMcp")],
+                    ] as Array<[ChatMetaChipId, string]>
+                  ).map(([id, label]) => {
+                    const on = (form.chatMetaChips ?? []).includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                        aria-pressed={on}
+                        onClick={() =>
+                          patch(
+                            "chatMetaChips",
+                            toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatReadAloud")} hint={t("settings.chatReadAloudHint")}>
+                <Toggle
+                  checked={Boolean(form.chatReadAloud)}
+                  onChange={(v) => patch("chatReadAloud", v)}
+                  label={t("settings.chatReadAloud")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
+                <Toggle
+                  checked={Boolean(form.chatEnterToSend)}
+                  onChange={(v) => patch("chatEnterToSend", v)}
+                  label={t("settings.chatEnterToSend")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatShowMessageTime")} hint={t("settings.chatShowMessageTimeHint")}>
+                <Toggle
+                  checked={Boolean(form.chatShowMessageTime)}
+                  onChange={(v) => patch("chatShowMessageTime", v)}
+                  label={t("settings.chatShowMessageTime")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatVoiceInput")} hint={t("settings.chatVoiceInputHint")}>
+                <Toggle
+                  checked={Boolean(form.chatVoiceInput)}
+                  onChange={(v) => patch("chatVoiceInput", v)}
+                  label={t("settings.chatVoiceInput")}
+                />
+              </SettingRow>
+            </SettingTable>
+          </>
         )}
 
         {section === "agent" && leaf === "model" && (
-          <section className={styles.card}>
-            {!settings.connectedProvider ? (
-              <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
-            ) : (
-              <>
-            <div className={styles.modelField}>
-              <span className={styles.modelLabel}>{t("settings.modelSection")}</span>
-              <ModelPicker
-                model={form.defaultModel}
-                models={models}
-                params={stableParams}
-                paramValues={form.defaultModelParams ?? {}}
-                paramsLoading={paramsLoading}
-                onChange={(value) => patch("defaultModel", value)}
-                onParamsChange={(next) =>
-                  patch(
-                    "defaultModelParams",
-                    modelParams.length === 0
-                      ? next
-                      : migrateModelParamValues(next, modelParams),
-                  )
-                }
-                onParamsOpen={(value) => loadParamsForModel(value)}
-                onOpen={() => {
-                  const provider = settings.connectedProvider;
-                  if (!provider) return;
-                  void ensureModels(provider, {
-                    force: adapterMeta(provider)?.cloudCatalog === true || modelParams.length === 0,
-                  }).then((catalog) => {
-                    if (!catalog) return;
-                    setModels(catalog.models ?? []);
-                    setModelParams(catalog.modelParams ?? []);
-                    rememberModelsCatalog(catalog);
-                  });
-                }}
-                placement="down"
-                variant="block"
-                loading={modelsLoading}
-              />
-              {modelsError && !modelsLoading && (
-                <p className={styles.hint}>{modelsError}</p>
-              )}
-            </div>
-            {modelParams.length === 0 && !modelsLoading && settings.connectedProvider === "cursor" && (
-              <p className={styles.hint}>{t("common.check")}</p>
-            )}
-              </>
-            )}
-          </section>
+          !settings.connectedProvider ? (
+            <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
+          ) : (
+            <SettingTable>
+              <SettingRow label={t("settings.modelSection")}>
+                <ModelPicker
+                  model={form.defaultModel}
+                  models={models}
+                  params={stableParams}
+                  paramValues={form.defaultModelParams ?? {}}
+                  paramsLoading={paramsLoading}
+                  onChange={(value) => patch("defaultModel", value)}
+                  onParamsChange={(next) =>
+                    patch(
+                      "defaultModelParams",
+                      modelParams.length === 0
+                        ? next
+                        : migrateModelParamValues(next, modelParams),
+                    )
+                  }
+                  onParamsOpen={(value) => loadParamsForModel(value)}
+                  onOpen={() => {
+                    const provider = settings.connectedProvider;
+                    if (!provider) return;
+                    void ensureModels(provider, {
+                      force: adapterMeta(provider)?.cloudCatalog === true || modelParams.length === 0,
+                    }).then((catalog) => {
+                      if (!catalog) return;
+                      setModels(catalog.models ?? []);
+                      setModelParams(catalog.modelParams ?? []);
+                      rememberModelsCatalog(catalog);
+                    });
+                  }}
+                  placement="down"
+                  variant="block"
+                  loading={modelsLoading}
+                />
+              </SettingRow>
+            </SettingTable>
+          )
         )}
 
         {section === "agent" && leaf === "advanced" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <label>
-                {t("settings.defaultFolder")}
+          <>
+            <SettingTable>
+              <SettingRow label={t("settings.defaultFolder")}>
                 <div className={styles.cwdPickRow}>
                   <button
                     type="button"
@@ -911,10 +1006,14 @@ export function SettingsPage() {
                     </button>
                   ) : null}
                 </div>
-              </label>
-              <p className={styles.fieldHint}>{t("settings.defaultFolder")}</p>
-              <label>
-                {t("settings.exportDir")}
+              </SettingRow>
+
+              <SettingRow
+                label={t("settings.exportDir")}
+                hint={t("settings.exportDirHint", {
+                  path: form.exportDir || exportDirDefault || "…",
+                })}
+              >
                 <div className={styles.cwdPickRow}>
                   <span
                     className={styles.cwdPath}
@@ -942,14 +1041,9 @@ export function SettingsPage() {
                     </button>
                   ) : null}
                 </div>
-              </label>
-              <p className={styles.fieldHint}>
-                {t("settings.exportDirHint", {
-                  path: form.exportDir || exportDirDefault || "…",
-                })}
-              </p>
-              <label>
-                {t("settings.permissionPolicy")}
+              </SettingRow>
+
+              <SettingRow label={t("settings.permissionPolicy")}>
                 <OptionPicker
                   variant="block"
                   placement="down"
@@ -962,85 +1056,65 @@ export function SettingsPage() {
                     { value: "allowlist", label: t("settings.permissionAllowlist") },
                   ]}
                 />
-              </label>
-              {form.permissionPolicy === "allowlist" && (
-                <div className={styles.allowlistSection}>
-                  <p className={styles.fieldHint}>{t("settings.allowlistHint")}</p>
-                  {(form.permissionAllowlist ?? []).map((entry, i) => (
-                    <div key={i} className={styles.allowlistRow}>
-                      <input
-                        className={styles.allowlistInput}
-                        type="text"
-                        value={entry}
-                        placeholder="e.g. read_file, execute_command"
-                        onChange={(e) => {
-                          const next = [...(form.permissionAllowlist ?? [])];
-                          next[i] = e.target.value;
-                          patch("permissionAllowlist", next);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className={styles.secondaryBtn}
-                        onClick={() => {
-                          const next = (form.permissionAllowlist ?? []).filter((_, j) => j !== i);
-                          patch("permissionAllowlist", next);
-                        }}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    className={styles.secondaryBtn}
-                    onClick={() => patch("permissionAllowlist", [...(form.permissionAllowlist ?? []), ""])}
-                  >
-                    + {t("common.add")}
-                  </button>
-                </div>
-              )}
-            </div>
+              </SettingRow>
 
-            <div className={`${styles.sectionBlock} ${styles.switchSection}`}>
-              <label className={`${styles.switchCard} ${form.resumeAgentContext ? styles.switchCardOn : ""}`}>
-                <input
-                  type="checkbox"
-                  className={styles.switchInput}
+              <SettingRow label={t("settings.resumeAgentContext")} hint={t("settings.resumeAgentContextHint")}>
+                <Toggle
                   checked={Boolean(form.resumeAgentContext)}
-                  onChange={(e) => patch("resumeAgentContext", e.target.checked)}
+                  onChange={(v) => patch("resumeAgentContext", v)}
+                  label={t("settings.resumeAgentContext")}
                 />
-                <span className={styles.switchBody}>
-                  <strong>{t("settings.resumeAgentContext")}</strong>
-                  <span>{t("settings.resumeAgentContextHint")}</span>
-                </span>
-                <span className={styles.switchSwitch} aria-hidden>
-                  <span />
-                </span>
-              </label>
-            </div>
+              </SettingRow>
 
-            <div className={`${styles.sectionBlock} ${styles.switchSection}`}>
-              <label className={`${styles.switchCard} ${form.multitask ? styles.switchCardOn : ""}`}>
-                <input
-                  type="checkbox"
-                  className={styles.switchInput}
+              <SettingRow label={t("settings.multitask")} hint={t("settings.multitaskHint")}>
+                <Toggle
                   checked={Boolean(form.multitask)}
-                  onChange={(e) => patch("multitask", e.target.checked)}
+                  onChange={(v) => patch("multitask", v)}
+                  label={t("settings.multitask")}
                 />
-                <span className={styles.switchBody}>
-                  <strong>{t("settings.multitask")}</strong>
-                  <span>{t("settings.multitaskHint")}</span>
-                </span>
-                <span className={styles.switchSwitch} aria-hidden>
-                  <span />
-                </span>
-              </label>
-            </div>
+              </SettingRow>
+            </SettingTable>
 
-            <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
-              <p className={styles.fieldHint}>{t("settings.cliAndPermissions")}</p>
+            {form.permissionPolicy === "allowlist" && (
+              <div className={styles.allowlistSection}>
+                <p className={styles.fieldHint}>{t("settings.allowlistHint")}</p>
+                {(form.permissionAllowlist ?? []).map((entry, i) => (
+                  <div key={i} className={styles.allowlistRow}>
+                    <input
+                      className={styles.allowlistInput}
+                      type="text"
+                      value={entry}
+                      placeholder="e.g. read_file, execute_command"
+                      onChange={(e) => {
+                        const next = [...(form.permissionAllowlist ?? [])];
+                        next[i] = e.target.value;
+                        patch("permissionAllowlist", next);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => {
+                        const next = (form.permissionAllowlist ?? []).filter((_, j) => j !== i);
+                        patch("permissionAllowlist", next);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("permissionAllowlist", [...(form.permissionAllowlist ?? []), ""])}
+                >
+                  + {t("common.add")}
+                </button>
+              </div>
+            )}
+
+            <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
+            <SettingTable>
               {(
                 [
                   {
@@ -1066,9 +1140,7 @@ export function SettingsPage() {
                 const value = form[item.key] ?? "";
                 const hasValue = value.trim().length > 0;
                 return (
-                  <div key={item.key} className={styles.secretField}>
-                    <span className={styles.modelLabel}>{item.label}</span>
-                    <span className={styles.fieldHint}>{item.env}</span>
+                  <SettingRow key={item.key} label={item.label} hint={item.env}>
                     <div className={styles.secretRow}>
                       <input
                         type="password"
@@ -1088,10 +1160,10 @@ export function SettingsPage() {
                         {t("common.delete")}
                       </button>
                     </div>
-                  </div>
+                  </SettingRow>
                 );
               })}
-            </div>
+            </SettingTable>
 
             <details className={styles.cliDisclosure}>
               <summary>{t("settings.cliAndPermissions")}</summary>
@@ -1135,50 +1207,54 @@ export function SettingsPage() {
                 })}
               </div>
             </details>
-          </section>
+          </>
         )}
 
         {section === "agent" && leaf === "mcp" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <p className={styles.fieldHint}>{t("settings.mcpHint")}</p>
-              <div className={styles.mcpApplyNote} role="note">
-                {t("settings.mcpApplyHint")}
-              </div>
-
+          <>
+            <div className={styles.mcpApplyNote} role="note">
+              {t("settings.mcpApplyHint")}
+            </div>
+            <SettingTable>
               {mcpServers.map((server) => (
-                <div key={server.id} className={styles.mcpRow}>
-                  <div className={styles.mcpRowMeta}>
-                    {server.enabled ? (
-                      <span
-                        className={`${styles.mcpStatusDot} ${
-                          mcpStatus[server.id] === true
-                            ? styles.mcpStatusDotOk
-                            : mcpStatus[server.id] === false
-                              ? styles.mcpStatusDotBad
-                              : styles.mcpStatusDotPending
-                        }`}
-                        title={
-                          mcpStatus[server.id] === true
-                            ? t("common.connected")
-                            : mcpStatus[server.id] === false
-                              ? t("common.notConnected")
-                              : t("common.checking")
-                        }
-                        aria-hidden
-                      />
-                    ) : null}
-                    <strong>{server.name}</strong>
-                    <span className={styles.mcpRowType}>
-                      {server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                <SettingRow
+                  key={server.id}
+                  label={
+                    <span className={styles.mcpRowMetaInline}>
+                      {server.enabled ? (
+                        <span
+                          className={`${styles.mcpStatusDot} ${
+                            mcpStatus[server.id] === true
+                              ? styles.mcpStatusDotOk
+                              : mcpStatus[server.id] === false
+                                ? styles.mcpStatusDotBad
+                                : styles.mcpStatusDotPending
+                          }`}
+                          title={
+                            mcpStatus[server.id] === true
+                              ? t("common.connected")
+                              : mcpStatus[server.id] === false
+                                ? t("common.notConnected")
+                                : t("common.checking")
+                          }
+                          aria-hidden
+                        />
+                      ) : null}
+                      <strong>{server.name}</strong>
+                      <span className={styles.mcpRowType}>
+                        {server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                      </span>
                     </span>
+                  }
+                  hint={
                     <span className={styles.mcpRowDetail}>
                       {server.url}
                       {server.type === "remote" && server.token ? (
                         <span className={styles.mcpRowToken}> · {t("settings.mcpTokenSet")}</span>
                       ) : null}
                     </span>
-                  </div>
+                  }
+                >
                   <label
                     className={styles.mcpToggle}
                     title={server.enabled ? t("settings.enabled") : t("settings.disabled")}
@@ -1203,93 +1279,100 @@ export function SettingsPage() {
                   >
                     {t("common.delete")}
                   </button>
-                </div>
+                </SettingRow>
               ))}
+              {mcpServers.length === 0 ? (
+                <SettingRow label={t("settings.mcpHint")} hint={t("settings.mcpEmptyHint")} />
+              ) : null}
+            </SettingTable>
 
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                onClick={() =>
-                  setMcpDraft({
-                    id: "",
-                    name: "",
-                    enabled: true,
-                    type: "local",
-                    url: "",
-                    token: "",
-                  })
-                }
-              >
-                + {t("settings.mcpAdd")}
-              </button>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={() =>
+                setMcpDraft({
+                  id: "",
+                  name: "",
+                  enabled: true,
+                  type: "local",
+                  url: "",
+                  token: "",
+                })
+              }
+            >
+              + {t("settings.mcpAdd")}
+            </button>
 
-              {mcpDraft && (
-                <div className={styles.mcpForm}>
+            {mcpDraft && (
+              <div className={styles.mcpForm}>
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.mcpName")}
+                  value={mcpDraft.name}
+                  onChange={(e) => setMcpDraft({ ...mcpDraft, name: e.target.value })}
+                />
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.mcpType")}
+                  value={mcpDraft.type}
+                  onChange={(v) =>
+                    setMcpDraft({
+                      ...mcpDraft,
+                      type: v === "remote" ? "remote" : "local",
+                    })
+                  }
+                  options={[
+                    { value: "local", label: t("settings.mcpLocal") },
+                    { value: "remote", label: t("settings.mcpRemote") },
+                  ]}
+                />
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.mcpUrl")}
+                  value={mcpDraft.url ?? ""}
+                  onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
+                />
+                {mcpDraft.type === "remote" && (
                   <input
                     className={styles.mcpInput}
-                    placeholder={t("settings.mcpName")}
-                    value={mcpDraft.name}
-                    onChange={(e) => setMcpDraft({ ...mcpDraft, name: e.target.value })}
+                    type="password"
+                    placeholder={t("settings.mcpToken")}
+                    value={mcpDraft.token ?? ""}
+                    onChange={(e) => setMcpDraft({ ...mcpDraft, token: e.target.value })}
                   />
-                  <OptionPicker
-                    variant="block"
-                    placement="down"
-                    menuTitle={t("settings.mcpType")}
-                    value={mcpDraft.type}
-                    onChange={(v) =>
-                      setMcpDraft({
-                        ...mcpDraft,
-                        type: v === "remote" ? "remote" : "local",
-                      })
-                    }
-                    options={[
-                      { value: "local", label: t("settings.mcpLocal") },
-                      { value: "remote", label: t("settings.mcpRemote") },
-                    ]}
-                  />
-                  <input
-                    className={styles.mcpInput}
-                    placeholder={t("settings.mcpUrl")}
-                    value={mcpDraft.url ?? ""}
-                    onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
-                  />
-                  {mcpDraft.type === "remote" && (
-                    <input
-                      className={styles.mcpInput}
-                      type="password"
-                      placeholder={t("settings.mcpToken")}
-                      value={mcpDraft.token ?? ""}
-                      onChange={(e) => setMcpDraft({ ...mcpDraft, token: e.target.value })}
-                    />
-                  )}
-                  <div className={styles.mcpFormActions}>
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() => setMcpDraft(null)}
-                    >
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.primaryBtn}
-                      disabled={!mcpDraft.name.trim() || !mcpDraft.url?.trim()}
-                      onClick={saveMcp}
-                    >
-                      {t("common.save")}
-                    </button>
-                  </div>
+                )}
+                <div className={styles.mcpFormActions}>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => setMcpDraft(null)}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryBtn}
+                    disabled={!mcpDraft.name.trim() || !mcpDraft.url?.trim()}
+                    onClick={saveMcp}
+                  >
+                    {t("common.save")}
+                  </button>
                 </div>
-              )}
-            </div>
-          </section>
+              </div>
+            )}
+          </>
         )}
 
         {section === "agent" && leaf === "diagnostics" && (
-          <section className={styles.card}>
-            <div className={styles.sectionBlock}>
-              <label>
-                {t("diagnostics.folder")}
+          <>
+            <SettingTable>
+              <SettingRow
+                label={t("diagnostics.folder")}
+                hint={t("diagnostics.folderHint", {
+                  path: diagDirResolved || diagDirDefault || "…",
+                })}
+              >
                 <div className={styles.cwdPickRow}>
                   <span
                     className={styles.cwdPath}
@@ -1317,17 +1400,14 @@ export function SettingsPage() {
                     </button>
                   ) : null}
                 </div>
-              </label>
-              <p className={styles.fieldHint}>
-                {t("diagnostics.folderHint", {
-                  path: diagDirResolved || diagDirDefault || "…",
-                })}
-              </p>
-            </div>
+              </SettingRow>
 
-            <div className={styles.sectionBlock}>
-              <div className={styles.modelField}>
-                <span className={styles.modelLabel}>{t("diagnostics.chat")}</span>
+              <SettingRow
+                label={t("diagnostics.chat")}
+                hint={
+                  sessions.length === 0 ? t("diagnostics.noChats") : t("diagnostics.chatHint")
+                }
+              >
                 <OptionPicker
                   value={diagSessionId ?? ""}
                   placement="down"
@@ -1347,161 +1427,136 @@ export function SettingsPage() {
                     })),
                   ]}
                 />
-              </div>
-              <p className={styles.fieldHint}>
-                {sessions.length === 0 ? t("diagnostics.noChats") : t("diagnostics.chatHint")}
-              </p>
-              <div className={styles.diagActions}>
-                <button
-                  type="button"
-                  className={styles.primaryBtn}
-                  disabled={diagBusy}
-                  onClick={() => {
-                    void (async () => {
-                      setDiagBusy(true);
-                      setDiagMessage(null);
-                      try {
-                        const dump = await submitDiagnosticsDump({
-                          reason: "manual",
-                          sessionId: diagSessionId ?? "",
-                        });
-                        setDiagMessage(t("diagnostics.savedTo", { path: dump.path }));
-                        await refreshDiagnostics();
-                      } catch (err) {
-                        setDiagMessage(err instanceof Error ? err.message : String(err));
-                      } finally {
-                        setDiagBusy(false);
-                      }
-                    })();
-                  }}
-                >
-                  {diagBusy ? t("diagnostics.saving") : t("diagnostics.createNow")}
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  disabled={diagLoading}
-                  onClick={() => void refreshDiagnostics()}
-                >
-                  {t("common.refresh")}
-                </button>
-              </div>
-              {diagMessage ? <p className={styles.hint}>{diagMessage}</p> : null}
+              </SettingRow>
+            </SettingTable>
+
+            <div className={styles.diagActions}>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                disabled={diagBusy}
+                onClick={() => {
+                  void (async () => {
+                    setDiagBusy(true);
+                    setDiagMessage(null);
+                    try {
+                      const dump = await submitDiagnosticsDump({
+                        reason: "manual",
+                        sessionId: diagSessionId ?? "",
+                      });
+                      setDiagMessage(t("diagnostics.savedTo", { path: dump.path }));
+                      await refreshDiagnostics();
+                    } catch (err) {
+                      setDiagMessage(err instanceof Error ? err.message : String(err));
+                    } finally {
+                      setDiagBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {diagBusy ? t("diagnostics.saving") : t("diagnostics.createNow")}
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                disabled={diagLoading}
+                onClick={() => void refreshDiagnostics()}
+              >
+                {t("common.refresh")}
+              </button>
+              {diagMessage ? <span className={styles.hint}>{diagMessage}</span> : null}
             </div>
 
-            <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>{t("diagnostics.dumpsTitle")}</h2>
-              <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
-              {diagLoading && !diagItems.length ? (
-                <p className={styles.hint}>{t("common.loading")}</p>
-              ) : null}
-              {!diagLoading && diagItems.length === 0 ? (
-                <p className={styles.hint}>{t("diagnostics.empty")}</p>
-              ) : null}
-              <ul className={styles.diagList}>
-                {diagItems.map((item) => (
-                  <li key={item.id} className={styles.diagCard}>
-                    <div className={styles.diagCardMain}>
-                      <div className={styles.diagCardTop}>
-                        <span className={styles.diagReason}>{item.reason}</span>
-                        <span className={styles.diagItemMeta}>
-                          {new Date(item.createdAt).toLocaleString()} ·{" "}
-                          {Math.max(1, Math.round(item.size / 1024))} KB
-                        </span>
-                      </div>
-                      <p className={styles.diagPath} title={item.path}>
-                        {item.fileName}
-                      </p>
+            <h2 className={styles.sectionHeading}>{t("diagnostics.dumpsTitle")}</h2>
+            <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
+            {diagLoading && !diagItems.length ? (
+              <p className={styles.hint}>{t("common.loading")}</p>
+            ) : null}
+            {!diagLoading && diagItems.length === 0 ? (
+              <p className={styles.hint}>{t("diagnostics.empty")}</p>
+            ) : null}
+            <ul className={styles.diagList}>
+              {diagItems.map((item) => (
+                <li key={item.id} className={styles.diagCard}>
+                  <div className={styles.diagCardMain}>
+                    <div className={styles.diagCardTop}>
+                      <span className={styles.diagReason}>{item.reason}</span>
+                      <span className={styles.diagItemMeta}>
+                        {new Date(item.createdAt).toLocaleString()} ·{" "}
+                        {Math.max(1, Math.round(item.size / 1024))} KB
+                      </span>
                     </div>
-                    <div className={styles.diagCardActions}>
-                      <button
-                        type="button"
-                        className={styles.secondaryBtn}
-                        disabled={diagCopyId === item.id}
-                        onClick={() => {
-                          void (async () => {
-                            setDiagCopyId(item.id);
-                            setDiagMessage(null);
-                            try {
-                              const full = await getDiagnosticsDump(item.id);
-                              await navigator.clipboard.writeText(
-                                JSON.stringify(full.payload, null, 2),
-                              );
-                              setDiagMessage(t("diagnostics.copied"));
-                            } catch (err) {
-                              setDiagMessage(err instanceof Error ? err.message : String(err));
-                            } finally {
-                              setDiagCopyId(null);
-                            }
-                          })();
-                        }}
-                      >
-                        {diagCopyId === item.id ? t("diagnostics.copying") : t("diagnostics.copyJson")}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.diagDelete}
-                        aria-label={t("common.delete")}
-                        onClick={() => {
-                          void (async () => {
-                            try {
-                              await api.deleteDiagnosticsDump(item.id);
-                              await refreshDiagnostics();
-                            } catch (err) {
-                              setDiagMessage(err instanceof Error ? err.message : String(err));
-                            }
-                          })();
-                        }}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
+                    <p className={styles.diagPath} title={item.path}>
+                      {item.fileName}
+                    </p>
+                  </div>
+                  <div className={styles.diagCardActions}>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      disabled={diagCopyId === item.id}
+                      onClick={() => {
+                        void (async () => {
+                          setDiagCopyId(item.id);
+                          setDiagMessage(null);
+                          try {
+                            const full = await getDiagnosticsDump(item.id);
+                            await navigator.clipboard.writeText(
+                              JSON.stringify(full.payload, null, 2),
+                            );
+                            setDiagMessage(t("diagnostics.copied"));
+                          } catch (err) {
+                            setDiagMessage(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setDiagCopyId(null);
+                          }
+                        })();
+                      }}
+                    >
+                      {diagCopyId === item.id ? t("diagnostics.copying") : t("diagnostics.copyJson")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.diagDelete}
+                      aria-label={t("common.delete")}
+                      onClick={() => {
+                        void (async () => {
+                          try {
+                            await api.deleteDiagnosticsDump(item.id);
+                            await refreshDiagnostics();
+                          } catch (err) {
+                            setDiagMessage(err instanceof Error ? err.message : String(err));
+                          }
+                        })();
+                      }}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         )}
 
         {section === "agent" && leaf === "remote" && (
-          <section className={`${styles.card} ${styles.remoteCard}`}>
-            <div className={styles.remoteStep}>
-              <span className={styles.remoteStepNum} aria-hidden>
-                1
-              </span>
-              <div className={styles.remoteStepBody}>
-                <h2 className={styles.sectionHeading}>{t("settings.remoteStep1Title")}</h2>
-                <p className={styles.fieldHint}>{t("settings.remoteStep1Body")}</p>
-              </div>
-            </div>
-            <div className={styles.remoteStep}>
-              <span className={styles.remoteStepNum} aria-hidden>
-                2
-              </span>
-              <div className={styles.remoteStepBody}>
-                <h2 className={styles.sectionHeading}>{t("settings.remoteStep2Title")}</h2>
-                <p className={styles.fieldHint}>{t("settings.remoteStep2Body")}</p>
-                <p className={styles.fieldHint}>{t("settings.remoteStep2HowIp")}</p>
-              </div>
-            </div>
-            <div className={styles.remoteStep}>
-              <span className={styles.remoteStepNum} aria-hidden>
-                3
-              </span>
-              <div className={styles.remoteStepBody}>
-                <h2 className={styles.sectionHeading}>{t("settings.remoteStep3Title")}</h2>
-                <p className={styles.fieldHint}>{t("settings.remoteStep3Body")}</p>
-                <label className={styles.remoteUrlLabel}>
-                  {t("settings.remoteCurrentUrl")}
-                  <div className={styles.remoteUrlRow}>
-                    <input value={pageUrl} readOnly title={pageUrl || undefined} />
-                    <button type="button" className={styles.secondaryBtn} onClick={() => void copyUrl()}>
-                      {copied ? t("settings.remoteCopied") : t("settings.remoteCopy")}
-                    </button>
-                  </div>
-                </label>
-              </div>
-            </div>
+          <>
+            <SettingTable>
+              <SettingRow label={t("settings.remoteStep1Title")} hint={t("settings.remoteStep1Body")} />
+              <SettingRow label={t("settings.remoteStep2Title")} hint={<>
+                {t("settings.remoteStep2Body")}
+                <br />
+                {t("settings.remoteStep2HowIp")}
+              </>} />
+              <SettingRow label={t("settings.remoteStep3Title")} hint={t("settings.remoteStep3Body")}>
+                <div className={styles.remoteUrlRow}>
+                  <input value={pageUrl} readOnly title={pageUrl || undefined} />
+                  <button type="button" className={styles.secondaryBtn} onClick={() => void copyUrl()}>
+                    {copied ? t("settings.remoteCopied") : t("settings.remoteCopy")}
+                  </button>
+                </div>
+              </SettingRow>
+            </SettingTable>
             <div className={styles.remoteTipsBlock}>
               <h2 className={styles.sectionHeading}>{t("settings.remoteTipTitle")}</h2>
               <ul className={styles.remoteTips}>
@@ -1512,7 +1567,7 @@ export function SettingsPage() {
                 <li>{t("settings.remoteTipInstall")}</li>
               </ul>
             </div>
-          </section>
+          </>
         )}
 
         {(section === "interface" ||

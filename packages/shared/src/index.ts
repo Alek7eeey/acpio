@@ -108,6 +108,19 @@ export type Theme = "light" | "dark";
 export type AppLocale = "ru" | "en";
 export type PermissionPolicy = "prompt" | "allowlist" | "always";
 
+/** Message action buttons under each message; fixed display order. */
+export type ChatActionId =
+  | "copy"
+  | "edit"
+  | "like"
+  | "dislike"
+  | "share"
+  | "regenerate"
+  | "readAloud";
+
+/** Chips shown in the composer bar above the input. */
+export type ChatMetaChipId = "folder" | "thoughts" | "mcp";
+
 export type MessagePartType =
   | "text"
   | "thought"
@@ -179,6 +192,21 @@ export interface AppSettings {
   darkScheme: string;
   /** Preferred read-aloud voice gender ("" = browser default). */
   ttsVoiceGender: "" | "female" | "male";
+  /**
+   * Message action buttons under each message, in display order. The first 5
+   * enabled actions render as icons, the rest hide behind the "⋯" menu.
+   */
+  chatActions: ChatActionId[];
+  /** Chips shown in the composer bar above the input. */
+  chatMetaChips: ChatMetaChipId[];
+  /** Master switch for message audio (read-aloud button + playback). */
+  chatReadAloud: boolean;
+  /** Enter sends the message; off → Enter inserts a newline, Ctrl+Enter sends. */
+  chatEnterToSend: boolean;
+  /** Show the send time next to each message. */
+  chatShowMessageTime: boolean;
+  /** Microphone (voice input) button in the composer. */
+  chatVoiceInput: boolean;
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
   mcpServers: McpServerConfig[];
 }
@@ -213,6 +241,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lightScheme: "",
   darkScheme: "",
   ttsVoiceGender: "",
+  chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
+  chatMetaChips: ["folder", "thoughts", "mcp"],
+  chatReadAloud: true,
+  chatEnterToSend: true,
+  chatShowMessageTime: false,
+  chatVoiceInput: true,
   mcpServers: [],
 };
 

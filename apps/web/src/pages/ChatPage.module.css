@@ -2156,3 +2156,11 @@
     padding-right: 28px;
   }
 }
+
+.msgTime {
+  margin-left: 4px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  align-self: center;
+  white-space: nowrap;
+}

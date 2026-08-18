@@ -21,7 +21,7 @@ describe("parseSettingsSearch", () => {
     },
   );
 
-  it.each(["appearance", "colors", "voice"] as const)(
+  it.each(["appearance", "colors", "voice", "chat"] as const)(
     "parses the interface leaf %j",
     (leaf) => {
       expect(parseSettingsSearch(`?section=interface&leaf=${leaf}`)).toEqual({
@@ -142,7 +142,7 @@ describe("settingsPath", () => {
     },
   );
 
-  it.each(["appearance", "colors", "voice"] as const)(
+  it.each(["appearance", "colors", "voice", "chat"] as const)(
     "round-trips the interface leaf %j",
     (leaf) => {
       const path = settingsPath("interface", leaf);
@@ -203,11 +203,13 @@ describe("getSettingsTree", () => {
       "appearance",
       "colors",
       "voice",
+      "chat",
     ]);
     expect(tree[1].children.map((c) => c.label)).toEqual([
       "settings.appearance",
       "settings.colors",
       "settings.voice",
+      "settings.chat",
     ]);
   });
 
