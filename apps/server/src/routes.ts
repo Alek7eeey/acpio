@@ -58,7 +58,7 @@ import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHu
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
-import type { AgentProvider } from "@acprocess/shared";
+import type { AgentProvider, AppSettings } from "@acprocess/shared";
 
 /** Content types for inline image previews of attached files (?inline=1). */
 const IMAGE_MIME: Record<string, string> = {
@@ -102,19 +102,21 @@ const settingsSchema = z.object({
   fontSize: z.string().optional(),
   lightScheme: z.string().optional(),
   darkScheme: z.string().optional(),
+  lightAccent: z.string().optional(),
+  lightBg: z.string().optional(),
+  lightSurface: z.string().optional(),
+  darkAccent: z.string().optional(),
+  darkBg: z.string().optional(),
+  darkSurface: z.string().optional(),
   ttsVoiceGender: z.enum(["", "female", "male"]).optional(),
-  chatActions: z
-    .array(z.enum(["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"]))
-    .optional(),
-  chatMetaChips: z.array(z.enum(["folder", "thoughts", "mcp"])).optional(),
-  chatComposerButtons: z.array(z.enum(["attach", "mic", "model", "mode"])).optional(),
-  chatTreeElements: z
-    .array(z.enum(["search", "searchMsgs", "pin", "archive", "more"]))
-    .optional(),
-  chatTreeCompact: z.boolean().optional(),
+  chatActions: z.array(z.string()).optional(),
+  chatMetaChips: z.array(z.string()).optional(),
+  chatComposerButtons: z.array(z.string()).optional(),
+  chatTreeElements: z.array(z.string()).optional(),
+  chatTreeMenu: z.array(z.string()).optional(),
   chatTreeShowArchive: z.boolean().optional(),
   chatHeaderHeight: z.number().min(40).max(72).optional(),
-  chatComposerHeight: z.number().min(24).max(96).optional(),
+  chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   mcpServers: z
@@ -309,7 +311,7 @@ export async function registerRoutes(app: FastifyInstance) {
       // Warm the status cache so the indicator reflects the new list quickly.
       void refreshMcpStatus();
     }
-    return updateSettings(patch);
+    return updateSettings(patch as Partial<AppSettings>);
   });
 
   app.get("/api/sessions", async () => listSessions());

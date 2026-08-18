@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useSettingsSearch } from "../lib/settingsSearch";
 import styles from "./SettingRow.module.css";
 
 /**
@@ -13,17 +14,29 @@ export function SettingTable({ children }: { children: ReactNode }) {
 export function SettingRow({
   label,
   hint,
+  terms,
   children,
 }: {
   label: ReactNode;
   hint?: ReactNode;
+  /** Extra search terms for rows whose label/hint are not plain text. */
+  terms?: string[];
   children?: ReactNode;
 }) {
+  const { active, matches, highlight } = useSettingsSearch();
+  const labelText = typeof label === "string" ? label : "";
+  const hintText = typeof hint === "string" ? hint : "";
+  if (active) {
+    const haystack = [labelText, hintText, ...(terms ?? [])].join(" ");
+    if (!matches(haystack)) return null;
+  }
   return (
     <div className={styles.row}>
       <div className={styles.text}>
-        <span className={styles.label}>{label}</span>
-        {hint ? <span className={styles.hint}>{hint}</span> : null}
+        <span className={styles.label}>{labelText ? highlight(labelText) : label}</span>
+        {hint ? (
+          <span className={styles.hint}>{hintText ? highlight(hintText) : hint}</span>
+        ) : null}
       </div>
       <div className={styles.control}>{children}</div>
     </div>

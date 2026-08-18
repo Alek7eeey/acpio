@@ -14,6 +14,7 @@ import {
   type SettingsSection,
   type SettingsLeaf,
 } from "../lib/settingsNav";
+import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { HoverTip } from "./HoverTip";
@@ -61,6 +62,31 @@ export function AppShell() {
   const agentAvailable = useAppStore((s) => s.agentAvailable);
   const settings = useAppStore((s) => s.settings);
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
+  const settingsQuery = useAppStore((s) => s.settingsQuery);
+  const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
+  const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
+
+  /**
+   * Tree view with the active search applied: branches/leaves whose label or
+   * search-index terms match; branches auto-expand while searching.
+   */
+  const settingsTreeView = useMemo(() => {
+    const q = settingsQuery.trim();
+    if (!q) return { branches: settingsTree, matches: 0 };
+    let matches = 0;
+    const branches = settingsTree
+      .map((branch) => {
+        const children = branch.children.filter((leaf) =>
+          matchAny([leaf.label, ...(searchIndex[leaf.id] ?? [])], q),
+        );
+        const branchHits = matchAny([branch.label], q);
+        if (children.length === 0 && !branchHits) return null;
+        matches += children.length;
+        return children.length > 0 ? { ...branch, children } : branch;
+      })
+      .filter((b): b is NonNullable<typeof b> => b !== null);
+    return { branches, matches };
+  }, [settingsTree, settingsQuery, searchIndex]);
 
   const hasAgent = Boolean(settings.connectedProvider);
   // Green only when the agent was actually verified (probe/prompt succeeded),
@@ -336,9 +362,62 @@ export function AppShell() {
           )}
 
           {isSettings && (
+            <div className={styles.settingsSearchWrap}>
+              <div className={styles.settingsSearch}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                  <path
+                    d="M16 16l4.5 4.5"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <input
+                  type="search"
+                  value={settingsQuery}
+                  onChange={(e) => setSettingsQuery(e.target.value)}
+                  placeholder={t("settings.searchPlaceholder")}
+                  aria-label={t("settings.searchPlaceholder")}
+                />
+                {settingsQuery ? (
+                  <button
+                    type="button"
+                    className={styles.settingsSearchClear}
+                    aria-label={t("settings.searchClear")}
+                    title={t("settings.searchClear")}
+                    onClick={() => setSettingsQuery("")}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M6 6l12 12M18 6L6 18"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
+              </div>
+              {settingsQuery.trim() ? (
+                <p
+                  className={`${styles.settingsSearchStatus}${
+                    settingsTreeView.matches === 0 ? ` ${styles.settingsSearchStatusEmpty}` : ""
+                  }`}
+                >
+                  {settingsTreeView.matches > 0
+                    ? t("settings.searchResults", { count: settingsTreeView.matches })
+                    : t("settings.searchNoResults")}
+                </p>
+              ) : null}
+            </div>
+          )}
+
+          {isSettings && (
             <nav className={styles.settingsTree} aria-label={t("common.settingsSections")}>
-              {settingsTree.map((branch) => {
-                const open = openBranches[branch.id] ?? true;
+              {settingsTreeView.branches.map((branch) => {
+                const open =
+                  settingsQuery.trim() || (openBranches[branch.id] ?? true);
                 const activeBranch = settingsNav.section === branch.id;
                 const hasChildren = branch.children.length > 0;
 
@@ -386,7 +465,11 @@ export function AppShell() {
                           )}
                         </span>
                       )}
-                      <span className={styles.settingsItemLabel}>{branch.label}</span>
+                      <span className={styles.settingsItemLabel}>
+                        {settingsQuery.trim()
+                          ? highlightText(branch.label, settingsQuery)
+                          : branch.label}
+                      </span>
                     </button>
                     {hasChildren && open && (
                       <div className={styles.settingsLeaves}>
@@ -402,7 +485,9 @@ export function AppShell() {
                               }`}
                               onClick={() => goSettings(branch.id, leaf.id)}
                             >
-                              {leaf.label}
+                              {settingsQuery.trim()
+                                ? highlightText(leaf.label, settingsQuery)
+                                : leaf.label}
                             </button>
                           );
                         })}
@@ -826,13 +911,19 @@ export function AppShell() {
               ) : null}
             </div>
             <div className={styles.toolCluster} role="group" aria-label={t("common.toolbar")}>
-              <LocaleToggle triggerClassName={styles.toolClusterLocale} compact />
-              <InstallAppButton className={styles.toolClusterBtn} />
-              <ThemeToggle
-                theme={theme}
-                className={styles.toolClusterBtn}
-                onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
-              />
+              {(settings.chatHeaderIcons ?? []).includes("lang") && (
+                <LocaleToggle triggerClassName={styles.toolClusterLocale} compact />
+              )}
+              {(settings.chatHeaderIcons ?? []).includes("install") && (
+                <InstallAppButton className={styles.toolClusterBtn} />
+              )}
+              {(settings.chatHeaderIcons ?? []).includes("theme") && (
+                <ThemeToggle
+                  theme={theme}
+                  className={styles.toolClusterBtn}
+                  onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
+                />
+              )}
               <button
                 type="button"
                 className={`${styles.toolClusterBtn} ${styles.toolClusterSettings}${isSettings ? ` ${styles.toolClusterBtnActive}` : ""}`}

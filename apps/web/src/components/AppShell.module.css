@@ -2282,6 +2282,73 @@
   padding: 4px 0;
 }
 
+.settingsSearchWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  flex: 0 0 auto;
+}
+
+.settingsSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.settingsSearch:focus-within {
+  border-color: var(--accent);
+}
+
+.settingsSearch input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.settingsSearch input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.settingsSearchClear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.settingsSearchClear:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+}
+
+.settingsSearchStatus {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: 0 4px;
+}
+
+.settingsSearchStatusEmpty {
+  color: var(--danger, #d64545);
+}
+
 .settingsBranch {
   display: flex;
   flex-direction: column;
@@ -2911,7 +2978,9 @@
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: min(88vw, var(--sidebar-width, 360px));
+    /* Fixed 88vw — the app sets --sidebar-width to 0px while the drawer is
+       closed, which would collapse the mobile drawer to a padding sliver. */
+    width: min(88vw, 360px);
     transform: translateX(-105%);
     transition: transform 0.22s ease;
     box-shadow: var(--shadow);
@@ -3124,4 +3193,9 @@
 
 .treeNoMore .sessionMore {
   display: none;
+}
+
+/* Right margin for the row time when the “⋯” button is hidden. */
+.treeNoMore .sessionItem {
+  padding-right: 10px;
 }

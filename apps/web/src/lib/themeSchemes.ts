@@ -156,3 +156,33 @@ export const SYSTEM_SWATCH: Record<"light" | "dark", { accent: string; bg: strin
   light: { accent: "#0866ff", bg: "#f7f8fa", surface: "#ffffff" },
   dark: { accent: "#4b8dff", bg: "#0f1115", surface: "#171a21" },
 };
+
+/**
+ * Build the "custom" palette from three user-picked colors (accent, bg,
+ * surface). The rest of the variables are derived with color-mix so the UI
+ * stays coherent without asking for every token.
+ */
+export function customScheme(
+  theme: "light" | "dark",
+  accent: string,
+  bg: string,
+  surface: string,
+): ThemeScheme {
+  const text = theme === "dark" ? "#e8ecf2" : "#1f2430";
+  return {
+    id: "custom",
+    name: "Свой",
+    vars: {
+      "--accent": accent,
+      "--accent-soft": `color-mix(in srgb, ${accent} 12%, transparent)`,
+      "--accent-hover": `color-mix(in srgb, ${accent} 82%, #000)`,
+      "--bg": bg,
+      "--bg-secondary": `color-mix(in srgb, ${bg} 55%, ${surface})`,
+      "--surface": surface,
+      "--surface-2": `color-mix(in srgb, ${surface} 92%, ${bg})`,
+      "--border": `color-mix(in srgb, ${surface} 72%, ${text})`,
+      "--border-soft": `color-mix(in srgb, ${text} 14%, ${surface})`,
+      "--text-secondary": `color-mix(in srgb, ${text} 62%, transparent)`,
+    },
+  };
+}

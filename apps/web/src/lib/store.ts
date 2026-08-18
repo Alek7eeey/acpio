@@ -117,6 +117,9 @@ type AppState = {
   /** Extra permission prompts waiting behind the one shown in the UI. */
   permissionQueue: PendingPermission[];
   pendingQuestion: PendingQuestion | null;
+  /** Settings search box text, shared by the sidebar tree and the page rows. */
+  settingsQuery: string;
+  setSettingsQuery: (query: string) => void;
   /** Bumped on each send; cancel stamps cancelledPromptEpoch to ignore late WS parts. */
   promptEpoch: number;
   cancelledPromptEpoch: number;
@@ -540,6 +543,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestion: null,
+  settingsQuery: "",
+  setSettingsQuery: (query) => set({ settingsQuery: query }),
   promptEpoch: 0,
   cancelledPromptEpoch: -1,
   promptQueue: [],

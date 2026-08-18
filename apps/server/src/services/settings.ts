@@ -14,6 +14,12 @@ function isKnownProvider(provider: unknown): provider is string {
   return typeof provider === "string" && adapters.ids().includes(provider);
 }
 
+/** Keep only valid config ids, healing rows saved before an id was removed.
+ *  An empty result is valid (the user may disable every item). */
+function filterValid<T extends string>(values: unknown[], valid: T[]): T[] {
+  return values.filter((v): v is T => typeof v === "string" && valid.includes(v as T));
+}
+
 function mergeSettings(raw: unknown): AppSettings {
   const base = { ...DEFAULT_SETTINGS };
   if (!raw || typeof raw !== "object") return base;
@@ -62,23 +68,64 @@ function mergeSettings(raw: unknown): AppSettings {
       merged[key] = "";
     }
   }
+  for (const key of [
+    "lightAccent",
+    "lightBg",
+    "lightSurface",
+    "darkAccent",
+    "darkBg",
+    "darkSurface",
+  ] as const) {
+    if (typeof merged[key] !== "string") {
+      merged[key] = "";
+    }
+  }
   if (merged.ttsVoiceGender !== "female" && merged.ttsVoiceGender !== "male") {
     merged.ttsVoiceGender = "";
   }
   if (!Array.isArray(merged.chatActions)) {
     merged.chatActions = [...DEFAULT_SETTINGS.chatActions];
+  } else {
+    merged.chatActions = filterValid(merged.chatActions, [
+      "copy",
+      "edit",
+      "like",
+      "dislike",
+      "share",
+      "regenerate",
+      "readAloud",
+    ]);
   }
   if (!Array.isArray(merged.chatMetaChips)) {
     merged.chatMetaChips = [...DEFAULT_SETTINGS.chatMetaChips];
+  } else {
+    merged.chatMetaChips = filterValid(merged.chatMetaChips, ["folder", "thoughts", "mcp"]);
   }
   if (!Array.isArray(merged.chatComposerButtons)) {
     merged.chatComposerButtons = [...DEFAULT_SETTINGS.chatComposerButtons];
+  } else {
+    merged.chatComposerButtons = filterValid(merged.chatComposerButtons, [
+      "attach",
+      "mic",
+      "model",
+      "mode",
+    ]);
   }
   if (!Array.isArray(merged.chatTreeElements)) {
     merged.chatTreeElements = [...DEFAULT_SETTINGS.chatTreeElements];
+  } else {
+    merged.chatTreeElements = filterValid(merged.chatTreeElements, [
+      "search",
+      "searchMsgs",
+      "pin",
+      "archive",
+      "more",
+    ]);
   }
-  if (typeof merged.chatTreeCompact !== "boolean") {
-    merged.chatTreeCompact = DEFAULT_SETTINGS.chatTreeCompact;
+  if (!Array.isArray(merged.chatTreeMenu)) {
+    merged.chatTreeMenu = [...DEFAULT_SETTINGS.chatTreeMenu];
+  } else {
+    merged.chatTreeMenu = filterValid(merged.chatTreeMenu, ["rename", "move", "export", "delete"]);
   }
   if (typeof merged.chatTreeShowArchive !== "boolean") {
     merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;
@@ -91,13 +138,10 @@ function mergeSettings(raw: unknown): AppSettings {
   } else {
     merged.chatHeaderHeight = Math.min(72, Math.max(40, Math.round(merged.chatHeaderHeight)));
   }
-  if (
-    typeof merged.chatComposerHeight !== "number" ||
-    !Number.isFinite(merged.chatComposerHeight)
-  ) {
-    merged.chatComposerHeight = DEFAULT_SETTINGS.chatComposerHeight;
+  if (!Array.isArray(merged.chatHeaderIcons)) {
+    merged.chatHeaderIcons = [...DEFAULT_SETTINGS.chatHeaderIcons];
   } else {
-    merged.chatComposerHeight = Math.min(96, Math.max(24, Math.round(merged.chatComposerHeight)));
+    merged.chatHeaderIcons = filterValid(merged.chatHeaderIcons, ["lang", "install", "theme"]);
   }
   if (typeof merged.chatEnterToSend !== "boolean") {
     merged.chatEnterToSend = DEFAULT_SETTINGS.chatEnterToSend;
@@ -105,13 +149,15 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
   }
-  // Fields replaced by icon-level controls / numeric heights (never shipped).
+  // Fields replaced by icon-level controls / never shipped.
   for (const stale of [
     "chatReadAloud",
     "chatVoiceInput",
     "chatTreeDensity",
     "chatHeaderSize",
     "chatToolbarSize",
+    "chatTreeCompact",
+    "chatComposerHeight",
   ] as const) {
     delete (merged as Record<string, unknown>)[stale];
   }

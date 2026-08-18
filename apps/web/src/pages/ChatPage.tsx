@@ -1388,12 +1388,145 @@ function MessageActions({
   const likeActive = rating === "like";
   const dislikeActive = rating === "dislike";
 
-  // Configurable actions, canonical order; the first 5 render as icons and
-  // the rest hide behind the "⋯" menu. "edit" lives on user messages only.
+  // Configurable actions in the user's order. "edit" lives on user messages
+  // only. Every enabled action renders as an icon in its configured position
+  // (read-aloud included); the "⋯" overflow holds anything beyond the icons.
   const chatActions = settings.chatActions ?? [];
   const enabledActions = chatActions.filter((a) => a !== "edit");
-  const iconActions = enabledActions.slice(0, 5);
-  const overflowActions = enabledActions.slice(5);
+  const iconActions = enabledActions.slice(0, 6);
+  const overflowActions = enabledActions.slice(6);
+
+  const renderIconAction = (id: (typeof iconActions)[number]) => {
+    switch (id) {
+      case "copy":
+        return (
+          <button
+            type="button"
+            className={styles.msgAction}
+            title={copied ? t("common.copied") : t("common.copy")}
+            aria-label={t("common.copy")}
+            tabIndex={tabIndex}
+            onClick={() => void copy()}
+          >
+            <IconCopy done={copied} />
+          </button>
+        );
+      case "like":
+        return (
+          <button
+            type="button"
+            className={`${styles.msgAction}${likeActive ? ` ${styles.msgActionActive}` : ""}`}
+            title={likeActive ? t("chat.liked") : t("common.like")}
+            aria-label={likeActive ? t("chat.liked") : t("common.like")}
+            aria-pressed={likeActive}
+            tabIndex={tabIndex}
+            onClick={() => setRating(likeActive ? null : "like")}
+          >
+            <MsgIcon>
+              <path
+                d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
+                stroke="currentColor"
+                strokeWidth="1.85"
+                strokeLinejoin="round"
+              />
+            </MsgIcon>
+          </button>
+        );
+      case "dislike":
+        return (
+          <button
+            type="button"
+            className={`${styles.msgAction}${dislikeActive ? ` ${styles.msgActionActive}` : ""}`}
+            title={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+            aria-label={dislikeActive ? t("chat.disliked") : t("common.dislike")}
+            aria-pressed={dislikeActive}
+            tabIndex={tabIndex}
+            onClick={() => setDislikeOpen(true)}
+          >
+            <MsgIcon>
+              <path
+                d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
+                stroke="currentColor"
+                strokeWidth="1.85"
+                strokeLinejoin="round"
+              />
+            </MsgIcon>
+          </button>
+        );
+      case "share":
+        return (
+          <button
+            type="button"
+            className={styles.msgAction}
+            title={t("common.share")}
+            aria-label={t("common.share")}
+            tabIndex={tabIndex}
+            onClick={(e) => void share(e)}
+          >
+            <MsgIcon>
+              <path
+                d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                stroke="currentColor"
+                strokeWidth="1.85"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </MsgIcon>
+          </button>
+        );
+      case "regenerate":
+        return (
+          <button
+            type="button"
+            className={styles.msgAction}
+            title={t("chat.regenerate")}
+            aria-label={t("chat.regenerate")}
+            disabled={!session}
+            tabIndex={tabIndex}
+            onClick={onRegenerate}
+          >
+            <MsgIcon>
+              <path
+                d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
+                stroke="currentColor"
+                strokeWidth="1.85"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </MsgIcon>
+          </button>
+        );
+      case "readAloud":
+        return (
+          <button
+            type="button"
+            className={`${styles.msgAction}${speaking ? ` ${styles.msgActionActive}` : ""}`}
+            title={speaking ? t("chat.stopReading") : t("chat.readAloud")}
+            aria-label={speaking ? t("chat.stopReading") : t("chat.readAloud")}
+            aria-pressed={speaking}
+            tabIndex={tabIndex}
+            onClick={toggleSpeak}
+          >
+            <MsgIcon>
+              <path
+                d="M4 9v6h3l5 4V5L7 9H4Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M16 8.5a4.5 4.5 0 0 1 0 7"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              />
+            </MsgIcon>
+          </button>
+        );
+      default:
+        return null;
+    }
+  };
 
   return (
     <div
@@ -1401,99 +1534,7 @@ function MessageActions({
       aria-label={t("common.actions")}
       aria-hidden={hidden}
     >
-      {iconActions.includes("copy") && (
-        <button
-          type="button"
-          className={styles.msgAction}
-          title={copied ? t("common.copied") : t("common.copy")}
-          aria-label={t("common.copy")}
-          tabIndex={tabIndex}
-          onClick={() => void copy()}
-        >
-          <IconCopy done={copied} />
-        </button>
-      )}
-      {iconActions.includes("like") && (
-        <button
-          type="button"
-          className={`${styles.msgAction}${likeActive ? ` ${styles.msgActionActive}` : ""}`}
-          title={likeActive ? t("chat.liked") : t("common.like")}
-          aria-label={likeActive ? t("chat.liked") : t("common.like")}
-          aria-pressed={likeActive}
-          tabIndex={tabIndex}
-          onClick={() => setRating(likeActive ? null : "like")}
-        >
-          <MsgIcon>
-            <path
-              d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
-              stroke="currentColor"
-              strokeWidth="1.85"
-              strokeLinejoin="round"
-            />
-          </MsgIcon>
-        </button>
-      )}
-      {iconActions.includes("dislike") && (
-        <button
-          type="button"
-          className={`${styles.msgAction}${dislikeActive ? ` ${styles.msgActionActive}` : ""}`}
-          title={dislikeActive ? t("chat.disliked") : t("common.dislike")}
-          aria-label={dislikeActive ? t("chat.disliked") : t("common.dislike")}
-          aria-pressed={dislikeActive}
-          tabIndex={tabIndex}
-          onClick={() => setDislikeOpen(true)}
-        >
-          <MsgIcon>
-            <path
-              d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
-              stroke="currentColor"
-              strokeWidth="1.85"
-              strokeLinejoin="round"
-            />
-          </MsgIcon>
-        </button>
-      )}
-      {iconActions.includes("share") && (
-        <button
-          type="button"
-          className={styles.msgAction}
-          title={t("common.share")}
-          aria-label={t("common.share")}
-          tabIndex={tabIndex}
-          onClick={(e) => void share(e)}
-        >
-          <MsgIcon>
-            <path
-              d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
-              stroke="currentColor"
-              strokeWidth="1.85"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </MsgIcon>
-        </button>
-      )}
-      {iconActions.includes("regenerate") && (
-        <button
-          type="button"
-          className={styles.msgAction}
-          title={t("chat.regenerate")}
-          aria-label={t("chat.regenerate")}
-          disabled={!session}
-          tabIndex={tabIndex}
-          onClick={onRegenerate}
-        >
-          <MsgIcon>
-            <path
-              d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
-              stroke="currentColor"
-              strokeWidth="1.85"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </MsgIcon>
-        </button>
-      )}
+      {iconActions.map((id) => renderIconAction(id))}
       {overflowActions.length > 0 && (
         <button
           type="button"
@@ -3343,11 +3384,6 @@ export function ChatPage() {
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               streaming ? styles.pillBusy : ""
             } ${composerLocked ? styles.pillLoading : ""}`}
-            style={
-              settings.chatComposerHeight
-                ? { ["--composer-h" as string]: `${settings.chatComposerHeight}px` }
-                : undefined
-            }
           >
             <SlashCommandMenu
               open={slashMenuOpen}

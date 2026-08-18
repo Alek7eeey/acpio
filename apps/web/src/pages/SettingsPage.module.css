@@ -377,6 +377,10 @@
   font-size: 0.82rem;
   font-weight: 600;
   color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .remoteTips {
@@ -1150,11 +1154,11 @@
 
 /* --- unified VS Code-style table helpers --- */
 .schemeGridInline {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
   gap: 8px;
-  justify-content: flex-end;
-  max-width: 460px;
+  max-width: 480px;
+  width: 100%;
 }
 
 .providerTitleRow {
@@ -1286,4 +1290,280 @@
 .actionAddChip:hover {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.chatAdvancedDetails {
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.chatAdvancedDetails summary {
+  cursor: pointer;
+  padding: 11px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  user-select: none;
+  list-style: none;
+}
+
+.chatAdvancedDetails summary::-webkit-details-marker {
+  display: none;
+}
+
+.chatAdvancedDetails summary::before {
+  content: "▸ ";
+  color: var(--text-secondary);
+}
+
+.chatAdvancedDetails[open] summary::before {
+  content: "▾ ";
+}
+
+.chatAdvancedDetails summary:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+}
+
+.chatAdvancedDetails .table {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Mobile: horizontal nav chips (the sidebar tree is hidden on phones). */
+.mobileNav {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .mobileNav {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 8px 10px;
+    margin: 0 -14px 4px;
+    scrollbar-width: none;
+  }
+
+  .mobileNav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobileNavChip {
+    flex: 0 0 auto;
+    padding: 7px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .mobileNavChipActive {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+    font-weight: 700;
+  }
+}
+
+/* Chat settings layout: interactive preview on desktop; on mobile the
+   preview is hidden and the config list is shown directly. */
+.previewDesktop {
+  display: block;
+}
+
+.mobileConfig {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .previewDesktop {
+    display: none;
+  }
+
+  .mobileConfig {
+    display: block;
+    margin-bottom: 12px;
+  }
+
+  .mobileConfig .table {
+    border-radius: 12px;
+  }
+}
+
+.customPickers {
+  display: flex;
+  gap: 5px;
+}
+
+.customPickers input[type=color] {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: none;
+  cursor: pointer;
+}
+
+/* On mobile the config list is already visible — hide the collapsible copy. */
+@media (max-width: 700px) {
+  .chatAdvancedDetails {
+    display: none;
+  }
+}
+
+.chatSettingsIntro {
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.schemeCardCustom {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.schemeCardCustom .schemeDots {
+  flex: 0 0 auto;
+}
+
+.schemeCardCustom .schemeCardName {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Mobile: color cards shrink to fit; the custom card wraps its controls. */
+@media (max-width: 700px) {
+  .schemeGridInline {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    gap: 6px;
+    max-width: none;
+  }
+
+  .schemeCard {
+    padding: 8px;
+  }
+
+  .schemeDot {
+    width: 14px;
+    height: 14px;
+  }
+
+  .schemeCardCustom {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .schemeCardCustom .customPickers {
+    margin-left: auto;
+  }
+}
+
+/* Settings search (mobile input + cross-leaf hits). */
+.mobileSearch {
+  display: none;
+}
+
+.searchHits {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.searchHitsLabel {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.searchHitsNone {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.searchHitChip {
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 550;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.searchHitChip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.searchHitChipActive {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chatSearchRows {
+  display: block;
+}
+
+@media (max-width: 700px) {
+  .mobileSearch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 14px 0;
+    padding: 0 12px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-secondary);
+  }
+
+  .mobileSearch:focus-within {
+    border-color: var(--accent);
+  }
+
+  .mobileSearch input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 1rem;
+  }
+
+  .mobileSearch input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .mobileSearchClear {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    padding: 4px 6px;
+    cursor: pointer;
+  }
 }

@@ -2158,7 +2158,8 @@
 }
 
 .msgTime {
-  margin-left: 4px;
+  margin-left: 8px;
+  margin-right: 6px;
   font-size: 0.68rem;
   color: var(--text-secondary);
   align-self: center;

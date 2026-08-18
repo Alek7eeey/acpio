@@ -1,5 +1,5 @@
 import type { AppSettings } from "@acprocess/shared";
-import { schemeById } from "./themeSchemes";
+import { customScheme, schemeById } from "./themeSchemes";
 
 /** Font family ids selectable in Settings → Interface. "" = default (Figtree). */
 export const FONT_FAMILIES: Record<string, string> = {
@@ -35,7 +35,15 @@ export function applyAppearance(settings: AppSettings) {
   setVar("font-size", FONT_SIZES[settings.fontSize] ?? null);
 
   const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  const scheme = schemeById(theme, theme === "dark" ? settings.darkScheme : settings.lightScheme);
+  const schemeId = theme === "dark" ? settings.darkScheme : settings.lightScheme;
+  let scheme = schemeById(theme, schemeId);
+  if (schemeId === "custom") {
+    const accent = theme === "dark" ? settings.darkAccent : settings.lightAccent;
+    const bg = theme === "dark" ? settings.darkBg : settings.lightBg;
+    const surface = theme === "dark" ? settings.darkSurface : settings.lightSurface;
+    if (accent && bg && surface) scheme = customScheme(theme, accent, bg, surface);
+    else scheme = undefined; // custom chosen but colors not set yet → system palette
+  }
   appliedSchemeVars.forEach((key) => document.documentElement.style.removeProperty(key));
   appliedSchemeVars.clear();
   if (scheme) {

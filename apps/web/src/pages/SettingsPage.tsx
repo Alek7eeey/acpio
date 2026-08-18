@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   migrateModelParamValues,
   type AgentProbeResult,
@@ -7,14 +7,17 @@ import {
   type AppSettings,
   type ChatActionId,
   type ChatComposerButtonId,
+  type ChatHeaderIconId,
   type ChatMetaChipId,
   type ChatTreeElementId,
+  type ChatTreeMenuId,
   type DiagnosticsDumpMeta,
   type McpServerConfig,
   type ModelParamDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
-import { parseSettingsSearch } from "../lib/settingsNav";
+import { getSettingsTree, parseSettingsSearch, settingsPath } from "../lib/settingsNav";
+import { matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
 import { useT } from "../lib/i18n";
 import { adapterMeta, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
@@ -24,29 +27,214 @@ import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
 import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
+import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
-/** Canonical display order for message actions and composer chips. */
-const CHAT_ACTION_ORDER: ChatActionId[] = [
-  "copy",
-  "edit",
-  "like",
-  "dislike",
-  "share",
-  "regenerate",
-  "readAloud",
-];
+/** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
 const CHAT_TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
+const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
+const CHAT_HEADER_ICON_ORDER: ChatHeaderIconId[] = ["lang", "install", "theme"];
 
 /** Toggle a value in a canonical-ordered array (re-adds in the right slot). */
 function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
   const next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id];
   return order.filter((v) => next.includes(v));
+}
+
+/**
+ * The chat settings rows (chips + switches). Shown inside the collapsible
+ * "Advanced" block on desktop and as the main list on mobile (where the
+ * interactive preview is hidden).
+ */
+function ChatConfigRows({
+  form,
+  patch,
+}: {
+  form: AppSettings;
+  patch: (key: string, value: unknown) => void;
+}) {
+  const t = useT();
+  return (
+    <SettingTable>
+      <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["copy", t("settings.chatActionCopy")],
+              ["edit", t("settings.chatActionEdit")],
+              ["like", t("settings.chatActionLike")],
+              ["dislike", t("settings.chatActionDislike")],
+              ["share", t("settings.chatActionShare")],
+              ["regenerate", t("settings.chatActionRegenerate")],
+              ["readAloud", t("settings.chatActionReadAloud")],
+            ] as Array<[ChatActionId, string]>
+          ).map(([id, label]) => {
+            const on = (form.chatActions ?? []).includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  patch(
+                    "chatActions",
+                    on
+                      ? (form.chatActions ?? []).filter((a) => a !== id)
+                      : [...(form.chatActions ?? []), id],
+                  )
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatMetaChips")} hint={t("settings.chatMetaChipsHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["folder", t("settings.chatMetaChipFolder")],
+              ["thoughts", t("settings.chatMetaChipThoughts")],
+              ["mcp", t("settings.chatMetaChipMcp")],
+            ] as Array<[ChatMetaChipId, string]>
+          ).map(([id, label]) => {
+            const on = (form.chatMetaChips ?? []).includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatComposerButtons")} hint={t("settings.chatComposerButtonsHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["attach", t("settings.chatComposerBtnAttach")],
+              ["mic", t("settings.chatComposerBtnMic")],
+              ["model", t("settings.chatComposerBtnModel")],
+              ["mode", t("settings.chatComposerBtnMode")],
+            ] as Array<[ChatComposerButtonId, string]>
+          ).map(([id, label]) => {
+            const on = (form.chatComposerButtons ?? []).includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  patch(
+                    "chatComposerButtons",
+                    toggleInOrder(form.chatComposerButtons ?? [], id, CHAT_COMPOSER_ORDER),
+                  )
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatTreeElements")} hint={t("settings.chatTreeElementsHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["search", t("settings.chatTreeElSearch")],
+              ["searchMsgs", t("settings.chatTreeElSearchMsgs")],
+              ["pin", t("settings.chatTreeElPin")],
+              ["archive", t("settings.chatTreeElArchive")],
+              ["more", t("settings.chatTreeElMore")],
+            ] as Array<[ChatTreeElementId, string]>
+          ).map(([id, label]) => {
+            const on = (form.chatTreeElements ?? []).includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  patch(
+                    "chatTreeElements",
+                    toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
+                  )
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatTreeMenuTitle")} hint={t("settings.chatTreeMenuHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["rename", t("chat.renameSession")],
+              ["move", t("chat.newInFolder")],
+              ["export", t("chat.exportChat")],
+              ["delete", t("common.delete")],
+            ] as Array<[ChatTreeMenuId, string]>
+          ).map(([id, label]) => {
+            const on = (form.chatTreeMenu ?? []).includes(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() =>
+                  patch(
+                    "chatTreeMenu",
+                    toggleInOrder(form.chatTreeMenu ?? [], id, CHAT_TREE_MENU_ORDER),
+                  )
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
+        <Toggle
+          checked={Boolean(form.chatEnterToSend)}
+          onChange={(v) => patch("chatEnterToSend", v)}
+          label={t("settings.chatEnterToSend")}
+        />
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatShowMessageTime")} hint={t("settings.chatShowMessageTimeHint")}>
+        <Toggle
+          checked={Boolean(form.chatShowMessageTime)}
+          onChange={(v) => patch("chatShowMessageTime", v)}
+          label={t("settings.chatShowMessageTime")}
+        />
+      </SettingRow>
+    </SettingTable>
+  );
 }
 
 /** Command value a provider's settings form carries (adapter-declared field). */
@@ -127,14 +315,45 @@ export function SettingsPage() {
     return registered;
   }, [adapters, t]);
   const location = useLocation();
+  const navigate = useNavigate();
   const { section, leaf } = useMemo(
     () => parseSettingsSearch(location.search),
     [location.search],
   );
+  // Flat leaf list for the mobile nav (the sidebar tree is hidden on phones).
+  const settingsLeaves = useMemo(
+    () =>
+      getSettingsTree(t).flatMap((branch) =>
+        branch.children.map((item) => ({
+          section: branch.id,
+          leaf: item.id,
+          label: item.label,
+        })),
+      ),
+    [t],
+  );
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const settingsQuery = useAppStore((s) => s.settingsQuery);
+  const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
+  /** Leaves whose label or index terms match the active search. */
+  const searchHits = useMemo(() => {
+    const q = settingsQuery.trim();
+    if (!q) return [];
+    return getSettingsTree(t).flatMap((branch) =>
+      branch.children
+        .filter((item) => matchAny([item.label, ...(searchIndex[item.id] ?? [])], q))
+        .map((item) => ({
+          section: branch.id,
+          leaf: item.id,
+          label: item.label,
+          branch: branch.label,
+        })),
+    );
+  }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
   const [saved, setSaved] = useState(false);
   const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
@@ -145,6 +364,23 @@ export function SettingsPage() {
   >("defaultCwd");
   const [copied, setCopied] = useState(false);
   const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
+
+  // Live-preview the appearance (font + palettes) while editing; the store
+  // re-applies the saved settings after saveSettings.
+  useEffect(() => {
+    applyAppearance(form);
+  }, [
+    form.fontFamily,
+    form.fontSize,
+    form.lightScheme,
+    form.darkScheme,
+    form.lightAccent,
+    form.lightBg,
+    form.lightSurface,
+    form.darkAccent,
+    form.darkBg,
+    form.darkSurface,
+  ]);
   const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
@@ -255,25 +491,6 @@ export function SettingsPage() {
   /** Adapter-declared settings fields (command/args/apiKey) — not in AppSettings. */
   const patchAny = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
-  };
-
-  const actionLabel = (id: ChatActionId): string => {
-    switch (id) {
-      case "copy":
-        return t("settings.chatActionCopy");
-      case "edit":
-        return t("settings.chatActionEdit");
-      case "like":
-        return t("settings.chatActionLike");
-      case "dislike":
-        return t("settings.chatActionDislike");
-      case "share":
-        return t("settings.chatActionShare");
-      case "regenerate":
-        return t("settings.chatActionRegenerate");
-      case "readAloud":
-        return t("settings.chatActionReadAloud");
-    }
   };
 
   const mcpServers = form.mcpServers ?? [];
@@ -597,7 +814,45 @@ export function SettingsPage() {
 
   return (
     <div className={styles.page}>
+      <div className={styles.mobileSearch}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+        <input
+          type="search"
+          value={settingsQuery}
+          onChange={(e) => setSettingsQuery(e.target.value)}
+          placeholder={t("settings.searchPlaceholder")}
+          aria-label={t("settings.searchPlaceholder")}
+        />
+        {settingsQuery ? (
+          <button
+            type="button"
+            className={styles.mobileSearchClear}
+            aria-label={t("settings.searchClear")}
+            onClick={() => setSettingsQuery("")}
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+      <nav className={styles.mobileNav} aria-label={t("common.settingsSections")}>
+        {settingsLeaves.map((item) => (
+          <button
+            key={`${item.section}:${item.leaf}`}
+            type="button"
+            className={`${styles.mobileNavChip}${
+              section === item.section && leaf === item.leaf ? ` ${styles.mobileNavChipActive}` : ""
+            }`}
+            onClick={() => navigate(settingsPath(item.section as "agent" | "interface", item.leaf))}
+          >
+            {item.label}
+          </button>
+        ))}
+      </nav>
       <form className={styles.panel} onSubmit={(e) => void onSubmit(e)}>
+        <SettingsSearchProvider query={settingsQuery}>
         <header className={styles.header}>
           <div>
             <p className={styles.eyebrow}>{eyebrow}</p>
@@ -605,6 +860,31 @@ export function SettingsPage() {
             <p className={styles.lead}>{subtitle}</p>
           </div>
         </header>
+
+        {settingsQuery.trim() ? (
+          <div className={styles.searchHits} role="group" aria-label={t("settings.searchFoundIn")}>
+            <span className={styles.searchHitsLabel}>{t("settings.searchFoundIn")}</span>
+            {searchHits.length === 0 ? (
+              <span className={styles.searchHitsNone}>{t("settings.searchNoResults")}</span>
+            ) : (
+              searchHits.map((hit) => {
+                const active = section === hit.section && leaf === hit.leaf;
+                return (
+                  <button
+                    key={`${hit.section}:${hit.leaf}`}
+                    type="button"
+                    className={`${styles.searchHitChip}${
+                      active ? ` ${styles.searchHitChipActive}` : ""
+                    }`}
+                    onClick={() => navigate(settingsPath(hit.section, hit.leaf))}
+                  >
+                    {hit.label}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        ) : null}
 
         {section === "agent" && leaf === "connect" && (
           <>
@@ -617,6 +897,7 @@ export function SettingsPage() {
                 return (
                   <SettingRow
                     key={item.id}
+                    terms={[item.title, item.description]}
                     label={
                       <span className={styles.providerTitleRow}>
                         <span className={styles.providerTitle}>{item.title}</span>
@@ -745,6 +1026,65 @@ export function SettingsPage() {
                     onClick={() => patch("lightScheme", s.id)}
                   />
                 ))}
+                <div
+                  className={`${styles.schemeCard} ${styles.schemeCardCustom}${
+                    form.lightScheme === "custom" ? ` ${styles.schemeCardActive}` : ""
+                  }`}
+                  onClick={() => patch("lightScheme", "custom")}
+                >
+                  <span className={styles.schemeDots} aria-hidden>
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.lightAccent || SYSTEM_SWATCH.light.accent }}
+                    />
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.lightBg || SYSTEM_SWATCH.light.bg }}
+                    />
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.lightSurface || SYSTEM_SWATCH.light.surface }}
+                    />
+                  </span>
+                  <span className={styles.schemeCardName}>{t("settings.customScheme")}</span>
+                  <div
+                    className={styles.customPickers}
+                    onClick={(e) => e.stopPropagation()}
+                    role="group"
+                    aria-label={t("settings.customScheme")}
+                  >
+                    <label title={t("settings.customAccent")}>
+                      <input
+                        type="color"
+                        value={form.lightAccent || SYSTEM_SWATCH.light.accent}
+                        onChange={(e) => {
+                          patch("lightAccent", e.target.value);
+                          patch("lightScheme", "custom");
+                        }}
+                      />
+                    </label>
+                    <label title={t("settings.customBg")}>
+                      <input
+                        type="color"
+                        value={form.lightBg || SYSTEM_SWATCH.light.bg}
+                        onChange={(e) => {
+                          patch("lightBg", e.target.value);
+                          patch("lightScheme", "custom");
+                        }}
+                      />
+                    </label>
+                    <label title={t("settings.customSurface")}>
+                      <input
+                        type="color"
+                        value={form.lightSurface || SYSTEM_SWATCH.light.surface}
+                        onChange={(e) => {
+                          patch("lightSurface", e.target.value);
+                          patch("lightScheme", "custom");
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             </SettingRow>
 
@@ -769,6 +1109,65 @@ export function SettingsPage() {
                     onClick={() => patch("darkScheme", s.id)}
                   />
                 ))}
+                <div
+                  className={`${styles.schemeCard} ${styles.schemeCardCustom}${
+                    form.darkScheme === "custom" ? ` ${styles.schemeCardActive}` : ""
+                  }`}
+                  onClick={() => patch("darkScheme", "custom")}
+                >
+                  <span className={styles.schemeDots} aria-hidden>
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.darkAccent || SYSTEM_SWATCH.dark.accent }}
+                    />
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.darkBg || SYSTEM_SWATCH.dark.bg }}
+                    />
+                    <span
+                      className={styles.schemeDot}
+                      style={{ background: form.darkSurface || SYSTEM_SWATCH.dark.surface }}
+                    />
+                  </span>
+                  <span className={styles.schemeCardName}>{t("settings.customScheme")}</span>
+                  <div
+                    className={styles.customPickers}
+                    onClick={(e) => e.stopPropagation()}
+                    role="group"
+                    aria-label={t("settings.customScheme")}
+                  >
+                    <label title={t("settings.customAccent")}>
+                      <input
+                        type="color"
+                        value={form.darkAccent || SYSTEM_SWATCH.dark.accent}
+                        onChange={(e) => {
+                          patch("darkAccent", e.target.value);
+                          patch("darkScheme", "custom");
+                        }}
+                      />
+                    </label>
+                    <label title={t("settings.customBg")}>
+                      <input
+                        type="color"
+                        value={form.darkBg || SYSTEM_SWATCH.dark.bg}
+                        onChange={(e) => {
+                          patch("darkBg", e.target.value);
+                          patch("darkScheme", "custom");
+                        }}
+                      />
+                    </label>
+                    <label title={t("settings.customSurface")}>
+                      <input
+                        type="color"
+                        value={form.darkSurface || SYSTEM_SWATCH.dark.surface}
+                        onChange={(e) => {
+                          patch("darkSurface", e.target.value);
+                          patch("darkScheme", "custom");
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
             </SettingRow>
           </SettingTable>
@@ -821,6 +1220,7 @@ export function SettingsPage() {
             </SettingTable>
 
             {!ttsHasNatural && (
+              <SearchGate terms={[t("settings.ttsNaturalHint"), t("settings.ttsOpenWindowsSpeech")]}>
               <div className={styles.ttsNaturalWarn}>
                 <p className={styles.fieldHint}>{t("settings.ttsNaturalHint")}</p>
                 <button
@@ -831,22 +1231,26 @@ export function SettingsPage() {
                   {t("settings.ttsOpenWindowsSpeech")}
                 </button>
               </div>
+              </SearchGate>
             )}
           </>
         )}
 
         {section === "interface" && leaf === "chat" && (
           <>
+            <SearchGate hideWhenSearching>
+              <p className={styles.chatSettingsIntro}>{t("settings.chatIntro")}</p>
+              <div className={styles.previewDesktop}>
             <ChatSettingsPreview
               actions={form.chatActions ?? []}
               chips={form.chatMetaChips ?? []}
               composerButtons={form.chatComposerButtons ?? []}
               treeElements={form.chatTreeElements ?? []}
-              treeCompact={Boolean(form.chatTreeCompact)}
+              treeMenu={form.chatTreeMenu ?? []}
               showArchive={Boolean(form.chatTreeShowArchive)}
               showTime={Boolean(form.chatShowMessageTime)}
               headerHeight={form.chatHeaderHeight ?? 52}
-              composerHeight={form.chatComposerHeight ?? 40}
+              headerIcons={form.chatHeaderIcons ?? []}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -869,192 +1273,49 @@ export function SettingsPage() {
                   toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
                 )
               }
-              onToggleTreeCompact={() => patch("chatTreeCompact", !form.chatTreeCompact)}
               onToggleShowArchive={() => patch("chatTreeShowArchive", !form.chatTreeShowArchive)}
+              onToggleTreeMenu={(id) =>
+                patch(
+                  "chatTreeMenu",
+                  toggleInOrder(form.chatTreeMenu ?? [], id, CHAT_TREE_MENU_ORDER),
+                )
+              }
               onHeaderHeight={(next) => patch("chatHeaderHeight", next)}
-              onComposerHeight={(next) => patch("chatComposerHeight", next)}
+              onToggleHeaderIcon={(id) =>
+                patch(
+                  "chatHeaderIcons",
+                  toggleInOrder(form.chatHeaderIcons ?? [], id, CHAT_HEADER_ICON_ORDER),
+                )
+              }
+              onReorderAction={(dragged, target) => {
+                const cur = [...(form.chatActions ?? [])];
+                const from = cur.indexOf(dragged);
+                const to = cur.indexOf(target);
+                if (from < 0 || to < 0 || from === to) return;
+                const next = [...cur];
+                next.splice(from, 1);
+                next.splice(to, 0, dragged);
+                patch("chatActions", next);
+              }}
             />
-            <SettingTable>
-              <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsOrderHint")}>
-                <div className={styles.actionList}>
-                  {(form.chatActions ?? []).map((id, idx) => {
-                    const count = (form.chatActions ?? []).length;
-                    const move = (dir: -1 | 1) => {
-                      const cur = [...(form.chatActions ?? [])];
-                      const at = cur.indexOf(id);
-                      const to = at + dir;
-                      if (at < 0 || to < 0 || to >= cur.length) return;
-                      const next = [...cur];
-                      [next[at], next[to]] = [next[to], next[at]];
-                      patch("chatActions", next);
-                    };
-                    return (
-                      <div key={id} className={styles.actionListRow}>
-                        <span className={styles.actionListLabel}>{actionLabel(id)}</span>
-                        <button
-                          type="button"
-                          className={styles.actionListBtn}
-                          disabled={idx === 0}
-                          aria-label={`${t("common.moveUp")} ${actionLabel(id)}`}
-                          title={t("common.moveUp")}
-                          onClick={() => move(-1)}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.actionListBtn}
-                          disabled={idx === count - 1}
-                          aria-label={`${t("common.moveDown")} ${actionLabel(id)}`}
-                          title={t("common.moveDown")}
-                          onClick={() => move(1)}
-                        >
-                          ↓
-                        </button>
-                        <Toggle
-                          checked
-                          onChange={() =>
-                            patch(
-                              "chatActions",
-                              (form.chatActions ?? []).filter((a) => a !== id),
-                            )
-                          }
-                          label={actionLabel(id)}
-                        />
-                      </div>
-                    );
-                  })}
-                  {CHAT_ACTION_ORDER.filter((id) => !(form.chatActions ?? []).includes(id)).length >
-                  0 ? (
-                    <div className={styles.actionAddRow}>
-                      {CHAT_ACTION_ORDER.filter((id) => !(form.chatActions ?? []).includes(id)).map(
-                        (id) => (
-                          <button
-                            key={id}
-                            type="button"
-                            className={styles.actionAddChip}
-                            onClick={() =>
-                              patch("chatActions", [...(form.chatActions ?? []), id])
-                            }
-                          >
-                            + {actionLabel(id)}
-                          </button>
-                        ),
-                      )}
-                    </div>
-                  ) : null}
+              </div>
+            </SearchGate>
+            {settingsQuery.trim() ? (
+              <div className={styles.chatSearchRows}>
+                <h2 className={styles.sectionHeading}>{t("settings.chatAdvanced")}</h2>
+                <ChatConfigRows form={form} patch={patchAny} />
+              </div>
+            ) : (
+              <>
+                <div className={styles.mobileConfig}>
+                  <ChatConfigRows form={form} patch={patchAny} />
                 </div>
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatMetaChips")} hint={t("settings.chatMetaChipsHint")}>
-                <div className={styles.actionChips}>
-                  {(
-                    [
-                      ["folder", t("settings.chatMetaChipFolder")],
-                      ["thoughts", t("settings.chatMetaChipThoughts")],
-                      ["mcp", t("settings.chatMetaChipMcp")],
-                    ] as Array<[ChatMetaChipId, string]>
-                  ).map(([id, label]) => {
-                    const on = (form.chatMetaChips ?? []).includes(id);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                        aria-pressed={on}
-                        onClick={() =>
-                          patch(
-                            "chatMetaChips",
-                            toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER),
-                          )
-                        }
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatComposerButtons")} hint={t("settings.chatComposerButtonsHint")}>
-                <div className={styles.actionChips}>
-                  {(
-                    [
-                      ["attach", t("settings.chatComposerBtnAttach")],
-                      ["mic", t("settings.chatComposerBtnMic")],
-                      ["model", t("settings.chatComposerBtnModel")],
-                      ["mode", t("settings.chatComposerBtnMode")],
-                    ] as Array<[ChatComposerButtonId, string]>
-                  ).map(([id, label]) => {
-                    const on = (form.chatComposerButtons ?? []).includes(id);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                        aria-pressed={on}
-                        onClick={() =>
-                          patch(
-                            "chatComposerButtons",
-                            toggleInOrder(form.chatComposerButtons ?? [], id, CHAT_COMPOSER_ORDER),
-                          )
-                        }
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatTreeElements")} hint={t("settings.chatTreeElementsHint")}>
-                <div className={styles.actionChips}>
-                  {(
-                    [
-                      ["search", t("settings.chatTreeElSearch")],
-                      ["searchMsgs", t("settings.chatTreeElSearchMsgs")],
-                      ["pin", t("settings.chatTreeElPin")],
-                      ["archive", t("settings.chatTreeElArchive")],
-                      ["more", t("settings.chatTreeElMore")],
-                    ] as Array<[ChatTreeElementId, string]>
-                  ).map(([id, label]) => {
-                    const on = (form.chatTreeElements ?? []).includes(id);
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                        aria-pressed={on}
-                        onClick={() =>
-                          patch(
-                            "chatTreeElements",
-                            toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
-                          )
-                        }
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
-                <Toggle
-                  checked={Boolean(form.chatEnterToSend)}
-                  onChange={(v) => patch("chatEnterToSend", v)}
-                  label={t("settings.chatEnterToSend")}
-                />
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatShowMessageTime")} hint={t("settings.chatShowMessageTimeHint")}>
-                <Toggle
-                  checked={Boolean(form.chatShowMessageTime)}
-                  onChange={(v) => patch("chatShowMessageTime", v)}
-                  label={t("settings.chatShowMessageTime")}
-                />
-              </SettingRow>
-            </SettingTable>
+                <details className={styles.chatAdvancedDetails}>
+                  <summary>{t("settings.chatAdvanced")}</summary>
+                  <ChatConfigRows form={form} patch={patchAny} />
+                </details>
+              </>
+            )}
           </>
         )}
 
@@ -1063,7 +1324,7 @@ export function SettingsPage() {
             <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
           ) : (
             <SettingTable>
-              <SettingRow label={t("settings.modelSection")}>
+              <SettingRow label={t("settings.modelSection")} terms={[form.defaultModel ?? ""]}>
                 <ModelPicker
                   model={form.defaultModel}
                   models={models}
@@ -1106,17 +1367,9 @@ export function SettingsPage() {
             <SettingTable>
               <SettingRow label={t("settings.defaultFolder")}>
                 <div className={styles.cwdPickRow}>
-                  <button
-                    type="button"
-                    className={styles.cwdPath}
-                    title={form.defaultCwd || undefined}
-                    onClick={() => {
-                      setFolderBrowseTarget("defaultCwd");
-                      setFolderBrowseOpen(true);
-                    }}
-                  >
+                  <span className={styles.cwdPath} title={form.defaultCwd || undefined}>
                     {form.defaultCwd || t("common.notSet")}
-                  </button>
+                  </span>
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -1174,7 +1427,7 @@ export function SettingsPage() {
                 </div>
               </SettingRow>
 
-              <SettingRow label={t("settings.permissionPolicy")}>
+              <SettingRow label={t("settings.permissionPolicy")} terms={["разрешения"]}>
                 <OptionPicker
                   variant="block"
                   placement="down"
@@ -1207,6 +1460,7 @@ export function SettingsPage() {
             </SettingTable>
 
             {form.permissionPolicy === "allowlist" && (
+              <SearchGate terms={[t("settings.allowlistHint"), t("settings.permissionAllowlist")]}>
               <div className={styles.allowlistSection}>
                 <p className={styles.fieldHint}>{t("settings.allowlistHint")}</p>
                 {(form.permissionAllowlist ?? []).map((entry, i) => (
@@ -1242,60 +1496,70 @@ export function SettingsPage() {
                   + {t("common.add")}
                 </button>
               </div>
+              </SearchGate>
             )}
 
-            <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
-            <SettingTable>
-              {(
-                [
-                  {
-                    key: "cursorApiKey" as const,
-                    label: `Cursor ${t("settings.apiKeys")}`,
-                    env: "CURSOR_API_KEY",
-                    placeholder: "",
-                  },
-                  {
-                    key: "anthropicApiKey" as const,
-                    label: `Anthropic ${t("settings.apiKeys")}`,
-                    env: "ANTHROPIC_API_KEY",
-                    placeholder: "sk-ant-...",
-                  },
-                  {
-                    key: "openaiApiKey" as const,
-                    label: `OpenAI ${t("settings.apiKeys")}`,
-                    env: "OPENAI_API_KEY",
-                    placeholder: "",
-                  },
-                ] as const
-              ).map((item) => {
-                const value = form[item.key] ?? "";
-                const hasValue = value.trim().length > 0;
-                return (
-                  <SettingRow key={item.key} label={item.label} hint={item.env}>
-                    <div className={styles.secretRow}>
-                      <input
-                        type="password"
-                        value={value}
-                        onChange={(e) => patch(item.key, e.target.value)}
-                        autoComplete="off"
-                        placeholder={item.placeholder || undefined}
-                        aria-label={item.label}
-                      />
-                      <button
-                        type="button"
-                        className={styles.clearKeyBtn}
-                        disabled={!hasValue}
-                        title={t("settings.removeKey")}
-                        onClick={() => void clearApiKey(item.key)}
-                      >
-                        {t("common.delete")}
-                      </button>
-                    </div>
-                  </SettingRow>
-                );
-              })}
-            </SettingTable>
+            <SearchGate terms={[t("settings.apiKeys"), "api", "cursor", "anthropic", "openai"]}>
+              <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
+              <SettingTable>
+                {(
+                  [
+                    {
+                      key: "cursorApiKey" as const,
+                      label: `Cursor ${t("settings.apiKeys")}`,
+                      env: "CURSOR_API_KEY",
+                      placeholder: "",
+                    },
+                    {
+                      key: "anthropicApiKey" as const,
+                      label: `Anthropic ${t("settings.apiKeys")}`,
+                      env: "ANTHROPIC_API_KEY",
+                      placeholder: "sk-ant-...",
+                    },
+                    {
+                      key: "openaiApiKey" as const,
+                      label: `OpenAI ${t("settings.apiKeys")}`,
+                      env: "OPENAI_API_KEY",
+                      placeholder: "",
+                    },
+                  ] as const
+                ).map((item) => {
+                  const value = form[item.key] ?? "";
+                  const hasValue = value.trim().length > 0;
+                  return (
+                    <SettingRow key={item.key} label={item.label} hint={item.env}>
+                      <div className={styles.secretRow}>
+                        <input
+                          type="password"
+                          value={value}
+                          onChange={(e) => patch(item.key, e.target.value)}
+                          autoComplete="off"
+                          placeholder={item.placeholder || undefined}
+                          aria-label={item.label}
+                        />
+                        <button
+                          type="button"
+                          className={styles.clearKeyBtn}
+                          disabled={!hasValue}
+                          title={t("settings.removeKey")}
+                          onClick={() => void clearApiKey(item.key)}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                    </SettingRow>
+                  );
+                })}
+              </SettingTable>
+            </SearchGate>
 
+            <SearchGate
+              terms={[
+                t("settings.cliAndPermissions"),
+                t("settings.agentAdvancedDesc"),
+                ...cliFormAdapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
+              ]}
+            >
             <details className={styles.cliDisclosure}>
               <summary>{t("settings.cliAndPermissions")}</summary>
               <div className={styles.cliDisclosureBody}>
@@ -1338,18 +1602,26 @@ export function SettingsPage() {
                 })}
               </div>
             </details>
+            </SearchGate>
           </>
         )}
 
         {section === "agent" && leaf === "mcp" && (
           <>
-            <div className={styles.mcpApplyNote} role="note">
-              {t("settings.mcpApplyHint")}
-            </div>
+            <SearchGate terms={[t("settings.mcpApplyHint"), "mcp"]}>
+              <div className={styles.mcpApplyNote} role="note">
+                {t("settings.mcpApplyHint")}
+              </div>
+            </SearchGate>
             <SettingTable>
               {mcpServers.map((server) => (
                 <SettingRow
                   key={server.id}
+                  terms={[
+                    server.name,
+                    server.url ?? "",
+                    server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote"),
+                  ]}
                   label={
                     <span className={styles.mcpRowMetaInline}>
                       {server.enabled ? (
@@ -1561,6 +1833,7 @@ export function SettingsPage() {
               </SettingRow>
             </SettingTable>
 
+            <SearchGate terms={[t("diagnostics.createNow"), t("diagnostics.saving"), t("common.refresh"), t("diagnostics.savedTo")]}>
             <div className={styles.diagActions}>
               <button
                 type="button"
@@ -1597,7 +1870,9 @@ export function SettingsPage() {
               </button>
               {diagMessage ? <span className={styles.hint}>{diagMessage}</span> : null}
             </div>
+            </SearchGate>
 
+            <SearchGate terms={[t("diagnostics.dumpsTitle"), t("diagnostics.dumpsHint"), t("diagnostics.empty"), t("diagnostics.copyJson")]}>
             <h2 className={styles.sectionHeading}>{t("diagnostics.dumpsTitle")}</h2>
             <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
             {diagLoading && !diagItems.length ? (
@@ -1667,6 +1942,7 @@ export function SettingsPage() {
                 </li>
               ))}
             </ul>
+            </SearchGate>
           </>
         )}
 
@@ -1688,6 +1964,16 @@ export function SettingsPage() {
                 </div>
               </SettingRow>
             </SettingTable>
+            <SearchGate
+              terms={[
+                t("settings.remoteTipTitle"),
+                t("settings.remoteTipLocalhost"),
+                t("settings.remoteTipSameNetwork"),
+                t("settings.remoteTipFirewall"),
+                t("settings.remoteTipHttp"),
+                t("settings.remoteTipInstall"),
+              ]}
+            >
             <div className={styles.remoteTipsBlock}>
               <h2 className={styles.sectionHeading}>{t("settings.remoteTipTitle")}</h2>
               <ul className={styles.remoteTips}>
@@ -1698,6 +1984,7 @@ export function SettingsPage() {
                 <li>{t("settings.remoteTipInstall")}</li>
               </ul>
             </div>
+            </SearchGate>
           </>
         )}
 
@@ -1708,6 +1995,7 @@ export function SettingsPage() {
             {saved && <span className={styles.ok}>{t("settings.saved")}</span>}
           </div>
         )}
+        </SettingsSearchProvider>
       </form>
       <ServerFolderBrowseDialog
         open={folderBrowseOpen}

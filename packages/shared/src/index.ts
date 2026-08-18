@@ -125,6 +125,13 @@ export type ChatMetaChipId = "folder" | "thoughts" | "mcp";
  *  are always visible and cannot be hidden. */
 export type ChatTreeElementId = "search" | "searchMsgs" | "pin" | "archive" | "more";
 
+/** Commands shown inside the session "⋯" context menu in the tree.
+ *  Pin/archive live on the row buttons and are configured separately. */
+export type ChatTreeMenuId = "rename" | "move" | "export" | "delete";
+
+/** Icons in the app header bar (language, install, theme). */
+export type ChatHeaderIconId = "lang" | "install" | "theme";
+
 /** Optional buttons in the composer bar. The input and send button are
  *  always visible. */
 export type ChatComposerButtonId = "attach" | "mic" | "model" | "mode";
@@ -198,6 +205,13 @@ export interface AppSettings {
   lightScheme: string;
   /** Dark theme palette id ("" = default system palette). */
   darkScheme: string;
+  /** Custom palette colors (accent/bg/surface) — used when the scheme is "custom". */
+  lightAccent: string;
+  lightBg: string;
+  lightSurface: string;
+  darkAccent: string;
+  darkBg: string;
+  darkSurface: string;
   /** Preferred read-aloud voice gender ("" = browser default). */
   ttsVoiceGender: "" | "female" | "male";
   /**
@@ -211,14 +225,14 @@ export interface AppSettings {
   chatComposerButtons: ChatComposerButtonId[];
   /** Tree sidebar controls shown (search, per-row actions). */
   chatTreeElements: ChatTreeElementId[];
-  /** Compact rows in the chat tree. */
-  chatTreeCompact: boolean;
+  /** Commands in the session "⋯" context menu. */
+  chatTreeMenu: ChatTreeMenuId[];
   /** Show the "Archive" section in the chat tree. */
   chatTreeShowArchive: boolean;
   /** App header height in px (drag the header in the preview). */
   chatHeaderHeight: number;
-  /** Composer input height in px (drag the composer in the preview). */
-  chatComposerHeight: number;
+  /** Icons shown in the app header bar. */
+  chatHeaderIcons: ChatHeaderIconId[];
   /** Enter sends the message; off → Enter inserts a newline, Ctrl+Enter sends. */
   chatEnterToSend: boolean;
   /** Show the send time next to each message. */
@@ -256,15 +270,21 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fontSize: "",
   lightScheme: "",
   darkScheme: "",
+  lightAccent: "",
+  lightBg: "",
+  lightSurface: "",
+  darkAccent: "",
+  darkBg: "",
+  darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
   chatMetaChips: ["folder", "thoughts", "mcp"],
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
-  chatTreeCompact: false,
+  chatTreeMenu: ["rename", "move", "export", "delete"],
   chatTreeShowArchive: true,
   chatHeaderHeight: 52,
-  chatComposerHeight: 40,
+  chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
   chatShowMessageTime: false,
   mcpServers: [],

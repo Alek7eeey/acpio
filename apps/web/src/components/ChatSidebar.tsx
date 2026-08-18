@@ -695,18 +695,21 @@ export function ChatSidebar({
                 {activity}
               </span>
             ) : null}
-            <button
-              type="button"
-              className={styles.sessionMore}
-              aria-label={t("common.chatMenu")}
-              onClick={(e) => openSessionMenu(e, s.id)}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <circle cx="5" cy="12" r="1.5" />
-                <circle cx="12" cy="12" r="1.5" />
-                <circle cx="19" cy="12" r="1.5" />
-              </svg>
-            </button>
+            {settings.chatTreeElements.includes("more") &&
+            (settings.chatTreeMenu ?? []).length > 0 ? (
+              <button
+                type="button"
+                className={styles.sessionMore}
+                aria-label={t("common.chatMenu")}
+                onClick={(e) => openSessionMenu(e, s.id)}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <circle cx="5" cy="12" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="19" cy="12" r="1.5" />
+                </svg>
+              </button>
+            ) : null}
           </>
         )}
       </div>
@@ -867,7 +870,10 @@ export function ChatSidebar({
         className={`${styles.chatPanel}${
           (settings.chatTreeElements ?? []).includes("pin") ? "" : ` ${styles.treeNoPin}`
         }${(settings.chatTreeElements ?? []).includes("archive") ? "" : ` ${styles.treeNoArchive}`}${
-          (settings.chatTreeElements ?? []).includes("more") ? "" : ` ${styles.treeNoMore}`
+          (settings.chatTreeElements ?? []).includes("more") &&
+          (settings.chatTreeMenu ?? []).length > 0
+            ? ""
+            : ` ${styles.treeNoMore}`
         }`}
       >
         <div className={styles.chatToolbar}>
@@ -976,9 +982,7 @@ export function ChatSidebar({
         )}
 
         <div
-          className={`${styles.sessionList} ${
-            settings.chatTreeCompact ? styles.treeCompact : ""
-          }`}
+          className={styles.sessionList}
           ref={sessionListRef}
         >
           {treeVirtual && (
@@ -1221,6 +1225,7 @@ export function ChatSidebar({
             style={{ left: Math.min(menu.x, window.innerWidth - 200), top: menu.y }}
             role="menu"
           >
+            {(settings.chatTreeMenu ?? []).includes("rename") && (
             <button type="button" role="menuitem" onClick={() => startRenameSession(menuSession)}>
               <MenuIcon>
                 <path
@@ -1233,6 +1238,8 @@ export function ChatSidebar({
               </MenuIcon>
               {t("chat.renameSession")}
             </button>
+            )}
+            {(settings.chatTreeMenu ?? []).includes("move") && (
             <button
               type="button"
               role="menuitem"
@@ -1256,6 +1263,7 @@ export function ChatSidebar({
               </MenuIcon>
               {t("chat.newInFolder")}
             </button>
+            )}
             {isTouch && (
               <>
                 <button
@@ -1277,6 +1285,10 @@ export function ChatSidebar({
                   </MenuIcon>
                   {menuSession.pinned ? t("chat.unpin") : t("chat.pin")}
                 </button>
+              </>
+            )}
+            {isTouch && (
+              <>
                 <button
                   type="button"
                   role="menuitem"
@@ -1304,6 +1316,7 @@ export function ChatSidebar({
                 </button>
               </>
             )}
+            {(settings.chatTreeMenu ?? []).includes("export") && (
             <button
               type="button"
               role="menuitem"
@@ -1323,6 +1336,9 @@ export function ChatSidebar({
               </MenuIcon>
               {t("chat.exportChat")}
             </button>
+            )}
+            {(settings.chatTreeMenu ?? []).includes("delete") && (
+            <>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"
@@ -1344,6 +1360,8 @@ export function ChatSidebar({
               </MenuIcon>
               {t("common.delete")}
             </button>
+            </>
+            )}
           </div>,
           document.body,
         )}
