@@ -1389,12 +1389,9 @@ function MessageActions({
   const dislikeActive = rating === "dislike";
 
   // Configurable actions, canonical order; the first 5 render as icons and
-  // the rest hide behind the "⋯" menu. Read-aloud additionally needs the
-  // master audio switch; "edit" lives on user messages only.
+  // the rest hide behind the "⋯" menu. "edit" lives on user messages only.
   const chatActions = settings.chatActions ?? [];
-  const enabledActions = chatActions.filter(
-    (a) => a !== "edit" && (a !== "readAloud" || settings.chatReadAloud),
-  );
+  const enabledActions = chatActions.filter((a) => a !== "edit");
   const iconActions = enabledActions.slice(0, 5);
   const overflowActions = enabledActions.slice(5);
 
@@ -3290,7 +3287,7 @@ export function ChatPage() {
                 </button>
               ) : null}
             </div>
-            {modeSwitcher.length > 0 ? (
+            {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
               <OptionPicker
                 className={`${styles.composerMode} ${styles.composerModeDesktop}`}
                 variant="quiet"
@@ -3345,13 +3342,12 @@ export function ChatPage() {
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               streaming ? styles.pillBusy : ""
-            } ${composerLocked ? styles.pillLoading : ""}${
-              settings.chatToolbarSize === "compact"
-                ? ` ${styles.pillCompact}`
-                : settings.chatToolbarSize === "roomy"
-                  ? ` ${styles.pillRoomy}`
-                  : ""
-            }`}
+            } ${composerLocked ? styles.pillLoading : ""}`}
+            style={
+              settings.chatComposerHeight
+                ? { ["--composer-h" as string]: `${settings.chatComposerHeight}px` }
+                : undefined
+            }
           >
             <SlashCommandMenu
               open={slashMenuOpen}
@@ -3436,6 +3432,7 @@ export function ChatPage() {
             />
 
             <div className={styles.pillFooter}>
+              {(settings.chatComposerButtons ?? []).includes("attach") && (
               <button
                 type="button"
                 className={styles.attachBtn}
@@ -3454,10 +3451,12 @@ export function ChatPage() {
                   />
                 </svg>
               </button>
+              )}
 
               {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
 
               <div className={styles.pillFooterEnd}>
+                {(settings.chatComposerButtons ?? []).includes("model") && (
                 <ModelPicker
                   className={styles.composerModel}
                   model={model}
@@ -3491,8 +3490,9 @@ export function ChatPage() {
                   onParamsOpen={(v) => loadParamsForModel(v)}
                   onParamsChange={(next) => void onParamsChange(next)}
                 />
+                )}
 
-                {modeSwitcher.length > 0 ? (
+                {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
                   <OptionPicker
                     className={`${styles.composerMode} ${styles.composerModeMobile}`}
                     variant="compact"
@@ -3526,7 +3526,7 @@ export function ChatPage() {
                   </button>
                 ) : (
                   <>
-                    {settings.chatVoiceInput && (
+                    {(settings.chatComposerButtons ?? []).includes("mic") && (
                     <button
                       type="button"
                       className={`${styles.micBtn} ${

@@ -1,18 +1,16 @@
-import { useState, type ReactNode } from "react";
-import type { ChatActionId, ChatMetaChipId, ChatTreeElementId } from "@acprocess/shared";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type {
+  ChatActionId,
+  ChatComposerButtonId,
+  ChatMetaChipId,
+  ChatTreeElementId,
+} from "@acprocess/shared";
 import { useT } from "../lib/i18n";
 import styles from "./ChatSettingsPreview.module.css";
 
 const CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
-const TREE_ORDER: ChatTreeElementId[] = [
-  "newChat",
-  "search",
-  "searchMsgs",
-  "folderAdd",
-  "pin",
-  "archive",
-  "more",
-];
+const TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
+const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
 
 /** i18n key for each action's tooltip/label. */
 const ACTION_LABEL_KEY: Record<ChatActionId, string> = {
@@ -25,15 +23,21 @@ const ACTION_LABEL_KEY: Record<ChatActionId, string> = {
   readAloud: "chat.readAloud",
 };
 
-/** i18n key for each tree control. */
+/** i18n key for each optional tree control. */
 const TREE_LABEL_KEY: Record<ChatTreeElementId, string> = {
-  newChat: "settings.chatTreeElNewChat",
   search: "settings.chatTreeElSearch",
   searchMsgs: "settings.chatTreeElSearchMsgs",
-  folderAdd: "settings.chatTreeElFolderAdd",
   pin: "settings.chatTreeElPin",
   archive: "settings.chatTreeElArchive",
   more: "settings.chatTreeElMore",
+};
+
+/** i18n key for each optional composer button. */
+const COMPOSER_LABEL_KEY: Record<ChatComposerButtonId, string> = {
+  attach: "settings.chatComposerBtnAttach",
+  mic: "settings.chatComposerBtnMic",
+  model: "settings.chatComposerBtnModel",
+  mode: "settings.chatComposerBtnMode",
 };
 
 function Icon({ children }: { children: ReactNode }) {
@@ -130,6 +134,88 @@ function actionIcon(id: ChatActionId): ReactNode {
         </Icon>
       );
   }
+}
+
+function composerIcon(id: ChatComposerButtonId): ReactNode {
+  switch (id) {
+    case "attach":
+      return (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
+    case "mic":
+      return (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
+
+/** Drag-to-resize strip (header / composer heights). */
+function DragBar({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (next: number) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const startY = useRef(0);
+  const startVal = useRef(0);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const onMove = (e: PointerEvent) => {
+      const next = Math.round(
+        Math.min(max, Math.max(min, startVal.current + (e.clientY - startY.current))),
+      );
+      onChange(next);
+    };
+    const onUp = () => setDragging(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, [dragging, min, max, onChange]);
+
+  return (
+    <div
+      className={`${styles.dragBar}${dragging ? ` ${styles.dragBarActive}` : ""}`}
+      title={label}
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label={label}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        startY.current = e.clientY;
+        startVal.current = value;
+        setDragging(true);
+      }}
+    >
+      <span className={styles.dragGrip} aria-hidden>
+        ⋮
+      </span>
+    </div>
+  );
 }
 
 /**
@@ -232,71 +318,84 @@ function PreviewActions({
 
 /**
  * Interactive full-app mock: header + chat tree + chat thread + composer.
- * Every control is clickable — click an element to hide it, click its
- * "+ label" slot to bring it back. Mirrors the real chat exactly.
+ * Every optional control is clickable — click an element to hide it, click
+ * its "+ label" slot to bring it back. The header and composer heights are
+ * adjusted by dragging their resize strips. Core actions (new chat, folder
+ * add, input, send) are always visible.
  */
 export function ChatSettingsPreview({
   actions,
   chips,
+  composerButtons,
   treeElements,
-  readAloud,
-  voiceInput,
+  treeCompact,
+  showArchive,
   showTime,
-  toolbarSize,
-  headerSize,
+  headerHeight,
+  composerHeight,
   onToggleAction,
   onToggleChip,
+  onToggleComposerButton,
   onToggleTreeElement,
+  onToggleTreeCompact,
+  onToggleShowArchive,
+  onHeaderHeight,
+  onComposerHeight,
 }: {
   actions: ChatActionId[];
   chips: ChatMetaChipId[];
+  composerButtons: ChatComposerButtonId[];
   treeElements: ChatTreeElementId[];
-  readAloud: boolean;
-  voiceInput: boolean;
+  treeCompact: boolean;
+  showArchive: boolean;
   showTime: boolean;
-  toolbarSize: "compact" | "default" | "roomy";
-  headerSize: "compact" | "default" | "roomy";
+  headerHeight: number;
+  composerHeight: number;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
+  onToggleComposerButton: (id: ChatComposerButtonId) => void;
   onToggleTreeElement: (id: ChatTreeElementId) => void;
+  onToggleTreeCompact: () => void;
+  onToggleShowArchive: () => void;
+  onHeaderHeight: (next: number) => void;
+  onComposerHeight: (next: number) => void;
 }) {
   const t = useT();
-  const mainBarActions = actions.filter((a) => a !== "edit" && (a !== "readAloud" || readAloud));
+  const mainBarActions = actions.filter((a) => a !== "edit" && a !== "readAloud");
   const userBarActions = actions.filter((a) => a === "copy" || a === "edit");
   const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const sizeClass =
-    toolbarSize === "compact"
-      ? styles.composerCompact
-      : toolbarSize === "roomy"
-        ? styles.composerRoomy
-        : "";
-  const headerClass =
-    headerSize === "compact"
-      ? styles.headerCompact
-      : headerSize === "roomy"
-        ? styles.headerRoomy
-        : "";
   const treeOn = (id: ChatTreeElementId) => treeElements.includes(id);
+  const btnOn = (id: ChatComposerButtonId) => composerButtons.includes(id);
 
   return (
     <div className={styles.wrap}>
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className={styles.sectionLabel}>{t("settings.chatPreviewHeader")}</div>
-      <div className={`${styles.header} ${headerClass}`}>
-        <span className={styles.brand} aria-hidden>
-          <span className={styles.brandMark}>AC</span>Process <span className={styles.brandChat}>Chat</span>
-        </span>
-        <span className={styles.headerAgent} aria-hidden>
-          <span className={styles.avatar} aria-hidden>
-            A
+      <div className={styles.headerWrap}>
+        <div className={styles.header} style={{ height: `${headerHeight}px` }}>
+          <span className={styles.brand} aria-hidden>
+            <span className={styles.brandMark}>AC</span>Process{" "}
+            <span className={styles.brandChat}>Chat</span>
           </span>
-          OMP · {t("common.online")}
-        </span>
-        <span className={styles.headerIcons} aria-hidden>
-          <span className={styles.headerIcon} />
-          <span className={styles.headerIcon} />
-          <span className={styles.headerIcon} />
-        </span>
+          <span className={styles.headerAgent} aria-hidden>
+            <span className={styles.avatar} aria-hidden>
+              A
+            </span>
+            OMP · {t("common.online")}
+          </span>
+          <span className={styles.headerIcons} aria-hidden>
+            <span className={styles.headerIcon} />
+            <span className={styles.headerIcon} />
+            <span className={styles.headerIcon} />
+          </span>
+        </div>
+        <DragBar
+          label={t("settings.chatHeaderSizeHint")}
+          value={headerHeight}
+          min={40}
+          max={72}
+          onChange={onHeaderHeight}
+        />
       </div>
 
       <div className={styles.body}>
@@ -304,24 +403,20 @@ export function ChatSettingsPreview({
         <div className={styles.column}>
           <div className={styles.sectionLabel}>{t("settings.chatPreviewTree")}</div>
           <div className={styles.tree}>
-            <div className={styles.treeTop}>
-              <T
-                on={treeOn("newChat")}
-                onToggle={() => onToggleTreeElement("newChat")}
-                addLabel={t("settings.chatTreeElNewChat")}
-              >
-                <span className={styles.treeNewChat} aria-hidden>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {t("common.newChat")}
-                </span>
-              </T>
+            {/* Mandatory: new chat */}
+            <span className={styles.treeNewChat} aria-hidden>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("common.newChat")}
+            </span>
+
+            <div className={styles.treeRowWrap}>
               <T
                 on={treeOn("search")}
                 onToggle={() => onToggleTreeElement("search")}
@@ -371,17 +466,12 @@ export function ChatSettingsPreview({
                 />
               </svg>
               <span className={styles.treeFolderLabel}>E:\share\acprocess</span>
-              <T
-                on={treeOn("folderAdd")}
-                onToggle={() => onToggleTreeElement("folderAdd")}
-                addLabel={t("settings.chatTreeElFolderAdd")}
-              >
-                <span className={styles.treeAdd} aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
-                  </svg>
-                </span>
-              </T>
+              {/* Mandatory: folder add */}
+              <span className={styles.treeAdd} aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+                </svg>
+              </span>
             </div>
 
             {[
@@ -442,6 +532,40 @@ export function ChatSettingsPreview({
                 </T>
               </div>
             ))}
+
+            {/* Density toggle + archive section */}
+            <div className={styles.treeBottom}>
+              <button
+                type="button"
+                className={`${styles.densityBtn}${treeCompact ? ` ${styles.densityBtnOn}` : ""}`}
+                aria-pressed={treeCompact}
+                title={t("settings.chatTreeDensity")}
+                onClick={onToggleTreeCompact}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M4 6h16M4 10h16M4 14h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              </button>
+              <T
+                on={showArchive}
+                onToggle={onToggleShowArchive}
+                addLabel={t("settings.chatTreeElArchive")}
+              >
+                <span className={styles.treeArchiveHead} aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                    <path d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                  {t("chat.archiveSection")}
+                  <span className={styles.treeArchiveCount}>2</span>
+                </span>
+              </T>
+            </div>
           </div>
         </div>
 
@@ -519,47 +643,74 @@ export function ChatSettingsPreview({
               </div>
             </div>
 
-            <div className={`${styles.composer} ${sizeClass}`}>
-              <div className={styles.chips}>
-                {CHIP_ORDER.filter((id) => chips.includes(id)).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    className={styles.chip}
-                    aria-pressed
-                    onClick={() => onToggleChip(id)}
+            <div className={styles.composerWrap}>
+              <DragBar
+                label={t("settings.chatToolbarSizeHint")}
+                value={composerHeight}
+                min={24}
+                max={96}
+                onChange={onComposerHeight}
+              />
+              <div className={styles.composer}>
+                <div className={styles.chips}>
+                  {CHIP_ORDER.filter((id) => chips.includes(id)).map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={styles.chip}
+                      aria-pressed
+                      onClick={() => onToggleChip(id)}
+                    >
+                      {id === "folder" ? t("settings.chatMetaChipFolder") : null}
+                      {id === "thoughts" ? t("settings.chatMetaChipThoughts") : null}
+                      {id === "mcp" ? t("settings.chatMetaChipMcp") : null}
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.inputRow} style={{ minHeight: `${composerHeight}px` }}>
+                  <T
+                    on={btnOn("attach")}
+                    onToggle={() => onToggleComposerButton("attach")}
+                    addLabel={t("settings.chatComposerBtnAttach")}
                   >
-                    {id === "folder" ? t("settings.chatMetaChipFolder") : null}
-                    {id === "thoughts" ? t("settings.chatMetaChipThoughts") : null}
-                    {id === "mcp" ? t("settings.chatMetaChipMcp") : null}
-                  </button>
-                ))}
-              </div>
-              <div className={styles.inputRow}>
-                <span className={styles.inputMock}>{t("common.messageOrCommand")}</span>
-                {voiceInput ? (
-                  <span className={styles.inputIcon} title={t("chat.voiceInput")} aria-hidden>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                      <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
+                    <span className={styles.composerBtn}>{composerIcon("attach")}</span>
+                  </T>
+                  <span className={styles.inputMock}>{t("common.messageOrCommand")}</span>
+                  <T
+                    on={btnOn("mic")}
+                    onToggle={() => onToggleComposerButton("mic")}
+                    addLabel={t("settings.chatComposerBtnMic")}
+                  >
+                    <span className={styles.composerBtn}>{composerIcon("mic")}</span>
+                  </T>
+                  <span className={styles.sendMock} aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                       <path
-                        d="M5 11a7 7 0 0 0 14 0M12 18v3"
+                        d="M12 19V5M12 5l-6 6M12 5l6 6"
                         stroke="currentColor"
-                        strokeWidth="1.7"
+                        strokeWidth="2"
                         strokeLinecap="round"
+                        strokeLinejoin="round"
                       />
                     </svg>
                   </span>
-                ) : null}
-                <span className={styles.sendMock} aria-hidden>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M4 12 20 4l-4 8 4 8-16-8Z"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
+                </div>
+                <div className={styles.composerFooter}>
+                  <T
+                    on={btnOn("model")}
+                    onToggle={() => onToggleComposerButton("model")}
+                    addLabel={t("settings.chatComposerBtnModel")}
+                  >
+                    <span className={styles.composerChip}>Deepseek V4 Flash</span>
+                  </T>
+                  <T
+                    on={btnOn("mode")}
+                    onToggle={() => onToggleComposerButton("mode")}
+                    addLabel={t("settings.chatComposerBtnMode")}
+                  >
+                    <span className={styles.composerChip}>{t("modes.agent")}</span>
+                  </T>
+                </div>
               </div>
             </div>
           </div>

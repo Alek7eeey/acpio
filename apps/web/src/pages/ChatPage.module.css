@@ -2175,3 +2175,9 @@
   min-height: 60px;
   font-size: 0.95rem;
 }
+
+/* Composer height (settings → Chat → drag the composer in the preview). */
+.pill textarea {
+  min-height: var(--composer-h, 40px);
+  transition: min-height 0.1s ease;
+}

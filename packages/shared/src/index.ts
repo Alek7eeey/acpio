@@ -121,15 +121,13 @@ export type ChatActionId =
 /** Chips shown in the composer bar above the input. */
 export type ChatMetaChipId = "folder" | "thoughts" | "mcp";
 
-/** Controls in the chat tree sidebar that can be hidden. */
-export type ChatTreeElementId =
-  | "newChat"
-  | "search"
-  | "searchMsgs"
-  | "folderAdd"
-  | "pin"
-  | "archive"
-  | "more";
+/** Optional controls in the chat tree. Core actions (new chat, folder add)
+ *  are always visible and cannot be hidden. */
+export type ChatTreeElementId = "search" | "searchMsgs" | "pin" | "archive" | "more";
+
+/** Optional buttons in the composer bar. The input and send button are
+ *  always visible. */
+export type ChatComposerButtonId = "attach" | "mic" | "model" | "mode";
 
 export type MessagePartType =
   | "text"
@@ -209,24 +207,22 @@ export interface AppSettings {
   chatActions: ChatActionId[];
   /** Chips shown in the composer bar above the input. */
   chatMetaChips: ChatMetaChipId[];
-  /** Master switch for message audio (read-aloud button + playback). */
-  chatReadAloud: boolean;
+  /** Optional composer buttons (attach, mic, model, mode picker). */
+  chatComposerButtons: ChatComposerButtonId[];
+  /** Tree sidebar controls shown (search, per-row actions). */
+  chatTreeElements: ChatTreeElementId[];
+  /** Compact rows in the chat tree. */
+  chatTreeCompact: boolean;
+  /** Show the "Archive" section in the chat tree. */
+  chatTreeShowArchive: boolean;
+  /** App header height in px (drag the header in the preview). */
+  chatHeaderHeight: number;
+  /** Composer input height in px (drag the composer in the preview). */
+  chatComposerHeight: number;
   /** Enter sends the message; off → Enter inserts a newline, Ctrl+Enter sends. */
   chatEnterToSend: boolean;
   /** Show the send time next to each message. */
   chatShowMessageTime: boolean;
-  /** Microphone (voice input) button in the composer. */
-  chatVoiceInput: boolean;
-  /** Show the "Archive" section in the chat tree. */
-  chatTreeShowArchive: boolean;
-  /** Row density of the chat tree. */
-  chatTreeDensity: "cozy" | "compact";
-  /** Tree sidebar controls shown (buttons, search, per-row actions). */
-  chatTreeElements: ChatTreeElementId[];
-  /** App header height. */
-  chatHeaderSize: "compact" | "default" | "roomy";
-  /** Composer (input toolbar) height. */
-  chatToolbarSize: "compact" | "default" | "roomy";
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
   mcpServers: McpServerConfig[];
 }
@@ -263,15 +259,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
   chatMetaChips: ["folder", "thoughts", "mcp"],
-  chatReadAloud: true,
+  chatComposerButtons: ["attach", "mic", "model", "mode"],
+  chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
+  chatTreeCompact: false,
+  chatTreeShowArchive: true,
+  chatHeaderHeight: 52,
+  chatComposerHeight: 40,
   chatEnterToSend: true,
   chatShowMessageTime: false,
-  chatVoiceInput: true,
-  chatTreeShowArchive: true,
-  chatTreeDensity: "cozy",
-  chatTreeElements: ["newChat", "search", "searchMsgs", "folderAdd", "pin", "archive", "more"],
-  chatHeaderSize: "default",
-  chatToolbarSize: "default",
   mcpServers: [],
 };
 

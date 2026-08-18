@@ -6,6 +6,7 @@ import {
   type AgentProvider,
   type AppSettings,
   type ChatActionId,
+  type ChatComposerButtonId,
   type ChatMetaChipId,
   type ChatTreeElementId,
   type DiagnosticsDumpMeta,
@@ -39,15 +40,8 @@ const CHAT_ACTION_ORDER: ChatActionId[] = [
   "readAloud",
 ];
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
-const CHAT_TREE_ORDER: ChatTreeElementId[] = [
-  "newChat",
-  "search",
-  "searchMsgs",
-  "folderAdd",
-  "pin",
-  "archive",
-  "more",
-];
+const CHAT_TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
+const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
 
 /** Toggle a value in a canonical-ordered array (re-adds in the right slot). */
 function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
@@ -846,12 +840,13 @@ export function SettingsPage() {
             <ChatSettingsPreview
               actions={form.chatActions ?? []}
               chips={form.chatMetaChips ?? []}
+              composerButtons={form.chatComposerButtons ?? []}
               treeElements={form.chatTreeElements ?? []}
-              readAloud={Boolean(form.chatReadAloud)}
-              voiceInput={Boolean(form.chatVoiceInput)}
+              treeCompact={Boolean(form.chatTreeCompact)}
+              showArchive={Boolean(form.chatTreeShowArchive)}
               showTime={Boolean(form.chatShowMessageTime)}
-              toolbarSize={form.chatToolbarSize ?? "default"}
-              headerSize={form.chatHeaderSize ?? "default"}
+              headerHeight={form.chatHeaderHeight ?? 52}
+              composerHeight={form.chatComposerHeight ?? 40}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -862,12 +857,22 @@ export function SettingsPage() {
               onToggleChip={(id) =>
                 patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
               }
+              onToggleComposerButton={(id) =>
+                patch(
+                  "chatComposerButtons",
+                  toggleInOrder(form.chatComposerButtons ?? [], id, CHAT_COMPOSER_ORDER),
+                )
+              }
               onToggleTreeElement={(id) =>
                 patch(
                   "chatTreeElements",
                   toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
                 )
               }
+              onToggleTreeCompact={() => patch("chatTreeCompact", !form.chatTreeCompact)}
+              onToggleShowArchive={() => patch("chatTreeShowArchive", !form.chatTreeShowArchive)}
+              onHeaderHeight={(next) => patch("chatHeaderHeight", next)}
+              onComposerHeight={(next) => patch("chatComposerHeight", next)}
             />
             <SettingTable>
               <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsOrderHint")}>
@@ -971,64 +976,67 @@ export function SettingsPage() {
                 </div>
               </SettingRow>
 
-              <SettingRow label={t("settings.chatReadAloud")} hint={t("settings.chatReadAloudHint")}>
-                <Toggle
-                  checked={Boolean(form.chatReadAloud)}
-                  onChange={(v) => patch("chatReadAloud", v)}
-                  label={t("settings.chatReadAloud")}
-                />
+              <SettingRow label={t("settings.chatComposerButtons")} hint={t("settings.chatComposerButtonsHint")}>
+                <div className={styles.actionChips}>
+                  {(
+                    [
+                      ["attach", t("settings.chatComposerBtnAttach")],
+                      ["mic", t("settings.chatComposerBtnMic")],
+                      ["model", t("settings.chatComposerBtnModel")],
+                      ["mode", t("settings.chatComposerBtnMode")],
+                    ] as Array<[ChatComposerButtonId, string]>
+                  ).map(([id, label]) => {
+                    const on = (form.chatComposerButtons ?? []).includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                        aria-pressed={on}
+                        onClick={() =>
+                          patch(
+                            "chatComposerButtons",
+                            toggleInOrder(form.chatComposerButtons ?? [], id, CHAT_COMPOSER_ORDER),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </SettingRow>
 
-              <SettingRow label={t("settings.chatTreeShowArchive")} hint={t("settings.chatTreeShowArchiveHint")}>
-                <Toggle
-                  checked={Boolean(form.chatTreeShowArchive)}
-                  onChange={(v) => patch("chatTreeShowArchive", v)}
-                  label={t("settings.chatTreeShowArchive")}
-                />
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatHeaderSize")} hint={t("settings.chatHeaderSizeHint")}>
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.chatHeaderSize")}
-                  value={form.chatHeaderSize ?? "default"}
-                  onChange={(v) => patch("chatHeaderSize", v as AppSettings["chatHeaderSize"])}
-                  options={[
-                    { value: "compact", label: t("settings.chatHeaderSizeCompact") },
-                    { value: "default", label: t("settings.chatHeaderSizeDefault") },
-                    { value: "roomy", label: t("settings.chatHeaderSizeRoomy") },
-                  ]}
-                />
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatTreeDensity")} hint={t("settings.chatTreeDensityHint")}>
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.chatTreeDensity")}
-                  value={form.chatTreeDensity ?? "cozy"}
-                  onChange={(v) => patch("chatTreeDensity", v as AppSettings["chatTreeDensity"])}
-                  options={[
-                    { value: "cozy", label: t("settings.chatTreeDensityCozy") },
-                    { value: "compact", label: t("settings.chatTreeDensityCompact") },
-                  ]}
-                />
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatToolbarSize")} hint={t("settings.chatToolbarSizeHint")}>
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.chatToolbarSize")}
-                  value={form.chatToolbarSize ?? "default"}
-                  onChange={(v) => patch("chatToolbarSize", v as AppSettings["chatToolbarSize"])}
-                  options={[
-                    { value: "compact", label: t("settings.chatToolbarSizeCompact") },
-                    { value: "default", label: t("settings.chatToolbarSizeDefault") },
-                    { value: "roomy", label: t("settings.chatToolbarSizeRoomy") },
-                  ]}
-                />
+              <SettingRow label={t("settings.chatTreeElements")} hint={t("settings.chatTreeElementsHint")}>
+                <div className={styles.actionChips}>
+                  {(
+                    [
+                      ["search", t("settings.chatTreeElSearch")],
+                      ["searchMsgs", t("settings.chatTreeElSearchMsgs")],
+                      ["pin", t("settings.chatTreeElPin")],
+                      ["archive", t("settings.chatTreeElArchive")],
+                      ["more", t("settings.chatTreeElMore")],
+                    ] as Array<[ChatTreeElementId, string]>
+                  ).map(([id, label]) => {
+                    const on = (form.chatTreeElements ?? []).includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                        aria-pressed={on}
+                        onClick={() =>
+                          patch(
+                            "chatTreeElements",
+                            toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
+                          )
+                        }
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </SettingRow>
 
               <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
@@ -1044,14 +1052,6 @@ export function SettingsPage() {
                   checked={Boolean(form.chatShowMessageTime)}
                   onChange={(v) => patch("chatShowMessageTime", v)}
                   label={t("settings.chatShowMessageTime")}
-                />
-              </SettingRow>
-
-              <SettingRow label={t("settings.chatVoiceInput")} hint={t("settings.chatVoiceInputHint")}>
-                <Toggle
-                  checked={Boolean(form.chatVoiceInput)}
-                  onChange={(v) => patch("chatVoiceInput", v)}
-                  label={t("settings.chatVoiceInput")}
                 />
               </SettingRow>
             </SettingTable>

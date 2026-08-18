@@ -680,13 +680,10 @@ export function AppShell() {
 
       <div className={styles.main}>
         <header
-          className={`${styles.header}${
-            settings.chatHeaderSize === "compact"
-              ? ` ${styles.headerCompact}`
-              : settings.chatHeaderSize === "roomy"
-                ? ` ${styles.headerRoomy}`
-                : ""
-          }`}
+          className={styles.header}
+          style={
+            settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
+          }
         >
           {showSidebar && !sidebarOpen ? (
             <button

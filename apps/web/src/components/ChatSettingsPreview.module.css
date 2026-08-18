@@ -603,3 +603,162 @@
 .composerRoomy .inputMock {
   font-size: 0.94rem;
 }
+
+/* --- resize strips --- */
+.headerWrap {
+  position: relative;
+}
+
+.dragBar {
+  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  color: var(--text-secondary);
+  opacity: 0.55;
+  user-select: none;
+  touch-action: none;
+}
+
+.dragBar:hover,
+.dragBarActive {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.dragGrip {
+  font-size: 0.85rem;
+  line-height: 1;
+  letter-spacing: 0.1em;
+}
+
+.composerWrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.composerWrap > .dragBar {
+  position: absolute;
+  top: -10px;
+  left: 0;
+  right: 0;
+  z-index: 5;
+}
+
+.composerWrap > .dragBar:hover {
+  background: transparent;
+}
+
+/* --- tree extras --- */
+.treeRowWrap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.treeBottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+
+.densityBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.densityBtnOn {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.treeArchiveHead {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.treeArchiveCount {
+  font-size: 0.68rem;
+  background: var(--border-soft, var(--border));
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* --- composer buttons --- */
+.composerBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+}
+
+.composerBtn:hover {
+  color: var(--text);
+  background: var(--border-soft, var(--border));
+}
+
+.composerFooter {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.composerChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.sendMock {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+/* --- mobile --- */
+@media (max-width: 700px) {
+  .body {
+    grid-template-columns: 1fr;
+    padding: 4px 8px 10px;
+  }
+
+  .thread {
+    max-height: 220px;
+  }
+
+  .composerFooter {
+    flex-wrap: wrap;
+  }
+}

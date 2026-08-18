@@ -107,17 +107,16 @@ const settingsSchema = z.object({
     .array(z.enum(["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"]))
     .optional(),
   chatMetaChips: z.array(z.enum(["folder", "thoughts", "mcp"])).optional(),
-  chatReadAloud: z.boolean().optional(),
+  chatComposerButtons: z.array(z.enum(["attach", "mic", "model", "mode"])).optional(),
+  chatTreeElements: z
+    .array(z.enum(["search", "searchMsgs", "pin", "archive", "more"]))
+    .optional(),
+  chatTreeCompact: z.boolean().optional(),
+  chatTreeShowArchive: z.boolean().optional(),
+  chatHeaderHeight: z.number().min(40).max(72).optional(),
+  chatComposerHeight: z.number().min(24).max(96).optional(),
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
-  chatVoiceInput: z.boolean().optional(),
-  chatTreeShowArchive: z.boolean().optional(),
-  chatTreeDensity: z.enum(["cozy", "compact"]).optional(),
-  chatTreeElements: z
-    .array(z.enum(["newChat", "search", "searchMsgs", "folderAdd", "pin", "archive", "more"]))
-    .optional(),
-  chatHeaderSize: z.enum(["compact", "default", "roomy"]).optional(),
-  chatToolbarSize: z.enum(["compact", "default", "roomy"]).optional(),
   mcpServers: z
     .array(
       z.object({

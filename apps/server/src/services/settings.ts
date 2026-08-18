@@ -71,8 +71,33 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.chatMetaChips)) {
     merged.chatMetaChips = [...DEFAULT_SETTINGS.chatMetaChips];
   }
-  if (typeof merged.chatReadAloud !== "boolean") {
-    merged.chatReadAloud = DEFAULT_SETTINGS.chatReadAloud;
+  if (!Array.isArray(merged.chatComposerButtons)) {
+    merged.chatComposerButtons = [...DEFAULT_SETTINGS.chatComposerButtons];
+  }
+  if (!Array.isArray(merged.chatTreeElements)) {
+    merged.chatTreeElements = [...DEFAULT_SETTINGS.chatTreeElements];
+  }
+  if (typeof merged.chatTreeCompact !== "boolean") {
+    merged.chatTreeCompact = DEFAULT_SETTINGS.chatTreeCompact;
+  }
+  if (typeof merged.chatTreeShowArchive !== "boolean") {
+    merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;
+  }
+  if (
+    typeof merged.chatHeaderHeight !== "number" ||
+    !Number.isFinite(merged.chatHeaderHeight)
+  ) {
+    merged.chatHeaderHeight = DEFAULT_SETTINGS.chatHeaderHeight;
+  } else {
+    merged.chatHeaderHeight = Math.min(72, Math.max(40, Math.round(merged.chatHeaderHeight)));
+  }
+  if (
+    typeof merged.chatComposerHeight !== "number" ||
+    !Number.isFinite(merged.chatComposerHeight)
+  ) {
+    merged.chatComposerHeight = DEFAULT_SETTINGS.chatComposerHeight;
+  } else {
+    merged.chatComposerHeight = Math.min(96, Math.max(24, Math.round(merged.chatComposerHeight)));
   }
   if (typeof merged.chatEnterToSend !== "boolean") {
     merged.chatEnterToSend = DEFAULT_SETTINGS.chatEnterToSend;
@@ -80,31 +105,15 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
   }
-  if (typeof merged.chatVoiceInput !== "boolean") {
-    merged.chatVoiceInput = DEFAULT_SETTINGS.chatVoiceInput;
-  }
-  if (typeof merged.chatTreeShowArchive !== "boolean") {
-    merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;
-  }
-  if (merged.chatTreeDensity !== "cozy" && merged.chatTreeDensity !== "compact") {
-    merged.chatTreeDensity = DEFAULT_SETTINGS.chatTreeDensity;
-  }
-  if (!Array.isArray(merged.chatTreeElements)) {
-    merged.chatTreeElements = [...DEFAULT_SETTINGS.chatTreeElements];
-  }
-  if (
-    merged.chatHeaderSize !== "compact" &&
-    merged.chatHeaderSize !== "default" &&
-    merged.chatHeaderSize !== "roomy"
-  ) {
-    merged.chatHeaderSize = DEFAULT_SETTINGS.chatHeaderSize;
-  }
-  if (
-    merged.chatToolbarSize !== "compact" &&
-    merged.chatToolbarSize !== "default" &&
-    merged.chatToolbarSize !== "roomy"
-  ) {
-    merged.chatToolbarSize = DEFAULT_SETTINGS.chatToolbarSize;
+  // Fields replaced by icon-level controls / numeric heights (never shipped).
+  for (const stale of [
+    "chatReadAloud",
+    "chatVoiceInput",
+    "chatTreeDensity",
+    "chatHeaderSize",
+    "chatToolbarSize",
+  ] as const) {
+    delete (merged as Record<string, unknown>)[stale];
   }
   if (!Array.isArray(merged.mcpServers)) {
     merged.mcpServers = [];
