@@ -3,7 +3,7 @@
   flex-direction: column;
   border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
+  /* No overflow:hidden — it would clip OptionPicker dropdowns. */
   background: var(--surface);
 }
 
@@ -12,6 +12,16 @@
   align-items: center;
   gap: 20px;
   padding: 12px 16px;
+}
+
+.row:first-child {
+  border-top-left-radius: 11px;
+  border-top-right-radius: 11px;
+}
+
+.row:last-child {
+  border-bottom-left-radius: 11px;
+  border-bottom-right-radius: 11px;
 }
 
 .row + .row {
@@ -49,6 +59,33 @@
   gap: 10px;
   justify-content: flex-end;
   min-width: 0;
+}
+
+/* Port of the previous `.card input` base styles — settings rows are no
+   longer wrapped in `.card`, so bare inputs keep their themed look. */
+.table input:not([type="checkbox"]):not([type="radio"]),
+.table select,
+.table textarea {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 12px;
+  padding: 11px 12px;
+  font-weight: 500;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.table input:not([type="checkbox"]):not([type="radio"]):focus,
+.table select:focus,
+.table textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.table input:not([type="checkbox"]):not([type="radio"]):disabled {
+  opacity: 0.7;
+  cursor: default;
 }
 
 /* --- toggle --- */

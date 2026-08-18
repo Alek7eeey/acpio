@@ -417,6 +417,9 @@ describe("DEFAULT_SETTINGS", () => {
     chatEnterToSend: true,
     chatShowMessageTime: false,
     chatVoiceInput: true,
+    chatTreeShowArchive: true,
+    chatTreeDensity: "cozy",
+    chatToolbarSize: "default",
     mcpServers: [],
   };
 

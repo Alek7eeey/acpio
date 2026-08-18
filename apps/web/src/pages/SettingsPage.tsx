@@ -253,6 +253,25 @@ export function SettingsPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const actionLabel = (id: ChatActionId): string => {
+    switch (id) {
+      case "copy":
+        return t("settings.chatActionCopy");
+      case "edit":
+        return t("settings.chatActionEdit");
+      case "like":
+        return t("settings.chatActionLike");
+      case "dislike":
+        return t("settings.chatActionDislike");
+      case "share":
+        return t("settings.chatActionShare");
+      case "regenerate":
+        return t("settings.chatActionRegenerate");
+      case "readAloud":
+        return t("settings.chatActionReadAloud");
+    }
+  };
+
   const mcpServers = form.mcpServers ?? [];
 
   // Live probe status for enabled MCP servers. Polled while the MCP section
@@ -820,45 +839,87 @@ export function SettingsPage() {
               readAloud={Boolean(form.chatReadAloud)}
               voiceInput={Boolean(form.chatVoiceInput)}
               showTime={Boolean(form.chatShowMessageTime)}
-              onToggleAction={(id) =>
-                patch("chatActions", toggleInOrder(form.chatActions ?? [], id, CHAT_ACTION_ORDER))
-              }
+              toolbarSize={form.chatToolbarSize ?? "default"}
+              onToggleAction={(id) => {
+                const cur = form.chatActions ?? [];
+                patch(
+                  "chatActions",
+                  cur.includes(id) ? cur.filter((a) => a !== id) : [...cur, id],
+                );
+              }}
               onToggleChip={(id) =>
                 patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
               }
             />
             <SettingTable>
-              <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsHint")}>
-                <div className={styles.actionChips}>
-                  {(
-                    [
-                      ["copy", t("settings.chatActionCopy")],
-                      ["edit", t("settings.chatActionEdit")],
-                      ["like", t("settings.chatActionLike")],
-                      ["dislike", t("settings.chatActionDislike")],
-                      ["share", t("settings.chatActionShare")],
-                      ["regenerate", t("settings.chatActionRegenerate")],
-                      ["readAloud", t("settings.chatActionReadAloud")],
-                    ] as Array<[ChatActionId, string]>
-                  ).map(([id, label]) => {
-                    const on = (form.chatActions ?? []).includes(id);
+              <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsOrderHint")}>
+                <div className={styles.actionList}>
+                  {(form.chatActions ?? []).map((id, idx) => {
+                    const count = (form.chatActions ?? []).length;
+                    const move = (dir: -1 | 1) => {
+                      const cur = [...(form.chatActions ?? [])];
+                      const at = cur.indexOf(id);
+                      const to = at + dir;
+                      if (at < 0 || to < 0 || to >= cur.length) return;
+                      const next = [...cur];
+                      [next[at], next[to]] = [next[to], next[at]];
+                      patch("chatActions", next);
+                    };
                     return (
-                      <button
-                        key={id}
-                        type="button"
-                        className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                        aria-pressed={on}
-                        onClick={() =>
-                          patch(
-                            "chatActions",
-                            toggleInOrder(form.chatActions ?? [], id, CHAT_ACTION_ORDER),
-                          )
-                        }
-                      >
-                        {label}
-                      </button>
+                      <div key={id} className={styles.actionListRow}>
+                        <span className={styles.actionListLabel}>{actionLabel(id)}</span>
+                        <button
+                          type="button"
+                          className={styles.actionListBtn}
+                          disabled={idx === 0}
+                          aria-label={`${t("common.moveUp")} ${actionLabel(id)}`}
+                          title={t("common.moveUp")}
+                          onClick={() => move(-1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.actionListBtn}
+                          disabled={idx === count - 1}
+                          aria-label={`${t("common.moveDown")} ${actionLabel(id)}`}
+                          title={t("common.moveDown")}
+                          onClick={() => move(1)}
+                        >
+                          ↓
+                        </button>
+                        <Toggle
+                          checked
+                          onChange={() =>
+                            patch(
+                              "chatActions",
+                              (form.chatActions ?? []).filter((a) => a !== id),
+                            )
+                          }
+                          label={actionLabel(id)}
+                        />
+                      </div>
                     );
                   })}
+                  {CHAT_ACTION_ORDER.filter((id) => !(form.chatActions ?? []).includes(id)).length >
+                  0 ? (
+                    <div className={styles.actionAddRow}>
+                      {CHAT_ACTION_ORDER.filter((id) => !(form.chatActions ?? []).includes(id)).map(
+                        (id) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className={styles.actionAddChip}
+                            onClick={() =>
+                              patch("chatActions", [...(form.chatActions ?? []), id])
+                            }
+                          >
+                            + {actionLabel(id)}
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </SettingRow>
 
@@ -897,6 +958,43 @@ export function SettingsPage() {
                   checked={Boolean(form.chatReadAloud)}
                   onChange={(v) => patch("chatReadAloud", v)}
                   label={t("settings.chatReadAloud")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatTreeShowArchive")} hint={t("settings.chatTreeShowArchiveHint")}>
+                <Toggle
+                  checked={Boolean(form.chatTreeShowArchive)}
+                  onChange={(v) => patch("chatTreeShowArchive", v)}
+                  label={t("settings.chatTreeShowArchive")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatTreeDensity")} hint={t("settings.chatTreeDensityHint")}>
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.chatTreeDensity")}
+                  value={form.chatTreeDensity ?? "cozy"}
+                  onChange={(v) => patch("chatTreeDensity", v as AppSettings["chatTreeDensity"])}
+                  options={[
+                    { value: "cozy", label: t("settings.chatTreeDensityCozy") },
+                    { value: "compact", label: t("settings.chatTreeDensityCompact") },
+                  ]}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatToolbarSize")} hint={t("settings.chatToolbarSizeHint")}>
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.chatToolbarSize")}
+                  value={form.chatToolbarSize ?? "default"}
+                  onChange={(v) => patch("chatToolbarSize", v as AppSettings["chatToolbarSize"])}
+                  options={[
+                    { value: "compact", label: t("settings.chatToolbarSizeCompact") },
+                    { value: "default", label: t("settings.chatToolbarSizeDefault") },
+                    { value: "roomy", label: t("settings.chatToolbarSizeRoomy") },
+                  ]}
                 />
               </SettingRow>
 

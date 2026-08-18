@@ -2164,3 +2164,14 @@
   align-self: center;
   white-space: nowrap;
 }
+
+/* Composer size variants (settings → Chat → Composer height). */
+.pillCompact textarea {
+  min-height: 24px;
+  font-size: 0.85rem;
+}
+
+.pillRoomy textarea {
+  min-height: 60px;
+  font-size: 0.95rem;
+}

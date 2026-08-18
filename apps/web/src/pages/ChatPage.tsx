@@ -370,34 +370,42 @@ function UserMessageActions({
   };
 
   const chatActions = settings.chatActions ?? [];
-  const showCopy = chatActions.includes("copy");
-  const showEdit = chatActions.includes("edit");
-  if (!showCopy && !showEdit && !settings.chatShowMessageTime) return null;
+  if (!chatActions.some((a) => a === "copy" || a === "edit") && !settings.chatShowMessageTime)
+    return null;
 
   return (
     <div className={`${styles.msgActions} ${styles.userMsgActions}`} aria-label={t("common.actions")}>
-      {showCopy && (
-        <button
-          type="button"
-          className={styles.msgAction}
-          title={copied ? t("common.copied") : t("common.copy")}
-          aria-label={t("common.copy")}
-          onClick={() => void copy()}
-        >
-          <IconCopy done={copied} />
-        </button>
-      )}
-      {showEdit && (
-        <button
-          type="button"
-          className={styles.msgAction}
-          title={t("common.edit")}
-          aria-label={t("common.edit")}
-          onClick={() => onEdit()}
-        >
-          <IconEdit />
-        </button>
-      )}
+      {chatActions.map((id) => {
+        if (id === "copy") {
+          return (
+            <button
+              key={id}
+              type="button"
+              className={styles.msgAction}
+              title={copied ? t("common.copied") : t("common.copy")}
+              aria-label={t("common.copy")}
+              onClick={() => void copy()}
+            >
+              <IconCopy done={copied} />
+            </button>
+          );
+        }
+        if (id === "edit") {
+          return (
+            <button
+              key={id}
+              type="button"
+              className={styles.msgAction}
+              title={t("common.edit")}
+              aria-label={t("common.edit")}
+              onClick={() => onEdit()}
+            >
+              <IconEdit />
+            </button>
+          );
+        }
+        return null;
+      })}
       {settings.chatShowMessageTime ? (
         <span className={styles.msgTime} aria-hidden>
           {new Date(createdAt).toLocaleTimeString([], {
@@ -3337,7 +3345,13 @@ export function ChatPage() {
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               streaming ? styles.pillBusy : ""
-            } ${composerLocked ? styles.pillLoading : ""}`}
+            } ${composerLocked ? styles.pillLoading : ""}${
+              settings.chatToolbarSize === "compact"
+                ? ` ${styles.pillCompact}`
+                : settings.chatToolbarSize === "roomy"
+                  ? ` ${styles.pillRoomy}`
+                  : ""
+            }`}
           >
             <SlashCommandMenu
               open={slashMenuOpen}

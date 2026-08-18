@@ -83,6 +83,19 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatVoiceInput !== "boolean") {
     merged.chatVoiceInput = DEFAULT_SETTINGS.chatVoiceInput;
   }
+  if (typeof merged.chatTreeShowArchive !== "boolean") {
+    merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;
+  }
+  if (merged.chatTreeDensity !== "cozy" && merged.chatTreeDensity !== "compact") {
+    merged.chatTreeDensity = DEFAULT_SETTINGS.chatTreeDensity;
+  }
+  if (
+    merged.chatToolbarSize !== "compact" &&
+    merged.chatToolbarSize !== "default" &&
+    merged.chatToolbarSize !== "roomy"
+  ) {
+    merged.chatToolbarSize = DEFAULT_SETTINGS.chatToolbarSize;
+  }
   if (!Array.isArray(merged.mcpServers)) {
     merged.mcpServers = [];
   } else {

@@ -3089,3 +3089,16 @@
     font-size: 0.98rem;
   }
 }
+
+/* Chat tree density (settings → Chat → Tree density). */
+.treeCompact .sessionItem {
+  min-height: 30px;
+}
+
+.treeCompact .sessionTitle {
+  font-size: 0.8rem;
+}
+
+.treeCompact .sessionList {
+  gap: 3px;
+}

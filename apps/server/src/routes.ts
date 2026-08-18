@@ -111,6 +111,9 @@ const settingsSchema = z.object({
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   chatVoiceInput: z.boolean().optional(),
+  chatTreeShowArchive: z.boolean().optional(),
+  chatTreeDensity: z.enum(["cozy", "compact"]).optional(),
+  chatToolbarSize: z.enum(["compact", "default", "roomy"]).optional(),
   mcpServers: z
     .array(
       z.object({

@@ -112,13 +112,7 @@ function actionIcon(id: ChatActionId): ReactNode {
   }
 }
 
-function ActionIconButton({
-  id,
-  onClick,
-}: {
-  id: ChatActionId;
-  onClick: () => void;
-}) {
+function ActionIconButton({ id, onClick }: { id: ChatActionId; onClick: () => void }) {
   const t = useT();
   const label = t(ACTION_LABEL_KEY[id] as "common.copy");
   return (
@@ -140,6 +134,7 @@ function PreviewActions({
   const [open, setOpen] = useState(false);
   const icons = actions.slice(0, 5);
   const overflow = actions.slice(5);
+  if (actions.length === 0) return null;
   return (
     <div className={styles.actions}>
       {icons.map((id) => (
@@ -187,9 +182,9 @@ function PreviewActions({
 }
 
 /**
- * Interactive chat mock: mirrors the configured message actions, composer
- * chips and flags. Clicking any action or chip toggles it — the settings
- * form updates live.
+ * Interactive chat mock: a realistic miniature chat (avatars, thinking block,
+ * tool row, typing indicator) that mirrors the configured message actions,
+ * composer chips and flags. Clicking actions/chips toggles them live.
  */
 export function ChatSettingsPreview({
   actions,
@@ -197,6 +192,7 @@ export function ChatSettingsPreview({
   readAloud,
   voiceInput,
   showTime,
+  toolbarSize,
   onToggleAction,
   onToggleChip,
 }: {
@@ -205,6 +201,7 @@ export function ChatSettingsPreview({
   readAloud: boolean;
   voiceInput: boolean;
   showTime: boolean;
+  toolbarSize: "compact" | "default" | "roomy";
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
 }) {
@@ -212,28 +209,90 @@ export function ChatSettingsPreview({
   const mainBarActions = actions.filter((a) => a !== "edit" && (a !== "readAloud" || readAloud));
   const userBarActions = actions.filter((a) => a === "copy" || a === "edit");
   const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const sizeClass =
+    toolbarSize === "compact"
+      ? styles.composerCompact
+      : toolbarSize === "roomy"
+        ? styles.composerRoomy
+        : "";
 
   return (
     <div className={styles.wrap}>
+      <div className={styles.header}>
+        <span className={styles.avatar} aria-hidden>
+          A
+        </span>
+        <div className={styles.headerMeta}>
+          <strong>ACProcess</strong>
+          <span>Deepseek V4 Flash · {t("settings.chatPreview")}</span>
+        </div>
+      </div>
+
       <div className={styles.thread}>
-        <div className={styles.bubbleRow}>
+        <div className={styles.msgRow}>
           <div className={`${styles.bubble} ${styles.userBubble}`}>
             {t("chatPreviewUser")}
             {showTime ? <span className={styles.time}>{now}</span> : null}
           </div>
         </div>
-        <div className={styles.bubbleRow}>
-          <div className={`${styles.bubble} ${styles.assistantBubble}`}>
-            {t("chatPreviewAssistant")}
-            {showTime ? <span className={styles.time}>{now}</span> : null}
+        {userBarActions.length > 0 ? (
+          <div className={styles.msgRow}>
+            <PreviewActions actions={userBarActions} onToggle={onToggleAction} />
+          </div>
+        ) : null}
+
+        <div className={styles.msgRow}>
+          <span className={`${styles.avatar} ${styles.assistantAvatar}`} aria-hidden>
+            A
+          </span>
+          <div className={styles.assistantCol}>
+            <div className={`${styles.bubble} ${styles.assistantBubble}`}>
+              {t("chatPreviewAssistant")}
+              {showTime ? <span className={styles.time}>{now}</span> : null}
+            </div>
+            <div className={styles.thought} aria-hidden>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span>{t("chatPreviewThought")}</span>
+            </div>
+            <div className={styles.toolRow} aria-hidden>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>{t("chatPreviewTool")}</span>
+              <svg className={styles.toolCheck} width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div className={styles.typing} aria-hidden>
+              <span />
+              <span />
+              <span />
+            </div>
+            <PreviewActions actions={mainBarActions} onToggle={onToggleAction} />
           </div>
         </div>
-        <PreviewActions actions={mainBarActions} onToggle={onToggleAction} />
-        {userBarActions.length > 0 ? (
-          <PreviewActions actions={userBarActions} onToggle={onToggleAction} />
-        ) : null}
       </div>
-      <div className={styles.composer}>
+
+      <div className={`${styles.composer} ${sizeClass}`}>
         <div className={styles.chips}>
           {CHIP_ORDER.filter((id) => chips.includes(id)).map((id) => (
             <button

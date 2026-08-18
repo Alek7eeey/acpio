@@ -1211,3 +1211,79 @@
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
+
+.actionList {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  max-width: 430px;
+}
+
+.actionListRow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.actionListLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.actionListBtn {
+  flex: 0 0 auto;
+  width: 27px;
+  height: 25px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.actionListBtn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.actionListBtn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.actionAddRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 7px;
+  margin-top: 2px;
+  border-top: 1px dashed var(--border);
+}
+
+.actionAddChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.actionAddChip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}

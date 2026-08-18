@@ -307,8 +307,11 @@ export function ChatSidebar({
   }, [sessions, query]);
 
   const archivedSessions = useMemo(
-    () => sortSessions(visibleSessions.filter((s) => s.archived)),
-    [visibleSessions],
+    () =>
+      settings.chatTreeShowArchive === false
+        ? []
+        : sortSessions(visibleSessions.filter((s) => s.archived)),
+    [visibleSessions, settings.chatTreeShowArchive],
   );
   const folders = useMemo(
     () => groupByFolder(visibleSessions.filter((s) => !s.archived)),
@@ -964,7 +967,12 @@ export function ChatSidebar({
           ) : null}
         </div>
 
-        <div className={styles.sessionList} ref={sessionListRef}>
+        <div
+          className={`${styles.sessionList} ${
+            settings.chatTreeDensity === "compact" ? styles.treeCompact : ""
+          }`}
+          ref={sessionListRef}
+        >
           {treeVirtual && (
             <div
               style={{

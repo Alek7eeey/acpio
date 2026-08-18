@@ -207,6 +207,12 @@ export interface AppSettings {
   chatShowMessageTime: boolean;
   /** Microphone (voice input) button in the composer. */
   chatVoiceInput: boolean;
+  /** Show the "Archive" section in the chat tree. */
+  chatTreeShowArchive: boolean;
+  /** Row density of the chat tree. */
+  chatTreeDensity: "cozy" | "compact";
+  /** Composer (input toolbar) height. */
+  chatToolbarSize: "compact" | "default" | "roomy";
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
   mcpServers: McpServerConfig[];
 }
@@ -247,6 +253,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatEnterToSend: true,
   chatShowMessageTime: false,
   chatVoiceInput: true,
+  chatTreeShowArchive: true,
+  chatTreeDensity: "cozy",
+  chatToolbarSize: "default",
   mcpServers: [],
 };
 
