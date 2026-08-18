@@ -121,6 +121,16 @@ export type ChatActionId =
 /** Chips shown in the composer bar above the input. */
 export type ChatMetaChipId = "folder" | "thoughts" | "mcp";
 
+/** Controls in the chat tree sidebar that can be hidden. */
+export type ChatTreeElementId =
+  | "newChat"
+  | "search"
+  | "searchMsgs"
+  | "folderAdd"
+  | "pin"
+  | "archive"
+  | "more";
+
 export type MessagePartType =
   | "text"
   | "thought"
@@ -211,6 +221,10 @@ export interface AppSettings {
   chatTreeShowArchive: boolean;
   /** Row density of the chat tree. */
   chatTreeDensity: "cozy" | "compact";
+  /** Tree sidebar controls shown (buttons, search, per-row actions). */
+  chatTreeElements: ChatTreeElementId[];
+  /** App header height. */
+  chatHeaderSize: "compact" | "default" | "roomy";
   /** Composer (input toolbar) height. */
   chatToolbarSize: "compact" | "default" | "roomy";
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
@@ -255,6 +269,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatVoiceInput: true,
   chatTreeShowArchive: true,
   chatTreeDensity: "cozy",
+  chatTreeElements: ["newChat", "search", "searchMsgs", "folderAdd", "pin", "archive", "more"],
+  chatHeaderSize: "default",
   chatToolbarSize: "default",
   mcpServers: [],
 };

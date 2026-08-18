@@ -863,7 +863,14 @@ export function ChatSidebar({
 
   return (
     <>
-      <div className={styles.chatPanel}>
+      <div
+        className={`${styles.chatPanel}${
+          (settings.chatTreeElements ?? []).includes("folderAdd") ? "" : ` ${styles.treeNoFolderAdd}`
+        }${(settings.chatTreeElements ?? []).includes("pin") ? "" : ` ${styles.treeNoPin}`}${
+          (settings.chatTreeElements ?? []).includes("archive") ? "" : ` ${styles.treeNoArchive}`
+        }${(settings.chatTreeElements ?? []).includes("more") ? "" : ` ${styles.treeNoMore}`}`}
+      >
+        {settings.chatTreeElements.includes("newChat") && (
         <div className={styles.chatToolbar}>
           <button
             className={styles.newChat}
@@ -890,7 +897,9 @@ export function ChatSidebar({
             <span className={styles.newChatLabel}>{t("common.newChat")}</span>
           </button>
         </div>
+        )}
 
+        {settings.chatTreeElements.includes("search") && (
         <div className={styles.chatSearch}>
           <div className={styles.chatSearchField}>
             <svg
@@ -940,7 +949,7 @@ export function ChatSidebar({
             </button>
           ) : null}
           </div>
-          {onSearchMessages ? (
+          {onSearchMessages && settings.chatTreeElements.includes("searchMsgs") ? (
             <button
               type="button"
               className={styles.chatSearchMsgs}
@@ -966,6 +975,7 @@ export function ChatSidebar({
             </button>
           ) : null}
         </div>
+        )}
 
         <div
           className={`${styles.sessionList} ${

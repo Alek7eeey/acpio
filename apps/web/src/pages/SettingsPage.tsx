@@ -7,6 +7,7 @@ import {
   type AppSettings,
   type ChatActionId,
   type ChatMetaChipId,
+  type ChatTreeElementId,
   type DiagnosticsDumpMeta,
   type McpServerConfig,
   type ModelParamDto,
@@ -38,6 +39,15 @@ const CHAT_ACTION_ORDER: ChatActionId[] = [
   "readAloud",
 ];
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
+const CHAT_TREE_ORDER: ChatTreeElementId[] = [
+  "newChat",
+  "search",
+  "searchMsgs",
+  "folderAdd",
+  "pin",
+  "archive",
+  "more",
+];
 
 /** Toggle a value in a canonical-ordered array (re-adds in the right slot). */
 function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
@@ -836,10 +846,12 @@ export function SettingsPage() {
             <ChatSettingsPreview
               actions={form.chatActions ?? []}
               chips={form.chatMetaChips ?? []}
+              treeElements={form.chatTreeElements ?? []}
               readAloud={Boolean(form.chatReadAloud)}
               voiceInput={Boolean(form.chatVoiceInput)}
               showTime={Boolean(form.chatShowMessageTime)}
               toolbarSize={form.chatToolbarSize ?? "default"}
+              headerSize={form.chatHeaderSize ?? "default"}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -849,6 +861,12 @@ export function SettingsPage() {
               }}
               onToggleChip={(id) =>
                 patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
+              }
+              onToggleTreeElement={(id) =>
+                patch(
+                  "chatTreeElements",
+                  toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
+                )
               }
             />
             <SettingTable>
@@ -966,6 +984,21 @@ export function SettingsPage() {
                   checked={Boolean(form.chatTreeShowArchive)}
                   onChange={(v) => patch("chatTreeShowArchive", v)}
                   label={t("settings.chatTreeShowArchive")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("settings.chatHeaderSize")} hint={t("settings.chatHeaderSizeHint")}>
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.chatHeaderSize")}
+                  value={form.chatHeaderSize ?? "default"}
+                  onChange={(v) => patch("chatHeaderSize", v as AppSettings["chatHeaderSize"])}
+                  options={[
+                    { value: "compact", label: t("settings.chatHeaderSizeCompact") },
+                    { value: "default", label: t("settings.chatHeaderSizeDefault") },
+                    { value: "roomy", label: t("settings.chatHeaderSizeRoomy") },
+                  ]}
                 />
               </SettingRow>
 

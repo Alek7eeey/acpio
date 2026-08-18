@@ -3102,3 +3102,29 @@
 .treeCompact .sessionList {
   gap: 3px;
 }
+
+/* Header height variants (settings → Chat → Header height). */
+.headerCompact {
+  height: calc(var(--header-height) - 10px);
+}
+
+.headerRoomy {
+  height: calc(var(--header-height) + 14px);
+}
+
+/* Hidden tree controls (settings → Chat → Tree buttons). */
+.treeNoFolderAdd .folderAdd {
+  display: none;
+}
+
+.treeNoPin .sessionItem > button:nth-of-type(2) {
+  display: none;
+}
+
+.treeNoArchive .sessionItem > button:nth-of-type(3) {
+  display: none;
+}
+
+.treeNoMore .sessionMore {
+  display: none;
+}

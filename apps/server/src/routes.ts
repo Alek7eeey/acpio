@@ -113,6 +113,10 @@ const settingsSchema = z.object({
   chatVoiceInput: z.boolean().optional(),
   chatTreeShowArchive: z.boolean().optional(),
   chatTreeDensity: z.enum(["cozy", "compact"]).optional(),
+  chatTreeElements: z
+    .array(z.enum(["newChat", "search", "searchMsgs", "folderAdd", "pin", "archive", "more"]))
+    .optional(),
+  chatHeaderSize: z.enum(["compact", "default", "roomy"]).optional(),
   chatToolbarSize: z.enum(["compact", "default", "roomy"]).optional(),
   mcpServers: z
     .array(

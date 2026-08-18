@@ -8,26 +8,111 @@
   margin-bottom: 18px;
 }
 
-/* --- header --- */
+.sectionLabel {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding: 8px 14px 4px;
+}
+
+/* --- header mock --- */
 .header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  padding: 0 14px;
+  height: 52px;
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  transition: height 0.15s ease;
+  overflow: hidden;
 }
 
+.headerCompact {
+  height: 40px;
+}
+
+.headerRoomy {
+  height: 64px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 0.9rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.brandMark {
+  color: var(--accent);
+}
+
+.brandChat {
+  color: var(--text-secondary);
+}
+
+.headerAgent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.headerIcons {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.headerIcon {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+/* --- body: tree + chat columns --- */
+.body {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  gap: 12px;
+  padding: 4px 14px 14px;
+}
+
+@media (max-width: 760px) {
+  .body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* --- avatar --- */
 .avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #fff));
   color: #fff;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 800;
   flex: 0 0 auto;
 }
@@ -36,26 +121,219 @@
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #000));
 }
 
-.headerMeta {
+/* --- click-to-toggle wrappers --- */
+.live {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  border-radius: 8px;
+  outline: 1px solid transparent;
+}
+
+.live:hover {
+  outline-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.addBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.addBtn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* --- tree mock --- */
+.tree {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  font-size: 0.8rem;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 8px;
+  min-height: 180px;
+}
+
+.treeTop {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.treeNewChat,
+.treeSearch {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.treeSearchMsgs {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   color: var(--text-secondary);
 }
 
-.headerMeta strong {
-  color: var(--text);
-  font-size: 0.88rem;
+.treeFolder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 2px;
+  color: var(--text-secondary);
 }
 
-/* --- thread --- */
+.treeFolderLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.treeAdd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  min-height: 30px;
+}
+
+.treeRowTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.treeBusy {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: treeBusyPulse 1s ease-in-out infinite;
+}
+
+@keyframes treeBusyPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.treeAct {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+}
+
+.treeAct:hover {
+  background: var(--border-soft, var(--border));
+  color: var(--text);
+}
+
+/* --- chat pane --- */
+.chatPane {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.chatHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+
+.chatHead strong {
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chatHeadChip {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+
+.chatHeadMode {
+  font-size: 0.72rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 .thread {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 14px;
-  max-height: 380px;
+  padding: 12px;
+  max-height: 340px;
   overflow: auto;
 }
 
@@ -79,7 +357,7 @@
   max-width: 82%;
   padding: 9px 13px;
   border-radius: 14px;
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   line-height: 1.5;
   color: var(--text);
 }
@@ -92,7 +370,7 @@
 }
 
 .assistantBubble {
-  background: var(--surface);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-bottom-left-radius: 4px;
 }
@@ -105,7 +383,6 @@
   text-align: right;
 }
 
-/* --- thinking block --- */
 .thought {
   display: inline-flex;
   align-items: center;
@@ -116,10 +393,9 @@
   background: color-mix(in srgb, var(--bg-secondary) 70%, transparent);
   border: 1px dashed var(--border);
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
-/* --- tool row --- */
 .toolRow {
   display: inline-flex;
   align-items: center;
@@ -128,16 +404,15 @@
   padding: 5px 10px;
   border-radius: 9px;
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
 }
 
 .toolCheck {
   color: var(--success, #2ea043);
 }
 
-/* --- typing indicator --- */
 .typing {
   display: inline-flex;
   align-items: center;
@@ -145,7 +420,7 @@
   padding: 6px 12px;
   border-radius: 12px;
   border-bottom-left-radius: 4px;
-  background: var(--surface);
+  background: var(--bg-secondary);
   border: 1px solid var(--border);
   width: fit-content;
 }
@@ -256,9 +531,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-top: 1px solid var(--border);
-  background: var(--surface);
 }
 
 .chips {
@@ -277,7 +551,7 @@
   background: var(--bg-secondary);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease;
 }
@@ -299,7 +573,7 @@
 
 .inputMock {
   flex: 1;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   color: var(--text-secondary);
 }
 
@@ -319,7 +593,7 @@
 }
 
 .composerCompact .inputMock {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
 }
 
 .composerRoomy .inputRow {
@@ -327,5 +601,5 @@
 }
 
 .composerRoomy .inputMock {
-  font-size: 0.95rem;
+  font-size: 0.94rem;
 }

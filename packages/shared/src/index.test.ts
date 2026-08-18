@@ -419,6 +419,8 @@ describe("DEFAULT_SETTINGS", () => {
     chatVoiceInput: true,
     chatTreeShowArchive: true,
     chatTreeDensity: "cozy",
+    chatTreeElements: ["newChat", "search", "searchMsgs", "folderAdd", "pin", "archive", "more"],
+    chatHeaderSize: "default",
     chatToolbarSize: "default",
     mcpServers: [],
   };

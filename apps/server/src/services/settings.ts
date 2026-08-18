@@ -89,6 +89,16 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.chatTreeDensity !== "cozy" && merged.chatTreeDensity !== "compact") {
     merged.chatTreeDensity = DEFAULT_SETTINGS.chatTreeDensity;
   }
+  if (!Array.isArray(merged.chatTreeElements)) {
+    merged.chatTreeElements = [...DEFAULT_SETTINGS.chatTreeElements];
+  }
+  if (
+    merged.chatHeaderSize !== "compact" &&
+    merged.chatHeaderSize !== "default" &&
+    merged.chatHeaderSize !== "roomy"
+  ) {
+    merged.chatHeaderSize = DEFAULT_SETTINGS.chatHeaderSize;
+  }
   if (
     merged.chatToolbarSize !== "compact" &&
     merged.chatToolbarSize !== "default" &&
