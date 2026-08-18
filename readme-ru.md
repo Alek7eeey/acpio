@@ -12,23 +12,38 @@
 
 ## Быстрый старт
 
+**Установка в один клик (Windows)** — нужен Node 20+ (ставится автоматически
+при первом запуске):
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+```
+
+**Из исходников (прод, один порт):**
+
 ```bash
-# 1. Env
-copy .env.example .env   # Windows
-# cp .env.example .env   # macOS/Linux
-
-# 2. Install
 npm install
+npm run build
+npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+```
 
-# 3. Dev
-npm run dev
+**Разработка (hot reload):**
+
+```bash
+npm install
+npm run dev       # UI http://localhost:5173, API http://localhost:3001
 ```
 
 > Схема БД создаётся автоматически при старте сервера (идемпотентный
 > `ensureSchema`). Опционально: `npm run db:push` для (пере)создания через drizzle-kit.
+> `.env` опционален — все настройки имеют рабочие значения по умолчанию
+> (см. «Прод-сборка»).
 
-- Web: [http://localhost:5173](http://localhost:5173)
-- API: [http://localhost:3001](http://localhost:3001)
+> **После обновления кода** (`git pull`) сделай **hard refresh** в браузере (`Ctrl+Shift+R`).
+> Браузер кеширует старые CSS/JS модули, и без hard refresh новые правки могут не примениться.
+
+- Прод: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
+- Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
 - Файл БД: `data/acprocess.db` (переопределяется через `DATABASE_PATH` в `.env`)
 
 ## Скриншоты
@@ -83,9 +98,9 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\a
 
 ## Телефон и VPN
 
-Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN.
+Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN. Прод-сборка работает так же на порту **3001**.
 
-1. На ПК запустите `npm run dev`.
+1. На ПК запустите `npm run dev` (или `npm run start` — прод, один порт).
 2. Подключите телефон к тому же VPN/LAN, что и ПК (WireGuard, Tailscale и т.п.).
 3. Узнайте IP ПК в VPN/LAN (не `0.0.0.0` и не `localhost`) и откройте на телефоне `http://IP_ПК:5173`.
 4. При необходимости разрешите входящий TCP **5173** (и **3001**) в файрволе Windows.

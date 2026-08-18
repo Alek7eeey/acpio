@@ -12,34 +12,45 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 
 ## Quick start
 
+**One-click install (Windows)** — Node 20+ is required and installed
+automatically on the first run:
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+```
+
+**From source (production, single port):**
+
 ```bash
-# 1. Env
-copy .env.example .env   # Windows
-# cp .env.example .env   # macOS/Linux
-
-# 2. Install
 npm install
+npm run build
+npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+```
 
-# 3. Dev
-npm run dev
+**Development (hot reload):**
+
+```bash
+npm install
+npm run dev       # UI http://localhost:5173, API http://localhost:3001
 ```
 
 > The DB schema is created automatically at server boot (idempotent
 > `ensureSchema`). Optional: `npm run db:push` to (re)generate it via drizzle-kit.
+> `.env` is optional — all settings have working defaults (see "Production build").
 
 > **After pulling code updates** (`git pull`) do a **hard refresh** in the browser
 > (`Ctrl+Shift+R`). Browsers cache old CSS/JS modules, and without a hard refresh
 > new changes may not show up.
 
-- Web: [http://localhost:5173](http://localhost:5173)
-- API: [http://localhost:3001](http://localhost:3001)
+- Prod: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
+- Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
 - DB file: `data/acprocess.db` (override with `DATABASE_PATH` in `.env`)
 
 ## Screenshots
 
 | Chat (light) | Chat (dark) | Settings |
 |---|---|---|
-| ![Chat light](docs/screens/chat-light.webp) | ![Chat dark](docs/screens/chat-dark.webp) | ![Settings](docs/screens/settings.webp) |
+| ![Chat light](docs/screens/chat-light-en.webp) | ![Chat dark](docs/screens/chat-dark-en.webp) | ![Settings](docs/screens/settings-en.webp) |
 
 ## Production build
 
@@ -87,9 +98,9 @@ Production env vars: `PORT` (default 3001), `HOST` (default `0.0.0.0`),
 
 ## Phone and VPN
 
-The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI from a phone via the PC's IP on the same network or VPN.
+The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI from a phone via the PC's IP on the same network or VPN. The production build works the same way on port **3001**.
 
-1. Start `npm run dev` on the PC.
+1. Start `npm run dev` on the PC (or `npm run start` for the single-port prod build).
 2. Connect the phone to the same VPN/LAN as the PC (WireGuard, Tailscale, etc.).
 3. Find the PC's IP in the VPN/LAN (not `0.0.0.0` and not `localhost`) and open `http://PC_IP:5173` on the phone.
 4. If needed, allow inbound TCP **5173** (and **3001**) in the Windows firewall.
