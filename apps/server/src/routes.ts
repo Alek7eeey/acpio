@@ -47,7 +47,6 @@ import { browseDirectory } from "./services/browseDirectory.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
-import { piperSpeakMixed, piperStatus, resolvePiperVoice } from "./services/piper.js";
 import {
   defaultDiagnosticsDir,
   deleteDiagnosticsDump,
@@ -145,46 +144,6 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/health", async () => ({ ok: true }));
-
-  app.get("/api/tts/ping", async () => {
-    const name = (v: { file: string; id: string } | null) =>
-      v ? v.file.replace(/\.onnx$/, "") : null;
-    return {
-      ...piperStatus(),
-      voicesByGender: {
-        female: {
-          ru: name(resolvePiperVoice("ru", "female")),
-          en: name(resolvePiperVoice("en", "female")),
-        },
-        male: {
-          ru: name(resolvePiperVoice("ru", "male")),
-          en: name(resolvePiperVoice("en", "male")),
-        },
-      },
-    };
-  });
-
-  app.get("/api/tts/speak", async (req, reply) => {
-    const q = req.query as { text?: string; gender?: string };
-    const text = typeof q.text === "string" ? q.text.trim() : "";
-    if (!text) {
-      return reply.code(400).send({ error: "text required" });
-    }
-    const gender =
-      q.gender === "male" || q.gender === "female" ? q.gender : "";
-    const ruVoice = resolvePiperVoice("ru", gender);
-    const enVoice = resolvePiperVoice("en", gender);
-    if (!ruVoice && !enVoice) {
-      return reply.code(501).send({ error: "Piper not available", status: piperStatus() });
-    }
-    try {
-      const wav = await piperSpeakMixed(text, ruVoice, enVoice);
-      return reply.type("audio/wav").header("Cache-Control", "no-store").send(wav);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return reply.code(500).send({ error: message });
-    }
-  });
 
   app.get("/api/export/default-dir", async () => ({ path: defaultExportDir() }));
 

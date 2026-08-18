@@ -122,12 +122,7 @@ export function SettingsPage() {
   const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
-  const [ttsEngine, setTtsEngine] = useState<"unknown" | "piper" | "browser">("unknown");
-  const [ttsVoicesByGender, setTtsVoicesByGender] = useState<{
-    female: { ru: string | null; en: string | null };
-    male: { ru: string | null; en: string | null };
-  } | null>(null);
-  const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "piper" | "browser">("idle");
+  const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "browser">("idle");
   const [models, setModels] = useState<Array<{ value: string; name: string }>>([]);
   const [modelParams, setModelParams] = useState<ModelParamDto[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -225,31 +220,6 @@ export function SettingsPage() {
     return () => {
       synth.removeEventListener?.("voiceschanged", onChanged);
       synth.onvoiceschanged = null;
-    };
-  }, [section, leaf]);
-
-  useEffect(() => {
-    if (section !== "interface" || leaf !== "voice") return;
-    let cancelled = false;
-    fetch("/api/tts/ping")
-      .then((r) => r.json())
-      .then((d: { available?: boolean; voicesByGender?: unknown }) => {
-        if (cancelled) return;
-        setTtsEngine(d.available ? "piper" : "browser");
-        if (d.voicesByGender) {
-          setTtsVoicesByGender(
-            d.voicesByGender as {
-              female: { ru: string | null; en: string | null };
-              male: { ru: string | null; en: string | null };
-            },
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setTtsEngine("browser");
-      });
-    return () => {
-      cancelled = true;
     };
   }, [section, leaf]);
 
@@ -823,8 +793,8 @@ export function SettingsPage() {
                       settings.locale === "en" ? "en" : "ru",
                       form.ttsVoiceGender ?? "",
                       {
+                        onStart: () => setTtsTestEngine("browser"),
                         onEnd: () => setTtsTestEngine("idle"),
-                        onEngine: (engine) => setTtsTestEngine(engine),
                       },
                     );
                   }}
@@ -832,42 +802,9 @@ export function SettingsPage() {
                   {t("settings.ttsTest")}
                 </button>
                 {ttsTestEngine !== "idle" && (
-                  <span className={styles.ttsTestStatus}>
-                    {ttsTestEngine === "piper"
-                      ? t("settings.ttsTestPiper")
-                      : t("settings.ttsTestBrowser")}
-                  </span>
+                  <span className={styles.ttsTestStatus}>{t("settings.ttsTestBrowser")}</span>
                 )}
               </div>
-
-              {ttsEngine !== "unknown" && (
-                <p className={styles.fieldHint}>
-                  {ttsEngine === "piper" ? t("settings.ttsEnginePiper") : t("settings.ttsEngineBrowser")}
-                </p>
-              )}
-
-              {ttsVoicesByGender && (
-                <div className={styles.ttsVoicesGrid}>
-                  {(form.ttsVoiceGender === "" || form.ttsVoiceGender === "female") && (
-                    <p className={styles.fieldHint}>
-                      {t("settings.ttsGenderFemale")}:{" "}
-                      {t("settings.ttsResolvedVoices", {
-                        ru: ttsVoicesByGender.female.ru ?? "—",
-                        en: ttsVoicesByGender.female.en ?? "—",
-                      })}
-                    </p>
-                  )}
-                  {(form.ttsVoiceGender === "" || form.ttsVoiceGender === "male") && (
-                    <p className={styles.fieldHint}>
-                      {t("settings.ttsGenderMale")}:{" "}
-                      {t("settings.ttsResolvedVoices", {
-                        ru: ttsVoicesByGender.male.ru ?? "—",
-                        en: ttsVoicesByGender.male.en ?? "—",
-                      })}
-                    </p>
-                  )}
-                </div>
-              )}
 
               {!ttsHasNatural && (
                 <div className={styles.ttsNaturalWarn}>

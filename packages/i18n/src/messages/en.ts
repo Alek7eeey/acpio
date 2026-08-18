@@ -279,12 +279,8 @@ export const en = {
     ttsNaturalHint:
       "For the most natural sound, install Windows Natural voices: Settings → Time & Language → Speech (Irina, Pavel Natural and more). Free and fully local.",
     ttsOpenWindowsSpeech: "Open Windows speech settings",
-    ttsEnginePiper: "Local neural engine Piper is active — read-aloud sounds the same on Windows and Linux.",
-    ttsEngineBrowser: "Local Piper engine is not installed — browser speech is used instead.",
-    ttsResolvedVoices: "Russian — {{ru}}, English — {{en}}",
     ttsTest: "Test voice",
     ttsTestText: "This is a voice test. Have a nice day!",
-    ttsTestPiper: "Engine: Piper (local)",
     ttsTestBrowser: "Engine: browser speech",
     mcpTitle: "MCP servers",
     mcpHint:

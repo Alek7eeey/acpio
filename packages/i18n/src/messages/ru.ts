@@ -303,13 +303,8 @@ export const ru = {
     ttsNaturalHint:
       "Для максимально естественного звучания установите натуральные голоса Windows: Параметры → Время и язык → Речь (голоса Irina, Pavel Natural и др.). Бесплатно и локально.",
     ttsOpenWindowsSpeech: "Открыть настройки речи Windows",
-    ttsEnginePiper:
-      "Локальный нейро-движок Piper активен — озвучка звучит одинаково на Windows и Linux.",
-    ttsEngineBrowser: "Локальный движок Piper не установлен — используется браузерная озвучка.",
-    ttsResolvedVoices: "русский — {{ru}}, английский — {{en}}",
     ttsTest: "Проверить голос",
     ttsTestText: "Отличный день сегодня. Как у тебя дела?",
-    ttsTestPiper: "Движок: Piper (локальный)",
     ttsTestBrowser: "Движок: браузерная озвучка",
     mcpTitle: "MCP-серверы",
     mcpHint:

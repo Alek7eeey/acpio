@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
@@ -11,7 +10,6 @@ import fastifyStatic from "@fastify/static";
 import { reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
 import { ensureSchema } from "./db/ensureSchema.js";
-import { piperStatus, warmPiper } from "./services/piper.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
@@ -79,26 +77,6 @@ async function main() {
     }
   } catch (err) {
     console.error("[sessions] reconcile failed", err);
-  }
-
-  const tts = piperStatus();
-  if (tts.available) {
-    console.log(`Piper TTS ready (${tts.voices.length} voices) — read-aloud uses the local engine.`);
-    void warmPiper().catch(() => {
-      /* warm-up is best-effort */
-    });
-  } else {
-    console.log("Piper TTS not installed — downloading the local TTS engine (~250 MB, one-time)…");
-    const installer = spawn(process.execPath, [path.join(rootDir, "scripts", "install-piper.mjs")], {
-      stdio: "inherit",
-    });
-    installer.on("exit", (code) => {
-      if (code === 0) {
-        console.log("Piper TTS installed. Restart the server to activate it.");
-      } else {
-        console.log(`Piper install failed (${code}) — browser speech will be used. Retry with: npm run tts:install`);
-      }
-    });
   }
 }
 

@@ -957,11 +957,6 @@
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
 }
 
-.ttsVoicesGrid {
-  display: grid;
-  gap: 4px;
-}
-
 .ttsTestRow {
   display: flex;
   align-items: center;
