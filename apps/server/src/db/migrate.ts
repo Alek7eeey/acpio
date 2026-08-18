@@ -1,18 +1,19 @@
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/postgres-js";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
-import postgres from "postgres";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const url = process.env.DATABASE_URL ?? "postgresql://acprocess:acprocess@localhost:5433/acprocess";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dbPath =
+  process.env.DATABASE_PATH ?? path.resolve(__dirname, "../../../../data/acprocess.db");
 
 async function main() {
-  const client = postgres(url, { max: 1 });
+  const client = new Database(dbPath);
   const db = drizzle(client);
   await migrate(db, { migrationsFolder: path.join(__dirname, "../../drizzle") });
-  await client.end();
+  client.close();
   console.log("Migrations applied");
 }
 

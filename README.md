@@ -8,34 +8,31 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 - `apps/web` — React + Vite + TypeScript
 - `apps/server` — Fastify + WebSocket + ACP stdio bridge
 - `packages/shared` — shared types
-- PostgreSQL (Docker)
+- SQLite (single file `data/acprocess.db`, embedded via better-sqlite3)
 
 ## Quick start
 
 ```bash
-# 1. Postgres (host port 5433, so it doesn't clash with a local PG)
-docker compose up -d
-
-# 2. Env
+# 1. Env
 copy .env.example .env   # Windows
 # cp .env.example .env   # macOS/Linux
 
-# 3. Install
+# 2. Install
 npm install
 
-# 4. DB schema
-npm run db:push
-
-# 5. Dev
+# 3. Dev
 npm run dev
 ```
+
+> The DB schema is created automatically at server boot (idempotent
+> `ensureSchema`). Optional: `npm run db:push` to (re)generate it via drizzle-kit.
 
 > **После обновления кода** (`git pull`) сделай **hard refresh** в браузере (`Ctrl+Shift+R`).
 > Браузер кеширует старые CSS/JS модули, и без hard refresh новые правки могут не примениться.
 
 - Web: [http://localhost:5173](http://localhost:5173)
 - API: [http://localhost:3001](http://localhost:3001)
-- Postgres: `localhost:5433`
+- DB file: `data/acprocess.db` (override with `DATABASE_PATH` in `.env`)
 
 ## Phone and VPN
 
@@ -83,6 +80,6 @@ automatically (provider list, CLI/API-key fields, models) from `GET /api/adapter
 
 ## Architecture
 
-Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ Postgres.
+Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ SQLite.
 
 `session/update` events, permissions, questions, plans and subagent cards are rendered in the chat feed via normalized adapter events.

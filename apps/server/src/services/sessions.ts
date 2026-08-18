@@ -325,7 +325,7 @@ async function lastThoughtPartOfSession(
       id: messageParts.id,
       messageId: messageParts.messageId,
       createdAt: messages.createdAt,
-      text: sql<string>`${messageParts.payload}->>'text'`,
+      text: sql<string>`json_extract(${messageParts.payload}, '$.text')`,
     })
     .from(messageParts)
     .innerJoin(messages, eq(messages.id, messageParts.messageId))
@@ -517,7 +517,7 @@ export async function reconcileStaleSessions(): Promise<{
         and(
           eq(messages.sessionId, sessionId),
           eq(messageParts.type, "error"),
-          eq(sql`(${messageParts.payload}->>'interrupted')`, "true"),
+          eq(sql`json_extract(${messageParts.payload}, '$.interrupted')`, "true"),
         ),
       )
       .limit(1);

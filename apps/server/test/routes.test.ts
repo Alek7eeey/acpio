@@ -1,8 +1,8 @@
-// Route integration tests: Fastify inject against the isolated acprocess_test
-// schema (globalSetup creates it; setup-env pre-wires DATABASE_URL). Covers
-// settings, sessions, themes, search, fs, export, diagnostics and agent
-// status routes with real inject calls. resetDb() wipes all tables between
-// tests; every app instance is closed in afterEach.
+// Route integration tests: Fastify inject against an isolated in-memory
+// SQLite DB (setup-env pre-wires DATABASE_PATH=":memory:"; buildApp boots the
+// schema). Covers settings, sessions, themes, search, fs, export, diagnostics
+// and agent status routes with real inject calls. resetDb() wipes all tables
+// between tests; every app instance is closed in afterEach.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import path from "node:path";

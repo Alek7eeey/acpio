@@ -8,31 +8,28 @@
 - `apps/web` — React + Vite + TypeScript
 - `apps/server` — Fastify + WebSocket + ACP stdio bridge
 - `packages/shared` — общие типы
-- PostgreSQL (Docker)
+- SQLite (один файл `data/acprocess.db`, встроенный через better-sqlite3)
 
 ## Быстрый старт
 
 ```bash
-# 1. Postgres (порт хоста 5433, чтобы не конфликтовать с локальным PG)
-docker compose up -d
-
-# 2. Env
+# 1. Env
 copy .env.example .env   # Windows
 # cp .env.example .env   # macOS/Linux
 
-# 3. Install
+# 2. Install
 npm install
 
-# 4. DB schema
-npm run db:push
-
-# 5. Dev
+# 3. Dev
 npm run dev
 ```
 
+> Схема БД создаётся автоматически при старте сервера (идемпотентный
+> `ensureSchema`). Опционально: `npm run db:push` для (пере)создания через drizzle-kit.
+
 - Web: [http://localhost:5173](http://localhost:5173)
 - API: [http://localhost:3001](http://localhost:3001)
-- Postgres: `localhost:5433`
+- Файл БД: `data/acprocess.db` (переопределяется через `DATABASE_PATH` в `.env`)
 
 ## Телефон и VPN
 
@@ -80,6 +77,6 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 
 ## Архитектура
 
-Браузер ↔ REST/WS сервер ↔ запуск CLI харнесса через реестр адаптеров (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ Postgres.
+Браузер ↔ REST/WS сервер ↔ запуск CLI харнесса через реестр адаптеров (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ SQLite.
 
 События `session/update`, permissions, вопросы, планы и карточки субагентов отображаются в ленте чата через нормализованные события адаптеров.

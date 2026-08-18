@@ -15,13 +15,12 @@ export default defineConfig({
       "apps/*/src/**/*.test.{ts,tsx}",
       "apps/server/test/**/*.test.{ts,tsx}",
     ],
-    // All workers see the test schema (db/client.ts picks this up; the app
-    // .env is loaded by dotenv but never overrides an existing env var).
+    // Each worker process gets its own private in-memory SQLite DB
+    // (db/client.ts picks up DATABASE_PATH; setup-env re-asserts it before
+    // any module import, so the dev DB file is never touched).
     env: {
-      DATABASE_URL:
-        "postgresql://acprocess:acprocess@localhost:5950/acprocess?options=-csearch_path%3Dacprocess_test",
+      DATABASE_PATH: ":memory:",
     },
-    globalSetup: ["apps/server/test/global-setup.ts"],
     setupFiles: ["apps/server/test/setup-env.ts"],
     testTimeout: 20_000,
     hookTimeout: 30_000,

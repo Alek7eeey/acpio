@@ -1,74 +1,95 @@
 import { sql } from "drizzle-orm";
 import { db } from "./client.js";
 
-/** Idempotent schema patches for local/dev without migration files. */
+/**
+ * Idempotent schema bootstrap for local/dev without migration files.
+ * SQLite dialect; mirrors src/db/schema.ts. Called at server boot, so a
+ * fresh clone works without running drizzle-kit push first.
+ */
 export async function ensureSchema() {
-  await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
-
-  await db.execute(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS chat_themes (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      name text NOT NULL,
-      sort_order integer NOT NULL DEFAULT 0,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      path TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
 
-  await db.execute(sql`
-    ALTER TABLE sessions
-    ADD COLUMN IF NOT EXISTS mcp_disabled_ids jsonb NOT NULL DEFAULT '[]'
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      title TEXT NOT NULL DEFAULT 'Новый чат',
+      provider TEXT NOT NULL DEFAULT 'cursor',
+      cwd TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'agent',
+      status TEXT NOT NULL DEFAULT 'idle',
+      acp_session_id TEXT,
+      theme_id TEXT REFERENCES chat_themes(id) ON DELETE SET NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      archived INTEGER NOT NULL DEFAULT 0,
+      mcp_disabled_ids TEXT NOT NULL DEFAULT '[]',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
   `);
 
-  await db.execute(sql`
-    ALTER TABLE sessions
-    ADD COLUMN IF NOT EXISTS theme_id uuid REFERENCES chat_themes(id) ON DELETE SET NULL
-  `);
-  await db.execute(sql`
-    ALTER TABLE sessions
-    ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0
-  `);
-
-  await db.execute(sql`
-    ALTER TABLE chat_themes
-    ADD COLUMN IF NOT EXISTS path text NOT NULL DEFAULT ''
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
   `);
 
-  await db.execute(sql`
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS message_parts (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      "order" INTEGER NOT NULL DEFAULT 0,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
+  `);
+
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
+  `);
+
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS users (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      username text NOT NULL UNIQUE,
-      display_name text NOT NULL DEFAULT '',
-      password_hash text NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL DEFAULT '',
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      connected_provider TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
-  await db.execute(sql`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS display_name text NOT NULL DEFAULT ''
-  `);
-  await db.execute(sql`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'user'
-  `);
-  await db.execute(sql`
-    ALTER TABLE users
-    ADD COLUMN IF NOT EXISTS connected_provider text
-  `);
 
-  await db.execute(sql`
+  db.run(sql`
     CREATE TABLE IF NOT EXISTS auth_sessions (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash text NOT NULL UNIQUE,
-      expires_at timestamptz NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT now()
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
 
   // Drop legacy seed themes — chats stay, just ungrouped (ON DELETE SET NULL).
-  await db.execute(sql`
+  db.run(sql`
     DELETE FROM chat_themes
     WHERE name IN ('Общее', 'Работа', 'Идеи')
   `);

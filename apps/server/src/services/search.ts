@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
 
@@ -25,14 +25,14 @@ function buildSnippet(text: string, needle: string): string {
 
 /**
  * Full-text search over every session's text parts (user + assistant).
- * Postgres ILIKE with escaped % / _ / \ — fine at this scale; ordered by
- * message recency so the freshest hits come first.
+ * SQLite's LIKE (and lower()) only folds ASCII, so case-insensitive matching
+ * for Cyrillic is done in JS over the text parts, ordered by message recency
+ * so the freshest hits come first. Fine at this scale (local single-user).
  */
 export async function searchMessages(raw: string, limit = 50): Promise<MessageSearchHit[]> {
   const needle = raw.trim();
   if (!needle) return [];
-  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-  const like = `%${escaped}%`;
+  const needleLower = needle.toLowerCase();
 
   const rows = await db
     .select({
@@ -42,27 +42,24 @@ export async function searchMessages(raw: string, limit = 50): Promise<MessageSe
       partId: messageParts.id,
       role: messages.role,
       createdAt: messageParts.createdAt,
-      text: sql<string>`${messageParts.payload}->>'text'`,
+      text: sql<string>`json_extract(${messageParts.payload}, '$.text')`,
     })
     .from(messageParts)
     .innerJoin(messages, eq(messageParts.messageId, messages.id))
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(
-      and(
-        eq(messageParts.type, "text"),
-        sql`${messageParts.payload}->>'text' ILIKE ${like} ESCAPE '\\'`,
-      ),
-    )
-    .orderBy(desc(messages.createdAt))
-    .limit(limit);
+    .where(eq(messageParts.type, "text"))
+    .orderBy(desc(messages.createdAt));
 
-  return rows.map((r) => ({
-    sessionId: r.sessionId,
-    sessionTitle: r.sessionTitle,
-    messageId: r.messageId,
-    partId: r.partId,
-    role: r.role,
-    snippet: buildSnippet(r.text ?? "", needle),
-    createdAt: r.createdAt.toISOString(),
-  }));
+  return rows
+    .filter((r) => (r.text ?? "").toLowerCase().includes(needleLower))
+    .slice(0, limit)
+    .map((r) => ({
+      sessionId: r.sessionId,
+      sessionTitle: r.sessionTitle,
+      messageId: r.messageId,
+      partId: r.partId,
+      role: r.role,
+      snippet: buildSnippet(r.text ?? "", needle),
+      createdAt: r.createdAt.toISOString(),
+    }));
 }

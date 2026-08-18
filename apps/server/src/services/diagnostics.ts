@@ -99,7 +99,7 @@ export async function writeDiagnosticsDump(input: {
       },
       env: {
         NODE_ENV: process.env.NODE_ENV ?? "",
-        hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+        hasDatabasePath: Boolean(process.env.DATABASE_PATH),
       },
     },
   };
