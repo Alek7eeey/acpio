@@ -249,6 +249,9 @@
 
 .railMenuItem {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   border: none;
   background: transparent;
   text-align: left;
@@ -267,10 +270,27 @@
 }
 
 .railMenuItemText {
+  flex: 1 1 auto;
+  min-width: 0;
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.railMenuItemActive {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.railMenuItemActive:hover {
+  background: var(--accent-soft);
+}
+
+.railMenuItemCheck {
+  flex: 0 0 auto;
+  margin-left: 8px;
+  color: var(--accent);
 }
 
 .moduleTitle {

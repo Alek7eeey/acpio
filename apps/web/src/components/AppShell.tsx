@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { modelDisplayName } from "@acprocess/shared";
@@ -146,8 +146,14 @@ export function AppShell() {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [railRecentsPos, setRailRecentsPos] = useState<{ x: number; y: number } | null>(null);
   const [railFolderPicker, setRailFolderPicker] = useState<{ x: number; y: number } | null>(null);
+  const [railSettingsMenu, setRailSettingsMenu] = useState<{
+    section: SettingsSection;
+    x: number;
+    y: number;
+  } | null>(null);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const railRecentsRef = useRef<HTMLDivElement>(null);
+  const railSettingsRef = useRef<HTMLDivElement>(null);
 
   const railMode = showSidebar && !sidebarOpen && settings.sidebarCollapse === "rail";
 
@@ -180,12 +186,43 @@ export function AppShell() {
     };
   }, [railRecentsPos]);
 
+  useEffect(() => {
+    if (!railSettingsMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (railSettingsRef.current?.contains(e.target as Node)) return;
+      setRailSettingsMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRailSettingsMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [railSettingsMenu]);
+
   const openRailRecents = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setRailFolderPicker(null);
     setRailRecentsPos({
       x: Math.min(rect.right + 8, window.innerWidth - 300),
       y: Math.min(rect.top, window.innerHeight - 360),
+    });
+  };
+
+  const openRailSettings = (
+    e: ReactMouseEvent<HTMLButtonElement>,
+    section: SettingsSection,
+  ) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRailRecentsPos(null);
+    setRailFolderPicker(null);
+    setRailSettingsMenu({
+      section,
+      x: Math.min(rect.right + 8, window.innerWidth - 300),
+      y: Math.min(rect.top, window.innerHeight - 420),
     });
   };
 
@@ -430,11 +467,12 @@ export function AppShell() {
                       } ${activeBranch && hasChildren ? styles.settingsItemParent : ""}`}
                       onClick={() => {
                         if (hasChildren) {
+                          const switching = settingsNav.section !== branch.id;
                           setOpenBranches((prev) => ({
                             ...prev,
-                            [branch.id]: !(prev[branch.id] ?? true),
+                            [branch.id]: switching ? true : !(prev[branch.id] ?? true),
                           }));
-                          goSettings(branch.id, defaultLeafFor(branch.id));
+                          if (switching) goSettings(branch.id, defaultLeafFor(branch.id));
                         } else {
                           goSettings(branch.id);
                         }
@@ -536,7 +574,6 @@ export function AppShell() {
           </button>
           {isSettings ? (
             settingsTree.map((branch) => {
-              const hasChildren = branch.children.length > 0;
               const active = settingsNav.section === branch.id;
               return (
                 <button
@@ -545,16 +582,8 @@ export function AppShell() {
                   className={`${styles.railBtn}${active ? ` ${styles.railBtnActive}` : ""}`}
                   title={branch.label}
                   aria-label={branch.label}
-                  onClick={() => {
-                    setRailRecentsPos(null);
-                    setRailFolderPicker(null);
-                    if (hasChildren) {
-                      setOpenBranches((prev) => ({ ...prev, [branch.id]: true }));
-                      goSettings(branch.id, defaultLeafFor(branch.id));
-                    } else {
-                      goSettings(branch.id);
-                    }
-                  }}
+                  aria-expanded={railSettingsMenu?.section === branch.id}
+                  onClick={(e) => openRailSettings(e, branch.id)}
                 >
                   {branch.id === "agent" ? (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -720,6 +749,63 @@ export function AppShell() {
               </div>,
               document.body,
             )}
+
+          {railSettingsMenu && (
+            (() => {
+              const branch = settingsTree.find((b) => b.id === railSettingsMenu.section);
+              if (!branch) return null;
+              return createPortal(
+                <div
+                  ref={railSettingsRef}
+                  className={styles.railMenu}
+                  style={{ left: railSettingsMenu.x, top: railSettingsMenu.y }}
+                  role="menu"
+                  aria-label={branch.label}
+                >
+                  <div className={styles.railMenuHead}>{branch.label}</div>
+                  {branch.children.map((leaf) => {
+                    const active =
+                      settingsNav.section === branch.id && settingsNav.leaf === leaf.id;
+                    return (
+                      <button
+                        key={leaf.id}
+                        type="button"
+                        role="menuitem"
+                        className={`${styles.railMenuItem}${
+                          active ? ` ${styles.railMenuItemActive}` : ""
+                        }`}
+                        onClick={() => {
+                          setRailSettingsMenu(null);
+                          goSettings(branch.id, leaf.id);
+                        }}
+                      >
+                        <span className={styles.railMenuItemText}>{leaf.label}</span>
+                        {active ? (
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            aria-hidden
+                            className={styles.railMenuItemCheck}
+                          >
+                            <path
+                              d="M5 12.5l4.5 4.5L19 7.5"
+                              stroke="currentColor"
+                              strokeWidth="2.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>,
+                document.body,
+              );
+            })()
+          )}
 
           {railFolderPicker && (
             <CreateSessionFolderPicker
