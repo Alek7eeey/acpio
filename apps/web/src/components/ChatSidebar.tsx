@@ -905,53 +905,51 @@ export function ChatSidebar({
 
         {settings.chatTreeElements.includes("search") && (
         <div className={styles.chatSearch}>
-          <div className={styles.chatSearchField}>
+          <div className={styles.settingsSearch}>
             <svg
-              className={styles.chatSearchIcon}
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden
-          >
-            <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-            <path
-              d="M16 16l4.5 4.5"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-            />
-          </svg>
-          <input
-            ref={searchInputRef}
-            className={styles.chatSearchInput}
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t("chat.searchPlaceholder")}
-            aria-label={t("chat.searchPlaceholder")}
-          />
-          {searchQuery ? (
-            <button
-              type="button"
-              className={styles.chatSearchClear}
-              aria-label={t("chat.clearSearch")}
-              title={t("chat.clearSearch")}
-              onClick={() => {
-                setSearchQuery("");
-                searchInputRef.current?.focus();
-              }}
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M6 6l12 12M18 6 6 18"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
+              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+              <path
+                d="M16 16l4.5 4.5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t("chat.searchPlaceholder")}
+              aria-label={t("chat.searchPlaceholder")}
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                className={styles.settingsSearchClear}
+                aria-label={t("chat.clearSearch")}
+                title={t("chat.clearSearch")}
+                onClick={() => {
+                  setSearchQuery("");
+                  searchInputRef.current?.focus();
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M6 6l12 12M18 6 6 18"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            ) : null}
           </div>
           {onSearchMessages && settings.chatTreeElements.includes("searchMsgs") ? (
             <button
