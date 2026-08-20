@@ -605,7 +605,7 @@ export type WsServerEvent =
       type: "question.request";
       sessionId: string;
       requestId: string;
-      kind: "ask_question" | "create_plan";
+      kind: "ask_question" | "create_plan" | "switch_mode";
       payload: Record<string, unknown>;
     }
   | {

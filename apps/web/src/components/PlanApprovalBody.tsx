@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { MarkdownContent } from "./MarkdownContent";
 import { useT } from "../lib/i18n";
 import styles from "./Modal.module.css";
@@ -27,17 +28,49 @@ function todoLabel(todo: PlanTodo) {
 }
 
 function TodoList({ todos }: { todos: PlanTodo[] }) {
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
   if (!todos.length) return null;
   return (
     <ul className={styles.planTodos}>
       {todos.map((todo, i) => {
         const label = todoLabel(todo);
         if (!label) return null;
-        const status = String(todo.status ?? "pending").toLowerCase();
+        const key = todo.id ?? `${label}-${i}`;
+        const baseStatus = String(todo.status ?? "pending").toLowerCase();
+        const done =
+          baseStatus === "completed" || baseStatus === "complete" || toggled[key] === true;
+        const status = done ? "completed" : baseStatus;
+        const toggle = () => setToggled((p) => ({ ...p, [key]: !p[key] }));
         return (
-          <li key={todo.id ?? `${label}-${i}`} className={styles.planTodo} data-status={status}>
-            <span className={styles.planTodoMark} aria-hidden />
-            <span>{label}</span>
+          <li
+            key={key}
+            className={styles.planTodo}
+            data-status={status}
+            role="checkbox"
+            aria-checked={done}
+            tabIndex={0}
+            onClick={toggle}
+            onKeyDown={(e) => {
+              if (e.key === " " || e.key === "Enter") {
+                e.preventDefault();
+                toggle();
+              }
+            }}
+          >
+            <span className={styles.planTodoMark} aria-hidden>
+              {done ? (
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M5 12.5l5 5L19 7.5"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : null}
+            </span>
+            <span className={styles.planTodoLabel}>{label}</span>
           </li>
         );
       })}

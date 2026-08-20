@@ -58,14 +58,79 @@ export function coerceUiMode(raw: string): AgentMode | null {
   return null;
 }
 
-async function applyAgentReportedMode(rt: SessionRuntime, rawModeId: string) {
+async function applyAgentReportedMode(
+  rt: SessionRuntime,
+  rawModeId: string,
+  opts?: { promptable?: boolean },
+) {
   const mode = coerceUiMode(rawModeId);
   if (!mode) return;
-  rt.client?.applyReportedMode(mode);
+
+  // First report from the agent is the session baseline — apply silently so we
+  // don't pop a consent window on every connect/resume or mode echo.
+  if (!rt.modeSynced) {
+    rt.client?.applyReportedMode(mode);
+    rt.modeSynced = true;
+    const detail = await getSessionDetail(rt.sessionId);
+    if (detail?.mode !== mode) {
+      await updateSession(rt.sessionId, { mode });
+      await updateSettings({ defaultMode: mode });
+    }
+    return;
+  }
+
   const detail = await getSessionDetail(rt.sessionId);
-  if (detail?.mode === mode) return;
-  await updateSettings({ defaultMode: mode });
-  await updateSession(rt.sessionId, { mode });
+  const current = (detail?.mode ?? "agent") as AgentMode;
+  // Idempotent echo (e.g. config_options repeating the active mode) — no prompt.
+  if (current === mode) {
+    rt.client?.applyReportedMode(mode);
+    return;
+  }
+
+  // Non-promptable genuine change (config sync) — apply silently.
+  if (!opts?.promptable) {
+    rt.client?.applyReportedMode(mode);
+    await updateSession(rt.sessionId, { mode });
+    await updateSettings({ defaultMode: mode });
+    return;
+  }
+
+  // Genuine agent-initiated switch mid-conversation → ask the user first.
+  const previousMode = current;
+  const rpcId = `switch-mode-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const reqKey = requestIdFor(rt.sessionId, rpcId);
+
+  broadcastToSession(rt.sessionId, {
+    type: "question.request",
+    sessionId: rt.sessionId,
+    requestId: reqKey,
+    kind: "switch_mode",
+    payload: { mode, previousMode },
+  });
+  await updateSession(rt.sessionId, { status: "waiting" });
+
+  const answer = await new Promise<{ outcome?: string } | undefined>((resolve) => {
+    rt.pending.set(reqKey, {
+      kind: "switch_mode",
+      rpcId: reqKey,
+      mode,
+      previousMode,
+      resolve: (v) => resolve(v as { outcome?: string } | undefined),
+    });
+  });
+
+  if (answer && answer.outcome === "accepted") {
+    rt.client?.applyReportedMode(mode);
+    await updateSession(rt.sessionId, { mode });
+    await updateSettings({ defaultMode: mode });
+  } else {
+    // Rejected or cancelled: keep the current mode, best-effort revert on agent side.
+    try {
+      await rt.client?.setMode(previousMode);
+    } catch {
+      /* agent may not support a live set_mode */
+    }
+  }
 }
 
 /** Whether an ACP tool `kind` denotes a nested agent for this harness. */
@@ -248,9 +313,12 @@ function pickCurrentModel(
 
 type PendingRequest = {
   resolve: (value: unknown) => void;
-  kind: AcpRequest["kind"];
+  kind: AcpRequest["kind"] | "switch_mode";
   /** Original JSON-RPC id from the agent (number | string) — do not re-parse from the URL key. */
   rpcId: string | number;
+  /** For synthetic switch_mode consents: requested and previous session mode. */
+  mode?: AgentMode;
+  previousMode?: AgentMode;
 };
 
 type TurnOpts = {
@@ -372,6 +440,8 @@ class SessionRuntime {
   subagentThinkingPoll = new Map<string, SubagentThinkingPoll>();
   /** Subagents whose terminal transcript snapshot was already attached. */
   subagentTranscriptDone = new Set<string>();
+  /** True once the agent has reported its initial mode — later changes prompt for consent. */
+  modeSynced = false;
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
@@ -722,7 +792,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "current_mode") {
-    await applyAgentReportedMode(rt, update.modeId);
+    await applyAgentReportedMode(rt, update.modeId, { promptable: true });
     return;
   }
 
@@ -730,7 +800,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     rt.client?.applyConfigOptionsUpdate(update.configOptions);
     const modeOpt = findModeConfigOption(rt.client?.configOptions ?? update.configOptions);
     if (modeOpt?.currentValue) {
-      await applyAgentReportedMode(rt, String(modeOpt.currentValue));
+      await applyAgentReportedMode(rt, String(modeOpt.currentValue), { promptable: false });
     }
     return;
   }
@@ -2209,6 +2279,15 @@ export function answerQuestion(
   if (!rt) throw new Error("Runtime not found");
   const pending = rt.pending.get(requestId);
   if (!pending) throw new Error("Question request not found");
+
+  // switch_mode is a synthetic consent (the agent already switched on its
+  // side), so there is no ACP request to answer — just resolve the waiter.
+  if (pending.kind === "switch_mode") {
+    pending.resolve(result);
+    rt.pending.delete(requestId);
+    void updateSession(sessionId, { status: "running" });
+    return;
+  }
 
   const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
 

@@ -186,6 +186,35 @@ export function ChatInlinePrompt({ onOpenPlan }: { onOpenPlan?: () => void }) {
       </div>
     );
   }
+  if (pendingQuestion?.kind === "switch_mode") {
+    const mode = String(pendingQuestion.payload.mode ?? "").trim() || "plan";
+    const modeName = t(`modes.${mode}`) || mode;
+    return (
+      <div className={styles.card} role="group" aria-label={t("question.modeSwitch")}>
+        <div className={styles.eyebrow}>{t("question.modeSwitch")}</div>
+        <div className={styles.title}>{t("question.modeSwitchTitle", { mode: modeName })}</div>
+        <p className={styles.overview}>{t("question.modeSwitchHint")}</p>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.danger}
+            onClick={() =>
+              void answerQuestion({ outcome: { outcome: "rejected", reason: "rejected by user" } })
+            }
+          >
+            {t("common.reject")}
+          </button>
+          <button
+            type="button"
+            className={styles.primary}
+            onClick={() => void answerQuestion({ outcome: { outcome: "accepted" } })}
+          >
+            {t("common.accept")}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (pendingQuestion?.kind === "ask_question") {
     return (

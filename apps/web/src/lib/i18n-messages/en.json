@@ -476,7 +476,10 @@
     "todos": "Todos",
     "planReady": "Plan ready for approval",
     "planAwaiting": "Awaiting",
-    "openPlan": "Open plan"
+    "openPlan": "Open plan",
+    "modeSwitch": "Mode switch suggested",
+    "modeSwitchTitle": "Switch to {{mode}}?",
+    "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode."
   },
   "modes": {
     "label": "Mode",
