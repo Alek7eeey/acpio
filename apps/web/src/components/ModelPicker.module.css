@@ -515,6 +515,20 @@
   }
 }
 
+@media (max-width: 899px) {
+  /* Settings switches to its mobile nav (chips) below 900px; shrink the
+     full-width selector buttons so more fit on a phone screen. */
+  .modelTriggerBlock {
+    padding: 5px 9px;
+    font-size: 0.84rem;
+    border-radius: 9px;
+  }
+
+  .modelTriggerBlock .modelTriggerText {
+    font-size: 0.8rem;
+  }
+}
+
 @media (max-width: 700px) {
   .modelTrigger {
     max-width: min(280px, 72vw);
