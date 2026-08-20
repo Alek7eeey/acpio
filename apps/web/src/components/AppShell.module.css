@@ -90,6 +90,30 @@
 .headerBrand:hover {
   background: var(--bg-tertiary);
 }
+/* App title hops when the tree (sidebar) collapses or expands (desktop only). */
+@media (min-width: 900px) {
+  .brandBump {
+    animation: brandJump 0.42s cubic-bezier(0.28, 0.84, 0.42, 1);
+  }
+}
+
+@keyframes brandJump {
+  0% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-7px);
+  }
+  55% {
+    transform: translateY(0);
+  }
+  72% {
+    transform: translateY(-3px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
 
 /* The brand lives in the tree next to the collapse button when the desktop
    sidebar is open; the header slot only shows it when the sidebar is

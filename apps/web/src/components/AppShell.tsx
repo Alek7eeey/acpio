@@ -156,6 +156,16 @@ export function AppShell() {
   const railSettingsRef = useRef<HTMLDivElement>(null);
 
   const railMode = showSidebar && !sidebarOpen && settings.sidebarCollapse === "rail";
+  // Bounce the app title whenever the tree (sidebar) collapses or expands.
+  const [brandBump, setBrandBump] = useState(false);
+  const prevSidebarOpen = useRef(sidebarOpen);
+  useEffect(() => {
+    if (prevSidebarOpen.current === sidebarOpen) return;
+    prevSidebarOpen.current = sidebarOpen;
+    setBrandBump(true);
+    const id = window.setTimeout(() => setBrandBump(false), 460);
+    return () => window.clearTimeout(id);
+  }, [sidebarOpen]);
 
   const recentSessions = useMemo(() => {
     const sorted = [...sessions].sort((a, b) =>
@@ -355,7 +365,7 @@ export function AppShell() {
   const brandButton = (
     <button
       type="button"
-      className={styles.headerBrand}
+      className={`${styles.headerBrand} ${brandBump ? styles.brandBump : ""}`}
       onClick={goChat}
       title={t("common.goToChat")}
       aria-label="ACProcess chat"
