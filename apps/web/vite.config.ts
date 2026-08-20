@@ -47,9 +47,10 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api/, /^\/ws/],
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
       },
-      // Dev SW is disabled: its fetch interception intermittently corrupts
-      // binary API responses (e.g. TTS audio). Production still gets a proper
-      // SW that never touches /api.
+      // Full Workbox SW stays off in dev — its fetch path intermittently corrupted
+      // binary /api (TTS). Installability in `npm run dev` uses public/pwa-dev-sw.js
+      // (registered from main.tsx). Production still gets a proper SW that never
+      // touches /api (navigateFallbackDenylist).
       devOptions: {
         enabled: false,
       },

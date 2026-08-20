@@ -101,6 +101,37 @@ export function InstallAppButton({ className }: InstallAppButtonProps) {
       return;
     }
 
+    // BIP may arrive right after SW activates — wait briefly before showing hints.
+    if (!ios && "serviceWorker" in navigator) {
+      setBusy(true);
+      try {
+        await navigator.serviceWorker.ready;
+        await new Promise<void>((resolve) => {
+          if (getDeferredInstallPrompt()) {
+            resolve();
+            return;
+          }
+          const done = () => {
+            window.clearTimeout(timer);
+            unsub();
+            resolve();
+          };
+          const unsub = subscribePwaInstall(() => {
+            if (getDeferredInstallPrompt()) done();
+          });
+          const timer = window.setTimeout(done, 2500);
+        });
+        if (getDeferredInstallPrompt()) {
+          setOpen(false);
+          const outcome = await promptPwaInstall();
+          if (outcome === "unavailable") setOpen(true);
+          return;
+        }
+      } finally {
+        setBusy(false);
+      }
+    }
+
     // iOS or Chromium without a ready prompt → show instructions / status.
     setOpen((v) => !v);
   };
