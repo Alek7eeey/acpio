@@ -279,6 +279,11 @@ export const ru = {
     voiceUnsupported: "Голосовой ввод не поддерживается этим браузером",
     voiceBlocked: "Доступ к микрофону запрещён — разрешите его в браузере",
     loadingChat: "Загружаем чат…",
+    contextUnit: "ток",
+    contextTooltip:
+      "Оценка контекста этого чата: {{tokens}} токенов ({{chars}} символов)",
+    contextAcpTooltip:
+      "Контекст по ACP: {{used}} / {{window}} токенов, стоимость {{cost}}",
   },
   settings: {
     agents: "Агенты",
@@ -326,6 +331,7 @@ export const ru = {
     chatMetaChipFolder: "Папка",
     chatMetaChipThoughts: "Размышления",
     chatMetaChipMcp: "MCP-серверы",
+    chatMetaChipContext: "Контекст",
     chatEnterToSend: "Enter отправляет сообщение",
     chatEnterToSendHint: "Выкл: Enter — новая строка, отправка по Ctrl+Enter.",
     chatShowMessageTime: "Время сообщений",

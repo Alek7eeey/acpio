@@ -1272,6 +1272,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
+    if (event.type === "session.usage") {
+      const sessions = state.sessions.map((s) =>
+        s.id === event.sessionId ? { ...s, usage: event.usage } : s,
+      );
+      const activeSession =
+        state.activeSession?.id === event.sessionId
+          ? { ...state.activeSession, usage: event.usage }
+          : state.activeSession;
+      if (activeSession && state.activeSession?.id === event.sessionId) {
+        rememberSessionDetail(activeSession);
+      }
+      set({ sessions, activeSession });
+      return;
+    }
     if (event.type === "message.created") {
       const nextSessions = state.sessions.map((s) =>
         s.id === event.sessionId

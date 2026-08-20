@@ -8,6 +8,7 @@ import type {
   AgentMode,
   AgentProvider,
   SessionStatus,
+  AcpUsage,
 } from "@acprocess/shared";
 import { defaultSessionTitle } from "@acprocess/i18n";
 import { db } from "../db/client.js";
@@ -44,6 +45,7 @@ function mapSession(
     createdAt,
     updatedAt: row.updatedAt.toISOString(),
     lastMessageAt: lastAt,
+    usage: (row.usage as AcpUsage | null) ?? null,
   };
 }
 
@@ -183,6 +185,13 @@ export async function updateSession(
   broadcastToSession(id, { type: "session.updated", sessionId: id, session: dto });
   return dto;
 }
+export async function saveSessionUsage(id: string, usage: AcpUsage | null): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ usage, updatedAt: new Date() })
+    .where(eq(sessions.id, id));
+}
+
 
 export async function reorderSessions(
   items: Array<{ id: string; themeId: string | null; sortOrder: number }>,

@@ -12,6 +12,7 @@ import {
   textFromUnknown,
   toolDisplayTitle,
   type AdapterExtensionKind,
+  type AcpUsage,
   type AgentMode,
   type AgentProvider,
   type AppSettings,
@@ -32,6 +33,7 @@ import {
   truncateMessagesAfter,
   updatePart,
   updateSession,
+  saveSessionUsage,
 } from "../services/sessions.js";
 import { broadcastToSession } from "../services/wsHub.js";
 import { adapterCommand, getAdapter } from "../adapters/registry.js";
@@ -459,6 +461,8 @@ class SessionRuntime {
   /** False after Stop until the next prompt starts — blocks late tokens. */
   acceptingStream = false;
   toolsHintSent = false;
+  /** Latest ACP-reported token/context usage (null until/if the harness sends it). */
+  usage: AcpUsage | null = null;
   /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
   disposing = false;
   /** MCP config changed while a turn was running — restart the agent when it idles. */
@@ -781,6 +785,17 @@ async function ensureAssistantMessage(rt: SessionRuntime) {
 }
 
 async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js").AcpUpdate) {
+  if (update.kind === "usage") {
+    rt.usage = update.usage;
+    await saveSessionUsage(rt.sessionId, update.usage);
+    broadcastToSession(rt.sessionId, {
+      type: "session.usage",
+      sessionId: rt.sessionId,
+      usage: update.usage,
+    });
+    return;
+  }
+
   if (update.kind === "available_commands") {
     rt.availableCommands = parseAvailableCommands(update.raw);
     broadcastToSession(rt.sessionId, {

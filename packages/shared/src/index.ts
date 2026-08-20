@@ -55,6 +55,83 @@ export function textFromUnknown(value: unknown): string {
   }
   return "";
 }
+/**
+ * Rough estimate of how many LLM context tokens a conversation occupies.
+ * Sums the characters of every message part's meaningful content and divides
+ * by ~4 (a common heuristic for mixed EN/RU/code text). The number is an
+ * estimate, not an exact harness-reported token count.
+ */
+export interface ContextUsage {
+  /** Total characters of conversation content. */
+  chars: number;
+  /** Estimated token count (ceil(chars / CHARS_PER_TOKEN)). */
+  tokens: number;
+}
+
+const CHARS_PER_TOKEN = 4;
+
+/** Meaningful text a part contributes to the model context. */
+function partContextText(part: MessagePartDto): string {
+  const payload = (part.payload ?? {}) as Record<string, unknown>;
+  switch (part.type) {
+    case "text":
+    case "thought":
+    case "status":
+      return String(payload.text ?? payload.message ?? payload.summary ?? "");
+    case "tool_call": {
+      const raw = (payload.raw ?? {}) as Record<string, unknown>;
+      const input = raw.rawInput ?? raw.input ?? raw.arguments ?? payload.input;
+      const args =
+        input != null
+          ? typeof input === "string"
+            ? input
+            : JSON.stringify(input)
+          : "";
+      const title = String(payload.title ?? payload.description ?? "").trim();
+      return [title, args].filter(Boolean).join(" ");
+    }
+    case "plan":
+      return [payload.name, payload.plan].map((v) => String(v ?? "")).join(" ").trim();
+    case "todo": {
+      const items = Array.isArray(payload.items) ? payload.items : [];
+      return items
+        .map((it) => String((it ?? ({} as Record<string, unknown>)).text ?? (it ?? ({} as Record<string, unknown>)).name ?? ""))
+        .filter(Boolean)
+        .join("\n");
+    }
+    case "question":
+    case "permission":
+      return String(
+        payload.text ?? payload.message ?? payload.question ?? payload.prompt ?? "",
+      );
+    case "subagent": {
+      const raw = (payload.raw ?? {}) as Record<string, unknown>;
+      const body =
+        textFromUnknown(payload.result) ||
+        textFromUnknown(raw.result) ||
+        textFromUnknown(payload.prompt) ||
+        textFromUnknown(raw.prompt);
+      const title = String(payload.title ?? payload.description ?? raw.title ?? "").trim();
+      return [title, body].filter(Boolean).join(" ");
+    }
+    case "error":
+      return String(payload.message ?? payload.text ?? "");
+    case "file":
+      return [payload.name, payload.path].map((v) => String(v ?? "")).join(" ").trim();
+    default:
+      return "";
+  }
+}
+
+export function estimateContextUsage(messages: MessageDto[]): ContextUsage {
+  let chars = 0;
+  for (const message of messages) {
+    for (const part of message.parts) {
+      chars += partContextText(part).length;
+    }
+  }
+  return { chars, tokens: Math.max(0, Math.ceil(chars / CHARS_PER_TOKEN)) };
+}
 
 /**
  * Normalized fields of a subagent request/roster entry: prompt, result and a
@@ -119,7 +196,7 @@ export type ChatActionId =
   | "readAloud";
 
 /** Chips shown in the composer bar above the input. */
-export type ChatMetaChipId = "folder" | "thoughts" | "mcp";
+export type ChatMetaChipId = "folder" | "thoughts" | "mcp" | "context";
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
@@ -278,7 +355,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "thoughts", "mcp"],
+  chatMetaChips: ["folder", "thoughts", "mcp", "context"],
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
@@ -459,6 +536,7 @@ function formatModelParams(params: string): string[] {
       const effortMap: Record<string, string> = {
         none: "None",
         low: "Low",
+
         medium: "Medium",
         high: "High",
         "extra-high": "Extra High",
@@ -504,8 +582,6 @@ function humanizeModelBase(base: string): string {
         fast: "Fast",
         high: "High",
         medium: "Medium",
-        low: "Low",
-        max: "Max",
         none: "None",
       };
       return known[token.toLowerCase()] ?? capitalizeToken(token);
@@ -536,6 +612,20 @@ export interface SlashCommandDto {
   inputHint?: string;
 }
 
+/** Token/context usage reported by the harness via ACP `usage_update`. */
+export interface AcpUsage {
+  /** Model context window size in tokens (if the harness reports it). */
+  contextWindow?: number;
+  /** Tokens currently/estimated used in the context window. */
+  usedTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  /** Cumulative cost (currency units) if the harness reports it. */
+  cost?: number;
+  /** Original harness payload, kept for fields we don't normalize. */
+  raw?: Record<string, unknown>;
+}
+
 export interface SessionDto {
   id: string;
   title: string;
@@ -552,6 +642,8 @@ export interface SessionDto {
   archived: boolean;
   /** MCP server ids disabled for THIS chat only (global list still applies to others). */
   mcpDisabledIds: string[];
+  /** Token/context usage reported by the harness via ACP (null until/if reported). */
+  usage?: AcpUsage | null;
   createdAt: string;
   updatedAt: string;
   /** Timestamp of the latest message in the session (falls back to createdAt). */
@@ -582,6 +674,7 @@ export interface SessionDetailDto extends SessionDto {
 
 export type WsServerEvent =
   | { type: "session.updated"; sessionId: string; session: SessionDto }
+  | { type: "session.usage"; sessionId: string; usage: AcpUsage }
   | { type: "message.created"; sessionId: string; message: MessageDto }
   | {
       type: "part.appended";

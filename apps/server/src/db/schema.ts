@@ -44,6 +44,8 @@ export const sessions = sqliteTable("sessions", {
   mcpDisabledIds: text("mcp_disabled_ids", { mode: "json" })
     .notNull()
     .$defaultFn(() => []),
+  /** Latest ACP-reported token/context usage (null until/if reported). */
+  usage: text("usage", { mode: "json" }),
   createdAt: createdAt(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()

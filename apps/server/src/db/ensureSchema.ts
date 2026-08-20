@@ -36,6 +36,20 @@ export async function ensureSchema() {
       updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
+  // Idempotent migration: CREATE TABLE IF NOT EXISTS above won't alter an
+  // existing sessions table, so add the column here if it's missing.
+  // drizzle wraps the SqliteError in a DrizzleError, so inspect both the
+  // message and the underlying cause when tolerating "already exists".
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN usage TEXT`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const causeMsg =
+      err && typeof err === "object" && "cause" in err && err.cause instanceof Error
+        ? err.cause.message
+        : "";
+    if (!/duplicate column/i.test(msg) && !/duplicate column/i.test(causeMsg)) throw err;
+  }
 
   db.run(sql`
     CREATE TABLE IF NOT EXISTS messages (

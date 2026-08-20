@@ -17,6 +17,7 @@ import {
   isSubagentToolCall,
   migrateModelParamValues,
   toolDisplayTitle,
+  estimateContextUsage,
   type AgentMode,
   type MessageDto,
   type MessagePartDto,
@@ -669,6 +670,16 @@ function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
       />
     </svg>
   );
+}
+/** Compact token count: 1234 → "1.2k", 1234567 → "1.2M". */
+function formatCompact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) {
+    const v = n / 1000;
+    return `${v >= 100 ? Math.round(v) : v.toFixed(1).replace(/\.0$/, "")}k`;
+  }
+  const v = n / 1_000_000;
+  return `${v.toFixed(1).replace(/\.0$/, "")}M`;
 }
 
 function isThoughtPart(part: MessagePartDto) {
@@ -2811,6 +2822,33 @@ export function ChatPage() {
     }
     return `${parts}:${chars}:${activeSession.status}`;
   }, [activeSession?.messages, activeSession?.status]);
+  const contextUsage = useMemo(
+    () => estimateContextUsage(activeSession?.messages ?? []),
+    [activeSession?.messages],
+  );
+  const contextDisplay = useMemo(() => {
+    const acp = activeSession?.usage ?? null;
+    const used = acp?.usedTokens;
+    const win = acp?.contextWindow;
+    const cost = acp?.cost;
+    const label =
+      used != null
+        ? win != null
+          ? `${formatCompact(used)} / ${formatCompact(win)}`
+          : `${formatCompact(used)} ${t("chat.contextUnit")}`
+        : `${formatCompact(contextUsage.tokens)} ${t("chat.contextUnit")}`;
+    const title = acp
+      ? t("chat.contextAcpTooltip", {
+          used: (used ?? 0).toLocaleString(),
+          window: (win ?? 0).toLocaleString(),
+          cost: cost != null ? cost.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—",
+        })
+      : t("chat.contextTooltip", {
+          tokens: contextUsage.tokens.toLocaleString(),
+          chars: contextUsage.chars.toLocaleString(),
+        });
+    return { label, title };
+  }, [activeSession?.usage, contextUsage, t]);
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
@@ -3336,6 +3374,27 @@ export function ChatPage() {
                     {t("chat.mcpChipCount", { count: chatMcp.length })}
                   </span>
                 </button>
+              ) : null}
+              {settings.chatMetaChips.includes("context") && activeSession ? (
+                <span
+                className={`${styles.metaChip} ${styles.metaChipForceLabel}`}
+                  title={contextDisplay.title}
+                >
+                  <span className={styles.metaChipIcon} aria-hidden>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d="M12 3 3 8l9 5 9-5-9-5ZM3 16l9 5 9-5M3 12l9 5 9-5"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <span className={styles.metaChipLabel}>
+                    {contextDisplay.label}
+                  </span>
+                </span>
               ) : null}
             </div>
             {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (

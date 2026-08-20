@@ -17,6 +17,7 @@ import {
   modelParamFamily,
   type AgentMode,
   type AgentProvider,
+  type AcpUsage,
   type AppSettings,
   type HarnessAdapter,
   type McpServerConfig,
@@ -54,6 +55,7 @@ export type AcpUpdate =
   | { kind: "config_options"; configOptions: ConfigOption[]; raw: Record<string, unknown> }
   | { kind: "available_commands"; raw: Record<string, unknown> }
   | { kind: "mixed_chunks"; thought?: string; text?: string }
+  | { kind: "usage"; usage: AcpUsage; raw: Record<string, unknown> }
   | { kind: "other"; sessionUpdate: string; raw: Record<string, unknown> };
 
 export type AcpRequest =
@@ -1216,6 +1218,32 @@ export class AcpClient extends EventEmitter {
     }
   }
 
+  /** Normalize a harness `usage_update` payload into our AcpUsage shape. */
+  private normalizeUsage(raw: Record<string, unknown>): AcpUsage {
+    const u = (raw.usage ?? raw) as Record<string, unknown>;
+    const num = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) ? v : undefined;
+    // ACP stabilized `usage_update`: required `used`/`size`, optional
+    // `cost: { amount, currency }`. Tolerate other field spellings too.
+    const costObj = (u.cost ?? raw.cost) as Record<string, unknown> | undefined;
+    const cost =
+      costObj && typeof costObj === "object"
+        ? num(costObj.amount)
+        : num(u.cost ?? raw.cost);
+    return {
+      contextWindow: num(
+        u.size ?? u.contextWindow ?? u.context_window ?? u.maxTokens ?? u.max_tokens,
+      ),
+      usedTokens: num(
+        u.used ?? u.usedTokens ?? u.totalTokens ?? u.tokenCount ?? u.tokens ?? u.used_tokens,
+      ),
+      inputTokens: num(u.inputTokens ?? u.promptTokens ?? u.input_tokens),
+      outputTokens: num(u.outputTokens ?? u.completionTokens ?? u.output_tokens),
+      cost,
+      raw,
+    };
+  }
+
   private mapUpdate(update: Record<string, unknown>): AcpUpdate {
     const sessionUpdate = String(update.sessionUpdate ?? update.type ?? "other");
     const content = update.content ?? update.text;
@@ -1319,6 +1347,13 @@ export class AcpClient extends EventEmitter {
     }
     if (sessionUpdate === "available_commands_update") {
       return { kind: "available_commands", raw: update };
+    }
+    if (
+      sessionUpdate === "usage_update" ||
+      sessionUpdate === "usage" ||
+      sessionUpdate === "context_update"
+    ) {
+      return { kind: "usage", usage: this.normalizeUsage(update), raw: update };
     }
     return { kind: "other", sessionUpdate, raw: update };
   }

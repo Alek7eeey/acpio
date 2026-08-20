@@ -2276,6 +2276,12 @@
   .iconBtnOpen svg {
     transform: rotate(90deg);
   }
+
+  /* In Settings the header burger is redundant on mobile (mobileNav chips
+     already provide section navigation); keep it on desktop only. */
+  .iconBtnSettings {
+    display: none;
+  }
 }
 
 .settingsTree {

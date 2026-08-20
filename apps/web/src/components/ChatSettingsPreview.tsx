@@ -10,7 +10,7 @@ import type {
 import { useT } from "../lib/i18n";
 import styles from "./ChatSettingsPreview.module.css";
 
-const CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp"];
+const CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context"];
 const TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
 const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "model", "mode", "mic"];
 const TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
@@ -778,13 +778,16 @@ export function ChatSettingsPreview({
                           ? t("settings.chatMetaChipFolder")
                           : id === "thoughts"
                             ? t("settings.chatMetaChipThoughts")
-                            : t("settings.chatMetaChipMcp")
+                            : id === "context"
+                              ? t("settings.chatMetaChipContext")
+                              : t("settings.chatMetaChipMcp")
                       }
                     >
                       <span className={styles.chip} aria-hidden>
                         {id === "folder" ? t("settings.chatMetaChipFolder") : null}
                         {id === "thoughts" ? t("settings.chatMetaChipThoughts") : null}
                         {id === "mcp" ? t("settings.chatMetaChipMcp") : null}
+                        {id === "context" ? t("settings.chatMetaChipContext") : null}
                       </span>
                     </El>
                   ))}

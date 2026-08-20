@@ -929,12 +929,13 @@ export function AppShell() {
             settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
           }
         >
-          {/* Settings renders its own in-page nav (mobileNav) and tree column, so the
-             tree-drawer burger is hidden there; it only opens an empty drawer on mobile. */}
-          {showSidebar && !isSettings ? (
+          {/* The header burger opens the tree drawer. In Settings it is hidden on
+             mobile (Settings already provides its own mobileNav chips); on desktop it
+             stays so the columns drawer can still be toggled. */}
+          {showSidebar ? (
             <button
               type="button"
-              className={`${styles.iconBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}`}
+              className={`${styles.iconBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}${isSettings ? ` ${styles.iconBtnSettings}` : ""}`}
               aria-label={t("common.openTree")}
               title={t("common.openTree")}
               onClick={() => setSidebarOpen(!sidebarOpen)}

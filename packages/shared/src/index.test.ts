@@ -13,6 +13,7 @@ import {
   parseModelWire,
   resolveModelParamValue,
   toolDisplayTitle,
+  estimateContextUsage,
 } from "@acprocess/shared";
 
 describe("parseModelWire", () => {
@@ -418,7 +419,7 @@ describe("DEFAULT_SETTINGS", () => {
     darkSurface: "",
     ttsVoiceGender: "",
     chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-    chatMetaChips: ["folder", "thoughts", "mcp"],
+    chatMetaChips: ["folder", "thoughts", "mcp", "context"],
     chatComposerButtons: ["attach", "mic", "model", "mode"],
     chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
     chatTreeMenu: ["rename", "move", "export", "delete"],
@@ -442,5 +443,42 @@ describe("DEFAULT_SETTINGS", () => {
 
   it("matches the full literal shape", () => {
     expect(DEFAULT_SETTINGS).toEqual(expectedDefaults);
+  });
+});
+
+describe("estimateContextUsage", () => {
+  const msg = (role: "user" | "assistant", parts: Array<{ type: string; payload?: Record<string, unknown> }>) => ({
+    id: "m",
+    sessionId: "s",
+    role,
+    createdAt: "",
+    parts: parts.map((p, i) => ({ id: `p${i}`, messageId: "m", type: p.type, order: i, payload: p.payload ?? {}, createdAt: "" })),
+  });
+
+  it("counts text and thought characters", () => {
+    const usage = estimateContextUsage([
+      msg("user", [{ type: "text", payload: { text: "hello world" } }]),
+      msg("assistant", [{ type: "thought", payload: { text: "thinking" } }, { type: "text", payload: { text: "reply" } }]),
+    ]);
+    // 11 + 8 + 5 = 24 chars → ceil(24/4) = 6 tokens
+    expect(usage.chars).toBe(24);
+    expect(usage.tokens).toBe(6);
+  });
+
+  it("extracts tool_call input and subagent result", () => {
+    const usage = estimateContextUsage([
+      msg("assistant", [
+        { type: "tool_call", payload: { title: "Read", raw: { input: { path: "a.txt" } } } },
+        { type: "subagent", payload: { prompt: "do thing", result: "done", raw: {} } },
+      ]),
+    ]);
+    const text = JSON.stringify({ path: "a.txt" });
+    // "Read" (4) + " " join + input json + "done" (result wins over prompt)
+    expect(usage.chars).toBe(4 + 1 + text.length + 4);
+    expect(usage.tokens).toBe(Math.ceil(usage.chars / 4));
+  });
+
+  it("returns zero for empty conversation", () => {
+    expect(estimateContextUsage([])).toEqual({ chars: 0, tokens: 0 });
   });
 });

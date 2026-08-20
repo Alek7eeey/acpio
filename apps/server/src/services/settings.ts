@@ -99,7 +99,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.chatMetaChips)) {
     merged.chatMetaChips = [...DEFAULT_SETTINGS.chatMetaChips];
   } else {
-    merged.chatMetaChips = filterValid(merged.chatMetaChips, ["folder", "thoughts", "mcp"]);
+    merged.chatMetaChips = filterValid(merged.chatMetaChips, ["folder", "thoughts", "mcp", "context"]);
   }
   if (!Array.isArray(merged.chatComposerButtons)) {
     merged.chatComposerButtons = [...DEFAULT_SETTINGS.chatComposerButtons];

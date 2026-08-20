@@ -1677,6 +1677,9 @@
     padding: 7px;
   }
 }
+.metaChipForceLabel .metaChipLabel {
+  display: inline;
+}
 
 .pill {
   display: flex;

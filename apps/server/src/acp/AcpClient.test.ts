@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
-import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acprocess/shared";
 import { getAdapter } from "../adapters/registry.js";
 import {
+  AcpClient,
   splitInlineThinking,
   findModelConfigOption,
   findModeConfigOption,
@@ -575,5 +576,59 @@ describe("resolveCommand", () => {
     { name: "cmd inside forward-slash path", command: "C:/Tools/agent.cmd", expected: { cmd: "C:/Tools/agent.cmd", shell: true } },
   ])("$name", async ({ command, expected }) => {
     expect(await resolveCommand(command)).toEqual(expected);
+  });
+});
+
+describe("ACP usage_update normalization", () => {
+  const fakeAdapter = {
+    id: "test",
+    label: "Test",
+    defaultModes: [],
+    subagentToolKinds: [],
+    apiKeyField: undefined,
+    envApiKeyName: undefined,
+    commandField: "command",
+    argsField: "args",
+    defaultCommand: "agent",
+    defaultArgs: ["acp"],
+    modelParamPrefix: "",
+    cloudCatalog: false,
+  } as unknown as HarnessAdapter;
+
+  // `normalizeUsage`/`mapUpdate` are private class methods; expose them through a
+  // single named cast so the test can drive the ACP ingestion path directly.
+  type TestableAcp = AcpClient & {
+    normalizeUsage: (r: Record<string, unknown>) => AcpUsage;
+    mapUpdate: (u: Record<string, unknown>) => { kind: string; usage?: AcpUsage };
+  };
+  const makeClient = () =>
+    new AcpClient(fakeAdapter, DEFAULT_SETTINGS, "/tmp", "agent" as AgentMode) as unknown as TestableAcp;
+
+  it("maps canonical ACP usage_update used/size/cost", () => {
+    const acp = makeClient();
+    const result = acp.normalizeUsage({
+      sessionUpdate: "usage_update",
+      used: 53000,
+      size: 200000,
+      cost: { amount: 0.045, currency: "USD" },
+    });
+    expect(result.usedTokens).toBe(53000);
+    expect(result.contextWindow).toBe(200000);
+    expect(result.cost).toBe(0.045);
+  });
+
+  it("falls back to alternate field spellings", () => {
+    const acp = makeClient();
+    const result = acp.normalizeUsage({ usedTokens: 5, contextWindow: 10 });
+    expect(result.usedTokens).toBe(5);
+    expect(result.contextWindow).toBe(10);
+  });
+
+  it("classifies usage_update as kind 'usage' via mapUpdate", () => {
+    const acp = makeClient();
+    const ev = acp.mapUpdate({ sessionUpdate: "usage_update", used: 1, size: 2 });
+    expect(ev.kind).toBe("usage");
+    expect(ev.usage?.usedTokens).toBe(1);
+    expect(ev.usage?.contextWindow).toBe(2);
   });
 });

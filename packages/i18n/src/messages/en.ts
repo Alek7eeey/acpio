@@ -255,6 +255,11 @@ export const en = {
     voiceUnsupported: "Voice input is not supported by this browser",
     voiceBlocked: "Microphone access is blocked — allow it in the browser",
     loadingChat: "Loading chat…",
+    contextUnit: "tok",
+    contextTooltip:
+      "Estimated context used by this chat: {{tokens}} tokens ({{chars}} characters)",
+    contextAcpTooltip:
+      "Context from ACP: {{used}} / {{window}} tokens used, cost {{cost}}",
   },
   settings: {
     agents: "Agents",
@@ -302,6 +307,7 @@ export const en = {
     chatMetaChipFolder: "Folder",
     chatMetaChipThoughts: "Thinking",
     chatMetaChipMcp: "MCP servers",
+    chatMetaChipContext: "Context",
     chatEnterToSend: "Enter sends the message",
     chatEnterToSendHint: "Off: Enter inserts a newline, Ctrl+Enter sends.",
     chatShowMessageTime: "Message timestamps",
