@@ -366,6 +366,24 @@ function rememberSessionDetail(detail: SessionDetailDto | null | undefined) {
   if (oldest) sessionDetailCache.delete(oldest);
 }
 
+/** Cheap equality so a quiet background refresh can skip a React paint. */
+function sessionDetailQuickEqual(
+  a: SessionDetailDto | null | undefined,
+  b: SessionDetailDto | null | undefined,
+) {
+  if (!a || !b) return a === b;
+  return (
+    a.id === b.id &&
+    a.updatedAt === b.updatedAt &&
+    a.status === b.status &&
+    a.title === b.title &&
+    a.mode === b.mode &&
+    a.messages.length === b.messages.length &&
+    a.messages.at(-1)?.id === b.messages.at(-1)?.id &&
+    (a.slashCommands?.length ?? 0) === (b.slashCommands?.length ?? 0)
+  );
+}
+
 /** Coalesce rapid token WS events into one React paint per frame. */
 type PendingPartEvent = Extract<WsServerEvent, { type: "part.appended" | "part.updated" }>;
 let pendingPartEvents: PendingPartEvent[] = [];
@@ -773,17 +791,53 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
     const seq = ++selectSessionSeq;
     const cached = sessionDetailCache.get(id);
-    const listItem = get().sessions.find((s) => s.id === id);
     const current = get().activeSession;
+    const alreadyWarm =
+      get().activeSessionId === id &&
+      current?.id === id &&
+      (Boolean(cached) || !get().sessionLoading);
 
-    // Highlight + show cached/skeleton immediately — don't wait on the network.
+    // Re-clicking the open chat (or StrictMode re-select): refresh quietly —
+    // no empty stub, no skeleton flash, no keyed thread remount.
+    if (alreadyWarm) {
+      try {
+        const detail = await api.getSession(id);
+        rememberSessionDetail(detail);
+        if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+        const live = get().activeSession;
+        if (live?.status === "running") {
+          set({
+            sessionLoading: false,
+            activeSession: {
+              ...live,
+              ...detail,
+              status: "running",
+              messages: live.messages.length ? live.messages : detail.messages,
+            },
+          });
+          return;
+        }
+        if (sessionDetailQuickEqual(live, detail)) {
+          if (get().sessionLoading) set({ sessionLoading: false });
+          return;
+        }
+        set({ activeSession: detail, sessionLoading: false });
+        clearMessageIdAliases(id);
+      } catch (err) {
+        if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+        set({
+          error: err instanceof Error ? err.message : String(err),
+          sessionLoading: false,
+        });
+      }
+      return;
+    }
+
+    // Prefer a warm cache / same-session detail. Never invent `{ messages: [] }`
+    // from a list row — that remounts an empty keyed thread, then refills it
+    // when GET lands (double paint before the first send).
     const optimistic: SessionDetailDto | null =
-      cached ??
-      (current?.id === id
-        ? current
-        : listItem
-          ? { ...listItem, messages: [], slashCommands: [] }
-          : null);
+      cached ?? (current?.id === id ? current : null);
 
     // Note: message-id aliases are deliberately NOT cleared here — an
     // in-flight optimistic turn in another chat must keep its bridge so
@@ -791,11 +845,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       activeSessionId: id,
-      activeSession: optimistic,
-      // Stay in "loading" while the same session is still being fetched
-      // (StrictMode double-mount re-selects it before the first fetch lands).
-      sessionLoading:
-        !cached && !(current?.id === id && (current.messages?.length ?? 0) > 0),
+      // When switching without a cache hit, keep the previous thread under the
+      // skeleton instead of mounting an empty placeholder for `id`.
+      ...(optimistic ? { activeSession: optimistic } : {}),
+      sessionLoading: !cached,
       pendingPermission: null,
       permissionQueue: [],
       pendingQuestion: null,
@@ -808,17 +861,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Don't clobber an in-flight optimistic turn with a stale GET snapshot —
       // but still deliver the fetched messages so a fresh load of a running
       // session isn't left with an empty thread (skeleton would vanish first).
-      if (get().activeSession?.status === "running") {
-        const current = get().activeSession!;
+      if (get().activeSession?.status === "running" && get().activeSession?.id === id) {
+        const live = get().activeSession!;
         set({
           sessionLoading: false,
           activeSession: {
-            ...current,
+            ...live,
             ...detail,
             status: "running",
-            messages: current.messages.length ? current.messages : detail.messages,
+            messages: live.messages.length ? live.messages : detail.messages,
           },
         });
+        return;
+      }
+      if (sessionDetailQuickEqual(get().activeSession, detail) && !get().sessionLoading) {
         return;
       }
       set({ activeSession: detail, sessionLoading: false });
@@ -841,6 +897,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
     } as Partial<SessionDto>);
     await get().refreshSessions();
+    // Seed cache so selectSession paints once (empty new chat) instead of
+    // empty-stub → GET refill.
+    rememberSessionDetail({ ...session, messages: [], slashCommands: [] });
     await get().selectSession(session.id);
     return session;
   },
@@ -1228,40 +1287,88 @@ export const useAppStore = create<AppState>((set, get) => ({
         cancelled && (event.session.status === "running" || event.session.status === "waiting")
           ? { ...event.session, status: "idle" as const }
           : event.session;
-      set({
-        ...(session.status === "running" || session.status === "waiting"
-          ? { modelsLoading: false }
-          : {}),
-        ...(session.mode && session.mode !== state.settings.defaultMode
-          ? { settings: { ...state.settings, defaultMode: session.mode } }
-          : {}),
-        sessions: state.sessions.map((s) =>
-          s.id === event.sessionId
-            ? {
-                ...session,
-                lastMessageAt: session.lastMessageAt ?? s.lastMessageAt ?? s.createdAt,
-              }
-            : s,
-        ),
-        activeSession:
-          state.activeSession?.id === event.sessionId
-            ? {
-                ...state.activeSession,
-                ...session,
-                lastMessageAt:
-                  session.lastMessageAt ??
-                  state.activeSession.lastMessageAt ??
-                  state.activeSession.createdAt,
-                messages: state.activeSession.messages,
-              }
-            : state.activeSession,
+      const busy = session.status === "running" || session.status === "waiting";
+      const prevActive = state.activeSession;
+      const nextSessions = state.sessions.map((s) => {
+        if (s.id !== event.sessionId) return s;
+        // Freeze tree sort key while the agent answers — otherwise the row
+        // jumps to the top mid-stream whenever lastMessageAt bumps.
+        const freshLast =
+          session.lastMessageAt ??
+          (prevActive?.id === event.sessionId ? prevActive.lastMessageAt : undefined) ??
+          s.lastMessageAt ??
+          s.createdAt;
+        // After Stop the row often stays put; still apply lastMessageAt so a
+        // lower chat can promote, but skip the write when the sort key is
+        // unchanged (avoids relative-time churn / false FLIP).
+        if (busy) {
+          return {
+            ...session,
+            lastMessageAt: s.lastMessageAt,
+            updatedAt: s.updatedAt,
+          };
+        }
+        if (freshLast === s.lastMessageAt) {
+          return {
+            ...session,
+            lastMessageAt: s.lastMessageAt,
+            updatedAt: s.updatedAt,
+          };
+        }
+        return {
+          ...session,
+          lastMessageAt: freshLast,
+          updatedAt: session.updatedAt ?? s.updatedAt,
+        };
       });
+      const sessionsChanged = nextSessions.some((s, i) => s !== state.sessions[i]);
+
+      // Keep the same activeSession reference when only the tree sort key
+      // moved — otherwise the chat pane re-renders (fake "double paint")
+      // every time a finished turn promotes the row.
+      let nextActive = prevActive;
+      if (prevActive?.id === event.sessionId) {
+        const nextLast =
+          session.lastMessageAt ?? prevActive.lastMessageAt ?? prevActive.createdAt;
+        const chatUiChanged =
+          prevActive.status !== session.status ||
+          prevActive.title !== session.title ||
+          prevActive.mode !== session.mode ||
+          prevActive.cwd !== session.cwd ||
+          prevActive.provider !== session.provider ||
+          prevActive.pinned !== session.pinned ||
+          prevActive.archived !== session.archived;
+        if (chatUiChanged) {
+          nextActive = {
+            ...prevActive,
+            ...session,
+            lastMessageAt: nextLast,
+            messages: prevActive.messages,
+          };
+        }
+      }
+
+      const patch: Partial<AppState> = {};
+      if (busy) patch.modelsLoading = false;
+      if (session.mode && session.mode !== state.settings.defaultMode) {
+        patch.settings = { ...state.settings, defaultMode: session.mode };
+      }
+      if (nextActive !== prevActive) patch.activeSession = nextActive;
+      // Apply chat-pane updates first. Tree reorder goes on a microtask so the
+      // right pane never re-renders from a sessions-list identity change.
+      if (Object.keys(patch).length) set(patch);
+      if (sessionsChanged) {
+        queueMicrotask(() => {
+          set({ sessions: nextSessions });
+        });
+      }
+
       // A few ACP adapters finish their RPC before the final WS part has
       // crossed the proxy. Reconcile only after idle so that answer cannot
       // remain hidden until the user reloads the chat.
       if (
         session.status === "idle" &&
-        state.activeSession?.id === event.sessionId &&
+        get().activeSession?.id === event.sessionId &&
         !cancelled
       ) {
         reconcileFinishedTurn(event.sessionId, get, set);
@@ -1287,13 +1394,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     if (event.type === "message.created") {
+      const listed = state.sessions.find((s) => s.id === event.sessionId);
+      const activeBusy =
+        state.activeSession?.id === event.sessionId &&
+        (state.activeSession.status === "running" || state.activeSession.status === "waiting");
+      const treeBusy =
+        listed?.status === "running" || listed?.status === "waiting" || activeBusy;
+      // Keep sidebar order stable while the turn is in flight; promote on idle.
       const nextSessions = state.sessions.map((s) =>
         s.id === event.sessionId
-          ? {
-              ...s,
-              lastMessageAt: event.message.createdAt,
-              updatedAt: event.message.createdAt,
-            }
+          ? treeBusy
+            ? s
+            : {
+                ...s,
+                lastMessageAt: event.message.createdAt,
+                updatedAt: event.message.createdAt,
+              }
           : s,
       );
       if (state.activeSession?.id !== event.sessionId) {

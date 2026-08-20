@@ -1915,6 +1915,16 @@ function findLatestPlan(session: { messages: MessageDto[] } | null): PlanPayload
   return null;
 }
 
+function modelParamsEqual(a: Record<string, string>, b: Record<string, string>) {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 export function ChatPage() {
   const t = useT();
   const navigate = useNavigate();
@@ -1927,14 +1937,17 @@ export function ChatPage() {
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
   const speakingMessageId = useAppStore((s) => s.speakingMessageId);
   const ttsLoading = useAppStore((s) => s.ttsLoading);
-  const sessions = useAppStore((s) => s.sessions);
+  // Don't subscribe to the full sessions list — tree reorder (lastMessageAt)
+  // would re-render the chat pane for no reason. Only take what the pane needs.
+  const hasSessions = useAppStore((s) => s.sessions.length > 0);
+  const storeActiveSessionId = useAppStore((s) => s.activeSessionId);
   // Keep the skeleton visible for at least a moment so fast loads don't
   // flash a blank thread. The timer runs once per appearance and survives
   // the data arriving early (no cleanup on showSkeleton flip).
   const [skeletonHold, setSkeletonHold] = useState(false);
   const skeletonTimerRef = useRef<number | null>(null);
   const showSkeleton =
-    sessionLoading || (!activeSession && (loading || sessions.length > 0));
+    sessionLoading || (!activeSession && (loading || hasSessions));
   useEffect(() => {
     if (!showSkeleton) return;
     setSkeletonHold(true);
@@ -2408,21 +2421,28 @@ export function ChatPage() {
     return () => window.clearInterval(timer);
   }, [focusMessageId, setFocusMessageId]);
 
-  const recentCwds = useMemo(
-    () => collectRecentCwds(sessions, settings.defaultCwd),
-    [sessions, settings.defaultCwd],
-  );
+  // Rebuild only when the set of folder paths changes — not on every
+  // lastMessageAt bump (tree promote), so the chat pane stays still.
+  const recentCwdsKey = useAppStore((s) => {
+    const uniq = [
+      ...new Set(
+        s.sessions
+          .map((session) => (session.cwd ?? "").trim())
+          .filter(Boolean),
+      ),
+    ].sort();
+    return `${s.settings.defaultCwd ?? ""}\0${s.sessions.length}\0${uniq.join("\0")}`;
+  });
+  const recentCwds = useMemo(() => {
+    const s = useAppStore.getState();
+    return collectRecentCwds(s.sessions, s.settings.defaultCwd);
+  }, [recentCwdsKey]);
   useEffect(() => {
     if (!agentProvider) return;
-    const cached = useAppStore.getState().modelsCatalog;
-    const cloudCatalog = adapterMeta(agentProvider)?.cloudCatalog === true;
-    const needForce = !cached || cached.provider !== agentProvider || cloudCatalog;
-    // Adapter meta drives TTL/force decisions — load it before the catalog.
+    // Soft refresh only — force on every mount (esp. cloudCatalog agents) was
+    // rewriting modelsCatalog and bouncing composer state before the first send.
     void useAppStore.getState().loadAdapters().then(() => {
-      const meta = adapterMeta(agentProvider);
-      const refreshed =
-        !cached || cached.provider !== agentProvider || meta?.cloudCatalog === true;
-      void ensureModels(agentProvider, { force: refreshed });
+      void ensureModels(agentProvider);
     });
     void api.warmModelParams(agentProvider);
   }, [agentProvider, ensureModels]);
@@ -2455,8 +2475,11 @@ export function ChatPage() {
 
   useEffect(() => {
     if (!catalog?.models.length) {
-      setModel(settings.defaultModel);
-      setModelParamValues(settings.defaultModelParams ?? {});
+      setModel((prev) => (prev === (settings.defaultModel || "") ? prev : settings.defaultModel));
+      setModelParamValues((prev) => {
+        const next = settings.defaultModelParams ?? {};
+        return modelParamsEqual(prev, next) ? prev : next;
+      });
       return;
     }
     // Drop a defaultModel that belongs to another agent (e.g. Cursor id in OMP chat).
@@ -2465,22 +2488,24 @@ export function ChatPage() {
       preferred && catalog.models.some((m) => m.value === preferred)
         ? preferred
         : catalog.currentModel || catalog.models[0]?.value || "";
-    setModel(nextModel);
+    setModel((prev) => (prev === nextModel ? prev : nextModel));
     const exposed = catalog.modelParams ?? [];
     if (!exposed.length) {
-      setModelParamValues(settings.defaultModelParams ?? {});
+      setModelParamValues((prev) => {
+        const next = settings.defaultModelParams ?? {};
+        return modelParamsEqual(prev, next) ? prev : next;
+      });
       return;
     }
     const migrated = migrateModelParamValues(settings.defaultModelParams ?? {}, exposed);
-    setModelParamValues(
-      Object.keys(migrated).length
-        ? migrated
-        : Object.fromEntries(
-            exposed
-              .filter((p) => p.currentValue != null && p.currentValue !== "")
-              .map((p) => [p.id, p.currentValue!]),
-          ),
-    );
+    const nextParams = Object.keys(migrated).length
+      ? migrated
+      : Object.fromEntries(
+          exposed
+            .filter((p) => p.currentValue != null && p.currentValue !== "")
+            .map((p) => [p.id, p.currentValue!]),
+        );
+    setModelParamValues((prev) => (modelParamsEqual(prev, nextParams) ? prev : nextParams));
   }, [catalog, settings.defaultModel, settings.defaultModelParams]);
 
   const applyModelSelection = async (
@@ -2852,6 +2877,8 @@ export function ChatPage() {
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
+  /** Pin to bottom across skeleton → first paint of an unloaded chat. */
+  const pendingBottomPinRef = useRef(false);
   const [scrolledAway, setScrolledAway] = useState(false);
   const scrollRafRef = useRef(0);
   const threadInnerRef = useRef<HTMLDivElement>(null);
@@ -2872,11 +2899,13 @@ export function ChatPage() {
   };
 
   const scheduleScrollToEnd = () => {
-    if (!stickToBottomRef.current && !userJustSentRef.current) return;
+    if (!stickToBottomRef.current && !userJustSentRef.current && !pendingBottomPinRef.current) {
+      return;
+    }
     if (scrollRafRef.current) return;
     scrollRafRef.current = window.requestAnimationFrame(() => {
       scrollRafRef.current = 0;
-      if (stickToBottomRef.current || userJustSentRef.current) {
+      if (stickToBottomRef.current || userJustSentRef.current || pendingBottomPinRef.current) {
         scrollThreadToEnd();
       }
     });
@@ -2897,6 +2926,13 @@ export function ChatPage() {
     if (!thread) return;
     const onScroll = () => {
       if (suppressScrollWatchRef.current) return;
+      // While pinning a freshly opened chat, ignore intermediate layouts that
+      // look like "scrolled away" (skeleton → content height jumps).
+      if (pendingBottomPinRef.current) {
+        stickToBottomRef.current = true;
+        setScrolledAway(false);
+        return;
+      }
       // Growth during stream can temporarily look like "scrolled away" before we catch up.
       const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
       const stuck = gap < 140;
@@ -2905,19 +2941,19 @@ export function ChatPage() {
     };
     thread.addEventListener("scroll", onScroll, { passive: true });
     return () => thread.removeEventListener("scroll", onScroll);
-  }, [activeSessionId]);
+  }, [storeActiveSessionId]);
 
   useEffect(() => {
     const inner = threadInnerRef.current;
     if (!inner || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (stickToBottomRef.current || userJustSentRef.current) {
+      if (stickToBottomRef.current || userJustSentRef.current || pendingBottomPinRef.current) {
         scrollThreadToEnd();
       }
     });
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [activeSessionId]);
+  }, [storeActiveSessionId, renderSkeleton]);
 
   useEffect(() => {
     return () => {
@@ -2925,25 +2961,60 @@ export function ChatPage() {
     };
   }, []);
 
-  // Snap on session switch, send, stream tokens, and permission prompts.
+  // Mark a bottom-pin whenever the store switches chats (often before detail arrives).
+  useLayoutEffect(() => {
+    if (storeActiveSessionId === prevSessionIdRef.current) return;
+    prevSessionIdRef.current = storeActiveSessionId;
+    stickToBottomRef.current = true;
+    userJustSentRef.current = false;
+    pendingBottomPinRef.current = Boolean(storeActiveSessionId);
+    if (!shouldAutoFocusComposer()) {
+      textareaRef.current?.blur();
+    } else if (keepComposerFocus.current) {
+      focusComposer();
+    }
+  }, [storeActiveSessionId]);
+
+  // Snap to bottom once the thread is actually painted (after skeleton), and
+  // keep pinning through the first content/layout settles.
+  useLayoutEffect(() => {
+    if (!pendingBottomPinRef.current) return;
+    if (renderSkeleton) return;
+    if (!storeActiveSessionId) {
+      pendingBottomPinRef.current = false;
+      return;
+    }
+    // Detail for another chat may still be on screen while the new id loads.
+    if (activeSession && activeSession.id !== storeActiveSessionId) return;
+
+    scrollThreadToEnd();
+    const raf = window.requestAnimationFrame(() => scrollThreadToEnd());
+    const t1 = window.setTimeout(() => scrollThreadToEnd(), 0);
+    const t2 = window.setTimeout(() => {
+      scrollThreadToEnd();
+      pendingBottomPinRef.current = false;
+    }, 120);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [
+    renderSkeleton,
+    storeActiveSessionId,
+    activeSessionId,
+    messageCount,
+    lastMessageId,
+    streamDigest,
+  ]);
+
+  // Snap on send, stream tokens, and permission prompts.
   useLayoutEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
-    const sessionChanged = activeSessionId !== prevSessionIdRef.current;
+    if (pendingBottomPinRef.current) return;
     const promptId =
       pendingPermission?.requestId ?? pendingQuestion?.requestId ?? null;
-    if (sessionChanged) {
-      prevSessionIdRef.current = activeSessionId;
-      stickToBottomRef.current = true;
-      userJustSentRef.current = false;
-      scrollThreadToEnd();
-      if (!shouldAutoFocusComposer()) {
-        textareaRef.current?.blur();
-      } else if (keepComposerFocus.current) {
-        focusComposer();
-      }
-      return;
-    }
     if (userJustSentRef.current || promptId) {
       stickToBottomRef.current = true;
       userJustSentRef.current = false;
@@ -2959,7 +3030,6 @@ export function ChatPage() {
     if (!stickToBottomRef.current) return;
     scheduleScrollToEnd();
   }, [
-    activeSessionId,
     lastMessageId,
     messageCount,
     streamDigest,
@@ -3007,7 +3077,7 @@ export function ChatPage() {
     <div className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""}`}>
       <div className={styles.mainColumn}>
       <div className={styles.thread} ref={threadRef}>
-        {renderSkeleton && (
+        {renderSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
             <div className={styles.skeletonTurn}>
               <div className={styles.skeletonLine} style={{ "--w": "64%" } as CSSProperties} />
@@ -3036,10 +3106,10 @@ export function ChatPage() {
               <div className={styles.skeletonLine} style={{ "--w": "80%" } as CSSProperties} />
             </div>
           </div>
-        )}
+        ) : (
         <div key={activeSession?.id ?? "empty"} className={styles.threadInner} ref={threadInnerRef}>
 
-        {!activeSession && !sessionLoading && !loading && sessions.length === 0 && (
+        {!activeSession && !sessionLoading && !loading && !hasSessions && (
           <div className={styles.empty}>
             <h1>
               <span>ACP</span>rocess
@@ -3157,6 +3227,7 @@ export function ChatPage() {
         )}
         <div ref={messageEndRef} className={styles.threadEnd} aria-hidden />
         </div>
+        )}
       </div>
 
       {(pendingPermission || pendingQuestion) &&

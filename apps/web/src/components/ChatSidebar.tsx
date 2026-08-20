@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acprocess/shared";
@@ -528,6 +528,74 @@ export function ChatSidebar({
     overscan: 8,
   });
 
+  // FLIP-animate tree rows only when session *order* actually changes
+  // (e.g. promote after a finished turn). Layout noise from Stop / status
+  // badges / relative-time text must not trigger motion.
+  const treeOrderKey = useMemo(
+    () =>
+      treeRows
+        .filter((r): r is Extract<TreeRow, { kind: "session" }> => r.kind === "session")
+        .map((r) => r.session.id)
+        .join("\n"),
+    [treeRows],
+  );
+  const treeFlipTops = useRef<Map<string, number>>(new Map());
+  const prevTreeOrderKey = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const root = sessionListRef.current;
+    if (!root || treeVirtual) {
+      treeFlipTops.current = new Map();
+      prevTreeOrderKey.current = treeOrderKey;
+      return;
+    }
+    const nodes = root.querySelectorAll<HTMLElement>("[data-tree-flip]");
+    const next = new Map<string, number>();
+    nodes.forEach((el) => {
+      const key = el.dataset.treeFlip;
+      if (!key) return;
+      next.set(key, el.getBoundingClientRect().top);
+    });
+
+    const orderChanged =
+      prevTreeOrderKey.current != null && prevTreeOrderKey.current !== treeOrderKey;
+    prevTreeOrderKey.current = treeOrderKey;
+
+    if (!orderChanged) {
+      treeFlipTops.current = next;
+      return;
+    }
+
+    const moving: { el: HTMLElement; dy: number }[] = [];
+    nodes.forEach((el) => {
+      const key = el.dataset.treeFlip;
+      if (!key) return;
+      const top = next.get(key);
+      const prev = treeFlipTops.current.get(key);
+      if (top == null || prev == null) return;
+      const dy = prev - top;
+      // Ignore tiny shifts — only real reorder slides.
+      if (Math.abs(dy) > 6) moving.push({ el, dy });
+    });
+    treeFlipTops.current = next;
+    if (!moving.length) return;
+
+    for (const { el, dy } of moving) {
+      el.style.transition = "none";
+      el.style.transform = `translateY(${dy}px)`;
+    }
+    void root.offsetHeight;
+    for (const { el } of moving) {
+      el.style.transition = "transform 0.48s cubic-bezier(0.22, 1, 0.36, 1)";
+      el.style.transform = "";
+    }
+    const clearId = window.setTimeout(() => {
+      for (const { el } of moving) {
+        el.style.transition = "";
+      }
+    }, 520);
+    return () => window.clearTimeout(clearId);
+  }, [treeRows, treeVirtual, treeOrderKey]);
+
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
     const isRenaming = renamingId === s.id;
@@ -577,6 +645,7 @@ export function ChatSidebar({
     return (
       <div
         key={s.id}
+        data-tree-flip={`s:${s.id}`}
         className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
           enteringSessionIds.current.has(s.id) ? styles.entering : ""
         }`}
@@ -1044,7 +1113,11 @@ export function ChatSidebar({
               : null;
 
             return (
-              <div key={folder.cwd || "__no_folder__"} className={styles.folderGroup}>
+              <div
+                key={folder.cwd || "__no_folder__"}
+                className={styles.folderGroup}
+                data-tree-flip={`fg:${folder.cwd || "__no_folder__"}`}
+              >
                 {showFolderHeaders && (
                   <div
                     className={`${styles.folderHead} ${
