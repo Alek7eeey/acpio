@@ -2149,6 +2149,13 @@
     /* Full column width on phones — avoids right-edge clip from % + padding. */
     max-width: 100%;
   }
+  .textPart {
+    font-size: 0.9rem;
+  }
+
+  .userBubble {
+    font-size: 0.9rem;
+  }
 }
 
 @media (min-width: 900px) {
