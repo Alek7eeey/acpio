@@ -3222,6 +3222,40 @@
   .sessionTitle {
     font-size: 0.98rem;
   }
+
+  /* Compact tree chrome — new chat + collapse sit smaller than the mobile hit targets. */
+  .brandRow {
+    min-height: 36px;
+    gap: 6px;
+  }
+
+  .collapseBtn {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+  }
+
+  .collapseBtn svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .chatToolbar {
+    gap: 4px;
+    padding: 0 0 6px;
+  }
+
+  .newChat {
+    min-height: 32px;
+    padding: 0 12px;
+    font-size: 0.8rem;
+    gap: 6px;
+  }
+
+  .newChatIcon svg {
+    width: 14px;
+    height: 14px;
+  }
 }
 
 /* Chat tree density (settings → Chat → Tree density). */
