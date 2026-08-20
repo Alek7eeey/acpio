@@ -302,6 +302,7 @@
     "mcpTitle": "MCP servers",
     "mcpApplyHint": "Changes apply to new chats. Active chats restart their agent with the new MCP list — history and model are preserved.",
     "mcpHint": "Attach external tools via the Model Context Protocol. Local — same-network HTTP endpoint (URL only); Remote — external endpoint, optionally with a bearer token.",
+    "mcpEmptyHint": "Attach external tools via the Model Context Protocol. Local — same-network HTTP endpoint (URL only); Remote — external endpoint, optionally with a bearer token.",
     "mcpLocal": "Local",
     "mcpRemote": "Remote",
     "mcpAdd": "Add MCP server",

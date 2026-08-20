@@ -363,6 +363,7 @@ export const en = {
     mcpTitle: "MCP servers",
     mcpHint:
       "Attach external tools via the Model Context Protocol. Local — same-network HTTP endpoint (URL only); Remote — external endpoint, optionally with a bearer token.",
+    mcpEmptyHint: "Attach external tools via the Model Context Protocol. Local — same-network HTTP endpoint (URL only); Remote — external endpoint, optionally with a bearer token.",
     mcpLocal: "Local",
     mcpRemote: "Remote",
     mcpAdd: "Add MCP server",
