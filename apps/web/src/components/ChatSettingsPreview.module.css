@@ -433,7 +433,7 @@
   max-width: 82%;
   padding: 9px 13px;
   border-radius: 14px;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   line-height: 1.5;
   color: var(--text);
 }
@@ -583,8 +583,8 @@
 }
 
 .icon {
-  width: 15px;
-  height: 15px;
+  width: 14px;
+  height: 14px;
 }
 
 .overflow {
@@ -657,7 +657,7 @@
 
 .inputMock {
   flex: 1;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   color: var(--text-secondary);
 }
 
@@ -670,6 +670,10 @@
   border-radius: 7px;
   color: var(--text-secondary);
 }
+  .composerBtn svg {
+    width: 14px;
+    height: 14px;
+  }
 
 .composerChip {
   display: inline-flex;

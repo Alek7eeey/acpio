@@ -1366,7 +1366,7 @@ export function SettingsPage() {
               treeMenu={form.chatTreeMenu ?? []}
               showArchive={Boolean(form.chatTreeShowArchive)}
               showTime={Boolean(form.chatShowMessageTime)}
-              headerHeight={form.chatHeaderHeight ?? 44}
+              headerHeight={form.chatHeaderHeight ?? 52}
               headerIcons={form.chatHeaderIcons ?? []}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];

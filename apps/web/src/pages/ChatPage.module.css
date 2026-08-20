@@ -835,7 +835,7 @@
   border-radius: 22px;
   padding: 10px 16px;
   line-height: 1.5;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   color: var(--text);
   user-select: text;
   caret-color: transparent;
@@ -958,7 +958,7 @@
 
 .textPart {
   line-height: 1.65;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   background: transparent;
   caret-color: transparent;
   outline: none;
@@ -1100,8 +1100,8 @@
 .msgActionIcon,
 .msgAction svg {
   display: block;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
@@ -1732,6 +1732,7 @@
   min-height: 40px;
   max-height: 160px;
   line-height: 1.45;
+  font-size: 0.95rem;
   box-shadow: none;
 }
 
@@ -1754,8 +1755,8 @@
 .sendBtn,
 .stopBtn {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border: none;
   border-radius: 999px;
   display: grid;
