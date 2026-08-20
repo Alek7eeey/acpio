@@ -3279,16 +3279,17 @@
     padding: 0 0 6px;
   }
 
+  /* Match chat-search field: same text size and similar control height. */
   .newChat {
-    min-height: 32px;
-    padding: 0 12px;
-    font-size: 0.8rem;
-    gap: 6px;
+    min-height: 34px;
+    padding: 0 14px;
+    font-size: 0.9rem;
+    gap: 7px;
   }
 
   .newChatIcon svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
   }
 }
 
