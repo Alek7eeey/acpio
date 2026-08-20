@@ -285,6 +285,21 @@ export function ChatSidebar({
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
+  // Track newly added sessions (e.g. a freshly created chat) so the sidebar
+  // can play a subtle entrance animation on just that row, not the whole list.
+  const prevSessionIds = useRef<Set<string> | null>(null);
+  const enteringSessionIds = useRef<Set<string>>(new Set());
+  const currentSessionIds = sessions.map((s) => s.id);
+  const prevIds = prevSessionIds.current;
+  if (prevIds === null) {
+    // Seed on first render so existing sessions don't animate on mount.
+    prevSessionIds.current = new Set(currentSessionIds);
+  } else {
+    for (const id of currentSessionIds) {
+      if (!prevIds.has(id)) enteringSessionIds.current.add(id);
+    }
+    prevSessionIds.current = new Set(currentSessionIds);
+  }
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
@@ -562,7 +577,9 @@ export function ChatSidebar({
     return (
       <div
         key={s.id}
-        className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""}`}
+        className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
+          enteringSessionIds.current.has(s.id) ? styles.entering : ""
+        }`}
         onContextMenu={(e) => openSessionMenu(e, s.id)}
       >
         {isRenaming ? (

@@ -24,6 +24,9 @@
 .withSidebar.sidebarCollapsed.railCollapsed {
   grid-template-columns: 0 var(--rail-width, 60px) 1fr;
 }
+.withSidebar:not(.resizing) {
+  transition: grid-template-columns 0.2s ease;
+}
 
 .resizing {
   cursor: col-resize;
@@ -1031,6 +1034,20 @@
 
 :global([data-theme="light"]) .sessionItem.active:hover {
   background: #dfeaff;
+}
+.sessionItem.entering {
+  animation: sessionItemIn 0.24s ease both;
+}
+
+@keyframes sessionItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .sessionBtn {

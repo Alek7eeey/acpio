@@ -3037,7 +3037,7 @@ export function ChatPage() {
             </div>
           </div>
         )}
-        <div className={styles.threadInner} ref={threadInnerRef}>
+        <div key={activeSession?.id ?? "empty"} className={styles.threadInner} ref={threadInnerRef}>
 
         {!activeSession && !sessionLoading && !loading && sessions.length === 0 && (
           <div className={styles.empty}>

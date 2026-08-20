@@ -43,6 +43,18 @@
   width: 100%;
   min-height: min-content;
 }
+.threadInner {
+  animation: threadIn 0.2s ease both;
+}
+
+@keyframes threadIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 
 .threadEnd {
   height: 1px;
