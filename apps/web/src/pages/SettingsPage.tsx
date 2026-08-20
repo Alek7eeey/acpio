@@ -1017,13 +1017,13 @@ export function SettingsPage() {
                     terms={[item.title, item.description]}
                     label={
                       <span className={styles.providerTitleRow}>
-                        <span className={styles.providerTitle}>{item.title}</span>
+                        <span className={styles.providerTitle}>{highlightText(item.title, settingsQuery)}</span>
                         {active && <span className={styles.providerBadge}>{t("common.connected")}</span>}
                       </span>
                     }
                     hint={
                       <>
-                        {item.description}
+                        {highlightText(item.description, settingsQuery)}
                         {probe ? (
                           <span
                             className={`${styles.providerProbeInline} ${
@@ -1678,9 +1678,9 @@ export function SettingsPage() {
               ]}
             >
             <details className={styles.cliDisclosure}>
-              <summary>{t("settings.cliAndPermissions")}</summary>
+              <summary>{highlightText(t("settings.cliAndPermissions"), settingsQuery)}</summary>
               <div className={styles.cliDisclosureBody}>
-                <p className={styles.fieldHint}>{t("settings.agentAdvancedDesc")}</p>
+                <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
                 {cliFormAdapters.map((a) => {
                   const command = String(
                     (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
@@ -1692,7 +1692,7 @@ export function SettingsPage() {
                     : "";
                   return (
                     <label key={a.id}>
-                      {a.label}
+                      {highlightText(a.label, settingsQuery)}
                       <div className={styles.row}>
                         <input
                           value={command}
