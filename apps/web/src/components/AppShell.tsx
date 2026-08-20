@@ -929,7 +929,9 @@ export function AppShell() {
             settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
           }
         >
-          {showSidebar ? (
+          {/* Settings renders its own in-page nav (mobileNav) and tree column, so the
+             tree-drawer burger is hidden there; it only opens an empty drawer on mobile. */}
+          {showSidebar && !isSettings ? (
             <button
               type="button"
               className={`${styles.iconBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}`}
