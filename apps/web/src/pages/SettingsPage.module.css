@@ -1218,6 +1218,47 @@
   .clearKeyBtn {
     justify-self: start;
   }
+
+  /* Phone: action buttons were oversized vs. the compact desktop look. */
+  .secondaryBtn,
+  .primaryBtn,
+  .footerBar button,
+  .footer button,
+  .ghostBtn,
+  .connectBtn,
+  .connectBtnActive,
+  .clearKeyBtn,
+  .accountSave,
+  .diagDelete,
+  .diagCardActions .secondaryBtn {
+    padding: 7px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 10px;
+  }
+
+  .providerActions button {
+    padding: 7px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+  }
+
+  .providerBtn,
+  .providerActive {
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    border-radius: 10px;
+  }
+
+  .actionChip {
+    padding: 4px 9px;
+    font-size: 0.74rem;
+  }
+
+  .actionAddChip {
+    padding: 3px 8px;
+    font-size: 0.72rem;
+  }
 }
 
 /* ── Desktop: tighten settings layout ──────────────────────────────────── */

@@ -516,20 +516,18 @@
 }
 
 @media (max-width: 899px) {
-  /* Settings switches to its mobile nav (chips) below 900px; shrink the
-     full-width selector buttons so more fit on a phone screen. */
+  /* Settings switches to its mobile nav (chips) below 900px; keep selectors
+     compact vs a full-width bar, but not tiny on phones. */
   .modelTriggerBlock {
-    /* Desktop control is ~188px wide; a full-width phone bar would be larger
-       by area, so cap the width and tighten padding to stay clearly smaller. */
     width: auto;
-    max-width: 200px;
-    padding: 4px 10px;
-    font-size: 0.8rem;
-    border-radius: 9px;
+    max-width: 248px;
+    padding: 6px 12px;
+    font-size: 0.86rem;
+    border-radius: 10px;
   }
 
   .modelTriggerBlock .modelTriggerText {
-    font-size: 0.78rem;
+    font-size: 0.84rem;
   }
 }
 
