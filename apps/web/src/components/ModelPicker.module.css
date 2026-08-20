@@ -519,13 +519,17 @@
   /* Settings switches to its mobile nav (chips) below 900px; shrink the
      full-width selector buttons so more fit on a phone screen. */
   .modelTriggerBlock {
-    padding: 5px 9px;
-    font-size: 0.84rem;
+    /* Desktop control is ~188px wide; a full-width phone bar would be larger
+       by area, so cap the width and tighten padding to stay clearly smaller. */
+    width: auto;
+    max-width: 200px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
     border-radius: 9px;
   }
 
   .modelTriggerBlock .modelTriggerText {
-    font-size: 0.8rem;
+    font-size: 0.78rem;
   }
 }
 
