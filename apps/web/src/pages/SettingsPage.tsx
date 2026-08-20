@@ -16,8 +16,8 @@ import {
   type ModelParamDto,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
-import { getSettingsTree, parseSettingsSearch, settingsPath } from "../lib/settingsNav";
-import { matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
+import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
+import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
 import { useT } from "../lib/i18n";
 import { adapterMeta, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
@@ -273,6 +273,106 @@ function SchemeCard({
   );
 }
 
+/**
+ * Search results: section blocks with matching setting descriptions.
+ * Each block shows the leaf name + a brief description from the search index.
+ * Clicking a block opens the full settings page for that section.
+ * Sections with no children (standalone pages) are excluded.
+ */
+function SearchResults({
+  hits,
+  query,
+  onNavigate,
+}: {
+  hits: { section: string; leaf: string; label: string }[];
+  query: string;
+  onNavigate: (section: SettingsSection, leaf: SettingsLeaf) => void;
+}) {
+  const t = useT();
+  const tree = useMemo(() => getSettingsTree(t), [t]);
+  const searchIdx = useMemo(() => settingsSearchIndex(t), [t]);
+  const hl = (text: string) => highlightText(text, query);
+
+  /** Get the first meaningful description term, skipping the leaf's own label. */
+  const leafDesc = (leafId: string, leafLabel: string): string => {
+    const terms = (searchIdx[leafId as SettingsLeaf] ?? []).filter(
+      (t) => t.toLowerCase() !== leafLabel.toLowerCase(),
+    );
+    return terms[0] ?? "";
+  };
+
+  /** Group hits by section, drop sections with no children. */
+  const sections = useMemo(() => {
+    const map = new Map<string, { section: string; leaves: typeof hits }>();
+    for (const h of hits) {
+      const branch = tree.find((b) => b.id === h.section);
+      if (!branch || branch.children.length === 0) continue;
+      const existing = map.get(h.section);
+      if (existing) existing.leaves.push(h);
+      else map.set(h.section, { section: h.section, leaves: [h] });
+    }
+    return Array.from(map.values());
+  }, [hits, tree]);
+
+  if (sections.length === 0) {
+    return (
+      <>
+        <header className={styles.header}>
+          <div>
+            <h1>{t("settings.searchResultsTitle")}</h1>
+          </div>
+        </header>
+        <p className={styles.hint}>{t("settings.searchNoResults")}</p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <header className={styles.header}>
+        <div>
+          <h1>{t("settings.searchResultsTitle")}</h1>
+          <p className={styles.lead}>
+            {t("settings.searchResultsCount", { count: hits.length })}
+          </p>
+        </div>
+      </header>
+      <nav className={styles.searchSidebar}>
+        {sections.map((sec) => {
+          const branch = tree.find((b) => b.id === sec.section);
+          return (
+            <div key={sec.section} className={styles.searchSidebarSection}>
+              <span className={styles.searchSidebarSectionTitle}>
+                {branch ? hl(branch.label) : sec.section}
+              </span>
+              <div className={styles.searchSidebarItems}>
+                {sec.leaves.map((leaf) => (
+                  <button
+                    key={leaf.leaf}
+                    type="button"
+                    className={styles.searchSidebarItem}
+                    onClick={() => onNavigate(sec.section as SettingsSection, leaf.leaf as SettingsLeaf)}
+                  >
+                    <span className={styles.searchSidebarItemContent}>
+                      <span className={styles.searchSidebarItemLabel}>{hl(leaf.label)}</span>
+                      <span className={styles.searchSidebarItemDesc}>{leafDesc(leaf.leaf, leaf.label)}</span>
+                    </span>
+                    <span className={styles.searchSidebarItemArrow} aria-hidden>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+    </>
+  );
+}
+
 export function SettingsPage() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
@@ -336,6 +436,26 @@ export function SettingsPage() {
   const saveSettings = useAppStore((s) => s.saveSettings);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
+  /** Show SearchResults panel; false = show normal page with highlighted text. */
+  const [viewingResults, setViewingResults] = useState(true);
+  // When section/leaf change (navigation via click), show page view.
+  const prevSectionRef = useRef(`${section}:${leaf}`);
+  useEffect(() => {
+    const key = `${section}:${leaf}`;
+    if (key !== prevSectionRef.current) {
+      prevSectionRef.current = key;
+      setViewingResults(false);
+    }
+  }, [section, leaf]);
+  // When query changes (typing), show results panel — but only if we didn't
+  // just navigate (the section/leaf effect already handled that frame).
+  const prevQueryRef = useRef(settingsQuery);
+  useEffect(() => {
+    if (settingsQuery !== prevQueryRef.current) {
+      prevQueryRef.current = settingsQuery;
+      if (settingsQuery.trim()) setViewingResults(true);
+    }
+  }, [settingsQuery]);
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
@@ -852,40 +972,37 @@ export function SettingsPage() {
         ))}
       </nav>
       <form className={styles.panel} onSubmit={(e) => void onSubmit(e)}>
-        <SettingsSearchProvider query={settingsQuery}>
+        <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
+        {settingsQuery.trim() && !viewingResults && (
+          <div className={styles.searchBackBar}>
+            <button type="button" className={styles.searchBackBtn} onClick={() => setViewingResults(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M19 12H5M12 19l-7-7 7-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {t("settings.searchBackToResults")}
+            </button>
+            <span className={styles.searchBackQueryTag}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <span className={styles.searchBackQueryText}>{settingsQuery}</span>
+            </span>
+          </div>
+        )}
+        {(!settingsQuery.trim() || !viewingResults) && (
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>{eyebrow}</p>
-            <h1>{title}</h1>
-            <p className={styles.lead}>{subtitle}</p>
+            <p className={styles.eyebrow}>{highlightText(eyebrow, settingsQuery)}</p>
+            <h1>{highlightText(title, settingsQuery)}</h1>
+            <p className={styles.lead}>{highlightText(subtitle, settingsQuery)}</p>
           </div>
         </header>
+        )}
 
-        {settingsQuery.trim() ? (
-          <div className={styles.searchHits} role="group" aria-label={t("settings.searchFoundIn")}>
-            <span className={styles.searchHitsLabel}>{t("settings.searchFoundIn")}</span>
-            {searchHits.length === 0 ? (
-              <span className={styles.searchHitsNone}>{t("settings.searchNoResults")}</span>
-            ) : (
-              searchHits.map((hit) => {
-                const active = section === hit.section && leaf === hit.leaf;
-                return (
-                  <button
-                    key={`${hit.section}:${hit.leaf}`}
-                    type="button"
-                    className={`${styles.searchHitChip}${
-                      active ? ` ${styles.searchHitChipActive}` : ""
-                    }`}
-                    onClick={() => navigate(settingsPath(hit.section, hit.leaf))}
-                  >
-                    {hit.label}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        ) : null}
-
+        {settingsQuery.trim() && viewingResults ? (
+          <SearchResults hits={searchHits} query={settingsQuery} onNavigate={(s, l) => { setViewingResults(false); navigate(settingsPath(s as SettingsSection, l as SettingsLeaf)); }} />
+        ) : (<div style={{ display: "contents" }}>
         {section === "agent" && leaf === "connect" && (
           <>
             <SettingTable>
@@ -1238,7 +1355,7 @@ export function SettingsPage() {
 
         {section === "interface" && leaf === "chat" && (
           <>
-            <SearchGate hideWhenSearching>
+            <SearchGate>
               <p className={styles.chatSettingsIntro}>{t("settings.chatIntro")}</p>
               <div className={styles.previewDesktop}>
             <ChatSettingsPreview
@@ -1302,7 +1419,7 @@ export function SettingsPage() {
             </SearchGate>
             {settingsQuery.trim() ? (
               <div className={styles.chatSearchRows}>
-                <h2 className={styles.sectionHeading}>{t("settings.chatAdvanced")}</h2>
+                <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatAdvanced"), settingsQuery)}</h2>
                 <ChatConfigRows form={form} patch={patchAny} />
               </div>
             ) : (
@@ -1500,7 +1617,7 @@ export function SettingsPage() {
             )}
 
             <SearchGate terms={[t("settings.apiKeys"), "api", "cursor", "anthropic", "openai"]}>
-              <h2 className={styles.sectionHeading}>{t("settings.apiKeys")}</h2>
+              <h2 className={styles.sectionHeading}>{highlightText(t("settings.apiKeys"), settingsQuery)}</h2>
               <SettingTable>
                 {(
                   [
@@ -1873,7 +1990,7 @@ export function SettingsPage() {
             </SearchGate>
 
             <SearchGate terms={[t("diagnostics.dumpsTitle"), t("diagnostics.dumpsHint"), t("diagnostics.empty"), t("diagnostics.copyJson")]}>
-            <h2 className={styles.sectionHeading}>{t("diagnostics.dumpsTitle")}</h2>
+              <h2 className={styles.sectionHeading}>{highlightText(t("diagnostics.dumpsTitle"), settingsQuery)}</h2>
             <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
             {diagLoading && !diagItems.length ? (
               <p className={styles.hint}>{t("common.loading")}</p>
@@ -1975,7 +2092,7 @@ export function SettingsPage() {
               ]}
             >
             <div className={styles.remoteTipsBlock}>
-              <h2 className={styles.sectionHeading}>{t("settings.remoteTipTitle")}</h2>
+              <h2 className={styles.sectionHeading}>{highlightText(t("settings.remoteTipTitle"), settingsQuery)}</h2>
               <ul className={styles.remoteTips}>
                 <li>{t("settings.remoteTipLocalhost")}</li>
                 <li>{t("settings.remoteTipSameNetwork")}</li>
@@ -1995,6 +2112,7 @@ export function SettingsPage() {
             {saved && <span className={styles.ok}>{t("settings.saved")}</span>}
           </div>
         )}
+        </div>)}
         </SettingsSearchProvider>
       </form>
       <ServerFolderBrowseDialog

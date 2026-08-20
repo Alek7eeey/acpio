@@ -23,15 +23,15 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 80px;
   max-width: min(340px, 46vw);
   border: none;
   background: transparent;
   color: var(--text-secondary);
   border-radius: 999px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   font-weight: 600;
-  font-size: 0.88rem;
-  min-width: 0;
+  font-size: 0.82rem;
 }
 
 @media (max-width: 700px) {
@@ -49,8 +49,8 @@
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  border-radius: 12px;
-  padding: 11px 12px;
+  border-radius: 10px;
+  padding: 8px 10px;
   font-weight: 500;
   font-size: 0.95rem;
 }
@@ -59,6 +59,7 @@
   max-width: none;
   flex: 1;
   text-align: left;
+  font-size: 0.82rem;
 }
 
 .modelTriggerBlock .modelChevron {
@@ -100,6 +101,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 170px;
+  font-size: 0.82rem;
 }
 
 .modelTriggerName {
@@ -193,15 +195,15 @@
   position: absolute;
   right: 0;
   bottom: calc(100% + 10px);
-  width: min(360px, calc(100vw - 48px));
+  width: min(320px, calc(100vw - 48px));
   max-width: calc(100vw - 48px);
-  max-height: min(360px, 50vh);
+  max-height: min(340px, 50vh);
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
   overflow-y: hidden;
-  padding: 8px;
-  border-radius: 16px;
+  padding: 6px;
+  border-radius: 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
@@ -254,12 +256,11 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   text-align: left;
   border: none;
   background: transparent;
   border-radius: 12px;
-  padding: 10px 8px 10px 12px;
+  padding: 8px 8px 8px 12px;
   color: var(--text);
 }
 
@@ -275,9 +276,7 @@
   display: block;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .rowMore {
@@ -477,7 +476,7 @@
 
 .modelOptionName {
   font-weight: 400;
-  font-size: 0.92rem;
+  font-size: 0.84rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

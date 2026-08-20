@@ -13,22 +13,32 @@ import searchStyles from "./settingsSearch.module.css";
  * text.
  */
 
-const SettingsSearchContext = createContext<string>("");
+type SettingsSearchState = { query: string; filtering: boolean };
+const SettingsSearchContext = createContext<SettingsSearchState>({
+  query: "",
+  filtering: false,
+});
 
 export function SettingsSearchProvider({
   query,
+  filtering,
   children,
 }: {
   query: string;
+  /** Narrow SettingRow/SearchGate content to the query. Off while a specific
+   *  section is open, so the full section renders (query still highlighted). */
+  filtering?: boolean;
   children: ReactNode;
 }) {
   return (
-    <SettingsSearchContext.Provider value={query}>{children}</SettingsSearchContext.Provider>
+    <SettingsSearchContext.Provider value={{ query, filtering: filtering ?? false }}>
+      {children}
+    </SettingsSearchContext.Provider>
   );
 }
 
 function splitTerms(q: string): string[] {
-  return q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return q.trim().toLowerCase().split(/\s+/).filter((term) => term.length > 0);
 }
 
 /** Wrap every query-term occurrence in <mark> (styled accent chip). */
@@ -60,9 +70,9 @@ export function highlightText(text: string, query: string): ReactNode {
 }
 
 export function useSettingsSearch() {
-  const query = useContext(SettingsSearchContext);
+  const { query, filtering } = useContext(SettingsSearchContext);
   const terms = splitTerms(query);
-  const active = terms.length > 0;
+  const active = filtering && terms.length > 0;
 
   const matches = (text: string): boolean => {
     if (!active) return true;
@@ -110,7 +120,7 @@ export function SearchGate({
  * found in" chips). Rows themselves filter live against their own text.
  */
 export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string[]> {
-  return {
+  const base: Record<SettingsLeaf, string[]> = {
     connect: [
       t("settings.connection"),
       t("settings.agentConnectTitle"),
@@ -126,7 +136,8 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.modelSection"),
       t("settings.agentModelTitle"),
       t("errors.agentNotConnected"),
-      t("models.auto"),
+      t("settings.auto"),
+      t("settings.agentConnectDesc"),
     ],
     advanced: [
       t("settings.advanced"),
@@ -182,6 +193,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
     appearance: [
       t("settings.appearance"),
       t("settings.sidebarCollapse"),
+      t("settings.sidebarCollapseHint"),
       t("settings.sidebarCollapseFull"),
       t("settings.sidebarCollapseRail"),
       t("settings.fontFamily"),
@@ -222,6 +234,63 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatShowMessageTime"),
       t("settings.chatAdvanced"),
       t("settings.chatIntro"),
+    ],
+  };
+  const hints = settingsRowHints(t);
+  const out = {} as Record<SettingsLeaf, string[]>;
+  (Object.keys(base) as SettingsLeaf[]).forEach((leaf) => {
+    out[leaf] = Array.from(new Set([...base[leaf], ...(hints[leaf] ?? [])]));
+  });
+  return out;
+}
+
+/**
+ * Row-level hint/description text per leaf. Indexed so searches match the
+ * explanatory copy shown under each setting, not just titles.
+ */
+function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
+  return {
+    connect: [t("settings.cursorDesc"), t("settings.ompDesc")],
+    model: [],
+    advanced: [
+      t("settings.exportDirHint", { path: "…" }),
+      t("settings.resumeAgentContextHint"),
+      t("settings.multitaskHint"),
+      t("settings.allowlistHint"),
+      t("settings.cliAndPermissions"),
+    ],
+    mcp: [t("settings.mcpEmptyHint"), t("settings.mcpApplyHint")],
+    diagnostics: [
+      t("diagnostics.folderHint", { path: "…" }),
+      t("diagnostics.chatHint"),
+      t("diagnostics.noChats"),
+      t("diagnostics.dumpsHint"),
+    ],
+    remote: [
+      t("settings.remoteStep1Body"),
+      t("settings.remoteStep2Body"),
+      t("settings.remoteStep2HowIp"),
+      t("settings.remoteStep3Body"),
+      t("settings.remoteTipLocalhost"),
+      t("settings.remoteTipSameNetwork"),
+    ],
+    appearance: [
+      t("settings.sidebarCollapseHint"),
+      t("settings.fontFamilyHint"),
+      t("settings.fontSizeHint"),
+      t("settings.showBootSplashHint"),
+    ],
+    colors: [t("settings.lightSchemeHint"), t("settings.darkSchemeHint")],
+    voice: [t("settings.ttsVoiceGenderHint"), t("settings.ttsNaturalHint"), t("settings.ttsOpenWindowsSpeech")],
+    chat: [
+      t("settings.chatIntro"),
+      t("settings.chatActionsHint"),
+      t("settings.chatMetaChipsHint"),
+      t("settings.chatComposerButtonsHint"),
+      t("settings.chatTreeElementsHint"),
+      t("settings.chatTreeMenuHint"),
+      t("settings.chatEnterToSendHint"),
+      t("settings.chatShowMessageTimeHint"),
     ],
   };
 }

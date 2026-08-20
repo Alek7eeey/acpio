@@ -339,6 +339,8 @@ export function AppShell() {
     if (window.innerWidth < 900) setSidebarOpen(false);
   };
 
+
+
   const shellStyle = (
     showSidebar
       ? {
@@ -346,6 +348,75 @@ export function AppShell() {
         }
       : undefined
   ) as CSSProperties | undefined;
+
+  /** "ACProcess | Chat" brand: shown in the header when the sidebar is
+   *  collapsed or on mobile, and inside the tree next to the collapse
+   *  button when the desktop sidebar is open. */
+  const brandButton = (
+    <button
+      type="button"
+      className={styles.headerBrand}
+      onClick={goChat}
+      title={t("common.goToChat")}
+      aria-label="ACProcess chat"
+    >
+      <span className={styles.brandLetters} aria-hidden>
+        {"ACProcess".split("").map((ch, i) => (
+          <span
+            key={`${ch}-${i}`}
+            className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
+          >
+            {ch}
+          </span>
+        ))}
+      </span>
+      <span className={styles.brandDivider} aria-hidden />
+      <span className={styles.brandChatMark} aria-hidden>
+        Chat
+      </span>
+    </button>
+  );
+
+  /** Settings search field: lives inside the tree top row, between the
+   *  back-to-chat button and the collapse button. */
+  const settingsSearchField = (
+    <div className={styles.settingsSearch}>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+        <path
+          d="M16 16l4.5 4.5"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
+      </svg>
+      <input
+        type="search"
+        value={settingsQuery}
+        onChange={(e) => setSettingsQuery(e.target.value)}
+        placeholder={t("settings.searchPlaceholder")}
+        aria-label={t("settings.searchPlaceholder")}
+      />
+      {settingsQuery ? (
+        <button
+          type="button"
+          className={styles.settingsSearchClear}
+          aria-label={t("settings.searchClear")}
+          title={t("settings.searchClear")}
+          onClick={() => setSettingsQuery("")}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
 
   return (
     <div
@@ -355,40 +426,77 @@ export function AppShell() {
       style={shellStyle}
     >
       {showSidebar && (
-        <aside className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""}`}>
+        <aside
+          className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""} ${
+            isChat ? styles.treeBrand : ""
+          }`}
+        >
           <div className={styles.brandRow}>
-            {isSettings && (
-              <button type="button" className={styles.backBtn} onClick={goChat}>
-                {t("common.backToChat")}
-              </button>
+            {isSettings ? (
+              <>
+                <button type="button" className={styles.backBtn} onClick={goChat}>
+                  {t("common.backToChat")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.collapseBtn}
+                  aria-label={t("common.collapseTree")}
+                  title={t("common.collapseTree")}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <rect
+                      x="3.5"
+                      y="4.5"
+                      width="17"
+                      height="15"
+                      rx="3"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    />
+                    <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M14.2 9.2 11.5 12l2.7 2.8"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={styles.sidebarBrand}>{brandButton}</span>
+                <button
+                  type="button"
+                  className={styles.collapseBtn}
+                  aria-label={t("common.collapseTree")}
+                  title={t("common.collapseTree")}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <rect
+                      x="3.5"
+                      y="4.5"
+                      width="17"
+                      height="15"
+                      rx="3"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                    />
+                    <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M14.2 9.2 11.5 12l2.7 2.8"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              className={styles.collapseBtn}
-              aria-label={t("common.collapseTree")}
-              title={t("common.collapseTree")}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <rect
-                  x="3.5"
-                  y="4.5"
-                  width="17"
-                  height="15"
-                  rx="3"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                />
-                <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
-                <path
-                  d="M14.2 9.2 11.5 12l2.7 2.8"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
           </div>
 
           {isChat && (
@@ -400,42 +508,7 @@ export function AppShell() {
 
           {isSettings && (
             <div className={styles.settingsSearchWrap}>
-              <div className={styles.settingsSearch}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                  <path
-                    d="M16 16l4.5 4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <input
-                  type="search"
-                  value={settingsQuery}
-                  onChange={(e) => setSettingsQuery(e.target.value)}
-                  placeholder={t("settings.searchPlaceholder")}
-                  aria-label={t("settings.searchPlaceholder")}
-                />
-                {settingsQuery ? (
-                  <button
-                    type="button"
-                    className={styles.settingsSearchClear}
-                    aria-label={t("settings.searchClear")}
-                    title={t("settings.searchClear")}
-                    onClick={() => setSettingsQuery("")}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path
-                        d="M6 6l12 12M18 6L6 18"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
+              {settingsSearchField}
               {settingsQuery.trim() ? (
                 <p
                   className={`${styles.settingsSearchStatus}${
@@ -856,13 +929,13 @@ export function AppShell() {
             settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
           }
         >
-          {showSidebar && !sidebarOpen ? (
+          {showSidebar ? (
             <button
               type="button"
-              className={styles.iconBtn}
+              className={`${styles.iconBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}`}
               aria-label={t("common.openTree")}
               title={t("common.openTree")}
-              onClick={() => setSidebarOpen(true)}
+              onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
@@ -874,28 +947,7 @@ export function AppShell() {
               </svg>
             </button>
           ) : null}
-          <button
-            type="button"
-            className={styles.headerBrand}
-            onClick={goChat}
-            title={t("common.goToChat")}
-            aria-label="ACProcess chat"
-          >
-            <span className={styles.brandLetters} aria-hidden>
-              {"ACProcess".split("").map((ch, i) => (
-                <span
-                  key={`${ch}-${i}`}
-                  className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
-                >
-                  {ch}
-                </span>
-              ))}
-            </span>
-            <span className={styles.brandDivider} aria-hidden />
-            <span className={styles.brandChatMark} aria-hidden>
-              Chat
-            </span>
-          </button>
+          <span className={styles.headerBrandSlot}>{brandButton}</span>
           <div className={styles.headerSpacer} />
           <div className={styles.headerActions}>
             <div

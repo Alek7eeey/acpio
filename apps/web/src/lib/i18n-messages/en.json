@@ -455,7 +455,12 @@
     "searchClear": "Clear",
     "searchResults": "Matches: {{count}}",
     "searchNoResults": "No results found",
-    "searchFoundIn": "Found in:"
+    "searchFoundIn": "Found in:",
+    "searchResultsTitle": "Found settings",
+    "searchResultsCount": "{{count}} matches found",
+    "section": "Section",
+    "subsection": "Subsection",
+    "searchBackToResults": "Back to results"
   },
   "permission": {
     "title": "Permission needed",

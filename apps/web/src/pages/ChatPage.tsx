@@ -1810,14 +1810,24 @@ function AssistantParts({
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
   const [paintStreaming, setPaintStreaming] = useState(streaming);
+  const wasStreamingRef = useRef(streaming);
   useEffect(() => {
     if (streaming) {
+      wasStreamingRef.current = true;
       setPaintStreaming(true);
       return;
     }
+    // After a user-initiated stop (session already idle), show actions
+    // immediately — no need to wait for late-arriving text.
+    if (wasStreamingRef.current && session?.status === "idle") {
+      wasStreamingRef.current = false;
+      setPaintStreaming(false);
+      return;
+    }
+    wasStreamingRef.current = false;
     const id = window.setTimeout(() => setPaintStreaming(false), 3200);
     return () => window.clearTimeout(id);
-  }, [streaming]);
+  }, [streaming, session?.status]);
 
   const parts = useMemo(() => {
     return coalesceAssistantParts(message.parts);

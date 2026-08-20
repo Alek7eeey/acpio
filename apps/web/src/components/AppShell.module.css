@@ -88,6 +88,39 @@
   background: var(--bg-tertiary);
 }
 
+/* The brand lives in the tree next to the collapse button when the desktop
+   sidebar is open; the header slot only shows it when the sidebar is
+   collapsed or on mobile. */
+.headerBrandSlot {
+  display: contents;
+}
+
+.sidebarBrand {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.sidebarBrand .headerBrand {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 4px 12px;
+  font-size: 1.12rem;
+  justify-content: flex-start;
+}
+
+@media (min-width: 900px) {
+  .sidebar.treeBrand.open ~ .main .headerBrandSlot .headerBrand {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .sidebarBrand {
+    display: none;
+  }
+}
+
 .headerSpacer {
   flex: 1;
   min-width: 0;
@@ -96,11 +129,14 @@
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(16px);
   border-right: 1px solid var(--border);
-  padding: 14px;
+  /* 4px top padding keeps brandRow aligned with the main header when the
+     sidebar collapses — the header sits flush at the top, so a 14px top
+     offset caused a visible "jump" of the hamburger / title. */
+  padding: 4px 14px 14px 14px;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -119,9 +155,11 @@
 .backBtn {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-start;
+  flex: 0 0 auto;
   border: none;
   background: transparent;
-  padding: 6px 4px;
+  padding: 6px 10px;
   font-weight: 650;
   color: var(--text-secondary);
   border-radius: 8px;
@@ -131,7 +169,7 @@
 
 .backBtn:hover {
   color: var(--text);
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
 }
 
 .collapseBtn {
@@ -334,6 +372,7 @@
   background: var(--text-secondary);
   opacity: 0.45;
   flex-shrink: 0;
+  align-self: center;
 }
 
 .brandChatMark {
@@ -345,6 +384,7 @@
   color: var(--accent);
   white-space: nowrap;
   user-select: none;
+  align-self: center;
 }
 
 .chatPanel {
@@ -2210,11 +2250,32 @@
   padding: 8px 10px;
 }
 
+
+
 .deleteBtn:hover,
 .iconBtn:hover,
 .themeBtn:hover {
   background: var(--bg-tertiary);
   color: var(--text);
+}
+
+/* On desktop the tree-open state keeps no hamburger slot (the header title
+   sits at the left edge in settings); on mobile the burger stays visible,
+   toggles the drawer and rotates 90° while the tree is open. */
+@media (min-width: 900px) {
+  .iconBtnGhost {
+    display: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .iconBtn svg {
+    transition: transform 0.18s ease;
+  }
+
+  .iconBtnOpen svg {
+    transform: rotate(90deg);
+  }
 }
 
 .settingsTree {
@@ -2230,8 +2291,8 @@
 .settingsSearchWrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 6px 12px 2px;
+  gap: 2px;
+  padding: 2px 12px 0;
   flex: 0 0 auto;
 }
 
@@ -2287,7 +2348,7 @@
   margin: 0;
   font-size: 0.78rem;
   color: var(--text-secondary);
-  padding: 0 4px;
+  padding: 4px 4px 0 12px;
 }
 
 .settingsSearchStatusEmpty {
@@ -2309,10 +2370,12 @@
   border: none;
   background: transparent;
   text-align: left;
-  color: var(--text);
-  border-radius: 10px;
-  padding: 9px 10px;
-  font-weight: 650;
+  color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
   min-width: 0;
 }
 
@@ -2353,10 +2416,20 @@
 }
 
 .settingsLeaf {
-  font-weight: 550;
-  font-size: 0.92rem;
+  display: block;
+  font-weight: 500;
+  font-size: 0.9rem;
   color: var(--text-secondary);
-  padding: 8px 10px;
+  padding: 5px 8px;
+}
+
+/* Mobile: hide the settings tree — the nav chip bar at the top handles
+   section navigation. */
+@media (max-width: 899px) {
+  .settingsSearchWrap,
+  .settingsTree {
+    display: none;
+  }
 }
 
 .nav {
