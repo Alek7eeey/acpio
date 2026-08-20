@@ -29,8 +29,8 @@ function cursorTaskCard(
           : status === "running" || status === "in_progress"
             ? "running"
             : "completed",
-      title: title || "Субагент",
-      description: title || "Субагент",
+      title: title || "Subagent",
+      description: title || "Subagent",
       ...(extra.result || extra.prompt ? { body: extra.result || extra.prompt } : {}),
       ...(subagentType ? { subagentType } : {}),
       raw: params,

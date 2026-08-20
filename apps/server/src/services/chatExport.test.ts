@@ -488,7 +488,7 @@ describe("renderMarkdown", () => {
       }),
       "ru",
     );
-    expect(md).toContain("**Субагент: Мой агент**\n\nитог работы");
+    expect(md).toContain("**Subagent: Мой агент**\n\nитог работы");
   });
 
   it("renders a bare subagent heading without title or body", () => {
@@ -496,7 +496,7 @@ describe("renderMarkdown", () => {
       makeDetail({ messages: [makeMessage("assistant", [makePart("subagent", {})])] }),
       "ru",
     );
-    expect(md).toContain("**Субагент**");
+    expect(md).toContain("**Subagent**");
   });
 
   it("filters generic subagent titles and falls back to raw.name", () => {
@@ -506,7 +506,7 @@ describe("renderMarkdown", () => {
       }),
       "ru",
     );
-    expect(md).toContain("**Субагент: worker**");
+    expect(md).toContain("**Subagent: worker**");
   });
 
   it("drops the title when only generic names are present", () => {
@@ -516,7 +516,7 @@ describe("renderMarkdown", () => {
       }),
       "ru",
     );
-    expect(md).toContain("**Субагент**");
+    expect(md).toContain("**Subagent**");
   });
 
   it.each([
@@ -531,7 +531,7 @@ describe("renderMarkdown", () => {
       makeDetail({ messages: [makeMessage("assistant", [makePart("subagent", { result })])] }),
       "ru",
     );
-    expect(md).toContain("**Субагент**\n\n" + expected);
+    expect(md).toContain("**Subagent**\n\n" + expected);
   });
 
   it("truncates long subagent bodies with the marker", () => {

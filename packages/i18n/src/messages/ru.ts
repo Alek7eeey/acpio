@@ -166,7 +166,7 @@ export const ru = {
     toolExpand: "Показать вывод",
     toolCollapse: "Скрыть вывод",
     outputTruncated: "вывод обрезан",
-    subagent: "Субагент",
+    subagent: "Subagent",
     subagentWorking: " · работает",
     subagentFailed: " · ошибка",
     agentThinking: "Агент думает",
@@ -559,7 +559,7 @@ export const ru = {
   agent: {
     toolsHint:
       "[Системно: в этой среде у тебя есть инструменты web/fetch, terminal и fs. Для актуальных данных (погода, сайты, новости) сразу вызывай инструменты — не отвечай, что «нет доступа к интернету/погоде».]",
-    subagent: "Субагент",
+    subagent: "Subagent",
   },
   diagnostics: {
     collect: "Собрать отчёт",
@@ -591,7 +591,7 @@ export const ru = {
     system: "Система",
     thinking: "Размышление",
     tool: "Инструмент",
-    subagent: "Субагент",
+    subagent: "Subagent",
     file: "Файл",
     error: "Ошибка",
     status: "Статус",
