@@ -2069,6 +2069,11 @@
     padding-left: max(12px, env(safe-area-inset-left, 0px));
     padding-right: max(12px, env(safe-area-inset-right, 0px));
   }
+  .threadInner {
+    /* Short conversations: pin content to the bottom so the last message
+       sits next to the composer instead of leaving a gap below it. */
+    margin-top: auto;
+  }
 
   .sessionCwdText {
     white-space: normal;
