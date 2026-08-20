@@ -283,7 +283,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
   chatTreeShowArchive: true,
-  chatHeaderHeight: 52,
+  chatHeaderHeight: 44,
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
   chatShowMessageTime: false,
