@@ -1464,7 +1464,9 @@
   margin: 0;
   box-sizing: border-box;
   z-index: 311;
-  max-height: min(82dvh, 560px);
+  max-height: calc(
+    100dvh - max(24px, env(safe-area-inset-top, 0px) + env(safe-area-inset-bottom, 0px) + 24px)
+  );
   overflow: auto;
   overscroll-behavior: contain;
   padding: 16px;
@@ -1492,10 +1494,15 @@
   position: fixed;
   inset: 0;
   z-index: 309;
-  display: grid;
-  place-items: center;
-  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
-    max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px))
+    max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
   background: rgba(8, 12, 20, 0.35);
   backdrop-filter: blur(2px);
 }
@@ -1511,13 +1518,14 @@
   top: auto !important;
   right: auto !important;
   bottom: auto !important;
-  width: min(380px, 100%) !important;
+  width: 100% !important;
   max-width: 100%;
-  max-height: min(85dvh, 560px);
+  max-height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
   z-index: 310;
   margin: 0;
+  box-sizing: border-box;
 }
 
 .folderPickDefaultCard {
@@ -2024,6 +2032,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-width: 0;
   border: none;
   background: transparent;
   text-align: left;
@@ -2076,6 +2085,7 @@
   align-items: center;
   gap: 10px;
   width: 100%;
+  min-width: 0;
   border: none;
   background: transparent;
   text-align: left;
@@ -2689,6 +2699,13 @@
   gap: 8px;
 }
 
+.agentTipMcpHead .agentTipLabel {
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .agentTipMcpCount {
   flex: 0 0 auto;
   font-size: 0.62rem;
@@ -3158,6 +3175,23 @@
     min-height: 48px;
     padding: 10px 12px;
     touch-action: manipulation;
+  }
+
+  .folderPickerOverlay {
+    padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .folderPickerModal,
+  .pickerPanel.folderPickerModal {
+    max-width: 100%;
+    width: 100% !important;
+  }
+
+  .pickerItemPath {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
   }
 
   .iconBtn {

@@ -218,6 +218,10 @@ export function AttachDialog({ open, initialDir, onClose, onAttach }: AttachDial
       setError(null);
       return;
     }
+    // Don't keep a desktop-resized size on phones — it overflows the viewport.
+    if (typeof window !== "undefined" && window.innerWidth < 900) {
+      setSize(null);
+    }
     void loadBrowse(initialDir && initialDir !== DRIVES_ROOT ? initialDir : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialDir]);

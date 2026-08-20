@@ -5,6 +5,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
     max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
   pointer-events: none;
@@ -27,8 +31,9 @@
   z-index: 1;
   pointer-events: auto;
   width: min(660px, 100%);
-  height: min(640px, 88dvh);
-  max-height: min(640px, 88dvh);
+  max-width: 100%;
+  height: min(640px, 100%);
+  max-height: 100%;
   overflow: hidden;
   overscroll-behavior: contain;
   box-sizing: border-box;
@@ -41,6 +46,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   color: var(--text);
 }
 
@@ -337,13 +343,52 @@
   color: color-mix(in srgb, #e8b84a 75%, var(--accent));
 }
 
-@media (max-width: 600px) {
+@media (max-width: 899px) {
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .dialog {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 14px;
+  }
+
   .sidebar {
     display: none;
   }
 
   .quickStrip {
     display: flex;
+  }
+
+  .upBtn,
+  .closeBtn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .addressBar,
+  .addressInput {
+    height: 40px;
+  }
+
+  .row {
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+
+  .secondaryBtn {
+    min-height: 42px;
+    padding: 10px 14px;
+  }
+
+  .resizeHandle {
+    display: none;
   }
 }
 

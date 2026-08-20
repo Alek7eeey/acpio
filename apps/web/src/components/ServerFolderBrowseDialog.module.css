@@ -5,6 +5,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
     max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
   pointer-events: none;
@@ -27,8 +31,9 @@
   z-index: 1;
   pointer-events: auto;
   width: min(560px, 100%);
-  height: min(620px, 88dvh);
-  max-height: min(620px, 88dvh);
+  max-width: 100%;
+  height: min(620px, 100%);
+  max-height: 100%;
   overflow: hidden;
   overscroll-behavior: contain;
   box-sizing: border-box;
@@ -41,6 +46,7 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
   color: var(--text);
 }
 
@@ -101,6 +107,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--surface);
@@ -333,12 +340,12 @@
 .primaryBtn {
   border: none;
   border-radius: 8px;
-  padding: 9px 14px;
+  padding: 7px 12px;
   font: inherit;
-  font-weight: 650;
-  font-size: 0.9rem;
+  font-weight: 600;
+  font-size: 0.82rem;
   cursor: pointer;
-  min-width: 108px;
+  min-width: 0;
 }
 
 .secondaryBtn {
@@ -365,11 +372,18 @@
 }
 
 @media (max-width: 899px) {
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+
   .dialog {
-    width: min(560px, 100%);
-    height: min(78dvh, 620px);
-    max-height: min(78dvh, 620px);
-    border-radius: 12px;
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 14px;
   }
 
   .row {
@@ -383,13 +397,31 @@
     height: 40px;
   }
 
-  .addressBar {
+  .addressBar,
+  .addressInput {
     height: 40px;
+  }
+
+  .folderField {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .folderLabel {
+    white-space: normal;
+  }
+
+  .actions {
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .secondaryBtn,
   .primaryBtn {
-    min-height: 42px;
-    padding: 10px 14px;
+    min-height: 0;
+    padding: 6px 11px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 7px;
   }
 }
