@@ -642,26 +642,6 @@
   min-width: 0;
 }
 
-.timeGroupHead {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  padding: 8px 10px 2px;
-  color: var(--text-secondary);
-}
-
-.timeGroupLabel {
-  min-width: 0;
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.72;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .folderHead {
   display: flex;
   align-items: center;

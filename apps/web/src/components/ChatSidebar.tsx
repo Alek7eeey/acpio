@@ -450,7 +450,6 @@ export function ChatSidebar({
   // Small trees keep the plain render (no measurement/scroll subtleties).
   type TreeRow =
     | { kind: "folder-head"; key: string; folder: (typeof folders)[number] }
-    | { kind: "group-head"; key: string; label: string }
     | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
     | { kind: "liked-head"; key: string; count: number }
@@ -469,12 +468,9 @@ export function ChatSidebar({
       if (useTimeGroups) {
         const timeGroups = groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs);
         for (const group of timeGroups) {
-          const sharedHeading = group.sessions.length > 1 && !!group.label;
-          if (sharedHeading) {
-            rows.push({ kind: "group-head", key: `gh:${fkey}:${group.key}`, label: group.label });
-          }
           for (const s of group.sessions) {
-            rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: !sharedHeading, inArchive: false, indent: true });
+            // Always show relative time on the row (never a shared heading above).
+            rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: true, inArchive: false, indent: true });
           }
         }
       } else {
@@ -514,8 +510,6 @@ export function ChatSidebar({
       switch (row.kind) {
         case "folder-head":
           return 34;
-        case "group-head":
-          return 24;
         case "session":
           return 48;
         case "archive-head":
@@ -870,12 +864,6 @@ export function ChatSidebar({
     );
   };
 
-  const renderGroupHead = (label: string) => (
-    <div className={styles.timeGroupHead}>
-      <span className={styles.timeGroupLabel}>{label}</span>
-    </div>
-  );
-
   const renderSectionHead = (
     sectionKey: "__archive__" | "__liked__",
     count: number,
@@ -937,8 +925,6 @@ export function ChatSidebar({
     switch (row.kind) {
       case "folder-head":
         return renderFolderHead(row.folder);
-      case "group-head":
-        return renderGroupHead(row.label);
       case "session":
         return renderSessionRow(row.session, row.showActivity, row.inArchive);
       case "archive-head":
@@ -1182,19 +1168,11 @@ export function ChatSidebar({
                 )}
                 {!collapsedFolders.has(folder.cwd || "__no_folder__") &&
                   (timeGroups
-                    ? timeGroups.map((group) => {
-                        const sharedHeading = group.sessions.length > 1 && !!group.label;
-                        return (
-                          <div key={group.key} className={styles.timeGroup}>
-                            {sharedHeading ? (
-                              <div className={styles.timeGroupHead}>
-                                <span className={styles.timeGroupLabel}>{group.label}</span>
-                              </div>
-                            ) : null}
-                            {group.sessions.map((s) => renderSessionRow(s, !sharedHeading))}
-                          </div>
-                        );
-                      })
+                    ? timeGroups.map((group) => (
+                        <div key={group.key} className={styles.timeGroup}>
+                          {group.sessions.map((s) => renderSessionRow(s, true))}
+                        </div>
+                      ))
                     : folder.sessions.map((s) => renderSessionRow(s, true)))}
               </div>
             );
