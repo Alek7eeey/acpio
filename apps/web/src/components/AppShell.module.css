@@ -569,7 +569,7 @@
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
   min-height: 0;
   padding: 2px 2px 14px;
 }
@@ -635,8 +635,8 @@
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  /* Air between projects; chats inside stay tight. */
-  margin-bottom: 20px;
+  /* Tight air between projects; chats inside use folderBody/timeGroup gap. */
+  margin-bottom: 6px;
 }
 
 /* Sessions under a folder: rail + indent so chats sit one level deeper. */
@@ -685,12 +685,12 @@
 .folderHead {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  min-height: 26px;
+  min-height: 24px;
   /* Align folder name with chat titles' column, chats go one step deeper. */
-  padding: 3px 4px 3px 6px;
-  margin-bottom: 5px;
+  padding: 2px 4px 2px 6px;
+  margin-bottom: 2px;
   border-radius: 6px;
   color: var(--text-secondary);
   cursor: pointer;
@@ -714,17 +714,34 @@
 
 .folderIcon {
   flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 14px;
   display: grid;
   place-items: center;
-  opacity: 0.9;
+  opacity: 1;
 }
 
 .folderIcon svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 13px;
+}
+
+/* Manila / kraft folder fills — fixed browns, not theme text. */
+.folderIconTab {
+  fill: #d4a574;
+}
+
+.folderIconBody {
+  fill: #b8834a;
+}
+
+.folderIconFront {
+  fill: #c9955c;
+}
+
+.folderIconEdge {
+  fill: #8f6233;
 }
 
 .folderLabel {

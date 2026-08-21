@@ -10,26 +10,26 @@
   --settings-hint-line: 1.4;
   --settings-section-size: 0.92rem;
   --settings-section-weight: 700;
-  --settings-control-radius: 12px;
+  --settings-control-radius: 10px;
   --settings-control-pad-y: 11px;
   --settings-control-pad-x: 12px;
   --settings-control-weight: 500;
   --settings-control-size: 0.88rem;
   --settings-btn-weight: 650;
-  --settings-btn-size: 0.88rem;
-  --settings-btn-pad-y: 11px;
-  --settings-btn-pad-x: 14px;
+  --settings-btn-size: 0.82rem;
+  --settings-btn-pad-y: 7px;
+  --settings-btn-pad-x: 12px;
   --settings-note-pad-y: 10px;
   --settings-note-pad-x: 12px;
   --settings-focus-ring: 0 0 0 4px var(--accent-soft);
 }
 
-/* Compact buttons on phones — inputs keep desktop control metrics. */
+/* Phones: same compact buttons (inputs keep control metrics). */
 @media (max-width: 700px) {
   :root {
-    --settings-btn-size: 0.82rem;
-    --settings-btn-pad-y: 7px;
-    --settings-btn-pad-x: 12px;
+    --settings-btn-size: 0.8rem;
+    --settings-btn-pad-y: 6px;
+    --settings-btn-pad-x: 10px;
     --settings-control-radius: 10px;
   }
 }

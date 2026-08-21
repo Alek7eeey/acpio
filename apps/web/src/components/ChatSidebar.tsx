@@ -27,6 +27,27 @@ type FolderPickerState = {
   dialogStartPath?: string;
 };
 
+/** Filled manila folder glyph for the chat tree. */
+function FolderGlyph() {
+  return (
+    <svg width="15" height="13" viewBox="0 0 24 20" aria-hidden>
+      <path
+        className={styles.folderIconTab}
+        d="M1.5 4.2A1.7 1.7 0 0 1 3.2 2.5h5.1l1.7 1.8h10.8A1.7 1.7 0 0 1 22.5 6v1.2H1.5V4.2Z"
+      />
+      <path
+        className={styles.folderIconEdge}
+        d="M1.5 7.2h21v10.1A1.7 1.7 0 0 1 20.8 19H3.2A1.7 1.7 0 0 1 1.5 17.3V7.2Z"
+      />
+      <path
+        className={styles.folderIconBody}
+        d="M1.5 8h21v9.3A1.7 1.7 0 0 1 20.8 19H3.2A1.7 1.7 0 0 1 1.5 17.3V8Z"
+      />
+      <path className={styles.folderIconFront} d="M1.5 8h21v2.4H1.5Z" opacity="0.55" />
+    </svg>
+  );
+}
+
 function sortSessions(list: SessionDto[]) {
   return [...list].sort(
     (a, b) =>
@@ -534,7 +555,7 @@ export function ChatSidebar({
       if (!row) return 40;
       switch (row.kind) {
         case "folder-head":
-          return 30;
+          return 28;
         case "session":
           return 34;
         case "archive-head":
@@ -862,21 +883,7 @@ export function ChatSidebar({
             </svg>
           </span>
           <span className={styles.folderIcon}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <FolderGlyph />
           </span>
         </span>
         <span className={styles.folderLabel}>
@@ -1184,21 +1191,7 @@ export function ChatSidebar({
                         </svg>
                       </span>
                       <span className={styles.folderIcon}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                          <path
-                            d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                          <path
-                            d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
+                        <FolderGlyph />
                       </span>
                     </span>
                     <span className={styles.folderLabel}>
