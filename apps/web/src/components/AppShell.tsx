@@ -137,6 +137,13 @@ export function AppShell() {
   const isSettings = pathname.startsWith("/settings");
   const showSidebar = isChat || isSettings;
 
+  // Chat tree drawer left open on mobile paints an empty settings shell.
+  // Close it whenever we enter settings (Links / gear skip goSettings).
+  useEffect(() => {
+    if (!isSettings) return;
+    if (window.innerWidth < 900) setSidebarOpen(false);
+  }, [isSettings, setSidebarOpen]);
+
   const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
     agent: true,
@@ -1082,7 +1089,7 @@ export function AppShell() {
                 className={`${styles.toolClusterBtn} ${styles.toolClusterSettings}${isSettings ? ` ${styles.toolClusterBtnActive}` : ""}`}
                 aria-label={t("common.settings")}
                 title={t("common.settings")}
-                onClick={() => navigate(settingsPath("agent", "connect"))}
+                onClick={() => goSettings("agent", "connect")}
               >
                 <svg
                   className={styles.toolClusterSettingsIcon}
