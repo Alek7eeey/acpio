@@ -480,13 +480,26 @@ export function ChatSidebar({
         const timeGroups = groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs);
         for (const group of timeGroups) {
           for (const s of group.sessions) {
-            // Always show relative time on the row (never a shared heading above).
-            rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: true, inArchive: false, indent: true });
+            rows.push({
+              kind: "session",
+              key: `s:${s.id}`,
+              session: s,
+              showActivity: true,
+              inArchive: false,
+              indent: showFolderHeaders,
+            });
           }
         }
       } else {
         for (const s of folder.sessions) {
-          rows.push({ kind: "session", key: `s:${s.id}`, session: s, showActivity: true, inArchive: false, indent: true });
+          rows.push({
+            kind: "session",
+            key: `s:${s.id}`,
+            session: s,
+            showActivity: true,
+            inArchive: false,
+            indent: showFolderHeaders,
+          });
         }
       }
     }
@@ -520,9 +533,9 @@ export function ChatSidebar({
       if (!row) return 40;
       switch (row.kind) {
         case "folder-head":
-          return 34;
+          return 30;
         case "session":
-          return 48;
+          return 34;
         case "archive-head":
         case "liked-head":
           return 32;
@@ -653,8 +666,8 @@ export function ChatSidebar({
         key={s.id}
         data-tree-flip={`s:${s.id}`}
         className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
-          enteringSessionIds.current.has(s.id) ? styles.entering : ""
-        }`}
+          menuOpen ? styles.sessionMenuOpen : ""
+        } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}`}
         onContextMenu={(e) => openSessionMenu(e, s.id)}
       >
         {isRenaming ? (
@@ -813,20 +826,37 @@ export function ChatSidebar({
   };
 
   const noFolderKey = "__no_folder__";
+  const activeFolderKey = useMemo(() => {
+    const active = sessions.find((s) => s.id === activeSessionId);
+    if (!active || active.archived) return null;
+    return normalizeCwd(active.cwd) || noFolderKey;
+  }, [sessions, activeSessionId]);
 
   const renderFolderHead = (folder: (typeof folders)[number]) => {
     const fkey = folder.cwd || noFolderKey;
+    const isActiveFolder = activeFolderKey === fkey;
     return (
       <div
         className={`${styles.folderHead} ${
           collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
-        }`}
+        }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
         title={folder.cwd || undefined}
         onClick={() => toggleFolder(fkey)}
       >
-        <span className={styles.folderIconWrap} aria-hidden>
+        <span className={styles.folderLead} aria-hidden>
+          <span className={styles.folderChevronIcon}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 9l6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
           <span className={styles.folderIcon}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
               <path
                 d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
                 stroke="currentColor"
@@ -838,17 +868,6 @@ export function ChatSidebar({
                 d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
                 stroke="currentColor"
                 strokeWidth="1.6"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className={styles.folderChevronIcon}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M6 9l6 6 6-6"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </svg>
@@ -1090,14 +1109,30 @@ export function ChatSidebar({
                     key={row.key}
                     data-index={vi.index}
                     ref={treeVirtualizer.measureElement}
+                    className={
+                      row.kind === "session" && row.indent
+                        ? `${styles.treeVirtNested}${
+                            activeFolderKey != null &&
+                            (normalizeCwd(row.session.cwd) || noFolderKey) === activeFolderKey
+                              ? ` ${styles.treeVirtNestedActive}`
+                              : ""
+                          }`
+                        : undefined
+                    }
                     style={{
                       position: "absolute",
                       top: 0,
                       left: 0,
                       width: "100%",
                       transform: `translateY(${vi.start}px)`,
-                      paddingBottom: row.kind === "session" && row.indent ? 4 : 8,
-                      ...(row.kind === "session" && row.indent ? { paddingLeft: 10 } : {}),
+                      paddingTop:
+                        row.kind === "folder-head" && vi.index > 0 ? 16 : 0,
+                      paddingBottom:
+                        row.kind === "session"
+                          ? 3
+                          : row.kind === "folder-head"
+                            ? 6
+                            : 8,
                     }}
                   >
                     {renderTreeRow(row)}
@@ -1113,24 +1148,37 @@ export function ChatSidebar({
             const timeGroups = useTimeGroups
               ? groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs)
               : null;
+            const fkey = folder.cwd || "__no_folder__";
+            const isActiveFolder = activeFolderKey === fkey;
 
             return (
               <div
-                key={folder.cwd || "__no_folder__"}
+                key={fkey}
                 className={styles.folderGroup}
-                data-tree-flip={`fg:${folder.cwd || "__no_folder__"}`}
+                data-tree-flip={`fg:${fkey}`}
               >
                 {showFolderHeaders && (
                   <div
                     className={`${styles.folderHead} ${
-                      collapsedFolders.has(folder.cwd || "__no_folder__") ? "" : styles.folderHeadOpen
-                    }`}
+                      collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
+                    }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
                     title={folder.cwd || undefined}
-                    onClick={() => toggleFolder(folder.cwd || "__no_folder__")}
+                    onClick={() => toggleFolder(fkey)}
                   >
-                    <span className={styles.folderIconWrap} aria-hidden>
+                    <span className={styles.folderLead} aria-hidden>
+                      <span className={styles.folderChevronIcon}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                          <path
+                            d="M6 9l6 6 6-6"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
                       <span className={styles.folderIcon}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                           <path
                             d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
                             stroke="currentColor"
@@ -1142,17 +1190,6 @@ export function ChatSidebar({
                             d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
                             stroke="currentColor"
                             strokeWidth="1.6"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </span>
-                      <span className={styles.folderChevronIcon}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                          <path
-                            d="M6 9l6 6 6-6"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
                             strokeLinejoin="round"
                           />
                         </svg>
@@ -1182,14 +1219,23 @@ export function ChatSidebar({
                     </button>
                   </div>
                 )}
-                {!collapsedFolders.has(folder.cwd || "__no_folder__") &&
-                  (timeGroups
-                    ? timeGroups.map((group) => (
-                        <div key={group.key} className={styles.timeGroup}>
-                          {group.sessions.map((s) => renderSessionRow(s, true))}
-                        </div>
-                      ))
-                    : folder.sessions.map((s) => renderSessionRow(s, true)))}
+                {!collapsedFolders.has(fkey) && (
+                  <div
+                    className={`${
+                      showFolderHeaders ? styles.folderBody : styles.ungroupedSessions
+                    }${
+                      showFolderHeaders && isActiveFolder ? ` ${styles.folderBodyActive}` : ""
+                    }`}
+                  >
+                    {timeGroups
+                      ? timeGroups.map((group) => (
+                          <div key={group.key} className={styles.timeGroup}>
+                            {group.sessions.map((s) => renderSessionRow(s, true))}
+                          </div>
+                        ))
+                      : folder.sessions.map((s) => renderSessionRow(s, true))}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1227,7 +1273,10 @@ export function ChatSidebar({
                 <span className={styles.archiveCount}>{archivedSessions.length}</span>
               </div>
               {!collapsedFolders.has("__archive__") &&
-                archivedSessions.map((s) => renderSessionRow(s, true, true))}
+                <div className={styles.ungroupedSessions}>
+                  {archivedSessions.map((s) => renderSessionRow(s, true, true))}
+                </div>
+              }
             </div>
           )}
           {liked.length > 0 && (
