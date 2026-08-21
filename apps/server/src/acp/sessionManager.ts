@@ -2008,7 +2008,7 @@ async function runTurn(
     const detail = await import("../services/sessions.js").then((m) => m.getSessionDetail(sessionId));
     const lastAssistant = detail?.messages.filter((m) => m.role === "assistant").at(-1);
     const hasContent = lastAssistant?.parts.some((p) =>
-      ["text", "thought", "tool_call", "error"].includes(p.type),
+      ["text", "thought", "tool_call"].includes(p.type),
     );
 
     if (lastAssistant) {
@@ -2026,8 +2026,8 @@ async function runTurn(
       const hint =
         `Агент завершил ход без текста (stopReason=${result.stopReason ?? "unknown"}). ` +
         `Модель: ${model}. В Настройках выбери модель с API (не local-ollama, если Ollama не запущена) и сохрани ключ.`;
-      const assistantId = await ensureAssistantMessage(rt);
-      await appendPart(sessionId, assistantId, "error", { message: hint });
+      // Surface only via the composer banner — do not embed in the message thread.
+      broadcastToSession(sessionId, { type: "error", sessionId, message: hint });
     }
 
     await updateSession(sessionId, { status: "idle" });
@@ -2039,12 +2039,6 @@ async function runTurn(
         (rt.client && findModelConfigOption(rt.client.configOptions)?.currentValue) ||
         settings.defaultModel;
       if (currentModel) denyModel(opts.provider, currentModel);
-    }
-    try {
-      const assistantId = await ensureAssistantMessage(rt);
-      await appendPart(sessionId, assistantId, "error", { message });
-    } catch {
-      // ignore secondary failures
     }
     await updateSession(sessionId, { status: "error" });
     broadcastToSession(sessionId, { type: "error", sessionId, message });

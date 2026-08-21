@@ -285,6 +285,21 @@ function isLocalAssistantId(id: string) {
   return id.startsWith("local-assistant-");
 }
 
+/** Last error part in the thread — used only for the composer banner. */
+function lastAssistantErrorMessage(session: SessionDetailDto): string | null {
+  for (let i = session.messages.length - 1; i >= 0; i -= 1) {
+    const msg = session.messages[i];
+    if (msg?.role !== "assistant") continue;
+    for (let j = msg.parts.length - 1; j >= 0; j -= 1) {
+      const part = msg.parts[j];
+      if (part?.type !== "error") continue;
+      const text = String(part.payload?.message ?? "").trim();
+      if (text) return text;
+    }
+  }
+  return null;
+}
+
 /**
  * Server message ids → stable client ids so optimistic bubbles never remount.
  * Entries are session-scoped: an in-flight turn's bridge must survive the user
@@ -826,7 +841,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (get().sessionLoading) set({ sessionLoading: false });
           return;
         }
-        set({ activeSession: detail, sessionLoading: false });
+        set({
+          activeSession: detail,
+          sessionLoading: false,
+          error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+        });
         clearMessageIdAliases(id);
       } catch (err) {
         if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
@@ -857,6 +876,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingPermission: null,
       permissionQueue: [],
       pendingQuestion: null,
+      // Composer banner is per active chat — don't carry another session's error.
+      error: null,
     });
 
     try {
@@ -882,7 +903,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (sessionDetailQuickEqual(get().activeSession, detail) && !get().sessionLoading) {
         return;
       }
-      set({ activeSession: detail, sessionLoading: false });
+      set({
+        activeSession: detail,
+        sessionLoading: false,
+        error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+      });
       // The fetched detail is server-authoritative: the optimistic aliases for
       // this session are obsolete (their local messages are gone).
       clearMessageIdAliases(id);
@@ -1501,6 +1526,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (state.activeSession?.id !== event.sessionId) return;
       // User hit Stop — ignore late tokens still arriving over WS.
       if (state.cancelledPromptEpoch === state.promptEpoch) return;
+      // Error parts are not rendered in the thread; lift them to the banner.
+      if (event.part.type === "error") {
+        const message = String(event.part.payload?.message ?? "").trim();
+        if (message) {
+          set({ error: message });
+          rememberDiagnosticsError(message, "part");
+          void submitAutoErrorDump(message);
+        }
+      }
       queuePartEvent(event, get, set);
       return;
     }

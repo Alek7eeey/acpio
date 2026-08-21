@@ -1147,12 +1147,9 @@ function PartView({
   }
 
   // Regular tool calls stay hidden — only thoughts + subagent cards + answer text.
-  if (part.type === "tool_call") {
+  // Errors are shown only in the composer banner (store.error), never in-thread.
+  if (part.type === "tool_call" || part.type === "error") {
     return null;
-  }
-
-  if (part.type === "error") {
-    return <div className={styles.error}>{String(part.payload.message ?? t("common.error"))}</div>;
   }
 
   return null;
@@ -1757,9 +1754,6 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
   return parts.some((p) => {
     if (p.type === "text" || p.type === "thought") {
       return Boolean(String(p.payload.text ?? "").trim());
-    }
-    if (p.type === "error") {
-      return Boolean(String(p.payload.message ?? "").trim());
     }
     if (p.type === "subagent") {
       return true;
@@ -2533,7 +2527,11 @@ function coalesceAssistantParts(
   const subagentIndexByKey = new Map<string, number>();
 
   for (const part of coalesced) {
-    if (part.type === "thought" || part.type === "text" || part.type === "error") {
+    if (part.type === "error") {
+      // Composer banner only — never keep error parts in the visible thread model.
+      continue;
+    }
+    if (part.type === "thought" || part.type === "text") {
       out.push(part);
       continue;
     }
@@ -2691,7 +2689,7 @@ function AssistantParts({
   }, [parts]);
   const mainParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return parts.filter((p) => p === finalText || p.type === "error");
+    return parts.filter((p) => p === finalText && p.type !== "error");
   }, [parts]);
   const plain = useMemo(() => {
     return mainParts
