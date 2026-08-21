@@ -2,9 +2,13 @@
 // integration suite. Behavior is fixed; a few env vars switch error paths:
 //   FAKE_PROMPT_ERROR=1   → session/prompt fails
 //   prompt containing "EXIT-NOW" → process exits with code 1 mid-turn
+//   prompt containing "SLOW-ACTIVE" → streams updates then finishes (tests timeout extend)
+//   prompt containing "SLOW-SILENT" → stays quiet then finishes (tests hard timeout)
 //   prompt starting with "PERMISSION:" → issues session/request_permission
 //                                  and waits for the client's decision
 import readline from "node:readline";
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const CONFIG_OPTIONS = [
   {
@@ -98,6 +102,34 @@ async function handle(method, params, id) {
       const text = String(params.prompt?.[0]?.text ?? "");
       if (text.includes("EXIT-NOW")) {
         process.exit(1);
+      }
+      if (text.includes("SLOW-ACTIVE")) {
+        // Keep sending traffic past a short host timeout so the client must
+        // extend the wait instead of rejecting an active turn.
+        for (let i = 0; i < 6; i++) {
+          await sleep(45);
+          notify("session/update", {
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              messageId: `slow-${i}`,
+              content: { type: "text", text: `tick ${i}` },
+            },
+          });
+        }
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "slow-final",
+            content: { type: "text", text: "slow-active done" },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
+      if (text.includes("SLOW-SILENT")) {
+        await sleep(250);
+        return { stopReason: "end_turn" };
       }
       if (text.startsWith("PERMISSION:")) {
         const requestId = `perm-${nextSession++}-${Date.now()}`;

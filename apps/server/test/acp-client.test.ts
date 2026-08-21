@@ -222,6 +222,31 @@ describe("AcpClient against the fake agent", () => {
     });
   });
 
+  it("extends request timeout while the agent keeps sending updates", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    AcpClient.requestTimeoutMs = 80;
+    try {
+      await withClient(async (client) => {
+        const result = await client.prompt("SLOW-ACTIVE please");
+        expect(result.stopReason).toBe("end_turn");
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
+  it("times out a prompt that stays silent past the idle ceiling", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    AcpClient.requestTimeoutMs = 80;
+    try {
+      await withClient(async (client) => {
+        await expect(client.prompt("SLOW-SILENT please")).rejects.toThrow(/Таймаут ответа ACP/);
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
   it("cancel() mid-prompt resolves the prompt with stopReason 'cancelled'", async () => {
     await withClient(async (client) => {
       const promptPromise = client.prompt("hello");

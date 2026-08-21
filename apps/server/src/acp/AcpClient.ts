@@ -32,6 +32,8 @@ type JsonRpcId = number | string;
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (err: Error) => void;
+  timer: NodeJS.Timeout;
+  method: string;
 }
 
 type TerminalEntry = {
@@ -451,6 +453,8 @@ export class AcpClient extends EventEmitter {
   } = {};
   /** While true (Cursor session/load replay), drop session/update notifications. */
   private suppressUpdates = false;
+  /** Last inbound ACP traffic (updates, replies, client method calls). */
+  private lastActivityAt = Date.now();
 
   /** OMP-style silent restore: agent supports `session/resume`. */
   get canResumeSession(): boolean {
@@ -542,7 +546,10 @@ export class AcpClient extends EventEmitter {
           : `spawn error: ${err.message}`;
       this.emit("log", msg);
       const wrapped = new Error(msg);
-      for (const [, p] of this.pending) p.reject(wrapped);
+      for (const [, p] of this.pending) {
+        clearTimeout(p.timer);
+        p.reject(wrapped);
+      }
       this.pending.clear();
     });
 
@@ -559,7 +566,10 @@ export class AcpClient extends EventEmitter {
           ? installHintFor(this.adapter, commandName)
           : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`;
       const err = new Error(message);
-      for (const [, p] of this.pending) p.reject(err);
+      for (const [, p] of this.pending) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
       this.pending.clear();
       this.killAllTerminals();
       this.emit("exit", { code, signal });
@@ -1094,11 +1104,16 @@ export class AcpClient extends EventEmitter {
   }
 
   /**
-   * Ceiling for any single ACP request (prompt, tool call, config change, …).
-   * A wedged agent — e.g. an MCP tool server that never answers — would
-   * otherwise keep the session "running" forever and lock the whole chat.
+   * Ceiling of silence for any single ACP request (prompt, tool call, …).
+   * While the agent still sends traffic (session/update, etc.) the wait is
+   * extended — only a quiet stretch of this length yields a timeout error.
+   * Overridable in tests.
    */
-  private static readonly REQUEST_TIMEOUT_MS = 5 * 60_000;
+  static requestTimeoutMs = 5 * 60_000;
+
+  private markActivity() {
+    this.lastActivityAt = Date.now();
+  }
 
   private request(
     method: string,
@@ -1112,25 +1127,47 @@ export class AcpClient extends EventEmitter {
     }
     const id = this.nextId++;
     this.write({ jsonrpc: "2.0", id, method, params });
+    this.markActivity();
     const promise = new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        if (this.promptRequestId === id) this.promptRequestId = null;
-        const msg = `Таймаут ответа ACP (${AcpClient.REQUEST_TIMEOUT_MS / 1000}с) на "${method}". ` +
-          `Агент не отвечает — возможно, завис внешний MCP-сервер или CLI.`;
-        this.emit("log", msg);
-        reject(new Error(msg));
-      }, AcpClient.REQUEST_TIMEOUT_MS);
-      this.pending.set(id, {
+      const pending: Pending = {
+        method,
+        timer: undefined as unknown as NodeJS.Timeout,
         resolve: (v) => {
-          clearTimeout(timer);
+          clearTimeout(pending.timer);
           resolve(v);
         },
         reject: (e) => {
-          clearTimeout(timer);
+          clearTimeout(pending.timer);
           reject(e);
         },
-      });
+      };
+
+      const armTimeout = () => {
+        pending.timer = setTimeout(() => {
+          if (!this.pending.has(id)) return;
+          // Agent still streaming / answering → do not kill an active turn.
+          const idleMs = Date.now() - this.lastActivityAt;
+          if (!this.closed && this.proc && idleMs < AcpClient.requestTimeoutMs) {
+            this.emit(
+              "log",
+              `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,
+            );
+            armTimeout();
+            return;
+          }
+          this.pending.delete(id);
+          if (this.promptRequestId === id) this.promptRequestId = null;
+          const timeoutSec = Math.round(AcpClient.requestTimeoutMs / 1000);
+          const msg =
+            `Таймаут ответа ACP (${timeoutSec}с) на "${method}". ` +
+            `Агент не отвечает — возможно, завис внешний MCP-сервер или CLI.`;
+          this.emit("log", msg);
+          pending.reject(new Error(msg));
+        }, AcpClient.requestTimeoutMs);
+      };
+
+      armTimeout();
+      this.pending.set(id, pending);
     });
     return { id, promise };
   }
@@ -1154,6 +1191,10 @@ export class AcpClient extends EventEmitter {
       this.emit("log", `non-json: ${trimmed.slice(0, 200)}`);
       return;
     }
+
+    // Any parsed ACP traffic means the agent is still alive — keep long
+    // requests (especially session/prompt) from timing out mid-stream.
+    this.markActivity();
 
     if ("id" in msg && (msg.result !== undefined || msg.error !== undefined) && !msg.method) {
       const id = msg.id as JsonRpcId;
