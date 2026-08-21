@@ -143,12 +143,23 @@ function actionIcon(id: ChatActionId): ReactNode {
       return (
         <Icon>
           <path
-            d="M4 9v6h3l5 4V5L7 9H4Z"
+            d="M11 5 6 9H2v6h4l5 4V5Z"
             stroke="currentColor"
-            strokeWidth="1.7"
+            strokeWidth="1.85"
             strokeLinejoin="round"
           />
-          <path d="M16 8.5a4.5 4.5 0 0 1 0 7" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path
+            d="M15.5 8.5a5 5 0 0 1 0 7"
+            stroke="currentColor"
+            strokeWidth="1.85"
+            strokeLinecap="round"
+          />
+          <path
+            d="M19 5.5a9 9 0 0 1 0 13"
+            stroke="currentColor"
+            strokeWidth="1.85"
+            strokeLinecap="round"
+          />
         </Icon>
       );
   }

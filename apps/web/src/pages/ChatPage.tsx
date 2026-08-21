@@ -347,6 +347,32 @@ function IconEdit() {
   );
 }
 
+/** Speaker glyph sized to match other 24×24 msg-action icons. */
+function IconReadAloud() {
+  return (
+    <MsgIcon>
+      <path
+        d="M11 5 6 9H2v6h4l5 4V5Z"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M15.5 8.5a5 5 0 0 1 0 7"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+      />
+      <path
+        d="M19 5.5a9 9 0 0 1 0 13"
+        stroke="currentColor"
+        strokeWidth="1.85"
+        strokeLinecap="round"
+      />
+    </MsgIcon>
+  );
+}
+
 function UserMessageActions({
   text,
   createdAt,
@@ -1673,20 +1699,7 @@ function MessageActions({
             tabIndex={tabIndex}
             onClick={toggleSpeak}
           >
-            <MsgIcon>
-              <path
-                d="M4 9v6h3l5 4V5L7 9H4Z"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M16 8.5a4.5 4.5 0 0 1 0 7"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-              />
-            </MsgIcon>
+            <IconReadAloud />
           </button>
         );
       default:
@@ -1747,20 +1760,7 @@ function MessageActions({
                   className={styles.msgActionMenuItem}
                   onClick={toggleSpeak}
                 >
-                  <MsgIcon>
-                    <path
-                      d="M4 9v6h3l5 4V5L7 9H4Z"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M16 8.5a4.5 4.5 0 0 1 0 7"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                    />
-                  </MsgIcon>
+                  <IconReadAloud />
                   {speaking ? t("chat.stopReading") : t("chat.readAloud")}
                 </button>
               ) : null,
