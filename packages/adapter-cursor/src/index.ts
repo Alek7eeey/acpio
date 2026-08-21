@@ -1,37 +1,64 @@
 import {
+  normalizeToolCallId,
   subagentFieldsFromRaw,
   type HarnessAdapter,
   type SubagentCardUpdate,
 } from "@acprocess/shared";
+import { readCursorAgentTranscript } from "./localTranscript.js";
+
+export {
+  cursorProjectSlugs,
+  findCursorAgentTranscript,
+  findRecentCursorAgentId,
+  findRecentCursorAgentIds,
+} from "./localTranscript.js";
 
 /** Map a `cursor/task` request to a normalized subagent card. */
 function cursorTaskCard(
   params: Record<string, unknown>,
 ): { toolCallId?: string; card: SubagentCardUpdate } | null {
-  const toolCallId = String(
+  const toolCallId = normalizeToolCallId(
     params.tool_call_id ?? params.toolCallId ?? params.toolCallID ?? "",
   );
+  const realAgentId = String(params.agentId ?? params.agent_id ?? "").trim();
   const extra = subagentFieldsFromRaw(params);
   const title = String(
     params.title ?? params.description ?? params.name ?? params.subtitle ?? extra.title ?? "",
   ).trim();
-  const status = String(params.status ?? "").trim();
-  const subagentType = String(
-    params.subagent_type ?? params.subagentType ?? params.kind ?? params.type ?? "",
-  ).trim();
+  const status = String(params.status ?? "").trim().toLowerCase();
+  const rawType = params.subagent_type ?? params.subagentType ?? params.kind ?? params.type;
+  const subagentType =
+    typeof rawType === "string"
+      ? rawType.trim()
+      : rawType && typeof rawType === "object"
+        ? String((rawType as { custom?: string }).custom ?? "task")
+        : "";
+  const resultText = String(extra.result ?? "").trim();
+  const backgroundRunning = /subagent is running in the background/i.test(resultText);
+  const hasDuration = typeof params.durationMs === "number" || typeof params.duration_ms === "number";
+  const terminal =
+    status === "failed" ||
+    status === "error" ||
+    status === "completed" ||
+    status === "cancelled" ||
+    status === "canceled" ||
+    (hasDuration && !backgroundRunning) ||
+    (Boolean(resultText) && !backgroundRunning && status !== "running" && status !== "in_progress");
+
   return {
     ...(toolCallId ? { toolCallId } : {}),
     card: {
-      agentId: toolCallId || String(params.agentId ?? "") || title || "task",
+      // Prefer the real subagent UUID so transcript polling can resolve JSONL.
+      agentId: realAgentId || toolCallId || title || "task",
       status:
         status === "failed" || status === "error"
           ? "failed"
-          : status === "running" || status === "in_progress"
-            ? "running"
-            : "completed",
+          : terminal && status !== "running" && status !== "in_progress"
+            ? "completed"
+            : "running",
       title: title || "Subagent",
       description: title || "Subagent",
-      ...(extra.result || extra.prompt ? { body: extra.result || extra.prompt } : {}),
+      ...(extra.result && !backgroundRunning ? { body: extra.result } : {}),
       ...(subagentType ? { subagentType } : {}),
       raw: params,
     },
@@ -77,6 +104,7 @@ function cursorExtensionReply(method: string, params: Record<string, unknown>): 
  * Cursor harness: ACP over the `cursor-agent` CLI. Session restore replays the
  * stored conversation (`session/load`), which the core swallows; subagent work
  * arrives as `cursor/task` requests with `outcome` reply envelopes.
+ * Live Task progress is not on the ACP stream — we poll local agent transcripts.
  */
 export const cursorAdapter: HarnessAdapter = {
   id: "cursor",
@@ -101,7 +129,8 @@ export const cursorAdapter: HarnessAdapter = {
   authenticateMethodId: "cursor_login",
 
   parameterizedModelPicker: true,
-  subagentStreaming: false,
+  // Live cards come from ~/.cursor/projects/.../agent-transcripts (not ACP RPC).
+  subagentStreaming: true,
   cloudCatalog: false,
   defaultModes: [
     { value: "agent", name: "Agent" },
@@ -122,5 +151,5 @@ export const cursorAdapter: HarnessAdapter = {
   },
   extensionReply: cursorExtensionReply,
   subagentTaskCard: cursorTaskCard,
-  // Subagent cards come from cursor/task requests, not roster snapshots.
+  readSubagentTranscript: readCursorAgentTranscript,
 };

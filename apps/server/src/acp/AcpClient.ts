@@ -15,6 +15,7 @@ import {
   parseModelWire,
   resolveModelParamValue,
   modelParamFamily,
+  normalizeToolCallId,
   type AgentMode,
   type AgentProvider,
   type AcpUsage,
@@ -49,6 +50,7 @@ export type AcpUpdate =
   | { kind: "user_message_chunk"; text: string }
   | { kind: "tool_call"; toolCallId: string; title?: string; status?: string; raw: Record<string, unknown> }
   | { kind: "tool_call_update"; toolCallId: string; status?: string; raw: Record<string, unknown> }
+  | { kind: "tool_call_content_chunk"; toolCallId: string; content: unknown; raw: Record<string, unknown> }
   | { kind: "plan"; raw: Record<string, unknown> }
   | { kind: "session_info"; raw: Record<string, unknown> }
   | { kind: "current_mode"; modeId: string; raw: Record<string, unknown> }
@@ -1281,7 +1283,7 @@ export class AcpClient extends EventEmitter {
     if (sessionUpdate === "tool_call") {
       return {
         kind: "tool_call",
-        toolCallId: String(update.toolCallId ?? update.toolCallID ?? ""),
+        toolCallId: normalizeToolCallId(update.toolCallId ?? update.toolCallID ?? ""),
         title: typeof update.title === "string" ? update.title : undefined,
         status: typeof update.status === "string" ? update.status : undefined,
         raw: update,
@@ -1290,8 +1292,16 @@ export class AcpClient extends EventEmitter {
     if (sessionUpdate === "tool_call_update") {
       return {
         kind: "tool_call_update",
-        toolCallId: String(update.toolCallId ?? update.toolCallID ?? ""),
+        toolCallId: normalizeToolCallId(update.toolCallId ?? update.toolCallID ?? ""),
         status: typeof update.status === "string" ? update.status : undefined,
+        raw: update,
+      };
+    }
+    if (sessionUpdate === "tool_call_content_chunk") {
+      return {
+        kind: "tool_call_content_chunk",
+        toolCallId: normalizeToolCallId(update.toolCallId ?? update.toolCallID ?? ""),
+        content: update.content,
         raw: update,
       };
     }

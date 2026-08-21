@@ -134,8 +134,19 @@ describe("subagentFieldsFromRaw", () => {
     [{ title: "task" }, {}],
     [{ title: "Tool" }, {}],
     [{ title: "subagent" }, {}],
+    [{ title: "other" }, {}],
     [{ title: "субагент" }, {}],
     [{ title: "  task  " }, {}],
+    [{ title: "Task: Subagent task" }, {}],
+    // Task tool description in rawInput beats ACP placeholder title
+    [
+      { title: "Task: Subagent task", rawInput: { description: "Random math A", prompt: "…" } },
+      {
+        prompt: "…",
+        title: "Random math A",
+        description: "Random math A",
+      },
+    ],
     [{ label: "task", result: "### Real Title\nbody" }, { result: "### Real Title\nbody", title: "Real Title", description: "Real Title" }],
     // title from body: ### heading
     [{ result: "### My Plan\nbody" }, { result: "### My Plan\nbody", title: "My Plan", description: "My Plan" }],

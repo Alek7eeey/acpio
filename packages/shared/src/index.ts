@@ -19,8 +19,11 @@ export type {
   ModelOption,
   SubagentCardUpdate,
   SubagentProgressUpdate,
+  SubagentToolEvent,
   SubagentTranscriptPage,
 } from "./adapters.js";
+
+export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 
 /** Extract the first readable text from an unknown tool/subagent payload. */
 export function textFromUnknown(value: unknown): string {
@@ -50,10 +53,81 @@ export function textFromUnknown(value: unknown): string {
     if (typeof obj.text === "string") return obj.text;
     if (typeof obj.prompt === "string") return obj.prompt;
     if (typeof obj.output === "string") return obj.output;
+    if (typeof obj.thinking === "string") return obj.thinking;
+    if (typeof obj.reasoning === "string") return obj.reasoning;
+    if (typeof obj.delta === "string") return obj.delta;
     if (obj.content !== undefined) return textFromUnknown(obj.content);
     if (obj.result !== undefined) return textFromUnknown(obj.result);
   }
   return "";
+}
+
+/**
+ * Split a tool-call `content` payload into live reasoning vs visible result text.
+ * Cursor streams subagent progress as content blocks (`thinking` / `text`) on
+ * `tool_call_update` while status is still in_progress — those must reach the card
+ * before the terminal update.
+ */
+export function extractSubagentLiveContent(raw: Record<string, unknown>): {
+  thinking: string[];
+  result: string;
+} {
+  const thinking: string[] = [];
+  const texts: string[] = [];
+
+  const pushThought = (value: unknown) => {
+    const text = textFromUnknown(value).trim();
+    if (text && !thinking.includes(text)) thinking.push(text);
+  };
+  const pushText = (value: unknown) => {
+    const text = textFromUnknown(value).trim();
+    if (text) texts.push(text);
+  };
+
+  const walk = (node: unknown, depth = 0) => {
+    if (node == null || depth > 10) return;
+    if (typeof node === "string") {
+      pushText(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, depth + 1);
+      return;
+    }
+    if (typeof node !== "object") return;
+    const obj = node as Record<string, unknown>;
+    const type = String(obj.type ?? "").toLowerCase();
+    if (/^(thinking|reasoning|thought|agent_thought)$/.test(type)) {
+      pushThought(obj.thinking ?? obj.reasoning ?? obj.text ?? obj.delta ?? obj.content);
+      return;
+    }
+    if (/^(diff|terminal|image|resource|blob)$/.test(type)) return;
+    if (type === "content" || type === "text" || type === "output_text" || type === "input_text") {
+      pushText(obj.content ?? obj.text ?? obj.delta);
+      return;
+    }
+    if (typeof obj.thinking === "string" || typeof obj.reasoning === "string") {
+      pushThought(obj.thinking ?? obj.reasoning);
+    }
+    if (typeof obj.delta === "string") {
+      pushText(obj.delta);
+      return;
+    }
+    if (typeof obj.text === "string") {
+      pushText(obj.text);
+      return;
+    }
+    if (obj.content !== undefined) walk(obj.content, depth + 1);
+  };
+
+  if (raw.content !== undefined) walk(raw.content);
+  const top =
+    textFromUnknown(raw.result).trim() ||
+    textFromUnknown(raw.output).trim() ||
+    (typeof raw.text === "string" ? raw.text.trim() : "");
+  if (top && !texts.includes(top)) texts.push(top);
+
+  return { thinking, result: texts.join("\n\n") };
 }
 /**
  * Rough estimate of how many LLM context tokens a conversation occupies.
@@ -144,24 +218,36 @@ export function subagentFieldsFromRaw(raw: Record<string, unknown>): {
   title?: string;
   description?: string;
 } {
+  const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
   const prompt =
     textFromUnknown(raw.prompt) ||
-    textFromUnknown((raw.rawInput as Record<string, unknown> | undefined)?.prompt) ||
+    textFromUnknown(args?.prompt) ||
     textFromUnknown((raw.arguments as Record<string, unknown> | undefined)?.prompt) ||
     textFromUnknown((raw.input as Record<string, unknown> | undefined)?.prompt);
   const result = textFromUnknown(raw.result) || textFromUnknown(raw.content);
+  const fromArgs = String(args?.description ?? args?.title ?? args?.name ?? "").trim();
   const titled = String(raw.title ?? raw.description ?? raw.name ?? raw.label ?? "").trim();
   const fromBody =
     result.match(/^###\s+([^\n\[]+?)(?:\s*\[|$)/m)?.[1]?.trim() ||
     result.match(/^\s*Label:\s*(.+)$/m)?.[1]?.trim() ||
     result.match(/<task-result\b[^>]*\bid="([^"]+)"/i)?.[1]?.trim() ||
     "";
-  const niceTitle = [titled, fromBody].find((v) => v && !/^(tool|task|subagent|субагент)$/i.test(v));
+  // Prefer Task `description` over ACP placeholders like "Task: Subagent task" / "other".
+  const niceTitle = [fromArgs, titled, fromBody].find(
+    (v) => v && !isPlaceholderSubagentTitle(v),
+  );
   return {
     ...(prompt ? { prompt } : {}),
     ...(result ? { result } : {}),
     ...(niceTitle ? { title: niceTitle, description: niceTitle } : {}),
   };
+}
+
+/** ACP/Cursor placeholders that must never be shown as a subagent card title. */
+export function isPlaceholderSubagentTitle(title: string): boolean {
+  const value = title.trim();
+  if (!value) return true;
+  return /^(tool|task|subagent|other|агент|субагент|task\s*:\s*subagent(\s+task)?)$/i.test(value);
 }
 
 /** MCP server connection defined in Settings → Connections. */

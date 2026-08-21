@@ -36,6 +36,8 @@ describe("cursor adapter", () => {
     expect(cursorAdapter.suppressReplayOnLoad).toBe(true);
     expect(cursorAdapter.authenticateMethodId).toBe("cursor_login");
     expect(cursorAdapter.parameterizedModelPicker).toBe(true);
+    expect(cursorAdapter.subagentStreaming).toBe(true);
+    expect(cursorAdapter.readSubagentTranscript).toBeTypeOf("function");
   });
 
   it("classifies cursor subagent tool kinds", () => {
@@ -64,7 +66,29 @@ describe("cursor adapter", () => {
     expect(mapped?.toolCallId).toBe("call-1");
     expect(mapped?.card.status).toBe("running");
     expect(mapped?.card.title).toBe("Проверь файл");
-    expect(mapped?.card.body).toBe("прочитай x.md");
+    // Launch prompt is not the card body — completion text comes later.
+    expect(mapped?.card.body).toBeUndefined();
+  });
+
+  it("treats cursor/task without terminal signals as running", () => {
+    const mapped = cursorAdapter.subagentTaskCard!({
+      toolCallId: "call-2",
+      description: "Random math A",
+      prompt: "compute …",
+    });
+    expect(mapped?.card.status).toBe("running");
+    expect(mapped?.card.title).toBe("Random math A");
+  });
+
+  it("marks cursor/task with durationMs as completed", () => {
+    const mapped = cursorAdapter.subagentTaskCard!({
+      toolCallId: "call-3",
+      description: "Done task",
+      durationMs: 1200,
+      result: "answer",
+    });
+    expect(mapped?.card.status).toBe("completed");
+    expect(mapped?.card.body).toBe("answer");
   });
 });
 

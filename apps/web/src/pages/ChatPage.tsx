@@ -14,6 +14,7 @@ import {
   type CSSProperties,
 } from "react";
 import {
+  isPlaceholderSubagentTitle,
   isSubagentToolCall,
   migrateModelParamValues,
   toolDisplayTitle,
@@ -484,42 +485,225 @@ function titleFromSubagentBody(text: string): string {
 }
 
 function resolveSubagentTitle(part: MessagePartDto, body: string): string {
+  const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
+  const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
   const candidates = [
     part.payload.description,
     part.payload.title,
-    (part.payload.raw as { title?: string; description?: string; name?: string; label?: string } | undefined)
-      ?.title,
-    (part.payload.raw as { description?: string } | undefined)?.description,
-    (part.payload.raw as { name?: string } | undefined)?.name,
-    (part.payload.raw as { label?: string } | undefined)?.label,
+    raw.title,
+    raw.description,
+    raw.name,
+    raw.label,
+    args?.description,
+    args?.title,
+    args?.name,
     titleFromSubagentBody(body),
     part.payload.subagentType,
   ]
     .map((v) => String(v ?? "").trim())
     .filter(Boolean)
-    .filter((v) => !/^(tool|task|subagent|субагент)$/i.test(v));
+    .filter((v) => !isGenericSubagentTitle(v));
   return candidates[0] ?? "";
 }
 
+/** Result + live thinking. Launch Task prompts stay hidden; completion text that
+ *  older sessions stored in `payload.prompt` still shows when it isn't the input prompt. */
 function resolveSubagentBody(part: MessagePartDto): string {
   const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
-  const body = (
+  const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
+  const launchPrompt = extractStructuredText(args?.prompt).trim();
+  const result = (
     extractStructuredText(part.payload.result) ||
     extractStructuredText(raw.result) ||
     extractStructuredText(raw.content) ||
-    extractStructuredText(raw.output) ||
+    extractStructuredText(raw.output)
+  ).trim();
+  const storedPrompt = (
     extractStructuredText(part.payload.prompt) ||
     extractStructuredText(raw.prompt)
   ).trim();
+  const completion =
+    result ||
+    (storedPrompt && storedPrompt !== launchPrompt ? storedPrompt : "");
   const thinking = Array.isArray(part.payload.thinking) ? part.payload.thinking : [];
-  if (!thinking.length) return body;
   const thoughts = thinking
     .map((t) => (typeof t === "string" ? t.trim() : ""))
     .filter(Boolean)
     .join("\n\n");
-  if (!thoughts) return body;
-  // Subagent reasoning renders inside its own card, after the live work body.
-  return body ? `${body}\n\n${thoughts}` : thoughts;
+  if (completion && thoughts) return `${completion}\n\n${thoughts}`;
+  return completion || thoughts;
+}
+
+/** Compact nested tool → synthetic tool_call part so we reuse ToolCallRow UI. */
+function nestedToolAsPart(
+  parent: MessagePartDto,
+  tool: { name?: string; args?: string; status?: string },
+  index: number,
+): MessagePartDto {
+  const name = String(tool.name ?? "tool").trim() || "tool";
+  const argsRaw = String(tool.args ?? "").trim();
+  let rawInput: unknown = argsRaw || undefined;
+  if (argsRaw.startsWith("{") || argsRaw.startsWith("[")) {
+    try {
+      rawInput = JSON.parse(argsRaw) as unknown;
+    } catch {
+      /* keep string */
+    }
+  }
+  const status = String(tool.status ?? "").toLowerCase();
+  const normalized =
+    status === "running" || status === "in_progress" || status === "pending"
+      ? "in_progress"
+      : status === "failed"
+        ? "failed"
+        : "completed";
+  const argsText =
+    rawInput && typeof rawInput === "object"
+      ? JSON.stringify(rawInput, null, 2)
+      : argsRaw;
+  return {
+    id: `${parent.id}:nested-tool:${index}:${name}`,
+    messageId: parent.messageId,
+    type: "tool_call",
+    order: index,
+    createdAt: parent.createdAt,
+    payload: {
+      title: name,
+      status: normalized,
+      raw: {
+        toolName: name,
+        ...(rawInput !== undefined ? { rawInput } : {}),
+        // Nested feeds rarely include stdout — expose args as expandable detail.
+        ...(argsText && normalized !== "in_progress"
+          ? { content: [{ type: "content", content: { type: "text", text: argsText } }] }
+          : {}),
+      },
+    },
+  };
+}
+
+function SubagentForkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="7" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="17" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="7" cy="18" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M9.1 7.2 14.7 11.1M9.1 16.8 14.7 12.9"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function SubagentPartView({
+  part,
+  streaming,
+}: {
+  part: MessagePartDto;
+  streaming?: boolean;
+}) {
+  const t = useT();
+  const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      expandedPartIds.set(part.id, value);
+      return value;
+    });
+  };
+
+  const body = resolveSubagentBody(part);
+  const title = resolveSubagentTitle(part, body);
+  const tools = Array.isArray(part.payload.tools)
+    ? (part.payload.tools as Array<{ name?: string; args?: string; status?: string }>)
+    : [];
+  const status = String(part.payload.status ?? "");
+  const working = status === "running";
+  const live = streaming && status !== "completed" && status !== "failed";
+  const busy = working || live;
+  const failed = status === "failed";
+  const hasContent = Boolean(body.trim() || tools.length);
+
+  // Open as soon as the subagent is live so title + streaming body stay visible.
+  useEffect(() => {
+    if (busy) setOpen(true);
+  }, [busy]);
+
+  return (
+    <div
+      className={`${styles.subagent} ${open ? styles.subagentOpen : ""} ${
+        busy ? styles.subagentBusy : ""
+      } ${failed ? styles.subagentFailed : ""}`}
+    >
+      <button
+        type="button"
+        className={styles.subagentToggle}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        <span
+          className={`${styles.subagentGlyph} ${busy ? styles.subagentGlyphLive : ""}`}
+          aria-hidden
+        >
+          <SubagentForkIcon />
+        </span>
+        <span className={styles.subagentLabelWrap}>
+          <span className={styles.subagentKind}>{t("agent.subagent")}</span>
+          {title ? <span className={styles.subagentTitle}>{title}</span> : null}
+        </span>
+        {failed ? (
+          <span className={styles.subagentStatus}>
+            {t("common.subagentFailed").replace(/^\s*·\s*/, "")}
+          </span>
+        ) : null}
+        <svg
+          className={`${styles.subagentChevron} ${open ? styles.subagentChevronOpen : ""}`}
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
+        >
+          <path
+            d="M9 6l6 6-6 6"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      {open && hasContent ? (
+        <div className={styles.subagentBody}>
+          {tools.length ? (
+            <div className={styles.subagentTools}>
+              {tools.map((tool, i) => {
+                const name = String(tool.name ?? "tool").trim() || "tool";
+                const args = String(tool.args ?? "").trim();
+                const toolBusy =
+                  tool.status === "running" ||
+                  (busy && i === tools.length - 1 && tool.status !== "completed");
+                return (
+                  <ToolCallRow
+                    key={`${part.id}:nested-tool:${i}:${name}:${args.slice(0, 24)}`}
+                    part={nestedToolAsPart(part, tool, i)}
+                    streaming={toolBusy}
+                  />
+                );
+              })}
+            </div>
+          ) : null}
+          {body.trim() ? (
+            <MarkdownContent text={body} className={styles.subagentMarkdown} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function PartView({
@@ -593,45 +777,7 @@ function PartView({
   }
 
   if (part.type === "subagent") {
-    const body = resolveSubagentBody(part);
-    const title = resolveSubagentTitle(part, body);
-    const status = String(part.payload.status ?? "");
-    // Explicit per-card work indicator: "running" means the subagent is
-    // actively working, independent of the global turn streaming state.
-    const working = status === "running";
-    const live = streaming && status !== "completed" && status !== "failed";
-    const label = title ? `${t("agent.subagent")} · ${title}` : t("agent.subagent");
-    return (
-      <div className={styles.subagent}>
-        <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
-          <span className={styles.thoughtLabel}>
-            {working ? (
-              <span className={styles.toolLoader} aria-hidden />
-            ) : live ? (
-              <span className={styles.pulseDot} />
-            ) : null}
-            {label}
-            {status === "failed"
-              ? t("common.subagentFailed")
-              : working
-                ? t("common.subagentWorking")
-                : ""}
-          </span>
-          <span className={styles.thoughtChevron} aria-hidden>
-            {open ? "▾" : "▸"}
-          </span>
-        </button>
-        {open && (
-          <div className={styles.subagentBody}>
-            {body ? (
-              <MarkdownContent text={body} className={styles.subagentMarkdown} />
-            ) : (
-              <p className={styles.subagentPrompt}>{t("common.emptyList")}</p>
-            )}
-          </div>
-        )}
-      </div>
-    );
+    return <SubagentPartView part={part} streaming={streaming} />;
   }
 
   // Regular tool calls stay hidden — only thoughts + subagent cards + answer text.
@@ -1145,10 +1291,14 @@ function StepsSpoiler({
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
   }, [startedAt, streaming]);
 
-  // Show one stable thinking row for the whole turn (including empty pending).
+  // Show the thinking header immediately while the turn is live (even before the
+  // first thought token). Hide only when idle with nothing to show.
   if (parts.length === 0 && !streaming) return null;
 
   const stepsLength = parts.length;
+  const subagentParts = parts.filter((p) => p.type === "subagent");
+  // Keep subagents reachable while thinking — even if the steps spoiler is collapsed.
+  const showSubagentsOutside = !open && subagentParts.length > 0;
 
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
   const label = streaming
@@ -1159,6 +1309,15 @@ function StepsSpoiler({
           count: agentDurationSec || elapsedSec,
         })
       : t("common.steps");
+
+  const renderPart = (part: MessagePartDto, idx: number, listLength: number) => {
+    const isLast = streaming && idx === listLength - 1;
+    return part.type === "tool_call" ? (
+      <ToolCallRow key={part.id} part={part} streaming={isLast} />
+    ) : (
+      <PartView key={part.id} part={part} embedded streaming={isLast} />
+    );
+  };
 
   return (
     <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`}>
@@ -1192,23 +1351,19 @@ function StepsSpoiler({
           </svg>
         </span>
       </button>
+      {showSubagentsOutside ? (
+        <div className={styles.stepsSubagentsPeek}>
+          {subagentParts
+            .slice()
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map((part, idx) => renderPart(part, idx, subagentParts.length))}
+        </div>
+      ) : null}
       {open && parts.length > 0 && (
         <div className={styles.stepsBody}>
           {[...parts]
             .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((part, idx) => {
-              const isLast = streaming && idx === stepsLength - 1;
-              return part.type === "tool_call" ? (
-                <ToolCallRow key={part.id} part={part} streaming={isLast} />
-              ) : (
-                <PartView
-                  key={part.id}
-                  part={part}
-                  embedded
-                  streaming={isLast}
-                />
-              );
-            })}
+            .map((part, idx) => renderPart(part, idx, stepsLength))}
         </div>
       )}
     </div>
@@ -1701,13 +1856,24 @@ function subagentKey(part: MessagePartDto): string | null {
 }
 
 function subagentDisplayTitle(part: MessagePartDto): string {
-  return String(
-    part.payload.description ?? part.payload.title ?? part.payload.subagentType ?? "",
-  ).trim();
+  const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
+  const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
+  const candidates = [
+    part.payload.description,
+    part.payload.title,
+    args?.description,
+    args?.title,
+    raw.description,
+    raw.title,
+    part.payload.subagentType,
+  ]
+    .map((v) => String(v ?? "").trim())
+    .filter((v) => v && !isPlaceholderSubagentTitle(v));
+  return candidates[0] ?? "";
 }
 
 function isGenericSubagentTitle(title: string) {
-  return !title || /^(tool|task|subagent|агент|субагент)$/i.test(title);
+  return isPlaceholderSubagentTitle(title);
 }
 
 function preferSubagentPart(a: MessagePartDto, b: MessagePartDto): MessagePartDto {
@@ -1734,12 +1900,29 @@ function preferSubagentPart(a: MessagePartDto, b: MessagePartDto): MessagePartDt
 function isSubagentLike(part: MessagePartDto) {
   if (part.type === "subagent") return true;
   if (part.type !== "tool_call") return false;
-  const kind = String(
-    (part.payload.raw as { kind?: string } | undefined)?.kind ?? part.payload.kind ?? "",
-  );
+  const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
+  const kind = String(raw.kind ?? part.payload.kind ?? "").trim();
+  const toolName = String(raw.toolName ?? "").trim();
+  const title = String(part.payload.title ?? part.payload.description ?? "").trim();
   // Registered adapters' subagent tool kinds + the built-in heuristic fallback.
   const metaKinds = useAppStore.getState().adapters.flatMap((a) => a.subagentToolKinds);
-  return isSubagentToolCall(kind) || metaKinds.includes(kind.toLowerCase());
+  if (isSubagentToolCall(kind) || metaKinds.includes(kind.toLowerCase())) return true;
+  if (isSubagentToolCall(toolName) || metaKinds.includes(toolName.toLowerCase())) return true;
+  // Cursor sometimes emits the Task spawn as a plain tool_call titled "Task: …".
+  if (/^task\s*:/i.test(title)) return true;
+  // Cursor Task often arrives as kind=other with description+prompt args.
+  if (kind.toLowerCase() === "other") {
+    const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
+    if (
+      typeof args?.description === "string" &&
+      args.description.trim() &&
+      typeof args?.prompt === "string" &&
+      args.prompt.trim()
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function coalesceAssistantParts(
@@ -1755,13 +1938,35 @@ function coalesceAssistantParts(
       continue;
     }
 
-    // omp task-tool spawns are represented by dedicated subagent cards
-    // (`_omp/agents/update` / `_omp/agents/progress`); drop the redundant tool
-    // rows so subagent work stays out of the thinking block.
-    if (
-      part.type === "tool_call" &&
-      (part.payload.raw as { toolName?: string } | undefined)?.toolName === "task"
-    ) {
+    const raw = (part.payload.raw as Record<string, unknown> | undefined) ?? {};
+    const toolName = String(raw.toolName ?? "").trim().toLowerCase();
+    const title = String(part.payload.title ?? part.payload.description ?? "").trim();
+    const looksLikeTaskSpawn =
+      toolName === "task" || /^task\s*:/i.test(title) || /^subagent(\s+task)?$/i.test(title);
+
+    // Drop redundant Task spawn tool rows when they aren't promoteable, or
+    // continue into subagent promotion below when they are.
+    // Cursor often sends Task with empty rawInput at start — still promote.
+    if (part.type === "tool_call" && looksLikeTaskSpawn && !isSubagentLike(part)) {
+      const asEarly: MessagePartDto = {
+        ...part,
+        type: "subagent",
+        payload: {
+          ...part.payload,
+          status:
+            part.payload.status === "pending" || part.payload.status === "in_progress"
+              ? "running"
+              : part.payload.status || "running",
+        },
+      };
+      const key = subagentKey(asEarly);
+      if (key && subagentIndexByKey.has(key)) {
+        const idx = subagentIndexByKey.get(key)!;
+        out[idx] = preferSubagentPart(out[idx], asEarly);
+        continue;
+      }
+      if (key) subagentIndexByKey.set(key, out.length);
+      out.push(asEarly);
       continue;
     }
 
@@ -1771,8 +1976,31 @@ function coalesceAssistantParts(
       continue;
     }
 
+    const args = (raw.rawInput ?? raw.input ?? raw.arguments) as Record<string, unknown> | undefined;
+    const betterTitle = String(
+      part.payload.description ??
+        args?.description ??
+        raw.description ??
+        part.payload.title ??
+        "",
+    ).trim();
     const asSubagent: MessagePartDto =
-      part.type === "tool_call" ? { ...part, type: "subagent" } : part;
+      part.type === "tool_call"
+        ? {
+            ...part,
+            type: "subagent",
+            payload: {
+              ...part.payload,
+              ...(betterTitle && !isGenericSubagentTitle(betterTitle)
+                ? { title: betterTitle, description: betterTitle }
+                : {}),
+              status:
+                part.payload.status === "pending" || part.payload.status === "in_progress"
+                  ? "running"
+                  : part.payload.status,
+            },
+          }
+        : part;
     const key = subagentKey(asSubagent);
 
     if (key && subagentIndexByKey.has(key)) {
@@ -1781,9 +2009,19 @@ function coalesceAssistantParts(
       continue;
     }
 
-    // Drop a lone generic "Tool" card if a named sibling already exists without shared id.
-    const title = subagentDisplayTitle(asSubagent);
-    if (isGenericSubagentTitle(title)) {
+    // Drop completed placeholder cards only — never hide a live subagent just
+    // because another one already has a nicer title (that caused staggered appearance).
+    const cardTitle = subagentDisplayTitle(asSubagent);
+    const cardStatus = String(asSubagent.payload.status ?? "").toLowerCase();
+    const cardLive =
+      cardStatus === "running" ||
+      cardStatus === "pending" ||
+      cardStatus === "in_progress" ||
+      !cardStatus;
+    if (
+      !cardLive &&
+      (isGenericSubagentTitle(cardTitle) || /^task\s*:/i.test(cardTitle))
+    ) {
       const hasNamed = out.some(
         (p) => p.type === "subagent" && !isGenericSubagentTitle(subagentDisplayTitle(p)),
       );
@@ -1845,18 +2083,15 @@ function AssistantParts({
   }, [message.parts]);
 
   // The final answer (last text part in emission order) stays outside the
-  // steps block; intermediate texts interleave with tools inside it, in the
-  // order the agent emitted them. Subagent cards never render inside the
-  // steps block — they have their own message-level representation.
+  // steps block; intermediate texts, tools, and subagents interleave inside
+  // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return parts.filter((p) => p !== finalText && p.type !== "subagent");
+    return parts.filter((p) => p !== finalText && p.type !== "error");
   }, [parts]);
   const mainParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return parts.filter(
-      (p) => p === finalText || p.type === "error" || p.type === "subagent",
-    );
+    return parts.filter((p) => p === finalText || p.type === "error");
   }, [parts]);
   const plain = useMemo(() => {
     return mainParts
@@ -1882,7 +2117,7 @@ function AssistantParts({
             key={part.id}
             part={part}
             streaming={
-              paintStreaming && isLast && (part.type === "text" || part.type === "subagent")
+              paintStreaming && isLast && part.type === "text"
             }
           />
         );

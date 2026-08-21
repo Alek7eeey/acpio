@@ -305,6 +305,15 @@ export async function updatePart(
   return part;
 }
 
+/** Current payload of a message part, or null if missing. */
+export async function getPartPayload(partId: string): Promise<Record<string, unknown> | null> {
+  const existing = await db.select().from(messageParts).where(eq(messageParts.id, partId)).limit(1);
+  if (!existing[0]) return null;
+  const payload = existing[0].payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  return payload as Record<string, unknown>;
+}
+
 function appendStreamText(prev: string, next: string): string {
   // Stream deltas already include their own spaces — never invent ones between
   // letters or subword tokens, or words get split like "Ex ce llen t".

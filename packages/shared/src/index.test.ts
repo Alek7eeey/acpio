@@ -14,6 +14,7 @@ import {
   resolveModelParamValue,
   toolDisplayTitle,
   estimateContextUsage,
+  extractSubagentLiveContent,
 } from "@acprocess/shared";
 
 describe("parseModelWire", () => {
@@ -480,5 +481,32 @@ describe("estimateContextUsage", () => {
 
   it("returns zero for empty conversation", () => {
     expect(estimateContextUsage([])).toEqual({ chars: 0, tokens: 0 });
+  });
+});
+
+describe("extractSubagentLiveContent", () => {
+  it("splits thinking blocks from text content while a tool call is in progress", () => {
+    expect(
+      extractSubagentLiveContent({
+        content: [
+          { type: "thinking", thinking: "First I will sleep…" },
+          { type: "content", content: { type: "text", text: "Waited 10s" } },
+        ],
+      }),
+    ).toEqual({
+      thinking: ["First I will sleep…"],
+      result: "Waited 10s",
+    });
+  });
+
+  it("collects multiple thinking blocks without dropping earlier ones", () => {
+    const live = extractSubagentLiveContent({
+      content: [
+        { type: "reasoning", text: "step 1" },
+        { type: "thought", thinking: "step 2" },
+      ],
+    });
+    expect(live.thinking).toEqual(["step 1", "step 2"]);
+    expect(live.result).toBe("");
   });
 });

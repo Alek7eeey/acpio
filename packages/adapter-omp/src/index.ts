@@ -40,10 +40,14 @@ function ompCardFromRoster(entry: Record<string, unknown>): SubagentCardUpdate |
   const rawStatus = String(entry.status ?? "");
   const status = cardStatus(rawStatus);
   const activity = typeof entry.activity === "string" ? entry.activity.trim() : "";
-  // `displayName` is the agent *type* ("scout", "task"); the id is the
-  // intent-derived name ("SummaryPorting") — prefer it as the card title.
+  // Prefer Task `description` / intent name over generic displayName ("task").
   const name = String(entry.displayName ?? "");
-  const title = name && !/^(tool|task|scout|subagent|агент|субагент)$/i.test(name) ? name : id;
+  const title =
+    (id && !/^(tool|task|scout|subagent|агент|субагент|main)$/i.test(id) ? id : "") ||
+    (name && !/^(tool|task|scout|subagent|агент|субагент)$/i.test(name) ? name : "") ||
+    id ||
+    name ||
+    "Subagent";
   const metrics =
     entry.metrics && typeof entry.metrics === "object"
       ? (entry.metrics as Record<string, unknown>)
@@ -79,11 +83,12 @@ function ompCardFromProgress(entry: Record<string, unknown>): SubagentProgressUp
         ? "failed"
         : "running";
   const intent = typeof entry.lastIntent === "string" ? entry.lastIntent.trim() : "";
+  const description = typeof entry.description === "string" ? entry.description.trim() : "";
+  const title = description || intent || id;
   const lines: string[] = [];
   if (intent) lines.push(intent);
-  const tool = typeof entry.currentTool === "string" ? entry.currentTool : "";
-  const toolArgs = typeof entry.currentToolArgs === "string" ? entry.currentToolArgs : "";
-  if (tool) lines.push(`инструмент: \`${tool}\`${toolArgs ? ` (${toolArgs.slice(0, 120)})` : ""}`);
+  const tool = typeof entry.currentTool === "string" ? entry.currentTool.trim() : "";
+  const toolArgs = typeof entry.currentToolArgs === "string" ? entry.currentToolArgs.trim() : "";
   if (Array.isArray(entry.recentOutput)) {
     for (const line of entry.recentOutput.slice(0, 5)) {
       if (typeof line === "string" && line.trim()) lines.push(line.trim().slice(0, 300));
@@ -100,10 +105,21 @@ function ompCardFromProgress(entry: Record<string, unknown>): SubagentProgressUp
   return {
     agentId: id,
     status,
-    title: id,
-    description: intent || id,
+    title,
+    description: title,
     ...(entry.resolvedModel ? { resolvedModel: String(entry.resolvedModel) } : {}),
     ...(lines.length ? { body: lines.join("\n\n") } : {}),
+    ...(tool
+      ? {
+          tools: [
+            {
+              name: tool,
+              ...(toolArgs ? { args: toolArgs.slice(0, 200) } : {}),
+              status: status === "running" ? "running" : "completed",
+            },
+          ],
+        }
+      : {}),
     raw: entry,
   };
 }

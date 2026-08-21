@@ -3,10 +3,13 @@ import { stat } from "node:fs/promises";
 import {
   isGenericToolTitle,
   isModelAccessError,
+  isPlaceholderSubagentTitle,
+  extractSubagentLiveContent,
   modelDisplayName,
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
+  normalizeToolCallId,
   parseModelWire,
   subagentFieldsFromRaw,
   textFromUnknown,
@@ -28,6 +31,7 @@ import {
   appendPart,
   appendTextChunk,
   createMessage,
+  getPartPayload,
   getSessionDetail,
   replaceUserMessageText,
   truncateMessagesAfter,
@@ -48,6 +52,11 @@ import {
   type AcpRequest,
   type ConfigOption,
 } from "./AcpClient.js";
+import {
+  agentIdFromToolText,
+  enrichCursorToolFromStore,
+} from "./cursorSubagentLive.js";
+import { findRecentCursorAgentId, findRecentCursorAgentIds } from "@acprocess/adapter-cursor";
 
 /** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
 export function coerceUiMode(raw: string): AgentMode | null {
@@ -138,6 +147,38 @@ async function applyAgentReportedMode(
 /** Whether an ACP tool `kind` denotes a nested agent for this harness. */
 function isSubagentToolKind(adapter: HarnessAdapter | null, kind: string): boolean {
   return adapter ? adapter.subagentToolKinds.includes(kind.trim().toLowerCase()) : false;
+}
+
+/** Whether an ACP tool update denotes a nested agent for this harness. */
+function isSubagentToolUpdate(
+  adapter: HarnessAdapter | null,
+  kind: string,
+  toolName?: string,
+  title?: string,
+  raw?: Record<string, unknown>,
+): boolean {
+  // OMP: the parent Task tool_call is only a spawn shell. Real cards (and live
+  // tools) come from `_omp/agents/update` + `_omp/agents/progress`. Treating
+  // Task as a subagent left a 3rd card once the shell completed before roster.
+  if (adapter?.id === "omp") return false;
+  if (isSubagentToolKind(adapter, kind)) return true;
+  const name = (toolName ?? "").trim().toLowerCase();
+  if (name && (isSubagentToolKind(adapter, name) || name === "task")) return true;
+  // Cursor sometimes labels the spawn tool "Task: Subagent task" without kind.
+  if (/^task\s*:/i.test((title ?? "").trim())) return true;
+  // Cursor Task often arrives as kind=other with description+prompt args.
+  if (kind.trim().toLowerCase() === "other" && raw) {
+    const args = argsFromRaw(raw) as Record<string, unknown> | undefined;
+    if (
+      typeof args?.description === "string" &&
+      args.description.trim() &&
+      typeof args?.prompt === "string" &&
+      args.prompt.trim()
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Real tool name from an ACP tool update's raw payload (runtime-narrowed). */
@@ -440,6 +481,8 @@ class SessionRuntime {
    * to the card while the agent runs, then stops at its terminal state.
    */
   subagentThinkingPoll = new Map<string, SubagentThinkingPoll>();
+  /** Cursor store.db polls keyed by toolCallId (title/agentId before ACP completes). */
+  cursorStorePoll = new Map<string, { timer: NodeJS.Timeout | undefined; inFlight: boolean }>();
   /** Subagents whose terminal transcript snapshot was already attached. */
   subagentTranscriptDone = new Set<string>();
   /** True once the agent has reported its initial mode — later changes prompt for consent. */
@@ -896,38 +939,70 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     // the tool row, not appended to the pre-tool blob.
     rt.turnThoughtPartId = null;
     rt.openThoughtPartId = null;
+    const toolCallId = normalizeToolCallId(update.toolCallId);
     // OMP labels MCP tools generically ("MCP: tool"); the real name rides in
     // `toolName`. Cursor sends neither — its MCP calls only carry the args, so
     // the display falls back to the call's own subject (query/path/…).
-    if (update.toolCallId) rt.toolStartRawByCallId.set(update.toolCallId, update.raw);
+    if (toolCallId) rt.toolStartRawByCallId.set(toolCallId, update.raw);
     const title =
       toolDisplayTitle(update.title ?? "", toolNameFromRaw(update.raw), argsFromRaw(update.raw)) ||
       "Tool";
     const kind = String((update.raw.kind as string) ?? "");
-    const isSubagent = isSubagentToolKind(rt.adapter, kind);
+    const toolName = toolNameFromRaw(update.raw);
+    // OMP Task spawn is redundant with roster cards — skip the shell row.
+    if (
+      rt.adapter?.id === "omp" &&
+      (toolName?.trim().toLowerCase() === "task" || /^task\s*:/i.test((update.title ?? title).trim()))
+    ) {
+      return;
+    }
+    const isSubagent = isSubagentToolUpdate(
+      rt.adapter,
+      kind,
+      toolName,
+      update.title ?? title,
+      update.raw,
+    );
     const extra = isSubagent ? subagentFieldsFromRaw(update.raw) : {};
+    const kindKey = kind.trim().toLowerCase();
+    const displayTitle =
+      (extra.title && !isPlaceholderSubagentTitle(extra.title) ? extra.title : "") ||
+      (title && !isPlaceholderSubagentTitle(title) && !isGenericToolTitle(title) ? title : "") ||
+      (isSubagent ? "Subagent" : title);
     const payload: Record<string, unknown> = {
-      toolCallId: update.toolCallId,
-      title,
-      description: title,
-      subagentType: kind || (isSubagent ? "task" : undefined),
-      status: update.status ?? "pending",
+      toolCallId,
+      subagentType:
+        (kindKey && kindKey !== "other" ? kind : "") || (isSubagent ? "task" : undefined),
+      status:
+        isSubagent && (update.status === "pending" || update.status === "in_progress" || !update.status)
+          ? "running"
+          : (update.status ?? "pending"),
       kind,
       raw: update.raw,
       ...extra,
+      // Resolved display title wins over ACP placeholders from extra/raw.
+      title: displayTitle,
+      description: displayTitle,
     };
 
-    const existingId = update.toolCallId ? rt.toolPartByCallId.get(update.toolCallId) : undefined;
+    const existingId = toolCallId ? rt.toolPartByCallId.get(toolCallId) : undefined;
     if (existingId) {
       // cursor/task may have arrived first — enrich that one card without clobbering its title.
       const { title: _title, description: _description, ...rest } = payload;
-      const named = title && !isGenericToolTitle(title) ? { title, description: title } : {};
+      const named =
+        displayTitle && !isPlaceholderSubagentTitle(displayTitle)
+          ? { title: displayTitle, description: displayTitle }
+          : {};
       await updatePart(
         rt.sessionId,
         existingId,
         { ...rest, ...named },
         isSubagent ? "subagent" : undefined,
       );
+      if (isSubagent && toolCallId) {
+        rt.subagentPartByAgentId.set(toolCallId, existingId);
+        startCursorStorePoll(rt, toolCallId, existingId);
+      }
       return;
     }
 
@@ -937,7 +1012,11 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       isSubagent ? "subagent" : "tool_call",
       payload,
     );
-    if (update.toolCallId) rt.toolPartByCallId.set(update.toolCallId, part.id);
+    if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
+    if (isSubagent && toolCallId) {
+      rt.subagentPartByAgentId.set(toolCallId, part.id);
+      startCursorStorePoll(rt, toolCallId, part.id);
+    }
     return;
   }
 
@@ -948,12 +1027,13 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     // consecutive thought parts still coalesce on the client).
     rt.turnThoughtPartId = null;
     rt.openThoughtPartId = null;
-    const partId = rt.toolPartByCallId.get(update.toolCallId);
+    const toolCallId = normalizeToolCallId(update.toolCallId);
+    const partId = rt.toolPartByCallId.get(toolCallId);
     // Merge with the start event so identifying fields (title/toolName/
     // rawInput/kind) survive the status updates that omit them.
-    const startRaw = update.toolCallId ? rt.toolStartRawByCallId.get(update.toolCallId) : undefined;
+    const startRaw = toolCallId ? rt.toolStartRawByCallId.get(toolCallId) : undefined;
     const mergedRaw = { ...(startRaw ?? {}), ...update.raw };
-    if (update.toolCallId) rt.toolStartRawByCallId.set(update.toolCallId, mergedRaw);
+    if (toolCallId) rt.toolStartRawByCallId.set(toolCallId, mergedRaw);
     const title =
       toolDisplayTitle(
         String(mergedRaw.title ?? ""),
@@ -962,41 +1042,159 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       ) || "Tool";
     const status = update.status ?? "in_progress";
     const kind = String(mergedRaw.kind ?? "");
-    const isSubagent = isSubagentToolKind(rt.adapter, kind);
+    const toolName = toolNameFromRaw(mergedRaw);
+    // OMP Task spawn shell — no card/row; roster+progress own the UI.
+    if (
+      rt.adapter?.id === "omp" &&
+      !partId &&
+      (toolName?.trim().toLowerCase() === "task" || /^task\s*:/i.test(String(mergedRaw.title ?? title).trim()))
+    ) {
+      return;
+    }
+    const isSubagent = isSubagentToolUpdate(
+      rt.adapter,
+      kind,
+      toolName,
+      String(mergedRaw.title ?? title),
+      mergedRaw,
+    );
     const extra = isSubagent ? subagentFieldsFromRaw(mergedRaw) : {};
+    const kindKey = kind.trim().toLowerCase();
+    const displayTitle =
+      (extra.title && !isPlaceholderSubagentTitle(extra.title) ? extra.title : "") ||
+      (title && !isPlaceholderSubagentTitle(title) && !isGenericToolTitle(title) ? title : "") ||
+      (isSubagent ? "Subagent" : title);
+    const normalizedStatus =
+      isSubagent && (status === "pending" || status === "in_progress")
+        ? "running"
+        : status;
+    // Prefer this update's content when present (ACP replacement snapshot); otherwise
+    // fall back to the merged start+update raw so we still see prior chunks.
+    const liveRaw =
+      update.raw.content !== undefined || update.raw.result !== undefined || update.raw.output !== undefined
+        ? update.raw
+        : mergedRaw;
+    const live = isSubagent ? extractSubagentLiveContent(liveRaw) : { thinking: [], result: "" };
     // Terminal status is final: late async progress must not reopen the card.
     if (status === "completed" || status === "failed") {
-      if (update.toolCallId) rt.terminalToolCallIds.add(update.toolCallId);
-    } else if (update.toolCallId && rt.terminalToolCallIds.has(update.toolCallId)) {
+      if (toolCallId) rt.terminalToolCallIds.add(toolCallId);
+    } else if (toolCallId && rt.terminalToolCallIds.has(toolCallId)) {
       return;
+    }
+    const livePatch: Record<string, unknown> = {};
+    if (live.result) livePatch.result = live.result;
+    if (live.thinking.length) {
+      if (update.raw.content !== undefined) {
+        // Full content snapshot replaces prior thinking from this tool call.
+        livePatch.thinking = live.thinking;
+      } else if (partId) {
+        const prevPayload = await getPartPayload(partId);
+        const prev = Array.isArray(prevPayload?.thinking)
+          ? (prevPayload!.thinking as string[])
+          : [];
+        const merged = [...prev];
+        for (const block of live.thinking) {
+          if (!merged.includes(block)) merged.push(block);
+        }
+        livePatch.thinking = merged;
+      } else {
+        livePatch.thinking = live.thinking;
+      }
     }
     if (!partId) {
       const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
-        toolCallId: update.toolCallId,
-        title,
-        description: title,
-        subagentType: kind || (isSubagent ? "task" : undefined),
-        status,
+        toolCallId,
+        subagentType:
+          (kindKey && kindKey !== "other" ? kind : "") || (isSubagent ? "task" : undefined),
+        status: normalizedStatus,
         kind,
         raw: mergedRaw,
         ...extra,
+        ...livePatch,
+        title: displayTitle,
+        description: displayTitle,
       });
-      rt.toolPartByCallId.set(update.toolCallId, part.id);
+      rt.toolPartByCallId.set(toolCallId, part.id);
+      if (isSubagent) startCursorStorePoll(rt, toolCallId, part.id);
       return;
     }
-    const named = title && !isGenericToolTitle(title) ? { title, description: title } : {};
+    const named =
+      displayTitle && !isPlaceholderSubagentTitle(displayTitle)
+        ? { title: displayTitle, description: displayTitle }
+        : {};
+    const agentFromLive =
+      isSubagent
+        ? agentIdFromToolText(live.result) ||
+          agentIdFromToolText(textFromUnknown(mergedRaw.result)) ||
+          agentIdFromToolText(textFromUnknown(update.raw.content)) ||
+          (typeof mergedRaw.agentId === "string" ? mergedRaw.agentId.trim() : "")
+        : undefined;
+    if (agentFromLive) {
+      rt.subagentPartByAgentId.set(agentFromLive, partId);
+      if (rt.adapter?.subagentStreaming && CURSOR_AGENT_UUID_RE.test(agentFromLive)) {
+        startSubagentThinkingPoll(rt, agentFromLive);
+      }
+    }
     await updatePart(
       rt.sessionId,
       partId,
       {
-        toolCallId: update.toolCallId,
-        status,
+        toolCallId,
+        status: normalizedStatus,
         kind,
         raw: mergedRaw,
         ...extra,
+        ...livePatch,
         ...named,
+        ...(agentFromLive ? { agentId: agentFromLive } : {}),
       },
       isSubagent ? "subagent" : undefined,
+    );
+    if (isSubagent) {
+      if (normalizedStatus === "completed" || normalizedStatus === "failed") {
+        clearCursorStorePoll(rt, toolCallId);
+        const agentId = agentFromLive || String((await getPartPayload(partId))?.agentId ?? "");
+        if (agentId) void stopSubagentThinkingPoll(rt, agentId);
+      } else {
+        startCursorStorePoll(rt, toolCallId, partId);
+      }
+    }
+    return;
+  }
+
+  if (update.kind === "tool_call_content_chunk") {
+    if (!rt.acceptingStream) return;
+    const toolCallId = normalizeToolCallId(update.toolCallId);
+    const partId = rt.toolPartByCallId.get(toolCallId);
+    if (!partId) return;
+    if (rt.terminalToolCallIds.has(toolCallId)) return;
+    const live = extractSubagentLiveContent({ content: update.content });
+    if (!live.result && !live.thinking.length) return;
+    const prevPayload = await getPartPayload(partId);
+    const prevThinking = Array.isArray(prevPayload?.thinking)
+      ? (prevPayload!.thinking as string[])
+      : [];
+    const thinking = [...prevThinking];
+    for (const block of live.thinking) {
+      if (!thinking.includes(block)) thinking.push(block);
+    }
+    const prevResult = String(prevPayload?.result ?? "").trim();
+    const result = live.result
+      ? prevResult
+        ? prevResult.endsWith(live.result)
+          ? prevResult
+          : `${prevResult}\n\n${live.result}`
+        : live.result
+      : prevResult;
+    await updatePart(
+      rt.sessionId,
+      partId,
+      {
+        ...(result ? { result } : {}),
+        ...(thinking.length ? { thinking } : {}),
+        status: "running",
+      },
+      "subagent",
     );
     return;
   }
@@ -1027,6 +1225,41 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
         options.find((o) => /allow/i.test(o.optionId));
       return byKind?.optionId ?? options[0]?.optionId ?? "allow_once";
     };
+
+    // Cursor often exposes Task args on the permission request before tool_call
+    // content streams — spawn the subagent card immediately with the real title.
+    const toolCall = (req.params as { toolCall?: Record<string, unknown> }).toolCall;
+    if (toolCall && rt.adapter?.id === "cursor") {
+      const kind = String(toolCall.kind ?? "");
+      const title = String(toolCall.title ?? "");
+      const toolName = toolNameFromRaw(toolCall);
+      if (isSubagentToolUpdate(rt.adapter, kind, toolName, title, toolCall)) {
+        const toolCallId = String(
+          toolCall.toolCallId ?? toolCall.toolCallID ?? toolCall.id ?? "",
+        );
+        const extra = subagentFieldsFromRaw(toolCall);
+        const cardTitle =
+          (extra.title && !isPlaceholderSubagentTitle(extra.title) ? extra.title : "") ||
+          (title && !isPlaceholderSubagentTitle(title) ? title : "") ||
+          "Subagent";
+        await rt.enqueue(async () => {
+          const messageId = await ensureAssistantMessage(rt);
+          await applySubagentCard(
+            rt,
+            messageId,
+            {
+              agentId: toolCallId || cardTitle,
+              status: "running",
+              title: cardTitle,
+              description: cardTitle,
+              subagentType: "task",
+              raw: toolCall,
+            },
+            toolCallId || undefined,
+          );
+        });
+      }
+    }
 
     if (settings.permissionPolicy === "always") {
       rt.client?.respond(req.id, { outcome: { outcome: "selected", optionId: pickAllow() } });
@@ -1107,6 +1340,10 @@ const MAX_SUBAGENT_THINKING_BLOCKS = 30;
 const MAX_SUBAGENT_TRANSCRIPT_PAGES = 10;
 /** Live thinking poll cadence per running subagent. */
 const SUBAGENT_THINKING_POLL_MS = 1500;
+/** Cursor store.db poll cadence for Task title/agentId while ACP is silent. */
+const CURSOR_STORE_POLL_MS = 400;
+const CURSOR_AGENT_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface SubagentThinkingPoll {
   timer: NodeJS.Timeout | undefined;
@@ -1118,6 +1355,103 @@ interface SubagentThinkingPoll {
   inFlight: boolean;
   /** True once the first snapshot (from byte 0) has been applied. */
   seeded: boolean;
+}
+
+function clearCursorStorePoll(rt: SessionRuntime, toolCallId: string): void {
+  const poll = rt.cursorStorePoll.get(toolCallId);
+  if (!poll) return;
+  clearInterval(poll.timer);
+  rt.cursorStorePoll.delete(toolCallId);
+}
+
+/**
+ * While Cursor Task runs, ACP often has empty rawInput and no content chunks.
+ * Poll `~/.cursor/acp-sessions/<id>/store.db` for description + agentId, then
+ * kick off the JSONL transcript drain once the real agent UUID appears.
+ */
+function startCursorStorePoll(rt: SessionRuntime, toolCallId: string, partId: string): void {
+  if (rt.adapter?.id !== "cursor") return;
+  if (rt.cursorStorePoll.has(toolCallId)) return;
+  const poll = { timer: undefined as NodeJS.Timeout | undefined, inFlight: false };
+  rt.cursorStorePoll.set(toolCallId, poll);
+  rt.subagentPartByAgentId.set(toolCallId, partId);
+  const startedAt = Date.now();
+
+  const tick = async () => {
+    if (poll.inFlight) return;
+    if (rt.terminalToolCallIds.has(toolCallId)) {
+      clearCursorStorePoll(rt, toolCallId);
+      return;
+    }
+    poll.inFlight = true;
+    try {
+      const detail = await getSessionDetail(rt.sessionId);
+      const acpSessionId = rt.client?.sessionId || detail?.acpSessionId || null;
+      const prev = (await getPartPayload(partId)) ?? {};
+      let enrich = enrichCursorToolFromStore(acpSessionId, toolCallId);
+      if (!enrich?.agentId) {
+        const bound = new Set(
+          [...rt.subagentPartByAgentId.keys()].filter((k) => CURSOR_AGENT_UUID_RE.test(k)),
+        );
+        const guessed =
+          findRecentCursorAgentId({
+            cwd: detail?.cwd,
+            prompt: String(prev.prompt ?? ""),
+            description:
+              String(prev.description ?? prev.title ?? "").trim() &&
+              !isPlaceholderSubagentTitle(String(prev.description ?? prev.title ?? ""))
+                ? String(prev.description ?? prev.title ?? "")
+                : "",
+            newerThanMs: startedAt - 5_000,
+          }) ||
+          findRecentCursorAgentIds({
+            cwd: detail?.cwd,
+            newerThanMs: startedAt - 5_000,
+            limit: 4,
+            exclude: bound,
+          })[0];
+        if (guessed) enrich = { ...(enrich ?? {}), agentId: guessed, status: "running" };
+      }
+      if (!enrich) return;
+      const patch: Record<string, unknown> = {};
+      if (enrich.description && !isPlaceholderSubagentTitle(enrich.description)) {
+        patch.title = enrich.description;
+        patch.description = enrich.description;
+      }
+      if (enrich.prompt && !prev.prompt) patch.prompt = enrich.prompt;
+      if (enrich.thinking?.length) patch.thinking = enrich.thinking.slice(0, MAX_SUBAGENT_THINKING_BLOCKS);
+      if (enrich.result && enrich.status !== "running") patch.result = enrich.result;
+      if (enrich.status) patch.status = enrich.status;
+      if (enrich.agentId) {
+        patch.agentId = enrich.agentId;
+        rt.subagentPartByAgentId.set(enrich.agentId, partId);
+        if (rt.adapter?.subagentStreaming && CURSOR_AGENT_UUID_RE.test(enrich.agentId)) {
+          startSubagentThinkingPoll(rt, enrich.agentId);
+        }
+      }
+      if (Object.keys(patch).length) {
+        const updated = await updatePart(rt.sessionId, partId, patch, "subagent");
+        if (!updated) {
+          clearCursorStorePoll(rt, toolCallId);
+          return;
+        }
+      }
+      if (enrich.status === "completed" || enrich.status === "failed") {
+        clearCursorStorePoll(rt, toolCallId);
+        if (enrich.agentId) void stopSubagentThinkingPoll(rt, enrich.agentId);
+      }
+    } catch (err) {
+      console.error(`[subagent] cursor store poll failed for ${toolCallId}`, err);
+    } finally {
+      poll.inFlight = false;
+    }
+  };
+
+  void tick();
+  poll.timer = setInterval(() => {
+    void tick();
+  }, CURSOR_STORE_POLL_MS);
+  poll.timer.unref?.();
 }
 
 function clearSubagentThinkingPoll(rt: SessionRuntime, id: string): void {
@@ -1143,12 +1477,18 @@ async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: Subag
   if (poll.inFlight) return;
   poll.inFlight = true;
   try {
+    const detail = await getSessionDetail(rt.sessionId);
+    const transcriptClient = {
+      requestAgent: <T,>(method: string, params: Record<string, unknown>) =>
+        client.requestAgent<T>(method, params),
+      cwd: detail?.cwd,
+      acpSessionId: client.sessionId ?? detail?.acpSessionId ?? undefined,
+    };
     let { lastByte, blocks } = poll;
+    const tools: Array<{ name: string; args?: string; status?: string }> = [];
     for (let page = 0; page < MAX_SUBAGENT_TRANSCRIPT_PAGES; page++) {
-      const res = (await readTranscript(client, id, lastByte)) ?? {};
+      const res = (await readTranscript(transcriptClient, id, lastByte)) ?? {};
       if (res.reset || !poll.seeded) {
-        // Transcript rewound (or first snapshot): rebuild the list from this
-        // response instead of appending to a stale one.
         blocks = [];
         lastByte = 0;
         poll.seeded = true;
@@ -1157,9 +1497,40 @@ async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: Subag
       for (const msg of res.messages ?? []) {
         if (msg.role !== "assistant" || !Array.isArray(msg.content)) continue;
         for (const block of msg.content) {
-          const b = block as { type?: string; thinking?: string };
-          if (b.type !== "thinking" || typeof b.thinking !== "string" || !b.thinking.trim()) continue;
-          const text = b.thinking.trim();
+          const b = block as {
+            type?: string;
+            thinking?: string;
+            name?: string;
+            args?: unknown;
+            arguments?: unknown;
+            input?: unknown;
+          };
+          const blockType = String(b.type ?? "").toLowerCase().replace(/_/g, "");
+          // OMP: `toolCall`; Cursor/Anthropic-style: `tool_use` / `tool-call`.
+          if (blockType === "toolcall" || blockType === "tooluse") {
+            const name = String(b.name ?? "tool").trim() || "tool";
+            const rawArgs = b.args ?? b.arguments ?? b.input;
+            const args =
+              typeof rawArgs === "string"
+                ? rawArgs.trim()
+                : rawArgs && typeof rawArgs === "object"
+                  ? JSON.stringify(rawArgs).slice(0, 200)
+                  : "";
+            const prev = tools[tools.length - 1];
+            if (!prev || prev.name !== name || prev.args !== args) {
+              if (prev?.status === "running") prev.status = "completed";
+              tools.push({ name, ...(args ? { args } : {}), status: "running" });
+            }
+          }
+          const thought =
+            (b.type === "thinking" || b.type === "reasoning" || b.type === "tool_use") &&
+            typeof b.thinking === "string"
+              ? b.thinking
+              : typeof b.thinking === "string"
+                ? b.thinking
+                : "";
+          const text = thought.trim();
+          if (!text) continue;
           if (!blocks.includes(text)) blocks.push(text);
           if (blocks.length >= MAX_SUBAGENT_THINKING_BLOCKS) break;
         }
@@ -1173,7 +1544,29 @@ async function drainSubagentThinking(rt: SessionRuntime, id: string, poll: Subag
     poll.lastByte = lastByte;
     const partId = rt.subagentPartByAgentId.get(id);
     if (!partId) return;
-    const updated = await updatePart(rt.sessionId, partId, { thinking: poll.blocks }, "subagent");
+    const prevPayload = await getPartPayload(partId);
+    const prevTools = Array.isArray(prevPayload?.tools)
+      ? (prevPayload!.tools as Array<{ name: string; args?: string; status?: string }>)
+      : [];
+    const mergedTools = prevTools.slice();
+    for (const tool of tools) {
+      const last = mergedTools[mergedTools.length - 1];
+      if (last && last.name === tool.name && last.args === tool.args) {
+        last.status = tool.status;
+      } else {
+        if (last?.status === "running") last.status = "completed";
+        mergedTools.push(tool);
+      }
+    }
+    const updated = await updatePart(
+      rt.sessionId,
+      partId,
+      {
+        thinking: poll.blocks,
+        ...(mergedTools.length ? { tools: mergedTools.slice(-40) } : {}),
+      },
+      "subagent",
+    );
     if (!updated) clearSubagentThinkingPoll(rt, id);
   } catch (err) {
     console.error(`[subagent] thinking drain failed for ${id}`, err);
@@ -1201,15 +1594,34 @@ function startSubagentThinkingPoll(rt: SessionRuntime, id: string): void {
  * Stop the live stream at a terminal state: one final drain catches any
  * blocks that landed after the last tick. For an agent that was never polled
  * while running (e.g. we joined mid-run) this is a single full snapshot.
+ * Cursor may flush `agent-transcripts` a beat after Task completes — retry briefly.
  */
 async function stopSubagentThinkingPoll(rt: SessionRuntime, id: string): Promise<void> {
   if (rt.subagentTranscriptDone.has(id)) return;
   const poll = rt.subagentThinkingPoll.get(id);
   clearSubagentThinkingPoll(rt, id);
   const partId = rt.subagentPartByAgentId.get(id);
-  if (!partId) return;
+  if (!partId) {
+    rt.subagentTranscriptDone.add(id);
+    return;
+  }
+  const empty = { timer: undefined, lastByte: 0, blocks: [], inFlight: false, seeded: false };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    await drainSubagentThinking(rt, id, poll ?? empty);
+    const payload = await getPartPayload(partId);
+    const thinking = Array.isArray(payload?.thinking) ? payload!.thinking.length : 0;
+    const tools = Array.isArray(payload?.tools) ? payload!.tools.length : 0;
+    if (thinking > 0 || tools > 0) break;
+    await new Promise((r) => setTimeout(r, 350));
+  }
+  const finalPayload = await getPartPayload(partId);
+  if (Array.isArray(finalPayload?.tools) && finalPayload!.tools.length) {
+    const tools = (finalPayload!.tools as Array<Record<string, unknown>>).map((tool) =>
+      String(tool.status ?? "") === "running" ? { ...tool, status: "completed" } : tool,
+    );
+    await updatePart(rt.sessionId, partId, { tools }, "subagent");
+  }
   rt.subagentTranscriptDone.add(id);
-  await drainSubagentThinking(rt, id, poll ?? { timer: undefined, lastByte: 0, blocks: [], inFlight: false, seeded: false });
 }
 
 async function handleExtension(
@@ -1262,13 +1674,74 @@ function subagentPayload(card: SubagentCardUpdate): Record<string, unknown> {
     status: card.status,
     title: card.title,
     description: card.description ?? card.title,
-    // The UI renders the card body from payload.prompt (last fallback after result).
-    ...(card.body ? { prompt: card.body } : {}),
+    // Completion / live body — UI reads `result` (not the Task launch `prompt`).
+    ...(card.body ? { result: card.body } : {}),
+    ...(card.tools?.length ? { tools: card.tools } : {}),
     ...(card.subagentType ? { subagentType: card.subagentType } : {}),
     ...(card.metrics ? { metrics: card.metrics } : {}),
     ...(card.resolvedModel ? { resolvedModel: card.resolvedModel } : {}),
     raw: card.raw,
   };
+}
+
+/** Soft-merge so progress ticks don't wipe a better title / prior tools. */
+async function mergeSubagentPayload(
+  partId: string,
+  card: SubagentCardUpdate,
+): Promise<Record<string, unknown>> {
+  const prev = (await getPartPayload(partId)) ?? {};
+  const next = subagentPayload(card);
+  const prevTitle = String(prev.title ?? prev.description ?? "").trim();
+  const nextTitle = String(next.title ?? next.description ?? "").trim();
+  const keepTitle =
+    prevTitle &&
+    !isPlaceholderSubagentTitle(prevTitle) &&
+    (isPlaceholderSubagentTitle(nextTitle) || nextTitle === card.agentId);
+  if (keepTitle) {
+    next.title = prevTitle;
+    next.description = prevTitle;
+  }
+  const prevTools = Array.isArray(prev.tools) ? (prev.tools as unknown[]) : [];
+  const nextTools = Array.isArray(next.tools) ? (next.tools as unknown[]) : [];
+  if (nextTools.length && prevTools.length) {
+    const merged = prevTools.slice() as Array<Record<string, unknown>>;
+    for (const tool of nextTools as Array<Record<string, unknown>>) {
+      const name = String(tool.name ?? "");
+      const args = String(tool.args ?? "");
+      const last = merged[merged.length - 1];
+      if (last && String(last.name ?? "") === name && String(last.args ?? "") === args) {
+        last.status = tool.status ?? last.status;
+      } else {
+        if (String(last?.status ?? "") === "running") last.status = "completed";
+        merged.push(tool);
+      }
+    }
+    next.tools = merged.slice(-40);
+  } else if (!nextTools.length && prevTools.length) {
+    // Later roster/progress ticks often omit currentTool — keep what we already saw.
+    const kept = prevTools.slice(-40) as Array<Record<string, unknown>>;
+    if (card.status === "completed" || card.status === "failed") {
+      for (const tool of kept) {
+        if (String(tool.status ?? "") === "running") tool.status = "completed";
+      }
+    }
+    next.tools = kept;
+  }
+  return next;
+}
+
+/** Running Task card from this turn that is not yet bound to a registry agent id. */
+function findOrphanRunningSubagentPart(rt: SessionRuntime): string | undefined {
+  for (const [callId, partId] of rt.toolPartByCallId) {
+    // Only Task/subagent shells — never adopt a Shell/Read tool_call as a card.
+    if (!rt.subagentPartByAgentId.has(callId)) continue;
+    if (rt.terminalToolCallIds.has(callId)) continue;
+    // Prefer cards still keyed only by toolCallId (OMP progress uses a different id).
+    const bound = [...rt.subagentPartByAgentId.entries()].filter(([, id]) => id === partId);
+    const onlyToolKey = bound.length === 0 || bound.every(([key]) => key === callId);
+    if (onlyToolKey) return partId;
+  }
+  return undefined;
 }
 
 /** Upsert one normalized subagent card, with the harness's card lifecycle. */
@@ -1278,35 +1751,68 @@ async function applySubagentCard(
   card: SubagentCardUpdate,
   toolCallId?: string,
 ): Promise<void> {
+  let partId: string | undefined;
   // cursor/task and the parallel ACP tool_call share the toolCallId — one card.
   if (toolCallId) {
     const existingToolPart = rt.toolPartByCallId.get(toolCallId);
     if (existingToolPart) {
-      await updatePart(rt.sessionId, existingToolPart, subagentPayload(card), "subagent");
-      return;
+      await updatePart(
+        rt.sessionId,
+        existingToolPart,
+        await mergeSubagentPayload(existingToolPart, card),
+        "subagent",
+      );
+      partId = existingToolPart;
     }
   }
-  const existingId = rt.subagentPartByAgentId.get(card.agentId);
-  if (existingId) {
-    await updatePart(rt.sessionId, existingId, subagentPayload(card), "subagent");
-  } else if (card.status === "running" || toolCallId) {
-    // Roster snapshots are process-global and include agents from earlier
-    // turns (idle/parked) — an idle-only sighting never re-creates an old
-    // card in a new message; explicit task requests always spawn theirs.
-    const part = await appendPart(rt.sessionId, messageId, "subagent", {
-      title: card.title,
-      description: card.description ?? card.title,
-      ...subagentPayload(card),
-    });
-    if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
-    rt.subagentPartByAgentId.set(card.agentId, part.id);
+  if (!partId) {
+    const existingId = rt.subagentPartByAgentId.get(card.agentId);
+    if (existingId) {
+      await updatePart(
+        rt.sessionId,
+        existingId,
+        await mergeSubagentPayload(existingId, card),
+        "subagent",
+      );
+      partId = existingId;
+    } else if (card.status === "running" || toolCallId) {
+      // OMP: progress/roster id ≠ parent Task toolCallId — adopt the orphan Task card.
+      if (!toolCallId) {
+        const orphan = findOrphanRunningSubagentPart(rt);
+        if (orphan) {
+          await updatePart(rt.sessionId, orphan, await mergeSubagentPayload(orphan, card), "subagent");
+          partId = orphan;
+        }
+      }
+      if (!partId) {
+        const part = await appendPart(rt.sessionId, messageId, "subagent", {
+          title: card.title,
+          description: card.description ?? card.title,
+          ...subagentPayload(card),
+        });
+        partId = part.id;
+        if (toolCallId) rt.toolPartByCallId.set(toolCallId, part.id);
+      }
+      rt.subagentPartByAgentId.set(card.agentId, partId);
+    }
+  }
+  if (partId) {
+    rt.subagentPartByAgentId.set(card.agentId, partId);
+    if (toolCallId) rt.subagentPartByAgentId.set(toolCallId, partId);
   }
   // Live thinking stream: drain while running, one final snapshot at terminal.
-  if (rt.adapter?.subagentStreaming) {
+  if (rt.adapter?.subagentStreaming && partId) {
     if (card.status === "running") {
-      startSubagentThinkingPoll(rt, card.agentId);
+      if (toolCallId && rt.adapter.id === "cursor") {
+        startCursorStorePoll(rt, toolCallId, partId);
+      }
+      // Cursor JSONL is keyed by agent UUID — don't poll with a toolCallId stand-in.
+      if (rt.adapter.id !== "cursor" || CURSOR_AGENT_UUID_RE.test(card.agentId)) {
+        startSubagentThinkingPoll(rt, card.agentId);
+      }
     } else {
       void stopSubagentThinkingPoll(rt, card.agentId);
+      if (toolCallId) clearCursorStorePoll(rt, toolCallId);
     }
   }
 }
@@ -2321,6 +2827,10 @@ export function disposeRuntime(sessionId: string) {
       clearInterval(poll.timer);
     }
     rt.subagentThinkingPoll.clear();
+    for (const poll of rt.cursorStorePoll.values()) {
+      clearInterval(poll.timer);
+    }
+    rt.cursorStorePoll.clear();
     rt.client?.dispose();
   }
   runtimes.delete(sessionId);

@@ -43,10 +43,19 @@ export interface SubagentCardUpdate {
   title: string;
   description?: string;
   body?: string;
+  /** Nested tool calls observed while the subagent runs (OMP progress / Cursor transcript). */
+  tools?: SubagentToolEvent[];
   subagentType?: string;
   metrics?: Record<string, unknown>;
   resolvedModel?: string;
   raw: Record<string, unknown>;
+}
+
+/** One nested tool invocation inside a subagent card. */
+export interface SubagentToolEvent {
+  name: string;
+  args?: string;
+  status?: "running" | "completed" | "failed";
 }
 
 /** A normalized live-work update for an existing subagent card. */
@@ -56,6 +65,7 @@ export interface SubagentProgressUpdate {
   title: string;
   description?: string;
   body?: string;
+  tools?: SubagentToolEvent[];
   metrics?: Record<string, unknown>;
   raw: Record<string, unknown>;
 }
@@ -63,6 +73,10 @@ export interface SubagentProgressUpdate {
 /** Minimal client surface adapters use to read a subagent transcript. */
 export interface AdapterTranscriptClient {
   requestAgent<T>(method: string, params: Record<string, unknown>): Promise<T>;
+  /** Workspace cwd — Cursor resolves `agent-transcripts` under `~/.cursor/projects`. */
+  cwd?: string;
+  /** Cursor ACP session id — joins to `~/.cursor/acp-sessions/<id>/store.db`. */
+  acpSessionId?: string;
 }
 
 export interface SubagentTranscriptPage {
