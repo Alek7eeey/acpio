@@ -11,6 +11,7 @@ import {
   subscribeLikedMessages,
   type LikedMessage,
 } from "../lib/likedMessages";
+import { showToast } from "../lib/toast";
 import {
   collectRecentCwds,
   CreateSessionFolderPicker,
@@ -750,7 +751,12 @@ export function ChatSidebar({
               aria-label={inArchive ? t("chat.unarchive") : t("chat.archive")}
               onClick={(e) => {
                 e.stopPropagation();
-                void setSessionFlags(s.id, { archived: !s.archived });
+                const next = !s.archived;
+                void setSessionFlags(s.id, { archived: next });
+                showToast(next ? t("common.toastArchived") : t("common.toastUnarchived"), {
+                  tone: "info",
+                  id: `archive-${s.id}`,
+                });
               }}
             >
               {inArchive ? (
@@ -1424,7 +1430,12 @@ export function ChatSidebar({
                   type="button"
                   role="menuitem"
                   onClick={() => {
-                    void setSessionFlags(menuSession.id, { archived: !menuSession.archived });
+                    const next = !menuSession.archived;
+                    void setSessionFlags(menuSession.id, { archived: next });
+                    showToast(next ? t("common.toastArchived") : t("common.toastUnarchived"), {
+                      tone: "info",
+                      id: `archive-${menuSession.id}`,
+                    });
                     setMenu(null);
                   }}
                 >

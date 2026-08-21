@@ -168,6 +168,14 @@
   min-width: 0;
   overflow: hidden;
   z-index: 20;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sidebar input,
+.sidebar textarea {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .brandRow {

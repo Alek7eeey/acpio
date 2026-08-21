@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAppStore } from "./lib/store";
 import { I18nProvider } from "./lib/i18n";
+import { installMessageHotkeys } from "./lib/messageHotkeys";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
 import { BootSplash } from "./components/BootSplash";
+import { ToastHost } from "./components/ToastHost";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
@@ -18,6 +20,8 @@ export function App() {
   useEffect(() => {
     void loadBootstrap();
   }, [loadBootstrap]);
+
+  useEffect(() => installMessageHotkeys(), []);
 
   useSessionSocket(activeSessionId, !loading);
 
@@ -38,6 +42,7 @@ export function App() {
   return (
     <I18nProvider>
       {app}
+      <ToastHost />
       {splashVisible && showBootSplash && <BootSplash ready={!loading} onDone={onSplashDone} />}
     </I18nProvider>
   );

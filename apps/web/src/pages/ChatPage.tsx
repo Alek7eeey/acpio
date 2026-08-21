@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Fragment,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -12,6 +13,8 @@ import {
   type MouseEvent,
   type ReactNode,
   type CSSProperties,
+  type RefObject,
+
 } from "react";
 import {
   isPlaceholderSubagentTitle,
@@ -55,6 +58,17 @@ import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete, requestNotificationPermission } from "../lib/notify";
 import { isImageFile } from "../lib/pathSegments";
+import {
+  prefersHotkeyHints,
+  registerMessageHotkeys,
+
+  setMessageHotkeyHover,
+  subscribeHotkeyHintPreference,
+  updateMessageHotkeys,
+  type MessageHotAction,
+} from "../lib/messageHotkeys";
+import { isTouchUi } from "../lib/pointerUi";
+import { showToast } from "../lib/toast";
 import {
   buildSlashInsertion,
   filterSlashCommands,
@@ -161,6 +175,84 @@ function messagePlainText(message: MessageDto): string {
     .trim();
 }
 
+type MessageCtxHandle = {
+  openAt: (x: number, y: number) => void;
+};
+
+function readDomSelection(): string {
+  const value = window.getSelection()?.toString() ?? "";
+  return value.trim() ? value : "";
+}
+
+async function copyTextToClipboard(value: string) {
+  if (!value) return;
+  await navigator.clipboard.writeText(value);
+}
+
+function selectionInsideMessage(messageId: string): boolean {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return false;
+  const node = sel.anchorNode;
+  if (!node) return false;
+  const el = node instanceof Element ? node : node.parentElement;
+  const safeId = messageId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return Boolean(el?.closest(`[data-msg-hotkey="${safeId}"]`));
+}
+
+function isAppleUi(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+/** Shortcut labels shown in the message context menu (platform-aware). */
+function messageCtxShortcuts(apple = isAppleUi()) {
+  return {
+    copySelection: apple ? "⌘C" : "Ctrl+C",
+    copyMessage: apple ? "⌘⇧C" : "Ctrl+Shift+C",
+    copy: apple ? "⌘C" : "Ctrl+C",
+    edit: "E",
+    like: "L",
+    dislike: "D",
+    share: "S",
+    regenerate: "R",
+    readAloud: "A",
+  } as const;
+}
+
+function useShowHotkeyHints() {
+  const [show, setShow] = useState(() => prefersHotkeyHints());
+  useEffect(() => subscribeHotkeyHintPreference(() => setShow(prefersHotkeyHints())), []);
+  return show;
+}
+
+function MsgMenuItem({
+  label,
+  shortcut,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  shortcut?: string;
+  disabled?: boolean;
+  onClick: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={styles.msgActionMenuItem}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+      <span className={styles.msgActionMenuLabel}>{label}</span>
+      {shortcut ? <span className={styles.msgActionMenuKbd}>{shortcut}</span> : null}
+    </button>
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "";
   const units = ["Б", "КБ", "МБ", "ГБ"];
@@ -171,6 +263,62 @@ function formatBytes(bytes: number): string {
     i++;
   }
   return `${v >= 100 ? Math.round(v) : Math.round(v * 10) / 10} ${units[i]}`;
+}
+
+function MessageArticle({
+  msg,
+  isLiveAssistant,
+  onEditUser,
+  onRegenerate,
+  slashCommands,
+  activeSession,
+  autoExpandSteps,
+  keepComposerFocus,
+  textareaRef,
+}: {
+  msg: MessageDto;
+  isLiveAssistant: boolean;
+  onEditUser: (messageId: string, value: string) => void;
+  onRegenerate: () => void;
+  slashCommands: SlashCommandDto[];
+  activeSession: SessionDetailDto | null;
+  autoExpandSteps: boolean;
+  keepComposerFocus: RefObject<boolean>;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+}) {
+  return (
+    <article
+      key={msg.id}
+      data-message-id={msg.id}
+      className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
+      onMouseEnter={() => setMessageHotkeyHover(msg.id)}
+      onMouseLeave={() => setMessageHotkeyHover(null)}
+      onMouseDown={(e) => {
+        if (!keepComposerFocus.current) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("button,a,input,textarea")) return;
+        const onUp = () => {
+          window.removeEventListener("mouseup", onUp);
+          const sel = window.getSelection();
+          if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+          textareaRef.current?.focus({ preventScroll: true });
+        };
+        window.addEventListener("mouseup", onUp);
+      }}
+    >
+      {msg.role === "user" ? (
+        <UserMessage message={msg} slashCommands={slashCommands} onEdit={onEditUser} />
+      ) : (
+        <AssistantParts
+          message={msg}
+          session={activeSession}
+          onRegenerate={onRegenerate}
+          streaming={!!isLiveAssistant}
+          autoExpandSteps={autoExpandSteps}
+        />
+      )}
+    </article>
+  );
 }
 
 function UserMessage({
@@ -184,6 +332,7 @@ function UserMessage({
 }) {
   const t = useT();
   const text = messagePlainText(message);
+  const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
   const explicitCommand = message.parts.some(
     (p) => p.type === "text" && Boolean(p.payload.isSlashCommand),
@@ -219,7 +368,18 @@ function UserMessage({
     );
 
   return (
-    <div className={styles.userMsg}>
+    <div
+      className={styles.userMsg}
+      data-msg-hotkey={message.id}
+      onContextMenu={(e) => {
+        // Mobile: keep native long-press text selection; no custom menu.
+        if (isTouchUi()) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea")) return;
+        e.preventDefault();
+        ctxRef.current?.openAt(e.clientX, e.clientY);
+      }}
+    >
       {body}
       {fileParts.length > 0 ? (
         <div className={styles.userFiles}>
@@ -285,9 +445,11 @@ function UserMessage({
         </div>
       ) : null}
       <UserMessageActions
+        messageId={message.id}
         text={text}
         createdAt={message.createdAt}
         onEdit={() => onEdit(message.id, text)}
+        ctxRef={ctxRef}
       />
     </div>
   );
@@ -374,23 +536,43 @@ function IconReadAloud() {
 }
 
 function UserMessageActions({
+  messageId,
   text,
   createdAt,
   onEdit,
+  ctxRef,
 }: {
+  messageId: string;
   text: string;
   createdAt: string;
   onEdit: () => void;
+  ctxRef?: RefObject<MessageCtxHandle | null>;
 }) {
   const t = useT();
   const settings = useAppStore((s) => s.settings);
+  const showHints = useShowHotkeyHints();
   const [copied, setCopied] = useState(false);
+  const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxSelection, setCtxSelection] = useState("");
+  const menuRef = useRef<HTMLDivElement>(null);
+  const runRef = useRef<(action: MessageHotAction) => boolean>(() => false);
 
   const copy = async () => {
-    if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied(true);
+      showToast(t("common.toastCopied"), { tone: "success", id: "clipboard" });
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // ignore
+    }
+  };
+
+  const copySelection = async () => {
+    try {
+      await copyTextToClipboard(ctxSelection || readDomSelection());
+      setCopied(true);
+      showToast(t("common.toastCopied"), { tone: "success", id: "clipboard" });
       window.setTimeout(() => setCopied(false), 1200);
     } catch {
       // ignore
@@ -398,51 +580,209 @@ function UserMessageActions({
   };
 
   const chatActions = settings.chatActions ?? [];
-  if (!chatActions.some((a) => a === "copy" || a === "edit") && !settings.chatShowMessageTime)
-    return null;
+  const menuActions = useMemo(
+    () => chatActions.filter((a) => a === "copy" || a === "edit"),
+    [chatActions],
+  );
+  const shortcuts = messageCtxShortcuts();
+  const showCtxMenu = Boolean(ctxPos && (menuActions.length > 0 || ctxSelection));
+
+  runRef.current = (action) => {
+    if (action === "copySelection") {
+      if (!menuActions.includes("copy") && !readDomSelection() && !ctxSelection) return false;
+      setCtxPos(null);
+      void copySelection().finally(() => setCtxSelection(""));
+      return true;
+    }
+    if (action === "copy") {
+      if (!menuActions.includes("copy")) return false;
+      setCtxPos(null);
+      setCtxSelection("");
+      void copy();
+      return true;
+    }
+    if (action === "edit") {
+      if (!menuActions.includes("edit")) return false;
+      setCtxPos(null);
+      setCtxSelection("");
+      onEdit();
+      return true;
+    }
+    return false;
+  };
+
+  useImperativeHandle(
+    ctxRef,
+    () => ({
+      openAt: (x, y) => {
+        setCtxSelection(readDomSelection());
+        setCtxPos({
+          x: Math.min(Math.max(8, x), window.innerWidth - 240),
+          y: Math.min(Math.max(8, y), window.innerHeight - 160),
+        });
+        setMessageHotkeyHover(messageId);
+      },
+    }),
+    [messageId],
+  );
+
+  useEffect(() => {
+    const target = {
+      id: messageId,
+      menuOpen: Boolean(ctxPos),
+      has: (action: MessageHotAction) => {
+        if (action === "copySelection") return menuActions.includes("copy") || Boolean(readDomSelection());
+        if (action === "copy" || action === "edit") return menuActions.includes(action);
+        return false;
+      },
+      run: (action: MessageHotAction) => runRef.current(action),
+      selectionInMessage: () => selectionInsideMessage(messageId),
+    };
+    const unreg = registerMessageHotkeys(target);
+    updateMessageHotkeys(target);
+    return unreg;
+  }, [messageId, ctxPos, menuActions]);
+
+  useEffect(() => {
+    if (!ctxPos) return;
+    const onDown = (e: Event) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setCtxPos(null);
+        setCtxSelection("");
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setCtxPos(null);
+        setCtxSelection("");
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("touchstart", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("touchstart", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ctxPos]);
+
+  if (!menuActions.length && !settings.chatShowMessageTime && !showCtxMenu) return null;
+
+  const hint = (value: string | undefined) => (showHints ? value : undefined);
 
   return (
-    <div className={`${styles.msgActions} ${styles.userMsgActions}`} aria-label={t("common.actions")}>
-      {chatActions.map((id) => {
-        if (id === "copy") {
-          return (
-            <button
-              key={id}
-              type="button"
-              className={styles.msgAction}
-              title={copied ? t("common.copied") : t("common.copy")}
-              aria-label={t("common.copy")}
-              onClick={() => void copy()}
-            >
-              <IconCopy done={copied} />
-            </button>
-          );
-        }
-        if (id === "edit") {
-          return (
-            <button
-              key={id}
-              type="button"
-              className={styles.msgAction}
-              title={t("common.edit")}
-              aria-label={t("common.edit")}
-              onClick={() => onEdit()}
-            >
-              <IconEdit />
-            </button>
-          );
-        }
-        return null;
-      })}
-      {settings.chatShowMessageTime ? (
-        <span className={styles.msgTime} aria-hidden>
-          {new Date(createdAt).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
+    <>
+      {(menuActions.length > 0 || settings.chatShowMessageTime) && (
+        <div className={`${styles.msgActions} ${styles.userMsgActions}`} aria-label={t("common.actions")}>
+          {chatActions.map((id) => {
+            if (id === "copy") {
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={styles.msgAction}
+                  title={copied ? t("common.copied") : t("common.copy")}
+                  aria-label={t("common.copy")}
+                  onClick={() => void copy()}
+                >
+                  <IconCopy done={copied} />
+                </button>
+              );
+            }
+            if (id === "edit") {
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={styles.msgAction}
+                  title={t("common.edit")}
+                  aria-label={t("common.edit")}
+                  onClick={() => onEdit()}
+                >
+                  <IconEdit />
+                </button>
+              );
+            }
+            return null;
           })}
-        </span>
-      ) : null}
-    </div>
+          {settings.chatShowMessageTime ? (
+            <span className={styles.msgTime} aria-hidden>
+              {new Date(createdAt).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          ) : null}
+        </div>
+      )}
+      {showCtxMenu &&
+        ctxPos &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={styles.msgActionMenu}
+            style={{ left: ctxPos.x, top: ctxPos.y }}
+            role="menu"
+            aria-label={t("common.actions")}
+          >
+            {ctxSelection ? (
+              <MsgMenuItem
+                label={t("common.copySelection")}
+                shortcut={hint(shortcuts.copySelection)}
+                onClick={() => {
+                  setCtxPos(null);
+                  void copySelection().finally(() => setCtxSelection(""));
+                }}
+              >
+                <IconCopy />
+              </MsgMenuItem>
+            ) : null}
+            {menuActions.map((id) => {
+              if (id === "copy") {
+                return (
+                  <MsgMenuItem
+                    key={id}
+                    label={
+                      ctxSelection
+                        ? t("common.copyMessage")
+                        : copied
+                          ? t("common.copied")
+                          : t("common.copy")
+                    }
+                    shortcut={hint(ctxSelection ? shortcuts.copyMessage : shortcuts.copy)}
+                    onClick={() => {
+                      setCtxPos(null);
+                      setCtxSelection("");
+                      void copy();
+                    }}
+                  >
+                    <IconCopy done={copied} />
+                  </MsgMenuItem>
+                );
+              }
+              if (id === "edit") {
+                return (
+                  <MsgMenuItem
+                    key={id}
+                    label={t("common.edit")}
+                    shortcut={hint(shortcuts.edit)}
+                    onClick={() => {
+                      setCtxPos(null);
+                      setCtxSelection("");
+                      onEdit();
+                    }}
+                  >
+                    <IconEdit />
+                  </MsgMenuItem>
+                );
+              }
+              return null;
+            })}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -1441,14 +1781,17 @@ function MessageActions({
   session,
   onRegenerate,
   hidden = false,
+  ctxRef,
 }: {
   message: MessageDto;
   session: SessionDetailDto | null;
   onRegenerate: () => void;
   hidden?: boolean;
+  ctxRef?: RefObject<MessageCtxHandle | null>;
 }) {
   const t = useT();
   const settings = useAppStore((s) => s.settings);
+  const showHints = useShowHotkeyHints();
   const speakingMessageId = useAppStore((s) => s.speakingMessageId);
   const setSpeakingMessageId = useAppStore((s) => s.setSpeakingMessageId);
   const setTtsLoading = useAppStore((s) => s.setTtsLoading);
@@ -1456,20 +1799,51 @@ function MessageActions({
   const [copied, setCopied] = useState(false);
   const [rating, setRatingState] = useState<MsgRating | null>(() => readMessageRating(message.id));
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null);
+  const [ctxSelection, setCtxSelection] = useState("");
   const [shareTip, setShareTip] = useState<{ x: number; y: number; link: string } | null>(null);
   const [dislikeOpen, setDislikeOpen] = useState(false);
   const [dislikeText, setDislikeText] = useState("");
   const [dislikeBusy, setDislikeBusy] = useState(false);
   const [dislikeDone, setDislikeDone] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
   const shareTipTimer = useRef<number | null>(null);
+  const runRef = useRef<(action: MessageHotAction) => boolean>(() => false);
   const speaking = speakingMessageId === message.id;
 
+  useImperativeHandle(
+    ctxRef,
+    () => ({
+      openAt: (x, y) => {
+        setMenuPos(null);
+        setCtxSelection(readDomSelection());
+        setCtxPos({
+          x: Math.min(Math.max(8, x), window.innerWidth - 240),
+          y: Math.min(Math.max(8, y), window.innerHeight - 280),
+        });
+        setMessageHotkeyHover(message.id);
+      },
+    }),
+    [message.id],
+  );
+
   const copy = async () => {
-    if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyTextToClipboard(text);
       setCopied(true);
+      showToast(t("common.toastCopied"), { tone: "success", id: "clipboard" });
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      // ignore
+    }
+  };
+
+  const copySelection = async () => {
+    try {
+      await copyTextToClipboard(ctxSelection || readDomSelection());
+      setCopied(true);
+      showToast(t("common.toastCopied"), { tone: "success", id: "clipboard" });
       window.setTimeout(() => setCopied(false), 1200);
     } catch {
       // ignore
@@ -1477,16 +1851,15 @@ function MessageActions({
   };
 
   /** Share a deep link to this message: open the same chat, jump to it. */
-  const share = async (e: MouseEvent<HTMLButtonElement>) => {
+  const shareAt = async (x: number, y: number) => {
     if (!text) return;
     const base = typeof window !== "undefined" ? window.location.origin : "";
     const link = `${base}/chat?session=${encodeURIComponent(session?.id ?? "")}&message=${encodeURIComponent(message.id)}`;
-    const rect = e.currentTarget.getBoundingClientRect();
     try {
       await navigator.clipboard.writeText(link);
       setShareTip({
-        x: Math.min(rect.right - 224, window.innerWidth - 240),
-        y: rect.bottom + 6,
+        x: Math.min(x, window.innerWidth - 240),
+        y: Math.min(y + 6, window.innerHeight - 80),
         link,
       });
       if (shareTipTimer.current) window.clearTimeout(shareTipTimer.current);
@@ -1496,7 +1869,13 @@ function MessageActions({
     }
   };
 
+  const share = async (e: MouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    await shareAt(Math.min(rect.right - 224, window.innerWidth - 240), rect.bottom);
+  };
+
   const setRating = (next: MsgRating | null) => {
+    const prev = rating;
     writeMessageRating(message.id, next);
     setRatingState(next);
     // Keep the "liked" collection in sync: like → add, unlike/dislike → drop.
@@ -1508,8 +1887,14 @@ function MessageActions({
         text,
         at: new Date().toISOString(),
       });
+      showToast(t("common.toastLiked"), { tone: "success", id: `rate-${message.id}` });
     } else {
       removeLikedMessage(message.id);
+      if (next === "dislike") {
+        showToast(t("common.toastDisliked"), { tone: "info", id: `rate-${message.id}` });
+      } else if (prev === "like") {
+        showToast(t("common.toastUnliked"), { tone: "info", id: `rate-${message.id}` });
+      }
     }
   };
 
@@ -1524,6 +1909,7 @@ function MessageActions({
 
   const toggleSpeak = () => {
     setMenuPos(null);
+    setCtxPos(null);
     if (speaking) {
       stopReadAloud();
       return;
@@ -1544,22 +1930,29 @@ function MessageActions({
   };
 
   useEffect(() => {
-    if (!menuPos) return;
+    if (!menuPos && !ctxPos) return;
     const onDown = (e: Event) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuPos(null);
+      const node = e.target as Node;
+      if (menuRef.current?.contains(node) || ctxMenuRef.current?.contains(node)) return;
+      setMenuPos(null);
+      setCtxPos(null);
+      setCtxSelection("");
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMenuPos(null);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMenuPos(null);
+      setCtxPos(null);
+      setCtxSelection("");
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("touchstart", onDown);
-    document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onEsc);
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("touchstart", onDown);
-      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onEsc);
     };
-  }, [menuPos]);
+  }, [menuPos, ctxPos]);
 
   const openMenu = (e: MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -1601,9 +1994,119 @@ function MessageActions({
   // only. Every enabled action renders as an icon in its configured position
   // (read-aloud included); the "⋯" overflow holds anything beyond the icons.
   const chatActions = settings.chatActions ?? [];
-  const enabledActions = chatActions.filter((a) => a !== "edit");
+  const enabledActions = useMemo(
+    () => chatActions.filter((a) => a !== "edit"),
+    [chatActions],
+  );
   const iconActions = enabledActions.slice(0, 6);
   const overflowActions = enabledActions.slice(6);
+
+  const runCtxAction = (id: (typeof enabledActions)[number]) => {
+    const at = ctxPos;
+    setCtxPos(null);
+    setCtxSelection("");
+    switch (id) {
+      case "copy":
+        void copy();
+        break;
+      case "like":
+        setRating(likeActive ? null : "like");
+        break;
+      case "dislike":
+        setDislikeOpen(true);
+        break;
+      case "share":
+        if (at) void shareAt(at.x, at.y);
+        else void shareAt(window.innerWidth - 40, window.innerHeight - 40);
+        break;
+      case "regenerate":
+        onRegenerate();
+        break;
+      case "readAloud":
+        toggleSpeak();
+        break;
+      default:
+        break;
+    }
+  };
+
+  runRef.current = (action) => {
+    if (action === "copySelection") {
+      if (!enabledActions.includes("copy")) return false;
+      setCtxPos(null);
+      void copySelection().finally(() => setCtxSelection(""));
+      return true;
+    }
+    if (action === "copy" || action === "like" || action === "dislike" || action === "share" || action === "regenerate" || action === "readAloud") {
+      if (!enabledActions.includes(action)) return false;
+      if (action === "regenerate" && !session) return false;
+      runCtxAction(action);
+      return true;
+    }
+    return false;
+  };
+
+  useEffect(() => {
+    const target = {
+      id: message.id,
+      menuOpen: Boolean(ctxPos),
+      has: (action: MessageHotAction) => {
+        if (action === "copySelection") return enabledActions.includes("copy");
+        if (action === "edit") return false;
+        return enabledActions.includes(action) && !(action === "regenerate" && !session);
+      },
+      run: (action: MessageHotAction) => runRef.current(action),
+      selectionInMessage: () => selectionInsideMessage(message.id),
+    };
+    const unreg = registerMessageHotkeys(target);
+    updateMessageHotkeys(target);
+    return unreg;
+  }, [message.id, ctxPos, enabledActions, session]);
+
+  const shortcuts = messageCtxShortcuts();
+  const hint = (value: string | undefined) => (showHints ? value : undefined);
+
+  const ctxShortcut = (id: (typeof enabledActions)[number]) => {
+    switch (id) {
+      case "copy":
+        return hint(ctxSelection ? shortcuts.copyMessage : shortcuts.copy);
+      case "like":
+        return hint(shortcuts.like);
+      case "dislike":
+        return hint(shortcuts.dislike);
+      case "share":
+        return hint(shortcuts.share);
+      case "regenerate":
+        return hint(shortcuts.regenerate);
+      case "readAloud":
+        return hint(shortcuts.readAloud);
+      default:
+        return undefined;
+    }
+  };
+
+  const ctxLabel = (id: (typeof enabledActions)[number]) => {
+    switch (id) {
+      case "copy":
+        return ctxSelection
+          ? t("common.copyMessage")
+          : copied
+            ? t("common.copied")
+            : t("common.copy");
+      case "like":
+        return likeActive ? t("chat.liked") : t("common.like");
+      case "dislike":
+        return dislikeActive ? t("chat.disliked") : t("common.dislike");
+      case "share":
+        return t("common.share");
+      case "regenerate":
+        return t("chat.regenerate");
+      case "readAloud":
+        return speaking ? t("chat.stopReading") : t("chat.readAloud");
+      default:
+        return id;
+    }
+  };
 
   const renderIconAction = (id: (typeof iconActions)[number]) => {
     switch (id) {
@@ -1782,6 +2285,86 @@ function MessageActions({
                 </button>
               ) : null,
             )}
+          </div>,
+          document.body,
+        )}
+
+      {ctxPos &&
+        (enabledActions.length > 0 || ctxSelection) &&
+        createPortal(
+          <div
+            ref={ctxMenuRef}
+            className={styles.msgActionMenu}
+            style={{ left: ctxPos.x, top: ctxPos.y }}
+            role="menu"
+            aria-label={t("common.actions")}
+          >
+            {ctxSelection ? (
+              <MsgMenuItem
+                label={t("common.copySelection")}
+                shortcut={hint(shortcuts.copySelection)}
+                onClick={() => {
+                  setCtxPos(null);
+                  void copySelection().finally(() => setCtxSelection(""));
+                }}
+              >
+                <IconCopy />
+              </MsgMenuItem>
+            ) : null}
+            {enabledActions.map((id) => (
+              <MsgMenuItem
+                key={id}
+                label={ctxLabel(id)}
+                shortcut={ctxShortcut(id)}
+                disabled={id === "regenerate" && !session}
+                onClick={() => runCtxAction(id)}
+              >
+                {id === "copy" ? <IconCopy done={copied} /> : null}
+                {id === "like" ? (
+                  <MsgIcon>
+                    <path
+                      d="M7 11v9H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h2Zm0 0 4.2-7.2A2.2 2.2 0 0 1 13.2 3h.3a2 2 0 0 1 2 2.3L14.8 11H20a2 2 0 0 1 2 2.3l-1.1 5.2A3 3 0 0 1 18 21H7"
+                      stroke="currentColor"
+                      strokeWidth="1.85"
+                      strokeLinejoin="round"
+                    />
+                  </MsgIcon>
+                ) : null}
+                {id === "dislike" ? (
+                  <MsgIcon>
+                    <path
+                      d="M17 13V4h2a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2Zm0 0-4.2 7.2A2.2 2.2 0 0 1 10.8 21h-.3a2 2 0 0 1-2-2.3L9.2 13H4a2 2 0 0 1-2-2.3L3.1 5.5A3 3 0 0 1 6 3h11"
+                      stroke="currentColor"
+                      strokeWidth="1.85"
+                      strokeLinejoin="round"
+                    />
+                  </MsgIcon>
+                ) : null}
+                {id === "share" ? (
+                  <MsgIcon>
+                    <path
+                      d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                      stroke="currentColor"
+                      strokeWidth="1.85"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </MsgIcon>
+                ) : null}
+                {id === "regenerate" ? (
+                  <MsgIcon>
+                    <path
+                      d="M4 12a8 8 0 0 1 13.7-5.7L20 8M20 4v4h-4M20 12a8 8 0 0 1-13.7 5.7L4 16M4 20v-4h4"
+                      stroke="currentColor"
+                      strokeWidth="1.85"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </MsgIcon>
+                ) : null}
+                {id === "readAloud" ? <IconReadAloud /> : null}
+              </MsgMenuItem>
+            ))}
           </div>,
           document.body,
         )}
@@ -2117,9 +2700,21 @@ function AssistantParts({
       .join("\n\n")
       .trim();
   }, [mainParts]);
+  const actionsCtxRef = useRef<MessageCtxHandle | null>(null);
 
   return (
-    <div className={styles.parts}>
+    <div
+      className={styles.parts}
+      data-msg-hotkey={message.id}
+      onContextMenu={(e) => {
+        if (isTouchUi()) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea")) return;
+        if (!plain) return;
+        e.preventDefault();
+        actionsCtxRef.current?.openAt(e.clientX, e.clientY);
+      }}
+    >
       <StepsSpoiler
         parts={stepsParts}
         streaming={streaming}
@@ -2145,6 +2740,7 @@ function AssistantParts({
           session={session}
           onRegenerate={onRegenerate}
           hidden={paintStreaming}
+          ctxRef={actionsCtxRef}
         />
       ) : null}
     </div>
@@ -2350,6 +2946,7 @@ export function ChatPage() {
     }
   }, [autoExpandSteps]);
   const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
+
   // MCP servers this chat's agent session runs with: globally enabled minus
   // the ids this chat disabled in its MCP dialog.
   const enabledMcp = (settings.mcpServers ?? []).filter(
@@ -3024,44 +3621,29 @@ export function ChatPage() {
       return null;
     }
     return (
-      <article
+      <MessageArticle
         key={msg.id}
-        data-message-id={msg.id}
-        className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
-        onMouseDown={(e) => {
-          if (!keepComposerFocus.current) return;
-          const target = e.target as HTMLElement;
-          if (target.closest("button,a,input,textarea")) return;
-          e.preventDefault();
+        msg={msg}
+        isLiveAssistant={isLiveAssistant}
+        onEditUser={(messageId, value) => {
+          setEditingMessageId(messageId);
+          setText(value);
+          window.requestAnimationFrame(() => {
+            const el = textareaRef.current;
+            if (!el) return;
+            el.focus();
+            syncComposerSize(el);
+            const end = value.length;
+            el.setSelectionRange(end, end);
+          });
         }}
-      >
-        {msg.role === "user" ? (
-          <UserMessage
-            message={msg}
-            slashCommands={slashCommands}
-            onEdit={(messageId, value) => {
-              setEditingMessageId(messageId);
-              setText(value);
-              window.requestAnimationFrame(() => {
-                const el = textareaRef.current;
-                if (!el) return;
-                el.focus();
-                syncComposerSize(el);
-                const end = value.length;
-                el.setSelectionRange(end, end);
-              });
-            }}
-          />
-        ) : (
-          <AssistantParts
-            message={msg}
-            session={activeSession}
-            onRegenerate={() => regenerate(msg)}
-            streaming={!!isLiveAssistant}
-            autoExpandSteps={autoExpandSteps}
-          />
-        )}
-      </article>
+        onRegenerate={() => regenerate(msg)}
+        slashCommands={slashCommands}
+        activeSession={activeSession}
+        autoExpandSteps={autoExpandSteps}
+        keepComposerFocus={keepComposerFocus}
+        textareaRef={textareaRef}
+      />
     );
   };
 
