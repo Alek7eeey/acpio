@@ -728,8 +728,8 @@ export function ChatSidebar({
               }}
             >
               <svg
-                width="17"
-                height="17"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 aria-hidden
@@ -760,7 +760,7 @@ export function ChatSidebar({
               }}
             >
               {inArchive ? (
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
                     stroke="currentColor"
@@ -776,7 +776,7 @@ export function ChatSidebar({
                   />
                 </svg>
               ) : (
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
                     stroke="currentColor"
@@ -818,7 +818,7 @@ export function ChatSidebar({
                 aria-label={t("common.chatMenu")}
                 onClick={(e) => openSessionMenu(e, s.id)}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <circle cx="5" cy="12" r="1.5" />
                   <circle cx="12" cy="12" r="1.5" />
                   <circle cx="19" cy="12" r="1.5" />

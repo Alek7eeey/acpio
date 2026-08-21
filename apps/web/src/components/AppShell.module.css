@@ -942,14 +942,14 @@
 .themeMore,
 .sessionMore {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 8px;
+  border-radius: 7px;
   padding: 0;
   opacity: 1;
   pointer-events: auto;
@@ -992,8 +992,8 @@
 /* Pin / archive actions — revealed only on row hover. */
 .sessionRowAction {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   border: none;
