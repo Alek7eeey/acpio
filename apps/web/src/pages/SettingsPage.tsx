@@ -29,6 +29,7 @@ import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
+import { showToast } from "../lib/toast";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
@@ -476,7 +477,6 @@ export function SettingsPage() {
     );
   }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
-  const [saved, setSaved] = useState(false);
   const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
   const [probingId, setProbingId] = useState<AgentProvider | null>(null);
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
@@ -737,8 +737,7 @@ export function SettingsPage() {
       const catalog = await useAppStore.getState().ensureModels(provider, { force: true });
       setModels(catalog?.models ?? []);
       setModelParams(catalog?.modelParams ?? []);
-      setSaved(true);
-      window.setTimeout(() => setSaved(false), 1500);
+      showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
     } finally {
       setConnectingId(null);
     }
@@ -862,8 +861,7 @@ export function SettingsPage() {
       .catch(() => {
         // poll will retry
       });
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1500);
+    showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
   };
 
   const clearApiKey = async (
@@ -873,8 +871,7 @@ export function SettingsPage() {
     setForm(next);
     const { defaultProvider: _provider, theme: _theme, ...rest } = next;
     await saveSettings(rest);
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1500);
+    showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
   };
 
   const title =
@@ -1058,9 +1055,6 @@ export function SettingsPage() {
                 );
               })}
             </SettingTable>
-            {saved && leaf === "connect" && (
-              <span className={styles.ok}>{t("settings.profileSaved")}</span>
-            )}
           </>
         )}
 
@@ -2110,7 +2104,6 @@ export function SettingsPage() {
           (section === "agent" && leaf !== "connect" && leaf !== "remote")) && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>
-            {saved && <span className={styles.ok}>{t("settings.saved")}</span>}
           </div>
         )}
         </div>)}
