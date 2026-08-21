@@ -169,7 +169,7 @@ export function AppShell() {
 
   const recentSessions = useMemo(() => {
     const sorted = [...sessions].sort((a, b) =>
-      b.lastMessageAt.localeCompare(a.lastMessageAt),
+      (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt),
     );
     return sorted.slice(0, 8);
   }, [sessions]);

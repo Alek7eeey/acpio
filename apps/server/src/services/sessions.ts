@@ -21,12 +21,14 @@ function mapSession(
   lastMessageAt?: Date | string | null,
 ): SessionDto {
   const createdAt = row.createdAt.toISOString();
+  // Only a real message stamps activity. Empty chats keep "" so open/warm
+  // cannot promote them or show a relative time until the first send.
   const lastAt =
     lastMessageAt instanceof Date
       ? lastMessageAt.toISOString()
       : typeof lastMessageAt === "string" && lastMessageAt
         ? lastMessageAt
-        : createdAt;
+        : "";
   return {
     id: row.id,
     title: row.title,
@@ -90,7 +92,8 @@ export async function listSessions(): Promise<SessionDto[]> {
   const mapped = rows.map((row) => mapSession(row, lastAts.get(row.id) ?? null));
   mapped.sort(
     (a, b) =>
-      b.lastMessageAt.localeCompare(a.lastMessageAt) || a.sortOrder - b.sortOrder,
+      (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt) ||
+      a.sortOrder - b.sortOrder,
   );
   return mapped;
 }

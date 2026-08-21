@@ -1268,12 +1268,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       ) {
         set({
           sessions: state.sessions.map((s) =>
-            s.id === event.sessionId ? { ...event.session, status: "running" } : s,
+            s.id === event.sessionId
+              ? { ...event.session, status: "running", lastMessageAt: s.lastMessageAt }
+              : s,
           ),
           activeSession: {
             ...state.activeSession,
             ...event.session,
             status: "running",
+            lastMessageAt: state.activeSession.lastMessageAt,
             messages: state.activeSession.messages,
           },
         });
@@ -1289,36 +1292,42 @@ export const useAppStore = create<AppState>((set, get) => ({
           : event.session;
       const busy = session.status === "running" || session.status === "waiting";
       const prevActive = state.activeSession;
+      const listedBefore = state.sessions.find((s) => s.id === event.sessionId);
+      const wasBusy =
+        listedBefore?.status === "running" || listedBefore?.status === "waiting";
       const nextSessions = state.sessions.map((s) => {
         if (s.id !== event.sessionId) return s;
-        // Freeze tree sort key while the agent answers — otherwise the row
-        // jumps to the top mid-stream whenever lastMessageAt bumps.
-        const freshLast =
-          session.lastMessageAt ??
-          (prevActive?.id === event.sessionId ? prevActive.lastMessageAt : undefined) ??
-          s.lastMessageAt ??
-          s.createdAt;
-        // After Stop the row often stays put; still apply lastMessageAt so a
-        // lower chat can promote, but skip the write when the sort key is
-        // unchanged (avoids relative-time churn / false FLIP).
-        if (busy) {
-          return {
-            ...session,
-            lastMessageAt: s.lastMessageAt,
-            updatedAt: s.updatedAt,
-          };
-        }
-        if (freshLast === s.lastMessageAt) {
-          return {
-            ...session,
-            lastMessageAt: s.lastMessageAt,
-            updatedAt: s.updatedAt,
-          };
+        // Tree activity (lastMessageAt) is owned by message.created — never by
+        // session.updated. Open/warm/status echoes used to look like "turn
+        // finished" when the list still said running, and promoted the row.
+        if (
+          s.status === session.status &&
+          s.title === session.title &&
+          s.mode === session.mode &&
+          s.cwd === session.cwd &&
+          s.provider === session.provider &&
+          s.pinned === session.pinned &&
+          s.archived === session.archived &&
+          s.acpSessionId === session.acpSessionId
+        ) {
+          return s;
         }
         return {
-          ...session,
-          lastMessageAt: freshLast,
-          updatedAt: session.updatedAt ?? s.updatedAt,
+          ...s,
+          status: session.status,
+          title: session.title,
+          mode: session.mode,
+          cwd: session.cwd,
+          provider: session.provider,
+          pinned: session.pinned,
+          archived: session.archived,
+          acpSessionId: session.acpSessionId,
+          themeId: session.themeId,
+          mcpDisabledIds: session.mcpDisabledIds,
+          usage: session.usage ?? s.usage,
+          // Keep prior activity stamp — do not take session.lastMessageAt.
+          lastMessageAt: s.lastMessageAt,
+          updatedAt: s.updatedAt,
         };
       });
       const sessionsChanged = nextSessions.some((s, i) => s !== state.sessions[i]);
@@ -1328,8 +1337,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       // every time a finished turn promotes the row.
       let nextActive = prevActive;
       if (prevActive?.id === event.sessionId) {
-        const nextLast =
-          session.lastMessageAt ?? prevActive.lastMessageAt ?? prevActive.createdAt;
         const chatUiChanged =
           prevActive.status !== session.status ||
           prevActive.title !== session.title ||
@@ -1342,7 +1349,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           nextActive = {
             ...prevActive,
             ...session,
-            lastMessageAt: nextLast,
+            lastMessageAt: prevActive.lastMessageAt,
             messages: prevActive.messages,
           };
         }
@@ -1364,10 +1371,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       // A few ACP adapters finish their RPC before the final WS part has
-      // crossed the proxy. Reconcile only after idle so that answer cannot
-      // remain hidden until the user reloads the chat.
+      // crossed the proxy. Reconcile only after a real in-flight turn goes idle
+      // — not on every warm/open session.updated.
       if (
         session.status === "idle" &&
+        wasBusy &&
         get().activeSession?.id === event.sessionId &&
         !cancelled
       ) {
@@ -1394,37 +1402,35 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     if (event.type === "message.created") {
-      const listed = state.sessions.find((s) => s.id === event.sessionId);
-      const activeBusy =
-        state.activeSession?.id === event.sessionId &&
-        (state.activeSession.status === "running" || state.activeSession.status === "waiting");
-      const treeBusy =
-        listed?.status === "running" || listed?.status === "waiting" || activeBusy;
-      // Keep sidebar order stable while the turn is in flight; promote on idle.
+      // Only user messages stamp tree activity / order. Assistant bubbles during
+      // a turn must not reshuffle the sidebar; open/warm never creates users.
+      const stampActivity = event.message.role === "user";
       const nextSessions = state.sessions.map((s) =>
-        s.id === event.sessionId
-          ? treeBusy
-            ? s
-            : {
-                ...s,
-                lastMessageAt: event.message.createdAt,
-                updatedAt: event.message.createdAt,
-              }
+        s.id === event.sessionId && stampActivity
+          ? {
+              ...s,
+              lastMessageAt: event.message.createdAt,
+              updatedAt: event.message.createdAt,
+            }
           : s,
       );
       if (state.activeSession?.id !== event.sessionId) {
-        set({ sessions: nextSessions });
+        if (stampActivity) set({ sessions: nextSessions });
         return;
       }
       const nextActive = {
         ...state.activeSession!,
-        lastMessageAt: event.message.createdAt,
-        updatedAt: event.message.createdAt,
+        ...(stampActivity
+          ? {
+              lastMessageAt: event.message.createdAt,
+              updatedAt: event.message.createdAt,
+            }
+          : {}),
         messages: upsertMessage(state.activeSession!.messages, event.message),
       };
       rememberSessionDetail(nextActive);
       set({
-        sessions: nextSessions,
+        ...(stampActivity ? { sessions: nextSessions } : {}),
         activeSession: nextActive,
       });
       return;

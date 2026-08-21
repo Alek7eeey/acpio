@@ -30,7 +30,7 @@ function sortSessions(list: SessionDto[]) {
   return [...list].sort(
     (a, b) =>
       Number(b.pinned) - Number(a.pinned) ||
-      b.lastMessageAt.localeCompare(a.lastMessageAt) ||
+      (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt) ||
       b.createdAt.localeCompare(a.createdAt),
   );
 }
@@ -55,7 +55,13 @@ export function groupByFolder(list: SessionDto[]) {
   const entries = [...map.entries()].map(([cwd, sessions]) => ({
     cwd,
     sessions: sortSessions(sessions),
-    latest: sessions.reduce((max, s) => (s.lastMessageAt > max ? s.lastMessageAt : max), ""),
+    latest: sessions.reduce(
+      (max, s) => {
+        const key = s.lastMessageAt || s.createdAt;
+        return key > max ? key : max;
+      },
+      "",
+    ),
   }));
   entries.sort((a, b) => {
     if (a.latest !== b.latest) return b.latest.localeCompare(a.latest);
@@ -170,7 +176,12 @@ function groupSessionsByActivity(
 ): TimeGroup[] {
   const groups: TimeGroup[] = [];
   for (const session of sessions) {
-    const bucket = activityBucket(session.lastMessageAt || session.createdAt, locale, t, nowMs);
+    const bucket = activityBucket(
+      session.lastMessageAt || session.createdAt,
+      locale,
+      t,
+      nowMs,
+    );
     const key = bucket?.key ?? `id:${session.id}`;
     const label = bucket?.label ?? "";
     const last = groups[groups.length - 1];
@@ -595,9 +606,10 @@ export function ChatSidebar({
     const isRenaming = renamingId === s.id;
     const menuOpen = menu?.id === s.id;
     const confirming = confirmDeleteId === s.id;
-    const activity = showActivity
-      ? formatRelativeActivity(s.lastMessageAt || s.createdAt, dateLocale, t, nowMs)
-      : "";
+    const activity =
+      showActivity && s.lastMessageAt
+        ? formatRelativeActivity(s.lastMessageAt, dateLocale, t, nowMs)
+        : "";
 
     if (confirming) {
       return (
@@ -764,13 +776,17 @@ export function ChatSidebar({
             {activity ? (
               <span
                 className={styles.sessionActivity}
-                title={new Intl.DateTimeFormat(dateLocale, {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }).format(new Date(s.lastMessageAt || s.createdAt))}
+                title={
+                  s.lastMessageAt
+                    ? new Intl.DateTimeFormat(dateLocale, {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      }).format(new Date(s.lastMessageAt))
+                    : undefined
+                }
               >
                 {activity}
               </span>
