@@ -70,6 +70,13 @@ export function OptionPicker({
       const narrow = window.matchMedia("(max-width: 700px)").matches;
       if (!narrow) {
         clear();
+        // Prefer left alignment; if the content-sized menu clips the viewport, pin to the right.
+        const rootRect = root.getBoundingClientRect();
+        const menuRect = menu.getBoundingClientRect();
+        if (menuRect.right > window.innerWidth - 12 && menuRect.width > rootRect.width + 1) {
+          menu.style.left = "auto";
+          menu.style.right = "0";
+        }
         return;
       }
       const trigger = root.getBoundingClientRect();

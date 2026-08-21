@@ -44,8 +44,10 @@
 .lead,
 .hint {
   margin: 0;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   color: var(--text-secondary);
-  line-height: 1.45;
 }
 
 .modelField {
@@ -54,9 +56,10 @@
 }
 
 .modelLabel {
-  font-size: 0.88rem;
-  font-weight: 650;
-  color: var(--text-secondary);
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
 }
 
 .card {
@@ -65,30 +68,32 @@
   padding: 16px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-soft);
-  border-radius: 16px;
+  border-radius: var(--settings-control-radius);
 }
 
 .cardTitle {
   margin: 0;
-  font-size: 0.98rem;
-  font-weight: 700;
+  font-size: var(--settings-section-size);
+  font-weight: var(--settings-section-weight);
   letter-spacing: -0.01em;
   color: var(--text);
 }
 
 .cardHint {
   margin: -6px 0 2px;
-  font-size: 0.84rem;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   color: var(--text-secondary);
-  line-height: 1.35;
 }
 
 .card label {
   display: grid;
   gap: 6px;
-  font-size: 0.88rem;
-  font-weight: 650;
-  color: var(--text-secondary);
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
 }
 
 .card input,
@@ -96,11 +101,13 @@
 .card textarea {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-weight: 500;
-  font-size: 0.84rem;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font-weight: var(--settings-control-weight);
+  font-size: var(--settings-control-size);
   color: var(--text);
+  font-family: inherit;
+  box-sizing: border-box;
 }
 
 .card input:focus,
@@ -108,7 +115,7 @@
 .card textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .row {
@@ -147,10 +154,18 @@
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  border-radius: 10px;
-  padding: 8px 12px;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
+  box-sizing: border-box;
+}
+
+.allowlistInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .allowlistInput::placeholder {
@@ -264,17 +279,18 @@
   min-width: 0;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
-  padding: 8px 10px;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
   font-family: inherit;
-  font-weight: 500;
-  font-size: 0.84rem;
+  font-weight: var(--settings-control-weight);
+  font-size: var(--settings-control-size);
   color: var(--text);
   word-break: break-all;
   overflow-wrap: anywhere;
-  line-height: 1.2;
+  line-height: 1.35;
   text-align: left;
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 @media (max-width: 700px) {
@@ -290,21 +306,21 @@
 
 .fieldHint {
   margin: 0;
-  font-size: 0.8rem;
-  font-weight: 500;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
   color: var(--text-secondary);
-  line-height: 1.35;
+  line-height: var(--settings-hint-line);
 }
 
 .mcpApplyNote {
   margin: 0;
-  padding: 9px 12px;
-  border-radius: 10px;
+  padding: var(--settings-note-pad-y) var(--settings-note-pad-x);
+  border-radius: var(--settings-control-radius);
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   background: color-mix(in srgb, var(--accent) 7%, transparent);
-  font-size: 0.82rem;
-  font-weight: 500;
-  line-height: 1.45;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   color: var(--text-secondary);
 }
 
@@ -327,10 +343,11 @@
 
 .sectionHeading {
   margin: 0;
-  font-size: 0.92rem;
-  font-weight: 700;
+  font-size: var(--settings-section-size);
+  font-weight: var(--settings-section-weight);
   letter-spacing: -0.01em;
   color: var(--text);
+  line-height: 1.35;
 }
 
 .schemeGrid {
@@ -345,7 +362,7 @@
   padding: 10px;
   border: 1.5px solid var(--border);
   background: var(--surface);
-  border-radius: 12px;
+  border-radius: var(--settings-control-radius);
   cursor: pointer;
   font: inherit;
   text-align: left;
@@ -375,13 +392,14 @@
 }
 
 .schemeCardName {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-btn-weight);
   color: var(--text);
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  line-height: 1.35;
 }
 
 .remoteTips {
@@ -389,9 +407,10 @@
   padding-left: 1.2em;
   display: grid;
   gap: 8px;
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.45;
+  color: var(--text-secondary);
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
 }
 
 .remoteCard {
@@ -434,9 +453,10 @@
 .remoteUrlLabel {
   display: grid;
   gap: 6px;
-  font-size: 0.88rem;
-  font-weight: 650;
-  color: var(--text-secondary);
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
 }
 
 .remoteUrlRow {
@@ -501,13 +521,8 @@
 
   .remoteTips {
     padding-left: 1.05em;
-    font-size: 0.86rem;
+    font-size: var(--settings-hint-size);
     gap: 10px;
-  }
-
-  .fieldHint {
-    font-size: 0.9rem;
-    line-height: 1.5;
   }
 }
 
@@ -526,12 +541,14 @@
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-secondary);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-size: 0.84rem;
-  font-weight: 650;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
   white-space: nowrap;
   height: fit-content;
+  cursor: pointer;
 }
 
 .clearKeyBtn:hover:not(:disabled) {
@@ -546,8 +563,8 @@
 }
 
 .cliDisclosure {
-  border: 1px solid var(--border-soft);
-  border-radius: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
   background: var(--surface);
   padding: 4px 12px 12px;
 }
@@ -556,9 +573,10 @@
   cursor: pointer;
   list-style: none;
   padding: 10px 2px;
-  font-size: 0.9rem;
-  font-weight: 700;
+  font-size: var(--settings-section-size);
+  font-weight: var(--settings-section-weight);
   color: var(--text);
+  line-height: 1.35;
   user-select: none;
 }
 
@@ -584,27 +602,46 @@
   padding-top: 4px;
 }
 
+.cliFields {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 420px);
+}
+
+.cliFields .row,
+.cliDisclosureBody .row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .cliDisclosureBody label {
   display: grid;
   gap: 6px;
-  font-size: 0.88rem;
-  font-weight: 650;
-  color: var(--text-secondary);
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
 }
 
 .cliDisclosureBody input {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-weight: 500;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font-weight: var(--settings-control-weight);
+  font-size: var(--settings-control-size);
   color: var(--text);
+  font-family: inherit;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
 }
 
 .cliDisclosureBody input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .providerList {
@@ -643,9 +680,10 @@
 }
 
 .providerTitle {
-  font-size: 0.98rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
 }
 
 .providerBadge {
@@ -662,8 +700,9 @@
 .providerDesc {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.86rem;
-  line-height: 1.4;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
 }
 
 .providerProbe {
@@ -684,11 +723,13 @@
 .connectBtn,
 .connectBtnActive {
   border: none;
-  border-radius: 10px;
-  padding: 9px 12px;
-  font-size: 0.86rem;
-  font-weight: 650;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .ghostBtn {
@@ -768,15 +809,22 @@
 .secondaryBtn,
 .footer button {
   justify-self: start;
-  border: none;
-  border-radius: 999px;
-  padding: 11px 16px;
-  font-weight: 650;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .secondaryBtn {
-  background: var(--bg-tertiary);
+  background: var(--surface);
   color: var(--text);
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
 }
 
 .mcpRow {
@@ -860,19 +908,14 @@
   align-items: center;
 }
 
-.mcpToggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-}
-
 .mcpForm {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px dashed var(--border);
-  border-radius: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
 }
 
 .mcpInput {
@@ -881,29 +924,34 @@
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
 }
 
 .mcpInput:focus {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--settings-focus-ring);
 }
 
 .mcpFormActions {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .primaryBtn {
   justify-self: start;
   border: none;
-  border-radius: 999px;
-  padding: 11px 16px;
-  font-weight: 700;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
   background: var(--accent);
   color: #fff;
   cursor: pointer;
@@ -936,9 +984,12 @@
   background: var(--accent);
   color: #fff;
   border: none;
-  border-radius: 12px;
-  padding: 11px 16px;
-  font-weight: 700;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .footerBar button:disabled,
@@ -957,9 +1008,9 @@
   display: grid;
   gap: 8px;
   justify-items: start;
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px dashed color-mix(in srgb, var(--border) 90%, transparent);
+  padding: var(--settings-note-pad-y) var(--settings-note-pad-x);
+  border-radius: var(--settings-control-radius);
+  border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
 }
 
@@ -971,9 +1022,10 @@
 }
 
 .ttsTestStatus {
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
   color: var(--success);
+  line-height: var(--settings-hint-line);
 }
 
 .probeOk,
@@ -1190,11 +1242,14 @@
 .accountSave {
   justify-self: start;
   border: none;
-  border-radius: 12px;
-  padding: 11px 16px;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
   background: var(--accent);
   color: #fff;
-  font-weight: 700;
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .accountSave:disabled {
@@ -1219,259 +1274,29 @@
     justify-self: start;
   }
 
-  /* Phone: action buttons were oversized vs. the compact desktop look. */
-  .secondaryBtn,
-  .primaryBtn,
-  .footerBar button,
-  .footer button,
-  .ghostBtn,
-  .connectBtn,
-  .connectBtnActive,
-  .clearKeyBtn,
-  .accountSave,
-  .diagDelete,
-  .diagCardActions .secondaryBtn {
-    padding: 7px 12px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    border-radius: 10px;
-  }
-
-  .providerActions button {
-    padding: 7px 12px;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-
-  .providerBtn,
-  .providerActive {
-    padding: 8px 10px;
-    font-size: 0.82rem;
-    border-radius: 10px;
-  }
-
-  .actionChip {
-    padding: 4px 9px;
-    font-size: 0.74rem;
-  }
-
-  .actionAddChip {
-    padding: 3px 8px;
-    font-size: 0.72rem;
+  .cliFields .row,
+  .cliDisclosureBody .row {
+    grid-template-columns: 1fr;
   }
 }
 
-/* ── Desktop: tighten settings layout ──────────────────────────────────── */
+/* Desktop: denser panel spacing only — keep control/text tokens unchanged. */
 @media (min-width: 900px) {
   .page {
     padding: 14px;
   }
 
   .panel {
-    padding: 14px;
-    gap: 10px;
-    border-radius: 14px;
-  }
-
-  .header h1 {
-    font-size: 0.9rem;
+    padding: 16px 18px;
+    gap: 14px;
   }
 
   .header {
-    gap: 10px;
-  }
-
-  .lead,
-  .hint {
-    font-size: 0.78rem;
-  }
-
-  .eyebrow {
-    font-size: 0.68rem;
+    gap: 12px;
   }
 
   .sectionBlock {
-    gap: 6px;
-    padding-top: 2px;
-  }
-
-  .sectionHeading {
-    font-size: 0.8rem;
-    margin-bottom: 0;
-  }
-
-  .card {
-    gap: 6px;
-    padding: 10px;
-    border-radius: 10px;
-  }
-
-  .cardTitle {
-    font-size: 0.82rem;
-  }
-
-  .cardHint {
-    font-size: 0.74rem;
-  }
-
-  .fieldLabel,
-  .fieldLabelInline {
-    font-size: 0.78rem;
-  }
-
-  .switchBody strong {
-    font-size: 0.78rem;
-  }
-
-  .switchBody span {
-    font-size: 0.72rem;
-  }
-
-  .fieldHint {
-    font-size: 0.74rem;
-  }
-
-  .providerRow {
     gap: 10px;
-    padding: 8px 10px;
-    border-radius: 10px;
-  }
-
-  .providerTitle {
-    font-size: 0.82rem;
-  }
-
-  .providerDesc {
-    font-size: 0.76rem;
-  }
-
-  .providerProbe {
-    padding: 6px 8px;
-    font-size: 0.78rem;
-  }
-
-  .modelLabel {
-    font-size: 0.78rem;
-  }
-
-  .modelPicker {
-    gap: 3px;
-  }
-
-  .remoteCard {
-    gap: 8px;
-    padding: 8px 10px;
-  }
-
-  .remoteTips {
-    font-size: 0.78rem;
-    gap: 5px;
-  }
-
-  .remoteStep {
-    gap: 8px;
-    padding-top: 2px;
-  }
-
-  .remoteStepContent {
-    gap: 4px;
-  }
-
-  /* Buttons */
-  .footerBar button,
-  .footer button {
-    padding: 8px 14px;
-    font-size: 0.82rem;
-    font-weight: 650;
-    border-radius: 10px;
-  }
-
-  .secondaryBtn,
-  .footer button {
-    padding: 7px 12px;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-
-  .primaryBtn {
-    padding: 8px 14px;
-    font-size: 0.82rem;
-  }
-
-  .providerActions button {
-    padding: 7px 12px;
-    font-size: 0.78rem;
-    font-weight: 600;
-  }
-
-  .schemeCard {
-    padding: 8px;
-    gap: 5px;
-  }
-
-  .schemeCardName {
-    font-size: 0.76rem;
-  }
-
-  .mcpRow {
-    padding: 6px 8px;
-  }
-
-  .mcpRowMeta strong {
-    font-size: 0.82rem;
-  }
-
-  .mcpInput {
-    padding: 6px 10px;
-    font-size: 0.82rem;
-  }
-
-  .mcpAddForm {
-    padding: 8px 10px;
-    gap: 6px;
-  }
-
-  .diagCard {
-    padding: 8px 10px;
-    gap: 8px;
-  }
-
-  .diagItemTitle {
-    font-size: 0.82rem;
-  }
-
-  .ttsTestBox {
-    padding: 8px 10px;
-  }
-
-  .cliDisclosure > summary {
-    padding: 8px 2px;
-    font-size: 0.82rem;
-  }
-
-  /* Inputs & selects */
-  .card input,
-  .card select,
-  .card textarea {
-    padding: 6px 10px;
-    font-size: 0.8rem;
-    border-radius: 8px;
-  }
-
-  .cwdPath {
-    padding: 6px 10px;
-    font-size: 0.8rem;
-    border-radius: 8px;
-  }
-
-  .mcpInput {
-    padding: 5px 8px;
-    font-size: 0.8rem;
-  }
-
-  .allowlistInput {
-    padding: 5px 8px;
-    font-size: 0.8rem;
   }
 }
 
@@ -1537,7 +1362,9 @@
 .diagPath {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 0.8rem;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1550,26 +1377,23 @@
   align-items: center;
 }
 
-.diagCardActions .secondaryBtn {
-  padding: 8px 12px;
-  font-size: 0.82rem;
-}
-
 .diagDelete {
   margin: 0;
   border: 1px solid var(--border);
-  background: transparent;
+  background: var(--surface);
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 8px 12px;
-  font: inherit;
-  font-size: 0.82rem;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
   cursor: pointer;
 }
 
 .diagDelete:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+  background: var(--bg-tertiary);
 }
 
 /* --- unified VS Code-style table helpers --- */
@@ -1601,6 +1425,14 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.mcpRowMetaInline strong {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
 }
 
 .actionChips {
@@ -1615,19 +1447,21 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 11px;
-  border-radius: 999px;
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  border-radius: var(--settings-control-radius);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
   cursor: pointer;
 }
 
 .actionChip:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--text) 25%, var(--border));
+  background: var(--bg-tertiary);
 }
 
 .actionChipOn {
@@ -1715,17 +1549,18 @@
 .chatAdvancedDetails {
   margin-top: 4px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--settings-control-radius);
   background: var(--surface);
   overflow: hidden;
 }
 
 .chatAdvancedDetails summary {
   cursor: pointer;
-  padding: 11px 16px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--text-secondary);
+  padding: 12px 16px;
+  font-size: var(--settings-section-size);
+  font-weight: var(--settings-section-weight);
+  color: var(--text);
+  line-height: 1.35;
   user-select: none;
   list-style: none;
 }
@@ -1735,12 +1570,14 @@
 }
 
 .chatAdvancedDetails summary::before {
-  content: "▸ ";
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
   color: var(--text-secondary);
 }
 
 .chatAdvancedDetails[open] summary::before {
-  content: "▾ ";
+  content: "▾";
 }
 
 .chatAdvancedDetails summary:hover {
@@ -1843,12 +1680,13 @@
 
 .chatSettingsIntro {
   margin: 0 0 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
+  padding: var(--settings-note-pad-y) var(--settings-note-pad-x);
+  border-radius: var(--settings-control-radius);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
-  font-size: 0.85rem;
-  line-height: 1.5;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   color: var(--text-secondary);
 }
 

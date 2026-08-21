@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--settings-control-radius);
   /* No overflow:hidden — it would clip OptionPicker dropdowns. */
   background: var(--surface);
 }
@@ -15,13 +15,13 @@
 }
 
 .row:first-child {
-  border-top-left-radius: 11px;
-  border-top-right-radius: 11px;
+  border-top-left-radius: calc(var(--settings-control-radius) - 1px);
+  border-top-right-radius: calc(var(--settings-control-radius) - 1px);
 }
 
 .row:last-child {
-  border-bottom-left-radius: 11px;
-  border-bottom-right-radius: 11px;
+  border-bottom-left-radius: calc(var(--settings-control-radius) - 1px);
+  border-bottom-right-radius: calc(var(--settings-control-radius) - 1px);
 }
 
 .row + .row {
@@ -41,14 +41,16 @@
 }
 
 .label {
-  font-size: 0.92rem;
-  font-weight: 600;
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
   color: var(--text);
+  line-height: 1.35;
 }
 
 .hint {
-  font-size: 0.8rem;
-  line-height: 1.4;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
   color: var(--text-secondary);
 }
 
@@ -61,29 +63,29 @@
   min-width: 0;
 }
 
-/* Port of the previous `.card input` base styles — settings rows are no
-   longer wrapped in `.card`, so bare inputs keep their themed look. */
-.table input:not([type="checkbox"]):not([type="radio"]),
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .table select,
 .table textarea {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
-  padding: 11px 12px;
-  font-weight: 500;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font-weight: var(--settings-control-weight);
+  font-size: var(--settings-control-size);
   color: var(--text);
   font-family: inherit;
+  box-sizing: border-box;
 }
 
-.table input:not([type="checkbox"]):not([type="radio"]):focus,
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
 .table select:focus,
 .table textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-soft);
+  box-shadow: var(--settings-focus-ring);
 }
 
-.table input:not([type="checkbox"]):not([type="radio"]):disabled {
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):disabled {
   opacity: 0.7;
   cursor: default;
 }
@@ -138,7 +140,6 @@
   outline-offset: 2px;
 }
 
-/* Mobile: stack label above the control so nothing overflows the viewport. */
 @media (max-width: 700px) {
   .row {
     flex-direction: column;

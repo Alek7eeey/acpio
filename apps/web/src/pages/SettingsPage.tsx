@@ -1676,42 +1676,45 @@ export function SettingsPage() {
               <summary>{highlightText(t("settings.cliAndPermissions"), settingsQuery)}</summary>
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
-                {cliFormAdapters.map((a) => {
-                  const command = String(
-                    (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
-                  );
-                  const args = (form as unknown as Record<string, unknown>)[a.argsField];
-                  const apiKeyField = a.apiKeyField;
-                  const apiKey = apiKeyField
-                    ? String((form as unknown as Record<string, unknown>)[apiKeyField] ?? "")
-                    : "";
-                  return (
-                    <label key={a.id}>
-                      {highlightText(a.label, settingsQuery)}
-                      <div className={styles.row}>
-                        <input
-                          value={command}
-                          onChange={(e) => patchAny(a.commandField, e.target.value)}
-                          placeholder={a.defaultCommand}
-                        />
-                        <input
-                          value={Array.isArray(args) ? args.join(" ") : ""}
-                          onChange={(e) =>
-                            patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
-                          }
-                          placeholder={a.defaultArgs.join(" ")}
-                        />
-                      </div>
-                      {apiKeyField ? (
-                        <input
-                          value={apiKey}
-                          onChange={(e) => patchAny(apiKeyField, e.target.value)}
-                          placeholder={a.envApiKeyName ?? "API key"}
-                        />
-                      ) : null}
-                    </label>
-                  );
-                })}
+                <SettingTable>
+                  {cliFormAdapters.map((a) => {
+                    const command = String(
+                      (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
+                    );
+                    const args = (form as unknown as Record<string, unknown>)[a.argsField];
+                    const apiKeyField = a.apiKeyField;
+                    const apiKey = apiKeyField
+                      ? String((form as unknown as Record<string, unknown>)[apiKeyField] ?? "")
+                      : "";
+                    return (
+                      <SettingRow key={a.id} label={a.label} terms={[a.label, a.defaultCommand]}>
+                        <div className={styles.cliFields}>
+                          <div className={styles.row}>
+                            <input
+                              value={command}
+                              onChange={(e) => patchAny(a.commandField, e.target.value)}
+                              placeholder={a.defaultCommand}
+                            />
+                            <input
+                              value={Array.isArray(args) ? args.join(" ") : ""}
+                              onChange={(e) =>
+                                patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
+                              }
+                              placeholder={a.defaultArgs.join(" ")}
+                            />
+                          </div>
+                          {apiKeyField ? (
+                            <input
+                              value={apiKey}
+                              onChange={(e) => patchAny(apiKeyField, e.target.value)}
+                              placeholder={a.envApiKeyName ?? "API key"}
+                            />
+                          ) : null}
+                        </div>
+                      </SettingRow>
+                    );
+                  })}
+                </SettingTable>
               </div>
             </details>
             </SearchGate>
@@ -1770,16 +1773,11 @@ export function SettingsPage() {
                     </span>
                   }
                 >
-                  <label
-                    className={styles.mcpToggle}
-                    title={server.enabled ? t("settings.enabled") : t("settings.disabled")}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={Boolean(server.enabled)}
-                      onChange={(e) => updateMcp(server.id, { enabled: e.target.checked })}
-                    />
-                  </label>
+                  <Toggle
+                    checked={Boolean(server.enabled)}
+                    onChange={(v) => updateMcp(server.id, { enabled: v })}
+                    label={server.enabled ? t("settings.enabled") : t("settings.disabled")}
+                  />
                   <button
                     type="button"
                     className={styles.secondaryBtn}

@@ -5,6 +5,7 @@ import { registerSW } from "virtual:pwa-register";
 import { App } from "./App";
 import { initPwaInstallCapture } from "./lib/pwaInstall";
 import "./styles/global.css";
+import "./styles/settingsUi.css";
 
 initPwaInstallCapture();
 
