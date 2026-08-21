@@ -2254,6 +2254,8 @@ export function ChatPage() {
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerMetaRef = useRef<HTMLDivElement>(null);
+  const [composerMetaEdge, setComposerMetaEdge] = useState({ left: false, right: false });
   const threadRef = useRef<HTMLDivElement>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
@@ -3126,6 +3128,37 @@ export function ChatPage() {
         });
     return { label, title };
   }, [activeSession?.usage, contextUsage, t]);
+
+  useEffect(() => {
+    const el = composerMetaRef.current;
+    if (!el) return;
+    const sync = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft > 2;
+      const right = max > 2 && el.scrollLeft < max - 2;
+      setComposerMetaEdge((prev) =>
+        prev.left === left && prev.right === right ? prev : { left, right },
+      );
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      ro.disconnect();
+    };
+  }, [
+    activeSession?.cwd,
+    activeSession?.id,
+    chatMcp.length,
+    contextDisplay.label,
+    enabledMcp.length,
+    modeSwitcher.length,
+    settings.chatMetaChips,
+    sessionMode,
+  ]);
+
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
@@ -3625,8 +3658,46 @@ export function ChatPage() {
                 </div>
               )}
           </div>
-          <div className={styles.composerMeta}>
-            <div className={styles.composerMetaStart}>
+          <div
+            className={`${styles.composerMetaShell} ${
+              !renderSkeleton && composerMetaEdge.left ? styles.composerMetaFadeLeft : ""
+            } ${!renderSkeleton && composerMetaEdge.right ? styles.composerMetaFadeRight : ""}`}
+          >
+            <div
+              className={styles.composerMeta}
+              ref={composerMetaRef}
+              aria-busy={renderSkeleton || undefined}
+            >
+              {renderSkeleton ? (
+                <>
+                  <span
+                    className={styles.metaChipSkeleton}
+                    style={{ "--w": "7.2rem" } as CSSProperties}
+                    aria-hidden
+                  />
+                  <span
+                    className={styles.metaChipSkeleton}
+                    style={{ "--w": "6.4rem" } as CSSProperties}
+                    aria-hidden
+                  />
+                  <span
+                    className={styles.metaChipSkeleton}
+                    style={{ "--w": "4.2rem" } as CSSProperties}
+                    aria-hidden
+                  />
+                  <span
+                    className={styles.metaChipSkeleton}
+                    style={{ "--w": "5.6rem" } as CSSProperties}
+                    aria-hidden
+                  />
+                  <span
+                    className={`${styles.metaChipSkeleton} ${styles.metaChipSkeletonMode}`}
+                    style={{ "--w": "4.8rem" } as CSSProperties}
+                    aria-hidden
+                  />
+                </>
+              ) : (
+                <>
               {settings.chatMetaChips.includes("folder") && activeSession?.cwd?.trim() ? (
                 <div className={styles.sessionCwd} title={activeSession.cwd}>
                   <span className={styles.sessionCwdIcon} aria-hidden>
@@ -3719,25 +3790,40 @@ export function ChatPage() {
                   </span>
                 </span>
               ) : null}
+              {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
+                <OptionPicker
+                  className={styles.composerMode}
+                  variant="quiet"
+                  placement="up"
+                  menuTitle={t("modes.label")}
+                  value={
+                    modeSwitcher.some((m) => m.value === sessionMode)
+                      ? sessionMode
+                      : modeSwitcher[0]?.value ?? "agent"
+                  }
+                  disabled={composerLocked}
+                  onChange={(v) => void onModeChange(v)}
+                  options={modeSwitcher.map((m) => ({
+                    value: m.value,
+                    label: modeLabel(m.value, m.name),
+                  }))}
+                />
+              ) : null}
+                </>
+              )}
             </div>
-            {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
-              <OptionPicker
-                className={`${styles.composerMode} ${styles.composerModeDesktop}`}
-                variant="quiet"
-                placement="up"
-                menuTitle={t("modes.label")}
-                value={
-                  modeSwitcher.some((m) => m.value === sessionMode)
-                    ? sessionMode
-                    : modeSwitcher[0]?.value ?? "agent"
-                }
-                disabled={composerLocked}
-                onChange={(v) => void onModeChange(v)}
-                options={modeSwitcher.map((m) => ({
-                  value: m.value,
-                  label: modeLabel(m.value, m.name),
-                }))}
-              />
+            {!renderSkeleton && composerMetaEdge.right ? (
+              <span className={styles.composerMetaMore} aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M9 6l6 6-6 6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
             ) : null}
           </div>
           {(pendingFiles.length > 0 || attachError) && (
@@ -3919,26 +4005,6 @@ export function ChatPage() {
                   onParamsChange={(next) => void onParamsChange(next)}
                 />
                 )}
-
-                {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
-                  <OptionPicker
-                    className={`${styles.composerMode} ${styles.composerModeMobile}`}
-                    variant="compact"
-                    placement="up"
-                    menuTitle={t("modes.label")}
-                    value={
-                      modeSwitcher.some((m) => m.value === sessionMode)
-                        ? sessionMode
-                        : modeSwitcher[0]?.value ?? "agent"
-                    }
-                    disabled={composerLocked}
-                    onChange={(v) => void onModeChange(v)}
-                    options={modeSwitcher.map((m) => ({
-                      value: m.value,
-                      label: modeLabel(m.value, m.name),
-                    }))}
-                  />
-                ) : null}
 
                 {streaming ? (
                   <button

@@ -1717,11 +1717,17 @@
   letter-spacing: -0.01em;
 }
 
+.composerMetaShell {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .composerMeta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 8px;
   min-width: 0;
   max-width: 100%;
 }
@@ -1738,6 +1744,7 @@
 .composerMode {
   flex: 0 0 auto;
   max-width: 7rem;
+  margin-left: auto;
 }
 
 .composerModeMobile {
@@ -1766,6 +1773,26 @@
     border-color var(--motion),
     color var(--motion),
     background var(--motion);
+}
+
+.metaChipSkeleton {
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 30px;
+  width: var(--w, 5rem);
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 25%,
+    color-mix(in srgb, var(--text) 14%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.3s ease-in-out infinite;
+}
+
+.metaChipSkeletonMode {
+  margin-left: auto;
 }
 
 .metaChip:hover {
@@ -1805,12 +1832,9 @@
 }
 
 @media (max-width: 700px) {
-  .metaChipLabel {
-    display: none;
-  }
-
+  /* Keep chip labels in the scroll row so overflow (and swipe) is obvious. */
   .metaChip {
-    padding: 7px;
+    padding: 6px 10px;
   }
 }
 .metaChipForceLabel .metaChipLabel {
@@ -2214,13 +2238,111 @@
     margin-top: auto;
   }
 
+  .sessionCwd {
+    max-width: min(52vw, 220px);
+    flex: 0 0 auto;
+  }
+
   .sessionCwdText {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: unset;
-    word-break: break-word;
-    line-height: 1.4;
-    font-size: 0.74rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: normal;
+    line-height: 1.3;
+    font-size: 0.72rem;
+  }
+
+  .composerMetaShell::before,
+  .composerMetaShell::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 28px;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 160ms ease;
+  }
+
+  .composerMetaShell::before {
+    left: 0;
+    background: linear-gradient(
+      to right,
+      var(--bg) 15%,
+      color-mix(in srgb, var(--bg) 55%, transparent) 55%,
+      transparent
+    );
+  }
+
+  .composerMetaShell::after {
+    right: 0;
+    width: 40px;
+    background: linear-gradient(
+      to left,
+      var(--bg) 30%,
+      color-mix(in srgb, var(--bg) 45%, transparent) 70%,
+      transparent
+    );
+  }
+
+  .composerMetaFadeLeft::before,
+  .composerMetaFadeRight::after {
+    opacity: 1;
+  }
+
+  .composerMetaMore {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    z-index: 2;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    pointer-events: none;
+    color: var(--text-secondary);
+    background: color-mix(in srgb, var(--bg) 88%, var(--surface));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
+    opacity: 0.92;
+  }
+
+  .composerMetaMore svg {
+    display: block;
+  }
+
+  .composerMeta {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    touch-action: pan-x;
+    gap: 8px;
+    padding: 1px 2px;
+  }
+
+  .composerMetaFadeRight .composerMeta {
+    padding-right: 22px;
+  }
+
+  .composerMeta::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .composerMode {
+    margin-left: 0;
+    max-width: none;
+    flex: 0 0 auto;
+  }
+
+  .metaChipSkeletonMode {
+    margin-left: 0;
   }
 
   .pill,
@@ -2278,14 +2400,6 @@
     min-width: 0;
     flex: 0 1 auto;
     max-width: min(280px, calc(100vw - 140px));
-  }
-
-  .composerModeDesktop {
-    display: none;
-  }
-
-  .composerModeMobile {
-    display: block;
   }
 
   .userBubble,
