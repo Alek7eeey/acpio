@@ -947,18 +947,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   async renameSession(id, title) {
     const trimmed = title.trim();
     if (!trimmed) return;
+    const prev = get().sessions.find((s) => s.id === id);
     const updated = await api.updateSession(id, { title: trimmed });
+    if (!updated) return;
+    // Metadata PATCH must not rewrite tree activity (lastMessageAt).
+    const merged = {
+      ...updated,
+      lastMessageAt: prev?.lastMessageAt ?? updated.lastMessageAt,
+      updatedAt: prev?.updatedAt ?? updated.updatedAt,
+    };
     set({
-      sessions: get().sessions.map((s) => (s.id === id ? updated : s)),
+      sessions: get().sessions.map((s) => (s.id === id ? { ...s, ...merged, title: updated.title } : s)),
       activeSession:
         get().activeSession?.id === id
-          ? { ...get().activeSession!, ...updated }
+          ? { ...get().activeSession!, title: updated.title }
           : get().activeSession,
     });
   },
 
   async setSessionFlags(id, patch) {
-    // Optimistic flip, then reconcile with the server's canonical row.
+    // Optimistic flip, then reconcile flags — never activity stamps.
     const apply = (s: SessionDto) => (s.id === id ? { ...s, ...patch } : s);
     set({
       sessions: get().sessions.map(apply),
@@ -969,11 +977,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     try {
       const updated = await api.updateSession(id, patch);
+      if (!updated) return;
       set({
-        sessions: get().sessions.map((s) => (s.id === id ? updated : s)),
+        sessions: get().sessions.map((s) =>
+          s.id === id
+            ? {
+                ...s,
+                pinned: updated.pinned,
+                archived: updated.archived,
+                mcpDisabledIds: updated.mcpDisabledIds ?? s.mcpDisabledIds,
+                // Keep the client activity stamp (last user message).
+                lastMessageAt: s.lastMessageAt,
+                updatedAt: s.updatedAt,
+              }
+            : s,
+        ),
         activeSession:
           get().activeSession?.id === id
-            ? { ...get().activeSession!, ...updated }
+            ? {
+                ...get().activeSession!,
+                pinned: updated.pinned,
+                archived: updated.archived,
+                mcpDisabledIds: updated.mcpDisabledIds ?? get().activeSession!.mcpDisabledIds,
+                lastMessageAt: get().activeSession!.lastMessageAt,
+                updatedAt: get().activeSession!.updatedAt,
+              }
             : get().activeSession,
       });
     } catch {

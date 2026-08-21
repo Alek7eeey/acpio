@@ -65,13 +65,15 @@ function mapPart(row: typeof messageParts.$inferSelect): MessagePartDto {
 async function loadLastMessageAts(sessionIds: string[]): Promise<Map<string, Date>> {
   const out = new Map<string, Date>();
   if (sessionIds.length === 0) return out;
+  // Tree activity follows the last *user* prompt only — assistant stubs from
+  // warm/turn start must not look like "used just now" after pin/rename/etc.
   const rows = await db
     .select({
       sessionId: messages.sessionId,
       lastAt: max(messages.createdAt),
     })
     .from(messages)
-    .where(inArray(messages.sessionId, sessionIds))
+    .where(and(inArray(messages.sessionId, sessionIds), eq(messages.role, "user")))
     .groupBy(messages.sessionId);
   for (const row of rows) {
     if (row.lastAt) out.set(row.sessionId, row.lastAt);
@@ -123,7 +125,8 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
     });
   }
 
-  const lastMessageAt = msgRows.at(-1)?.createdAt ?? null;
+  const lastMessageAt =
+    [...msgRows].reverse().find((m) => m.role === "user")?.createdAt ?? null;
   return { ...mapSession(rows[0], lastMessageAt), messages: result };
 }
 
