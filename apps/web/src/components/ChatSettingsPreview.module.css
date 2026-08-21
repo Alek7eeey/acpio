@@ -185,9 +185,9 @@
   width: 100%;
   padding: 6px 9px;
   border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: var(--accent);
+  border: 1px solid transparent;
+  color: #fff;
   font-size: 0.76rem;
 }
 

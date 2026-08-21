@@ -359,7 +359,7 @@ export function AppShell() {
       : undefined
   ) as CSSProperties | undefined;
 
-  /** "ACProcess | Chat" brand: shown in the header when the sidebar is
+  /** "ACProcess · Chat" brand: shown in the header when the sidebar is
    *  collapsed or on mobile, and inside the tree next to the collapse
    *  button when the desktop sidebar is open. */
   const brandButton = (
@@ -380,7 +380,9 @@ export function AppShell() {
           </span>
         ))}
       </span>
-      <span className={styles.brandDivider} aria-hidden />
+      <span className={styles.brandDivider} aria-hidden>
+        ·
+      </span>
       <span className={styles.brandChatMark} aria-hidden>
         Chat
       </span>

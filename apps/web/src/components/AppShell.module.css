@@ -390,16 +390,17 @@
   display: inline-block;
 }
 
-/* Product-suffix mark: this app is the chat part of a larger product —
-   a vertical divider, then "chat" in the brand accent (same as ACP). */
+/* Product-suffix mark: desktop uses a middle-dot separator before "Chat". */
 .brandDivider {
-  width: 1.5px;
-  height: 1em;
-  margin-left: 9px;
-  background: var(--text-secondary);
-  opacity: 0.45;
+  margin-left: 8px;
+  font-size: 1em;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0.55;
   flex-shrink: 0;
   align-self: center;
+  user-select: none;
 }
 
 .brandChatMark {
@@ -481,44 +482,43 @@
   justify-content: center;
   gap: 8px;
   border: none;
-  background: color-mix(in srgb, var(--text) 12%, var(--bg-secondary));
-  color: var(--text);
+  background: var(--accent);
+  color: #fff;
   border-radius: 999px;
   padding: 0 18px;
   font: inherit;
   font-size: 0.9rem;
-  font-weight: 400;
+  font-weight: 500;
   letter-spacing: -0.015em;
-  box-shadow: none;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease;
+  transition: background 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
 }
 
 :global([data-theme="light"]) .newChat {
-  border: 1px solid #e5e7eb;
-  background: #fff;
-  color: #18181b;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 14%), 0 2px 6px rgb(15 23 42 / 7%);
+  border: none;
+  background: var(--accent);
+  color: #fff;
 }
 
 :global([data-theme="dark"]) .newChat {
-  background: #3f3f46;
+  background: var(--accent);
   color: #fff;
 }
 
 .newChat:hover {
-  background: color-mix(in srgb, var(--text) 16%, var(--bg-secondary));
+  filter: brightness(1.07);
 }
 
 :global([data-theme="light"]) .newChat:hover {
-  background: #f8fafc;
-  border-color: #d9dee7;
-  filter: none;
+  background: var(--accent);
+  filter: brightness(1.06);
 }
 
 :global([data-theme="dark"]) .newChat:hover {
-  background: #4b4b53;
-  filter: none;
+  background: var(--accent);
+  filter: brightness(1.1);
 }
 
 .newChatIcon {
@@ -1017,11 +1017,13 @@
 }
 
 .sessionItem.active {
-  background: color-mix(in srgb, var(--text) 9%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :global([data-theme="light"]) .sessionItem.active {
-  background: #e8f0ff;
+  background: #eceef2;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .sessionItem:hover {
@@ -1029,7 +1031,8 @@
 }
 
 .sessionItem.active:hover {
-  background: color-mix(in srgb, var(--text) 11%, transparent);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :global([data-theme="light"]) .sessionItem:hover {
@@ -1037,7 +1040,8 @@
 }
 
 :global([data-theme="light"]) .sessionItem.active:hover {
-  background: #dfeaff;
+  background: #e4e6eb;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .sessionItem.entering {
   animation: sessionItemIn 0.24s ease both;
@@ -1141,15 +1145,16 @@
   align-items: center;
   height: 17px;
   margin: 0;
-  padding: 0 6px;
-  border-radius: 999px;
+  padding: 0 2px;
+  border: none;
+  border-radius: 0;
   font-size: 0.66rem;
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   line-height: 1;
   color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text) 5%, transparent);
+  background: transparent;
   white-space: nowrap;
   max-width: 7.5rem;
   box-sizing: border-box;
@@ -1163,34 +1168,32 @@
 
 :global([data-theme="light"]) .sessionItem.active .sessionTitle,
 :global([data-theme="light"]) .sessionItem.active .sessionMore {
-  color: #2563eb;
+  color: var(--text);
 }
 
 .sessionItem.active .sessionActivity {
-  color: color-mix(in srgb, var(--text-secondary) 70%, var(--text));
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: color-mix(in srgb, var(--text-secondary) 55%, var(--text));
+  background: transparent;
 }
 
 .sessionItem:hover .sessionActivity {
-  background: color-mix(in srgb, var(--text) 7%, transparent);
+  background: transparent;
 }
 
-/* Light theme: same recipe as the "New chat" button — black text, black
-   outline, transparent fill. */
 :global([data-theme="light"]) .sessionActivity {
-  color: rgba(24, 24, 27, 0.5);
-  border: 1px solid rgba(24, 24, 27, 0.16);
+  color: rgba(24, 24, 27, 0.48);
+  border: none;
   background: transparent;
   font-weight: 400;
 }
 
 :global([data-theme="light"]) .sessionItem:hover .sessionActivity {
-  background: rgba(24, 24, 27, 0.03);
+  background: transparent;
 }
 
 :global([data-theme="light"]) .sessionItem.active .sessionActivity {
-  color: rgba(24, 24, 27, 0.65);
-  background: rgba(24, 24, 27, 0.04);
+  color: rgba(24, 24, 27, 0.58);
+  background: transparent;
 }
 
 .renameInput,
