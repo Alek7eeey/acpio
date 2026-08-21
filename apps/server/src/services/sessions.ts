@@ -233,19 +233,13 @@ export async function createMessage(
     parts: [],
   };
   broadcastToSession(sessionId, { type: "message.created", sessionId, message: dto });
-  const [sessionRow] = await db
+  // Touch updatedAt for bookkeeping, but do NOT broadcast session.updated —
+  // that frame still carries the pre-turn status (idle) and made clients flash
+  // the thinking header off/on when createMessage raced ahead of status=running.
+  await db
     .update(sessions)
     .set({ updatedAt: row.createdAt })
-    .where(eq(sessions.id, sessionId))
-    .returning();
-  if (sessionRow) {
-    const sessionDto = mapSession(sessionRow, row.createdAt);
-    broadcastToSession(sessionId, {
-      type: "session.updated",
-      sessionId,
-      session: sessionDto,
-    });
-  }
+    .where(eq(sessions.id, sessionId));
   return dto;
 }
 

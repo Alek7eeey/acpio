@@ -10,6 +10,13 @@
   user-select: text;
 }
 
+@media (max-width: 700px) {
+  .root {
+    font-size: 0.86rem;
+    line-height: 1.55;
+  }
+}
+
 .streaming .body {
   caret-color: transparent;
 }

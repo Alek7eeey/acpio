@@ -1269,6 +1269,21 @@ function StepsSpoiler({
       return value;
     });
   };
+  // Keep the empty "Размышления" header mounted across brief streaming→idle
+  //→streaming flaps (stale session.updated) so the section never remounts.
+  const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
+  useEffect(() => {
+    if (streaming) {
+      setHoldEmptyLive(true);
+      return;
+    }
+    if (parts.length > 0) {
+      setHoldEmptyLive(false);
+      return;
+    }
+    const id = window.setTimeout(() => setHoldEmptyLive(false), 160);
+    return () => window.clearTimeout(id);
+  }, [streaming, parts.length]);
   const thoughts = parts.filter(isThoughtPart);
   const agentDurationSec = thoughts.reduce((max, part) => {
     const ms = Number(part.payload.durationMs);
@@ -1279,7 +1294,7 @@ function StepsSpoiler({
     Number.isFinite(messageStartedAt) ? messageStartedAt : null,
   );
   const [elapsedSec, setElapsedSec] = useState(() => {
-    if (streaming) return 0;
+    if (streaming || holdEmptyLive) return 0;
     const value = Date.parse(startedAt);
     return Number.isFinite(value) ? Math.max(1, Math.round((Date.now() - value) / 1000)) : 0;
   });
@@ -1295,8 +1310,10 @@ function StepsSpoiler({
     setOpen(autoExpand);
   }, [autoExpand, setOpen]);
 
+  const liveHeader = streaming || holdEmptyLive;
+
   useEffect(() => {
-    if (!streaming) return;
+    if (!liveHeader) return;
     if (startedAtRef.current == null) startedAtRef.current = Date.now();
     const tick = () => {
       const start = startedAtRef.current ?? Date.now();
@@ -1305,21 +1322,21 @@ function StepsSpoiler({
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [streaming]);
+  }, [liveHeader]);
 
   useEffect(() => {
-    if (streaming) return;
+    if (liveHeader) return;
     if (startedAtRef.current == null) {
       const value = Date.parse(startedAt);
       if (Number.isFinite(value)) startedAtRef.current = value;
     }
     if (startedAtRef.current == null) return;
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
-  }, [startedAt, streaming]);
+  }, [startedAt, liveHeader]);
 
   // Show the thinking header immediately while the turn is live (even before the
   // first thought token). Hide only when idle with nothing to show.
-  if (parts.length === 0 && !streaming) return null;
+  if (parts.length === 0 && !liveHeader) return null;
 
   const stepsLength = parts.length;
   const subagentParts = parts.filter((p) => p.type === "subagent");
@@ -1327,7 +1344,7 @@ function StepsSpoiler({
   const showSubagentsOutside = !open && subagentParts.length > 0;
 
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
-  const label = streaming
+  const label = liveHeader
     ? t("common.steps")
     : (agentDurationSec || elapsedSec) > 0
       ? t("common.thoughtFor", {
@@ -1359,7 +1376,7 @@ function StepsSpoiler({
           <ThoughtSparkIcon size={16} />
         </span>
         <span className={styles.stepsTitle}>
-          {streaming ? <span className={styles.pulseDot} /> : null}
+          {liveHeader ? <span className={styles.pulseDot} /> : null}
           {label}
         </span>
         <span

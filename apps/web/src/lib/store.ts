@@ -294,6 +294,9 @@ function isLocalAssistantId(id: string) {
 const serverToClientMessageId = new Map<string, { clientId: string; sessionId: string }>();
 /** One prompt may be active at a time. Map its server messages only to its pair. */
 let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: string } | null = null;
+/** Sessions for which the server has confirmed running/waiting this turn.
+ *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
+const serverConfirmedBusy = new Set<string>();
 
 function resolveClientMessageId(messageId: string, sessionId?: string) {
   const entry = serverToClientMessageId.get(messageId);
@@ -308,10 +311,12 @@ function clearMessageIdAliases(sessionId?: string) {
       if (entry.sessionId === sessionId) serverToClientMessageId.delete(key);
     }
     if (pendingOptimisticPair?.sessionId === sessionId) pendingOptimisticPair = null;
+    serverConfirmedBusy.delete(sessionId);
     return;
   }
   serverToClientMessageId.clear();
   pendingOptimisticPair = null;
+  serverConfirmedBusy.clear();
 }
 
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
@@ -1107,6 +1112,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     const commitRunning = (sessionId: string, messages: MessageDto[] | null, epoch: number) => {
       const active = get().activeSession;
+      // New turn: wait for a server running/waiting before accepting idle again.
+      serverConfirmedBusy.delete(sessionId);
       set({
         modelsLoading: false,
         promptEpoch: epoch,
@@ -1227,6 +1234,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...state.activeSession, status: "idle" as const, messages }
           : state.activeSession,
     });
+    serverConfirmedBusy.delete(id);
     try {
       await api.cancel(id);
     } catch (err) {
@@ -1286,13 +1294,43 @@ export const useAppStore = create<AppState>((set, get) => ({
       const cancelled =
         state.activeSession?.id === event.sessionId &&
         state.cancelledPromptEpoch === state.promptEpoch;
-      const session =
+      let session =
         cancelled && (event.session.status === "running" || event.session.status === "waiting")
           ? { ...event.session, status: "idle" as const }
           : event.session;
+      if (session.status === "running" || session.status === "waiting") {
+        serverConfirmedBusy.add(event.sessionId);
+      }
+      // createMessage (and similar) used to broadcast idle while the client had
+      // already painted optimistic running — that hid/reshowed the Steps header.
+      const listedBefore = state.sessions.find((s) => s.id === event.sessionId);
+      const clientBusy =
+        listedBefore?.status === "running" ||
+        listedBefore?.status === "waiting" ||
+        (state.activeSession?.id === event.sessionId &&
+          (state.activeSession.status === "running" || state.activeSession.status === "waiting"));
+      const turnStillOpen =
+        state.activeSession?.id === event.sessionId &&
+        state.promptEpoch !== state.cancelledPromptEpoch;
+      if (
+        session.status === "idle" &&
+        clientBusy &&
+        turnStillOpen &&
+        !cancelled &&
+        !serverConfirmedBusy.has(event.sessionId)
+      ) {
+        session = {
+          ...session,
+          status: (listedBefore?.status === "waiting" || state.activeSession?.status === "waiting"
+            ? "waiting"
+            : "running") as typeof session.status,
+        };
+      }
+      if (session.status === "idle" || session.status === "error" || session.status === "closed") {
+        serverConfirmedBusy.delete(event.sessionId);
+      }
       const busy = session.status === "running" || session.status === "waiting";
       const prevActive = state.activeSession;
-      const listedBefore = state.sessions.find((s) => s.id === event.sessionId);
       const wasBusy =
         listedBefore?.status === "running" || listedBefore?.status === "waiting";
       const nextSessions = state.sessions.map((s) => {
@@ -1348,7 +1386,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (chatUiChanged) {
           nextActive = {
             ...prevActive,
-            ...session,
+            status: session.status,
+            title: session.title,
+            mode: session.mode,
+            cwd: session.cwd,
+            provider: session.provider,
+            pinned: session.pinned,
+            archived: session.archived,
+            acpSessionId: session.acpSessionId,
+            themeId: session.themeId,
+            mcpDisabledIds: session.mcpDisabledIds,
+            usage: session.usage ?? prevActive.usage,
             lastMessageAt: prevActive.lastMessageAt,
             messages: prevActive.messages,
           };

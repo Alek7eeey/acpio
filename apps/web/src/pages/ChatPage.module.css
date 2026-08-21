@@ -2294,11 +2294,72 @@
     max-width: 100%;
   }
   .textPart {
-    font-size: 0.9rem;
+    font-size: 0.86rem;
   }
 
   .userBubble {
     font-size: 0.9rem;
+  }
+
+  /* Thinking / subagents — keep clearly smaller than the answer (0.86rem). */
+  .stepsToggle {
+    font-size: 0.78rem;
+    gap: 6px;
+  }
+
+  .stepsIcon svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .thoughtBody,
+  .stepsBody .textEmbedded {
+    font-size: 0.75rem;
+    line-height: 1.45;
+  }
+
+  .toolRow {
+    font-size: 0.72rem;
+  }
+
+  .toolDetail,
+  .toolMeta {
+    font-size: 0.66rem;
+  }
+
+  .subagentToggle {
+    gap: 6px;
+    min-height: 28px;
+    padding: 4px 6px;
+  }
+
+  .subagentKind {
+    font-size: 0.58rem;
+  }
+
+  .subagentTitle {
+    font-size: 0.74rem;
+  }
+
+  .subagentStatus {
+    font-size: 0.64rem;
+  }
+
+  .subagentMarkdown {
+    font-size: 0.72rem;
+    line-height: 1.45;
+  }
+
+  .subagentBody .subagentMarkdown {
+    font-size: 0.72rem;
+  }
+
+  .subagentBody {
+    margin-left: 20px;
+  }
+
+  .subagentTools .toolRow {
+    font-size: 0.7rem;
   }
 }
 
