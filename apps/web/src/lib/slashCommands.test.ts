@@ -9,6 +9,7 @@ import {
   mergeSlashCommands,
   parseSlashCommandText,
   slashCommandRequiresInput,
+  splitSlashCommandHighlight,
 } from "./slashCommands";
 import type { SlashCommandDto } from "@acprocess/shared";
 
@@ -471,5 +472,42 @@ describe("isSlashCommandText", () => {
 
   it("rejects plain text", () => {
     expect(isSlashCommandText("hello")).toBe(false);
+  });
+});
+
+describe("splitSlashCommandHighlight", () => {
+  it("highlights a bare command", () => {
+    expect(splitSlashCommandHighlight("/stop")).toEqual([{ kind: "command", value: "/stop" }]);
+  });
+
+  it("keeps args as ordinary text", () => {
+    expect(splitSlashCommandHighlight("/ask what is this")).toEqual([
+      { kind: "command", value: "/ask" },
+      { kind: "text", value: " what is this" },
+    ]);
+  });
+
+  it("ignores Windows paths", () => {
+    expect(splitSlashCommandHighlight("/C:/Users/me")).toEqual([
+      { kind: "text", value: "/C:/Users/me" },
+    ]);
+  });
+
+  it("ignores mid-word slashes", () => {
+    expect(splitSlashCommandHighlight("x/y")).toEqual([{ kind: "text", value: "x/y" }]);
+  });
+
+  it("only highlights a full match when known names are given", () => {
+    expect(splitSlashCommandHighlight("/sto", ["stop"])).toEqual([
+      { kind: "text", value: "/sto" },
+    ]);
+    expect(splitSlashCommandHighlight("/stop", ["stop"])).toEqual([
+      { kind: "command", value: "/stop" },
+    ]);
+    expect(splitSlashCommandHighlight("/stop now", ["stop"])).toEqual([
+      { kind: "command", value: "/stop" },
+      { kind: "text", value: " now" },
+    ]);
+    expect(splitSlashCommandHighlight("/ask", ["stop"])).toEqual([{ kind: "text", value: "/ask" }]);
   });
 });

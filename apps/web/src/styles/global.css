@@ -16,6 +16,7 @@
   --success: #1f8f4e;
   --success-soft: rgba(31, 143, 78, 0.12);
   --warning: #b78103;
+  --slash-cmd: #e67e22;
   --shadow: 0 8px 24px rgba(15, 20, 25, 0.06);
   --shadow-soft: 0 1px 2px rgba(15, 20, 25, 0.04);
   --radius: 12px;
@@ -46,6 +47,7 @@
   --success: #3ecf8e;
   --success-soft: rgba(62, 207, 142, 0.14);
   --warning: #f0b429;
+  --slash-cmd: #f5a524;
   --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.25);
   color-scheme: dark;

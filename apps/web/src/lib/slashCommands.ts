@@ -112,3 +112,35 @@ export function parseSlashCommandText(text: string) {
 export function isSlashCommandText(text: string) {
   return Boolean(parseSlashCommandText(text));
 }
+
+const SLASH_TOKEN_RE = /(^|[\s])(\/[a-z][\w-]*(?::[a-z][\w-]*)?)(?=\s|$)/gi;
+
+/** Split user text so `/command` tokens can be highlighted without a special card. */
+export function splitSlashCommandHighlight(text: string, knownNames?: Iterable<string>) {
+  const known = knownNames
+    ? new Set([...knownNames].map((n) => n.replace(/^\//, "").toLowerCase()))
+    : null;
+  const out: { kind: "text" | "command"; value: string }[] = [];
+  const pushText = (value: string) => {
+    if (!value) return;
+    const prev = out[out.length - 1];
+    if (prev?.kind === "text") prev.value += value;
+    else out.push({ kind: "text", value });
+  };
+  SLASH_TOKEN_RE.lastIndex = 0;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SLASH_TOKEN_RE.exec(text)) !== null) {
+    const prefix = match[1] ?? "";
+    const cmd = match[2] ?? "";
+    const cmdStart = match.index + prefix.length;
+    if (cmdStart > last) pushText(text.slice(last, cmdStart));
+    const name = cmd.slice(1).toLowerCase();
+    if (!known || known.has(name)) out.push({ kind: "command", value: cmd });
+    else pushText(cmd);
+    last = cmdStart + cmd.length;
+  }
+  if (last < text.length) pushText(text.slice(last));
+  if (out.length === 0) out.push({ kind: "text", value: text });
+  return out;
+}

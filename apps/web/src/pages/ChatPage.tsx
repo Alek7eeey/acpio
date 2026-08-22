@@ -84,6 +84,7 @@ import {
   mergeSlashCommands,
   parseSlashCommandText,
   slashCommandRequiresInput,
+  splitSlashCommandHighlight,
 } from "../lib/slashCommands";
 import styles from "./ChatPage.module.css";
 
@@ -277,7 +278,6 @@ function MessageArticle({
   isLiveAssistant,
   onEditUser,
   onRegenerate,
-  slashCommands,
   activeSession,
   autoExpandSteps,
   keepComposerFocus,
@@ -287,7 +287,6 @@ function MessageArticle({
   isLiveAssistant: boolean;
   onEditUser: (messageId: string, value: string) => void;
   onRegenerate: () => void;
-  slashCommands: SlashCommandDto[];
   activeSession: SessionDetailDto | null;
   autoExpandSteps: boolean;
   keepComposerFocus: RefObject<boolean>;
@@ -314,7 +313,7 @@ function MessageArticle({
       }}
     >
       {msg.role === "user" ? (
-        <UserMessage message={msg} slashCommands={slashCommands} onEdit={onEditUser} />
+        <UserMessage message={msg} onEdit={onEditUser} />
       ) : (
         <AssistantParts
           message={msg}
@@ -328,51 +327,42 @@ function MessageArticle({
   );
 }
 
+function highlightUserText(text: string, knownNames?: Iterable<string>) {
+  return splitSlashCommandHighlight(text, knownNames).map((seg, i) =>
+    seg.kind === "command" ? (
+      <span key={`${i}-${seg.value}`} className={styles.userSlashCmd}>
+        {seg.value}
+      </span>
+    ) : (
+      <Fragment key={i}>{seg.value}</Fragment>
+    ),
+  );
+}
+
 function UserMessage({
   message,
-  slashCommands,
   onEdit,
 }: {
   message: MessageDto;
-  slashCommands: SlashCommandDto[];
   onEdit: (messageId: string, text: string) => void;
 }) {
-  const t = useT();
   const text = messagePlainText(message);
   const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
-  const explicitCommand = message.parts.some(
-    (p) => p.type === "text" && Boolean(p.payload.isSlashCommand),
-  );
-  const parsed = parseSlashCommandText(text);
-  const isCommand = explicitCommand || Boolean(parsed);
 
   if (!text && fileParts.length === 0) return null;
 
-  const body =
-    isCommand && parsed ? (
-      <div className={styles.userCommand}>
-        <div className={styles.userCommandHeader}>
-          <span className={styles.userCommandBadge}>{t("common.command")}</span>
-          <code className={styles.userCommandName}>/{parsed.name}</code>
-        </div>
-        {parsed.args ? (
-          <p className={styles.userCommandArgs}>{parsed.args}</p>
-        ) : metaDescription(slashCommands, parsed.name) ? (
-          <p className={styles.userCommandDesc}>{metaDescription(slashCommands, parsed.name)}</p>
-        ) : null}
-      </div>
-    ) : (
-      <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
-        {message.parts.map((part) =>
-          part.type === "text" ? (
-            <div key={part.id}>{String(part.payload.text ?? "")}</div>
-          ) : (
-            <PartView key={part.id} part={part} />
-          ),
-        )}
-      </div>
-    );
+  const body = (
+    <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
+      {message.parts.map((part) =>
+        part.type === "text" ? (
+          <div key={part.id}>{highlightUserText(String(part.payload.text ?? ""))}</div>
+        ) : (
+          <PartView key={part.id} part={part} />
+        ),
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -460,10 +450,6 @@ function UserMessage({
       />
     </div>
   );
-}
-
-function metaDescription(slashCommands: SlashCommandDto[], name: string) {
-  return slashCommands.find((c) => c.name.toLowerCase() === name.toLowerCase())?.description;
 }
 
 function MsgIcon({ children }: { children: ReactNode }) {
@@ -2927,6 +2913,7 @@ function ChatThread() {
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const composerHighlightInnerRef = useRef<HTMLDivElement>(null);
   const composerMetaRef = useRef<HTMLDivElement>(null);
   const [composerMetaEdge, setComposerMetaEdge] = useState({ left: false, right: false });
   const threadRef = useRef<HTMLDivElement>(null);
@@ -3095,7 +3082,7 @@ function ChatThread() {
     }
 
     const hasNewline = value.includes("\n");
-    const pillW = el.parentElement?.clientWidth ?? el.clientWidth;
+    const pillW = (el.closest(`.${styles.pill}`) as HTMLElement | null)?.clientWidth ?? el.clientWidth;
     const textBudget = Math.max(96, pillW - 230);
     const approxFit = Math.max(8, Math.floor(textBudget / 7.2));
     // Hysteresis: enter early, leave only when clearly short again (no bounce at the edge).
@@ -3187,15 +3174,19 @@ function ChatThread() {
 
   const insertSlashCommand = (cmd: SlashCommandDto) => {
     const insertion = buildSlashInsertion(cmd);
-    setText(insertion);
-    setCursorPos(insertion.length);
+    const start = slashCtx?.start ?? 0;
+    const end = Math.max(cursorPos, start);
+    const next = text.slice(0, start) + insertion + text.slice(end);
+    const caret = start + insertion.length;
+    setText(next);
+    setCursorPos(caret);
     setSlashMenuDismissed(true);
-    setComposerMultilineIfNeeded(insertion.includes("\n"));
+    setComposerMultilineIfNeeded(next.includes("\n"));
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (!el) return;
       el.focus({ preventScroll: true });
-      el.setSelectionRange(insertion.length, insertion.length);
+      el.setSelectionRange(caret, caret);
       syncComposerSize(el);
     });
   };
@@ -3207,8 +3198,8 @@ function ChatThread() {
   }, [slashCtx?.query, slashCtx?.start]);
 
   const applySlashCommand = (cmd: SlashCommandDto) => {
-    setSlashMenuDismissed(true);
-    if (cmd.name === "stop") {
+    if (cmd.name === "stop" && streaming) {
+      setSlashMenuDismissed(true);
       setText("");
       setCursorPos(0);
       setComposerMultilineIfNeeded(false);
@@ -3218,11 +3209,7 @@ function ChatThread() {
       requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
       return;
     }
-    if (slashCommandRequiresInput(cmd)) {
-      insertSlashCommand(cmd);
-      return;
-    }
-    submitMessage(`/${cmd.name}`);
+    insertSlashCommand(cmd);
   };
 
   const submitMessage = (raw: string) => {
@@ -3735,7 +3722,6 @@ function ChatThread() {
           });
         }}
         onRegenerate={() => regenerate(msg)}
-        slashCommands={slashCommands}
         activeSession={activeSession}
         autoExpandSteps={autoExpandSteps}
         keepComposerFocus={keepComposerFocus}
@@ -4567,15 +4553,31 @@ function ChatThread() {
                 setSlashIndex(idx);
               }}
             />
-            <textarea
+            <div className={styles.pillInputWrap}>
+              {text ? (
+                <div className={styles.pillInputHighlight} aria-hidden>
+                  <div ref={composerHighlightInnerRef} className={styles.pillInputHighlightInner}>
+                    {highlightUserText(
+                      text,
+                      slashCommands.map((c) => c.name),
+                    )}
+                    {"\u200b"}
+                  </div>
+                </div>
+              ) : null}
+              <textarea
               ref={textareaRef}
-              className={styles.pillInput}
+              className={`${styles.pillInput}${text ? ` ${styles.pillInputGhost}` : ""}`}
               value={text}
               onChange={(e) => {
                 if (composerLocked) return;
                 setText(e.target.value);
                 setCursorPos(e.target.selectionStart);
                 syncComposerSize(e.currentTarget);
+              }}
+              onScroll={(e) => {
+                const inner = composerHighlightInnerRef.current;
+                if (inner) inner.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
               }}
               onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}
               onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}
@@ -4634,6 +4636,7 @@ function ChatThread() {
                 }
               }}
             />
+            </div>
 
             <div className={styles.pillFooter}>
               {(settings.chatComposerButtons ?? []).includes("attach") && (

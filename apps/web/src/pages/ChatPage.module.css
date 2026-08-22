@@ -1113,65 +1113,9 @@
   min-width: 0;
 }
 
-.userCommand {
-  max-width: min(78%, 520px);
-  width: fit-content;
-  min-width: 0;
-  box-sizing: border-box;
-  display: grid;
-  gap: 4px;
-  padding: 8px 12px;
-  border-radius: 14px;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
-  box-shadow: var(--shadow-soft);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.userCommandHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.userCommandBadge {
-  flex: 0 0 auto;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-
-.userCommandName {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  font-size: 0.86rem;
-  font-weight: 650;
-  color: var(--text);
-  background: transparent;
-  border: none;
-  padding: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.userCommandDesc,
-.userCommandArgs {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.4;
-  color: var(--text-secondary);
-  overflow-wrap: break-word;
-  word-break: break-word;
-}
-
-.userCommandArgs {
-  color: var(--text);
-  font-size: 0.9rem;
+.userSlashCmd {
+  color: var(--slash-cmd);
+  font-weight: inherit;
 }
 
 .parts {
@@ -2150,22 +2094,66 @@
   cursor: wait;
 }
 
-.pillInput {
+.pillInputWrap {
+  --composer-pad: 10px 4px;
   flex: 1 1 auto;
   order: 2;
   position: relative;
   z-index: 0;
+  display: grid;
   min-width: 0;
-  resize: none;
-  border: none;
-  background: transparent;
-  outline: none;
-  padding: 10px 4px;
+  align-self: stretch;
+}
+
+.pillInputHighlight,
+.pillInput {
+  grid-area: 1 / 1;
+  min-width: 0;
+  padding: var(--composer-pad);
   min-height: 40px;
   max-height: 160px;
   line-height: 1.45;
   font-size: 0.95rem;
+  box-sizing: border-box;
+}
+
+.pillInputHighlight {
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.pillInputHighlightInner {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.pillInput {
+  position: relative;
+  z-index: 1;
+  resize: none;
+  border: none;
+  background: transparent;
+  outline: none;
   box-shadow: none;
+  overflow: auto;
+}
+
+.pillInputGhost {
+  color: transparent;
+  caret-color: var(--text);
+  -webkit-text-fill-color: transparent;
+}
+
+.pillInputGhost::selection {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .pillInput:focus {
@@ -2449,11 +2437,15 @@
   border-radius: 22px;
 }
 
-.pillMultiline .pillInput {
+.pillMultiline .pillInputWrap {
+  --composer-pad: 4px 6px 8px;
   order: 0;
   width: 100%;
   flex: 1 1 auto;
-  padding: 4px 6px 8px;
+}
+
+.pillMultiline .pillInput,
+.pillMultiline .pillInputHighlight {
   min-height: 48px;
 }
 
@@ -2623,15 +2615,21 @@
     border-radius: 22px;
   }
 
-  .pillInput,
-  .pillMultiline .pillInput {
+  .pillInputWrap,
+  .pillMultiline .pillInputWrap {
+    --composer-pad: 4px 6px 8px;
     order: 0;
     width: 100% !important;
     max-width: 100%;
     box-sizing: border-box;
     flex: 1 1 auto;
     min-width: 0;
-    padding: 4px 6px 8px;
+  }
+
+  .pillInput,
+  .pillInputHighlight,
+  .pillMultiline .pillInput,
+  .pillMultiline .pillInputHighlight {
     min-height: 44px;
   }
 
@@ -2671,8 +2669,7 @@
     max-width: min(280px, calc(100vw - 140px));
   }
 
-  .userBubble,
-  .userCommand {
+  .userBubble {
     /* Full column width on phones — avoids right-edge clip from % + padding. */
     max-width: 100%;
   }
@@ -2773,12 +2770,14 @@
 }
 
 /* Composer size variants (settings → Chat → Composer height). */
-.pillCompact textarea {
+.pillCompact textarea,
+.pillCompact .pillInputHighlight {
   min-height: 24px;
   font-size: 0.85rem;
 }
 
-.pillRoomy textarea {
+.pillRoomy textarea,
+.pillRoomy .pillInputHighlight {
   min-height: 60px;
   font-size: 0.95rem;
 }
