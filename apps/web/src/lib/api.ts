@@ -47,6 +47,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   getSettings: () => request<AppSettings>("/api/settings"),
+  remoteAccessStatus: () =>
+    request<{ required: boolean; unlocked: boolean }>("/api/remote-access"),
+  unlockRemoteAccess: (key: string) =>
+    request<{ ok: boolean; required: boolean }>("/api/remote-access", {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    }),
   mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
   searchMessages: (q: string, limit?: number) => {
     const qs = new URLSearchParams({ q });

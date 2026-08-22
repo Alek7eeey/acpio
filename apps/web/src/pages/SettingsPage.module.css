@@ -551,6 +551,31 @@
   align-items: end;
 }
 
+.remoteKeyRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+}
+
+.remoteKeyRow input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.remoteKeyRow .secondaryBtn,
+.remoteKeyRow .clearKeyBtn {
+  flex: 0 0 auto;
+  align-self: stretch;
+  height: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
 .secretRow input {
   min-width: 0;
 }

@@ -248,6 +248,32 @@
   color: var(--text-secondary);
 }
 
+.keyInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font: inherit;
+  font-size: 1.05rem;
+  letter-spacing: 0.08em;
+}
+
+.keyInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.keyError {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 550;
+  color: var(--danger, #d64545);
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

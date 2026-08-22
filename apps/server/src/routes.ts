@@ -60,6 +60,13 @@ import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chat
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acprocess/shared";
+import {
+  isLoopbackHost,
+  isRemoteAccessPublicPath,
+  REMOTE_ACCESS_COOKIE,
+  remoteAccessProtected,
+  remoteKeysMatch,
+} from "./lib/remoteAccess.js";
 
 /** Content types for inline image previews of attached files (?inline=1). */
 const IMAGE_MIME: Record<string, string> = {
@@ -123,6 +130,7 @@ const settingsSchema = z.object({
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   chatSplit: z.boolean().optional(),
+  remoteAccessKey: z.string().max(80).optional(),
   mcpServers: z
     .array(
       z.object({
@@ -164,7 +172,47 @@ export async function registerRoutes(app: FastifyInstance) {
       .send({ error: err instanceof Error ? err.message : String(err) });
   });
 
+  app.addHook("onRequest", async (req, reply) => {
+    if (isRemoteAccessPublicPath(req.url) || !remoteAccessProtected(req.url)) return;
+    const expected = (await getSettings()).remoteAccessKey.trim();
+    if (!expected) return;
+    if (isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined)) {
+      return;
+    }
+    const cookie = req.cookies?.[REMOTE_ACCESS_COOKIE];
+    const headerRaw = req.headers["x-acp-remote-key"];
+    const header = typeof headerRaw === "string" ? headerRaw : "";
+    if (remoteKeysMatch(cookie, expected) || remoteKeysMatch(header, expected)) return;
+    return reply.code(401).send({ error: "remote_key_required", code: "remote_key_required" });
+  });
+
   app.get("/api/health", async () => ({ ok: true }));
+
+  app.get("/api/remote-access", async (req) => {
+    const expected = (await getSettings()).remoteAccessKey.trim();
+    const loopback = isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined);
+    const cookie = req.cookies?.[REMOTE_ACCESS_COOKIE];
+    const unlocked = !expected || loopback || remoteKeysMatch(cookie, expected);
+    return { required: Boolean(expected) && !loopback, unlocked };
+  });
+
+  app.post("/api/remote-access", async (req, reply) => {
+    const body = z.object({ key: z.string().max(80) }).parse(req.body ?? {});
+    const expected = (await getSettings()).remoteAccessKey.trim();
+    if (!expected) {
+      return { ok: true, required: false };
+    }
+    if (!remoteKeysMatch(body.key.trim(), expected)) {
+      return reply.code(401).send({ error: "remote_key_required", code: "remote_key_invalid" });
+    }
+    reply.setCookie(REMOTE_ACCESS_COOKIE, expected, {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24 * 30,
+    });
+    return { ok: true, required: true };
+  });
 
   app.get("/api/export/default-dir", async () => ({ path: defaultExportDir() }));
 

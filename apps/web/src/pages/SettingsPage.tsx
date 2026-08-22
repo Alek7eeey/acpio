@@ -2059,6 +2059,55 @@ export function SettingsPage() {
         {section === "agent" && leaf === "remote" && (
           <>
             <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.remoteKeyTitle")}
+                hint={t("settings.remoteKeyHint")}
+                terms={[t("settings.remoteKeyTitle"), t("settings.remoteKeyHint"), t("settings.remoteStep4Body")]}
+              >
+                <div className={styles.remoteKeyRow}>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={form.remoteAccessKey ?? ""}
+                    onChange={(e) => patch("remoteAccessKey", e.target.value)}
+                    onBlur={(e) => {
+                      const next = e.currentTarget.value.trim();
+                      patch("remoteAccessKey", next);
+                      void saveSettings({ remoteAccessKey: next });
+                    }}
+                    placeholder={t("settings.remoteKeyPlaceholder")}
+                    aria-label={t("settings.remoteKeyTitle")}
+                  />
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+                      const bytes = new Uint8Array(8);
+                      crypto.getRandomValues(bytes);
+                      const next = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+                      patch("remoteAccessKey", next);
+                      void saveSettings({ remoteAccessKey: next });
+                    }}
+                  >
+                    {t("settings.remoteKeyGenerate")}
+                  </button>
+                  {(form.remoteAccessKey ?? "").trim() ? (
+                    <button
+                      type="button"
+                      className={styles.clearKeyBtn}
+                      onClick={() => {
+                        patch("remoteAccessKey", "");
+                        void saveSettings({ remoteAccessKey: "" });
+                      }}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  ) : null}
+                </div>
+              </SettingRow>
               <SettingRow label={t("settings.remoteStep1Title")} hint={t("settings.remoteStep1Body")} />
               <SettingRow label={t("settings.remoteStep2Title")} hint={<>
                 {t("settings.remoteStep2Body")}
@@ -2073,6 +2122,7 @@ export function SettingsPage() {
                   </button>
                 </div>
               </SettingRow>
+              <SettingRow label={t("settings.remoteStep4Title")} hint={t("settings.remoteStep4Body")} />
             </SettingTable>
             <SearchGate
               terms={[
@@ -2082,6 +2132,7 @@ export function SettingsPage() {
                 t("settings.remoteTipFirewall"),
                 t("settings.remoteTipHttp"),
                 t("settings.remoteTipInstall"),
+                t("settings.remoteTipKey"),
               ]}
             >
             <div className={styles.remoteTipsBlock}>
@@ -2092,6 +2143,7 @@ export function SettingsPage() {
                 <li>{t("settings.remoteTipFirewall")}</li>
                 <li>{t("settings.remoteTipHttp")}</li>
                 <li>{t("settings.remoteTipInstall")}</li>
+                <li>{t("settings.remoteTipKey")}</li>
               </ul>
             </div>
             </SearchGate>

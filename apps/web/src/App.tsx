@@ -10,6 +10,8 @@ import { BootSplash } from "./components/BootSplash";
 import { ToastHost } from "./components/ToastHost";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { RemoteKeyGate } from "./components/RemoteKeyGate";
+import { api } from "./lib/api";
 
 export function App() {
   const loadBootstrap = useAppStore((s) => s.loadBootstrap);
@@ -18,19 +20,38 @@ export function App() {
   const showBootSplash = useAppStore((s) => s.settings.showBootSplash);
   const agentGateDismissed = useAppStore((s) => s.agentGateDismissed);
   const [splashVisible, setSplashVisible] = useState(true);
+  const [remoteLock, setRemoteLock] = useState<"unknown" | "locked" | "open">("unknown");
 
   useEffect(() => {
+    let cancelled = false;
+    void api
+      .remoteAccessStatus()
+      .then((s) => {
+        if (cancelled) return;
+        setRemoteLock(s.required && !s.unlocked ? "locked" : "open");
+      })
+      .catch(() => {
+        if (!cancelled) setRemoteLock("open");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (remoteLock !== "open") return;
     void loadBootstrap();
-  }, [loadBootstrap]);
+  }, [loadBootstrap, remoteLock]);
 
   useEffect(() => installMessageHotkeys(), []);
 
-  useSessionSocket(activeSessionId, !loading);
+  useSessionSocket(activeSessionId, remoteLock === "open" && !loading);
 
   const onSplashDone = useCallback(() => setSplashVisible(false), []);
 
+  const ready = remoteLock === "open";
   const app =
-    loading && splashVisible && showBootSplash ? null : (
+    !ready || (loading && splashVisible && showBootSplash) ? null : (
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
@@ -45,11 +66,14 @@ export function App() {
 
   return (
     <I18nProvider>
+      {remoteLock === "locked" ? <RemoteKeyGate onUnlocked={() => setRemoteLock("open")} /> : null}
       {app}
       <ToastHost />
-      {splashVisible && showBootSplash && <BootSplash ready={!loading} onDone={onSplashDone} />}
-      {!loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
-      {!loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
+      {ready && splashVisible && showBootSplash && (
+        <BootSplash ready={!loading} onDone={onSplashDone} />
+      )}
+      {ready && !loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
+      {ready && !loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
     </I18nProvider>
   );
 }

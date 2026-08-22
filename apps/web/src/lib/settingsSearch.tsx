@@ -187,8 +187,11 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.remoteStep1Title"),
       t("settings.remoteStep2Title"),
       t("settings.remoteStep3Title"),
+      t("settings.remoteStep4Title"),
+      t("settings.remoteKeyTitle"),
       t("settings.remoteTipTitle"),
       t("settings.remoteCopy"),
+      t("settings.remoteTipKey"),
     ],
     appearance: [
       t("settings.appearance"),

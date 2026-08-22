@@ -149,6 +149,49 @@ describe("health & settings", () => {
     expect(get.json().displayName).toBe("Tester");
   });
 
+  it("optional remote access key is skipped on localhost and empty key", async () => {
+    const lan = { host: "192.168.1.9:5173" };
+    expect((await app.inject({ method: "GET", url: "/api/settings", headers: lan })).statusCode).toBe(
+      200,
+    );
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { remoteAccessKey: "SECRET42" },
+    });
+    expect((await app.inject({ method: "GET", url: "/api/settings" })).statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/health", headers: lan })).statusCode,
+    ).toBe(200);
+    const blocked = await app.inject({ method: "GET", url: "/api/settings", headers: lan });
+    expect(blocked.statusCode).toBe(401);
+    const status = await app.inject({ method: "GET", url: "/api/remote-access", headers: lan });
+    expect(status.json()).toEqual({ required: true, unlocked: false });
+    const bad = await app.inject({
+      method: "POST",
+      url: "/api/remote-access",
+      headers: lan,
+      payload: { key: "nope" },
+    });
+    expect(bad.statusCode).toBe(401);
+    const unlock = await app.inject({
+      method: "POST",
+      url: "/api/remote-access",
+      headers: lan,
+      payload: { key: "SECRET42" },
+    });
+    expect(unlock.statusCode).toBe(200);
+    const cookie = unlock.cookies.find((c) => c.name === "acp_remote");
+    expect(cookie?.value).toBe("SECRET42");
+    const ok = await app.inject({
+      method: "GET",
+      url: "/api/settings",
+      headers: lan,
+      cookies: { acp_remote: "SECRET42" },
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+
   it("PUT /api/settings rejects an invalid locale with 400 (zod → error handler)", async () => {
     const res = await app.inject({
       method: "PUT",

@@ -406,6 +406,11 @@ export interface AppSettings {
   chatShowMessageTime: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
+  /**
+   * Optional shared key for opening the UI from a phone or another PC.
+   * Empty = anyone on the VPN/LAN can connect. Localhost never asks.
+   */
+  remoteAccessKey: string;
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
   mcpServers: McpServerConfig[];
 }
@@ -459,6 +464,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatEnterToSend: true,
   chatShowMessageTime: false,
   chatSplit: true,
+  remoteAccessKey: "",
   mcpServers: [],
 };
 
