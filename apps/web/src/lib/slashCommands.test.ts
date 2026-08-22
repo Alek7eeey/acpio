@@ -134,6 +134,14 @@ describe("getSlashContext", () => {
     expect(getSlashContext("foo\n/st", 7)).toEqual({ query: "st", start: 4 });
   });
 
+  it("captures a command after existing draft text", () => {
+    expect(getSlashContext("hello /st", 9)).toEqual({ query: "st", start: 6 });
+  });
+
+  it("returns an empty query for a bare slash after a space", () => {
+    expect(getSlashContext("hello /", 7)).toEqual({ query: "", start: 6 });
+  });
+
   it("returns null for empty text", () => {
     expect(getSlashContext("", 0)).toBeNull();
   });
@@ -150,8 +158,8 @@ describe("getSlashContext", () => {
     expect(getSlashContext("a\n/", 3)).toEqual({ query: "", start: 2 });
   });
 
-  it("returns null when a slash is mid-line without a preceding newline", () => {
-    expect(getSlashContext("a /b", 3)).toBeNull();
+  it("captures a slash after a space mid-line", () => {
+    expect(getSlashContext("a /b", 4)).toEqual({ query: "b", start: 2 });
   });
 
   it("returns null when there is no slash at all", () => {

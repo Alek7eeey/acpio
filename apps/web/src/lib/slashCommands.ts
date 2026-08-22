@@ -62,7 +62,9 @@ export function mergeSlashCommands(agentCommands: SlashCommandDto[] = [], t: Tra
 
 export function getSlashContext(text: string, cursor: number) {
   const before = text.slice(0, cursor);
-  const match = before.match(/(?:^|\n)\/([\w:-]*)$/);
+  // Token start: beginning, newline, or whitespace — so "/cmd" still works
+  // after existing draft text. Mid-word "x/y" stays ignored.
+  const match = before.match(/(?:^|[\s])\/([\w:-]*)$/);
   if (!match) return null;
   const query = match[1] ?? "";
   const start = before.lastIndexOf("/");
