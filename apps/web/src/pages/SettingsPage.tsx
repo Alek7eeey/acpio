@@ -500,8 +500,7 @@ export function SettingsPage() {
   >({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
-  const [paramsLoading, setParamsLoading] = useState(false);
-  const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
+  const [paramsLoadingKey, setParamsLoadingKey] = useState<string | null>(null);
   const [diagDirDefault, setDiagDirDefault] = useState("");
   const [diagDirResolved, setDiagDirResolved] = useState("");
   const [exportDirDefault, setExportDirDefault] = useState("");
@@ -533,11 +532,6 @@ export function SettingsPage() {
       return sessions[0]?.id ?? "";
     });
   }, [leaf, sessions, activeSessionId]);
-
-  useEffect(() => {
-    if (paramsLoading) return;
-    setStableParams([]);
-  }, [paramsLoading]);
 
   const refreshDiagnostics = async () => {
     setDiagLoading(true);
@@ -678,24 +672,17 @@ export function SettingsPage() {
     const cacheKey = `${provider}:${nextModel}`;
     const cached = paramsCacheRef.current.get(cacheKey);
     if (cached?.length) {
-      setStableParams(cached);
+      setParamsByProvider((prev) => ({ ...prev, [provider]: cached }));
       return;
     }
-    const existing = paramsByProvider[provider];
-    if (existing?.length) {
-      paramsCacheRef.current.set(cacheKey, existing);
-      setStableParams(existing);
-      return;
-    }
-    setParamsLoading(true);
+    setParamsLoadingKey(cacheKey);
     try {
       const res = await api.getModelParams(provider, nextModel);
       const fresh = res.modelParams ?? [];
       paramsCacheRef.current.set(cacheKey, fresh);
-      setStableParams(fresh);
       setParamsByProvider((prev) => ({ ...prev, [provider]: fresh }));
     } finally {
-      setParamsLoading(false);
+      setParamsLoadingKey((key) => (key === cacheKey ? null : key));
     }
   };
 
@@ -740,6 +727,15 @@ export function SettingsPage() {
     ) => {
       setModelsByProvider((prev) => ({ ...prev, [id]: catalog.models ?? [] }));
       setParamsByProvider((prev) => ({ ...prev, [id]: catalog.modelParams ?? [] }));
+      const currentPick =
+        (catalog.currentModel &&
+        (catalog.models ?? []).some((m) => m.value === catalog.currentModel)
+          ? catalog.currentModel
+          : "") ||
+        "";
+      if (catalog.modelParams?.length && currentPick) {
+        paramsCacheRef.current.set(`${id}:${currentPick}`, catalog.modelParams);
+      }
       setForm((prev) => {
         const exposed = catalog.modelParams ?? [];
         const mapped = prev.defaultModelParamsByProvider?.[id] ?? {};
@@ -1389,40 +1385,72 @@ export function SettingsPage() {
                   const modelParams = paramsByProvider[item.id] ?? [];
                   const model = form.defaultModelByProvider?.[item.id] ?? "";
                   const paramValues = form.defaultModelParamsByProvider?.[item.id] ?? {};
+                  const parameterized =
+                    adapters.find((a) => a.id === item.id)?.parameterizedModelPicker === true ||
+                    item.id === "cursor";
+                  const loadingParams = Boolean(paramsLoadingKey?.startsWith(`${item.id}:`));
                   return (
                     <SettingRow
                       key={item.id}
+                      layout="stack"
                       label={t("settings.defaultModelFor", { agent: item.title })}
                       terms={[model]}
                     >
                       <ModelPicker
                         model={model}
                         models={models}
-                        params={stableParams.length ? stableParams : modelParams}
+                        params={modelParams}
                         paramValues={paramValues}
-                        paramsLoading={paramsLoading}
+                        paramsLoading={loadingParams}
+                        showParamsMenu={parameterized || modelParams.length > 0}
                         onChange={(value) => {
-                          patch("defaultModelByProvider", {
+                          const defaultModelByProvider = {
                             ...form.defaultModelByProvider,
                             [item.id]: value,
+                          };
+                          const defaultModelParamsByProvider = {
+                            ...form.defaultModelParamsByProvider,
+                            [item.id]: {},
+                          };
+                          patch("defaultModelByProvider", defaultModelByProvider);
+                          patch("defaultModelParamsByProvider", defaultModelParamsByProvider);
+                          if (form.defaultProvider === item.id) {
+                            patch("defaultModel", value);
+                            patch("defaultModelParams", {});
+                          }
+                          void saveSettings({
+                            defaultModelByProvider,
+                            defaultModelParamsByProvider,
+                            ...(form.defaultProvider === item.id
+                              ? { defaultModel: value, defaultModelParams: {} }
+                              : {}),
                           });
-                          if (form.defaultProvider === item.id) patch("defaultModel", value);
+                          void loadParamsForModel(item.id, value);
                         }}
                         onParamsChange={(next) => {
                           const migrated =
                             modelParams.length === 0
                               ? next
                               : migrateModelParamValues(next, modelParams);
-                          patch("defaultModelParamsByProvider", {
+                          const defaultModelParamsByProvider = {
                             ...form.defaultModelParamsByProvider,
                             [item.id]: migrated,
-                          });
+                          };
+                          patch("defaultModelParamsByProvider", defaultModelParamsByProvider);
                           if (form.defaultProvider === item.id) {
                             patch("defaultModelParams", migrated);
                           }
+                          void saveSettings({
+                            defaultModelParamsByProvider,
+                            ...(form.defaultProvider === item.id
+                              ? { defaultModelParams: migrated }
+                              : {}),
+                          });
                         }}
                         onParamsOpen={(value) => void loadParamsForModel(item.id, value)}
                         onOpen={() => {
+                          void api.warmModelParams(item.id);
+                          if (model) void loadParamsForModel(item.id, model);
                           if (models.length) return;
                           void useAppStore.getState().fetchProviderModels(item.id).then((catalog) => {
                             if (!catalog) return;

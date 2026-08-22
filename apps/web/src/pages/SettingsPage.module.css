@@ -253,6 +253,22 @@
   transform: translateX(17px);
 }
 
+@media (min-width: 900px) {
+  .switchSwitch {
+    width: 42px;
+    height: 23px;
+  }
+
+  .switchSwitch span {
+    width: 17px;
+    height: 17px;
+  }
+
+  .switchCardOn .switchSwitch span {
+    transform: translateX(19px);
+  }
+}
+
 /* The multitask toggle sits between dense field blocks in Agent → Advanced:
    no card frame and no separators around it, label spans the full width. */
 .sectionBlock.switchSection {
@@ -1407,7 +1423,8 @@
   margin-top: 6px;
   border-radius: 8px;
   padding: 6px 8px;
-  font-size: 0.78rem;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
 }
 
 .mcpRowMetaInline {

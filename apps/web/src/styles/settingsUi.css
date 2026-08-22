@@ -24,7 +24,19 @@
   --settings-focus-ring: 0 0 0 4px var(--accent-soft);
 }
 
-/* Phones: buttons match fields (desktop buttons stay smaller). */
+/* Desktop: fields and buttons a bit larger; phones keep the compact tokens. */
+@media (min-width: 900px) {
+  :root {
+    --settings-control-size: 0.94rem;
+    --settings-control-pad-y: 13px;
+    --settings-control-pad-x: 14px;
+    --settings-btn-size: 0.9rem;
+    --settings-btn-pad-y: 10px;
+    --settings-btn-pad-x: 14px;
+  }
+}
+
+/* Phones: buttons match fields (desktop buttons stay slightly smaller than fields). */
 @media (max-width: 899px) {
   :root {
     --settings-btn-size: var(--settings-control-size);

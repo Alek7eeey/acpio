@@ -170,7 +170,7 @@ export function CreateSessionFolderPicker({
   }, []);
 
   useEffect(() => {
-    if (!provider) {
+    if (!provider || lockFolder || !onOpenExisting) {
       setExisting([]);
       setExistingLoading(false);
       return;
@@ -191,7 +191,7 @@ export function CreateSessionFolderPicker({
     return () => {
       cancelled = true;
     };
-  }, [provider, lockFolder, lockedPath, defaultCwd]);
+  }, [provider, lockFolder, lockedPath, defaultCwd, onOpenExisting]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -353,7 +353,7 @@ export function CreateSessionFolderPicker({
   );
 
   const existingHover =
-    onOpenExisting && provider ? (
+    onOpenExisting && provider && !lockFolder ? (
       <div
         ref={existingRowRef}
         className={styles.pickerAgentHover}
@@ -468,7 +468,6 @@ export function CreateSessionFolderPicker({
           ) : (
             <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
           )}
-          {existingHover}
           {error ? <p className={styles.popoverError}>{error}</p> : null}
         </>
       ) : (

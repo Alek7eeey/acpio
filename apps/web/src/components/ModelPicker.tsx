@@ -179,6 +179,11 @@ type ModelPickerProps = {
   paramsLoading?: boolean;
   /** Called when the dropdown opens — use to refresh params for the current agent. */
   onOpen?: () => void;
+  /**
+   * Show the per-model ⋯ menu even before params have loaded.
+   * Defaults to visible whenever `params` has options.
+   */
+  showParamsMenu?: boolean;
   placement?: "up" | "down";
   variant?: "compact" | "block";
   className?: string;
@@ -196,6 +201,7 @@ export function ModelPicker({
   onParamsOpen,
   paramsLoading = false,
   onOpen,
+  showParamsMenu,
   placement = "up",
   variant = "compact",
   className,
@@ -204,7 +210,7 @@ export function ModelPicker({
 }: ModelPickerProps) {
   const t = useT();
   const paramLabels = { yes: t("models.yes"), no: t("models.no") };
-  const defaultModelLabel = t("models.default");
+  const defaultModelLabel = t("models.auto");
   const effortPrefix = t("models.effort");
   const contextPrefix = t("models.context");
   const [open, setOpen] = useState(false);
@@ -478,8 +484,9 @@ export function ModelPicker({
         param.currentValue ??
         param.options[0]?.value ??
         "";
-      const title = modelParamSectionName(param.id, param.name);
       const family = modelParamFamily(param.id);
+      const title =
+        family === "fast" ? t("models.auto") : modelParamSectionName(param.id, param.name);
 
       if (family === "fast") {
         const onValues = new Set(
@@ -555,7 +562,7 @@ export function ModelPicker({
   const paramsLabel = visibleParams
     .map((p) => modelParamSectionName(p.id, p.name))
     .join(", ");
-  const showMore = visibleParams.length > 0;
+  const showMore = showParamsMenu ?? visibleParams.length > 0;
 
   return (
     <div

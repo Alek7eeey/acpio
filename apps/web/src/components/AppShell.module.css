@@ -71,10 +71,11 @@
 
 .headerBrand {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   font-weight: 700;
   font-size: 1.18rem;
   letter-spacing: -0.03em;
+  line-height: 1;
   padding: 6px 10px;
   border: none;
   background: transparent;
@@ -197,7 +198,19 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /* Match .sessionTitleText in the chat tree. */
+  font-family:
+    system-ui,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
   font-weight: 400;
+  font-synthesis: none;
+  font-size: 0.88rem;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
   color: color-mix(in srgb, var(--text) 68%, var(--text-secondary));
 }
 
@@ -478,6 +491,8 @@
 
 .brandLetters {
   display: inline-flex;
+  align-items: baseline;
+  line-height: 1;
 }
 
 .brandMark {
@@ -486,6 +501,7 @@
 
 .brandFlip {
   display: inline-block;
+  line-height: 1;
 }
 
 /* Product-suffix mark: desktop uses a middle-dot separator before "Chat". */
@@ -497,20 +513,19 @@
   color: var(--text-secondary);
   opacity: 0.55;
   flex-shrink: 0;
-  align-self: center;
   user-select: none;
 }
 
 .brandChatMark {
   margin-left: 8px;
-  font-size: 0.92rem;
+  font-size: 1em;
   font-weight: 700;
   font-style: normal;
-  letter-spacing: -0.01em;
+  letter-spacing: inherit;
+  line-height: 1;
   color: var(--accent);
   white-space: nowrap;
   user-select: none;
-  align-self: center;
 }
 
 .chatPanel {
@@ -4052,8 +4067,17 @@
     font-size: 1.02rem;
   }
 
-  .sessionTitleText {
+  .sessionTitleText,
+  .headerChatTitle {
     font-size: 0.9rem;
+  }
+
+  .settingsItem {
+    font-size: 0.98rem;
+  }
+
+  .settingsLeaf {
+    font-size: 0.94rem;
   }
 
   /* Compact tree chrome — new chat + collapse sit smaller than the mobile hit targets. */

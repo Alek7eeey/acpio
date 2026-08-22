@@ -175,3 +175,19 @@
     max-width: 100%;
   }
 }
+
+@media (min-width: 900px) {
+  .toggleTrack {
+    width: 42px;
+    height: 22px;
+  }
+
+  .toggleKnob {
+    width: 18px;
+    height: 18px;
+  }
+
+  .toggleInput:checked + .toggleTrack .toggleKnob {
+    transform: translateX(20px);
+  }
+}
