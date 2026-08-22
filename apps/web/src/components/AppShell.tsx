@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { modelDisplayName } from "@acprocess/shared";
+import { modelDisplayName, modelForProvider, type MessageDto, type SessionDto } from "@acprocess/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
@@ -17,6 +17,9 @@ import {
 import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
+import { harnessShortLabel } from "../lib/harness";
+import { normalizeCwd } from "../lib/pathSegments";
+import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
@@ -36,6 +39,45 @@ const SIDEBAR_VIEWPORT_MARGIN = 320;
 /** Mobile bottom-sheet snap heights (viewport fractions). */
 const SHEET_SNAPS_CHAT = [0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.94] as const;
 const SHEET_SNAPS_SETTINGS = [0.42, 0.5, 0.58, 0.66, 0.74, 0.82, 0.9] as const;
+
+function headerFolderLabel(cwd: string | null | undefined) {
+  const normalized = normalizeCwd(cwd);
+  if (!normalized) return "";
+  if (normalized.length <= 28) return normalized;
+  const parts = normalized.split("/").filter(Boolean);
+  const leaf = parts[parts.length - 1] || normalized;
+  return leaf.length <= 28 ? leaf : `…${leaf.slice(-26)}`;
+}
+
+function firstUserMessageLine(messages: MessageDto[] | undefined): string {
+  if (!messages?.length) return "";
+  const user = messages.find((m) => m.role === "user");
+  if (!user) return "";
+  const text = user.parts
+    .filter((p) => p.type === "text")
+    .map((p) => String(p.payload.text ?? ""))
+    .join("\n")
+    .trim();
+  return text.split(/\r?\n/)[0]?.trim() ?? "";
+}
+
+/** Prefer the full first user line when the stored title was clipped (~80 chars). */
+function headerChatTitle(
+  session: SessionDto,
+  messages: MessageDto[] | undefined,
+): string {
+  const stored = session.title.trim();
+  const fromMsg = firstUserMessageLine(messages);
+  if (
+    fromMsg &&
+    fromMsg.startsWith(stored) &&
+    fromMsg.length > stored.length &&
+    stored.length >= 60
+  ) {
+    return fromMsg;
+  }
+  return stored || fromMsg;
+}
 
 function readStoredWidth() {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT;
@@ -60,10 +102,32 @@ export function AppShell() {
   const sessions = useAppStore((s) => s.sessions);
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
+  const adapters = useAppStore((s) => s.adapters);
+  const agentAvailability = useAppStore((s) => s.agentAvailability);
   const theme = useAppStore((s) => s.settings.theme);
   const setTheme = useAppStore((s) => s.setTheme);
-  const agentAvailable = useAppStore((s) => s.agentAvailable);
   const settings = useAppStore((s) => s.settings);
+  const activeSession = useAppStore((s) => s.activeSession);
+  const sessionDetails = useAppStore((s) => s.sessionDetails);
+  const chatPaneIds = useAppStore((s) => s.chatPaneIds);
+  const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
+  const headerSession = useMemo(() => {
+    const focusedId =
+      (chatPaneIds?.length ?? 0) > 1
+        ? (chatPaneIds?.[focusedPaneIndex] ?? null)
+        : (activeSession?.id ?? null);
+    if (!focusedId) return activeSession;
+    if (activeSession?.id === focusedId) return activeSession;
+    return sessions.find((s) => s.id === focusedId) ?? activeSession;
+  }, [activeSession, chatPaneIds, focusedPaneIndex, sessions]);
+  const headerTitle = useMemo(() => {
+    if (!headerSession) return "";
+    const detail =
+      activeSession?.id === headerSession.id
+        ? activeSession
+        : sessionDetails[headerSession.id];
+    return headerChatTitle(headerSession, detail?.messages);
+  }, [activeSession, headerSession, sessionDetails]);
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
@@ -91,21 +155,20 @@ export function AppShell() {
     return { branches, matches };
   }, [settingsTree, settingsQuery, searchIndex]);
 
-  const hasAgent = Boolean(settings.connectedProvider);
-  // Green only when the agent was actually verified (probe/prompt succeeded),
-  // not merely because "Connect" was pressed.
-  const agentOnline = hasAgent && agentAvailable;
+  const harnessIds = adapters.length
+    ? adapters.map((a) => a.id)
+    : (["cursor", "omp"] as const);
+  const onlineHarnessCount = harnessIds.filter((id) => agentAvailability[id] === true).length;
+  const harnessTotal = harnessIds.length;
 
-  const agentStatusTitle = useMemo(() => {
-    const provider = settings.connectedProvider;
-    const agent = !provider
-      ? t("common.noAgent")
-      : useAppStore.getState().adapters.find((a) => a.id === provider)?.label ?? provider;
-    return t("common.agentStatus", {
-      agent,
-      status: agentOnline ? t("common.online") : t("common.offline"),
-    });
-  }, [settings.connectedProvider, agentOnline, t]);
+  const agentStatusTitle = useMemo(
+    () =>
+      t("common.harnessesStatus", {
+        online: onlineHarnessCount,
+        total: harnessTotal,
+      }),
+    [onlineHarnessCount, harnessTotal, t],
+  );
 
   // Popover on the header agent chip: hover (desktop) / tap (touch) shows
   // agent name, default model and connection status.
@@ -606,22 +669,6 @@ export function AppShell() {
       window.removeEventListener("pointercancel", onUp);
     };
   }, [dragging, sidebarOpen, setSidebarOpen]);
-
-  const agentLabel = useMemo(() => {
-    const provider = settings.connectedProvider;
-    if (!provider) return t("common.noAgent");
-    if (provider === "cursor") return "Cursor";
-    if (provider === "omp") return "OMP";
-    return provider;
-  }, [settings.connectedProvider, t]);
-
-  const modelName = useMemo(
-    () =>
-      settings.defaultModel
-        ? modelDisplayName(settings.defaultModel, undefined, t("models.default"))
-        : t("models.auto"),
-    [settings.defaultModel, t],
-  );
 
   // MCP servers actually handed to the agent (enabled + has an endpoint URL).
   const enabledMcpServers = useMemo(
@@ -1211,11 +1258,28 @@ export function AppShell() {
           defaultCwd={settings.defaultCwd ?? ""}
           dialogStartPath={settings.defaultCwd ?? ""}
           recentCwds={recentCwds}
+          agents={harnessIds.map((id) => ({
+            id,
+            label: adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id),
+            online: agentAvailability[id] === true,
+          }))}
+          preferredProvider={settings.defaultProvider}
           onClose={() => setRailFolderPicker(null)}
-          onConfirm={async (cwd) => {
+          onConfirm={async (cwd, provider) => {
             setRailFolderPicker(null);
-            await createSession(cwd);
-            navigate("/chat");
+            try {
+              await createSession(cwd, provider);
+              navigate("/chat");
+            } catch (err) {
+              showToast(
+                err instanceof Error && err.message === "noAgentsOnline"
+                  ? t("common.noAgentsOnline")
+                  : err instanceof Error
+                    ? err.message
+                    : String(err),
+                { tone: "danger" },
+              );
+            }
           }}
         />
       )}
@@ -1301,15 +1365,30 @@ export function AppShell() {
               {brandButton}
             </span>
           </span>
-          <div className={styles.headerSpacer} />
+          {!isSettings && headerSession ? (
+            <HoverTip as="div" wrap className={styles.headerChatCtx} text={headerTitle}>
+              {headerFolderLabel(headerSession.cwd) ? (
+                <>
+                  <span className={styles.headerChatFolder}>
+                    {headerFolderLabel(headerSession.cwd)}
+                  </span>
+                  <span className={styles.headerChatSep} aria-hidden>
+                    /
+                  </span>
+                </>
+              ) : null}
+              <span className={styles.headerChatTitle}>{headerTitle}</span>
+            </HoverTip>
+          ) : (
+            <div className={styles.headerSpacer} />
+          )}
           <div className={styles.headerActions}>
-            <div
-              ref={agentChipRef}
-              className={styles.agentChipWrap}
-            >
+            <div ref={agentChipRef} className={styles.agentChipWrap}>
               <button
                 type="button"
-                className={styles.agentChip}
+                className={`${styles.agentChip} ${
+                  onlineHarnessCount > 0 ? styles.agentChipOn : styles.agentChipOff
+                }`}
                 aria-haspopup="true"
                 aria-expanded={agentTipOpen}
                 aria-label={agentStatusTitle}
@@ -1329,30 +1408,45 @@ export function AppShell() {
                   }
                 }}
               >
-                <span
-                  className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
-                  aria-hidden
-                />
-                <span className={styles.agentChipModel}>{modelName}</span>
+                <span className={styles.agentCount} aria-hidden>
+                  {onlineHarnessCount}
+                </span>
+                <span className={styles.agentPip} aria-hidden />
               </button>
               {agentTipOpen ? (
                 <div className={styles.agentTip} role="tooltip">
-                  <div className={styles.agentTipRow}>
-                    <span
-                      className={`${styles.dot} ${agentOnline ? styles.on : styles.off}`}
-                      aria-hidden
-                    />
-                    <span className={styles.agentTipName}>{agentLabel}</span>
-                  </div>
-                  <div className={styles.agentTipLine}>
-                    <span className={styles.agentTipLabel}>{t("settings.modelSection")}</span>
-                    <span className={styles.agentTipValue}>{settings.defaultModel || t("models.auto")}</span>
-                  </div>
-                  <div className={styles.agentTipLine}>
-                    <span className={styles.agentTipLabel}>{t("common.status")}</span>
-                    <span className={agentOnline ? styles.agentTipOk : styles.agentTipBad}>
-                      {agentOnline ? t("common.connected") : t("common.notConnected")}
-                    </span>
+                  <div className={styles.agentTipHarnessList}>
+                  {harnessIds.map((id) => {
+                    const online = agentAvailability[id] === true;
+                    const label =
+                      adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id);
+                    const modelId = modelForProvider(settings, id);
+                    const model = modelId
+                      ? modelDisplayName(modelId, undefined, t("models.default"))
+                      : t("models.auto");
+                    return (
+                      <div key={id} className={styles.agentTipHarness}>
+                        <div className={styles.agentTipRow}>
+                          <span
+                            className={`${styles.agentTipDot} ${online ? styles.agentTipDotOn : styles.agentTipDotOff}`}
+                            aria-hidden
+                          />
+                          <span className={styles.agentTipName}>{label}</span>
+                          <span className={online ? styles.agentTipOk : styles.agentTipBad}>
+                            {online ? t("common.online") : t("common.offline")}
+                          </span>
+                        </div>
+                        {online ? (
+                          <div className={styles.agentTipLine}>
+                            <span className={styles.agentTipLabel}>{t("settings.modelSection")}</span>
+                            <span className={styles.agentTipValue} title={model}>
+                              {model}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                   </div>
                   <div className={styles.agentTipMcp}>
                     <div className={styles.agentTipMcpHead}>

@@ -273,8 +273,8 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 2px 2px;
-  color: var(--text-secondary);
+  padding: 4px 2px 6px;
+  color: var(--text);
 }
 
 .treeFolderLabel {
@@ -283,8 +283,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text);
 }
 
 .treeAdd {
@@ -310,8 +311,17 @@
 }
 
 .treeRowActive {
-  background: color-mix(in srgb, var(--text) 2.2%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-secondary));
+}
+
+.treeRowActive::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
 }
 
 .treeRowTitle {
@@ -321,10 +331,15 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.78rem;
-  color: var(--text);
+  font-weight: 400;
+  color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.treeRowActive .treeRowTitle {
+  color: var(--text);
 }
 
 .treeBusy {
@@ -593,11 +608,23 @@
   display: inline-flex;
   border-radius: 8px;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
   outline: 1px solid transparent;
 }
 
-.dragSlot:active {
+.dragSlot .el {
+  cursor: grab;
+}
+
+.dragSlot:active,
+.dragSlotDragging,
+.dragSlotDragging .el {
   cursor: grabbing;
+}
+
+.dragSlotDragging {
+  opacity: 0.55;
 }
 
 .dragSlotOver {

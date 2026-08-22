@@ -27,10 +27,12 @@ import {
   writeStoredChatPanes,
   type ChatPaneSlot,
 } from "./chatPanes";
+import { pickCreateProvider, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
+const MODELS_SESSION_KEY = "acprocess.modelsCatalog.session.v1";
 const ACTIVE_SESSION_KEY = "acprocess.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
@@ -75,6 +77,14 @@ export function sanitizeCatalogModes(
   }
   // OMP only advertises a lone "default" — never a switcher.
   return [];
+}
+
+export function cachedModelsFor(provider: AgentProvider): ModelsCatalog | null {
+  const sessionHit = readSessionModelsMap()[provider];
+  if (sessionHit?.models.length) return sessionHit;
+  const active = useAppStore.getState().modelsCatalog;
+  if (active?.provider === provider && active.models.length) return active;
+  return readStoredModelsCatalog(provider);
 }
 
 type ModelsCatalogMap = Partial<Record<AgentProvider, ModelsCatalog>>;
@@ -133,8 +143,17 @@ type AppState = {
   modelsLoading: boolean;
   sidebarOpen: boolean;
   connected: boolean;
-  /** True only when the connected agent was actually verified (probe/prompt OK). */
+  /** True when the focused chat's harness (or any harness) last probed OK. */
   agentAvailable: boolean;
+  /** Per-harness: true / false / null while probing. */
+  agentAvailability: AgentAvailabilityMap;
+  agentProbing: Partial<Record<AgentProvider, boolean>>;
+  agentGateDismissed: boolean;
+  probeAllAgents: (opts?: { quiet?: boolean; reportOffline?: boolean; force?: boolean }) => Promise<void>;
+  dismissAgentGate: () => void;
+  /** Harnesses that were online last time and went offline on this reload. */
+  agentOfflineWarning: AgentProvider[];
+  dismissAgentOfflineWarning: () => void;
   pendingPermission: PendingPermission | null;
   /** Extra permission prompts waiting behind the one shown in the UI. */
   permissionQueue: PendingPermission[];
@@ -175,7 +194,7 @@ type AppState = {
   setFocusMessageId: (id: string | null) => void;
   setSpeakingMessageId: (id: string | null) => void;
   setTtsLoading: (loading: boolean) => void;
-  createSession: (cwd?: string) => Promise<SessionDto>;
+  createSession: (cwd?: string, provider?: AgentProvider, model?: string) => Promise<SessionDto>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   /** Toggle pin/archive flags (optimistic PATCH). */
@@ -204,7 +223,7 @@ type AppState = {
   cancelPrompt: (sessionId?: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
-  setAgentAvailable: (available: boolean) => void;
+  setAgentAvailable: (provider: AgentProvider, available: boolean) => void;
   handleWsEvent: (event: WsServerEvent) => void;
   answerPermission: (optionId: string) => Promise<void>;
   answerQuestion: (result: Record<string, unknown>) => Promise<void>;
@@ -214,6 +233,8 @@ type AppState = {
     provider: AgentProvider,
     opts?: { force?: boolean },
   ) => Promise<ModelsCatalog | null>;
+  /** Load a harness catalog without blocking the UI when a cache already exists. */
+  fetchProviderModels: (provider: AgentProvider) => Promise<ModelsCatalog | null>;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -255,8 +276,40 @@ function readStoredModelsMap(): ModelsCatalogMap {
   return {};
 }
 
+function readSessionModelsMap(): ModelsCatalogMap {
+  try {
+    if (typeof sessionStorage === "undefined") return {};
+    const raw = sessionStorage.getItem(MODELS_SESSION_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as { byProvider?: ModelsCatalogMap };
+    if (!parsed?.byProvider) return {};
+    const map: ModelsCatalogMap = {};
+    for (const value of Object.values(parsed.byProvider)) {
+      const cat = normalizeCatalog(value as Partial<ModelsCatalog>);
+      if (cat) map[cat.provider] = cat;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function writeSessionModelsMap(map: ModelsCatalogMap) {
+  try {
+    if (typeof sessionStorage === "undefined") return;
+    sessionStorage.setItem(MODELS_SESSION_KEY, JSON.stringify({ byProvider: map }));
+  } catch {
+    /* ignore */
+  }
+}
+
 function readStoredModelsCatalog(provider?: AgentProvider): ModelsCatalog | null {
-  const map = readStoredModelsMap();
+  const sessionMap = readSessionModelsMap();
+  const disk = readStoredModelsMap();
+  if (!Object.keys(sessionMap).length && Object.keys(disk).length) {
+    writeSessionModelsMap(disk);
+  }
+  const map = { ...disk, ...sessionMap };
   if (provider) return map[provider] ?? null;
   const values = Object.values(map).filter(Boolean) as ModelsCatalog[];
   if (!values.length) return null;
@@ -270,6 +323,7 @@ function writeStoredModelsCatalog(catalog: ModelsCatalog | null, clearProvider?:
     if (catalog) map[catalog.provider] = catalog;
     localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify({ byProvider: map }));
     localStorage.removeItem(MODELS_CACHE_KEY_LEGACY);
+    writeSessionModelsMap(map);
   } catch {
     // ignore quota / private mode
   }
@@ -338,6 +392,11 @@ let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: str
 /** Sessions for which the server has confirmed running/waiting this turn.
  *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
 const serverConfirmedBusy = new Set<string>();
+let probeAllAgentsInflight: Promise<void> | null = null;
+let lastProbeAllAgentsAt = 0;
+const PROBE_ALL_COOLDOWN_MS = 45_000;
+const OFFLINE_HOLD_MS = 2500;
+const offlineHoldTimers: Partial<Record<AgentProvider, ReturnType<typeof setTimeout>>> = {};
 
 function resolveClientMessageId(messageId: string, sessionId?: string) {
   const entry = serverToClientMessageId.get(messageId);
@@ -599,18 +658,10 @@ async function loadAppData(
   applyAppearance(settings);
   const sessions = await api.listSessions();
   set({ settings: { ...settings, theme, locale }, sessions, themes: [] });
-  const provider = get().settings.connectedProvider;
-  if (provider) {
-    void get().ensureModels(provider);
-    // Verify the agent is really reachable — the header dot must reflect
-    // actual availability, not just a saved "connected" flag.
-    void api
-      .probeAgent(provider)
-      .then((result) => get().setAgentAvailable(result.ok))
-      .catch(() => get().setAgentAvailable(false));
-  } else {
-    set({ modelsCatalog: null, modelsLoading: false });
-  }
+  void get().probeAllAgents({
+    quiet: hasStoredAgentAvailability(get().agentAvailability),
+    reportOffline: hasStoredAgentAvailability(get().agentAvailability),
+  });
   const storedId =
     typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
   const pick =
@@ -684,6 +735,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
   agentAvailable: false,
+  agentAvailability: typeof window !== "undefined" ? readStoredAgentAvailability() : {},
+  agentProbing: {},
+  agentGateDismissed:
+    typeof window !== "undefined" && hasStoredAgentAvailability(),
+  agentOfflineWarning: [],
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestion: null,
@@ -721,6 +777,107 @@ export const useAppStore = create<AppState>((set, get) => ({
       // The static registry is served at boot; a failure leaves the UI with
       // the default (cursor/omp) provider forms.
     }
+  },
+
+  dismissAgentGate() {
+    set({ agentGateDismissed: true });
+  },
+
+  dismissAgentOfflineWarning() {
+    set({ agentOfflineWarning: [] });
+  },
+
+  async probeAllAgents(opts) {
+    const force = opts?.force === true;
+    if (probeAllAgentsInflight) return probeAllAgentsInflight;
+    if (
+      !force &&
+      lastProbeAllAgentsAt > 0 &&
+      Date.now() - lastProbeAllAgentsAt < PROBE_ALL_COOLDOWN_MS
+    ) {
+      return;
+    }
+    probeAllAgentsInflight = (async () => {
+    if (!get().adapters.length) {
+      await get().loadAdapters();
+    }
+    const ids = (
+      get().adapters.length
+        ? get().adapters.map((a) => a.id)
+        : (["cursor", "omp"] as AgentProvider[])
+    ) as AgentProvider[];
+    const quiet = opts?.quiet === true;
+    const reportOffline = opts?.reportOffline === true;
+    const snapshot: AgentAvailabilityMap = { ...get().agentAvailability };
+    const probing: Partial<Record<AgentProvider, boolean>> = { ...get().agentProbing };
+    for (const id of ids) probing[id] = true;
+    if (quiet) {
+      set({ agentProbing: probing });
+    } else {
+      const availability: AgentAvailabilityMap = { ...get().agentAvailability };
+      for (const id of ids) {
+        if (availability[id] !== true && availability[id] !== false) availability[id] = null;
+      }
+      set({ agentProbing: probing, agentAvailability: availability });
+    }
+    const results: Partial<Record<AgentProvider, boolean>> = {};
+    await Promise.all(
+      ids.map(async (id) => {
+        let next: boolean;
+        try {
+          next = (await api.probeAgent(id)).ok;
+        } catch {
+          next = false;
+        }
+        results[id] = next;
+        const prev = get().agentAvailability[id];
+        if (prev !== next) get().setAgentAvailable(id, next);
+        set({
+          agentProbing: { ...get().agentProbing, [id]: false },
+        });
+      }),
+    );
+    writeStoredAgentAvailability(get().agentAvailability);
+    if (reportOffline) {
+      const wentOffline = ids.filter(
+        (id) => snapshot[id] === true && results[id] === false,
+      );
+      if (wentOffline.length) set({ agentOfflineWarning: wentOffline });
+    }
+    const online = ids.filter(
+      (id) => results[id] === true || get().agentAvailability[id] === true,
+    );
+    const settings = get().settings;
+    const nextDefault =
+      settings.defaultProvider && online.includes(settings.defaultProvider)
+        ? settings.defaultProvider
+        : (online[0] ?? null);
+    if (nextDefault) {
+      const patch: Partial<typeof settings> = {};
+      if (settings.connectedProvider !== nextDefault) patch.connectedProvider = nextDefault;
+      if (Object.keys(patch).length) {
+        try {
+          const saved = await api.updateSettings(patch);
+          set({ settings: saved });
+        } catch {
+          /* keep local */
+        }
+      }
+      const focus = get().activeSession?.provider ?? nextDefault;
+      void get().ensureModels(focus);
+    } else if (settings.connectedProvider) {
+      try {
+        const saved = await api.updateSettings({ connectedProvider: null });
+        set({ settings: saved });
+      } catch {
+        /* keep local */
+      }
+    }
+    })().finally(() => {
+      lastProbeAllAgentsAt = Date.now();
+      probeAllAgentsInflight = null;
+    });
+    return probeAllAgentsInflight;
   },
 
   rememberModelsCatalog(catalog) {
@@ -824,9 +981,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
 
     try {
-      const res = await api.listModels(provider, {
-        force: force || missingParams || missingModes || staleCursorModes || providerMismatch,
-      });
+      const res = await api.listModels(provider, { force });
       const catalog: ModelsCatalog = {
         provider,
         models: res.models ?? [],
@@ -852,6 +1007,59 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  async fetchProviderModels(provider) {
+    const activeCatalog = get().modelsCatalog;
+    const existing =
+      activeCatalog?.provider === provider && activeCatalog.models.length
+        ? activeCatalog
+        : readStoredModelsCatalog(provider);
+
+    const apply = (catalog: ModelsCatalog) => {
+      const cleaned = {
+        ...catalog,
+        modes: sanitizeCatalogModes(catalog.provider, catalog.modes),
+      };
+      writeStoredModelsCatalog(cleaned);
+      if (get().modelsCatalog?.provider === cleaned.provider) {
+        set({ modelsCatalog: cleaned, modelsLoading: false });
+      }
+      return cleaned;
+    };
+
+    const refresh = async () => {
+      const res = await api.listModels(provider);
+      const catalog: ModelsCatalog = {
+        provider,
+        models: res.models ?? [],
+        modelParams: res.modelParams ?? [],
+        modes: sanitizeCatalogModes(provider, res.modes),
+        currentModel: res.currentModel,
+        at: Date.now(),
+      };
+      if (catalog.models.length || catalog.modelParams.length || catalog.modes.length) {
+        return apply(catalog);
+      }
+      return existing;
+    };
+
+    if (existing?.models.length) {
+      if (Date.now() - existing.at >= modelsHardTtl(provider)) {
+        void refresh().catch(() => {
+          /* keep cache */
+        });
+      }
+      return existing;
+    }
+
+    try {
+      return await refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      rememberDiagnosticsError(message, "models");
+      return null;
+    }
+  },
+
   async setTheme(theme) {
     get().applyTheme(theme);
     const settings = await api.updateSettings({ theme });
@@ -868,8 +1076,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   async loadBootstrap() {
     set({ loading: true, error: null });
     try {
-      // Harness adapter meta drives the provider list and catalog decisions —
-      // load it before any model/TTL logic runs.
       void get().loadAdapters();
       await loadAppData(set, get);
     } catch (err) {
@@ -1123,11 +1329,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().selectSession(id);
   },
 
-  async createSession(cwd) {
+  async createSession(cwd, provider, model) {
     const trimmedCwd = cwd?.trim();
+    const ids = (
+      get().adapters.length
+        ? get().adapters.map((a) => a.id)
+        : (["cursor", "omp"] as AgentProvider[])
+    ) as AgentProvider[];
+    const chosen =
+      provider ??
+      pickCreateProvider(get().agentAvailability, ids, get().settings.defaultProvider);
+    if (!chosen) {
+      throw new Error("noAgentsOnline");
+    }
+    const pinnedModel = model?.trim();
     const session = await api.createSession({
       themeId: null,
+      provider: chosen,
       ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+      ...(pinnedModel ? { model: pinnedModel } : {}),
     } as Partial<SessionDto>);
     await get().refreshSessions();
     // Seed cache so selectSession paints once (empty new chat) instead of
@@ -1548,8 +1768,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ connected });
   },
 
-  setAgentAvailable(available) {
-    set({ agentAvailable: available });
+  setAgentAvailable(provider, available) {
+    const pending = offlineHoldTimers[provider];
+    if (pending) {
+      clearTimeout(pending);
+      delete offlineHoldTimers[provider];
+    }
+    const apply = (next: boolean) => {
+      const agentAvailability: AgentAvailabilityMap = {
+        ...get().agentAvailability,
+        [provider]: next,
+      };
+      const focus = get().activeSession?.provider;
+      const focusOnline = focus ? agentAvailability[focus] === true : false;
+      set({
+        agentAvailability,
+        agentAvailable: focus ? focusOnline : Object.values(agentAvailability).some((v) => v === true),
+      });
+      writeStoredAgentAvailability(agentAvailability);
+    };
+    if (available) {
+      apply(true);
+      return;
+    }
+    // Transient spawn/probe failures flip the LED for a second; wait them out.
+    offlineHoldTimers[provider] = setTimeout(() => {
+      delete offlineHoldTimers[provider];
+      apply(false);
+    }, OFFLINE_HOLD_MS);
   },
 
   handleWsEvent(event) {
@@ -1663,6 +1909,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           themeId: session.themeId,
           mcpDisabledIds: session.mcpDisabledIds,
           usage: session.usage ?? s.usage,
+          model: session.model ?? s.model,
+          modelParams: session.modelParams ?? s.modelParams,
           // Keep prior activity stamp — do not take session.lastMessageAt.
           lastMessageAt: s.lastMessageAt,
           updatedAt: s.updatedAt,
@@ -1682,7 +1930,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           prevActive.cwd !== session.cwd ||
           prevActive.provider !== session.provider ||
           prevActive.pinned !== session.pinned ||
-          prevActive.archived !== session.archived;
+          prevActive.archived !== session.archived ||
+          prevActive.model !== session.model;
         if (chatUiChanged) {
           nextActive = {
             ...prevActive,
@@ -1697,6 +1946,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             themeId: session.themeId,
             mcpDisabledIds: session.mcpDisabledIds,
             usage: session.usage ?? prevActive.usage,
+            model: session.model ?? prevActive.model,
+            modelParams: session.modelParams ?? prevActive.modelParams,
             lastMessageAt: prevActive.lastMessageAt,
             messages: prevActive.messages,
           };
@@ -1734,6 +1985,8 @@ export const useAppStore = create<AppState>((set, get) => ({
               themeId: session.themeId,
               mcpDisabledIds: session.mcpDisabledIds,
               usage: session.usage ?? paneLive.usage,
+              model: session.model ?? paneLive.model,
+              modelParams: session.modelParams ?? paneLive.modelParams,
               lastMessageAt: paneLive.lastMessageAt,
               messages: paneLive.messages,
             },
@@ -1903,9 +2156,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (event.type === "agent.availability") {
-      if (event.provider === state.settings.connectedProvider) {
-        set({ agentAvailable: event.available });
-      }
+      get().setAgentAvailable(event.provider, event.available);
       return;
     }
 
@@ -1913,7 +2164,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: event.message });
       rememberDiagnosticsError(event.message, "ws");
       void submitAutoErrorDump(event.message);
-      const provider = get().settings.connectedProvider ?? get().settings.defaultProvider;
+      const provider = get().activeSession?.provider ?? get().settings.defaultProvider;
       if (provider && isModelAccessError(event.message)) {
         void get().ensureModels(provider, { force: true });
       }

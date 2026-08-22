@@ -48,6 +48,11 @@ function mapSession(
     updatedAt: row.updatedAt.toISOString(),
     lastMessageAt: lastAt,
     usage: (row.usage as AcpUsage | null) ?? null,
+    model: row.model || "",
+    modelParams:
+      row.modelParams && typeof row.modelParams === "object" && !Array.isArray(row.modelParams)
+        ? (row.modelParams as Record<string, string>)
+        : {},
   };
 }
 
@@ -145,6 +150,7 @@ export async function createSession(input: {
   cwd: string;
   mode: AgentMode;
   themeId?: string | null;
+  model?: string;
 }): Promise<SessionDto> {
   const siblings = await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
@@ -159,6 +165,7 @@ export async function createSession(input: {
       status: "idle",
       themeId: input.themeId ?? null,
       sortOrder,
+      ...(input.model?.trim() ? { model: input.model.trim() } : {}),
     })
     .returning();
   return mapSession(row);
@@ -178,6 +185,8 @@ export async function updateSession(
     pinned: boolean;
     archived: boolean;
     mcpDisabledIds: string[];
+    model?: string;
+    modelParams?: Record<string, string>;
   }>,
 ): Promise<SessionDto | null> {
   if (patch.cwd !== undefined) patch.cwd = normalizeCwd(patch.cwd);

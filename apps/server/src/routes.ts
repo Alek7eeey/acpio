@@ -37,7 +37,6 @@ import {
   setSessionModel,
   setSessionMode,
   getAgentAvailability,
-  syncSessionAgent,
   warmAcp,
   restartSessionsForMcpChange,
   restartSessionMcp,
@@ -83,6 +82,8 @@ const settingsSchema = z.object({
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
   defaultModelParams: z.record(z.string()).optional(),
+  defaultModelByProvider: z.record(z.string()).optional(),
+  defaultModelParamsByProvider: z.record(z.record(z.string())).optional(),
   cursorCommand: z.string().optional(),
   cursorArgs: z.array(z.string()).optional(),
   ompCommand: z.string().optional(),
@@ -136,9 +137,10 @@ const settingsSchema = z.object({
     .optional(),
 });
 
-async function agentConnected(): Promise<AgentProvider | null> {
-  const settings = await getSettings();
-  return settings.connectedProvider;
+async function sendAgentOffline(req: FastifyRequest, reply: FastifyReply) {
+  return reply
+    .code(400)
+    .send({ error: errorMessage(await resolveLocale(req), "agentOffline") });
 }
 
 export async function registerRoutes(app: FastifyInstance) {
@@ -246,7 +248,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z
       .object({ provider: z.enum(adapters.ids() as [string, ...string[]]).optional() })
       .parse(req.body ?? {});
-    return probeAgent(body.provider);
+    return probeAgent(body.provider, { catalogOnly: true });
   });
 
   app.get("/api/agent/models", async (req) => {
@@ -258,11 +260,16 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/agent/status", async () => {
     const settings = await getSettings();
+    const availability: Record<string, boolean> = {};
+    for (const id of adapters.ids()) {
+      availability[id] = getAgentAvailability(id);
+    }
+    const online = adapters.ids().find((id) => availability[id]);
+    const provider = online ?? settings.connectedProvider ?? null;
     return {
-      provider: settings.connectedProvider,
-      available: settings.connectedProvider
-        ? getAgentAvailability(settings.connectedProvider)
-        : false,
+      provider,
+      available: provider ? Boolean(availability[provider]) : false,
+      availability,
     };
   });
 
@@ -359,12 +366,6 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions", async (req, reply) => {
-    const connected = await agentConnected();
-    if (!connected) {
-      return reply
-        .code(400)
-        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
-    }
     const body = z
       .object({
         title: z.string().optional(),
@@ -372,17 +373,22 @@ export async function registerRoutes(app: FastifyInstance) {
         cwd: z.string().optional(),
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
+        model: z.string().max(200).optional(),
       })
       .parse(req.body ?? {});
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
-    const provider = body.provider ?? connected;
+    const provider = body.provider ?? settings.connectedProvider ?? settings.defaultProvider;
+    if (!getAgentAvailability(provider)) {
+      return sendAgentOffline(req, reply);
+    }
     const session = await createSession({
       title: body.title,
       provider,
       cwd,
       mode: body.mode ?? settings.defaultMode,
       themeId: body.themeId,
+      model: body.model,
     });
     void warmAcp(session.id, {
       provider: session.provider,
@@ -426,10 +432,9 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const connected = await agentConnected();
-    const detail = await syncSessionAgent(id, connected);
+    const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    if (connected) {
+    if (getAgentAvailability(detail.provider)) {
       void warmAcp(id, {
         provider: detail.provider,
         cwd: detail.cwd,
@@ -499,14 +504,11 @@ export async function registerRoutes(app: FastifyInstance) {
           .optional(),
       })
       .parse(req.body);
-    const connected = await agentConnected();
-    if (!connected) {
-      return reply
-        .code(400)
-        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
-    }
-    const detail = await syncSessionAgent(id, connected);
+    const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
+    if (!getAgentAvailability(detail.provider)) {
+      return sendAgentOffline(req, reply);
+    }
 
     const settings = await getSettings();
     const defaultTitle = defaultSessionTitle(settings.locale);
@@ -589,12 +591,6 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/sessions/:id/model", async (req, reply) => {
-    const connected = await agentConnected();
-    if (!connected) {
-      return reply
-        .code(400)
-        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
-    }
     const { id } = req.params as { id: string };
     const body = z
       .object({
@@ -604,22 +600,20 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    await syncSessionAgent(id, connected);
+    if (!getAgentAvailability(detail.provider)) {
+      return sendAgentOffline(req, reply);
+    }
     return setSessionModel(id, body.model, body.params);
   });
 
   app.post("/api/sessions/:id/mode", async (req, reply) => {
-    const connected = await agentConnected();
-    if (!connected) {
-      return reply
-        .code(400)
-        .send({ error: errorMessage(await resolveLocale(req), "agentNotConnected") });
-    }
     const { id } = req.params as { id: string };
     const body = z.object({ mode: z.enum(["agent", "plan", "ask"]) }).parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    await syncSessionAgent(id, connected);
+    if (!getAgentAvailability(detail.provider)) {
+      return sendAgentOffline(req, reply);
+    }
     return setSessionMode(id, body.mode);
   });
 

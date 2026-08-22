@@ -2,8 +2,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import type { SessionDto } from "@acprocess/shared";
+import type { AgentProvider, SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
+import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { useAppStore } from "../lib/store";
@@ -26,6 +27,7 @@ type FolderPickerState = {
   x: number;
   y: number;
   dialogStartPath?: string;
+  lockedCwd?: string;
 };
 
 /** Filled manila folder glyph for the chat tree. */
@@ -244,11 +246,25 @@ export function ChatSidebar({
   const selectSession = useAppStore((s) => s.selectSession);
   const openSessionInNewPane = useAppStore((s) => s.openSessionInNewPane);
   const createSession = useAppStore((s) => s.createSession);
+  const adapters = useAppStore((s) => s.adapters);
+  const agentAvailability = useAppStore((s) => s.agentAvailability);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
   const setSessionFlags = useAppStore((s) => s.setSessionFlags);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
+
+  const agentOptions = useMemo(
+    () =>
+      (adapters.length
+        ? adapters.map((a) => ({ id: a.id, label: a.label }))
+        : [
+            { id: "cursor" as AgentProvider, label: "Cursor" },
+            { id: "omp" as AgentProvider, label: "OMP" },
+          ]
+      ).map((a) => ({ ...a, online: agentAvailability[a.id] === true })),
+    [adapters, agentAvailability],
+  );
 
   const [liked, setLiked] = useState<LikedMessage[]>(() => listLikedMessages());
   useEffect(() => subscribeLikedMessages(() => setLiked(listLikedMessages())), []);
@@ -401,13 +417,34 @@ export function ChatSidebar({
     closeMobile();
   };
 
-  const openFolderPicker = (opts: { x: number; y: number; dialogStartPath?: string }) => {
+  const startNewSession = async (cwd?: string, provider?: AgentProvider) => {
+    try {
+      await createSession(cwd, provider);
+      goToChat();
+    } catch (err) {
+      const message =
+        err instanceof Error && err.message === "noAgentsOnline"
+          ? t("common.noAgentsOnline")
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      showToast(message, { tone: "danger" });
+    }
+  };
+
+  const openFolderPicker = (opts: {
+    x: number;
+    y: number;
+    dialogStartPath?: string;
+    lockedCwd?: string;
+  }) => {
     setMenu(null);
     setConfirmDeleteId(null);
     setFolderPicker({
       x: opts.x,
       y: opts.y,
       dialogStartPath: opts.dialogStartPath,
+      lockedCwd: opts.lockedCwd,
     });
   };
 
@@ -737,7 +774,19 @@ export function ChatSidebar({
               }}
             >
               <span className={styles.sessionTitle}>
-                <span className={styles.sessionTitleText}>{s.title}</span>
+                <span className={styles.sessionTitleText} title={s.title}>
+                  {s.title}
+                </span>
+                {s.provider ? (
+                  <span
+                    className={`${styles.sessionAgentBadge}${
+                      agentAvailability[s.provider] === false ? ` ${styles.sessionAgentBadgeOff}` : ""
+                    }`}
+                    title={harnessShortLabel(s.provider)}
+                  >
+                    {harnessShortLabel(s.provider)}
+                  </span>
+                ) : null}
                 {(s.status === "running" || s.status === "waiting") &&
                   s.id !== activeSessionId && (
                     <span
@@ -752,9 +801,10 @@ export function ChatSidebar({
                   )}
               </span>
             </button>
+            <div className={styles.sessionRowActions}>
             <button
               type="button"
-              className={styles.sessionRowAction}
+              className={`${styles.sessionRowAction} ${styles.sessionPin}`}
               title={s.pinned ? t("chat.unpin") : t("chat.pin")}
               aria-label={s.pinned ? t("chat.unpin") : t("chat.pin")}
               onClick={(e) => {
@@ -781,7 +831,7 @@ export function ChatSidebar({
             </button>
             <button
               type="button"
-              className={styles.sessionRowAction}
+              className={`${styles.sessionRowAction} ${styles.sessionArchive}`}
               title={inArchive ? t("chat.unarchive") : t("chat.archive")}
               aria-label={inArchive ? t("chat.unarchive") : t("chat.archive")}
               onClick={(e) => {
@@ -827,6 +877,7 @@ export function ChatSidebar({
                 </svg>
               )}
             </button>
+            </div>
             {activity ? (
               <span
                 className={styles.sessionActivity}
@@ -910,7 +961,11 @@ export function ChatSidebar({
           aria-label={t("chat.newInFolder")}
           onClick={(e) => {
             e.stopPropagation();
-            void createSession(folder.cwd || undefined).then(() => goToChat());
+            openFolderPicker({
+              x: e.clientX,
+              y: e.clientY,
+              lockedCwd: folder.cwd || "",
+            });
           }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1094,17 +1149,11 @@ export function ChatSidebar({
               onClick={onSearchMessages}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
                 <path
-                  d="M7 3h10a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 17 16h-7.5l-3.5 3.4v-3.4H7A2.5 2.5 0 0 1 4.5 13.5v-8A2.5 2.5 0 0 1 7 3Z"
+                  d="M16 16l4.5 4.5"
                   stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinejoin="round"
-                />
-                <circle cx="16.3" cy="15.7" r="2.7" stroke="currentColor" strokeWidth="1.6" />
-                <path
-                  d="M18.4 17.8l2.2 2.2"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
+                  strokeWidth="1.8"
                   strokeLinecap="round"
                 />
               </svg>
@@ -1158,7 +1207,7 @@ export function ChatSidebar({
                         row.kind === "session"
                           ? 3
                           : row.kind === "folder-head"
-                            ? 6
+                            ? 10
                             : 8,
                     }}
                   >
@@ -1218,7 +1267,11 @@ export function ChatSidebar({
                       aria-label={t("chat.newInFolder")}
                       onClick={(e) => {
                         e.stopPropagation();
-                        void createSession(folder.cwd || undefined).then(() => goToChat());
+                        openFolderPicker({
+                          x: e.clientX,
+                          y: e.clientY,
+                          lockedCwd: folder.cwd || "",
+                        });
                       }}
                     >
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1392,8 +1445,7 @@ export function ChatSidebar({
                 openFolderPicker({
                   x,
                   y,
-                  dialogStartPath:
-                    menuSession.cwd?.trim() || settings.defaultCwd?.trim() || "",
+                  lockedCwd: menuSession.cwd?.trim() || "",
                 });
               }}
             >
@@ -1521,11 +1573,14 @@ export function ChatSidebar({
           y={folderPicker.y}
           defaultCwd={settings.defaultCwd ?? ""}
           dialogStartPath={folderPicker.dialogStartPath ?? ""}
+          lockedCwd={folderPicker.lockedCwd}
           recentCwds={recentCwds}
+          agents={agentOptions}
+          preferredProvider={settings.defaultProvider}
           onClose={() => setFolderPicker(null)}
-          onConfirm={async (cwd) => {
+          onConfirm={async (cwd, provider) => {
             setFolderPicker(null);
-            await createSession(cwd);
+            await startNewSession(cwd, provider);
           }}
         />
       )}

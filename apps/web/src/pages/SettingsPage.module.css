@@ -607,14 +607,7 @@
 .cliFields {
   display: grid;
   gap: 8px;
-  width: min(100%, 420px);
-}
-
-.cliFields .row,
-.cliDisclosureBody .row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  width: 100%;
 }
 
 .cliDisclosureBody label {
@@ -1274,11 +1267,6 @@
 
   .clearKeyBtn {
     justify-self: start;
-  }
-
-  .cliFields .row,
-  .cliDisclosureBody .row {
-    grid-template-columns: 1fr;
   }
 }
 

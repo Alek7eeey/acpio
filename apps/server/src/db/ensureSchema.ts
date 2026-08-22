@@ -1,6 +1,15 @@
 import { sql } from "drizzle-orm";
 import { db } from "./client.js";
 
+function isDuplicateColumn(err: unknown) {
+  const msg = err instanceof Error ? err.message : String(err);
+  const causeMsg =
+    err && typeof err === "object" && "cause" in err && err.cause instanceof Error
+      ? err.cause.message
+      : "";
+  return /duplicate column/i.test(msg) || /duplicate column/i.test(causeMsg);
+}
+
 /**
  * Idempotent schema bootstrap for local/dev without migration files.
  * SQLite dialect; mirrors src/db/schema.ts. Called at server boot, so a
@@ -43,12 +52,17 @@ export async function ensureSchema() {
   try {
     db.run(sql`ALTER TABLE sessions ADD COLUMN usage TEXT`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const causeMsg =
-      err && typeof err === "object" && "cause" in err && err.cause instanceof Error
-        ? err.cause.message
-        : "";
-    if (!/duplicate column/i.test(msg) && !/duplicate column/i.test(causeMsg)) throw err;
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN model TEXT NOT NULL DEFAULT ''`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN model_params TEXT NOT NULL DEFAULT '{}'`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
   }
 
   db.run(sql`

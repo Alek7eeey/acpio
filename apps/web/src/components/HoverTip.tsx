@@ -11,6 +11,8 @@ type HoverTipProps = {
   as?: "button" | "div" | "span";
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
+  /** Wrap long copy instead of clipping (native `title` is truncated on Windows). */
+  wrap?: boolean;
   "aria-label"?: string;
   "aria-disabled"?: boolean | "true" | "false";
 };
@@ -23,6 +25,7 @@ export function HoverTip({
   as = "div",
   type = "button",
   disabled,
+  wrap = false,
   ...rest
 }: HoverTipProps) {
   const t = useT();
@@ -38,14 +41,18 @@ export function HoverTip({
   const Tip =
     pos &&
     createPortal(
-      <div className={styles.tip} style={{ left: pos.x, top: pos.y }} role="tooltip">
+      <div
+        className={`${styles.tip} ${wrap ? styles.tipWrap : ""}`}
+        style={{ left: pos.x, top: pos.y }}
+        role="tooltip"
+      >
         {tipText}
       </div>,
       document.body,
     );
 
   const shared = {
-    className: `${styles.host} ${className ?? ""}`,
+    className: `${styles.host} ${wrap ? styles.hostLabel : ""} ${className ?? ""}`,
     style,
     onMouseMove: onMove,
     onMouseEnter: onMove,

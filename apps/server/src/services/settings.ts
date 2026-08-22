@@ -152,6 +152,30 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
+  if (
+    !merged.defaultModelByProvider ||
+    typeof merged.defaultModelByProvider !== "object" ||
+    Array.isArray(merged.defaultModelByProvider)
+  ) {
+    merged.defaultModelByProvider = {};
+  }
+  if (
+    !merged.defaultModelParamsByProvider ||
+    typeof merged.defaultModelParamsByProvider !== "object" ||
+    Array.isArray(merged.defaultModelParamsByProvider)
+  ) {
+    merged.defaultModelParamsByProvider = {};
+  }
+  if (
+    merged.defaultProvider &&
+    merged.defaultModel &&
+    !merged.defaultModelByProvider[merged.defaultProvider]
+  ) {
+    merged.defaultModelByProvider = {
+      ...merged.defaultModelByProvider,
+      [merged.defaultProvider]: merged.defaultModel,
+    };
+  }
   // Fields replaced by icon-level controls / never shipped.
   for (const stale of [
     "chatReadAloud",

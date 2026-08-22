@@ -559,7 +559,9 @@ export function ModelPicker({
 
   return (
     <div
-      className={`${styles.modelPicker} ${variant === "block" ? styles.block : ""} ${className ?? ""}`}
+      className={`${styles.modelPicker} ${variant === "block" ? styles.block : ""} ${
+        open ? styles.modelPickerOpen : ""
+      } ${className ?? ""}`}
       ref={rootRef}
     >
       <button

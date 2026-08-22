@@ -33,11 +33,13 @@ const tempDirs: string[] = [];
 
 /** PUT /api/settings {connectedProvider:'omp'} pointing at the fake agent. */
 function connectAgent() {
+  setAgentAvailable("omp", true);
   return app.inject({
     method: "PUT",
     url: "/api/settings",
     payload: {
       connectedProvider: "omp",
+      defaultProvider: "omp",
       ompCommand: process.execPath,
       ompArgs: [FAKE_AGENT],
     },
@@ -159,10 +161,10 @@ describe("health & settings", () => {
 });
 
 describe("sessions", () => {
-  it("POST /api/sessions without a connected agent → 400", async () => {
+  it("POST /api/sessions without a reachable agent → 400", async () => {
     const res = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("Сначала подключите агента в Настройках");
+    expect(res.json().error).toBe("Агент этого чата сейчас недоступен на этом компьютере");
   });
 
   it("POST /api/sessions with connected agent → 200 with id; detail shows warmed acpSessionId", async () => {
@@ -842,7 +844,11 @@ describe("agent status", () => {
   it("GET /api/agent/status without a connected provider → provider null, available false", async () => {
     const res = await app.inject({ method: "GET", url: "/api/agent/status" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ provider: null, available: false });
+    expect(res.json()).toEqual({
+      provider: null,
+      available: false,
+      availability: { cursor: false, omp: false },
+    });
   });
 
   it("GET /api/agent/status with a connected provider reports it", async () => {
@@ -852,7 +858,7 @@ describe("agent status", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.provider).toBe("omp");
-    // No prompt has ever run in this suite, so the agent is not marked available.
-    expect(body.available).toBe(false);
+    expect(body.available).toBe(true);
+    expect(body.availability.omp).toBe(true);
   });
 });

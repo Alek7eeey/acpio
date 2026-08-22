@@ -15,12 +15,15 @@ export function SettingRow({
   label,
   hint,
   terms,
+  layout = "inline",
   children,
 }: {
   label: ReactNode;
   hint?: ReactNode;
   /** Extra search terms for rows whose label/hint are not plain text. */
   terms?: string[];
+  /** `stack`: label above, control full width (CLI fields, long inputs). */
+  layout?: "inline" | "stack";
   children?: ReactNode;
 }) {
   const { active, matches, highlight } = useSettingsSearch();
@@ -31,7 +34,7 @@ export function SettingRow({
     if (!matches(haystack)) return null;
   }
   return (
-    <div className={styles.row}>
+    <div className={`${styles.row}${layout === "stack" ? ` ${styles.rowStack}` : ""}`}>
       <div className={styles.text}>
         <span className={styles.label}>{labelText ? highlight(labelText) : label}</span>
         {hint ? (

@@ -161,6 +161,46 @@
   min-width: 0;
 }
 
+.headerChatCtx {
+  display: flex;
+  align-items: baseline;
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.headerChatFolder {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  opacity: 0.78;
+}
+
+.headerChatSep {
+  flex-shrink: 0;
+  margin: 0 0.45em;
+  color: var(--text-secondary);
+  opacity: 0.35;
+  font-weight: 400;
+}
+
+.headerChatTitle {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--text) 68%, var(--text-secondary));
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -683,10 +723,9 @@
 .folderGroup {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   min-width: 0;
-  /* Tight air between projects; chats inside use folderBody/timeGroup gap. */
-  margin-bottom: 6px;
+  margin-bottom: 10px;
 }
 
 /* Sessions under a folder: rail + indent so chats sit one level deeper. */
@@ -696,13 +735,13 @@
   gap: 3px;
   min-width: 0;
   margin: 0 0 0 10px;
-  padding: 4px 0 0 14px;
-  border-left: 1px solid color-mix(in srgb, var(--border) 32%, transparent);
+  padding: 8px 0 0 14px;
+  border-left: 1px solid color-mix(in srgb, var(--border) 16%, transparent);
   transition: border-color 0.18s ease;
 }
 
 .folderBodyActive {
-  border-left-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .treeVirtNested {
@@ -710,12 +749,12 @@
   padding-left: 22px;
   margin-left: 8px;
   width: calc(100% - 8px) !important;
-  border-left: 1px solid color-mix(in srgb, var(--border) 32%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--border) 16%, transparent);
   transition: border-color 0.18s ease;
 }
 
 .treeVirtNestedActive {
-  border-left-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-left-color: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .ungroupedSessions {
@@ -739,10 +778,10 @@
   min-width: 0;
   min-height: 24px;
   /* Align folder name with chat titles' column, chats go one step deeper. */
-  padding: 2px 4px 2px 6px;
-  margin-bottom: 2px;
+  padding: 3px 4px 3px 6px;
+  margin-bottom: 0;
   border-radius: 6px;
-  color: var(--text-secondary);
+  color: var(--text);
   cursor: pointer;
   transition:
     color 0.18s ease,
@@ -750,16 +789,16 @@
 }
 
 .folderHeadActive {
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  color: color-mix(in srgb, var(--text-secondary) 60%, var(--accent));
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  color: var(--text);
 }
 
 .folderHeadActive .folderLabel {
-  color: color-mix(in srgb, var(--text-secondary) 50%, var(--accent));
+  color: var(--text);
 }
 
 .folderHeadActive .folderLead {
-  color: color-mix(in srgb, var(--text-secondary) 45%, var(--accent));
+  color: var(--text);
 }
 
 .folderIcon {
@@ -806,12 +845,12 @@
     "Helvetica Neue",
     Arial,
     sans-serif;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 500;
   font-synthesis: none;
   line-height: 1.25;
-  letter-spacing: 0.01em;
-  color: color-mix(in srgb, var(--text-secondary) 88%, transparent);
+  letter-spacing: 0.005em;
+  color: var(--text);
 }
 
 .folderAdd {
@@ -860,7 +899,7 @@
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--text-secondary) 88%, transparent);
+  color: color-mix(in srgb, var(--text) 82%, var(--text-secondary));
 }
 
 .folderChevronIcon {
@@ -1033,15 +1072,22 @@
     pointer-events: auto;
   }
 
-  /* ⋯ only while the row is hovered (or its menu is open). */
+  /* ⋯ only while the row is hovered (or its menu is open). Collapsed so the
+     time stamp can sit on the right edge until then. */
   .sessionMore {
+    width: 0;
+    min-width: 0;
     opacity: 0;
+    overflow: hidden;
     pointer-events: none;
   }
 
   .sessionItem:hover .sessionMore,
   .sessionItem.sessionMenuOpen .sessionMore {
+    width: 24px;
+    min-width: 24px;
     opacity: 1;
+    overflow: visible;
     pointer-events: auto;
   }
 }
@@ -1054,6 +1100,15 @@
 .themeMore:hover,
 .sessionMore:hover {
   color: var(--accent);
+}
+
+/* Pin / archive sit with the time on the right; ⋯ appears after the time. */
+.sessionRowActions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 0;
+  min-width: 0;
 }
 
 /* Pin / archive actions — revealed only on row hover. */
@@ -1096,12 +1151,19 @@
    the opacity actually applies), reveal only while the chat row is hovered. */
 @media (hover: hover) and (pointer: fine) {
   .sessionRowAction {
+    width: 0;
+    min-width: 0;
     opacity: 0;
+    overflow: hidden;
     pointer-events: none;
   }
 
-  .sessionItem:hover .sessionRowAction {
+  .sessionItem:hover .sessionRowAction,
+  .sessionItem.sessionMenuOpen .sessionRowAction {
+    width: 24px;
+    min-width: 24px;
     opacity: 1;
+    overflow: visible;
     pointer-events: auto;
   }
 }
@@ -1137,27 +1199,41 @@
 }
 
 .sessionItem {
-  display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
+  display: flex;
   align-items: center;
+  gap: 0;
   border-radius: 6px;
   border: none;
   cursor: pointer;
   position: relative;
+  overflow: hidden;
   min-height: 32px;
   touch-action: manipulation;
   margin: 0;
+  padding-right: 8px;
   transition: background 0.12s ease;
 }
 
 .sessionItem.active {
-  background: color-mix(in srgb, var(--text) 2.2%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.sessionItem.active::before,
+.sessionItem.sessionInPane::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 .sessionItem.sessionInPane {
-  background: color-mix(in srgb, var(--text) 1%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.sessionItem.sessionInPane::before {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .sessionItem.sessionInPane .sessionTitle,
@@ -1169,36 +1245,12 @@
   opacity: 0.72;
 }
 
-:global([data-theme="light"]) .sessionItem.active {
-  background: rgba(24, 24, 27, 0.035);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-:global([data-theme="light"]) .sessionItem.sessionInPane {
-  background: rgba(24, 24, 27, 0.018);
-}
-
-:global([data-theme="light"]) .sessionItem.sessionInPane .sessionTitle,
-:global([data-theme="light"]) .sessionItem.sessionInPane .sessionTitleText {
-  color: rgba(24, 24, 27, 0.55);
-}
-
 .sessionItem:hover {
-  background: color-mix(in srgb, var(--text) 3.2%, transparent);
+  background: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 .sessionItem.active:hover {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-:global([data-theme="light"]) .sessionItem:hover {
-  background: rgba(24, 24, 27, 0.04);
-}
-
-:global([data-theme="light"]) .sessionItem.active:hover {
-  background: rgba(24, 24, 27, 0.055);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .sessionItem.entering {
   animation: sessionItemIn 0.24s ease both;
@@ -1219,26 +1271,31 @@
   text-align: left;
   border: none;
   background: transparent;
-  padding: 5px 4px 5px 10px;
+  padding: 5px 2px 5px 10px;
   min-width: 0;
+  overflow: hidden;
   color: var(--text);
-  width: 100%;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  column-gap: 10px;
+  gap: 4px;
 }
 
 .sessionTitle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .sessionTitleText {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1253,10 +1310,46 @@
     sans-serif;
   font-weight: 400;
   font-synthesis: none;
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   line-height: 1.25;
   letter-spacing: -0.01em;
-  color: color-mix(in srgb, var(--text) 90%, var(--text-secondary));
+  color: var(--text-secondary);
+}
+
+.sessionItem.active .sessionTitleText {
+  color: var(--text);
+}
+
+.sessionAgentBadge {
+  flex-shrink: 0;
+  max-width: 4.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.sessionAgentBadgeOff {
+  opacity: 0.55;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sessionAgentBadge {
+    display: none;
+  }
+
+  .sessionItem.active .sessionAgentBadge,
+  .sessionItem:hover .sessionAgentBadge,
+  .sessionItem.sessionMenuOpen .sessionAgentBadge,
+  .sessionItem:focus-within .sessionAgentBadge {
+    display: inline-flex;
+  }
 }
 
 /* "Working" indicator: three staggered bouncing bars (mini equalizer) —
@@ -1305,27 +1398,28 @@
 }
 
 .sessionActivity {
-  justify-self: end;
+  flex: 0 0 auto;
   align-self: center;
   display: inline-flex;
   align-items: center;
-  height: 17px;
+  justify-content: flex-end;
+  height: 16px;
   margin: 0;
-  padding: 0 2px;
+  padding: 0 0 0 6px;
   border: none;
   border-radius: 0;
-  font-size: 0.64rem;
+  font-size: 0.7rem;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   line-height: 1;
-  color: color-mix(in srgb, var(--text-secondary) 72%, transparent);
+  color: var(--text-secondary);
   background: transparent;
   white-space: nowrap;
-  max-width: 7.5rem;
+  max-width: none;
+  min-width: max-content;
   box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
 }
 
 .sessionItem.active .sessionTitle {
@@ -1338,7 +1432,7 @@
 }
 
 .sessionItem.active .sessionActivity {
-  color: color-mix(in srgb, var(--text-secondary) 58%, transparent);
+  color: color-mix(in srgb, var(--text-secondary) 88%, var(--text));
   background: transparent;
 }
 
@@ -1347,7 +1441,7 @@
 }
 
 :global([data-theme="light"]) .sessionActivity {
-  color: rgba(24, 24, 27, 0.34);
+  color: rgba(24, 24, 27, 0.52);
   border: none;
   background: transparent;
   font-weight: 400;
@@ -1355,11 +1449,11 @@
 
 :global([data-theme="light"]) .sessionItem:hover .sessionActivity {
   background: transparent;
-  color: rgba(24, 24, 27, 0.4);
+  color: rgba(24, 24, 27, 0.62);
 }
 
 :global([data-theme="light"]) .sessionItem.active .sessionActivity {
-  color: rgba(24, 24, 27, 0.4);
+  color: rgba(24, 24, 27, 0.62);
   background: transparent;
 }
 
@@ -2096,7 +2190,35 @@
   flex-direction: column;
   gap: 0;
   padding: 6px;
+  overflow: visible;
   animation: rise 0.16s ease;
+}
+
+.pickerPanelCompact {
+  min-width: 198px;
+}
+
+.pickerPanelCompact .pickerHead {
+  padding: 6px 9px 3px;
+  font-size: 0.68rem;
+}
+
+.pickerPanelCompact .pickerLockedCwd {
+  gap: 8px;
+  padding: 2px 9px 6px;
+  font-size: 0.8rem;
+}
+
+.pickerPanelCompact .pickerItem,
+.pickerPanelCompact .pickerItemPath,
+.pickerPanelCompact .pickerEmpty {
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.pickerPanelCompact .pickerItem {
+  padding: 7px 9px;
+  gap: 8px;
 }
 
 .pickerSearch {
@@ -2169,6 +2291,42 @@
   color: var(--text-secondary);
 }
 
+.pickerLockedCwd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 10px 8px;
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+
+.pickerAgentRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.pickerAgentChip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pickerAgentChipOn {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
 .pickerList {
   display: flex;
   flex-direction: column;
@@ -2191,11 +2349,21 @@
   color: var(--text);
   font: inherit;
   font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.25;
   cursor: pointer;
 }
 
 .pickerItem:hover {
   background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.pickerItemActive {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.pickerItemActive:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .pickerItemIcon {
@@ -2215,6 +2383,50 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.pickerAgentHover {
+  position: relative;
+}
+
+.pickerNestedModels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 0 4px 12px;
+}
+
+.pickerSubmenu {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 0;
+  z-index: 312;
+  min-width: 220px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(320px, calc(100vh - 16px));
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  font-size: 0.88rem;
+  animation: rise 0.14s ease;
+}
+
+.pickerSubmenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  max-height: min(280px, calc(100vh - 48px));
 }
 
 .pickerEmpty {
@@ -2244,6 +2456,8 @@
   color: var(--text);
   font: inherit;
   font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.25;
   cursor: pointer;
 }
 
@@ -2254,16 +2468,30 @@
 .pickerActionLabel {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 400;
+  line-height: 1.25;
 }
 
 .pickerActionChevron {
   flex: 0 0 auto;
   color: var(--text-secondary);
   opacity: 0.6;
+  display: grid;
+  place-items: center;
+  transition: transform 0.15s ease;
 }
 
 .pickerActionChevron svg {
   display: block;
+}
+
+.pickerActionChevronOpen {
+  transform: rotate(90deg);
 }
 
 .folderPickerPopover form {
@@ -2666,6 +2894,7 @@
   z-index: 200;
   height: var(--header-height);
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 12px;
   padding: 0 16px;
@@ -2694,136 +2923,173 @@
   margin-left: auto;
 }
 
-/* Agent status chip — a status dot + the default model name. On mobile it
-   collapses to the bare dot (the model name lives in the tap popup). */
+/* Agent status — separate from the language/theme toolbar cluster. */
 .agentChipWrap {
+  position: relative;
   display: inline-flex;
   flex-shrink: 0;
+  overflow: visible;
 }
 
 .agentChip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 30px;
-  max-width: min(180px, 34vw);
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  justify-content: center;
+  gap: 5px;
+  width: calc(var(--toolbar-btn-size) + 6px);
+  height: calc(var(--toolbar-btn-size) + 6px);
+  min-width: calc(var(--toolbar-btn-size) + 6px);
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
   cursor: pointer;
-  transition: border-color var(--motion), color var(--motion);
+  box-sizing: border-box;
+  transition: background var(--motion), color var(--motion);
 }
 
 .agentChip:hover {
-  border-color: var(--accent);
+  background: var(--bg-tertiary);
   color: var(--text);
 }
 
-.agentChip .dot {
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
+.agentCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0.7em;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
 }
 
-.agentChip .dot.off {
-  background: var(--danger);
-  box-shadow: 0 0 0 3px var(--danger-soft);
+.agentPip {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
 }
 
-.agentChip .dot.on {
-  background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-soft);
+.agentChipOn .agentPip {
+  background: color-mix(in srgb, var(--success) 48%, var(--text-secondary));
 }
 
-.agentChipModel {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+.agentChipOff .agentPip {
+  background: color-mix(in srgb, var(--danger) 42%, var(--text-secondary));
 }
 
 .agentTip {
-  /* Anchored to the header (position: relative, spans the viewport), so the
-     popup always sits at the top-right and never overflows on narrow screens. */
   position: absolute;
   top: calc(100% + 8px);
-  right: max(12px, env(safe-area-inset-right, 0px));
+  right: 0;
   z-index: 300;
-  width: max-content;
-  min-width: min(210px, calc(100vw - 24px));
-  max-width: min(320px, calc(100vw - 24px));
-  padding: 11px 13px;
+  width: 240px;
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 10px 11px;
   border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18);
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 16%, transparent);
   display: grid;
   gap: 8px;
   pointer-events: none;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text);
 }
 
 .agentTipRow {
   display: flex;
   align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.agentTipHarnessList {
+  display: grid;
   gap: 8px;
 }
 
-.agentTip .dot {
-  width: 8px;
-  height: 8px;
+.agentTipHarness {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agentTipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background: color-mix(in srgb, var(--text-secondary) 50%, transparent);
 }
 
-.agentTip .dot.off {
-  background: var(--danger);
-  box-shadow: 0 0 0 3px var(--danger-soft);
+.agentTipDotOff {
+  background: color-mix(in srgb, var(--danger) 50%, var(--text-secondary));
 }
 
-.agentTip .dot.on {
-  background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-soft);
+.agentTipDotOn {
+  background: color-mix(in srgb, var(--success) 48%, var(--text-secondary));
 }
 
 .agentTipName {
-  font-size: 0.9rem;
-  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agentTipLine {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px;
+  display: flex;
   align-items: baseline;
-  font-size: 0.8rem;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-left: 13px;
+  font-size: 11px;
   font-weight: 500;
 }
 
 .agentTipLabel {
   color: var(--text-secondary);
   white-space: nowrap;
+  font-size: 11px;
 }
 
 .agentTipValue {
-  color: var(--text);
+  color: var(--text-secondary);
   text-align: right;
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
 }
 
 .agentTipOk {
-  color: var(--success);
-  font-weight: 650;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--success) 38%, var(--text-secondary));
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .agentTipBad {
-  color: var(--danger);
-  font-weight: 650;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--danger) 34%, var(--text-secondary));
+  font-size: 11px;
+  font-weight: 500;
 }
 
 .agentTipMcp {
@@ -2842,22 +3108,22 @@
 }
 
 .agentTipMcpHead .agentTipLabel {
-  font-size: 0.7rem;
+  font-size: 10px;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .agentTipMcpCount {
   flex: 0 0 auto;
-  font-size: 0.62rem;
-  font-weight: 700;
-  color: var(--text-tertiary, var(--text-secondary));
+  font-size: 10px;
+  font-weight: 650;
+  color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 1px 7px;
-  line-height: 1.4;
+  padding: 0 6px;
+  line-height: 1.6;
 }
 
 .agentTipMcpList {
@@ -2888,8 +3154,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-weight: 600;
-  font-size: 0.78rem;
+  font-weight: 550;
+  font-size: 11px;
 }
 
 .agentTipMcpDot {
@@ -2900,13 +3166,11 @@
 }
 
 .agentTipMcpDotOk {
-  background: var(--success);
-  box-shadow: 0 0 0 2px var(--success-soft);
+  background: color-mix(in srgb, var(--success) 50%, var(--text-secondary));
 }
 
 .agentTipMcpDotBad {
-  background: var(--danger);
-  box-shadow: 0 0 0 2px var(--danger-soft);
+  background: color-mix(in srgb, var(--danger) 50%, var(--text-secondary));
 }
 
 .agentTipMcpDotPending {
@@ -2916,28 +3180,28 @@
 
 .agentTipMcpType {
   flex: 0 0 auto;
-  color: var(--accent);
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 1px 6px;
 }
 
 .agentTipMuted {
   justify-self: start;
   display: inline-flex;
   align-items: center;
-  padding: 2px 9px;
+  padding: 1px 8px;
   border-radius: 999px;
-  border: 1px dashed color-mix(in srgb, var(--text-tertiary, var(--text-secondary)) 45%, transparent);
-  font-size: 0.72rem;
-  font-weight: 550;
-  letter-spacing: 0.02em;
+  border: 1px dashed color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   line-height: 1.4;
-  color: var(--text-tertiary, var(--text-secondary));
+  color: var(--text-secondary);
   font-style: normal;
 }
 
@@ -2952,6 +3216,7 @@
   background: var(--surface);
   height: calc(var(--toolbar-btn-size) + 6px);
   box-sizing: border-box;
+  overflow: visible;
 }
 
 .toolCluster > * {
@@ -3158,6 +3423,23 @@
 .dot.on {
   background: var(--success);
   box-shadow: 0 0 0 4px var(--success-soft);
+}
+
+.dotSpin {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.6px solid var(--border);
+  border-top-color: var(--accent);
+  background: transparent;
+  box-shadow: none;
+  animation: agentDotSpin 0.7s linear infinite;
+}
+
+@keyframes agentDotSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .themeBtn {
@@ -3703,22 +3985,6 @@
     gap: 0 !important;
   }
 
-  /* Mobile: collapse the agent chip to a bare status dot. */
-  .agentChip {
-    width: 26px;
-    height: 26px;
-    min-width: 26px;
-    max-width: none;
-    padding: 0;
-    justify-content: center;
-    gap: 0;
-    flex-shrink: 0;
-  }
-
-  .agentChipModel {
-    display: none;
-  }
-
   .collapseBtn {
     width: var(--toolbar-btn-size);
     height: var(--toolbar-btn-size);
@@ -3801,11 +4067,11 @@
 }
 
 /* Hidden tree controls (settings → Chat → Tree buttons). */
-.treeNoPin .sessionItem > button:nth-of-type(2) {
+.treeNoPin .sessionPin {
   display: none;
 }
 
-.treeNoArchive .sessionItem > button:nth-of-type(3) {
+.treeNoArchive .sessionArchive {
   display: none;
 }
 

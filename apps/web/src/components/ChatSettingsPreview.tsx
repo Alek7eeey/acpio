@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import type {
   ChatActionId,
   ChatComposerButtonId,
@@ -252,6 +252,9 @@ function DragBar({
  * Message action bar mock: every applicable action renders as a draggable
  * icon in a STABLE slot (position never jumps when toggling). The "⋯"
  * overflow exists only in the real chat — the preview shows all actions.
+ *
+ * Pointer capture (not HTML5 DnD): nested click-to-toggle chips swallow
+ * native dragstart/drop in Chromium, so reorder never fired.
  */
 function PreviewActions({
   actions,
@@ -266,33 +269,80 @@ function PreviewActions({
 }) {
   const t = useT();
   const [overId, setOverId] = useState<ChatActionId | null>(null);
+  const [draggingId, setDraggingId] = useState<ChatActionId | null>(null);
+  const skipClickRef = useRef(false);
+  const onReorderRef = useRef(onReorder);
+  onReorderRef.current = onReorder;
   const isOn = (id: ChatActionId) => actions.includes(id);
+
+  const onPointerDown = (id: ChatActionId) => (e: ReactPointerEvent<HTMLSpanElement>) => {
+    if (e.button !== 0) return;
+    const pointerId = e.pointerId;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const bar = e.currentTarget.parentElement;
+    let moved = false;
+
+    const hit = (x: number, y: number): ChatActionId | null => {
+      if (!bar) return null;
+      for (const el of bar.querySelectorAll<HTMLElement>("[data-action-id]")) {
+        const r = el.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          return el.dataset.actionId as ChatActionId;
+        }
+      }
+      return null;
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+        moved = true;
+        skipClickRef.current = true;
+        setDraggingId(id);
+      }
+      setOverId(hit(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      const target = moved ? hit(ev.clientX, ev.clientY) : null;
+      setDraggingId(null);
+      setOverId(null);
+      if (moved && target && target !== id) onReorderRef.current(id, target);
+      if (moved) {
+        window.setTimeout(() => {
+          skipClickRef.current = false;
+        }, 0);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
 
   return (
     <div className={styles.actions}>
       {ordered.map((id) => (
         <span
           key={id}
-          className={`${styles.dragSlot}${overId === id ? ` ${styles.dragSlotOver}` : ""}`}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("text/plain", id);
-            e.dataTransfer.effectAllowed = "move";
-          }}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setOverId(id);
-          }}
-          onDragLeave={() => setOverId((v) => (v === id ? null : v))}
-          onDrop={(e) => {
-            e.preventDefault();
-            const dragged = e.dataTransfer.getData("text/plain") as ChatActionId;
-            if (dragged && dragged !== id) onReorder(dragged, id);
-            setOverId(null);
-          }}
-          onDragEnd={() => setOverId(null)}
+          data-action-id={id}
+          className={`${styles.dragSlot}${overId === id ? ` ${styles.dragSlotOver}` : ""}${
+            draggingId === id ? ` ${styles.dragSlotDragging}` : ""
+          }`}
+          onPointerDown={onPointerDown(id)}
         >
-          <El on={isOn(id)} onToggle={() => onToggle(id)} label={t(ACTION_LABEL_KEY[id] as "common.copy")}>
+          <El
+            on={isOn(id)}
+            onToggle={() => {
+              if (skipClickRef.current) return;
+              onToggle(id);
+            }}
+            label={t(ACTION_LABEL_KEY[id] as "common.copy")}
+          >
             <span className={styles.actIcon}>{actionIcon(id)}</span>
           </El>
         </span>
@@ -344,7 +394,7 @@ export function ChatSettingsPreview({
   onToggleTreeElement: (id: ChatTreeElementId) => void;
   onToggleTreeMenu: (id: ChatTreeMenuId) => void;
   onToggleShowArchive: () => void;
-  onReorderAction: (dragged: ChatActionId, target: ChatActionId) => void;
+  onReorderAction: (nextOrder: ChatActionId[]) => void;
   onHeaderHeight: (next: number) => void;
   onToggleHeaderIcon: (id: ChatHeaderIconId) => void;
   onToggleChatSplit: () => void;
@@ -373,25 +423,23 @@ export function ChatSettingsPreview({
     "regenerate",
     "readAloud",
   ];
-  const orderRef = useRef<ChatActionId[] | null>(null);
-  if (!orderRef.current) {
-    orderRef.current = [...actions, ...ALL_ACTIONS.filter((id) => !actions.includes(id))];
-  }
-  const displayOrder = orderRef.current;
+  const [displayOrder, setDisplayOrder] = useState<ChatActionId[]>(() => [
+    ...actions,
+    ...ALL_ACTIONS.filter((id) => !actions.includes(id)),
+  ]);
   const orderedFor = (applicable: ChatActionId[]): ChatActionId[] =>
     applicable
       .filter((id) => displayOrder.includes(id))
       .sort((a, b) => displayOrder.indexOf(a) - displayOrder.indexOf(b));
   const handleReorder = (dragged: ChatActionId, target: ChatActionId) => {
-    const cur = [...(orderRef.current ?? [])];
-    const from = cur.indexOf(dragged);
-    const to = cur.indexOf(target);
+    const from = displayOrder.indexOf(dragged);
+    const to = displayOrder.indexOf(target);
     if (from < 0 || to < 0 || from === to) return;
-    const next = [...cur];
+    const next = [...displayOrder];
     next.splice(from, 1);
     next.splice(to, 0, dragged);
-    orderRef.current = next;
-    onReorderAction(dragged, target);
+    setDisplayOrder(next);
+    onReorderAction(next);
   };
   const [treeMenuPos, setTreeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const treeMenuRef = useRef<HTMLDivElement>(null);
@@ -545,13 +593,8 @@ export function ChatSettingsPreview({
               >
                 <span className={styles.treeSearchMsgs} aria-hidden>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M7 3h10a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 17 16h-7.5l-3.5 3.4v-3.4H7A2.5 2.5 0 0 1 4.5 13.5v-8A2.5 2.5 0 0 1 7 3Z"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinejoin="round"
-                    />
-                    <circle cx="16.3" cy="15.7" r="2.7" stroke="currentColor" strokeWidth="1.6" />
+                    <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                    <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                   </svg>
                 </span>
               </El>

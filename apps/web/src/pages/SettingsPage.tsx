@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   migrateModelParamValues,
-  type AgentProbeResult,
   type AgentProvider,
   type AppSettings,
   type ChatActionId,
@@ -19,7 +18,7 @@ import { api } from "../lib/api";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
 import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
 import { useT } from "../lib/i18n";
-import { adapterMeta, useAppStore } from "../lib/store";
+import { cachedModelsFor, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
@@ -248,14 +247,6 @@ function ChatConfigRows({
   );
 }
 
-/** Command value a provider's settings form carries (adapter-declared field). */
-function adapterCommandFor(form: AppSettings, provider: AgentProvider): string {
-  const meta = adapterMeta(provider);
-  if (!meta) return provider === "cursor" ? form.cursorCommand ?? "agent" : form.ompCommand ?? "omp";
-  const stored = (form as unknown as Record<string, unknown>)[meta.commandField];
-  return typeof stored === "string" && stored.trim() ? stored.trim() : meta.defaultCommand;
-}
-
 function SchemeCard({
   active,
   name,
@@ -433,6 +424,7 @@ export function SettingsPage() {
   );
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const agentAvailability = useAppStore((s) => s.agentAvailability);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
   /** Show SearchResults panel; false = show normal page with highlighted text. */
@@ -474,14 +466,11 @@ export function SettingsPage() {
     );
   }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
-  const [probes, setProbes] = useState<Partial<Record<AgentProvider, AgentProbeResult>>>({});
-  const [probingId, setProbingId] = useState<AgentProvider | null>(null);
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
   const [folderBrowseTarget, setFolderBrowseTarget] = useState<
     "defaultCwd" | "diagnosticsDir" | "exportDir"
   >("defaultCwd");
   const [copied, setCopied] = useState(false);
-  const [connectingId, setConnectingId] = useState<AgentProvider | null>(null);
 
   // Live-preview the appearance (font + palettes) while editing; the store
   // re-applies the saved settings after saveSettings.
@@ -503,8 +492,12 @@ export function SettingsPage() {
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "browser">("idle");
-  const [models, setModels] = useState<Array<{ value: string; name: string }>>([]);
-  const [modelParams, setModelParams] = useState<ModelParamDto[]>([]);
+  const [modelsByProvider, setModelsByProvider] = useState<
+    Partial<Record<AgentProvider, Array<{ value: string; name: string }>>>
+  >({});
+  const [paramsByProvider, setParamsByProvider] = useState<
+    Partial<Record<AgentProvider, ModelParamDto[]>>
+  >({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [paramsLoading, setParamsLoading] = useState(false);
@@ -543,8 +536,8 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (paramsLoading) return;
-    setStableParams(modelParams);
-  }, [modelParams, paramsLoading]);
+    setStableParams([]);
+  }, [paramsLoading]);
 
   const refreshDiagnostics = async () => {
     setDiagLoading(true);
@@ -681,163 +674,135 @@ export function SettingsPage() {
     setMcpDraft(null);
   };
 
-  const loadParamsForModel = async (nextModel: string) => {
-    const cached = paramsCacheRef.current.get(nextModel);
+  const loadParamsForModel = async (provider: AgentProvider, nextModel: string) => {
+    const cacheKey = `${provider}:${nextModel}`;
+    const cached = paramsCacheRef.current.get(cacheKey);
     if (cached?.length) {
       setStableParams(cached);
       return;
     }
-    if (nextModel === form.defaultModel && modelParams.length) {
-      paramsCacheRef.current.set(nextModel, modelParams);
-      setStableParams(modelParams);
+    const existing = paramsByProvider[provider];
+    if (existing?.length) {
+      paramsCacheRef.current.set(cacheKey, existing);
+      setStableParams(existing);
       return;
     }
-    const provider = settings.connectedProvider ?? form.defaultProvider;
-    if (!provider) return;
     setParamsLoading(true);
     try {
       const res = await api.getModelParams(provider, nextModel);
       const fresh = res.modelParams ?? [];
-      paramsCacheRef.current.set(nextModel, fresh);
+      paramsCacheRef.current.set(cacheKey, fresh);
       setStableParams(fresh);
-      if (nextModel === form.defaultModel) {
-        setModelParams(fresh);
-      }
+      setParamsByProvider((prev) => ({ ...prev, [provider]: fresh }));
     } finally {
       setParamsLoading(false);
     }
   };
 
-  const connectProvider = async (provider: AgentProvider) => {
-    setConnectingId(provider);
-    try {
-      // Verify the agent is actually reachable before committing the connection.
-      const probe = await api.probeAgent(provider);
-      setProbes((prev) => ({ ...prev, [provider]: probe }));
-      useAppStore.getState().setAgentAvailable(probe.ok);
-      if (!probe.ok) {
-        setModelsError(probe.message || t("settings.agentUnavailable"));
-        return;
-      }
-      const same = form.connectedProvider === provider;
-      const next: AppSettings = {
-        ...form,
-        defaultProvider: provider,
-        connectedProvider: provider,
-        defaultModel: same ? form.defaultModel : "",
-        defaultModelParams: same ? form.defaultModelParams : {},
-      };
-      setForm(next);
-      setModelsError(null);
-      await saveSettings({
-        defaultProvider: provider,
-        connectedProvider: provider,
-        defaultModel: next.defaultModel,
-        defaultModelParams: next.defaultModelParams,
-      });
-      // Pull Fast/Effort for the new agent immediately (uses per-provider cache).
-      const catalog = await useAppStore.getState().ensureModels(provider, { force: true });
-      setModels(catalog?.models ?? []);
-      setModelParams(catalog?.modelParams ?? []);
-      showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
-    } finally {
-      setConnectingId(null);
-    }
-  };
+  useEffect(() => {
+    if (section !== "agent" || leaf !== "connect") return;
+    void useAppStore.getState().probeAllAgents({ quiet: true });
+  }, [section, leaf]);
 
-  const runProbe = async (provider: AgentProvider) => {
-    setProbingId(provider);
-    setProbes((prev) => {
-      const next = { ...prev };
-      delete next[provider];
-      return next;
-    });
-    try {
-      const result = await api.probeAgent(provider);
-      setProbes((prev) => ({ ...prev, [provider]: result }));
-      useAppStore.getState().setAgentAvailable(result.ok);
-      if (result.ok && result.currentModel && form.defaultProvider === provider && !form.defaultModel) {
-        const defaultModelParams = Object.fromEntries(
-          (result.modelParams ?? [])
-            .filter((p) => p.currentValue != null && p.currentValue !== "")
-            .map((p) => [p.id, p.currentValue!]),
-        );
-        setForm((prev) => ({
-          ...prev,
-          defaultModel: result.currentModel!,
-          defaultModelParams,
-        }));
-        setModelParams(result.modelParams ?? []);
-        // Do not send defaultProvider — that would auto-connect the agent.
-        await saveSettings({
-          defaultModel: result.currentModel,
-          defaultModelParams,
-        });
-      } else if (result.modelParams) {
-        setModelParams(result.modelParams);
-      }
-    } catch (err) {
-      setProbes((prev) => ({
-        ...prev,
-        [provider]: {
-          ok: false,
-          provider,
-          command: adapterCommandFor(form, provider),
-          message: err instanceof Error ? err.message : String(err),
-        },
-      }));
-    } finally {
-      setProbingId(null);
-    }
-  };
-
-  const ensureModels = useAppStore((s) => s.ensureModels);
-  const rememberModelsCatalog = useAppStore((s) => s.rememberModelsCatalog);
+  const onlineHarnessKey = providers
+    .filter((p) => agentAvailability[p.id] === true)
+    .map((p) => p.id)
+    .join(",");
 
   useEffect(() => {
     if (section !== "agent" || leaf !== "model") return;
-    const provider = settings.connectedProvider;
-    if (!provider) {
-      setModels([]);
-      setModelParams([]);
+    const online = providers.filter((p) => agentAvailability[p.id] === true);
+    if (!online.length) {
       setModelsLoading(false);
       setModelsError(null);
       return;
     }
+    const seededModels: Partial<Record<AgentProvider, Array<{ value: string; name: string }>>> = {};
+    const seededParams: Partial<Record<AgentProvider, ModelParamDto[]>> = {};
+    for (const item of online) {
+      const cached = cachedModelsFor(item.id);
+      if (cached?.models.length) {
+        seededModels[item.id] = cached.models;
+        seededParams[item.id] = cached.modelParams ?? [];
+      }
+    }
+    if (Object.keys(seededModels).length) {
+      setModelsByProvider((prev) => ({ ...seededModels, ...prev }));
+      setParamsByProvider((prev) => ({ ...seededParams, ...prev }));
+    }
+    const ingest = (
+      id: AgentProvider,
+      catalog: {
+        models?: Array<{ value: string; name: string }>;
+        modelParams?: ModelParamDto[];
+        currentModel?: string;
+      },
+    ) => {
+      setModelsByProvider((prev) => ({ ...prev, [id]: catalog.models ?? [] }));
+      setParamsByProvider((prev) => ({ ...prev, [id]: catalog.modelParams ?? [] }));
+      setForm((prev) => {
+        const exposed = catalog.modelParams ?? [];
+        const mapped = prev.defaultModelParamsByProvider?.[id] ?? {};
+        const migrated = migrateModelParamValues(mapped, exposed);
+        const nextProviderParams =
+          Object.keys(migrated).length > 0
+            ? migrated
+            : Object.fromEntries(
+                exposed
+                  .filter((p) => p.currentValue != null && p.currentValue !== "")
+                  .map((p) => [p.id, p.currentValue!]),
+              );
+        const current = prev.defaultModelByProvider?.[id] || "";
+        const pick =
+          current ||
+          (catalog.currentModel &&
+          (catalog.models ?? []).some((m) => m.value === catalog.currentModel)
+            ? catalog.currentModel
+            : "");
+        return {
+          ...prev,
+          defaultModelByProvider: {
+            ...prev.defaultModelByProvider,
+            [id]: pick,
+          },
+          defaultModelParamsByProvider: {
+            ...prev.defaultModelParamsByProvider,
+            [id]: nextProviderParams,
+          },
+        };
+      });
+    };
+    for (const item of online) {
+      const cached = cachedModelsFor(item.id);
+      if (cached?.models.length) ingest(item.id, cached);
+    }
+    const missing = online.filter((item) => !seededModels[item.id]?.length);
     let cancelled = false;
-    setModelsLoading(true);
+    if (missing.length) setModelsLoading(true);
+    else setModelsLoading(false);
     setModelsError(null);
-    void ensureModels(provider, {
-      force: adapterMeta(provider)?.cloudCatalog === true,
-    })
-      .then((catalog) => {
+    const fetchProviderModels = useAppStore.getState().fetchProviderModels;
+    for (const item of online) {
+      if (!seededModels[item.id]?.length) continue;
+      void fetchProviderModels(item.id).then((catalog) => {
         if (cancelled || !catalog) return;
-        setModels(catalog.models ?? []);
-        setModelParams(catalog.modelParams ?? []);
-        setForm((prev) => {
-          const exposed = catalog.modelParams ?? [];
-          const migrated = migrateModelParamValues(prev.defaultModelParams ?? {}, exposed);
-          const nextParams =
-            Object.keys(migrated).length > 0
-              ? migrated
-              : Object.fromEntries(
-                  exposed
-                    .filter((p) => p.currentValue != null && p.currentValue !== "")
-                    .map((p) => [p.id, p.currentValue!]),
-                );
-          if (!prev.defaultModel && catalog.currentModel) {
-            return {
-              ...prev,
-              defaultModel: catalog.currentModel,
-              defaultModelParams: nextParams,
-            };
-          }
-          return { ...prev, defaultModelParams: nextParams };
-        });
+        ingest(item.id, catalog);
+      });
+    }
+    void Promise.all(
+      missing.map(async (item) => {
+        const catalog = await fetchProviderModels(item.id);
+        return { id: item.id, catalog };
+      }),
+    )
+      .then((rows) => {
+        if (cancelled) return;
+        for (const { id, catalog } of rows) {
+          if (catalog) ingest(id, catalog);
+        }
       })
       .catch((err) => {
         if (cancelled) return;
-        setModels([]);
         setModelsError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
@@ -846,7 +811,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [section, leaf, settings.connectedProvider, ensureModels]);
+  }, [section, leaf, onlineHarnessKey]);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -993,55 +958,49 @@ export function SettingsPage() {
           <>
             <SettingTable>
               {providers.map((item) => {
-                const active = settings.connectedProvider === item.id;
-                const probe = probes[item.id];
-                const probing = probingId === item.id;
-                const connecting = connectingId === item.id;
+                const known = agentAvailability[item.id];
+                const checking = known !== true && known !== false;
+                const online = known === true;
                 return (
                   <SettingRow
                     key={item.id}
                     terms={[item.title, item.description]}
-                    label={
-                      <span className={styles.providerTitleRow}>
-                        <span className={styles.providerTitle}>{highlightText(item.title, settingsQuery)}</span>
-                        {active && <span className={styles.providerBadge}>{t("common.connected")}</span>}
-                      </span>
-                    }
-                    hint={
-                      <>
-                        {highlightText(item.description, settingsQuery)}
-                        {probe ? (
-                          <span
-                            className={`${styles.providerProbeInline} ${
-                              probe.ok ? styles.probeOk : styles.probeFail
-                            }`}
-                          >
-                            <strong>{probe.ok ? t("common.connected") : t("common.error")}</strong>
-                            <span>{probe.message}</span>
-                          </span>
-                        ) : null}
-                      </>
-                    }
+                    label={item.title}
+                    hint={highlightText(item.description, settingsQuery)}
                   >
-                    <button
-                      type="button"
-                      className={styles.ghostBtn}
-                      disabled={probing || connecting}
-                      onClick={() => void runProbe(item.id)}
-                    >
-                      {probing ? t("common.checking") : t("common.check")}
-                    </button>
-                    <button
-                      type="button"
-                      className={active ? styles.connectBtnActive : styles.connectBtn}
-                      disabled={connecting || (active && !connecting)}
-                      onClick={() => void connectProvider(item.id)}
-                    >
-                      {connecting ? "…" : active ? t("common.connected") : t("common.connect")}
-                    </button>
+                    <span className={styles.providerProbeInline}>
+                      {checking ? t("common.checking") : online ? t("common.online") : t("common.offline")}
+                    </span>
                   </SettingRow>
                 );
               })}
+            </SettingTable>
+            <SettingTable>
+              <SettingRow
+                label={t("settings.defaultAgent")}
+                hint={t("settings.defaultAgentHint")}
+                terms={[t("settings.defaultAgent"), t("settings.defaultAgentHint")]}
+              >
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.defaultAgent")}
+                  value={form.defaultProvider}
+                  onChange={(v) => {
+                    const id = v as AgentProvider;
+                    patch("defaultProvider", id);
+                    void saveSettings({
+                      defaultProvider: id,
+                      defaultModel: form.defaultModelByProvider?.[id] ?? "",
+                      defaultModelParams: form.defaultModelParamsByProvider?.[id] ?? {},
+                    });
+                  }}
+                  options={providers.map((item) => ({
+                    value: item.id,
+                    label: item.title,
+                  }))}
+                />
+              </SettingRow>
             </SettingTable>
           </>
         )}
@@ -1389,15 +1348,12 @@ export function SettingsPage() {
                 )
               }
               onToggleChatSplit={() => persistChatSplit(form.chatSplit === false)}
-              onReorderAction={(dragged, target) => {
-                const cur = [...(form.chatActions ?? [])];
-                const from = cur.indexOf(dragged);
-                const to = cur.indexOf(target);
-                if (from < 0 || to < 0 || from === to) return;
-                const next = [...cur];
-                next.splice(from, 1);
-                next.splice(to, 0, dragged);
-                patch("chatActions", next);
+              onReorderAction={(nextOrder) => {
+                const enabled = new Set(form.chatActions ?? []);
+                patch(
+                  "chatActions",
+                  nextOrder.filter((id) => enabled.has(id)),
+                );
               }}
             />
               </div>
@@ -1422,44 +1378,72 @@ export function SettingsPage() {
         )}
 
         {section === "agent" && leaf === "model" && (
-          !settings.connectedProvider ? (
-            <p className={styles.hint}>{t("errors.agentNotConnected")}</p>
+          providers.filter((p) => agentAvailability[p.id] === true).length === 0 ? (
+            <p className={styles.hint}>{t("common.noAgentsOnline")}</p>
           ) : (
             <SettingTable>
-              <SettingRow label={t("settings.modelSection")} terms={[form.defaultModel ?? ""]}>
-                <ModelPicker
-                  model={form.defaultModel}
-                  models={models}
-                  params={stableParams}
-                  paramValues={form.defaultModelParams ?? {}}
-                  paramsLoading={paramsLoading}
-                  onChange={(value) => patch("defaultModel", value)}
-                  onParamsChange={(next) =>
-                    patch(
-                      "defaultModelParams",
-                      modelParams.length === 0
-                        ? next
-                        : migrateModelParamValues(next, modelParams),
-                    )
-                  }
-                  onParamsOpen={(value) => loadParamsForModel(value)}
-                  onOpen={() => {
-                    const provider = settings.connectedProvider;
-                    if (!provider) return;
-                    void ensureModels(provider, {
-                      force: adapterMeta(provider)?.cloudCatalog === true || modelParams.length === 0,
-                    }).then((catalog) => {
-                      if (!catalog) return;
-                      setModels(catalog.models ?? []);
-                      setModelParams(catalog.modelParams ?? []);
-                      rememberModelsCatalog(catalog);
-                    });
-                  }}
-                  placement="down"
-                  variant="block"
-                  loading={modelsLoading}
-                />
-              </SettingRow>
+              {providers
+                .filter((p) => agentAvailability[p.id] === true)
+                .map((item) => {
+                  const models = modelsByProvider[item.id] ?? [];
+                  const modelParams = paramsByProvider[item.id] ?? [];
+                  const model = form.defaultModelByProvider?.[item.id] ?? "";
+                  const paramValues = form.defaultModelParamsByProvider?.[item.id] ?? {};
+                  return (
+                    <SettingRow
+                      key={item.id}
+                      label={t("settings.defaultModelFor", { agent: item.title })}
+                      terms={[model]}
+                    >
+                      <ModelPicker
+                        model={model}
+                        models={models}
+                        params={stableParams.length ? stableParams : modelParams}
+                        paramValues={paramValues}
+                        paramsLoading={paramsLoading}
+                        onChange={(value) => {
+                          patch("defaultModelByProvider", {
+                            ...form.defaultModelByProvider,
+                            [item.id]: value,
+                          });
+                          if (form.defaultProvider === item.id) patch("defaultModel", value);
+                        }}
+                        onParamsChange={(next) => {
+                          const migrated =
+                            modelParams.length === 0
+                              ? next
+                              : migrateModelParamValues(next, modelParams);
+                          patch("defaultModelParamsByProvider", {
+                            ...form.defaultModelParamsByProvider,
+                            [item.id]: migrated,
+                          });
+                          if (form.defaultProvider === item.id) {
+                            patch("defaultModelParams", migrated);
+                          }
+                        }}
+                        onParamsOpen={(value) => void loadParamsForModel(item.id, value)}
+                        onOpen={() => {
+                          if (models.length) return;
+                          void useAppStore.getState().fetchProviderModels(item.id).then((catalog) => {
+                            if (!catalog) return;
+                            setModelsByProvider((prev) => ({
+                              ...prev,
+                              [item.id]: catalog.models ?? [],
+                            }));
+                            setParamsByProvider((prev) => ({
+                              ...prev,
+                              [item.id]: catalog.modelParams ?? [],
+                            }));
+                          });
+                        }}
+                        placement="down"
+                        variant="block"
+                        loading={modelsLoading && models.length === 0}
+                      />
+                    </SettingRow>
+                  );
+                })}
+              {modelsError ? <p className={styles.hint}>{modelsError}</p> : null}
             </SettingTable>
           )
         )}
@@ -1677,22 +1661,20 @@ export function SettingsPage() {
                       ? String((form as unknown as Record<string, unknown>)[apiKeyField] ?? "")
                       : "";
                     return (
-                      <SettingRow key={a.id} label={a.label} terms={[a.label, a.defaultCommand]}>
+                      <SettingRow key={a.id} layout="stack" label={a.label} terms={[a.label, a.defaultCommand]}>
                         <div className={styles.cliFields}>
-                          <div className={styles.row}>
-                            <input
-                              value={command}
-                              onChange={(e) => patchAny(a.commandField, e.target.value)}
-                              placeholder={a.defaultCommand}
-                            />
-                            <input
-                              value={Array.isArray(args) ? args.join(" ") : ""}
-                              onChange={(e) =>
-                                patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
-                              }
-                              placeholder={a.defaultArgs.join(" ")}
-                            />
-                          </div>
+                          <input
+                            value={command}
+                            onChange={(e) => patchAny(a.commandField, e.target.value)}
+                            placeholder={a.defaultCommand}
+                          />
+                          <input
+                            value={Array.isArray(args) ? args.join(" ") : ""}
+                            onChange={(e) =>
+                              patchAny(a.argsField, e.target.value.split(/\s+/).filter(Boolean))
+                            }
+                            placeholder={a.defaultArgs.join(" ")}
+                          />
                           {apiKeyField ? (
                             <input
                               value={apiKey}

@@ -6,9 +6,13 @@ import {
   isPlaceholderSubagentTitle,
   extractSubagentLiveContent,
   modelDisplayName,
+  modelForProvider,
+  modelForSession,
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
+  modelParamsForProvider,
+  modelParamsForSession,
   normalizeToolCallId,
   parseModelWire,
   subagentFieldsFromRaw,
@@ -322,13 +326,14 @@ function denyModel(provider: AgentProvider, model: string) {
   }
   if (denied.has(model)) return;
   denied.add(model);
-  if (modelsCache?.provider === provider) {
-    const models = filterDeniedModels(provider, modelsCache.models);
+  if (modelsCacheFor(provider)) {
+    const cache = modelsCacheFor(provider)!;
+    const models = filterDeniedModels(provider, cache.models);
     const currentModel =
-      modelsCache.currentModel && !denied.has(modelsCache.currentModel)
-        ? modelsCache.currentModel
+      cache.currentModel && !denied.has(cache.currentModel)
+        ? cache.currentModel
         : models[0]?.value;
-    rememberModels(provider, currentModel, models, modelsCache.modelParams, modelsCache.modes);
+    rememberModels(provider, currentModel, models, cache.modelParams, cache.modes);
   }
 }
 
@@ -666,6 +671,18 @@ export async function ensureAcp(
 
   const settings = await getSettings();
   const detail = await getSessionDetail(sessionId);
+  const bootModel =
+    boot?.model ??
+    (detail ? modelForSession(settings, detail) : modelForProvider(settings, opts.provider));
+  const bootParams =
+    boot?.modelParams ??
+    (detail
+      ? modelParamsForSession(settings, detail)
+      : modelParamsForProvider(settings, opts.provider));
+  const bootModelOpts = {
+    model: bootModel || undefined,
+    modelParams: Object.keys(bootParams).length ? bootParams : undefined,
+  };
   const { mode: restoreMode, storedSessionId } = resolveRestoreMode(
     opts,
     settings,
@@ -694,9 +711,9 @@ export async function ensureAcp(
       rt.provider = null;
       rt.running = false;
       rt.toolsHintSent = false;
-      // An unexpected agent exit means the agent is not available right now.
+      // One chat's process dying is not "the harness is gone" — a parallel
+      // probe or a Cursor singleton restart used to flip the header LED.
       if (!intentional) {
-        setAgentAvailable(opts.provider, false);
         await updateSession(sessionId, { status: "closed" });
       }
     });
@@ -745,11 +762,10 @@ export async function ensureAcp(
         await client.start(
           mode === "new" ? 45_000 : 120_000,
           mode === "new"
-            ? { model: boot?.model, modelParams: boot?.modelParams, mcpServers }
+            ? { ...bootModelOpts, mcpServers }
             : {
                 resume: { sessionId: storedSessionId!, mode },
-                model: boot?.model,
-                modelParams: boot?.modelParams,
+                ...bootModelOpts,
                 mcpServers,
               },
         );
@@ -768,6 +784,8 @@ export async function ensureAcp(
         if (models.length || modelParams.length || modes.length) {
           rememberModels(opts.provider, currentModel, models, modelParams, modes);
         }
+        setAgentAvailable(opts.provider, true);
+        if (paramsProbe?.provider === opts.provider) disposeParamsProbe();
         await updateSession(sessionId, {
           acpSessionId: client.sessionId,
           // Don't clobber an in-flight prompt if warm-up finishes during runPrompt.
@@ -1938,9 +1956,14 @@ export async function runPrompt(
   }
 
   if (opts.titleHint) {
-    await updateSession(sessionId, {
-      title: opts.titleHint.slice(0, 80),
-    });
+    const title = opts.titleHint
+      .trim()
+      .split(/\r?\n/)[0]
+      ?.trim()
+      .slice(0, 500);
+    if (title) {
+      await updateSession(sessionId, { title });
+    }
   }
 
   if (rt.running) {
@@ -2137,12 +2160,63 @@ export async function cancelPrompt(sessionId: string) {
   await updateSession(sessionId, { status: "idle" });
 }
 
-export async function probeAgent(
-  provider?: AgentProvider,
-  opts?: { catalogOnly?: boolean },
+function liveAcpClient(provider: AgentProvider): AcpClient | null {
+  for (const rt of runtimes.values()) {
+    if (rt.provider === provider && rt.client) return rt.client;
+  }
+  return null;
+}
+
+async function probeResultFromClient(
+  selected: AgentProvider,
+  client: AcpClient,
+  details: string,
+  live: boolean,
 ) {
   const settings = await getSettings();
-  const selected = provider ?? settings.defaultProvider;
+  const acpModels = toModelList(client.configOptions);
+  const models = await finalizeModelList(selected, settings, acpModels);
+  const modelParams = toModelParams(client.configOptions);
+  const modes = toModesList(client.configOptions, getAdapter(selected).defaultModes, client.sessionModes);
+  const sessionId = client.sessionId ?? undefined;
+  const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
+  const currentModel = pickCurrentModel(models, rawCurrent);
+  if (models.length || modelParams.length || modes.length) {
+    rememberModels(selected, currentModel, models, modelParams, modes);
+  }
+  setAgentAvailable(selected, true);
+  const paramSummary = modelParams
+    .map((p) => `${p.name}: ${modelParamLabel(p.id, p.currentValue ?? "", undefined)}`)
+    .filter((s) => !s.endsWith(": "))
+    .join(", ");
+  return {
+    ok: true as const,
+    provider: selected,
+    command: adapterCommand(getAdapter(selected), settings),
+    message: currentModel
+      ? `ACP OK${live ? " (live)" : ""}. Model: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
+      : `ACP OK${live ? " (live)" : ""} — session ${sessionId}`,
+    details: details.slice(-1500),
+    sessionId,
+    currentModel,
+    models,
+    modelParams,
+    modes,
+  };
+}
+
+const probeInflight = new Map<AgentProvider, Promise<Awaited<ReturnType<typeof probeAgentOnce>>>>();
+
+async function probeAgentOnce(
+  selected: AgentProvider,
+  opts?: { catalogOnly?: boolean },
+) {
+  const live = liveAcpClient(selected);
+  if (live) {
+    return probeResultFromClient(selected, live, "", true);
+  }
+
+  const settings = await getSettings();
   const client = new AcpClient(
     getAdapter(selected),
     settings,
@@ -2155,47 +2229,43 @@ export async function probeAgent(
     await client.start(opts?.catalogOnly ? 20_000 : 30_000, {
       catalogOnly: opts?.catalogOnly,
     });
-    const acpModels = toModelList(client.configOptions);
-    const models = await finalizeModelList(selected, settings, acpModels);
-    const modelParams = toModelParams(client.configOptions);
-    const modes = toModesList(client.configOptions, getAdapter(selected).defaultModes, client.sessionModes);
-    const sessionId = client.sessionId ?? undefined;
-    const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
-    const currentModel = pickCurrentModel(models, rawCurrent);
-    if (models.length || modelParams.length || modes.length) {
-      rememberModels(selected, currentModel, models, modelParams, modes);
-    }
+    const result = await probeResultFromClient(selected, client, logs.join("\n"), false);
     client.dispose();
-    setAgentAvailable(selected, true);
-    const paramSummary = modelParams
-      .map((p) => `${p.name}: ${modelParamLabel(p.id, p.currentValue ?? "", undefined)}`)
-      .filter((s) => !s.endsWith(": "))
-      .join(", ");
-    return {
-      ok: true,
-      provider: selected,
-      command: adapterCommand(getAdapter(selected), settings),
-      message: currentModel
-        ? `ACP OK. Model: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
-        : `ACP OK — session ${sessionId}`,
-      details: logs.join("\n").slice(-1500),
-      sessionId,
-      currentModel,
-      models,
-      modelParams,
-      modes,
-    };
+    return result;
   } catch (err) {
     client.dispose();
+    const stillLive = liveAcpClient(selected);
+    if (stillLive) {
+      return probeResultFromClient(selected, stillLive, logs.join("\n"), true);
+    }
     setAgentAvailable(selected, false);
     return {
-      ok: false,
+      ok: false as const,
       provider: selected,
       command: adapterCommand(getAdapter(selected), settings),
       message: err instanceof Error ? err.message : String(err),
       details: `${logs.join("\n")}\n${client.lastStderr}`.slice(-2000),
+      currentModel: undefined,
+      models: [] as ModelOption[],
+      modelParams: [] as ModelParamDto[],
+      modes: [] as ModeOption[],
     };
   }
+}
+
+export async function probeAgent(
+  provider?: AgentProvider,
+  opts?: { catalogOnly?: boolean },
+) {
+  const settings = await getSettings();
+  const selected = provider ?? settings.defaultProvider;
+  const existing = probeInflight.get(selected);
+  if (existing) return existing;
+  const work = probeAgentOnce(selected, opts).finally(() => {
+    if (probeInflight.get(selected) === work) probeInflight.delete(selected);
+  });
+  probeInflight.set(selected, work);
+  return work;
 }
 
 function parseAvailableCommands(raw: Record<string, unknown>) {
@@ -2382,13 +2452,12 @@ export async function setSessionModel(
   model: string,
   params?: Record<string, string>,
 ) {
-  const patch: { defaultModel: string; defaultModelParams?: Record<string, string> } = {
-    defaultModel: model,
-  };
-  if (params) patch.defaultModelParams = params;
-  await updateSettings(patch);
+  const detail = await getSessionDetail(sessionId);
+  await updateSession(sessionId, {
+    model,
+    ...(params ? { modelParams: params } : {}),
+  });
 
-  const detail = await syncSessionAgent(sessionId);
   const rt = runtimes.get(sessionId);
   // Mid-session set_config_option often leaves OMP/Cursor in a broken state
   // ("Model is unavailable"). Restart ACP so the new model applies like a new chat.
@@ -2399,11 +2468,15 @@ export async function setSessionModel(
   }
 
   try {
-    const client = await ensureAcp(sessionId, {
-      provider: detail.provider,
-      cwd: detail.cwd,
-      mode: detail.mode,
-    });
+    const client = await ensureAcp(
+      sessionId,
+      {
+        provider: detail.provider,
+        cwd: detail.cwd,
+        mode: detail.mode,
+      },
+      { model, modelParams: params },
+    );
     const settings = await getSettings();
     const models = await finalizeModelList(
       detail.provider,
@@ -2438,14 +2511,20 @@ export async function setSessionModel(
   }
 }
 
-let modelsCache: {
+type ModelsCacheEntry = {
   provider: AgentProvider;
   currentModel?: string;
   models: Array<{ value: string; name: string }>;
   modelParams: ModelParamDto[];
   modes: ModeOption[];
   at: number;
-} | null = null;
+};
+
+const modelsCacheByProvider = new Map<AgentProvider, ModelsCacheEntry>();
+
+function modelsCacheFor(provider: AgentProvider): ModelsCacheEntry | undefined {
+  return modelsCacheByProvider.get(provider);
+}
 
 export function rememberModels(
   provider: AgentProvider,
@@ -2459,20 +2538,19 @@ export function rememberModels(
     currentModel && filtered.some((m) => m.value === currentModel)
       ? currentModel
       : filtered[0]?.value;
-  modelsCache = {
+  modelsCacheByProvider.set(provider, {
     provider,
     currentModel: resolvedCurrent,
     models: filtered,
     modelParams,
     modes,
     at: Date.now(),
-  };
+  });
 }
 
 export function clearModelsCache(provider?: AgentProvider) {
-  if (!provider || modelsCache?.provider === provider) {
-    modelsCache = null;
-  }
+  if (!provider) modelsCacheByProvider.clear();
+  else modelsCacheByProvider.delete(provider);
   if (!provider || paramsProbe?.provider === provider) {
     disposeParamsProbe();
   }
@@ -2509,6 +2587,9 @@ function disposeParamsProbe() {
 }
 
 async function warmParamsProbeClient(provider: AgentProvider): Promise<AcpClient> {
+  const live = liveAcpClient(provider);
+  if (live) return live;
+
   if (paramsProbe?.provider === provider) {
     try {
       return await paramsProbe.boot;
@@ -2542,6 +2623,9 @@ export function warmModelParamsProbe(provider?: AgentProvider) {
   void (async () => {
     const settings = await getSettings();
     const selected = provider ?? settings.connectedProvider ?? settings.defaultProvider;
+    const inflight = probeInflight.get(selected);
+    if (inflight) await inflight;
+    if (liveAcpClient(selected)) return;
     await warmParamsProbeClient(selected);
   })().catch(() => {
     // best-effort
@@ -2549,6 +2633,11 @@ export function warmModelParamsProbe(provider?: AgentProvider) {
 }
 
 async function probeModelParams(provider: AgentProvider, model: string): Promise<ModelParamDto[]> {
+  const live = liveAcpClient(provider);
+  if (live) {
+    // Never set_config_option on the user's live chat process.
+    return toModelParams(live.configOptions);
+  }
   const client = await warmParamsProbeClient(provider);
   await client.applyModelSelection(model, {});
   return toModelParams(client.configOptions);
@@ -2561,8 +2650,9 @@ function modelParamsKey(provider: AgentProvider, model: string) {
 function storeModelParamsCache(provider: AgentProvider, model: string, params: ModelParamDto[]) {
   if (!params.length) return;
   modelParamsCache.set(modelParamsKey(provider, model), { params, at: Date.now() });
-  if (modelsCache?.provider === provider) {
-    modelsCache = { ...modelsCache, modelParams: params, at: Date.now() };
+  const cache = modelsCacheFor(provider);
+  if (cache) {
+    modelsCacheByProvider.set(provider, { ...cache, modelParams: params, at: Date.now() });
   }
 }
 
@@ -2656,10 +2746,10 @@ export async function listModels(
   const selected = provider ?? settings.defaultProvider;
   const force = opts?.force === true;
   const cacheTtl = modelsCacheTtlMs(selected);
+  const modelsCache = modelsCacheFor(selected);
   if (
     !force &&
     modelsCache &&
-    modelsCache.provider === selected &&
     Date.now() - modelsCache.at < cacheTtl &&
     // Empty params may be a cold partial — don't stick for the full TTL.
     (modelsCache.modelParams.length > 0 || Date.now() - modelsCache.at < 20_000) &&
@@ -2698,7 +2788,8 @@ export async function listModels(
     );
   }
   const models = filterDeniedModels(selected, probed.models ?? []);
-  const preferred = settings.defaultModel || probed.currentModel;
+  const preferred =
+    settings.defaultModelByProvider?.[selected] || settings.defaultModel || probed.currentModel;
   const currentModel =
     preferred && models.some((m) => m.value === preferred)
       ? preferred
@@ -2719,7 +2810,7 @@ export async function listModels(
 
 export async function setSessionMode(sessionId: string, mode: AgentMode) {
   await updateSettings({ defaultMode: mode });
-  const detail = await syncSessionAgent(sessionId);
+  const detail = await getSessionDetail(sessionId);
   if (!detail) {
     return { ok: true, mode, appliedLive: false };
   }

@@ -25,6 +25,9 @@ import {
   migrateModelParamValues,
   toolDisplayTitle,
   estimateContextUsage,
+  modelForProvider,
+  modelForSession,
+  modelParamsForSession,
   type AgentMode,
   type MessageDto,
   type MessagePartDto,
@@ -36,7 +39,7 @@ import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { CHAT_SPLIT_MIN_PX, FALLBACK_CHAT_PANES } from "../lib/chatPanes";
-import { adapterMeta, sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
+import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
@@ -2859,6 +2862,8 @@ function ChatThread() {
     [cancelPromptStore, bind?.sessionId],
   );
   const createSession = useAppStore((s) => s.createSession);
+  const agentAvailability = useAppStore((s) => s.agentAvailability);
+  const adapters = useAppStore((s) => s.adapters);
   const error = useAppStore((s) => (!bind || bind.focused ? s.error : null));
   const modelsCatalog = useAppStore((s) => s.modelsCatalog);
   const modelsLoading = useAppStore((s) => s.modelsLoading);
@@ -2900,9 +2905,9 @@ function ChatThread() {
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [planPanelOpen, setPlanPanelOpen] = useState(false);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
-    () => settings.defaultModelParams ?? {},
+    () => modelParamsForSession(settings, null),
   );
-  const [model, setModel] = useState(settings.defaultModel);
+  const [model, setModel] = useState(modelForProvider(settings, settings.defaultProvider));
   const [folderPicker, setFolderPicker] = useState<{ x: number; y: number } | null>(null);
   const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
     try {
@@ -3127,10 +3132,14 @@ function ChatThread() {
     applyComposerHeight(el);
   };
 
-  // Models / ACP only after the user explicitly connected an agent.
-  const agentProvider = settings.connectedProvider ?? null;
-  const agentMissing = !agentProvider;
-
+  const agentProvider = activeSession?.provider ?? null;
+  const agentOffline = Boolean(agentProvider && agentAvailability[agentProvider] === false);
+  const noOnlineAgents =
+    !agentProvider &&
+    !(adapters.length
+      ? adapters.some((a) => agentAvailability[a.id] === true)
+      : agentAvailability.cursor === true || agentAvailability.omp === true);
+  const agentMissing = noOnlineAgents;
   const catalog =
     agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
   const models = catalog?.models ?? [];
@@ -3143,7 +3152,9 @@ function ChatThread() {
   // Block typing while agent missing, or while models are loading with empty list.
   // Once the agent is already answering, don't keep the composer stuck on "loading models".
   const composerLocked =
-    agentMissing || (!streaming && modelsLoading && models.length === 0);
+    agentMissing ||
+    agentOffline ||
+    (!!agentProvider && !streaming && !agentOffline && modelsLoading && models.length === 0);
 
   const slashCommands = useMemo(
     () => mergeSlashCommands(activeSession?.slashCommands, t),
@@ -3392,16 +3403,19 @@ function ChatThread() {
   }, [agentProvider, model, activeSession?.id, modelParams.length]);
 
   useEffect(() => {
+    const session = activeSession?.provider === agentProvider ? activeSession : null;
     if (!catalog?.models.length) {
-      setModel((prev) => (prev === (settings.defaultModel || "") ? prev : settings.defaultModel));
+      setModel((prev) => {
+        const next = modelForSession(settings, session) || "";
+        return prev === next ? prev : next;
+      });
       setModelParamValues((prev) => {
-        const next = settings.defaultModelParams ?? {};
+        const next = modelParamsForSession(settings, session);
         return modelParamsEqual(prev, next) ? prev : next;
       });
       return;
     }
-    // Drop a defaultModel that belongs to another agent (e.g. Cursor id in OMP chat).
-    const preferred = settings.defaultModel || catalog.currentModel || "";
+    const preferred = modelForSession(settings, session) || catalog.currentModel || "";
     const nextModel =
       preferred && catalog.models.some((m) => m.value === preferred)
         ? preferred
@@ -3410,12 +3424,12 @@ function ChatThread() {
     const exposed = catalog.modelParams ?? [];
     if (!exposed.length) {
       setModelParamValues((prev) => {
-        const next = settings.defaultModelParams ?? {};
+        const next = modelParamsForSession(settings, session);
         return modelParamsEqual(prev, next) ? prev : next;
       });
       return;
     }
-    const migrated = migrateModelParamValues(settings.defaultModelParams ?? {}, exposed);
+    const migrated = migrateModelParamValues(modelParamsForSession(settings, session), exposed);
     const nextParams = Object.keys(migrated).length
       ? migrated
       : Object.fromEntries(
@@ -3424,7 +3438,17 @@ function ChatThread() {
             .map((p) => [p.id, p.currentValue!]),
         );
     setModelParamValues((prev) => (modelParamsEqual(prev, nextParams) ? prev : nextParams));
-  }, [catalog, settings.defaultModel, settings.defaultModelParams]);
+  }, [
+    catalog,
+    settings.defaultModel,
+    settings.defaultModelParams,
+    settings.defaultModelByProvider,
+    settings.defaultModelParamsByProvider,
+    agentProvider,
+    activeSession?.id,
+    activeSession?.model,
+    activeSession?.modelParams,
+  ]);
 
   const applyModelSelection = async (
     nextModel: string,
@@ -3437,7 +3461,6 @@ function ChatThread() {
         : migrateModelParamValues(nextParams, modelParams);
     setModel(nextModel);
     setModelParamValues(supported);
-    await saveSettings({ defaultModel: nextModel, defaultModelParams: supported });
     if (!agentProvider) return modelParams;
     if (activeSession?.id) {
       try {
@@ -3621,6 +3644,7 @@ function ChatThread() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
+  const emptyReady = Boolean(activeSession) && !renderSkeleton && messageCount === 0;
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
@@ -4017,7 +4041,7 @@ function ChatThread() {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
     >
-      <div className={styles.mainColumn}>
+      <div className={`${styles.mainColumn}${emptyReady ? ` ${styles.mainColumnEmptyReady}` : ""}`}>
       <div className={styles.thread} ref={threadRef}>
         {renderSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
@@ -4057,16 +4081,9 @@ function ChatThread() {
               <span>ACP</span>rocess
             </h1>
             <p>{t("chat.emptyDescription")}</p>
+            {agentMissing ? <p>{t("common.noAgentsOnline")}</p> : null}
             <div className={styles.emptyActions}>
-              {agentMissing ? (
-                <Link
-                  className={styles.secondary}
-                  to="/settings?section=agent&leaf=connect"
-                  style={{ display: "inline-flex", alignItems: "center" }}
-                >
-                  {t("chat.connectAgent")}
-                </Link>
-              ) : (
+              {!agentMissing ? (
                 <>
                   <button
                     type="button"
@@ -4085,7 +4102,7 @@ function ChatThread() {
                     {t("common.settings")}
                   </Link>
                 </>
-              )}
+              ) : null}
             </div>
           </div>
         )}
@@ -4254,8 +4271,11 @@ function ChatThread() {
         </div>
       )}
 
-      <form className={styles.composer} onSubmit={onSubmit}>
-        {scrolledAway && activeSession ? (
+      <form
+        className={`${styles.composer}${emptyReady ? ` ${styles.composerEmptyReady}` : ""}`}
+        onSubmit={onSubmit}
+      >
+        {scrolledAway && activeSession && !emptyReady ? (
           <button
             type="button"
             className={styles.jumpLatest}
@@ -4282,6 +4302,9 @@ function ChatThread() {
           </button>
         ) : null}
         <div className={styles.composerInner}>
+          {emptyReady ? (
+            <p className={styles.emptyReadyLead}>{t("chat.emptyReady")}</p>
+          ) : null}
           <div className={styles.composerStatusSlot} aria-live="polite">
             {editingMessageId && (
               <div className={styles.typingBar}>
@@ -4299,14 +4322,18 @@ function ChatThread() {
                 </button>
               </div>
             )}
-            {!editingMessageId && agentMissing && (
-              <div className={styles.typingBar}>{t("common.connectAgentInSettings")}</div>
+            {!editingMessageId && agentOffline && (
+              <div className={styles.typingBar}>{t("common.thisChatAgentOffline")}</div>
             )}
-            {!editingMessageId && !agentMissing && activeSession?.status === "waiting" && (
+            {!editingMessageId && agentMissing && (
+              <div className={styles.typingBar}>{t("common.noAgentsOnline")}</div>
+            )}
+            {!editingMessageId && !agentMissing && !agentOffline && activeSession?.status === "waiting" && (
               <div className={styles.typingBar}>{t("common.waitingInput")}</div>
             )}
             {!editingMessageId &&
               !agentMissing &&
+              !agentOffline &&
               composerLocked &&
               !streaming && (
                 <div className={styles.typingBar}>
@@ -4546,11 +4573,9 @@ function ChatThread() {
               onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}
               placeholder={
                 slashInputHint ??
-                (agentMissing
-                  ? t("common.connectAgentEllipsis")
-                  : composerLocked
-                    ? t("common.loadingModels")
-                    : t("common.messageOrCommand"))
+                (composerLocked && !agentMissing && !agentOffline
+                  ? t("common.loadingModels")
+                  : t("common.messageOrCommand"))
               }
               rows={1}
               disabled={composerLocked}
@@ -4641,12 +4666,11 @@ function ChatThread() {
                     if (!agentProvider) return;
                     void api.warmModelParams(agentProvider);
                     const cached = useAppStore.getState().modelsCatalog;
-                    const stale =
+                    const needsCatalog =
                       !cached ||
                       cached.provider !== agentProvider ||
-                      (cached.modelParams?.length ?? 0) === 0 ||
-                      adapterMeta(agentProvider)?.cloudCatalog === true;
-                    void ensureModels(agentProvider, { force: stale });
+                      (cached.models?.length ?? 0) === 0;
+                    void ensureModels(agentProvider, { force: needsCatalog });
                     if (model) {
                       void api.getModelParams(agentProvider, model, {
                         sessionId: activeSession?.id,
@@ -4722,7 +4746,9 @@ function ChatThread() {
                         disabled={composerLocked || !text.trim()}
                         title={
                           agentMissing
-                            ? t("common.connectAgentFirst")
+                            ? t("common.noAgentsOnline")
+                            : agentOffline
+                              ? t("common.thisChatAgentOffline")
                             : composerLocked
                               ? t("common.loadingModels")
                               : t("common.send")
@@ -4754,11 +4780,30 @@ function ChatThread() {
           y={folderPicker.y}
           defaultCwd={settings.defaultCwd ?? ""}
           recentCwds={recentCwds}
+          agents={(adapters.length
+            ? adapters.map((a) => ({ id: a.id, label: a.label }))
+            : [
+                { id: "cursor" as const, label: "Cursor" },
+                { id: "omp" as const, label: "OMP" },
+              ]
+          ).map((a) => ({ ...a, online: agentAvailability[a.id] === true }))}
+          preferredProvider={settings.defaultProvider}
           onClose={() => setFolderPicker(null)}
-          onConfirm={async (cwd) => {
+          onConfirm={async (cwd, provider) => {
             setFolderPicker(null);
-            await createSession(cwd);
-            if (shouldAutoFocusComposer()) focusComposer();
+            try {
+              await createSession(cwd, provider);
+              if (shouldAutoFocusComposer()) focusComposer();
+            } catch (err) {
+              showToast(
+                err instanceof Error && err.message === "noAgentsOnline"
+                  ? t("common.noAgentsOnline")
+                  : err instanceof Error
+                    ? err.message
+                    : String(err),
+                { tone: "danger" },
+              );
+            }
           }}
         />
       )}
@@ -4851,17 +4896,8 @@ function SplitToggleFab({ enabled }: { enabled: boolean }) {
       onClick={() => setChatPaneCount?.(2)}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-        <rect x="3.75" y="5.5" width="7" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
-        <rect
-          x="13.25"
-          y="5.5"
-          width="7"
-          height="13"
-          rx="1.5"
-          stroke="currentColor"
-          strokeWidth="1.7"
-          opacity="0.55"
-        />
+        <rect x="3.5" y="5" width="17" height="14" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M12 5.5v13" stroke="currentColor" strokeWidth="1.7" />
       </svg>
     </button>
   );
@@ -4903,7 +4939,6 @@ function SplitPaneChrome({
       className={`${styles.splitChrome}${focused ? ` ${styles.splitChromeFocused}` : ""}`}
       onPointerDown={() => focusChatPane(paneIndex)}
     >
-      <span className={styles.splitChromeIndex}>{paneIndex + 1}</span>
       <span className={styles.splitChromeTitle}>
         {running ? <span className={styles.splitChromeLive} aria-hidden /> : null}
         <span className={styles.splitChromeName}>{title || t("chat.splitEmptyTitle")}</span>

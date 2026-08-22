@@ -393,6 +393,8 @@ describe("DEFAULT_SETTINGS", () => {
     defaultCwd: "",
     defaultModel: "",
     defaultModelParams: {},
+    defaultModelByProvider: {},
+    defaultModelParamsByProvider: {},
     cursorCommand: "agent",
     cursorArgs: ["acp"],
     ompCommand: "omp",

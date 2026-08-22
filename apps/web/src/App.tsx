@@ -5,6 +5,7 @@ import { I18nProvider } from "./lib/i18n";
 import { installMessageHotkeys } from "./lib/messageHotkeys";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
+import { AgentGate, AgentOfflineWarning } from "./components/AgentGate";
 import { BootSplash } from "./components/BootSplash";
 import { ToastHost } from "./components/ToastHost";
 import { ChatPage } from "./pages/ChatPage";
@@ -15,6 +16,7 @@ export function App() {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const loading = useAppStore((s) => s.loading);
   const showBootSplash = useAppStore((s) => s.settings.showBootSplash);
+  const agentGateDismissed = useAppStore((s) => s.agentGateDismissed);
   const [splashVisible, setSplashVisible] = useState(true);
 
   useEffect(() => {
@@ -39,11 +41,15 @@ export function App() {
       </Routes>
     );
 
+  const splashBlocking = splashVisible && showBootSplash;
+
   return (
     <I18nProvider>
       {app}
       <ToastHost />
       {splashVisible && showBootSplash && <BootSplash ready={!loading} onDone={onSplashDone} />}
+      {!loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
+      {!loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
     </I18nProvider>
   );
 }

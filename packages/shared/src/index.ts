@@ -327,6 +327,10 @@ export interface AppSettings {
   defaultModel: string;
   /** Cursor ACP parameterized picker values (fast, effort, context, …). */
   defaultModelParams: Record<string, string>;
+  /** Default model id per harness (Models settings + new chats). */
+  defaultModelByProvider: Partial<Record<AgentProvider, string>>;
+  /** Parameter picker values per harness. */
+  defaultModelParamsByProvider: Partial<Record<AgentProvider, Record<string, string>>>;
   cursorCommand: string;
   cursorArgs: string[];
   ompCommand: string;
@@ -416,6 +420,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultCwd: "",
   defaultModel: "",
   defaultModelParams: {},
+  defaultModelByProvider: {},
+  defaultModelParamsByProvider: {},
   cursorCommand: "agent",
   cursorArgs: ["acp"],
   ompCommand: "omp",
@@ -455,6 +461,46 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatSplit: true,
   mcpServers: [],
 };
+
+export function modelForProvider(
+  settings: AppSettings,
+  provider: AgentProvider | null | undefined,
+): string {
+  if (!provider) return settings.defaultModel ?? "";
+  const mapped = settings.defaultModelByProvider?.[provider];
+  if (mapped) return mapped;
+  if (settings.defaultProvider === provider) return settings.defaultModel ?? "";
+  return "";
+}
+
+export function modelForSession(
+  settings: AppSettings,
+  session: { provider: AgentProvider; model?: string | null } | null | undefined,
+): string {
+  const pinned = session?.model?.trim();
+  if (pinned) return pinned;
+  return modelForProvider(settings, session?.provider);
+}
+
+export function modelParamsForProvider(
+  settings: AppSettings,
+  provider: AgentProvider | null | undefined,
+): Record<string, string> {
+  if (!provider) return settings.defaultModelParams ?? {};
+  const mapped = settings.defaultModelParamsByProvider?.[provider];
+  if (mapped) return mapped;
+  if (settings.defaultProvider === provider) return settings.defaultModelParams ?? {};
+  return {};
+}
+
+export function modelParamsForSession(
+  settings: AppSettings,
+  session: { provider: AgentProvider; modelParams?: Record<string, string> | null } | null | undefined,
+): Record<string, string> {
+  const pinned = session?.modelParams;
+  if (pinned && Object.keys(pinned).length) return pinned;
+  return modelParamsForProvider(settings, session?.provider);
+}
 
 /** Billing / credits failure from OMP when a model cannot be used. */
 export function isModelAccessError(message: string): boolean {
@@ -733,6 +779,10 @@ export interface SessionDto {
   mcpDisabledIds: string[];
   /** Token/context usage reported by the harness via ACP (null until/if reported). */
   usage?: AcpUsage | null;
+  /** Model chosen in this chat. Empty/null → settings default for the harness. */
+  model?: string | null;
+  /** Parameter picker values for this chat's model. */
+  modelParams?: Record<string, string> | null;
   createdAt: string;
   updatedAt: string;
   /** Timestamp of the latest message in the session (falls back to createdAt). */
