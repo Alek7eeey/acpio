@@ -153,7 +153,7 @@ function mergeSettings(raw: unknown): AppSettings {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
   if (typeof merged.remoteAccessKey !== "string") {
-    merged.remoteAccessKey = DEFAULT_SETTINGS.remoteAccessKey;
+    merged.remoteAccessKey = "";
   }
   if (
     !merged.defaultModelByProvider ||

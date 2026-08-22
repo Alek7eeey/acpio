@@ -174,7 +174,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.addHook("onRequest", async (req, reply) => {
     if (isRemoteAccessPublicPath(req.url) || !remoteAccessProtected(req.url)) return;
-    const expected = (await getSettings()).remoteAccessKey.trim();
+    const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
     if (!expected) return;
     if (isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined)) {
       return;
@@ -189,7 +189,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/health", async () => ({ ok: true }));
 
   app.get("/api/remote-access", async (req) => {
-    const expected = (await getSettings()).remoteAccessKey.trim();
+    const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
     const loopback = isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined);
     const cookie = req.cookies?.[REMOTE_ACCESS_COOKIE];
     const unlocked = !expected || loopback || remoteKeysMatch(cookie, expected);
@@ -198,7 +198,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/remote-access", async (req, reply) => {
     const body = z.object({ key: z.string().max(80) }).parse(req.body ?? {});
-    const expected = (await getSettings()).remoteAccessKey.trim();
+    const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
     if (!expected) {
       return { ok: true, required: false };
     }
