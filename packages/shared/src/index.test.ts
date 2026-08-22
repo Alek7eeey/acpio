@@ -429,6 +429,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatHeaderIcons: ["lang", "install", "theme"],
     chatEnterToSend: true,
     chatShowMessageTime: false,
+    chatSplit: true,
     mcpServers: [],
   };
 

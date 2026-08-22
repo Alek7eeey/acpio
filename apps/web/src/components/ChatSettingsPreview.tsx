@@ -316,6 +316,7 @@ export function ChatSettingsPreview({
   showTime,
   headerHeight,
   headerIcons,
+  chatSplit,
   onToggleAction,
   onToggleChip,
   onToggleComposerButton,
@@ -325,6 +326,7 @@ export function ChatSettingsPreview({
   onReorderAction,
   onHeaderHeight,
   onToggleHeaderIcon,
+  onToggleChatSplit,
 }: {
   actions: ChatActionId[];
   chips: ChatMetaChipId[];
@@ -335,6 +337,7 @@ export function ChatSettingsPreview({
   showTime: boolean;
   headerHeight: number;
   headerIcons: ChatHeaderIconId[];
+  chatSplit: boolean;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
   onToggleComposerButton: (id: ChatComposerButtonId) => void;
@@ -344,6 +347,7 @@ export function ChatSettingsPreview({
   onReorderAction: (dragged: ChatActionId, target: ChatActionId) => void;
   onHeaderHeight: (next: number) => void;
   onToggleHeaderIcon: (id: ChatHeaderIconId) => void;
+  onToggleChatSplit: () => void;
 }) {
   const t = useT();
   const mainBarActions = actions.filter((a) => a !== "edit");
@@ -688,6 +692,29 @@ export function ChatSettingsPreview({
 
         {/* ── Chat ──────────────────────────────────────────────── */}
         <div className={`${styles.column} ${styles.chatColumn}`}>
+          <span className={styles.previewSplitSlot}>
+          <El
+            on={chatSplit}
+            onToggle={onToggleChatSplit}
+            label={t("settings.chatSplit")}
+          >
+            <span className={styles.previewSplitFab} aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <rect x="3.75" y="5.5" width="7" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+                <rect
+                  x="13.25"
+                  y="5.5"
+                  width="7"
+                  height="13"
+                  rx="1.5"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  opacity="0.55"
+                />
+              </svg>
+            </span>
+          </El>
+          </span>
           <button
             type="button"
             className={styles.mobileTreeBtn}
@@ -696,12 +723,6 @@ export function ChatSettingsPreview({
             {mobileTreeOpen ? "✕" : "☰"}
           </button>
           <div className={styles.chatPane}>
-            <div className={styles.chatHead}>
-              <strong>{t("settings.chatPreviewChatTitle")}</strong>
-              <span className={styles.chatHeadChip}>{t("models.auto")}</span>
-              <span className={styles.chatHeadMode}>{t("modes.agent")}</span>
-            </div>
-
             <div className={styles.thread}>
               <div className={styles.msgRow}>
                 <div className={`${styles.bubble} ${styles.userBubble}`}>

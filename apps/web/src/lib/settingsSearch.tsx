@@ -232,6 +232,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatTreeMenuTitle"),
       t("settings.chatEnterToSend"),
       t("settings.chatShowMessageTime"),
+      t("settings.chatSplit"),
       t("settings.chatAdvanced"),
       t("settings.chatIntro"),
     ],
@@ -291,6 +292,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.chatTreeMenuHint"),
       t("settings.chatEnterToSendHint"),
       t("settings.chatShowMessageTimeHint"),
+      t("settings.chatSplitHint"),
     ],
   };
 }

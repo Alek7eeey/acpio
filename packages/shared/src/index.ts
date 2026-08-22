@@ -400,6 +400,8 @@ export interface AppSettings {
   chatEnterToSend: boolean;
   /** Show the send time next to each message. */
   chatShowMessageTime: boolean;
+  /** Desktop: allow two chats side by side. */
+  chatSplit: boolean;
   /** MCP servers attached to the agent (local stdio + remote endpoints). */
   mcpServers: McpServerConfig[];
 }
@@ -450,6 +452,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
   chatShowMessageTime: false,
+  chatSplit: true,
   mcpServers: [],
 };
 

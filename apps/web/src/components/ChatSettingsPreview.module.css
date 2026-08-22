@@ -124,6 +124,31 @@
   min-width: 0;
 }
 
+.chatColumn {
+  position: relative;
+}
+
+.previewSplitSlot {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 4;
+}
+
+.previewSplitSlot .elOn {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 85%, var(--surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.previewSplitFab {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+}
+
 /* --- toggle chip (always visible; active accent / inactive dimmed) --- */
 .el {
   display: inline-flex;
@@ -370,7 +395,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
+  padding: 9px 44px 9px 12px;
   border-bottom: 1px solid var(--border);
   font-size: 0.82rem;
 }
@@ -402,8 +427,8 @@
 .thread {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 18px 16px 12px;
+  gap: 8px;
+  padding: 44px 48px 12px 16px;
   background: var(--bg);
   max-height: 340px;
   overflow: auto;
@@ -418,6 +443,8 @@
 
 .userActionsRow {
   justify-content: flex-end;
+  margin-top: 2px;
+  padding-top: 4px;
 }
 
 .assistantCol {

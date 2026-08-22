@@ -1155,6 +1155,10 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+.sessionItem.sessionInPane {
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 :global([data-theme="light"]) .sessionItem.active {
   background: rgba(24, 24, 27, 0.035);
   box-shadow: inset 2px 0 0 var(--accent);
@@ -3204,10 +3208,12 @@
     flex-direction: column;
     overflow: hidden;
     will-change: transform, height;
+    pointer-events: none;
   }
 
   .sidebar.open {
     transform: translateY(0);
+    pointer-events: auto;
   }
 
   .sidebar[data-dragging="true"] {
@@ -3274,18 +3280,26 @@
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 45;
+    z-index: 80;
     height: var(--mobile-dock-h);
     margin: 0;
-    padding: 10px 0 max(8px, env(safe-area-inset-bottom, 0px));
+    padding: 6px 0 max(6px, env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
     border: none;
     border-top: 1px solid var(--border-soft);
     background: color-mix(in srgb, var(--surface) 92%, var(--bg));
-    cursor: grab;
+    cursor: pointer;
+    pointer-events: auto;
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
     animation: sheetPullerIn 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .sheetPullerHidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    animation: none;
   }
 
   @keyframes sheetPullerIn {

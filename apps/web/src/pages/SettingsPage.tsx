@@ -55,13 +55,22 @@ function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
 function ChatConfigRows({
   form,
   patch,
+  persistChatSplit,
 }: {
   form: AppSettings;
   patch: (key: string, value: unknown) => void;
+  persistChatSplit: (value: boolean) => void;
 }) {
   const t = useT();
   return (
     <SettingTable>
+      <SettingRow label={t("settings.chatSplit")} hint={t("settings.chatSplitHint")}>
+        <Toggle
+          checked={form.chatSplit !== false}
+          onChange={persistChatSplit}
+          label={t("settings.chatSplit")}
+        />
+      </SettingRow>
       <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsHint")}>
         <div className={styles.actionChips}>
           {(
@@ -600,6 +609,10 @@ export function SettingsPage() {
   /** Adapter-declared settings fields (command/args/apiKey) — not in AppSettings. */
   const patchAny = (key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+  const persistChatSplit = (value: boolean) => {
+    patch("chatSplit", value);
+    void saveSettings({ chatSplit: value });
   };
 
   const mcpServers = form.mcpServers ?? [];
@@ -1337,6 +1350,7 @@ export function SettingsPage() {
               showTime={Boolean(form.chatShowMessageTime)}
               headerHeight={form.chatHeaderHeight ?? 52}
               headerIcons={form.chatHeaderIcons ?? []}
+              chatSplit={form.chatSplit !== false}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -1373,6 +1387,7 @@ export function SettingsPage() {
                   toggleInOrder(form.chatHeaderIcons ?? [], id, CHAT_HEADER_ICON_ORDER),
                 )
               }
+              onToggleChatSplit={() => persistChatSplit(form.chatSplit === false)}
               onReorderAction={(dragged, target) => {
                 const cur = [...(form.chatActions ?? [])];
                 const from = cur.indexOf(dragged);
@@ -1389,16 +1404,16 @@ export function SettingsPage() {
             {settingsQuery.trim() ? (
               <div className={styles.chatSearchRows}>
                 <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatAdvanced"), settingsQuery)}</h2>
-                <ChatConfigRows form={form} patch={patchAny} />
+                <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
               </div>
             ) : (
               <>
                 <div className={styles.mobileConfig}>
-                  <ChatConfigRows form={form} patch={patchAny} />
+                  <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
                 </div>
                 <details className={styles.chatAdvancedDetails}>
                   <summary>{t("settings.chatAdvanced")}</summary>
-                  <ChatConfigRows form={form} patch={patchAny} />
+                  <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
                 </details>
               </>
             )}

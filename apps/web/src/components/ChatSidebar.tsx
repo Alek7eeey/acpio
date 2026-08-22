@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
 import { normalizeCwd } from "../lib/pathSegments";
+import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { useAppStore } from "../lib/store";
 import {
   listLikedMessages,
@@ -238,7 +239,10 @@ export function ChatSidebar({
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const chatPaneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
+  const chatSplitOn = useAppStore((s) => s.settings.chatSplit !== false);
   const selectSession = useAppStore((s) => s.selectSession);
+  const openSessionInNewPane = useAppStore((s) => s.openSessionInNewPane);
   const createSession = useAppStore((s) => s.createSession);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
@@ -638,6 +642,7 @@ export function ChatSidebar({
 
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
+    const inPane = chatSplitOn && chatPaneIds.length > 1 && chatPaneIds.includes(s.id);
     const isRenaming = renamingId === s.id;
     const menuOpen = menu?.id === s.id;
     const confirming = confirmDeleteId === s.id;
@@ -687,7 +692,9 @@ export function ChatSidebar({
       <div
         key={s.id}
         data-tree-flip={`s:${s.id}`}
-        className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
+        className={`${styles.sessionItem} ${isActive || inPane || menuOpen ? styles.active : ""} ${
+          inPane && !isActive ? styles.sessionInPane : ""
+        } ${
           menuOpen ? styles.sessionMenuOpen : ""
         } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}`}
         onContextMenu={(e) => openSessionMenu(e, s.id)}
@@ -711,8 +718,15 @@ export function ChatSidebar({
               className={styles.sessionBtn}
               onPointerDown={(e) => {
                 if (e.button !== 0) return;
-                // Paint selection on press, before click/navigation.
+                if (e.ctrlKey || e.metaKey) {
+                  void openSessionInNewPane(s.id);
+                  return;
+                }
                 void selectSession(s.id);
+                if (window.innerWidth < 900) {
+                  navigate("/chat");
+                  setSidebarOpen(false);
+                }
               }}
               onClick={() => {
                 goToChat();

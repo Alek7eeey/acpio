@@ -149,6 +149,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
   }
+  if (typeof merged.chatSplit !== "boolean") {
+    merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
+  }
   // Fields replaced by icon-level controls / never shipped.
   for (const stale of [
     "chatReadAloud",

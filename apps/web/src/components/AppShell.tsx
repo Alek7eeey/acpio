@@ -311,6 +311,18 @@ export function AppShell() {
   }, [sidebarOpen, setSidebarOpen]);
 
   const sheetDismissingRef = useRef(false);
+  const ignoreSheetDismissUntilRef = useRef(0);
+
+  const openSheetAt = useCallback(
+    (snapIndex: number) => {
+      ignoreSheetDismissUntilRef.current = Date.now() + 500;
+      sheetSnapRef.current = snapIndex;
+      sheetDismissingRef.current = false;
+      setSidebarOpen(true);
+      requestAnimationFrame(() => applySheetSnapCss(snapIndex));
+    },
+    [setSidebarOpen, applySheetSnapCss],
+  );
 
   /** Mobile: slide the sheet off-screen, then unmount. Desktop: instant close. */
   const dismissSheet = useCallback(() => {
@@ -356,16 +368,6 @@ export function AppShell() {
     el.addEventListener("transitionend", onEnd);
     window.setTimeout(finish, 480);
   }, [setSidebarOpen]);
-
-  const openSheetAt = useCallback(
-    (snapIndex: number) => {
-      sheetSnapRef.current = snapIndex;
-      sheetDismissingRef.current = false;
-      setSidebarOpen(true);
-      requestAnimationFrame(() => applySheetSnapCss(snapIndex));
-    },
-    [setSidebarOpen, applySheetSnapCss],
-  );
 
   const snapSheetHeight = useCallback(
     (heightPx: number) => {
@@ -477,10 +479,10 @@ export function AppShell() {
   const onPullerPointerDown = useCallback(
     (e: ReactPointerEvent<HTMLButtonElement>) => {
       if (window.innerWidth >= 900) return;
-      // Do not preventDefault here: it cancels the pointer on some mobile
-      // browsers, so a tap never reaches pointerup/click and the sheet
-      // only opens when the user drags. Window listeners still survive
-      // puller unmount when the sheet opens mid-drag.
+      // Keep this button in the DOM for the whole gesture. Unmounting it
+      // (or setting pointer-events: none) fires pointercancel and the user
+      // has to press again to keep dragging.
+      setPullerHeld(true);
       const pointerId = e.pointerId;
       const startY = e.clientY;
       const drag = {
@@ -507,6 +509,7 @@ export function AppShell() {
         const up = drag.startY - ev.clientY;
         if (!drag.opened && up > 8) {
           drag.opened = true;
+          ignoreSheetDismissUntilRef.current = Date.now() + 500;
           sheetSnapRef.current = 0;
           setSidebarOpen(true);
         }
@@ -515,18 +518,28 @@ export function AppShell() {
         sheetDragRaf.current = requestAnimationFrame(() => {
           sheetDragRaf.current = 0;
           if (!pullerDragRef.current) return;
-          // Sheet may mount one frame later after setSidebarOpen.
           if (!paintFromFinger(ev.clientY)) {
             requestAnimationFrame(() => paintFromFinger(ev.clientY));
           }
         });
       };
 
-      const onUp = (ev: PointerEvent) => {
-        if (ev.pointerId !== pointerId) return;
+      const stopListen = () => {
         window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onUp);
-        window.removeEventListener("pointercancel", onUp);
+        window.removeEventListener("pointerup", onEnd);
+        window.removeEventListener("pointercancel", onEnd);
+      };
+
+      let ended = false;
+      const onEnd = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId || ended) return;
+        if (ev.type === "pointercancel" && drag.opened) {
+          // Keep waiting for pointerup; cancel here used to abort the drag.
+          return;
+        }
+        ended = true;
+        stopListen();
+        setPullerHeld(false);
         const d = pullerDragRef.current;
         pullerDragRef.current = null;
         if (sheetDragRaf.current) {
@@ -535,7 +548,8 @@ export function AppShell() {
         }
         if (!d) return;
         if (!d.opened) {
-          if (Math.abs(d.startY - d.lastY) < 8) openSheetAt(isSettings ? 1 : 2);
+          if (ev.type === "pointercancel") return;
+          openSheetAt(isSettings ? 1 : 2);
           return;
         }
         const finish = () => {
@@ -554,14 +568,13 @@ export function AppShell() {
           el.style.transform = "";
           snapSheetHeight(height);
         };
-        // Ensure sheet exists before snapping.
         if (sheetRef.current) finish();
         else requestAnimationFrame(finish);
       };
 
       window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onUp);
-      window.addEventListener("pointercancel", onUp);
+      window.addEventListener("pointerup", onEnd);
+      window.addEventListener("pointercancel", onEnd);
     },
     [setSidebarOpen, applyLiveSheetHeight, openSheetAt, snapSheetHeight, isSettings, sheetMinPx, sheetSnaps],
   );
@@ -620,6 +633,8 @@ export function AppShell() {
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const mcpStatusSeq = useRef(0);
   const [messageSearchOpen, setMessageSearchOpen] = useState(false);
+  /** Keep the puller mounted and hittable while a drag-open is in progress. */
+  const [pullerHeld, setPullerHeld] = useState(false);
   useEffect(() => {
     if (!agentTipOpen) return;
     const seq = ++mcpStatusSeq.current;
@@ -635,14 +650,14 @@ export function AppShell() {
 
   const goChat = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
-    if (window.innerWidth < 900) setSidebarOpen(false);
+    if (window.innerWidth < 900) dismissSheet();
     navigate("/chat");
-  }, [navigate, setSidebarOpen]);
+  }, [navigate, dismissSheet]);
 
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
     setOpenBranches((prev) => ({ ...prev, [section]: true }));
-    // Mobile: leave the settings tree at its current snap (peek by default).
+    if (window.innerWidth < 900) dismissSheet();
   };
 
 
@@ -1225,7 +1240,10 @@ export function AppShell() {
           type="button"
           className={styles.backdrop}
           aria-label={t("common.closeMenu")}
-          onClick={dismissSheet}
+          onClick={() => {
+            if (Date.now() < ignoreSheetDismissUntilRef.current) return;
+            dismissSheet();
+          }}
         />
       )}
 
@@ -1434,15 +1452,13 @@ export function AppShell() {
       </div>
 
       {/* Mobile: bottom splitter — tap or drag up to open the tree sheet. */}
-      {showSidebar && !sidebarOpen ? (
+      {showSidebar ? (
         <button
           type="button"
-          className={styles.sheetPuller}
+          className={`${styles.sheetPuller}${sidebarOpen && !pullerHeld ? ` ${styles.sheetPullerHidden}` : ""}`}
+          tabIndex={sidebarOpen ? -1 : 0}
+          aria-hidden={sidebarOpen && !pullerHeld}
           aria-label={isSettings ? t("common.openSettingsSheet") : t("common.openChatsSheet")}
-          onClick={() => {
-            if (window.innerWidth >= 900) return;
-            openSheetAt(isSettings ? 1 : 2);
-          }}
           onPointerDown={onPullerPointerDown}
         >
           <span className={styles.sheetPullerBar} aria-hidden />

@@ -19,6 +19,14 @@ import {
 } from "@acprocess/shared";
 import { api } from "./api";
 import { applyAppearance } from "./appearance";
+import {
+  CHAT_PANE_MAX,
+  chatSplitAllowed,
+  readStoredChatPanes,
+  sanitizeChatPanes,
+  writeStoredChatPanes,
+  type ChatPaneSlot,
+} from "./chatPanes";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
@@ -96,6 +104,18 @@ type AppState = {
   themes: ChatThemeDto[];
   activeSessionId: string | null;
   activeSession: SessionDetailDto | null;
+  /**
+   * Desktop split: 1–4 slots. Null = empty column. Mobile always uses a
+   * single slot equal to activeSessionId.
+   */
+  chatPaneIds: ChatPaneSlot[];
+  focusedPaneIndex: number;
+  /** Live details for open split panes (and the focused chat). */
+  sessionDetails: Record<string, SessionDetailDto>;
+  setChatPaneCount: (count: number) => void;
+  focusChatPane: (index: number) => void;
+  closeChatPane: (index: number) => void;
+  openSessionInNewPane: (id: string) => Promise<void>;
   /** Transient: message to scroll to/highlight once its session renders. */
   focusMessageId: string | null;
   /** True while a session detail is being fetched (skeleton shown). */
@@ -131,11 +151,15 @@ type AppState = {
   promptQueue: Array<{
     id: string;
     text: string;
+    sessionId: string;
     editMessageId?: string | null;
     attachments?: PendingAttachment[];
   }>;
-  /** Prompts handed to the server whose turns have not completed yet. */
+  /** Prompts handed to the server whose turns have not completed yet (legacy sum). */
   inflight: number;
+  inflightBySession: Record<string, number>;
+  promptEpochBySession: Record<string, number>;
+  cancelledPromptEpochBySession: Record<string, number>;
   loading: boolean;
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
@@ -162,12 +186,12 @@ type AppState = {
   ) => Promise<void>;
   sendPrompt: (
     text: string,
-    opts?: { editMessageId?: string; attachments?: PendingAttachment[] },
+    opts?: { editMessageId?: string; attachments?: PendingAttachment[]; sessionId?: string },
   ) => Promise<void>;
   /** Internal: actually hand one prompt to the server (optimistic pair optional). */
   runSendPrompt: (
     text: string,
-    opts?: { editMessageId?: string; attachments?: PendingAttachment[] },
+    opts?: { editMessageId?: string; attachments?: PendingAttachment[]; sessionId?: string },
     flags?: { optimistic?: boolean },
   ) => Promise<void>;
   removeQueuedPrompt: (id: string) => void;
@@ -175,7 +199,7 @@ type AppState = {
   drainPromptQueue: () => Promise<void>;
   /** Optimistic local toggle; the save happens in the background. */
   setMultitask: (value: boolean) => Promise<void>;
-  cancelPrompt: () => Promise<void>;
+  cancelPrompt: (sessionId?: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   setConnected: (connected: boolean) => void;
   setAgentAvailable: (available: boolean) => void;
@@ -386,6 +410,62 @@ function rememberSessionDetail(detail: SessionDetailDto | null | undefined) {
   if (oldest) sessionDetailCache.delete(oldest);
 }
 
+function liveDetail(state: AppState, sessionId: string): SessionDetailDto | null {
+  if (state.activeSession?.id === sessionId) return state.activeSession;
+  return (state.sessionDetails ?? {})[sessionId] ?? sessionDetailCache.get(sessionId) ?? null;
+}
+
+function paneSlots(state: Pick<AppState, "chatPaneIds"> | AppState): ChatPaneSlot[] {
+  return Array.isArray(state.chatPaneIds) ? state.chatPaneIds : [null];
+}
+
+function commitDetail(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  next: SessionDetailDto,
+) {
+  rememberSessionDetail(next);
+  const state = get();
+  const keep =
+    paneSlots(state).includes(next.id) ||
+    state.activeSessionId === next.id ||
+    Boolean((state.sessionDetails ?? {})[next.id]);
+  set({
+    sessionDetails: keep
+      ? { ...(state.sessionDetails ?? {}), [next.id]: next }
+      : (state.sessionDetails ?? {}),
+    ...(state.activeSession?.id === next.id ? { activeSession: next } : {}),
+  });
+}
+
+function persistPanes(ids: ChatPaneSlot[], focus: number) {
+  writeStoredChatPanes(ids, focus);
+}
+
+function syncPanesOnSelect(get: () => AppState, set: (partial: Partial<AppState>) => void, id: string) {
+  if (!chatSplitAllowed(get().settings.chatSplit)) {
+    persistPanes([id], 0);
+    set({ chatPaneIds: [id], focusedPaneIndex: 0 });
+    return;
+  }
+  const panes = [...paneSlots(get())];
+  const existing = panes.findIndex((slot) => slot === id);
+  if (existing >= 0) {
+    persistPanes(panes, existing);
+    set({ focusedPaneIndex: existing });
+    return;
+  }
+  if (panes.length === 0) {
+    persistPanes([id], 0);
+    set({ chatPaneIds: [id], focusedPaneIndex: 0 });
+    return;
+  }
+  const idx = Math.max(0, Math.min(panes.length - 1, get().focusedPaneIndex));
+  panes[idx] = id;
+  persistPanes(panes, idx);
+  set({ chatPaneIds: panes, focusedPaneIndex: idx });
+}
+
 /** Cheap equality so a quiet background refresh can skip a React paint. */
 function sessionDetailQuickEqual(
   a: SessionDetailDto | null | undefined,
@@ -415,57 +495,60 @@ function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppS
   pendingPartEvents = [];
   if (!batch.length) return;
 
-  const state = get();
-  const active = state.activeSession;
-  if (!active) return;
-
-  let messages = active.messages;
-  let touched = false;
+  const grouped = new Map<string, PendingPartEvent[]>();
   for (const event of batch) {
-    if (active.id !== event.sessionId) continue;
-    if (state.cancelledPromptEpoch === state.promptEpoch) continue;
-    let messageId = resolveClientMessageId(event.messageId, active.id);
-    if (messageId === event.messageId) {
-      const optimisticId =
-        pendingOptimisticPair?.sessionId === active.id ? pendingOptimisticPair.assistantId : null;
-      if (optimisticId && messages.some((message) => message.id === optimisticId)) {
-        serverToClientMessageId.set(event.messageId, {
-          clientId: optimisticId,
-          sessionId: active.id,
-        });
-        messageId = optimisticId;
+    const list = grouped.get(event.sessionId);
+    if (list) list.push(event);
+    else grouped.set(event.sessionId, [event]);
+  }
+
+  for (const [sessionId, events] of grouped) {
+    const state = get();
+    const current = liveDetail(state, sessionId);
+    if (!current) continue;
+    const epoch = state.promptEpochBySession?.[sessionId] ?? state.promptEpoch;
+    const cancelled = state.cancelledPromptEpochBySession?.[sessionId] ?? state.cancelledPromptEpoch;
+    if (cancelled === epoch && epoch !== 0) continue;
+
+    let messages = current.messages;
+    let touched = false;
+    for (const event of events) {
+      let messageId = resolveClientMessageId(event.messageId, current.id);
+      if (messageId === event.messageId) {
+        const optimisticId =
+          pendingOptimisticPair?.sessionId === current.id ? pendingOptimisticPair.assistantId : null;
+        if (optimisticId && messages.some((message) => message.id === optimisticId)) {
+          serverToClientMessageId.set(event.messageId, {
+            clientId: optimisticId,
+            sessionId: current.id,
+          });
+          messageId = optimisticId;
+        }
+      }
+      let found = false;
+      messages = messages.map((m) => {
+        if (m.id !== messageId) return m;
+        found = true;
+        touched = true;
+        return { ...m, parts: upsertMessagePart(m, { ...event.part, messageId }) };
+      });
+      if (!found) {
+        touched = true;
+        messages = [
+          ...messages,
+          {
+            id: messageId,
+            sessionId: event.sessionId,
+            role: "assistant",
+            createdAt: new Date().toISOString(),
+            parts: [{ ...event.part, messageId }],
+          },
+        ];
       }
     }
-    let found = false;
-    messages = messages.map((m) => {
-      if (m.id !== messageId) return m;
-      found = true;
-      touched = true;
-      return { ...m, parts: upsertMessagePart(m, { ...event.part, messageId }) };
-    });
-    if (!found) {
-      touched = true;
-      messages = [
-        ...messages,
-        {
-          id: messageId,
-          sessionId: event.sessionId,
-          role: "assistant",
-          createdAt: new Date().toISOString(),
-          parts: [{ ...event.part, messageId }],
-        },
-      ];
-    }
+    if (!touched) continue;
+    commitDetail(get, set, { ...current, messages });
   }
-  if (!touched) return;
-  const nextActive = {
-    ...active,
-    messages,
-  };
-  rememberSessionDetail(nextActive);
-  set({
-    activeSession: nextActive,
-  });
 }
 
 function queuePartEvent(
@@ -488,17 +571,9 @@ function reconcileFinishedTurn(
       .getSession(sessionId)
       .then((detail) => {
         const state = get();
-        const active = state.activeSession;
-        // Another chat has taken over; don't apply this session's result there.
-        if (!active || active.id !== sessionId) {
-          return;
-        }
-        // The persisted detail is the reliable final answer. Render it as
-        // normal text; never gate the visible answer on a client animation.
-        rememberSessionDetail(detail);
-        set({ activeSession: detail });
-        // Server truth replaced the optimistic messages — drop this session's
-        // aliases so late WS parts never rebuild a duplicate message.
+        const current = liveDetail(state, sessionId);
+        if (!current) return;
+        commitDetail(get, set, detail);
         clearMessageIdAliases(sessionId);
       })
       .catch(() => {
@@ -542,8 +617,34 @@ async function loadAppData(
       : sessions[0]?.id ?? null;
   if (pick) {
     await get().selectSession(pick);
+    const known = new Set(sessions.map((s) => s.id));
+    const stored = readStoredChatPanes();
+    const splitOn = chatSplitAllowed(get().settings.chatSplit);
+    const ids = splitOn
+      ? sanitizeChatPanes(stored?.ids ?? [pick], known, pick)
+      : [pick];
+    const focus = splitOn
+      ? Math.max(0, Math.min(ids.length - 1, stored?.focus ?? 0))
+      : 0;
+    writeStoredChatPanes(ids, focus);
+    set({ chatPaneIds: ids, focusedPaneIndex: focus });
+    const focusId = ids[focus];
+    if (focusId && focusId !== get().activeSessionId) {
+      await get().selectSession(focusId);
+      set({ chatPaneIds: ids, focusedPaneIndex: focus });
+      writeStoredChatPanes(ids, focus);
+    }
+    for (const id of ids) {
+      if (!id || id === get().activeSessionId) continue;
+      void api
+        .getSession(id)
+        .then((detail) => commitDetail(get, set, detail))
+        .catch(() => {
+          /* pane will retry when focused */
+        });
+    }
   } else {
-    set({ activeSessionId: null, activeSession: null });
+    set({ activeSessionId: null, activeSession: null, chatPaneIds: [null], focusedPaneIndex: 0 });
   }
 }
 
@@ -565,6 +666,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   themes: [],
   activeSessionId: null,
   activeSession: null,
+  chatPaneIds: [null],
+  focusedPaneIndex: 0,
+  sessionDetails: {},
   focusMessageId: null,
   sessionLoading: false,
   speakingMessageId: null,
@@ -587,6 +691,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   cancelledPromptEpoch: -1,
   promptQueue: [],
   inflight: 0,
+  inflightBySession: {},
+  promptEpochBySession: {},
+  cancelledPromptEpochBySession: {},
   loading: true,
   error: null,
 
@@ -878,7 +985,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       pendingQuestion: null,
       // Composer banner is per active chat — don't carry another session's error.
       error: null,
+      ...(optimistic
+        ? { sessionDetails: { ...(get().sessionDetails ?? {}), [id]: optimistic } }
+        : {}),
     });
+    syncPanesOnSelect(get, set, id);
 
     try {
       const detail = await api.getSession(id);
@@ -907,6 +1018,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeSession: detail,
         sessionLoading: false,
         error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+        sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
       });
       // The fetched detail is server-authoritative: the optimistic aliases for
       // this session are obsolete (their local messages are gone).
@@ -918,6 +1030,83 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionLoading: false,
       });
     }
+  },
+
+  setChatPaneCount(count) {
+    const n = Math.max(1, Math.min(CHAT_PANE_MAX, Math.round(count)));
+    if (!chatSplitAllowed(get().settings.chatSplit)) return;
+    const state = get();
+    let ids = [...paneSlots(state)];
+    if (ids.length === 0) ids = [state.activeSessionId];
+    const known = state.sessions.filter((s) => !s.archived);
+    while (ids.length < n) {
+      const take = known.find((s) => !ids.includes(s.id));
+      ids.push(take?.id ?? null);
+    }
+    ids = ids.slice(0, n);
+    const focus = Math.min(state.focusedPaneIndex, n - 1);
+    persistPanes(ids, focus);
+    set({ chatPaneIds: ids, focusedPaneIndex: focus });
+    const focusId = ids[focus];
+    if (focusId && focusId !== state.activeSessionId) void get().selectSession(focusId);
+    for (const paneId of ids) {
+      if (!paneId || paneId === get().activeSessionId || get().sessionDetails?.[paneId]) continue;
+      void api
+        .getSession(paneId)
+        .then((detail) => commitDetail(get, set, detail))
+        .catch(() => {});
+    }
+  },
+
+  focusChatPane(index) {
+    const ids = paneSlots(get());
+    if (index < 0 || index >= ids.length) return;
+    persistPanes(ids, index);
+    set({ focusedPaneIndex: index });
+    const paneId = ids[index];
+    if (paneId && paneId !== get().activeSessionId) void get().selectSession(paneId);
+  },
+
+  closeChatPane(index) {
+    const ids = [...paneSlots(get())];
+    if (ids.length <= 1) return;
+    ids.splice(index, 1);
+    const focus = Math.min(get().focusedPaneIndex, ids.length - 1);
+    persistPanes(ids, focus);
+    set({ chatPaneIds: ids, focusedPaneIndex: focus });
+    const paneId = ids[focus];
+    if (paneId) void get().selectSession(paneId);
+  },
+
+  async openSessionInNewPane(id) {
+    if (!chatSplitAllowed(get().settings.chatSplit)) {
+      await get().selectSession(id);
+      return;
+    }
+    const ids = [...paneSlots(get())];
+    const existing = ids.findIndex((slot) => slot === id);
+    if (existing >= 0) {
+      persistPanes(ids, existing);
+      set({ focusedPaneIndex: existing });
+      await get().selectSession(id);
+      return;
+    }
+    const empty = ids.findIndex((slot) => !slot);
+    if (empty >= 0) {
+      ids[empty] = id;
+      persistPanes(ids, empty);
+      set({ chatPaneIds: ids, focusedPaneIndex: empty });
+      await get().selectSession(id);
+      return;
+    }
+    if (ids.length < CHAT_PANE_MAX) {
+      ids.push(id);
+      persistPanes(ids, ids.length - 1);
+      set({ chatPaneIds: ids, focusedPaneIndex: ids.length - 1 });
+      await get().selectSession(id);
+      return;
+    }
+    await get().selectSession(id);
   },
 
   async createSession(cwd) {
@@ -938,9 +1127,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     await api.deleteSession(id);
     const { activeSessionId } = get();
     await get().refreshSessions();
+    const panes = paneSlots(get()).map((slot) => (slot === id ? null : slot));
+    const remaining = panes.filter(Boolean);
+    if (remaining.length === 0) {
+      persistPanes(panes.length ? panes : [null], 0);
+      set({ chatPaneIds: panes.length ? panes : [null], focusedPaneIndex: 0 });
+    } else if (panes !== get().chatPaneIds) {
+      const focus = Math.min(get().focusedPaneIndex, panes.length - 1);
+      persistPanes(panes, focus);
+      set({ chatPaneIds: panes, focusedPaneIndex: focus });
+    }
+    const details = { ...get().sessionDetails };
+    delete details[id];
+    set({ sessionDetails: details });
     if (activeSessionId === id) {
-      const next = get().sessions[0];
-      await get().selectSession(next?.id ?? null);
+      const next =
+        panes.find((slot) => slot && slot !== id) ?? get().sessions[0]?.id ?? null;
+      await get().selectSession(next);
     }
   },
 
@@ -1026,32 +1229,44 @@ export const useAppStore = create<AppState>((set, get) => ({
    * multitask is enabled.
    */
   async sendPrompt(text, opts) {
+    const sid = opts?.sessionId ?? get().activeSessionId;
     const limit = get().settings.multitask ? 2 : 1;
+    const detail = sid ? liveDetail(get(), sid) : get().activeSession;
+    const listed = sid ? get().sessions.find((s) => s.id === sid) : null;
+    const status = detail?.status ?? listed?.status;
+    const inf = sid ? (get().inflightBySession?.[sid] ?? 0) : get().inflight;
+    const queued = sid
+      ? get().promptQueue.filter((q) => q.sessionId === sid)
+      : get().promptQueue;
     const busy =
-      get().inflight >= limit ||
-      get().promptQueue.length > 0 ||
-      get().activeSession?.status === "running" ||
-      get().activeSession?.status === "waiting";
+      inf >= limit || queued.length > 0 || status === "running" || status === "waiting";
     if (busy) {
+      if (!sid) return;
       set({
         promptQueue: [
           ...get().promptQueue,
           {
             id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             text,
+            sessionId: sid,
             editMessageId: opts?.editMessageId ?? null,
             attachments: opts?.attachments,
           },
         ],
       });
-      // Small delay so the queue bar renders before drain picks up the item.
       await new Promise((r) => setTimeout(r, 80));
       void get().drainPromptQueue();
       return;
     }
-    // Reserve a slot so a second send while this turn is running actually
-    // queues instead of being drained instantly (inflight only drops on idle).
-    set({ inflight: get().inflight + 1 });
+    if (sid) {
+      const inflightBySession = { ...get().inflightBySession, [sid]: inf + 1 };
+      set({
+        inflightBySession,
+        inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+      });
+    } else {
+      set({ inflight: get().inflight + 1 });
+    }
     await get().runSendPrompt(text, opts, { optimistic: true });
   },
 
@@ -1076,41 +1291,54 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async drainPromptQueue() {
     const limit = get().settings.multitask ? 2 : 1;
-    if (get().inflight >= limit) return;
-    // Serial mode: never start the next turn while the agent is still working
-    // (inflight can read 0 after a page reload mid-turn).
-    const status = get().activeSession?.status;
-    if (limit === 1 && (status === "running" || status === "waiting")) return;
     const q = get().promptQueue;
     if (!q.length) return;
-    const [item, ...rest] = q;
-    set({ promptQueue: rest, inflight: get().inflight + 1 });
+    const idx = q.findIndex((item) => {
+      const inf = get().inflightBySession?.[item.sessionId] ?? 0;
+      if (inf >= limit) return false;
+      const detail = liveDetail(get(), item.sessionId);
+      const listed = get().sessions.find((s) => s.id === item.sessionId);
+      const status = detail?.status ?? listed?.status;
+      if (limit === 1 && (status === "running" || status === "waiting")) return false;
+      return true;
+    });
+    if (idx < 0) return;
+    const item = q[idx];
+    const rest = q.filter((_, i) => i !== idx);
+    const inf = (get().inflightBySession?.[item.sessionId] ?? 0) + 1;
+    const inflightBySession = { ...get().inflightBySession, [item.sessionId]: inf };
+    set({
+      promptQueue: rest,
+      inflightBySession,
+      inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+    });
     try {
       await get().runSendPrompt(
         item.text,
         {
+          sessionId: item.sessionId,
           ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
           ...(item.attachments?.length ? { attachments: item.attachments } : {}),
         },
-        {
-          // The first slot reuses the optimistic pair; extra multitask slots
-          // stream their real messages in over WS instead.
-          optimistic: get().inflight <= 1,
-        },
+        { optimistic: inf <= 1 },
       );
     } catch {
-      set({ inflight: Math.max(0, get().inflight - 1) });
+      const cur = Math.max(0, (get().inflightBySession?.[item.sessionId] ?? 1) - 1);
+      const next = { ...get().inflightBySession, [item.sessionId]: cur };
+      set({
+        inflightBySession: next,
+        inflight: Object.values(next).reduce((a, b) => a + b, 0),
+      });
     }
-    // Fill the second multitask slot; serial mode is already at the limit.
     void get().drainPromptQueue();
   },
 
   async runSendPrompt(text, opts, { optimistic = true } = {}) {
-    const id = get().activeSessionId;
+    const id = opts?.sessionId ?? get().activeSessionId;
     set({ error: null });
 
     const buildOptimisticPair = (sessionId: string, baseMessages: MessageDto[]) => {
-      const epoch = get().promptEpoch + 1;
+      const epoch = (get().promptEpochBySession?.[sessionId] ?? get().promptEpoch) + 1;
       const now = new Date().toISOString();
       const userId = `local-user-${epoch}`;
       const assistantId = `local-assistant-${epoch}`;
@@ -1164,24 +1392,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
 
     const commitRunning = (sessionId: string, messages: MessageDto[] | null, epoch: number) => {
-      const active = get().activeSession;
-      // New turn: wait for a server running/waiting before accepting idle again.
+      const current = liveDetail(get(), sessionId);
       serverConfirmedBusy.delete(sessionId);
       set({
         modelsLoading: false,
         promptEpoch: epoch,
+        promptEpochBySession: { ...get().promptEpochBySession, [sessionId]: epoch },
         sessions: get().sessions.map((s) =>
           s.id === sessionId ? { ...s, status: "running" as const } : s,
         ),
-        activeSession:
-          active?.id === sessionId
-            ? {
-                ...active,
-                status: "running",
-                ...(messages ? { messages } : {}),
-              }
-            : active,
       });
+      if (current) {
+        commitDetail(get, set, {
+          ...current,
+          status: "running",
+          ...(messages ? { messages } : {}),
+        });
+      }
     };
 
     if (!id) {
@@ -1194,8 +1421,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
 
-    if (opts?.editMessageId && get().activeSession?.id === id) {
-      const msgs = get().activeSession!.messages;
+    if (opts?.editMessageId && id) {
+      const current = liveDetail(get(), id);
+      if (current) {
+      const msgs = current.messages;
       const idx = msgs.findIndex((m) => m.id === opts.editMessageId);
       if (idx >= 0) {
         const trimmed = text.trim();
@@ -1243,28 +1472,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         await api.prompt(id, text, { editMessageId: opts.editMessageId });
         return;
       }
+      }
     }
 
-    const active = get().activeSession;
-    if (active?.id === id && optimistic) {
-      const pair = buildOptimisticPair(id, active.messages);
+    const current = id ? liveDetail(get(), id) : null;
+    if (current && optimistic) {
+      const pair = buildOptimisticPair(id, current.messages);
       pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId, sessionId: id };
       commitRunning(id, pair.messages, pair.epoch);
     } else {
-      commitRunning(id, null, get().promptEpoch + 1);
+      commitRunning(id, null, (get().promptEpochBySession?.[id ?? ""] ?? get().promptEpoch) + 1);
     }
     await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
   },
 
-  async cancelPrompt() {
-    const id = get().activeSessionId;
+  async cancelPrompt(sessionId) {
+    const id = sessionId ?? get().activeSessionId;
     if (!id) return;
     const state = get();
-    // In-flight tool/subagent calls become "cancelled" right away so their
-    // spinners stop — the WS epoch filter below drops the server's late
-    // part.updated events after Stop, so we can't wait for them.
+    const current = liveDetail(state, id);
     const STUCK = new Set(["pending", "in_progress", "running"]);
-    const messages = (state.activeSession?.messages ?? []).map((m) => ({
+    const messages = (current?.messages ?? []).map((m) => ({
       ...m,
       parts: m.parts.map((p) =>
         (p.type === "tool_call" || p.type === "subagent") &&
@@ -1273,20 +1501,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           : p,
       ),
     }));
+    const epoch = state.promptEpochBySession?.[id] ?? state.promptEpoch;
+    const inflightBySession = { ...state.inflightBySession, [id]: 0 };
     set({
-      cancelledPromptEpoch: state.promptEpoch,
-      promptQueue: [],
-      inflight: 0,
+      cancelledPromptEpoch: epoch,
+      cancelledPromptEpochBySession: { ...state.cancelledPromptEpochBySession, [id]: epoch },
+      promptQueue: state.promptQueue.filter((item) => item.sessionId !== id),
+      inflightBySession,
+      inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
       pendingPermission:
         state.pendingPermission?.sessionId === id ? null : state.pendingPermission,
       permissionQueue: state.permissionQueue.filter((p) => p.sessionId !== id),
       pendingQuestion: state.pendingQuestion?.sessionId === id ? null : state.pendingQuestion,
       sessions: state.sessions.map((s) => (s.id === id ? { ...s, status: "idle" as const } : s)),
-      activeSession:
-        state.activeSession?.id === id
-          ? { ...state.activeSession, status: "idle" as const, messages }
-          : state.activeSession,
     });
+    if (current) {
+      commitDetail(get, set, { ...current, status: "idle", messages });
+    }
     serverConfirmedBusy.delete(id);
     try {
       await api.cancel(id);
@@ -1345,8 +1576,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       // After Stop, don't let a late "running"/"waiting" event revive the stream UI.
       const cancelled =
-        state.activeSession?.id === event.sessionId &&
-        state.cancelledPromptEpoch === state.promptEpoch;
+        (state.cancelledPromptEpochBySession?.[event.sessionId] ??
+          (state.activeSession?.id === event.sessionId ? state.cancelledPromptEpoch : -1)) ===
+        (state.promptEpochBySession?.[event.sessionId] ??
+          (state.activeSession?.id === event.sessionId ? state.promptEpoch : 0));
       let session =
         cancelled && (event.session.status === "running" || event.session.status === "waiting")
           ? { ...event.session, status: "idle" as const }
@@ -1462,6 +1695,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         patch.settings = { ...state.settings, defaultMode: session.mode };
       }
       if (nextActive !== prevActive) patch.activeSession = nextActive;
+      const paneLive = liveDetail(state, event.sessionId);
+      if (paneLive && paneLive !== nextActive && nextActive?.id !== event.sessionId) {
+        // keep pane thread in sync when it is not the focused chat
+      }
+      if (paneLive && event.sessionId !== prevActive?.id) {
+        const chatUiChanged =
+          paneLive.status !== session.status ||
+          paneLive.title !== session.title ||
+          paneLive.mode !== session.mode;
+        if (chatUiChanged) {
+          patch.sessionDetails = {
+            ...state.sessionDetails,
+            [event.sessionId]: {
+              ...paneLive,
+              status: session.status,
+              title: session.title,
+              mode: session.mode,
+              cwd: session.cwd,
+              provider: session.provider,
+              pinned: session.pinned,
+              archived: session.archived,
+              acpSessionId: session.acpSessionId,
+              themeId: session.themeId,
+              mcpDisabledIds: session.mcpDisabledIds,
+              usage: session.usage ?? paneLive.usage,
+              lastMessageAt: paneLive.lastMessageAt,
+              messages: paneLive.messages,
+            },
+          };
+        }
+      }
       // Apply chat-pane updates first. Tree reorder goes on a microtask so the
       // right pane never re-renders from a sessions-list identity change.
       if (Object.keys(patch).length) set(patch);
@@ -1477,12 +1741,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (
         session.status === "idle" &&
         wasBusy &&
-        get().activeSession?.id === event.sessionId &&
+        liveDetail(get(), event.sessionId) &&
         !cancelled
       ) {
         reconcileFinishedTurn(event.sessionId, get, set);
-        // All in-flight turns are done — free the queue slots and send more.
-        if (get().inflight > 0) set({ inflight: 0 });
+        const inflightBySession = { ...get().inflightBySession, [event.sessionId]: 0 };
+        set({
+          inflightBySession,
+          inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+        });
         void get().drainPromptQueue();
       }
       return;
@@ -1516,6 +1783,19 @@ export const useAppStore = create<AppState>((set, get) => ({
           : s,
       );
       if (state.activeSession?.id !== event.sessionId) {
+        const current = liveDetail(state, event.sessionId);
+        if (current) {
+          commitDetail(get, set, {
+            ...current,
+            ...(stampActivity
+              ? {
+                  lastMessageAt: event.message.createdAt,
+                  updatedAt: event.message.createdAt,
+                }
+              : {}),
+            messages: upsertMessage(current.messages, event.message),
+          });
+        }
         if (stampActivity) set({ sessions: nextSessions });
         return;
       }
@@ -1538,22 +1818,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (event.type === "messages.truncated" || event.type === "messages.replaced") {
-      if (state.activeSession?.id !== event.sessionId) return;
-      const replacedActive = {
-        ...state.activeSession!,
-        messages: event.messages,
-      };
-      rememberSessionDetail(replacedActive);
-      set({
-        activeSession: replacedActive,
-      });
+      const current = liveDetail(state, event.sessionId);
+      if (!current) return;
+      commitDetail(get, set, { ...current, messages: event.messages });
       return;
     }
 
     if (event.type === "part.appended" || event.type === "part.updated") {
-      if (state.activeSession?.id !== event.sessionId) return;
-      // User hit Stop — ignore late tokens still arriving over WS.
-      if (state.cancelledPromptEpoch === state.promptEpoch) return;
+      if (!liveDetail(state, event.sessionId)) return;
+      const epoch = state.promptEpochBySession?.[event.sessionId] ?? state.promptEpoch;
+      const cancelledAt =
+        state.cancelledPromptEpochBySession?.[event.sessionId] ??
+        (state.activeSession?.id === event.sessionId ? state.cancelledPromptEpoch : -2);
+      if (cancelledAt === epoch && epoch !== 0) return;
       // Error parts are not rendered in the thread; lift them to the banner.
       if (event.part.type === "error") {
         const message = String(event.part.payload?.message ?? "").trim();
@@ -1711,6 +1988,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings });
     applyAppearance(settings);
+    if (settings.chatSplit === false) {
+      const id = get().activeSessionId;
+      persistPanes([id], 0);
+      set({ chatPaneIds: [id], focusedPaneIndex: 0 });
+    }
     const providerToLoad =
       nextPatch.connectedProvider ?? (providerChanged ? settings.defaultProvider : null);
     if (providerToLoad) {

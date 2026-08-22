@@ -336,6 +336,9 @@ export const ru = {
     chatEnterToSendHint: "Выкл: Enter — новая строка, отправка по Ctrl+Enter.",
     chatShowMessageTime: "Время сообщений",
     chatShowMessageTimeHint: "Показывать время отправки у каждого сообщения.",
+    chatSplit: "Два чата рядом",
+    chatSplitHint:
+      "Только на широком экране. Плавающая кнопка под шапкой делит рабочую область на два чата. Ctrl+клик по чату в дереве открывает его во второй панели.",
     chatVoiceInput: "Голосовой ввод",
     chatVoiceInputHint: "Кнопка микрофона в панели ввода.",
     chatPreview: "Предпросмотр",

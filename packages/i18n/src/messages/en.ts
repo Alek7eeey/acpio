@@ -312,6 +312,9 @@ export const en = {
     chatEnterToSendHint: "Off: Enter inserts a newline, Ctrl+Enter sends.",
     chatShowMessageTime: "Message timestamps",
     chatShowMessageTimeHint: "Show the send time next to each message.",
+    chatSplit: "Two chats side by side",
+    chatSplitHint:
+      "Desktop only. A small floating button under the header splits the workspace into two chats. Ctrl+click a chat in the tree to open it in the other pane.",
     chatVoiceInput: "Voice input",
     chatVoiceInputHint: "The microphone button in the composer.",
     chatPreview: "Preview",

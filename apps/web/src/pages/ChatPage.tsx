@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Fragment,
+  createContext,
+  useCallback,
+  useContext,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -32,6 +35,7 @@ import {
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
+import { CHAT_SPLIT_MIN_PX, FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { adapterMeta, sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
@@ -2771,13 +2775,44 @@ function modelParamsEqual(a: Record<string, string>, b: Record<string, string>) 
   return true;
 }
 
-export function ChatPage() {
+type ChatPaneBind = {
+  sessionId: string | null;
+  paneIndex: number;
+  paneCount: number;
+  focused: boolean;
+};
+
+const ChatPaneContext = createContext<ChatPaneBind | null>(null);
+
+function useDesktopSplit() {
+  const [desktop, setDesktop] = useState(
+    () => typeof window !== "undefined" && window.innerWidth >= CHAT_SPLIT_MIN_PX,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${CHAT_SPLIT_MIN_PX}px)`);
+    const onChange = () => setDesktop(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return desktop;
+}
+
+function ChatThread() {
+  const bind = useContext(ChatPaneContext);
   const t = useT();
   const navigate = useNavigate();
   const { search } = useBrowserLocation();
-  const activeSession = useAppStore((s) => s.activeSession);
+  const activeSession = useAppStore((s) => {
+    if (!bind?.sessionId) return s.activeSession;
+    return (
+      s.sessionDetails?.[bind.sessionId] ??
+      (s.activeSession?.id === bind.sessionId ? s.activeSession : null)
+    );
+  });
   const loading = useAppStore((s) => s.loading);
-  const sessionLoading = useAppStore((s) => s.sessionLoading);
+  const sessionLoading = useAppStore(
+    (s) => Boolean(bind?.sessionId) && s.activeSessionId === bind?.sessionId && s.sessionLoading,
+  );
   const selectSession = useAppStore((s) => s.selectSession);
   const focusMessageId = useAppStore((s) => s.focusMessageId);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
@@ -2792,8 +2827,9 @@ export function ChatPage() {
   // the data arriving early (no cleanup on showSkeleton flip).
   const [skeletonHold, setSkeletonHold] = useState(false);
   const skeletonTimerRef = useRef<number | null>(null);
-  const showSkeleton =
-    sessionLoading || (!activeSession && (loading || hasSessions));
+  const showSkeleton = bind?.sessionId
+    ? sessionLoading || (!activeSession && (loading || hasSessions))
+    : sessionLoading || (!activeSession && (loading || hasSessions));
   useEffect(() => {
     if (!showSkeleton) return;
     setSkeletonHold(true);
@@ -2806,19 +2842,47 @@ export function ChatPage() {
   const renderSkeleton = showSkeleton || skeletonHold;
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
-  const sendPrompt = useAppStore((s) => s.sendPrompt);
-  const cancelPrompt = useAppStore((s) => s.cancelPrompt);
+  const sendPromptStore = useAppStore((s) => s.sendPrompt);
+  const sendPrompt = useCallback(
+    (text: string, opts?: { editMessageId?: string; attachments?: PendingAttachment[] }) =>
+      sendPromptStore(text, { ...opts, sessionId: bind?.sessionId ?? undefined }),
+    [sendPromptStore, bind?.sessionId],
+  );
+  const cancelPromptStore = useAppStore((s) => s.cancelPrompt);
+  const cancelPrompt = useCallback(
+    () => cancelPromptStore(bind?.sessionId ?? undefined),
+    [cancelPromptStore, bind?.sessionId],
+  );
   const createSession = useAppStore((s) => s.createSession);
-  const error = useAppStore((s) => s.error);
+  const error = useAppStore((s) => (!bind || bind.focused ? s.error : null));
   const modelsCatalog = useAppStore((s) => s.modelsCatalog);
   const modelsLoading = useAppStore((s) => s.modelsLoading);
   const ensureModels = useAppStore((s) => s.ensureModels);
   const rememberModelsCatalog = useAppStore((s) => s.rememberModelsCatalog);
-  const pendingPermission = useAppStore((s) => s.pendingPermission);
-  const pendingQuestion = useAppStore((s) => s.pendingQuestion);
+  const pendingPermission = useAppStore((s) => {
+    const p = s.pendingPermission;
+    if (!p) return null;
+    if (bind?.sessionId && p.sessionId !== bind.sessionId) return null;
+    return p;
+  });
+  const pendingQuestion = useAppStore((s) => {
+    const p = s.pendingQuestion;
+    if (!p) return null;
+    if (bind?.sessionId && p.sessionId !== bind.sessionId) return null;
+    return p;
+  });
   const answerQuestion = useAppStore((s) => s.answerQuestion);
-  const promptQueue = useAppStore((s) => s.promptQueue);
-  const inflight = useAppStore((s) => s.inflight);
+  const promptQueueAll = useAppStore((s) => s.promptQueue);
+  const promptQueue = useMemo(
+    () =>
+      bind?.sessionId
+        ? promptQueueAll.filter((q) => q.sessionId === bind.sessionId)
+        : promptQueueAll,
+    [bind?.sessionId, promptQueueAll],
+  );
+  const inflight = useAppStore((s) =>
+    bind?.sessionId ? (s.inflightBySession?.[bind.sessionId] ?? 0) : s.inflight,
+  );
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const [text, setText] = useState("");
   const hasText = text.trim().length > 0;
@@ -3933,13 +3997,21 @@ export function ChatPage() {
     };
   }, []);
 
+  const focusChatPane = useAppStore((s) => s.focusChatPane);
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     submitMessage(text);
   };
 
   return (
-    <div className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""}`}>
+    <div
+      className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""} ${
+        bind && bind.paneCount > 1 ? styles.pageInSplit : ""
+      }`}
+      onPointerDown={() => {
+        if (bind && !bind.focused) focusChatPane(bind.paneIndex);
+      }}
+    >
       <div className={styles.mainColumn}>
       <div className={styles.thread} ref={threadRef}>
         {renderSkeleton ? (
@@ -4708,7 +4780,7 @@ export function ChatPage() {
       />
       </div>
 
-      {speakingMessageId && (
+      {(!bind || bind.focused) && speakingMessageId && (
         <button
           type="button"
           className={styles.ttsStopFab}
@@ -4728,14 +4800,17 @@ export function ChatPage() {
           )}
         </button>
       )}
+      {(!bind || bind.focused) && (
       <PlanTabButton
         visible={Boolean(activePlan) && !planPanelOpen}
         open={planPanelOpen}
         pending={planPending}
         onClick={() => setPlanPanelOpen(true)}
-      />      <PlanSidePanel
+      />
+      )}
+      <PlanSidePanel
         plan={activePlan}
-        open={planPanelOpen}
+        open={planPanelOpen && (!bind || bind.focused)}
         pending={planPending}
         onClose={() => setPlanPanelOpen(false)}
         onAccept={
@@ -4752,6 +4827,152 @@ export function ChatPage() {
             : undefined
         }
       />
+    </div>
+  );
+}
+
+function SplitToggleFab({ enabled }: { enabled: boolean }) {
+  const t = useT();
+  const count = useAppStore((s) => Math.max(1, s.chatPaneIds?.length ?? 1));
+  const setChatPaneCount = useAppStore((s) => s.setChatPaneCount);
+  if (!enabled) return null;
+  const splitOn = count > 1;
+  return (
+    <button
+      type="button"
+      className={`${styles.splitFab}${splitOn ? ` ${styles.splitFabOn}` : ""}`}
+      aria-pressed={splitOn}
+      aria-label={splitOn ? t("chat.splitOne") : t("chat.splitTwo")}
+      title={splitOn ? t("chat.splitOne") : t("chat.splitTwo")}
+      onClick={() => setChatPaneCount?.(splitOn ? 1 : 2)}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <rect x="3.75" y="5.5" width="7" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+        <rect
+          x="13.25"
+          y="5.5"
+          width="7"
+          height="13"
+          rx="1.5"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          opacity="0.55"
+        />
+      </svg>
+    </button>
+  );
+}
+
+function SplitPaneChrome({
+  paneIndex,
+  sessionId,
+  focused,
+  closable,
+}: {
+  paneIndex: number;
+  sessionId: string | null;
+  focused: boolean;
+  closable: boolean;
+}) {
+  const t = useT();
+  const title = useAppStore((s) => {
+    if (!sessionId) return null;
+    return (
+      s.sessionDetails?.[sessionId]?.title ??
+      s.sessions.find((x) => x.id === sessionId)?.title ??
+      null
+    );
+  });
+  const running = useAppStore((s) => {
+    if (!sessionId) return false;
+    const st =
+      s.sessionDetails?.[sessionId]?.status ?? s.sessions.find((x) => x.id === sessionId)?.status;
+    return st === "running" || st === "waiting";
+  });
+  const focusChatPane = useAppStore((s) => s.focusChatPane);
+  const closeChatPane = useAppStore((s) => s.closeChatPane);
+  return (
+    <div
+      className={`${styles.splitChrome}${focused ? ` ${styles.splitChromeFocused}` : ""}`}
+      onPointerDown={() => focusChatPane(paneIndex)}
+    >
+      <span className={styles.splitChromeTitle}>
+        {running ? <span className={styles.splitChromeLive} aria-hidden /> : null}
+        {title || t("chat.splitEmptyTitle")}
+      </span>
+      {closable ? (
+        <button
+          type="button"
+          className={styles.splitChromeClose}
+          aria-label={t("chat.splitClose")}
+          title={t("chat.splitClose")}
+          onClick={(e) => {
+            e.stopPropagation();
+            closeChatPane(paneIndex);
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function ChatPage() {
+  const t = useT();
+  const desktop = useDesktopSplit();
+  const splitSetting = useAppStore((s) => s.settings.chatSplit !== false);
+  const paneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
+  const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
+  const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const slots = desktop && splitSetting && paneIds.length > 1 ? paneIds : [activeSessionId];
+  const paneCount = slots.length;
+  const split = desktop && splitSetting && paneCount > 1;
+
+  return (
+    <div className={split ? styles.splitWorkspace : styles.splitSingle}>
+      <SplitToggleFab enabled={desktop && splitSetting} />
+      <div
+        className={split ? styles.splitCols : styles.splitColsSingle}
+        style={split ? { gridTemplateColumns: `repeat(${paneCount}, minmax(0, 1fr))` } : undefined}
+      >
+        {slots.map((sessionId, paneIndex) => {
+          const focused = paneIndex === focusedPaneIndex || paneCount === 1;
+          return (
+            <section
+              key={`pane-${paneIndex}`}
+              className={`${styles.splitPane}${focused ? ` ${styles.splitPaneFocused}` : ""}`}
+            >
+              {split ? (
+                <SplitPaneChrome
+                  paneIndex={paneIndex}
+                  sessionId={sessionId}
+                  focused={focused}
+                  closable={paneCount > 1}
+                />
+              ) : null}
+              {sessionId || paneCount === 1 ? (
+                <ChatPaneContext.Provider
+                  value={{ sessionId, paneIndex, paneCount, focused }}
+                >
+                  <ChatThread />
+                </ChatPaneContext.Provider>
+              ) : (
+                <div className={styles.splitEmpty}>
+                  <p>{t("chat.splitEmpty")}</p>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
