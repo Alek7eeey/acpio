@@ -33,6 +33,9 @@ const SIDEBAR_DEFAULT = 360;
 const SIDEBAR_COLLAPSE_AT = 240;
 /** Keep at least this much room for the chat column. */
 const SIDEBAR_VIEWPORT_MARGIN = 320;
+/** Mobile bottom-sheet snap heights (viewport fractions). */
+const SHEET_SNAPS_CHAT = [0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.94] as const;
+const SHEET_SNAPS_SETTINGS = [0.42, 0.5, 0.58, 0.66, 0.74, 0.82, 0.9] as const;
 
 function readStoredWidth() {
   if (typeof window === "undefined") return SIDEBAR_DEFAULT;
@@ -137,8 +140,35 @@ export function AppShell() {
   const isSettings = pathname.startsWith("/settings");
   const showSidebar = isChat || isSettings;
 
-  // Chat tree drawer left open on mobile paints an empty settings shell.
-  // Close it whenever we enter settings (Links / gear skip goSettings).
+  const sheetRef = useRef<HTMLElement | null>(null);
+  const sheetSnapRef = useRef(2);
+  const sheetDragRaf = useRef(0);
+  const sheetDragRef = useRef<{
+    startY: number;
+    lastY: number;
+    startH: number;
+  } | null>(null);
+  const pullerDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    lastY: number;
+    opened: boolean;
+  } | null>(null);
+
+  const sheetSnaps = isSettings ? SHEET_SNAPS_SETTINGS : SHEET_SNAPS_CHAT;
+  const sheetMinPx = isSettings ? 280 : 360;
+
+  const applySheetSnapCss = useCallback(
+    (index: number, snaps: readonly number[] = sheetSnaps) => {
+      const el = sheetRef.current;
+      if (!el) return;
+      const i = Math.max(0, Math.min(snaps.length - 1, index));
+      el.style.setProperty("--sheet-h", `${Math.round(snaps[i] * 100)}dvh`);
+    },
+    [sheetSnaps],
+  );
+
+  // Close chat tree when entering settings on mobile (don't auto-open).
   useEffect(() => {
     if (!isSettings) return;
     if (window.innerWidth < 900) setSidebarOpen(false);
@@ -171,8 +201,11 @@ export function AppShell() {
     prevSidebarOpen.current = sidebarOpen;
     setBrandBump(true);
     const id = window.setTimeout(() => setBrandBump(false), 460);
+    if (sidebarOpen) {
+      requestAnimationFrame(() => applySheetSnapCss(sheetSnapRef.current));
+    }
     return () => window.clearTimeout(id);
-  }, [sidebarOpen]);
+  }, [sidebarOpen, applySheetSnapCss]);
 
   const recentSessions = useMemo(() => {
     const sorted = [...sessions].sort((a, b) =>
@@ -277,6 +310,262 @@ export function AppShell() {
     setSidebarOpen(!sidebarOpen);
   }, [sidebarOpen, setSidebarOpen]);
 
+  const sheetDismissingRef = useRef(false);
+
+  /** Mobile: slide the sheet off-screen, then unmount. Desktop: instant close. */
+  const dismissSheet = useCallback(() => {
+    if (window.innerWidth >= 900) {
+      setSidebarOpen(false);
+      return;
+    }
+    const el = sheetRef.current;
+    if (!el) {
+      setSidebarOpen(false);
+      return;
+    }
+    if (sheetDismissingRef.current) return;
+    sheetDismissingRef.current = true;
+    delete el.dataset.dragging;
+    delete el.dataset.undersize;
+    el.dataset.closing = "true";
+    const h = el.getBoundingClientRect().height;
+    el.style.height = `${h}px`;
+    el.style.maxHeight = "none";
+    el.style.transform = "translateY(0)";
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.style.transform = "translateY(110%)";
+      });
+    });
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      el.removeEventListener("transitionend", onEnd);
+      sheetDismissingRef.current = false;
+      delete el.dataset.closing;
+      el.style.height = "";
+      el.style.maxHeight = "";
+      el.style.transform = "";
+      setSidebarOpen(false);
+    };
+    const onEnd = (ev: TransitionEvent) => {
+      if (ev.target !== el || ev.propertyName !== "transform") return;
+      finish();
+    };
+    el.addEventListener("transitionend", onEnd);
+    window.setTimeout(finish, 480);
+  }, [setSidebarOpen]);
+
+  const openSheetAt = useCallback(
+    (snapIndex: number) => {
+      sheetSnapRef.current = snapIndex;
+      sheetDismissingRef.current = false;
+      setSidebarOpen(true);
+      requestAnimationFrame(() => applySheetSnapCss(snapIndex));
+    },
+    [setSidebarOpen, applySheetSnapCss],
+  );
+
+  const snapSheetHeight = useCallback(
+    (heightPx: number) => {
+      const vh = window.innerHeight || 1;
+      const minH = Math.max(sheetMinPx, vh * sheetSnaps[0] * 0.9);
+      if (heightPx < minH) {
+        dismissSheet();
+        return;
+      }
+      const frac = heightPx / vh;
+      let best = 0;
+      let bestDist = Infinity;
+      for (let i = 0; i < sheetSnaps.length; i++) {
+        const d = Math.abs(sheetSnaps[i] - frac);
+        if (d < bestDist) {
+          bestDist = d;
+          best = i;
+        }
+      }
+      sheetSnapRef.current = best;
+      applySheetSnapCss(best);
+    },
+    [dismissSheet, applySheetSnapCss, sheetSnaps, sheetMinPx],
+  );
+
+  const applyLiveSheetHeight = useCallback(
+    (heightPx: number) => {
+      const el = sheetRef.current;
+      if (!el) return false;
+      const maxH = window.innerHeight * sheetSnaps[sheetSnaps.length - 1];
+      const next = Math.min(maxH, Math.max(48, heightPx));
+      el.style.height = `${next}px`;
+      el.style.maxHeight = "none";
+      el.style.transform = "translateY(0)";
+      if (next < sheetMinPx) el.dataset.undersize = "true";
+      else delete el.dataset.undersize;
+      return true;
+    },
+    [sheetSnaps, sheetMinPx],
+  );
+
+  const onSheetPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      if (window.innerWidth >= 900 || !sidebarOpen) return;
+      const target = e.target as HTMLElement;
+      if (!target.closest(`.${styles.sheetGrabber}`)) return;
+      const el = sheetRef.current;
+      if (!el) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      sheetDragRef.current = {
+        startY: e.clientY,
+        lastY: e.clientY,
+        startH: el.getBoundingClientRect().height,
+      };
+      el.dataset.dragging = "true";
+    },
+    [sidebarOpen],
+  );
+
+  const onSheetPointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      const drag = sheetDragRef.current;
+      if (!drag) return;
+      drag.lastY = e.clientY;
+      if (sheetDragRaf.current) return;
+      sheetDragRaf.current = requestAnimationFrame(() => {
+        sheetDragRaf.current = 0;
+        const d = sheetDragRef.current;
+        if (!d) return;
+        applyLiveSheetHeight(d.startH + (d.startY - d.lastY));
+      });
+    },
+    [applyLiveSheetHeight],
+  );
+
+  const onSheetPointerUp = useCallback(
+    (e: ReactPointerEvent<HTMLElement>) => {
+      const drag = sheetDragRef.current;
+      const el = sheetRef.current;
+      sheetDragRef.current = null;
+      if (sheetDragRaf.current) {
+        cancelAnimationFrame(sheetDragRaf.current);
+        sheetDragRaf.current = 0;
+      }
+      if (el) {
+        delete el.dataset.dragging;
+        delete el.dataset.undersize;
+      }
+      if (!drag || !el) return;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // already released
+      }
+      const height = el.getBoundingClientRect().height;
+      const minH = Math.max(sheetMinPx, (window.innerHeight || 1) * sheetSnaps[0] * 0.9);
+      if (height < minH) {
+        snapSheetHeight(height);
+        return;
+      }
+      el.style.height = "";
+      el.style.maxHeight = "";
+      el.style.transform = "";
+      snapSheetHeight(height);
+    },
+    [snapSheetHeight, sheetMinPx, sheetSnaps],
+  );
+
+  const onPullerPointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLButtonElement>) => {
+      if (window.innerWidth >= 900) return;
+      // Do not preventDefault here: it cancels the pointer on some mobile
+      // browsers, so a tap never reaches pointerup/click and the sheet
+      // only opens when the user drags. Window listeners still survive
+      // puller unmount when the sheet opens mid-drag.
+      const pointerId = e.pointerId;
+      const startY = e.clientY;
+      const drag = {
+        pointerId,
+        startY,
+        lastY: startY,
+        opened: false,
+      };
+      pullerDragRef.current = drag;
+
+      const paintFromFinger = (clientY: number) => {
+        const pulled = window.innerHeight - clientY;
+        const painted = applyLiveSheetHeight(pulled);
+        if (painted) {
+          const el = sheetRef.current;
+          if (el) el.dataset.dragging = "true";
+        }
+        return painted;
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        drag.lastY = ev.clientY;
+        const up = drag.startY - ev.clientY;
+        if (!drag.opened && up > 8) {
+          drag.opened = true;
+          sheetSnapRef.current = 0;
+          setSidebarOpen(true);
+        }
+        if (!drag.opened) return;
+        if (sheetDragRaf.current) return;
+        sheetDragRaf.current = requestAnimationFrame(() => {
+          sheetDragRaf.current = 0;
+          if (!pullerDragRef.current) return;
+          // Sheet may mount one frame later after setSidebarOpen.
+          if (!paintFromFinger(ev.clientY)) {
+            requestAnimationFrame(() => paintFromFinger(ev.clientY));
+          }
+        });
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        const d = pullerDragRef.current;
+        pullerDragRef.current = null;
+        if (sheetDragRaf.current) {
+          cancelAnimationFrame(sheetDragRaf.current);
+          sheetDragRaf.current = 0;
+        }
+        if (!d) return;
+        if (!d.opened) {
+          if (Math.abs(d.startY - d.lastY) < 8) openSheetAt(isSettings ? 1 : 2);
+          return;
+        }
+        const finish = () => {
+          const el = sheetRef.current;
+          if (!el) return;
+          delete el.dataset.dragging;
+          delete el.dataset.undersize;
+          const height = el.getBoundingClientRect().height;
+          const minH = Math.max(sheetMinPx, (window.innerHeight || 1) * sheetSnaps[0] * 0.9);
+          if (height < minH) {
+            snapSheetHeight(height);
+            return;
+          }
+          el.style.height = "";
+          el.style.maxHeight = "";
+          el.style.transform = "";
+          snapSheetHeight(height);
+        };
+        // Ensure sheet exists before snapping.
+        if (sheetRef.current) finish();
+        else requestAnimationFrame(finish);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+    [setSidebarOpen, applyLiveSheetHeight, openSheetAt, snapSheetHeight, isSettings, sheetMinPx, sheetSnaps],
+  );
+
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: PointerEvent) => {
@@ -353,7 +642,7 @@ export function AppShell() {
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
     setOpenBranches((prev) => ({ ...prev, [section]: true }));
-    if (window.innerWidth < 900) setSidebarOpen(false);
+    // Mobile: leave the settings tree at its current snap (peek by default).
   };
 
 
@@ -441,81 +730,80 @@ export function AppShell() {
     <div
       className={`${styles.shell} ${showSidebar ? styles.withSidebar : styles.fullBleed} ${
         showSidebar && !sidebarOpen ? styles.sidebarCollapsed : ""
+      } ${
+        showSidebar && !sidebarOpen ? styles.shellDock : ""
       } ${railMode ? styles.railCollapsed : ""} ${dragging ? styles.resizing : ""}`}
       style={shellStyle}
     >
       {showSidebar && (
         <aside
+          ref={sheetRef}
           className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""} ${
             isChat ? styles.treeBrand : ""
           }`}
+          role={sidebarOpen ? "dialog" : undefined}
+          aria-modal={sidebarOpen ? true : undefined}
+          aria-label={isSettings ? t("common.settingsSections") : t("common.openTree")}
+          onPointerDown={onSheetPointerDown}
+          onPointerMove={onSheetPointerMove}
+          onPointerUp={onSheetPointerUp}
+          onPointerCancel={onSheetPointerUp}
         >
+          <div className={styles.sheetGrabber} aria-hidden />
           <div className={styles.brandRow}>
             {isSettings ? (
-              <>
-                <button type="button" className={styles.backBtn} onClick={goChat}>
-                  {t("common.backToChat")}
-                </button>
-                <button
-                  type="button"
-                  className={styles.collapseBtn}
-                  aria-label={t("common.collapseTree")}
-                  title={t("common.collapseTree")}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <rect
-                      x="3.5"
-                      y="4.5"
-                      width="17"
-                      height="15"
-                      rx="3"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                    />
-                    <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
-                    <path
-                      d="M14.2 9.2 11.5 12l2.7 2.8"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </>
+              <button type="button" className={styles.backBtn} onClick={goChat}>
+                {t("common.backToChat")}
+              </button>
             ) : (
-              <>
-                <span className={styles.sidebarBrand}>{brandButton}</span>
-                <button
-                  type="button"
-                  className={styles.collapseBtn}
-                  aria-label={t("common.collapseTree")}
-                  title={t("common.collapseTree")}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <rect
-                      x="3.5"
-                      y="4.5"
-                      width="17"
-                      height="15"
-                      rx="3"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                    />
-                    <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
-                    <path
-                      d="M14.2 9.2 11.5 12l2.7 2.8"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              </>
+              <span className={styles.sidebarBrand}>{brandButton}</span>
             )}
+            <span className={styles.sheetTitle}>
+              {isSettings ? t("common.openSettingsSheet") : t("common.openChatsSheet")}
+            </span>
+            <button
+              type="button"
+              className={styles.collapseBtn}
+              aria-label={t("common.collapseTree")}
+              title={t("common.collapseTree")}
+              onClick={dismissSheet}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <rect
+                  x="3.5"
+                  y="4.5"
+                  width="17"
+                  height="15"
+                  rx="3"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                />
+                <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.7" />
+                <path
+                  d="M14.2 9.2 11.5 12l2.7 2.8"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.sheetDone}
+              aria-label={t("common.collapseTree")}
+              title={t("common.collapseTree")}
+              onClick={dismissSheet}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6L6 18"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
           </div>
 
           {isChat && (
@@ -898,23 +1186,23 @@ export function AppShell() {
               );
             })()
           )}
-
-          {railFolderPicker && (
-            <CreateSessionFolderPicker
-              x={railFolderPicker.x}
-              y={railFolderPicker.y}
-              defaultCwd={settings.defaultCwd ?? ""}
-              dialogStartPath={settings.defaultCwd ?? ""}
-              recentCwds={recentCwds}
-              onClose={() => setRailFolderPicker(null)}
-              onConfirm={async (cwd) => {
-                setRailFolderPicker(null);
-                await createSession(cwd);
-                navigate("/chat");
-              }}
-            />
-          )}
         </div>
+      )}
+
+      {railFolderPicker && (
+        <CreateSessionFolderPicker
+          x={railFolderPicker.x}
+          y={railFolderPicker.y}
+          defaultCwd={settings.defaultCwd ?? ""}
+          dialogStartPath={settings.defaultCwd ?? ""}
+          recentCwds={recentCwds}
+          onClose={() => setRailFolderPicker(null)}
+          onConfirm={async (cwd) => {
+            setRailFolderPicker(null);
+            await createSession(cwd);
+            navigate("/chat");
+          }}
+        />
       )}
 
       {showSidebar && sidebarOpen && (
@@ -937,7 +1225,7 @@ export function AppShell() {
           type="button"
           className={styles.backdrop}
           aria-label={t("common.closeMenu")}
-          onClick={() => setSidebarOpen(false)}
+          onClick={dismissSheet}
         />
       )}
 
@@ -948,15 +1236,14 @@ export function AppShell() {
             settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
           }
         >
-          {/* The header burger opens the tree drawer. In Settings it is hidden on
-             mobile (Settings already provides its own mobileNav chips); on desktop it
-             stays so the columns drawer can still be toggled. */}
+          {/* Desktop: header burger. Mobile: bottom sheet puller. */}
           {showSidebar ? (
             <button
               type="button"
-              className={`${styles.iconBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}${isSettings ? ` ${styles.iconBtnSettings}` : ""}`}
+              className={`${styles.iconBtn} ${styles.headerTreeBtn}${sidebarOpen ? ` ${styles.iconBtnGhost} ${styles.iconBtnOpen}` : ""}${isSettings ? ` ${styles.iconBtnSettings}` : ""}`}
               aria-label={t("common.openTree")}
               title={t("common.openTree")}
+              aria-expanded={sidebarOpen}
               onClick={() => setSidebarOpen(!sidebarOpen)}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -969,7 +1256,33 @@ export function AppShell() {
               </svg>
             </button>
           ) : null}
-          <span className={styles.headerBrandSlot}>{brandButton}</span>
+          <span className={styles.headerBrandSlot}>
+            {isSettings ? (
+              <button
+                type="button"
+                className={styles.headerBackToChat}
+                onClick={goChat}
+                title={t("common.goToChat")}
+                aria-label={t("common.backToChat")}
+              >
+                <span className={styles.headerBackToChatIcon} aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M14.2 5.8 8.5 12l5.7 6.2"
+                      stroke="currentColor"
+                      strokeWidth="2.15"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className={styles.headerBackToChatLabel}>{t("common.navChat")}</span>
+              </button>
+            ) : null}
+            <span className={isSettings ? styles.headerBrandHideOnMobile : undefined}>
+              {brandButton}
+            </span>
+          </span>
           <div className={styles.headerSpacer} />
           <div className={styles.headerActions}>
             <div
@@ -1119,6 +1432,23 @@ export function AppShell() {
           <ShellPage pathname={pathname} />
         </div>
       </div>
+
+      {/* Mobile: bottom splitter — tap or drag up to open the tree sheet. */}
+      {showSidebar && !sidebarOpen ? (
+        <button
+          type="button"
+          className={styles.sheetPuller}
+          aria-label={isSettings ? t("common.openSettingsSheet") : t("common.openChatsSheet")}
+          onClick={() => {
+            if (window.innerWidth >= 900) return;
+            openSheetAt(isSettings ? 1 : 2);
+          }}
+          onPointerDown={onPullerPointerDown}
+        >
+          <span className={styles.sheetPullerBar} aria-hidden />
+        </button>
+      ) : null}
+
       <MessageSearchDialog open={messageSearchOpen} onClose={() => setMessageSearchOpen(false)} />
     </div>
   );

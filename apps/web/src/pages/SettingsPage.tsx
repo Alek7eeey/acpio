@@ -422,18 +422,6 @@ export function SettingsPage() {
     () => parseSettingsSearch(location.search),
     [location.search],
   );
-  // Flat leaf list for the mobile nav (the sidebar tree is hidden on phones).
-  const settingsLeaves = useMemo(
-    () =>
-      getSettingsTree(t).flatMap((branch) =>
-        branch.children.map((item) => ({
-          section: branch.id,
-          leaf: item.id,
-          label: item.label,
-        })),
-      ),
-    [t],
-  );
   const settings = useAppStore((s) => s.settings);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
@@ -955,20 +943,6 @@ export function SettingsPage() {
           </button>
         ) : null}
       </div>
-      <nav className={styles.mobileNav} aria-label={t("common.settingsSections")}>
-        {settingsLeaves.map((item) => (
-          <button
-            key={`${item.section}:${item.leaf}`}
-            type="button"
-            className={`${styles.mobileNavChip}${
-              section === item.section && leaf === item.leaf ? ` ${styles.mobileNavChipActive}` : ""
-            }`}
-            onClick={() => navigate(settingsPath(item.section as "agent" | "interface", item.leaf))}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
       <form className={styles.panel} onSubmit={(e) => void onSubmit(e)}>
         <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
         {settingsQuery.trim() && !viewingResults && (

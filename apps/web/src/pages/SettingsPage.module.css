@@ -1593,44 +1593,9 @@
   border-top: 1px solid var(--border);
 }
 
-/* Mobile: horizontal nav chips (the sidebar tree is hidden on phones). */
+/* Mobile settings use the bottom-sheet tree (header burger), not chip nav. */
 .mobileNav {
   display: none;
-}
-
-@media (max-width: 700px) {
-  .mobileNav {
-    display: flex;
-    gap: 6px;
-    overflow-x: auto;
-    padding: 8px 10px;
-    margin: 0 -14px 4px;
-    scrollbar-width: none;
-  }
-
-  .mobileNav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .mobileNavChip {
-    flex: 0 0 auto;
-    padding: 7px 13px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-secondary);
-    font: inherit;
-    font-size: 0.82rem;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .mobileNavChipActive {
-    color: var(--accent);
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-    font-weight: 700;
-  }
 }
 
 /* Chat settings layout: interactive preview on desktop; on mobile the
@@ -1791,7 +1756,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    margin: 10px 14px 0;
+    margin: 10px 14px 14px;
     padding: 0 12px;
     height: 40px;
     border-radius: 12px;

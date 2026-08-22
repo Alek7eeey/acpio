@@ -122,6 +122,14 @@
   display: contents;
 }
 
+.headerBackToChat {
+  display: none;
+}
+
+.headerBrandHideOnMobile {
+  display: contents;
+}
+
 .sidebarBrand {
   flex: 1 1 auto;
   min-width: 0;
@@ -228,6 +236,48 @@
   background: var(--accent-soft);
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   color: var(--accent);
+}
+
+/* Bottom sheet dock / FAB — mobile only (see max-width block). */
+.sheetDock {
+  display: none;
+}
+
+.sheetFab {
+  display: none;
+}
+
+.sheetPuller {
+  display: none;
+}
+
+.settingsBackFab {
+  display: none;
+}
+
+.shellDock {
+  /* Mobile: reserves space under inputs for .sheetDock (see media query). */
+}
+
+/* Bottom-sheet chrome — hidden on desktop column sidebar. */
+.sheetGrabber {
+  display: none;
+}
+
+.sheetTitle {
+  display: none;
+}
+
+.sheetDone {
+  display: none;
+}
+
+.collapseBtnMobile {
+  display: none;
+}
+
+.collapseBtnDesktop {
+  display: grid;
 }
 
 .collapseBtn svg {
@@ -2405,10 +2455,9 @@
     transform: rotate(90deg);
   }
 
-  /* In Settings the header burger is redundant on mobile (mobileNav chips
-     already provide section navigation); keep it on desktop only. */
+  /* Settings also uses the bottom sheet tree on phones. */
   .iconBtn.iconBtnSettings {
-    display: none;
+    display: inline-grid;
   }
 }
 
@@ -2557,14 +2606,7 @@
   padding: 5px 8px;
 }
 
-/* Mobile: hide the settings tree — the nav chip bar at the top handles
-   section navigation. */
-@media (max-width: 899px) {
-  .settingsSearchWrap,
-  .settingsTree {
-    display: none;
-  }
-}
+/* Settings tree lives in the mobile bottom sheet (not hidden). */
 
 .nav {
   display: grid;
@@ -3129,35 +3171,317 @@
     display: none;
   }
 
-  /* Mobile uses the off-canvas drawer + header hamburger instead of the rail. */
+  /* Mobile: one-hand bottom sheet (thumb-reach) instead of a left drawer. */
   .rail {
     display: none;
   }
 
   .sidebar {
     position: fixed;
-    inset: 0 auto 0 0;
-    /* Fixed 88vw — the app sets --sidebar-width to 0px while the drawer is
-       closed, which would collapse the mobile drawer to a padding sliver. */
-    width: min(88vw, 360px);
-    transform: translateX(-105%);
-    transition: transform 0.22s ease;
-    box-shadow: var(--shadow);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: 100%;
+    max-width: none;
+    height: var(--sheet-h, 62dvh);
+    max-height: none;
+    transform: translateY(108%);
+    transition:
+      transform 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+      height 0.38s cubic-bezier(0.32, 0.72, 0, 1),
+      box-shadow 0.28s ease,
+      opacity 0.28s ease;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.22);
     z-index: 60;
-    gap: 14px;
-    padding: max(12px, env(safe-area-inset-top, 0px)) 14px
-      max(14px, env(safe-area-inset-bottom, 0px)) max(14px, env(safe-area-inset-left, 0px));
+    gap: 10px;
+    padding: 0 14px max(12px, env(safe-area-inset-bottom, 0px));
+    border-radius: 18px 18px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    will-change: transform, height;
   }
 
   .sidebar.open {
-    transform: translateX(0);
+    transform: translateY(0);
+  }
+
+  .sidebar[data-dragging="true"] {
+    transition: none;
+  }
+
+  .sidebar[data-closing="true"] {
+    pointer-events: none;
+    transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1) !important;
+  }
+
+  .sidebar[data-undersize="true"] {
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.14);
+  }
+
+  .sheetGrabber {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: 44px;
+    padding: 16px 0 12px;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .sheetGrabber::before {
+    content: "";
+    width: 48px;
+    height: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    transition:
+      width 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      background 0.22s ease;
+  }
+
+  .sidebar[data-dragging="true"] .sheetGrabber::before,
+  .sidebar[data-undersize="true"] .sheetGrabber::before {
+    width: 64px;
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  /* One-hand: no top-left burger — pull the tree up from the bottom splitter. */
+  .headerTreeBtn {
+    display: none !important;
+  }
+
+  .shellDock {
+    --composer-safe-bottom: 4px;
+    --mobile-dock-h: calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .shellDock .content {
+    padding-bottom: var(--mobile-dock-h);
+    box-sizing: border-box;
+  }
+
+  .sheetPuller {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 45;
+    height: var(--mobile-dock-h);
+    margin: 0;
+    padding: 10px 0 max(8px, env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+    border: none;
+    border-top: 1px solid var(--border-soft);
+    background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+    cursor: grab;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    animation: sheetPullerIn 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes sheetPullerIn {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  .sheetPullerBar {
+    display: block;
+    width: 48px;
+    height: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-secondary) 42%, transparent);
+    transition: background var(--motion), width var(--motion);
+  }
+
+  .sheetPuller:active .sheetPullerBar {
+    width: 60px;
+    background: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
+
+  .settingsBackFab {
+    display: none;
+  }
+
+  .headerBrandHideOnMobile {
+    display: none;
+  }
+
+  .headerBackToChat {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex: 0 1 auto;
+    min-width: 0;
+    height: 30px;
+    margin: 0;
+    padding: 0 12px 0 4px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    cursor: pointer;
+    box-shadow: var(--shadow-soft);
+    -webkit-tap-highlight-color: transparent;
+    animation: headerBackIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+    transition:
+      background var(--motion),
+      border-color var(--motion),
+      transform 0.18s ease;
+  }
+
+  .headerBackToChatIcon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .headerBackToChatIcon svg {
+    display: block;
+    width: 13px;
+    height: 13px;
+    margin-left: -1px;
+  }
+
+  .headerBackToChatLabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-bottom: 0.5px;
+  }
+
+  .headerBackToChat:active {
+    background: var(--bg-tertiary);
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+    transform: scale(0.97);
+  }
+
+  @keyframes headerBackIn {
+    from {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  /* Legacy dock chrome — unused after sheet puller. */
+  .sheetDock,
+  .dockBar,
+  .dockItem,
+  .dockItemActive,
+  .dockFlyout,
+  .dockFlyoutItem,
+  .dockFlyoutItemActive,
+  .sheetFab,
+  .dockCluster,
+  .dockTab,
+  .dockTabPrimary,
+  .dockTabAccent,
+  .dockIcon,
+  .dockIconPrimary,
+  .dockIconAccent {
+    display: none;
   }
 
   .brandRow {
     min-height: 36px;
-    padding: 0 2px 4px;
-    margin-bottom: 2px;
+    padding: 0 2px 8px;
+    margin-bottom: 0;
     border-bottom: 1px solid var(--border-soft);
+    flex: 0 0 auto;
+  }
+
+  .collapseBtnDesktop {
+    display: none;
+  }
+
+  .collapseBtnMobile {
+    display: none;
+  }
+
+  /* Mobile sheet: title + text Done — no panel-collapse icon. */
+  .sidebar .collapseBtn {
+    display: none;
+  }
+
+  .sheetTitle {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0 8px;
+    font-size: 1.02rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1.2;
+  }
+
+  /* Settings already has “Back to chat” — don’t stack a second title. */
+  .sidebar:has(.backBtn) .sheetTitle {
+    display: none;
+  }
+
+  .sheetDone {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin: 0;
+    margin-left: auto;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .sheetDone:active {
+    background: var(--bg-secondary);
+    color: var(--text);
+  }
+
+  .sheetDone svg {
+    display: block;
+  }
+
+  .sidebar .backBtn {
+    flex: 0 0 auto;
+    max-width: 42%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .backBtn {
@@ -3166,9 +3490,9 @@
   }
 
   .collapseBtn {
-    width: 32px;
-    height: 32px;
-    border-radius: 9px;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
   }
 
   .moduleTitle {
@@ -3177,13 +3501,63 @@
     margin-top: 2px;
   }
 
+  .sidebar .settingsTree,
+  .sidebar .chatPanel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar .chatPanel .sessionList {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-bottom: 8px;
+  }
+
+  .sidebar .settingsTree {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding-bottom: 8px;
+  }
+
+  .sidebar .settingsSearchWrap {
+    display: flex;
+    flex: 0 0 auto;
+    padding: 4px 0 10px;
+    gap: 4px;
+  }
+
   .backdrop {
     display: block;
     position: fixed;
     inset: 0;
     border: none;
-    background: rgba(8, 12, 20, 0.42);
+    background: rgba(8, 12, 20, 0.45);
     z-index: 55;
+    backdrop-filter: blur(2px);
+    animation: sheetBackdropIn 0.28s ease both;
+  }
+
+  .sidebar[data-closing="true"] ~ .backdrop,
+  .sidebar[data-closing="true"] ~ * .backdrop {
+    animation: none;
+    opacity: 0;
+    transition: opacity 0.32s ease;
+  }
+
+  @keyframes sheetBackdropIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   .header {

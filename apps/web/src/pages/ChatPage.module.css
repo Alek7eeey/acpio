@@ -1685,7 +1685,8 @@
   border-top: none;
   background: transparent;
   padding: 2px 16px 14px;
-  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  /* --composer-safe-bottom is set by AppShell when the mobile chats dock is shown. */
+  padding-bottom: max(14px, var(--composer-safe-bottom, env(safe-area-inset-bottom)));
   display: grid;
   gap: 6px;
   flex-shrink: 0;
@@ -2250,7 +2251,7 @@
 
 @media (max-width: 700px) {
   .composer {
-    padding: 8px 10px max(12px, env(safe-area-inset-bottom));
+    padding: 8px 10px max(12px, var(--composer-safe-bottom, env(safe-area-inset-bottom)));
   }
 
   .inlinePromptDock {
