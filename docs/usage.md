@@ -4,6 +4,46 @@ ACProcess connects agents through **harness adapters**. Two are bundled: **Curso
 **OMP**. Any other harness is added as a plugin adapter (see the
 [developer guide](adapters.md)) and shows up in the UI automatically — the core needs no changes.
 
+## Chat interface
+
+The main workspace shows a **session tree** on the left and the active chat on the right.
+
+- **Reasoning** — agent thoughts stream in collapsible blocks (when the harness exposes them).
+- **Tool calls** — each tool invocation appears as a card with arguments and output.
+- **Subagents** — `task` requests show progress, roster, and nested thinking when available.
+- **Permissions & questions** — inline prompts when the agent needs approval or user input.
+- **Composer** — attach files, pick model/mode per chat, stop a running turn with **Stop**.
+
+### Slash commands
+
+Type `/` in the composer to open the command menu. Commands come from the agent over ACP
+(`available_commands`) and are merged per session — including OMP `skill:*` entries.
+Pick a command to insert it; some commands show an input hint for extra arguments.
+Slash commands are sent to the agent as prompts, not handled locally by the UI.
+
+### Message search
+
+Use **Search messages** in the chat toolbar to find text across the current session's
+history. Results jump to the matching message in the feed.
+
+### Split view (desktop)
+
+Enable **Settings → Two chats side by side**, then use the split button under the header.
+`Ctrl+click` a chat in the tree to open it in the other pane. Each pane has its own
+composer and scroll position.
+
+### Per-chat MCP
+
+MCP servers are configured globally in **Settings → MCP**, but each chat shows which
+servers are active for that session in the header chip. Changing the MCP list restarts
+the live agent process for affected chats (MCP is applied only at `session/new|resume|load`).
+
+### Resume agent context
+
+**Settings → Resume agent context** controls whether reopening a chat or restarting after
+model/MCP changes brings back the agent's ACP session (`resume` / `load`) instead of
+starting blank. Locale changes do not restart the agent — only UI and prompt hints update.
+
 ## Connecting an agent (Cursor / OMP)
 
 1. **Settings → Agents → Connect**.
@@ -70,3 +110,11 @@ The adapter then appears on its own:
 - **Model does not apply** — check that the value is in the agent's model list; Cursor accepts
   only the listed `model[param=value]` combinations.
 - **After `git pull`** — hard-refresh the browser (`Ctrl+Shift+R`): old CSS/JS modules are cached.
+
+## Mobile and remote access
+
+- **Phone & VPN** — dev listens on `0.0.0.0`; open `http://<PC_IP>:5173` from a phone on the same LAN/VPN. Production uses port **3001**.
+- **Install (PWA)** — toolbar button adds the app to the home screen.
+- **Remote access key** — optional key in **Settings → Phone & VPN** to protect the instance when exposed beyond localhost.
+
+See also the screenshots gallery in [README.md](../README.md).

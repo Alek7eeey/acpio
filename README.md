@@ -48,9 +48,31 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 ## Screenshots
 
-| Chat (light) | Chat (dark) | Settings |
+### Chat
+
+Dark and light themes with streamed reasoning, tool calls, and subagent cards.
+
+| Dark | Light |
+|---|---|
+| ![Chat dark](docs/screens/chat-dark-en.webp) | ![Chat light](docs/screens/chat-light-en.webp) |
+
+### Slash commands, search, split view
+
+Type `/` in the composer to browse agent commands (from ACP `available_commands`). Search across all messages in a chat. Split the workspace into two panes on desktop.
+
+| Slash menu | Message search | Two chats |
 |---|---|---|
-| ![Chat light](docs/screens/chat-light-en.webp) | ![Chat dark](docs/screens/chat-dark-en.webp) | ![Settings](docs/screens/settings-en.webp) |
+| ![Slash commands](docs/screens/chat-slash-en.webp) | ![Search](docs/screens/chat-search-en.webp) | ![Split view](docs/screens/chat-split-en.webp) |
+
+### Settings and mobile
+
+Connect agents, tune models, open from a phone over VPN/LAN.
+
+| Settings | Agents | Phone & VPN | Mobile |
+|---|---|---|---|
+| ![Settings](docs/screens/settings-en.webp) | ![Agents](docs/screens/settings-agents-en.webp) | ![Remote access](docs/screens/settings-remote-en.webp) | ![Mobile chat](docs/screens/mobile-chat-en.webp) |
+
+Regenerate screenshots after UI changes: `npm run screens` (requires `npm run dev` and `npx playwright install chromium`).
 
 ## Production build
 

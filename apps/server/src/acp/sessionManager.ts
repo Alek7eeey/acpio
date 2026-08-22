@@ -29,6 +29,7 @@ import {
   type ModelParamDto,
   type SessionDetailDto,
   type SessionDto,
+  type SlashCommandDto,
   type SubagentCardUpdate,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
@@ -66,6 +67,11 @@ import {
 } from "./cursorSubagentLive.js";
 import { findRecentCursorAgentId, findRecentCursorAgentIds, listCursorAcpSessions } from "@acprocess/adapter-cursor";
 import { listOmpSessions, readOmpSessionTranscript } from "@acprocess/adapter-omp";
+import {
+  isAgentSlashPrompt,
+  mergeSlashCommandLists,
+  parseAvailableCommands,
+} from "./slashCommands.js";
 
 /** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
 export function coerceUiMode(raw: string): AgentMode | null {
@@ -1046,11 +1052,13 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "available_commands") {
-    rt.availableCommands = parseAvailableCommands(update.raw);
+    const parsed = parseAvailableCommands(update.raw);
+    rt.availableCommands = mergeSlashCommandLists(rt.availableCommands, parsed);
+    rememberSessionCommands(rt.sessionId, rt.availableCommands);
     broadcastToSession(rt.sessionId, {
       type: "commands.updated",
       sessionId: rt.sessionId,
-      commands: rt.availableCommands,
+      commands: getSessionSlashCommands(rt.sessionId),
     });
     return;
   }
@@ -2247,14 +2255,13 @@ async function runTurn(
 
   try {
     const client = await acpReady;
-    // UI shows the raw user text; agent gets a tools reminder so it doesn't refuse web lookups.
-    let promptText = promptUserText;
-    if (priorTranscript) {
+    let promptText = isAgentSlashPrompt(promptUserText) ? promptUserText.trim() : promptUserText;
+    if (priorTranscript && !isAgentSlashPrompt(promptUserText)) {
       promptText =
         `Earlier conversation (for context only):\n${priorTranscript}\n\n` +
         `The user edited their last message. Continue from this message:\n${promptUserText}`;
     }
-    if (!rt.toolsHintSent) {
+    if (!rt.toolsHintSent && !isAgentSlashPrompt(promptUserText)) {
       rt.toolsHintSent = true;
       promptText = `${promptText}\n\n${t(locale, "agent.toolsHint")}`;
     }
@@ -2517,41 +2524,6 @@ export async function probeAgent(
   return work;
 }
 
-function parseAvailableCommands(raw: Record<string, unknown>) {
-  const list = (raw.availableCommands ?? raw.commands ?? []) as unknown[];
-  if (!Array.isArray(list)) return [];
-  const hidden = new Set(["plugins", "plugin", "manage-plugins", "manage_plugins"]);
-  const out: import("@acprocess/shared").SlashCommandDto[] = [];
-  for (const item of list) {
-    if (!item || typeof item !== "object") continue;
-    const cmd = item as Record<string, unknown>;
-    const name = String(cmd.name ?? "").trim().replace(/^\//, "");
-    // Names may carry a `namespace:name` form (OMP skills arrive as `skill:<name>`).
-    if (!name || !/^[a-z][\w-]*(?::[a-z][\w-]*)?$/i.test(name)) continue;
-    if (hidden.has(name.toLowerCase())) continue;
-    const description = String(cmd.description ?? "").trim();
-    if (/manage\s+plugins?/i.test(description)) continue;
-    if (/^\[[^\]]*\|[^\]]*\]/.test(description)) continue;
-    const input = cmd.input;
-    const hasInput = Boolean(input && typeof input === "object" && !Array.isArray(input));
-    let inputHint = "";
-    if (hasInput) {
-      const hint = (input as { hint?: string }).hint;
-      if (typeof hint === "string") inputHint = hint.trim();
-    }
-    if (inputHint && /^\[[^\]]*\|[^\]]*\]/.test(inputHint)) {
-      inputHint = "";
-    }
-    out.push({
-      name,
-      description: description || name,
-      ...(hasInput ? { requiresInput: true } : {}),
-      ...(inputHint ? { inputHint } : {}),
-    });
-  }
-  return out;
-}
-
 function resetAcpClient(rt: SessionRuntime) {
   rt.clientReady = null;
   try {
@@ -2647,8 +2619,23 @@ export async function restartSessionsForMcpChange(): Promise<void> {
   console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
 }
 
+const rememberedSlashCommands = new Map<
+  string,
+  import("@acprocess/shared").SlashCommandDto[]
+>();
+
+function rememberSessionCommands(sessionId: string, commands: SlashCommandDto[]) {
+  const merged = mergeSlashCommandLists(rememberedSlashCommands.get(sessionId), commands);
+  if (merged.length) rememberedSlashCommands.set(sessionId, merged);
+}
+
 export function getSessionSlashCommands(sessionId: string) {
-  return runtimes.get(sessionId)?.availableCommands ?? [];
+  const rt = runtimes.get(sessionId);
+  return mergeSlashCommandLists(rt?.availableCommands, rememberedSlashCommands.get(sessionId));
+}
+
+export function forgetSessionSlashCommands(sessionId: string) {
+  rememberedSlashCommands.delete(sessionId);
 }
 
 /**

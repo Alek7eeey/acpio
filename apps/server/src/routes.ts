@@ -27,6 +27,7 @@ import {
   answerQuestion,
   cancelPrompt,
   disposeRuntime,
+  forgetSessionSlashCommands,
   getSessionSlashCommands,
   listModels,
   clearModelsCache,
@@ -562,6 +563,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.delete("/api/sessions/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     disposeRuntime(id);
+    forgetSessionSlashCommands(id);
     const ok = await deleteSession(id);
     if (!ok) return reply.code(404).send({ error: "Not found" });
     return { ok: true };

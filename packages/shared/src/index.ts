@@ -751,6 +751,31 @@ export interface SlashCommandDto {
   /** Agent command expects text after the command name. */
   requiresInput?: boolean;
   inputHint?: string;
+  /** ACP/harness tag when present (`skill`, …). */
+  kind?: string;
+  /** From the user's `.cursor/commands` or `.cursor/skills` on disk. */
+  local?: boolean;
+}
+
+/** Later lists win on the same name; empty lists are ignored so a stale GET cannot shrink the menu. */
+export function mergeSlashCommandLists(
+  ...lists: Array<SlashCommandDto[] | undefined>
+): SlashCommandDto[] {
+  const byName = new Map<string, SlashCommandDto>();
+  for (const list of lists) {
+    if (!list?.length) continue;
+    for (const cmd of list) {
+      const name = cmd.name.trim().replace(/^\//, "");
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const prev = byName.get(key);
+      const next: SlashCommandDto = { ...cmd, name };
+      if (prev?.local || cmd.local) next.local = true;
+      if (prev?.kind === "skill" || cmd.kind === "skill") next.kind = "skill";
+      byName.set(key, next);
+    }
+  }
+  return [...byName.values()];
 }
 
 /** Token/context usage reported by the harness via ACP `usage_update`. */

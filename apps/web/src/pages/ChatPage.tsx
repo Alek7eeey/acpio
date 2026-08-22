@@ -39,7 +39,7 @@ import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { CHAT_SPLIT_MIN_PX, FALLBACK_CHAT_PANES } from "../lib/chatPanes";
-import { sanitizeCatalogModes, useAppStore, type PendingAttachment } from "../lib/store";
+import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
@@ -2778,6 +2778,19 @@ type ChatPaneBind = {
 
 const ChatPaneContext = createContext<ChatPaneBind | null>(null);
 
+/** Per-session composer drafts — survive chat switches until reload. */
+const composerDrafts = new Map<string, string>();
+
+function rememberComposerDraft(sessionId: string | null | undefined, value: string) {
+  if (!sessionId) return;
+  if (value) composerDrafts.set(sessionId, value);
+  else composerDrafts.delete(sessionId);
+}
+
+function forgetComposerDraft(sessionId: string | null | undefined) {
+  if (sessionId) composerDrafts.delete(sessionId);
+}
+
 function useDesktopSplit() {
   const [desktop, setDesktop] = useState(
     () => typeof window !== "undefined" && window.innerWidth >= CHAT_SPLIT_MIN_PX,
@@ -2801,13 +2814,9 @@ function ChatThread() {
   const t = useT();
   const navigate = useNavigate();
   const { search } = useBrowserLocation();
-  const activeSession = useAppStore((s) => {
-    if (!bind?.sessionId) return s.activeSession;
-    return (
-      s.sessionDetails?.[bind.sessionId] ??
-      (s.activeSession?.id === bind.sessionId ? s.activeSession : null)
-    );
-  });
+  const activeSession = useAppStore((s) =>
+    bind?.sessionId ? selectLiveSessionDetail(s, bind.sessionId) : s.activeSession,
+  );
   const loading = useAppStore((s) => s.loading);
   const sessionLoading = useAppStore(
     (s) => Boolean(bind?.sessionId) && s.activeSessionId === bind?.sessionId && s.sessionLoading,
@@ -2891,6 +2900,10 @@ function ChatThread() {
   );
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const [text, setText] = useState("");
+  const textRef = useRef(text);
+  textRef.current = text;
+  const composerSessionId = bind?.sessionId ?? activeSession?.id ?? null;
+  const composerSessionRef = useRef<string | null>(null);
   const hasText = text.trim().length > 0;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
@@ -3129,6 +3142,29 @@ function ChatThread() {
     applyComposerHeight(el);
   };
 
+  useEffect(() => {
+    return () => {
+      rememberComposerDraft(composerSessionRef.current, textRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (composerSessionRef.current === composerSessionId) return;
+    rememberComposerDraft(composerSessionRef.current, textRef.current);
+    composerSessionRef.current = composerSessionId;
+    const next = composerSessionId ? (composerDrafts.get(composerSessionId) ?? "") : "";
+    setText(next);
+    setCursorPos(next.length);
+    setSlashMenuDismissed(false);
+    setComposerMultilineIfNeeded(next.includes("\n"));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.setSelectionRange(next.length, next.length);
+      syncComposerSize(el);
+    });
+  }, [composerSessionId]);
+
   const agentProvider = activeSession?.provider ?? null;
   const agentOffline = Boolean(agentProvider && agentAvailability[agentProvider] === false);
   const noOnlineAgents =
@@ -3199,21 +3235,10 @@ function ChatThread() {
   useEffect(() => {
     setSlashIndex(0);
     setSlashKeyboardNav(false);
-    setSlashMenuDismissed(false);
+    if (slashCtx) setSlashMenuDismissed(false);
   }, [slashCtx?.query, slashCtx?.start]);
 
   const applySlashCommand = (cmd: SlashCommandDto) => {
-    if (cmd.name === "stop" && streaming) {
-      setSlashMenuDismissed(true);
-      setText("");
-      setCursorPos(0);
-      setComposerMultilineIfNeeded(false);
-      const el = textareaRef.current;
-      if (el) el.style.height = "auto";
-      void cancelPrompt();
-      requestAnimationFrame(() => textareaRef.current?.focus({ preventScroll: true }));
-      return;
-    }
     insertSlashCommand(cmd);
   };
 
@@ -3225,13 +3250,6 @@ function ChatThread() {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
     }
-    if (value === "/stop") {
-      setText("");
-      setEditingMessageId(null);
-      setComposerMultilineIfNeeded(false);
-      void cancelPrompt();
-      return;
-    }
     if (shouldAutoFocusComposer()) {
       keepComposerFocus.current = true;
     } else {
@@ -3240,6 +3258,7 @@ function ChatThread() {
     userJustSentRef.current = true;
     const editId = editingMessageId;
     const attach = editId ? undefined : pendingFiles;
+    forgetComposerDraft(composerSessionRef.current);
     setText("");
     setEditingMessageId(null);
     setCursorPos(0);
@@ -3281,6 +3300,7 @@ function ChatThread() {
       // Same housekeeping as submitMessage: clear the composer, resend as an
       // edit (the server truncates the old reply and regenerates it).
       userJustSentRef.current = true;
+      forgetComposerDraft(composerSessionRef.current);
       setText("");
       setEditingMessageId(null);
       setCursorPos(0);
@@ -4313,6 +4333,7 @@ function ChatThread() {
                   className={styles.editCancel}
                   onClick={() => {
                     setEditingMessageId(null);
+                    forgetComposerDraft(composerSessionRef.current);
                     setText("");
                     setComposerMultilineIfNeeded(false);
                   }}
@@ -4583,6 +4604,11 @@ function ChatThread() {
               onScroll={(e) => {
                 const inner = composerHighlightInnerRef.current;
                 if (inner) inner.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
+              }}
+              onBlur={(e) => {
+                const next = e.relatedTarget as Node | null;
+                if (next?.closest?.('[role="listbox"]')) return;
+                setSlashMenuDismissed(true);
               }}
               onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}
               onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}

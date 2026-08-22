@@ -1,22 +1,67 @@
 import type { SlashCommandDto } from "@acprocess/shared";
 import type { TranslateFn } from "@acprocess/i18n";
 
-export function getBuiltinSlashCommands(t: TranslateFn): SlashCommandDto[] {
-  return [
-    {
-      name: "stop",
-      description: t("chat.stopGeneration"),
-    },
-  ];
+export function slashCommandBareName(name: string) {
+  return name.trim().replace(/^\//, "").replace(/^skill:/i, "").toLowerCase();
 }
 
-const HIDDEN_COMMAND_NAMES = new Set(["plugins", "plugin", "manage-plugins", "manage_plugins"]);
+function preferSlashCommand(prev: SlashCommandDto, next: SlashCommandDto): SlashCommandDto {
+  const merged: SlashCommandDto = {
+    ...next,
+    ...(prev.local || next.local ? { local: true } : {}),
+    ...(prev.kind === "skill" || next.kind === "skill" ? { kind: "skill" } : {}),
+  };
+  const prevSkill = prev.name.toLowerCase().startsWith("skill:");
+  const nextSkill = next.name.toLowerCase().startsWith("skill:");
+  const keepPrev =
+    (prev.local && !next.local) ||
+    (Boolean(prev.local) === Boolean(next.local) && prevSkill && !nextSkill) ||
+    (Boolean(prev.local) === Boolean(next.local) && prevSkill === nextSkill && prev.name.length < next.name.length);
+  if (keepPrev) {
+    return {
+      ...prev,
+      ...(merged.local ? { local: true } : {}),
+      ...(merged.kind ? { kind: merged.kind } : {}),
+    };
+  }
+  return merged;
+}
+
+export function mergeSlashCommandLists(
+  ...lists: Array<SlashCommandDto[] | undefined>
+): SlashCommandDto[] {
+  const byName = new Map<string, SlashCommandDto>();
+  for (const list of lists) {
+    if (!list?.length) continue;
+    for (const cmd of list) {
+      const name = cmd.name.trim().replace(/^\//, "");
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const prev = byName.get(key);
+      const next: SlashCommandDto = { ...cmd, name };
+      if (prev?.local || cmd.local) next.local = true;
+      if (prev?.kind === "skill" || cmd.kind === "skill") next.kind = "skill";
+      byName.set(key, next);
+    }
+  }
+  const byBare = new Map<string, SlashCommandDto>();
+  for (const cmd of byName.values()) {
+    const bare = slashCommandBareName(cmd.name);
+    const prev = byBare.get(bare);
+    byBare.set(bare, prev ? preferSlashCommand(prev, cmd) : cmd);
+  }
+  return [...byBare.values()];
+}
+
+export function getBuiltinSlashCommands(_t: TranslateFn): SlashCommandDto[] {
+  return [];
+}
 
 function isValidSlashCommandName(name: string) {
   // `namespace:name` is legal (OMP skills arrive as `skill:<name>`); the
   // part after the colon must start with a letter so Windows paths like
   // "/C:/…" don't parse as commands.
-  return /^[a-z][\w-]*(?::[a-z][\w-]*)?$/i.test(name);
+  return /^[a-z][\w.-]*(?::[a-z][\w.-]*)*$/i.test(name);
 }
 
 function isBracketSyntaxHint(hint: string) {
@@ -30,41 +75,71 @@ export function slashCommandRequiresInput(cmd: SlashCommandDto) {
 export function sanitizeSlashCommand(cmd: SlashCommandDto): SlashCommandDto | null {
   const name = cmd.name.trim().replace(/^\//, "");
   if (!isValidSlashCommandName(name)) return null;
-  if (HIDDEN_COMMAND_NAMES.has(name.toLowerCase())) return null;
 
   const description = cmd.description.trim();
-  if (/manage\s+plugins?/i.test(description)) return null;
-  if (isBracketSyntaxHint(description)) return null;
 
   const inputHint = cmd.inputHint?.trim();
-  const requiresInput = Boolean(cmd.requiresInput ?? inputHint);
+  const kind = cmd.kind?.trim();
   return {
     name,
     description: description || name,
-    ...(requiresInput ? { requiresInput: true } : {}),
+    ...(cmd.requiresInput || (inputHint && !isBracketSyntaxHint(inputHint))
+      ? { requiresInput: true }
+      : {}),
     ...(inputHint && !isBracketSyntaxHint(inputHint) ? { inputHint } : {}),
+    ...(kind ? { kind } : {}),
+    ...(cmd.local ? { local: true } : {}),
   };
 }
 
+const SKILL_SCOPE_RE = /\((?:user |project |builtin )?skill\)\s*$/i;
+const USER_SKILL_SCOPE_RE = /\(user skill\)\s*$/i;
+
+function commandLooksLikeSkill(cmd: SlashCommandDto) {
+  const name = cmd.name.trim().toLowerCase();
+  const kind = (cmd.kind ?? "").trim().toLowerCase();
+  return (
+    kind === "skill" ||
+    kind === "skills" ||
+    name.startsWith("skill:") ||
+    name.startsWith("skills:") ||
+    SKILL_SCOPE_RE.test(cmd.description)
+  );
+}
+
+/** User-installed skills go first; Cursor tags them `(user skill)`, OMP as `skill:name`. */
+export function isUserSlashSkill(cmd: SlashCommandDto) {
+  const name = cmd.name.trim().toLowerCase();
+  if (name.startsWith("skill:") || name.startsWith("skills:")) return true;
+  return USER_SKILL_SCOPE_RE.test(cmd.description);
+}
+
+export function isSlashSkill(cmd: SlashCommandDto) {
+  return isUserSlashSkill(cmd) || commandLooksLikeSkill(cmd);
+}
+
+function slashMenuRank(cmd: SlashCommandDto) {
+  if (isUserSlashSkill(cmd)) return 0;
+  if (isSlashSkill(cmd)) return 1;
+  return 2;
+}
+
 export function mergeSlashCommands(agentCommands: SlashCommandDto[] = [], t: TranslateFn) {
-  const seen = new Set<string>();
-  const out: SlashCommandDto[] = [];
+  const cleaned: SlashCommandDto[] = [];
   for (const cmd of [...getBuiltinSlashCommands(t), ...agentCommands]) {
     const clean = sanitizeSlashCommand(cmd);
     if (!clean) continue;
-    const key = clean.name.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(clean);
+    cleaned.push(clean);
   }
-  return out;
+  const out = mergeSlashCommandLists(cleaned);
+  return [...out].sort((a, b) => slashMenuRank(a) - slashMenuRank(b));
 }
 
 export function getSlashContext(text: string, cursor: number) {
   const before = text.slice(0, cursor);
   // Token start: beginning, newline, or whitespace — so "/cmd" still works
   // after existing draft text. Mid-word "x/y" stays ignored.
-  const match = before.match(/(?:^|[\s])\/([\w:-]*)$/);
+  const match = before.match(/(?:^|[\s])\/([\w:.-]*)$/);
   if (!match) return null;
   const query = match[1] ?? "";
   const start = before.lastIndexOf("/");
@@ -82,7 +157,7 @@ export function filterSlashCommands(commands: SlashCommandDto[], query: string) 
 }
 
 export function buildSlashInsertion(cmd: SlashCommandDto) {
-  return `/${cmd.name}${slashCommandRequiresInput(cmd) ? " " : ""}`;
+  return `/${cmd.name} `;
 }
 
 export function findSlashCommand(commands: SlashCommandDto[], name: string) {
@@ -90,18 +165,13 @@ export function findSlashCommand(commands: SlashCommandDto[], name: string) {
   return commands.find((cmd) => cmd.name.toLowerCase() === key) ?? null;
 }
 
-export function isSlashCommandReadyToSend(text: string, commands: SlashCommandDto[]) {
-  const parsed = parseSlashCommandText(text);
-  if (!parsed) return true;
-  const cmd = findSlashCommand(commands, parsed.name);
-  if (!cmd) return true;
-  if (slashCommandRequiresInput(cmd) && !parsed.args) return false;
+export function isSlashCommandReadyToSend(_text: string, _commands: SlashCommandDto[]) {
   return true;
 }
 
 export function parseSlashCommandText(text: string) {
   const trimmed = text.trim();
-  const match = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)(?:\s+([\s\S]*))?$/i);
+  const match = trimmed.match(/^\/([a-z][\w.-]*(?::[a-z][\w.-]*)*)(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
   return {
     name: match[1],
@@ -113,7 +183,7 @@ export function isSlashCommandText(text: string) {
   return Boolean(parseSlashCommandText(text));
 }
 
-const SLASH_TOKEN_RE = /(^|[\s])(\/[a-z][\w-]*(?::[a-z][\w-]*)?)(?=\s|$)/gi;
+const SLASH_TOKEN_RE = /(^|[\s])(\/[a-z][\w.-]*(?::[a-z][\w.-]*)*)(?=\s|$)/gi;
 
 /** Split user text so `/command` tokens can be highlighted without a special card. */
 export function splitSlashCommandHighlight(text: string, knownNames?: Iterable<string>) {

@@ -48,9 +48,31 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 ## Скриншоты
 
-| Чат (светлая тема) | Чат (тёмная тема) | Настройки |
+### Чат
+
+Тёмная и светлая темы: стрим рассуждений, tool calls и карточки субагентов.
+
+| Тёмная | Светлая |
+|---|---|
+| ![Чат тёмная](docs/screens/chat-dark.webp) | ![Чат светлая](docs/screens/chat-light.webp) |
+
+### Слэш-команды, поиск, два чата
+
+Введите `/` в поле ввода — откроется меню команд агента (из ACP `available_commands`). Поиск по сообщениям в чате. На десктопе — два чата рядом.
+
+| Слэш-меню | Поиск | Два чата |
 |---|---|---|
-| ![Чат светлая](docs/screens/chat-light.webp) | ![Чат тёмная](docs/screens/chat-dark.webp) | ![Настройки](docs/screens/settings.webp) |
+| ![Слэш-команды](docs/screens/chat-slash.webp) | ![Поиск](docs/screens/chat-search.webp) | ![Два чата](docs/screens/chat-split.webp) |
+
+### Настройки и телефон
+
+Подключение агентов, модели, доступ с телефона по VPN/LAN.
+
+| Настройки | Агенты | Телефон и VPN | Мобильный |
+|---|---|---|---|
+| ![Настройки](docs/screens/settings.webp) | ![Агенты](docs/screens/settings-agents.webp) | ![Удалённый доступ](docs/screens/settings-remote.webp) | ![Мобильный чат](docs/screens/mobile-chat.webp) |
+
+Переснять скриншоты после изменений UI: `npm run screens` (нужны `npm run dev` и `npx playwright install chromium`).
 
 ## Прод-сборка
 

@@ -1,7 +1,7 @@
 .root {
   position: relative;
   line-height: 1.65;
-  font-size: 0.98rem;
+  font-size: 0.96rem;
   color: var(--text);
   min-width: 0;
   max-width: 100%;
@@ -171,8 +171,8 @@
   border-radius: 6px;
   background: color-mix(in srgb, var(--text) 7%, transparent);
   border: 1px solid var(--border-soft);
-  overflow-wrap: anywhere;
-  word-break: break-all;
+  overflow-wrap: break-word;
+  word-break: normal;
   white-space: pre-wrap;
 }
 

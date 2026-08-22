@@ -165,6 +165,7 @@ export const ru = {
     harnessForAgents: "Harness for agents",
     command: "Команда",
     commands: "Команды",
+    skills: "Скиллы",
     steps: "Размышления",
     autoSteps: "Размышления",
     autoStepsHint: "Раскрывать размышления агента",

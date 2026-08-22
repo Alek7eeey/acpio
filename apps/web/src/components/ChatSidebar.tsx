@@ -778,16 +778,6 @@ export function ChatSidebar({
                 <span className={styles.sessionTitleText} title={s.title}>
                   {s.title}
                 </span>
-                {s.provider ? (
-                  <span
-                    className={`${styles.sessionAgentBadge}${
-                      agentAvailability[s.provider] === false ? ` ${styles.sessionAgentBadgeOff}` : ""
-                    }`}
-                    title={harnessShortLabel(s.provider)}
-                  >
-                    {harnessShortLabel(s.provider)}
-                  </span>
-                ) : null}
                 {(s.status === "running" || s.status === "waiting") &&
                   s.id !== activeSessionId && (
                     <span
@@ -802,6 +792,16 @@ export function ChatSidebar({
                   )}
               </span>
             </button>
+            {s.provider ? (
+              <span
+                className={`${styles.sessionAgentBadge}${
+                  agentAvailability[s.provider] === false ? ` ${styles.sessionAgentBadgeOff}` : ""
+                }`}
+                title={harnessShortLabel(s.provider)}
+              >
+                {harnessShortLabel(s.provider)}
+              </span>
+            ) : null}
             <div className={styles.sessionRowActions}>
             <button
               type="button"

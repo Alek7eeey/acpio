@@ -24,17 +24,22 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const unlock = (next: "locked" | "open") => {
+      if (cancelled) return;
+      window.clearTimeout(timer);
+      setRemoteLock(next);
+    };
+    // If the status probe hangs (proxy down, flaky tunnel), don't leave a blank page.
+    const timer = window.setTimeout(() => {
+      if (!cancelled) setRemoteLock((cur) => (cur === "unknown" ? "open" : cur));
+    }, 5000);
     void api
       .remoteAccessStatus()
-      .then((s) => {
-        if (cancelled) return;
-        setRemoteLock(s.required && !s.unlocked ? "locked" : "open");
-      })
-      .catch(() => {
-        if (!cancelled) setRemoteLock("open");
-      });
+      .then((s) => unlock(s.required && !s.unlocked ? "locked" : "open"))
+      .catch(() => unlock("open"));
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -49,9 +54,11 @@ export function App() {
 
   const onSplashDone = useCallback(() => setSplashVisible(false), []);
 
+  const checkingRemote = remoteLock === "unknown";
   const ready = remoteLock === "open";
+  const splashBlocking = splashVisible && showBootSplash;
   const app =
-    !ready || (loading && splashVisible && showBootSplash) ? null : (
+    checkingRemote || !ready || (loading && splashBlocking) ? null : (
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
@@ -62,16 +69,14 @@ export function App() {
       </Routes>
     );
 
-  const splashBlocking = splashVisible && showBootSplash;
+  const showSplash = (checkingRemote || ready) && splashBlocking;
 
   return (
     <I18nProvider>
       {remoteLock === "locked" ? <RemoteKeyGate onUnlocked={() => setRemoteLock("open")} /> : null}
       {app}
       <ToastHost />
-      {ready && splashVisible && showBootSplash && (
-        <BootSplash ready={!loading} onDone={onSplashDone} />
-      )}
+      {showSplash ? <BootSplash ready={ready && !loading} onDone={onSplashDone} /> : null}
       {ready && !loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
       {ready && !loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
     </I18nProvider>

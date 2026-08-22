@@ -80,6 +80,20 @@ describe("SlashCommandMenu", () => {
     expect(onSelect).toHaveBeenCalledWith(commands[0]);
   });
 
+  it("puts skills above other commands with section labels", () => {
+    renderMenu({
+      list: [
+        { name: "git-commit-ru", description: "Commit (user skill)" },
+        { name: "compact", description: "Сжать тему" },
+      ],
+    });
+    const options = screen.getAllByRole("option");
+    expect(options[0].textContent).toMatch(/\/git-commit-ru/);
+    expect(options[1].textContent).toMatch(/\/compact/);
+    expect(screen.getByText("Скиллы")).toBeTruthy();
+    expect(screen.queryByText("Команды")).toBeNull();
+  });
+
   it("reports the hovered option through onActiveIndexChange", () => {
     const { onActiveIndexChange } = renderMenu();
     fireEvent.mouseEnter(screen.getByRole("option", { name: /\/ask/ }));

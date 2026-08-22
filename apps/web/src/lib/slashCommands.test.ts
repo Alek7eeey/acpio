@@ -6,6 +6,7 @@ import {
   getSlashContext,
   isSlashCommandReadyToSend,
   isSlashCommandText,
+  isSlashSkill,
   mergeSlashCommands,
   parseSlashCommandText,
   slashCommandRequiresInput,
@@ -223,38 +224,27 @@ describe("filterSlashCommands", () => {
 });
 
 describe("mergeSlashCommands", () => {
-  it("returns just the builtin commands when no agent commands are given", () => {
-    expect(mergeSlashCommands([], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-    ]);
+  it("returns an empty list when no agent commands are given", () => {
+    expect(mergeSlashCommands([], t)).toEqual([]);
   });
 
   it("defaults agentCommands to an empty array", () => {
-    expect(mergeSlashCommands(undefined, t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-    ]);
+    expect(mergeSlashCommands(undefined, t)).toEqual([]);
   });
 
-  it("appends agent commands after the builtin ones", () => {
+  it("keeps agent commands", () => {
     expect(mergeSlashCommands([{ name: "clear", description: "Clear" }], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
       { name: "clear", description: "Clear" },
     ]);
   });
 
-  it("dedupes an agent command that collides with a builtin, keeping the builtin", () => {
+  it("keeps stop when the agent advertises it", () => {
     expect(mergeSlashCommands([{ name: "stop", description: "dupe" }], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
+      { name: "stop", description: "dupe" },
     ]);
   });
 
-  it("dedupes command names case-insensitively", () => {
-    expect(mergeSlashCommands([{ name: "Stop", description: "dupe" }], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-    ]);
-  });
-
-  it("dedupes repeated agent commands, keeping the first", () => {
+  it("dedupes repeated agent commands, keeping the later snapshot", () => {
     expect(
       mergeSlashCommands(
         [
@@ -263,65 +253,112 @@ describe("mergeSlashCommands", () => {
         ],
         t,
       ),
-    ).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-      { name: "a", description: "first" },
-    ]);
+    ).toEqual([{ name: "a", description: "second" }]);
   });
 
   it("strips a leading slash and trims the name/description of agent commands", () => {
-    expect(mergeSlashCommands([{ name: "/clear", description: "  Clear now  " }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "/clear", description: "  Clear now  " }], t)[0]).toEqual({
       name: "clear",
       description: "Clear now",
     });
   });
 
   it("keeps namespace-style command names", () => {
-    expect(mergeSlashCommands([{ name: "skill:foo", description: "d" }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "skill:foo", description: "d" }], t)[0]).toEqual({
       name: "skill:foo",
       description: "d",
     });
   });
 
+  it("lists user skills above other advertised commands", () => {
+    expect(
+      mergeSlashCommands(
+        [
+          { name: "copy-request-id", description: "Copy the last request ID" },
+          { name: "compact", description: "Compact" },
+          { name: "git-commit-ru", description: "Commit in Russian (user skill)" },
+          { name: "create-pr", description: "Open a PR" },
+        ],
+        t,
+      ).map((c) => c.name),
+    ).toEqual(["git-commit-ru", "copy-request-id", "compact", "create-pr"]);
+  });
+
+  it("lists OMP skill: names with user skills", () => {
+    expect(
+      mergeSlashCommands(
+        [
+          { name: "compact", description: "Compact" },
+          { name: "skill:git-commit-ru", description: "OMP" },
+        ],
+        t,
+      ).map((c) => c.name),
+    ).toEqual(["skill:git-commit-ru", "compact"]);
+  });
+
+  it("dedupes OMP skill:name against the unprefixed skill name", () => {
+    expect(
+      mergeSlashCommands(
+        [
+          { name: "skill:git-commit-ru", description: "OMP" },
+          { name: "git-commit-ru", description: "Skill", kind: "skill" },
+        ],
+        t,
+      ).map((c) => c.name),
+    ).toEqual(["skill:git-commit-ru"]);
+  });
+});
+
+describe("isSlashSkill", () => {
+  it("uses agent skill markers, not unknown names", () => {
+    expect(isSlashSkill({ name: "skill:foo", description: "d" })).toBe(true);
+    expect(isSlashSkill({ name: "git-commit-ru", description: "Commit (user skill)" })).toBe(true);
+    expect(isSlashSkill({ name: "review", description: "Review (project skill)" })).toBe(true);
+    expect(isSlashSkill({ name: "automate", description: "d" })).toBe(false);
+    expect(isSlashSkill({ name: "compact", description: "d" })).toBe(false);
+    expect(isSlashSkill({ name: "tagged", description: "d", kind: "skill" })).toBe(true);
+  });
+});
+
+describe("mergeSlashCommands keeps previously hidden names", () => {
   it.each(["plugins", "plugin", "manage-plugins", "manage_plugins", "PLUGINS", "Manage-Plugins"])(
-    "drops the hidden command %j",
+    "keeps the command %j",
     (name) => {
-      expect(mergeSlashCommands([{ name, description: "d" }], t)).toEqual([
-        { name: "stop", description: "chat.stopGeneration" },
-      ]);
+      expect(mergeSlashCommands([{ name, description: "d" }], t)[0]?.name.toLowerCase()).toBe(
+        name.toLowerCase(),
+      );
     },
   );
 
   it.each(["manage plugins", "Manage Plugins", "manage plugin", "MANAGE PLUGINS"])(
-    "drops commands whose description mentions plugin management: %j",
+    "keeps commands whose description mentions plugin management: %j",
     (description) => {
       expect(mergeSlashCommands([{ name: "x", description }], t)).toEqual([
-        { name: "stop", description: "chat.stopGeneration" },
+        { name: "x", description },
       ]);
     },
   );
 
-  it("drops commands with bracket-syntax placeholder descriptions", () => {
-    expect(mergeSlashCommands([{ name: "x", description: "[arg|value] tool" }], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-    ]);
+  it("keeps commands whose description starts with a bracket placeholder", () => {
+    expect(mergeSlashCommands([{ name: "create-pr", description: "[title|body] Open a PR" }], t)[0]).toEqual({
+      name: "create-pr",
+      description: "[title|body] Open a PR",
+    });
   });
 
   it("keeps descriptions that only contain brackets mid-text", () => {
-    expect(mergeSlashCommands([{ name: "x", description: "tool [a|b]" }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "x", description: "tool [a|b]" }], t)[0]).toEqual({
       name: "x",
       description: "tool [a|b]",
     });
   });
 
   it("skips agent commands with invalid names", () => {
-    expect(mergeSlashCommands([{ name: "1bad", description: "d" }], t)).toEqual([
-      { name: "stop", description: "chat.stopGeneration" },
-    ]);
+    expect(mergeSlashCommands([{ name: "1bad", description: "d" }], t)).toEqual([]);
   });
 
   it("preserves requiresInput on agent commands", () => {
-    expect(mergeSlashCommands([{ name: "ask", description: "d", requiresInput: true }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "ask", description: "d", requiresInput: true }], t)[0]).toEqual({
       name: "ask",
       description: "d",
       requiresInput: true,
@@ -329,14 +366,14 @@ describe("mergeSlashCommands", () => {
   });
 
   it("falls back to the name for an empty description", () => {
-    expect(mergeSlashCommands([{ name: "bare", description: "  " }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "bare", description: "  " }], t)[0]).toEqual({
       name: "bare",
       description: "bare",
     });
   });
 
   it("keeps a plain inputHint and marks the command as requiring input", () => {
-    expect(mergeSlashCommands([{ name: "ask", description: "d", inputHint: "prompt" }], t)[1]).toEqual({
+    expect(mergeSlashCommands([{ name: "ask", description: "d", inputHint: "prompt" }], t)[0]).toEqual({
       name: "ask",
       description: "d",
       requiresInput: true,
@@ -344,11 +381,10 @@ describe("mergeSlashCommands", () => {
     });
   });
 
-  it("drops a bracket-syntax inputHint but keeps requiresInput", () => {
-    expect(mergeSlashCommands([{ name: "ask", description: "d", inputHint: "[a|b]" }], t)[1]).toEqual({
+  it("drops a bracket-syntax inputHint", () => {
+    expect(mergeSlashCommands([{ name: "ask", description: "d", inputHint: "[a|b]" }], t)[0]).toEqual({
       name: "ask",
       description: "d",
-      requiresInput: true,
     });
   });
 });
@@ -366,8 +402,8 @@ describe("isSlashCommandReadyToSend", () => {
     expect(isSlashCommandReadyToSend("/stop", [stop])).toBe(true);
   });
 
-  it("blocks a known command that requires input when args are missing", () => {
-    expect(isSlashCommandReadyToSend("/clear", [stop, clear])).toBe(false);
+  it("sends known commands without args so the agent can handle them", () => {
+    expect(isSlashCommandReadyToSend("/clear", [stop, clear])).toBe(true);
   });
 
   it("allows a known command that requires input when args are present", () => {
@@ -378,16 +414,16 @@ describe("isSlashCommandReadyToSend", () => {
     expect(isSlashCommandReadyToSend("/nope", [stop])).toBe(true);
   });
 
-  it("blocks a command with only an inputHint when args are missing", () => {
-    expect(isSlashCommandReadyToSend("/ask", [ask])).toBe(false);
+  it("sends a command that only has an inputHint", () => {
+    expect(isSlashCommandReadyToSend("/ask", [ask])).toBe(true);
   });
 
   it("allows an inputHint command once args are typed", () => {
     expect(isSlashCommandReadyToSend("/ask something", [ask])).toBe(true);
   });
 
-  it("blocks on trailing whitespace because the args come back empty", () => {
-    expect(isSlashCommandReadyToSend("/clear  ", [clear])).toBe(false);
+  it("does not block trailing whitespace before send", () => {
+    expect(isSlashCommandReadyToSend("/clear  ", [clear])).toBe(true);
   });
 
   it("respects an explicit requiresInput:false even with an inputHint", () => {
@@ -397,8 +433,8 @@ describe("isSlashCommandReadyToSend", () => {
 });
 
 describe("buildSlashInsertion", () => {
-  it("inserts a bare slash command with no trailing space", () => {
-    expect(buildSlashInsertion({ name: "stop", description: "d" })).toBe("/stop");
+  it("inserts a slash command with a trailing space so the menu can close", () => {
+    expect(buildSlashInsertion({ name: "stop", description: "d" })).toBe("/stop ");
   });
 
   it("appends a trailing space for commands that require input", () => {
@@ -409,12 +445,12 @@ describe("buildSlashInsertion", () => {
     expect(buildSlashInsertion({ name: "ask", description: "d", inputHint: "hint" })).toBe("/ask ");
   });
 
-  it("does not append a space when requiresInput is explicitly false even with a hint", () => {
-    expect(buildSlashInsertion({ name: "x", description: "d", requiresInput: false, inputHint: "hint" })).toBe("/x");
+  it("still appends a space when requiresInput is explicitly false", () => {
+    expect(buildSlashInsertion({ name: "x", description: "d", requiresInput: false, inputHint: "hint" })).toBe("/x ");
   });
 
   it("handles namespace-style names", () => {
-    expect(buildSlashInsertion({ name: "skill:foo", description: "d" })).toBe("/skill:foo");
+    expect(buildSlashInsertion({ name: "skill:foo", description: "d" })).toBe("/skill:foo ");
   });
 });
 

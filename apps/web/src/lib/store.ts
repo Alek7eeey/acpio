@@ -9,6 +9,7 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
+  SlashCommandDto,
   Theme,
   WsServerEvent,
 } from "@acprocess/shared";
@@ -29,6 +30,14 @@ import {
 } from "./chatPanes";
 import { pickCreateProvider, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
+import {
+  hydrateSessionSlashCommands,
+  mergeIncomingSlashCommands,
+  preferSessionSlashCommands,
+  rememberSessionSlashCommands,
+  slashCommandsKey,
+  slashListStillLoading,
+} from "./sessionSlashCommands";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
@@ -493,11 +502,21 @@ function upsertMessage(messages: MessageDto[], message: MessageDto) {
 
 /** Keep recently opened chats warm so tree → chat feels instant. */
 const sessionDetailCache = new Map<string, SessionDetailDto>();
+/** Agent slash commands often arrive over WS before GET / selectSession. */
+const slashCommandsCache = new Map<string, SlashCommandDto[]>();
+const slashPollSeq = new Map<string, number>();
 let selectSessionSeq = 0;
+
+function readCachedSessionDetail(id: string): SessionDetailDto | undefined {
+  const cached = sessionDetailCache.get(id);
+  if (!cached) return undefined;
+  return hydrateSessionSlashCommands(cached, slashCommandsCache) ?? undefined;
+}
 
 function rememberSessionDetail(detail: SessionDetailDto | null | undefined) {
   if (!detail?.id) return;
-  sessionDetailCache.set(detail.id, detail);
+  const next = rememberSessionSlashCommands(detail, slashCommandsCache);
+  sessionDetailCache.set(next.id, next);
   if (sessionDetailCache.size <= 24) return;
   const oldest = sessionDetailCache.keys().next().value;
   if (oldest) sessionDetailCache.delete(oldest);
@@ -541,9 +560,21 @@ async function pollImportedTranscript(
   markRestoringDone(get, set, sessionId);
 }
 
+/** Session detail with warm slash-command cache applied (for UI selectors). */
+export function selectLiveSessionDetail(
+  state: Pick<AppState, "activeSession" | "sessionDetails">,
+  sessionId: string | null | undefined,
+): SessionDetailDto | null {
+  if (!sessionId) return state.activeSession;
+  const detail =
+    state.activeSession?.id === sessionId
+      ? state.activeSession
+      : (state.sessionDetails ?? {})[sessionId] ?? sessionDetailCache.get(sessionId) ?? null;
+  return hydrateSessionSlashCommands(detail, slashCommandsCache);
+}
+
 function liveDetail(state: AppState, sessionId: string): SessionDetailDto | null {
-  if (state.activeSession?.id === sessionId) return state.activeSession;
-  return (state.sessionDetails ?? {})[sessionId] ?? sessionDetailCache.get(sessionId) ?? null;
+  return selectLiveSessionDetail(state, sessionId);
 }
 
 function paneSlots(state: Pick<AppState, "chatPaneIds"> | AppState): ChatPaneSlot[] {
@@ -568,6 +599,47 @@ function commitDetail(
     ...(state.activeSession?.id === next.id ? { activeSession: next } : {}),
   });
   if (next.messages.length) markRestoringDone(get, set, next.id);
+}
+
+function preferSlashCommands(
+  fetched: SessionDetailDto,
+  live?: SessionDetailDto | null,
+): SessionDetailDto {
+  return preferSessionSlashCommands(fetched, live, slashCommandsCache);
+}
+
+function pollSlashCommands(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  const seq = (slashPollSeq.get(sessionId) ?? 0) + 1;
+  slashPollSeq.set(sessionId, seq);
+  void (async () => {
+    for (let i = 0; i < 16; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (slashPollSeq.get(sessionId) !== seq) return;
+      const live = liveDetail(get(), sessionId);
+      const hydrated = hydrateSessionSlashCommands(live, slashCommandsCache);
+      if (!slashListStillLoading(hydrated?.slashCommands)) return;
+      try {
+        const fetched = preferSlashCommands(
+          await api.getSession(sessionId),
+          hydrated ?? live,
+        );
+        if (slashPollSeq.get(sessionId) !== seq) return;
+        if (slashListStillLoading(fetched.slashCommands)) continue;
+        const cur = hydrateSessionSlashCommands(liveDetail(get(), sessionId), slashCommandsCache);
+        const next = { ...(cur ?? fetched), slashCommands: fetched.slashCommands };
+        rememberSessionDetail(next);
+        if (cur) commitDetail(get, set, next);
+        else commitDetail(get, set, fetched);
+        return;
+      } catch {
+        return;
+      }
+    }
+  })();
 }
 
 function persistPanes(ids: ChatPaneSlot[], focus: number) {
@@ -612,7 +684,8 @@ function sessionDetailQuickEqual(
     a.mode === b.mode &&
     a.messages.length === b.messages.length &&
     a.messages.at(-1)?.id === b.messages.at(-1)?.id &&
-    (a.slashCommands?.length ?? 0) === (b.slashCommands?.length ?? 0)
+    (a.slashCommands?.length ?? 0) === (b.slashCommands?.length ?? 0) &&
+    slashCommandsKey(a.slashCommands) === slashCommandsKey(b.slashCommands)
   );
 }
 
@@ -824,7 +897,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inflightBySession: {},
   promptEpochBySession: {},
   cancelledPromptEpochBySession: {},
-  loading: true,
+  loading: false,
   error: null,
 
   // Apply the persisted theme before the first paint: theme-scoped rules
@@ -1197,7 +1270,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
     const seq = ++selectSessionSeq;
-    const cached = sessionDetailCache.get(id);
+    const cached = readCachedSessionDetail(id);
     const current = get().activeSession;
     const alreadyWarm =
       get().activeSessionId === id &&
@@ -1208,8 +1281,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     // no empty stub, no skeleton flash, no keyed thread remount.
     if (alreadyWarm) {
       try {
-        const detail = await api.getSession(id);
+        const detail = preferSlashCommands(await api.getSession(id), liveDetail(get(), id));
         rememberSessionDetail(detail);
+        if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
         if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
         const live = get().activeSession;
         if (live?.status === "running") {
@@ -1272,8 +1346,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     syncPanesOnSelect(get, set, id);
 
     try {
-      const detail = await api.getSession(id);
+      const detail = preferSlashCommands(await api.getSession(id), liveDetail(get(), id));
       rememberSessionDetail(detail);
+      if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
       const live = get().activeSession;
       if (detail.messages.length === 0 && live?.id === id && live.messages.length > 0) {
@@ -1435,6 +1510,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     // empty-stub → GET refill.
     rememberSessionDetail({ ...session, messages: [], slashCommands: [] });
     await get().selectSession(session.id);
+    if (slashListStillLoading(get().activeSession?.slashCommands)) {
+      pollSlashCommands(session.id, get, set);
+    }
     return session;
   },
 
@@ -1473,6 +1551,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const details = { ...get().sessionDetails };
     delete details[id];
+    slashCommandsCache.delete(id);
+    sessionDetailCache.delete(id);
     set({ sessionDetails: details });
     if (activeSessionId === id) {
       const next =
@@ -2289,13 +2369,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (event.type === "commands.updated") {
-      if (state.activeSession?.id !== event.sessionId) return;
-      set({
-        activeSession: {
-          ...state.activeSession!,
-          slashCommands: event.commands,
-        },
-      });
+      const live = liveDetail(get(), event.sessionId);
+      const merged = mergeIncomingSlashCommands(
+        event.sessionId,
+        event.commands ?? [],
+        live,
+        slashCommandsCache,
+      );
+      if (!merged.length) return;
+      slashCommandsCache.set(event.sessionId, merged);
+      const base =
+        live ??
+        readCachedSessionDetail(event.sessionId) ??
+        (get().activeSession?.id === event.sessionId ? get().activeSession : null);
+      if (base) commitDetail(get, set, { ...base, slashCommands: merged });
       return;
     }
 

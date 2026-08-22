@@ -147,6 +147,7 @@ export const en = {
     harnessForAgents: "Harness for agents",
     command: "Command",
     commands: "Commands",
+    skills: "Skills",
     steps: "Thinking",
     autoSteps: "Thinking",
     autoStepsHint: "Expand agent thinking",

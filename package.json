@@ -17,7 +17,8 @@
     "dist": "node scripts/package-dist.mjs",
     "db:generate": "npm run db:generate -w @acprocess/server",
     "db:migrate": "npm run db:migrate -w @acprocess/server",
-    "db:push": "npm run db:push -w @acprocess/server"
+    "db:push": "npm run db:push -w @acprocess/server",
+    "screens": "node scripts/capture-screens.mjs"
   },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",
@@ -25,6 +26,8 @@
     "@testing-library/user-event": "^14.6.4",
     "concurrently": "^9.1.2",
     "jsdom": "^28.1.0",
+    "playwright": "^1.49.0",
+    "sharp": "^0.35.3",
     "vitest": "^4.1.10"
   },
   "engines": {
