@@ -585,8 +585,11 @@ export function ChatSettingsPreview({
             {[
               { title: "Деплой ACProcess на прод", busy: true },
               { title: "Рефакторинг поиска сообщений", busy: false },
-            ].map((row) => (
-              <div key={row.title} className={styles.treeRow}>
+            ].map((row, i) => (
+              <div
+                key={row.title}
+                className={`${styles.treeRow}${i === 0 ? ` ${styles.treeRowActive}` : ""}`}
+              >
                 <span className={styles.treeRowTitle}>
                   {row.title}
                   
@@ -724,14 +727,13 @@ export function ChatSettingsPreview({
           </button>
           <div className={styles.chatPane}>
             <div className={styles.thread}>
-              <div className={styles.msgRow}>
-                <div className={`${styles.bubble} ${styles.userBubble}`}>
+              <div className={styles.threadInner}>
+              <div className={`${styles.msgRow} ${styles.userMsg}`}>
+                <div className={styles.userBubble}>
                   {t("chatPreviewUser")}
                   {showTime ? <span className={styles.time}>{now}</span> : null}
                 </div>
               </div>
-              {/* Always rendered — icons stay visible (dimmed) so they can
-                  be re-enabled even when every user-message action is off. */}
               <div className={`${styles.msgRow} ${styles.userActionsRow}`}>
                 <PreviewActions
                   actions={userBarActions}
@@ -741,12 +743,9 @@ export function ChatSettingsPreview({
                 />
               </div>
 
-              <div className={styles.msgRow}>
-                <span className={`${styles.avatar} ${styles.assistantAvatar}`} aria-hidden>
-                  A
-                </span>
+              <div className={`${styles.msgRow} ${styles.assistantMsg}`}>
                 <div className={styles.assistantCol}>
-                  <div className={`${styles.bubble} ${styles.assistantBubble}`}>
+                  <div className={styles.assistantText}>
                     {t("chatPreviewAssistant")}
                     {showTime ? <span className={styles.time}>{now}</span> : null}
                   </div>
@@ -795,6 +794,7 @@ export function ChatSettingsPreview({
                   />
                 </div>
               </div>
+              </div>
             </div>
 
             <div className={styles.composer}>
@@ -835,7 +835,7 @@ export function ChatSettingsPreview({
                   </span>
                 </El>
               </div>
-              <div className={styles.inputRow}>
+              <div className={styles.pill}>
                 <El
                   on={btnOn("attach")} variant="dim"
                   onToggle={() => onToggleComposerButton("attach")}
@@ -868,7 +868,7 @@ export function ChatSettingsPreview({
                   onToggle={() => onToggleComposerButton("mic")}
                   label={t("settings.chatComposerBtnMic")}
                 >
-                  <span className={styles.composerBtn} aria-hidden>
+                  <span className={`${styles.composerBtn} ${styles.composerBtnRound}`} aria-hidden>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
                       <rect x="9" y="3" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.7" />
                       <path d="M5 11a7 7 0 0 0 14 0M12 18v3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
