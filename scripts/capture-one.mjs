@@ -27,9 +27,135 @@ async function api(pathname, init) {
   return res.json();
 }
 
-async function pickSession() {
+function userText(message) {
+  const part = message.parts?.find((p) => p.type === "text");
+  return (part?.payload?.text ?? "").trim();
+}
+
+function analyzeSession(detail) {
+  let thought = 0;
+  let tool = 0;
+  let text = 0;
+  let user = 0;
+  let focusMessageId = null;
+  let searchHint = "";
+
+  for (const message of detail.messages ?? []) {
+    if (message.role === "user") {
+      user++;
+      const t = userText(message);
+      if (t && !t.startsWith("/") && t.length > searchHint.length) searchHint = t.slice(0, 40);
+    }
+    let hasTool = false;
+    let hasThought = false;
+    for (const part of message.parts ?? []) {
+      if (part.type === "thought") hasThought = true;
+      if (part.type === "tool_call") hasTool = true;
+      if (part.type === "thought") thought++;
+      if (part.type === "tool_call") tool++;
+      if (part.type === "text" && part.payload?.text) text += part.payload.text.length;
+    }
+    if (!focusMessageId && hasTool && hasThought) focusMessageId = message.id;
+  }
+
+  const title = (detail.title ?? "").trim();
+  let bonus = 0;
+  if (tool >= 2) bonus += 40;
+  if (thought >= 2) bonus += 20;
+  if (/test|retest|check|debug/i.test(title)) bonus -= 30;
+  if (/^как дела$/i.test(title) || /^new chat$/i.test(title)) bonus -= 25;
+  if (title.length > 8 && !/^новый чат$/i.test(title)) bonus += 10;
+
+  const total = thought * 15 + tool * 12 + text / 40 + user * 4 + bonus;
+
+  return { thought, tool, text, user, total, focusMessageId, searchHint: searchHint || "folder" };
+}
+
+async function scoreSession(summary) {
+  const detail = await api(`/api/sessions/${summary.id}`);
+  const stats = analyzeSession(detail);
+  return {
+    id: summary.id,
+    title: summary.title,
+    status: summary.status,
+    detail,
+    ...stats,
+  };
+}
+
+async function pickRichSessions() {
+  const override = process.env.SCREEN_SESSION_ID?.trim();
+  if (override) {
+    const detail = await api(`/api/sessions/${override}`);
+    const stats = analyzeSession(detail);
+    return {
+      primary: { id: override, focusMessageId: stats.focusMessageId, searchHint: stats.searchHint },
+      secondary: null,
+    };
+  }
+
   const sessions = await api("/api/sessions");
-  return sessions.find((s) => s.status === "idle") ?? sessions[0] ?? null;
+  const candidates = sessions.filter((s) => s.status !== "closed");
+  const scored = [];
+  for (const summary of candidates.slice(0, 30)) {
+    try {
+      const row = await scoreSession(summary);
+      if ((row.detail.messages?.length ?? 0) >= 4) scored.push(row);
+    } catch {
+      /* skip */
+    }
+  }
+
+  if (!scored.length) {
+    for (const summary of sessions.slice(0, 15)) {
+      try {
+        const row = await scoreSession(summary);
+        if ((row.detail.messages?.length ?? 0) >= 4) scored.push(row);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+
+  scored.sort((a, b) => b.total - a.total);
+  const primary = scored[0];
+  const secondary =
+    scored.find((s) => s.id !== primary?.id && s.tool >= 2) ??
+    scored.find((s) => s.id !== primary?.id) ??
+    null;
+
+  if (!primary) return { primary: null, secondary: null };
+
+  console.log(
+    `  session: ${primary.title} (${primary.tool} tools, ${primary.thought} thoughts)`,
+  );
+  if (secondary) {
+    console.log(`  split pane: ${secondary.title}`);
+  }
+
+  return {
+    primary: {
+      id: primary.id,
+      focusMessageId: primary.focusMessageId,
+      searchHint: primary.searchHint,
+    },
+    secondary: secondary
+      ? {
+          id: secondary.id,
+          focusMessageId: secondary.focusMessageId,
+          searchHint: secondary.searchHint,
+        }
+      : null,
+  };
+}
+
+async function scrollToMessage(page, messageId) {
+  if (!messageId) return;
+  const el = page.locator(`[data-message-id="${messageId}"]`);
+  if (await el.count()) {
+    await el.scrollIntoViewIfNeeded();
+    await page.waitForTimeout(500);
+  }
 }
 
 async function main() {
@@ -42,7 +168,9 @@ async function main() {
   const mobile = action === "mobile";
   const needsChat =
     action === "chat" || action === "slash" || action === "search" || action === "split" || mobile;
-  const session = needsChat ? await pickSession() : null;
+  const picked = needsChat ? await pickRichSessions() : null;
+  const session = picked?.primary ?? null;
+  const splitSecond = action === "split" ? picked?.secondary ?? null : null;
 
   const browser = await chromium.launch({
     headless: true,
@@ -52,19 +180,26 @@ async function main() {
   try {
     const page = await browser.newPage();
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+
+    const panePayload =
+      action === "split" && session && splitSecond
+        ? JSON.stringify({ ids: [session.id, splitSecond.id], focus: 0 })
+        : null;
+
     await page.addInitScript(
-      ({ locale, theme, sessionId }) => {
+      ({ locale, theme, sessionId, panePayload }) => {
         localStorage.setItem("acprocess.locale", locale);
         localStorage.setItem("acprocess.theme", theme);
         localStorage.setItem("acprocess.bootSplashDismissed", "1");
         if (sessionId) localStorage.setItem("acprocess.activeSessionId", sessionId);
+        if (panePayload) localStorage.setItem("acprocess.chatPanes.v1", panePayload);
         sessionStorage.setItem(
           "acprocess.agentAvailability.v1",
           JSON.stringify({ cursor: true, omp: false }),
         );
         document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
       },
-      { locale, theme, sessionId: session?.id ?? null },
+      { locale, theme, sessionId: session?.id ?? null, panePayload },
     );
 
     const url = action.startsWith("settings") || action === "remote" ? `${BASE}/settings` : `${BASE}/chat`;
@@ -78,10 +213,13 @@ async function main() {
     }
 
     if (needsChat && session?.id) {
-      await page.waitForSelector('[data-testid="chat-composer"], textarea, [contenteditable="true"]', {
-        timeout: 20_000,
-      }).catch(() => {});
+      await page
+        .waitForSelector('[data-testid="chat-composer"], textarea, [contenteditable="true"]', {
+          timeout: 20_000,
+        })
+        .catch(() => {});
       await page.waitForTimeout(600);
+      await scrollToMessage(page, session.focusMessageId);
     }
 
     if (action === "slash") {
@@ -91,10 +229,19 @@ async function main() {
       await page.waitForTimeout(500);
     } else if (action === "search") {
       await page.getByRole("button", { name: /Search messages|Поиск по сообщениям/i }).click();
+      await page.waitForTimeout(300);
+      const q = session?.searchHint?.slice(0, 20) ?? "folder";
+      const input = page.getByPlaceholder(/Search|Поиск/i).first();
+      await input.fill(q);
       await page.waitForTimeout(500);
     } else if (action === "split") {
-      await page.getByRole("button", { name: /Split|Разделить|два чата/i }).click();
-      await page.waitForTimeout(700);
+      if (!splitSecond) {
+        await page.getByRole("button", { name: /Split|Разделить|два чата/i }).click();
+        await page.waitForTimeout(700);
+      } else {
+        await page.waitForTimeout(700);
+      }
+      if (session?.focusMessageId) await scrollToMessage(page, session.focusMessageId);
     } else if (action === "remote") {
       await page.getByRole("button", { name: /Phone|Телефон|VPN/i }).first().click();
       await page.waitForTimeout(500);
