@@ -707,7 +707,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   color: var(--text-secondary);
@@ -776,9 +776,9 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 27px;
   /* Align folder name with chat titles' column, chats go one step deeper. */
-  padding: 3px 4px 3px 6px;
+  padding: 4px 4px 4px 6px;
   margin-bottom: 0;
   border-radius: 6px;
   color: var(--text);
@@ -845,7 +845,7 @@
     "Helvetica Neue",
     Arial,
     sans-serif;
-  font-size: 0.8rem;
+  font-size: 0.86rem;
   font-weight: 500;
   font-synthesis: none;
   line-height: 1.25;
@@ -1207,7 +1207,7 @@
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  min-height: 32px;
+  min-height: 35px;
   touch-action: manipulation;
   margin: 0;
   padding-right: 8px;
@@ -1271,7 +1271,7 @@
   text-align: left;
   border: none;
   background: transparent;
-  padding: 5px 2px 5px 10px;
+  padding: 6px 2px 6px 10px;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
@@ -1310,7 +1310,7 @@
     sans-serif;
   font-weight: 400;
   font-synthesis: none;
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   line-height: 1.25;
   letter-spacing: -0.01em;
   color: var(--text-secondary);
@@ -1408,7 +1408,7 @@
   padding: 0 0 0 6px;
   border: none;
   border-radius: 0;
-  font-size: 0.7rem;
+  font-size: 0.74rem;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -4049,7 +4049,11 @@
   }
 
   .sessionTitle {
-    font-size: 0.98rem;
+    font-size: 1.02rem;
+  }
+
+  .sessionTitleText {
+    font-size: 0.9rem;
   }
 
   /* Compact tree chrome — new chat + collapse sit smaller than the mobile hit targets. */
@@ -4090,11 +4094,15 @@
 
 /* Chat tree density (settings → Chat → Tree density). */
 .treeCompact .sessionItem {
-  min-height: 30px;
+  min-height: 32px;
 }
 
 .treeCompact .sessionTitle {
-  font-size: 0.8rem;
+  font-size: 0.84rem;
+}
+
+.treeCompact .sessionTitleText {
+  font-size: 0.84rem;
 }
 
 .treeCompact .sessionList {
