@@ -612,6 +612,7 @@ export function SettingsPage() {
   };
   const persistChatSplit = (value: boolean) => {
     patch("chatSplit", value);
+    if (!value) useAppStore.getState().collapseToSinglePane();
     void saveSettings({ chatSplit: value });
   };
 

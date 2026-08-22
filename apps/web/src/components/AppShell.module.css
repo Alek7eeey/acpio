@@ -1156,12 +1156,31 @@
 }
 
 .sessionItem.sessionInPane {
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--text) 1%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.sessionItem.sessionInPane .sessionTitle,
+.sessionItem.sessionInPane .sessionTitleText {
+  color: color-mix(in srgb, var(--text) 62%, var(--text-secondary));
+}
+
+.sessionItem.sessionInPane .sessionActivity {
+  opacity: 0.72;
 }
 
 :global([data-theme="light"]) .sessionItem.active {
   background: rgba(24, 24, 27, 0.035);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+:global([data-theme="light"]) .sessionItem.sessionInPane {
+  background: rgba(24, 24, 27, 0.018);
+}
+
+:global([data-theme="light"]) .sessionItem.sessionInPane .sessionTitle,
+:global([data-theme="light"]) .sessionItem.sessionInPane .sessionTitleText {
+  color: rgba(24, 24, 27, 0.55);
 }
 
 .sessionItem:hover {

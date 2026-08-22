@@ -692,7 +692,7 @@ export function ChatSidebar({
       <div
         key={s.id}
         data-tree-flip={`s:${s.id}`}
-        className={`${styles.sessionItem} ${isActive || inPane || menuOpen ? styles.active : ""} ${
+        className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
           inPane && !isActive ? styles.sessionInPane : ""
         } ${
           menuOpen ? styles.sessionMenuOpen : ""

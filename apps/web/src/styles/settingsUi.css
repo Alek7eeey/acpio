@@ -24,12 +24,11 @@
   --settings-focus-ring: 0 0 0 4px var(--accent-soft);
 }
 
-/* Phones: same compact buttons (inputs keep control metrics). */
-@media (max-width: 700px) {
+/* Phones: buttons match fields (desktop buttons stay smaller). */
+@media (max-width: 899px) {
   :root {
-    --settings-btn-size: 0.8rem;
-    --settings-btn-pad-y: 6px;
-    --settings-btn-pad-x: 10px;
-    --settings-control-radius: 10px;
+    --settings-btn-size: var(--settings-control-size);
+    --settings-btn-pad-y: var(--settings-control-pad-y);
+    --settings-btn-pad-x: var(--settings-control-pad-x);
   }
 }

@@ -115,6 +115,8 @@ type AppState = {
   setChatPaneCount: (count: number) => void;
   focusChatPane: (index: number) => void;
   closeChatPane: (index: number) => void;
+  /** Drop back to the focused chat only (settings off, mobile, unsplit). */
+  collapseToSinglePane: () => void;
   openSessionInNewPane: (id: string) => Promise<void>;
   /** Transient: message to scroll to/highlight once its session renders. */
   focusMessageId: string | null;
@@ -1032,10 +1034,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  collapseToSinglePane() {
+    const id = get().activeSessionId;
+    const ids = paneSlots(get());
+    if (ids.length === 1 && ids[0] === id && get().focusedPaneIndex === 0) return;
+    persistPanes([id], 0);
+    set({ chatPaneIds: [id], focusedPaneIndex: 0 });
+  },
+
   setChatPaneCount(count) {
     const n = Math.max(1, Math.min(CHAT_PANE_MAX, Math.round(count)));
-    if (!chatSplitAllowed(get().settings.chatSplit)) return;
     const state = get();
+    if (n === 1) {
+      get().collapseToSinglePane();
+      return;
+    }
+    if (!chatSplitAllowed(state.settings.chatSplit)) return;
     let ids = [...paneSlots(state)];
     if (ids.length === 0) ids = [state.activeSessionId];
     const known = state.sessions.filter((s) => !s.archived);
@@ -1977,6 +1991,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async saveSettings(patch) {
     const current = get().settings;
+    if (typeof patch.chatSplit === "boolean") {
+      set({ settings: { ...current, chatSplit: patch.chatSplit } });
+      if (patch.chatSplit === false) get().collapseToSinglePane();
+    }
     const providerChanged =
       patch.defaultProvider !== undefined && patch.defaultProvider !== current.defaultProvider;
     const nextPatch =
@@ -1984,14 +2002,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? { ...patch, defaultModel: "", defaultModelParams: {} }
         : patch;
     const settings = await api.updateSettings(nextPatch);
+    const nextSettings =
+      typeof nextPatch.chatSplit === "boolean"
+        ? { ...settings, chatSplit: nextPatch.chatSplit }
+        : settings;
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
-    set({ settings });
-    applyAppearance(settings);
-    if (settings.chatSplit === false) {
-      const id = get().activeSessionId;
-      persistPanes([id], 0);
-      set({ chatPaneIds: [id], focusedPaneIndex: 0 });
+    set({ settings: nextSettings });
+    applyAppearance(nextSettings);
+    if (nextPatch.chatSplit === false || nextSettings.chatSplit === false) {
+      get().collapseToSinglePane();
     }
     const providerToLoad =
       nextPatch.connectedProvider ?? (providerChanged ? settings.defaultProvider : null);

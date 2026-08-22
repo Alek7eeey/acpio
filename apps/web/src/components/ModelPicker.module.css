@@ -536,24 +536,20 @@
 }
 
 @media (max-width: 899px) {
-  /* Settings switches to its mobile nav (chips) below 900px; keep selectors
-     compact vs a full-width bar, but not tiny on phones. */
   .modelTriggerBlock {
-    width: auto;
-    max-width: 248px;
-    padding: 6px 12px;
-    font-size: 0.86rem;
-    border-radius: 10px;
-  }
-
-  .modelTriggerBlock .modelTriggerText {
-    font-size: 0.84rem;
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
   }
 }
 
 @media (max-width: 700px) {
   .modelTrigger {
     max-width: min(280px, 72vw);
+  }
+
+  .modelTriggerBlock {
+    max-width: none;
   }
 
   .modelTriggerName {

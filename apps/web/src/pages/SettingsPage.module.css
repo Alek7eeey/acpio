@@ -1792,3 +1792,10 @@
     cursor: pointer;
   }
 }
+
+@media (max-width: 899px) {
+  .actionChips {
+    max-width: none;
+    justify-content: flex-start;
+  }
+}

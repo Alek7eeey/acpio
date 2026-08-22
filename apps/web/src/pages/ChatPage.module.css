@@ -63,17 +63,38 @@
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
-  height: 30px;
-  padding: 0 6px 0 12px;
+  height: 36px;
+  padding: 0 8px 0 10px;
   border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
-  opacity: 1;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: color-mix(in srgb, var(--bg) 72%, var(--surface));
+  cursor: pointer;
 }
 
 .splitChromeFocused {
   background: var(--surface);
   box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.splitChromeIndex {
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.splitChromeFocused .splitChromeIndex {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .splitChromeTitle {
@@ -82,17 +103,22 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-  color: color-mix(in srgb, var(--text-secondary) 88%, var(--text));
+  overflow: hidden;
+}
+
+.splitChromeName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.84rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: color-mix(in srgb, var(--text-secondary) 82%, var(--text));
 }
 
-.splitChromeFocused .splitChromeTitle {
+.splitChromeFocused .splitChromeName {
   color: var(--text);
 }
 
@@ -103,31 +129,39 @@
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
-  opacity: 1;
 }
 
-.splitChromeClose {
+.splitChromeClose,
+.splitChromeUnsplit {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 7px;
+  border-radius: 8px;
   padding: 0;
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0.55;
+}
+
+.splitChromeUnsplit {
+  opacity: 0.7;
 }
 
 .splitPane:hover .splitChromeClose,
 .splitChromeFocused .splitChromeClose,
-.splitChrome:focus-within .splitChromeClose {
-  opacity: 0.85;
+.splitChrome:focus-within .splitChromeClose,
+.splitPane:hover .splitChromeUnsplit,
+.splitChromeFocused .splitChromeUnsplit,
+.splitChrome:focus-within .splitChromeUnsplit {
+  opacity: 0.9;
 }
 
-.splitChromeClose:hover {
+.splitChromeClose:hover,
+.splitChromeUnsplit:hover {
   background: var(--bg-tertiary);
   color: var(--text);
   opacity: 1;
@@ -201,20 +235,8 @@
   background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 
-.splitFabOn,
-.splitFabOn:hover,
-.splitFabOn:focus-visible {
-  opacity: 1;
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent-soft) 80%, var(--surface));
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent),
-    0 8px 18px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-
 .splitWorkspace .splitFab {
-  top: 36px;
+  display: none;
 }
 
 .mainColumn {

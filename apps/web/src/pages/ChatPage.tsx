@@ -2788,12 +2788,17 @@ function useDesktopSplit() {
   const [desktop, setDesktop] = useState(
     () => typeof window !== "undefined" && window.innerWidth >= CHAT_SPLIT_MIN_PX,
   );
+  const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
   useEffect(() => {
     const mq = window.matchMedia(`(min-width: ${CHAT_SPLIT_MIN_PX}px)`);
-    const onChange = () => setDesktop(mq.matches);
+    const onChange = () => {
+      setDesktop(mq.matches);
+      if (!mq.matches) collapseToSinglePane();
+    };
     mq.addEventListener("change", onChange);
+    if (!mq.matches) collapseToSinglePane();
     return () => mq.removeEventListener("change", onChange);
-  }, []);
+  }, [collapseToSinglePane]);
   return desktop;
 }
 
@@ -4835,16 +4840,15 @@ function SplitToggleFab({ enabled }: { enabled: boolean }) {
   const t = useT();
   const count = useAppStore((s) => Math.max(1, s.chatPaneIds?.length ?? 1));
   const setChatPaneCount = useAppStore((s) => s.setChatPaneCount);
-  if (!enabled) return null;
-  const splitOn = count > 1;
+  if (!enabled || count > 1) return null;
   return (
     <button
       type="button"
-      className={`${styles.splitFab}${splitOn ? ` ${styles.splitFabOn}` : ""}`}
-      aria-pressed={splitOn}
-      aria-label={splitOn ? t("chat.splitOne") : t("chat.splitTwo")}
-      title={splitOn ? t("chat.splitOne") : t("chat.splitTwo")}
-      onClick={() => setChatPaneCount?.(splitOn ? 1 : 2)}
+      className={styles.splitFab}
+      aria-pressed={false}
+      aria-label={t("chat.splitTwo")}
+      title={t("chat.splitTwo")}
+      onClick={() => setChatPaneCount?.(2)}
     >
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
         <rect x="3.75" y="5.5" width="7" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
@@ -4868,11 +4872,13 @@ function SplitPaneChrome({
   sessionId,
   focused,
   closable,
+  showUnsplit,
 }: {
   paneIndex: number;
   sessionId: string | null;
   focused: boolean;
   closable: boolean;
+  showUnsplit: boolean;
 }) {
   const t = useT();
   const title = useAppStore((s) => {
@@ -4891,15 +4897,33 @@ function SplitPaneChrome({
   });
   const focusChatPane = useAppStore((s) => s.focusChatPane);
   const closeChatPane = useAppStore((s) => s.closeChatPane);
+  const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
   return (
     <div
       className={`${styles.splitChrome}${focused ? ` ${styles.splitChromeFocused}` : ""}`}
       onPointerDown={() => focusChatPane(paneIndex)}
     >
+      <span className={styles.splitChromeIndex}>{paneIndex + 1}</span>
       <span className={styles.splitChromeTitle}>
         {running ? <span className={styles.splitChromeLive} aria-hidden /> : null}
-        {title || t("chat.splitEmptyTitle")}
+        <span className={styles.splitChromeName}>{title || t("chat.splitEmptyTitle")}</span>
       </span>
+      {showUnsplit ? (
+        <button
+          type="button"
+          className={styles.splitChromeUnsplit}
+          aria-label={t("chat.splitOne")}
+          title={t("chat.splitOne")}
+          onClick={(e) => {
+            e.stopPropagation();
+            collapseToSinglePane();
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect x="6.5" y="5.5" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.7" />
+          </svg>
+        </button>
+      ) : null}
       {closable ? (
         <button
           type="button"
@@ -4932,9 +4956,14 @@ export function ChatPage() {
   const paneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
   const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
   const slots = desktop && splitSetting && paneIds.length > 1 ? paneIds : [activeSessionId];
   const paneCount = slots.length;
   const split = desktop && splitSetting && paneCount > 1;
+
+  useEffect(() => {
+    if (!desktop || !splitSetting) collapseToSinglePane();
+  }, [desktop, splitSetting, collapseToSinglePane]);
 
   return (
     <div className={split ? styles.splitWorkspace : styles.splitSingle}>
@@ -4956,6 +4985,7 @@ export function ChatPage() {
                   sessionId={sessionId}
                   focused={focused}
                   closable={paneCount > 1}
+                  showUnsplit={paneIndex === paneCount - 1}
                 />
               ) : null}
               {sessionId || paneCount === 1 ? (

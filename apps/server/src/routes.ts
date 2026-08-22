@@ -119,6 +119,7 @@ const settingsSchema = z.object({
   chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
+  chatSplit: z.boolean().optional(),
   mcpServers: z
     .array(
       z.object({
