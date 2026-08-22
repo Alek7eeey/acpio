@@ -1684,11 +1684,16 @@ function StepsSpoiler({
       : t("common.steps");
 
   const renderPart = (part: MessagePartDto, idx: number, listLength: number) => {
+    const status = String(part.payload.status ?? "").toLowerCase();
+    const toolLive =
+      status === "in_progress" || status === "pending" || status === "running";
     const isLast = streaming && idx === listLength - 1;
+    const live =
+      part.type === "tool_call" || part.type === "subagent" ? streaming && toolLive : isLast;
     return part.type === "tool_call" ? (
-      <ToolCallRow key={part.id} part={part} streaming={isLast} />
+      <ToolCallRow key={part.id} part={part} streaming={live} />
     ) : (
-      <PartView key={part.id} part={part} embedded streaming={isLast} />
+      <PartView key={part.id} part={part} embedded streaming={live} />
     );
   };
 
@@ -1748,7 +1753,7 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
     if (p.type === "text" || p.type === "thought") {
       return Boolean(String(p.payload.text ?? "").trim());
     }
-    if (p.type === "subagent") {
+    if (p.type === "subagent" || p.type === "tool_call") {
       return true;
     }
     return false;

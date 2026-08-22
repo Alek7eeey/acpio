@@ -400,6 +400,27 @@ let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: str
 /** Sessions for which the server has confirmed running/waiting this turn.
  *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
 const serverConfirmedBusy = new Set<string>();
+const delayedIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const ACTIVE_TURN_PART = new Set(["pending", "in_progress", "running"]);
+
+function sessionHasActiveTurnParts(messages: MessageDto[]) {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "assistant") continue;
+    return msg.parts.some(
+      (p) =>
+        (p.type === "tool_call" || p.type === "subagent") &&
+        ACTIVE_TURN_PART.has(String(p.payload.status ?? "").toLowerCase()),
+    );
+  }
+  return false;
+}
+
+function clearDelayedIdle(sessionId: string) {
+  const timer = delayedIdleTimers.get(sessionId);
+  if (timer) window.clearTimeout(timer);
+  delayedIdleTimers.delete(sessionId);
+}
 let probeAllAgentsInflight: Promise<void> | null = null;
 let lastProbeAllAgentsAt = 0;
 const PROBE_ALL_COOLDOWN_MS = 45_000;
@@ -420,11 +441,14 @@ function clearMessageIdAliases(sessionId?: string) {
     }
     if (pendingOptimisticPair?.sessionId === sessionId) pendingOptimisticPair = null;
     serverConfirmedBusy.delete(sessionId);
+    clearDelayedIdle(sessionId);
     return;
   }
   serverToClientMessageId.clear();
   pendingOptimisticPair = null;
   serverConfirmedBusy.clear();
+  for (const timer of delayedIdleTimers.values()) window.clearTimeout(timer);
+  delayedIdleTimers.clear();
 }
 
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
@@ -1813,6 +1837,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     const epoch = state.promptEpochBySession?.[id] ?? state.promptEpoch;
     const inflightBySession = { ...state.inflightBySession, [id]: 0 };
+    clearDelayedIdle(id);
     set({
       cancelledPromptEpoch: epoch,
       cancelledPromptEpochBySession: { ...state.cancelledPromptEpochBySession, [id]: epoch },
@@ -1922,6 +1947,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           : event.session;
       if (session.status === "running" || session.status === "waiting") {
         serverConfirmedBusy.add(event.sessionId);
+        clearDelayedIdle(event.sessionId);
       }
       // createMessage (and similar) used to broadcast idle while the client had
       // already painted optimistic running — that hid/reshowed the Steps header.
@@ -1947,6 +1973,46 @@ export const useAppStore = create<AppState>((set, get) => ({
             ? "waiting"
             : "running") as typeof session.status,
         };
+      }
+      const liveMessages =
+        (state.activeSession?.id === event.sessionId ? state.activeSession.messages : null) ??
+        liveDetail(state, event.sessionId)?.messages ??
+        [];
+      if (
+        session.status === "idle" &&
+        !cancelled &&
+        sessionHasActiveTurnParts(liveMessages)
+      ) {
+        session = { ...session, status: "running" as typeof session.status };
+        clearDelayedIdle(event.sessionId);
+        delayedIdleTimers.set(
+          event.sessionId,
+          window.setTimeout(() => {
+            delayedIdleTimers.delete(event.sessionId);
+            const latest = get();
+            const pane = liveDetail(latest, event.sessionId);
+            if (!pane) return;
+            if (sessionHasActiveTurnParts(pane.messages)) {
+              reconcileFinishedTurn(event.sessionId, get, set);
+            }
+            const nextSessions = latest.sessions.map((s) =>
+              s.id === event.sessionId ? { ...s, status: "idle" as const } : s,
+            );
+            const inflightBySession = { ...latest.inflightBySession, [event.sessionId]: 0 };
+            set({
+              sessions: nextSessions,
+              inflightBySession,
+              inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+            });
+            if (latest.activeSession?.id === event.sessionId) {
+              commitDetail(get, set, { ...latest.activeSession, status: "idle" });
+            } else if (pane) {
+              commitDetail(get, set, { ...pane, status: "idle" });
+            }
+            serverConfirmedBusy.delete(event.sessionId);
+            void get().drainPromptQueue();
+          }, 800),
+        );
       }
       if (session.status === "idle" || session.status === "error" || session.status === "closed") {
         serverConfirmedBusy.delete(event.sessionId);

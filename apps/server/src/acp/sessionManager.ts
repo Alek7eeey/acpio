@@ -513,6 +513,8 @@ class SessionRuntime {
   streamGen = 0;
   /** False after Stop until the next prompt starts — blocks late tokens. */
   acceptingStream = false;
+  /** Last session/update that belongs to the current prompt (tools included). */
+  lastStreamAt = 0;
   /** Persist session/load replay into an empty local chat (imported harness session). */
   ingestingReplay = false;
   ingestLastRole: "user" | "assistant" | null = null;
@@ -739,6 +741,17 @@ export async function ensureAcp(
 
     client.on("update", (update) => {
       const gen = rt.streamGen;
+      if (
+        rt.acceptingStream &&
+        (update.kind === "agent_message_chunk" ||
+          update.kind === "agent_thought_chunk" ||
+          update.kind === "mixed_chunks" ||
+          update.kind === "tool_call" ||
+          update.kind === "tool_call_update" ||
+          update.kind === "tool_call_content_chunk")
+      ) {
+        rt.lastStreamAt = Date.now();
+      }
       void rt.enqueue(async () => {
         try {
           const isStream =
@@ -2180,6 +2193,33 @@ export async function runPrompt(
   return runTurn(rt, sessionId, promptUserText, priorTranscript, opts, settings, acpReady);
 }
 
+const STREAM_SETTLE_QUIET_MS = 450;
+const STREAM_SETTLE_MAX_MS = 12_000;
+const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
+
+/** Wait until ACP updates stop arriving after session/prompt returns. */
+async function settlePromptStream(rt: SessionRuntime) {
+  const started = Date.now();
+  rt.lastStreamAt = Math.max(rt.lastStreamAt, started);
+  while (rt.acceptingStream) {
+    if (Date.now() - started >= STREAM_SETTLE_MAX_MS) break;
+    if (Date.now() - rt.lastStreamAt >= STREAM_SETTLE_QUIET_MS && rt.pending.size === 0) break;
+    await rt.enqueue(async () => undefined);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+async function completeDanglingTurnParts(sessionId: string) {
+  const detail = await getSessionDetail(sessionId);
+  const last = detail?.messages.filter((m) => m.role === "assistant").at(-1);
+  if (!last) return;
+  for (const part of last.parts) {
+    if (part.type !== "tool_call" && part.type !== "subagent") continue;
+    if (!STUCK_TURN_PART.has(String(part.payload.status ?? "").toLowerCase())) continue;
+    await updatePart(sessionId, part.id, { status: "completed" });
+  }
+}
+
 async function runTurn(
   rt: SessionRuntime,
   sessionId: string,
@@ -2193,6 +2233,7 @@ async function runTurn(
   rt.running = true;
   rt.streamGen += 1;
   rt.acceptingStream = true;
+  rt.lastStreamAt = Date.now();
   rt.assistantMessageId = null;
   rt.openTextPartId = null;
   rt.openThoughtPartId = null;
@@ -2226,10 +2267,15 @@ async function runTurn(
       await updateSession(sessionId, { status: "idle" });
       return result;
     }
-    // Let in-flight update handlers settle briefly before finalizing.
-    await rt.enqueue(async () => undefined);
-    await new Promise((r) => setTimeout(r, 50));
-    await rt.enqueue(async () => undefined);
+    // Agents often resolve session/prompt before the last tool/text updates
+    // arrive. Keep the turn live until the stream is quiet, or those chunks
+    // are dropped and the UI unlocks with spinning tools and no answer.
+    await settlePromptStream(rt);
+    if (!rt.acceptingStream) {
+      await updateSession(sessionId, { status: "idle" });
+      return result;
+    }
+    await completeDanglingTurnParts(sessionId);
 
     const detail = await import("../services/sessions.js").then((m) => m.getSessionDetail(sessionId));
     const lastAssistant = detail?.messages.filter((m) => m.role === "assistant").at(-1);
