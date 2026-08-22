@@ -24,9 +24,11 @@ import {
   type AgentProvider,
   type AppSettings,
   type HarnessAdapter,
+  type HarnessSessionDto,
   type McpServerConfig,
   type ModelParamDto,
   type SessionDetailDto,
+  type SessionDto,
   type SubagentCardUpdate,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
@@ -35,8 +37,10 @@ import {
   appendPart,
   appendTextChunk,
   createMessage,
+  createSession,
   getPartPayload,
   getSessionDetail,
+  listSessions,
   replaceUserMessageText,
   truncateMessagesAfter,
   updatePart,
@@ -60,7 +64,8 @@ import {
   agentIdFromToolText,
   enrichCursorToolFromStore,
 } from "./cursorSubagentLive.js";
-import { findRecentCursorAgentId, findRecentCursorAgentIds } from "@acprocess/adapter-cursor";
+import { findRecentCursorAgentId, findRecentCursorAgentIds, listCursorAcpSessions } from "@acprocess/adapter-cursor";
+import { listOmpSessions, readOmpSessionTranscript } from "@acprocess/adapter-omp";
 
 /** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
 export function coerceUiMode(raw: string): AgentMode | null {
@@ -508,6 +513,11 @@ class SessionRuntime {
   streamGen = 0;
   /** False after Stop until the next prompt starts — blocks late tokens. */
   acceptingStream = false;
+  /** Persist session/load replay into an empty local chat (imported harness session). */
+  ingestingReplay = false;
+  ingestLastRole: "user" | "assistant" | null = null;
+  ingestUserMessageId: string | null = null;
+  ingestUserPartId: string | null = null;
   toolsHintSent = false;
   /** Latest ACP-reported token/context usage (null until/if the harness sends it). */
   usage: AcpUsage | null = null;
@@ -613,7 +623,11 @@ export function pickRestoreMode(input: {
   toggle: boolean;
   hasStoredSession: boolean;
   cwdMatches: boolean;
+  forceRestore?: boolean;
 }): RestoreMode {
+  if (input.forceRestore && input.hasStoredSession) {
+    return input.restoreMode === "new" ? "new" : input.restoreMode;
+  }
   if (
     !input.preferResume ||
     !input.toggle ||
@@ -630,8 +644,9 @@ function resolveRestoreMode(
   settings: AppSettings,
   preferResume: boolean,
   detail: SessionDetailDto | null,
+  forceRestore = false,
 ): { mode: RestoreMode; storedSessionId?: string } {
-  if (preferResume === false || !settings.resumeAgentContext) {
+  if (!forceRestore && (preferResume === false || !settings.resumeAgentContext)) {
     return { mode: "new" };
   }
   const adapter = getAdapter(opts.provider);
@@ -645,6 +660,7 @@ function resolveRestoreMode(
     toggle: true,
     hasStoredSession: Boolean(detail?.acpSessionId),
     cwdMatches: Boolean(detail && detail.cwd === opts.cwd && detail.provider === opts.provider),
+    forceRestore,
   });
   return mode === "new"
     ? { mode }
@@ -659,6 +675,8 @@ export async function ensureAcp(
     /** Re-apply this exact model at boot (defaults to settings.defaultModel). */
     model?: string;
     modelParams?: Record<string, string>;
+    /** Open a stored harness session even if resume-on-restart is off. */
+    forceRestore?: boolean;
   },
 ): Promise<AcpClient> {
   const rt = getRuntime(sessionId);
@@ -688,6 +706,7 @@ export async function ensureAcp(
     settings,
     boot?.preferResume ?? true,
     detail,
+    boot?.forceRestore,
   );
   // This chat's MCP list: globally enabled minus ids disabled for this chat.
   const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds);
@@ -728,7 +747,7 @@ export async function ensureAcp(
             update.kind === "mixed_chunks";
           // Drop tokens from a cancelled / superseded prompt (including chunks that
           // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
-          if (isStream && (!rt.acceptingStream || rt.streamGen !== gen)) {
+          if (isStream && !rt.ingestingReplay && (!rt.acceptingStream || rt.streamGen !== gen)) {
             return;
           }
           await handleUpdate(rt, update);
@@ -757,18 +776,28 @@ export async function ensureAcp(
 
     rt.clientReady = (async () => {
       try {
-        // Restore boots get a bigger budget: Cursor's session/load replays the
-        // whole stored conversation before responding.
-        await client.start(
-          mode === "new" ? 45_000 : 120_000,
-          mode === "new"
-            ? { ...bootModelOpts, mcpServers }
-            : {
-                resume: { sessionId: storedSessionId!, mode },
-                ...bootModelOpts,
-                mcpServers,
-              },
-        );
+        const ingestReplay = mode !== "new" && (detail?.messages.length ?? 0) === 0;
+        rt.ingestingReplay = ingestReplay;
+        rt.ingestLastRole = null;
+        rt.ingestUserMessageId = null;
+        rt.ingestUserPartId = null;
+        try {
+          // Restore boots get a bigger budget: Cursor's session/load replays the
+          // whole stored conversation before responding.
+          await client.start(
+            mode === "new" ? 45_000 : 120_000,
+            mode === "new"
+              ? { ...bootModelOpts, mcpServers }
+              : {
+                  resume: { sessionId: storedSessionId!, mode },
+                  ingestReplay,
+                  ...bootModelOpts,
+                  mcpServers,
+                },
+          );
+        } finally {
+          rt.ingestingReplay = false;
+        }
         const settings = await getSettings();
         const models = await finalizeModelList(
           opts.provider,
@@ -816,6 +845,9 @@ export async function ensureAcp(
         console.error(
           `[acp:${sessionId}] ${mode} failed (${err instanceof Error ? err.message : String(err)}) — starting fresh`,
         );
+        // Import/restore must keep the stored harness id. Falling back to
+        // session/new would replace it with an empty conversation.
+        if (boot?.forceRestore) throw err;
         return startClient("new");
       }
       throw err;
@@ -833,6 +865,149 @@ export function warmAcp(
   return ensureAcp(sessionId, opts).catch((err) => {
     console.error(`[acp:${sessionId}] warm failed`, err);
   });
+}
+
+/** Harness sessions that are not already rows in the chat tree. */
+export async function listUnlinkedHarnessSessions(
+  provider: AgentProvider,
+  cwd?: string,
+): Promise<HarnessSessionDto[]> {
+  const byId = new Map<string, HarnessSessionDto>();
+
+  try {
+    const known = await listSessions();
+    const exclude = new Set(
+      known.map((s) => s.acpSessionId).filter((id): id is string => Boolean(id)),
+    );
+
+    // Disk is the source of truth. Live `session/list` only sees the current
+    // ACP process (sessions created in this app) and crowds out native CLI/TUI chats.
+
+    if (provider === "omp") {
+      try {
+        for (const row of listOmpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
+          if (byId.has(row.sessionId)) {
+            const prev = byId.get(row.sessionId)!;
+            byId.set(row.sessionId, {
+              ...prev,
+              cwd: prev.cwd || row.cwd,
+              title: prev.title || row.title,
+              updatedAt: prev.updatedAt || row.updatedAt,
+            });
+          } else {
+            byId.set(row.sessionId, {
+              provider,
+              acpSessionId: row.sessionId,
+              cwd: row.cwd,
+              title: row.title,
+              updatedAt: row.updatedAt,
+            });
+          }
+        }
+      } catch (err) {
+        console.log(`[acp] omp session scan failed: ${String(err)}`);
+      }
+    }
+
+    if (provider === "cursor") {
+      try {
+        for (const row of listCursorAcpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
+          if (byId.has(row.sessionId)) {
+            const prev = byId.get(row.sessionId)!;
+            byId.set(row.sessionId, {
+              ...prev,
+              cwd: prev.cwd || row.cwd,
+              title: prev.title || row.title,
+              updatedAt: prev.updatedAt || row.updatedAt,
+            });
+          } else {
+            byId.set(row.sessionId, {
+              provider,
+              acpSessionId: row.sessionId,
+              cwd: row.cwd,
+              title: row.title,
+              updatedAt: row.updatedAt,
+            });
+          }
+        }
+      } catch (err) {
+        console.log(`[acp] cursor session scan failed: ${String(err)}`);
+      }
+    }
+  } catch (err) {
+    console.error("[acp] listUnlinkedHarnessSessions failed", err);
+    return [];
+  }
+
+  return [...byId.values()]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .slice(0, 24);
+}
+
+export async function importHarnessSession(input: {
+  provider: AgentProvider;
+  acpSessionId: string;
+  cwd?: string;
+  title?: string;
+}): Promise<SessionDetailDto | SessionDto> {
+  const acpSessionId = input.acpSessionId.trim();
+  if (!acpSessionId) {
+    throw Object.assign(new Error("acpSessionId required"), { statusCode: 400 });
+  }
+  const known = await listSessions();
+  const existing = known.find((s) => s.acpSessionId === acpSessionId);
+  if (existing) {
+    throw Object.assign(new Error("alreadyInTree"), { statusCode: 409, sessionId: existing.id });
+  }
+  const settings = await getSettings();
+  const disk =
+    input.provider === "omp" ? readOmpSessionTranscript(acpSessionId) : null;
+  const cwd = (input.cwd || disk?.cwd || settings.defaultCwd || process.cwd()).trim();
+  const title = (
+    input.title ||
+    disk?.title ||
+    disk?.turns.find((turn) => turn.role === "user")?.text.split(/\r?\n/)[0] ||
+    ""
+  )
+    .trim()
+    .slice(0, 500);
+  const session = await createSession({
+    title: title || undefined,
+    provider: input.provider,
+    cwd,
+    mode: settings.defaultMode,
+    acpSessionId,
+  });
+  if (disk?.turns.length) {
+    try {
+      await ingestImportedTranscript(session.id, disk.turns);
+    } catch (err) {
+      console.error(`[acp:${session.id}] omp transcript import failed`, err);
+    }
+  }
+  void ensureAcp(
+    session.id,
+    { provider: session.provider, cwd: session.cwd, mode: session.mode },
+    { preferResume: true, forceRestore: true },
+  ).catch((err) => {
+    console.error(`[acp:${session.id}] import warm failed`, err);
+  });
+  return (await getSessionDetail(session.id)) ?? session;
+}
+
+async function ingestImportedTranscript(
+  sessionId: string,
+  turns: Array<{ role: "user" | "assistant"; text: string; thought?: string }>,
+) {
+  for (const turn of turns) {
+    const msg = await createMessage(sessionId, turn.role);
+    if (turn.role === "assistant" && turn.thought?.trim()) {
+      await appendPart(sessionId, msg.id, "thought", { text: turn.thought });
+    }
+    if (turn.text.trim()) {
+      await appendPart(sessionId, msg.id, "text", { text: turn.text });
+    }
+  }
 }
 
 async function ensureAssistantMessage(rt: SessionRuntime) {
@@ -882,17 +1057,37 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   // Metadata-only updates should not create empty assistant bubbles
-  if (
-    update.kind === "session_info" ||
-    update.kind === "other" ||
-    update.kind === "user_message_chunk"
-  ) {
+  if (update.kind === "session_info" || update.kind === "other") {
+    return;
+  }
+
+  if (update.kind === "user_message_chunk") {
+    if (!rt.ingestingReplay || !update.text) return;
+    if (rt.ingestLastRole !== "user" || !rt.ingestUserMessageId) {
+      const msg = await createMessage(rt.sessionId, "user");
+      rt.ingestUserMessageId = msg.id;
+      rt.ingestUserPartId = null;
+      rt.assistantMessageId = null;
+      rt.openTextPartId = null;
+      rt.ingestLastRole = "user";
+    }
+    rt.ingestUserPartId = await appendTextChunk(
+      rt.sessionId,
+      rt.ingestUserMessageId,
+      "text",
+      update.text,
+      rt.ingestUserPartId,
+    );
     return;
   }
 
   if (update.kind === "agent_message_chunk") {
-    if (!rt.acceptingStream) return;
+    if (!rt.acceptingStream && !rt.ingestingReplay) return;
     if (!update.text) return;
+    if (rt.ingestingReplay) {
+      rt.ingestLastRole = "assistant";
+      rt.ingestUserMessageId = null;
+    }
     const messageId = await ensureAssistantMessage(rt);
     // Continue same text part for the turn; tools may split later via clearing openTextPartId
     rt.openTextPartId = await appendTextChunk(
@@ -906,7 +1101,11 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "mixed_chunks") {
-    if (!rt.acceptingStream) return;
+    if (!rt.acceptingStream && !rt.ingestingReplay) return;
+    if (rt.ingestingReplay) {
+      rt.ingestLastRole = "assistant";
+      rt.ingestUserMessageId = null;
+    }
     const messageId = await ensureAssistantMessage(rt);
     if (update.thought) {
       const partId = await appendTextChunk(
@@ -932,8 +1131,12 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "agent_thought_chunk") {
-    if (!rt.acceptingStream) return;
+    if (!rt.acceptingStream && !rt.ingestingReplay) return;
     if (!update.text) return;
+    if (rt.ingestingReplay) {
+      rt.ingestLastRole = "assistant";
+      rt.ingestUserMessageId = null;
+    }
     const messageId = await ensureAssistantMessage(rt);
     // Always one reasoning block per turn
     const partId = await appendTextChunk(

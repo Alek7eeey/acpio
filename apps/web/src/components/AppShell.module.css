@@ -1615,6 +1615,29 @@
   background: var(--danger);
 }
 
+:global([data-theme="light"]) .menuDanger {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text)) !important;
+}
+
+:global([data-theme="light"]) .menuDanger .contextMenuIcon {
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+:global([data-theme="light"]) .sessionConfirm,
+:global([data-theme="light"]) .sessionConfirmActive {
+  border-color: color-mix(in srgb, var(--danger) 20%, var(--border));
+  background: color-mix(in srgb, var(--danger) 5%, var(--surface));
+}
+
+:global([data-theme="light"]) .sessionConfirmDelete {
+  background: color-mix(in srgb, var(--danger) 68%, #6e2a36);
+  color: #fff;
+}
+
+:global([data-theme="light"]) .sessionConfirmDelete:hover {
+  background: color-mix(in srgb, var(--danger) 78%, #5a222c);
+}
+
 .actionPopover {
   position: fixed;
   z-index: 310;
@@ -2327,6 +2350,23 @@
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
 }
 
+.pickerExistingMeta {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pickerExistingBody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .pickerList {
   display: flex;
   flex-direction: column;
@@ -2399,6 +2439,11 @@
   flex-direction: column;
   gap: 1px;
   padding: 0 0 4px 12px;
+}
+
+.pickerSubmenuWide {
+  min-width: 260px;
+  max-width: min(380px, calc(100vw - 24px));
 }
 
 .pickerSubmenu {
@@ -2989,8 +3034,8 @@
   top: calc(100% + 8px);
   right: 0;
   z-index: 300;
-  width: 240px;
-  max-width: min(240px, calc(100vw - 24px));
+  width: 260px;
+  max-width: min(260px, calc(100vw - 24px));
   padding: 10px 11px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
@@ -3000,8 +3045,8 @@
   display: grid;
   gap: 8px;
   pointer-events: none;
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--text);
 }
 
@@ -3042,7 +3087,7 @@
 .agentTipName {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--text);
@@ -3058,14 +3103,14 @@
   gap: 10px;
   min-width: 0;
   padding-left: 13px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .agentTipLabel {
   color: var(--text-secondary);
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agentTipValue {
@@ -3075,20 +3120,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .agentTipOk {
   flex: 0 0 auto;
   color: color-mix(in srgb, var(--success) 38%, var(--text-secondary));
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
 .agentTipBad {
   flex: 0 0 auto;
   color: color-mix(in srgb, var(--danger) 34%, var(--text-secondary));
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -3108,7 +3153,7 @@
 }
 
 .agentTipMcpHead .agentTipLabel {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -3116,7 +3161,7 @@
 
 .agentTipMcpCount {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
@@ -3155,7 +3200,7 @@
   white-space: nowrap;
   color: var(--text);
   font-weight: 550;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .agentTipMcpDot {
@@ -3181,7 +3226,7 @@
 .agentTipMcpType {
   flex: 0 0 auto;
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -3197,7 +3242,7 @@
   padding: 1px 8px;
   border-radius: 999px;
   border: 1px dashed color-mix(in srgb, var(--text-secondary) 40%, transparent);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.01em;
   line-height: 1.4;

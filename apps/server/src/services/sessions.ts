@@ -151,6 +151,7 @@ export async function createSession(input: {
   mode: AgentMode;
   themeId?: string | null;
   model?: string;
+  acpSessionId?: string;
 }): Promise<SessionDto> {
   const siblings = await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
@@ -166,6 +167,7 @@ export async function createSession(input: {
       themeId: input.themeId ?? null,
       sortOrder,
       ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+      ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
     })
     .returning();
   return mapSession(row);

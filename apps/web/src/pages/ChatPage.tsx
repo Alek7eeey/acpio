@@ -2821,6 +2821,10 @@ function ChatThread() {
   const sessionLoading = useAppStore(
     (s) => Boolean(bind?.sessionId) && s.activeSessionId === bind?.sessionId && s.sessionLoading,
   );
+  const restoring = useAppStore((s) => {
+    const id = bind?.sessionId ?? s.activeSessionId;
+    return Boolean(id && s.restoringSessionIds[id]);
+  });
   const selectSession = useAppStore((s) => s.selectSession);
   const focusMessageId = useAppStore((s) => s.focusMessageId);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
@@ -2862,6 +2866,7 @@ function ChatThread() {
     [cancelPromptStore, bind?.sessionId],
   );
   const createSession = useAppStore((s) => s.createSession);
+  const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const adapters = useAppStore((s) => s.adapters);
   const error = useAppStore((s) => (!bind || bind.focused ? s.error : null));
@@ -3644,7 +3649,8 @@ function ChatThread() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
-  const emptyReady = Boolean(activeSession) && !renderSkeleton && messageCount === 0;
+  const emptyReady = Boolean(activeSession) && !renderSkeleton && messageCount === 0 && !restoring;
+  const restoringEmpty = Boolean(activeSession) && !renderSkeleton && messageCount === 0 && restoring;
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
@@ -4041,7 +4047,7 @@ function ChatThread() {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
     >
-      <div className={`${styles.mainColumn}${emptyReady ? ` ${styles.mainColumnEmptyReady}` : ""}`}>
+      <div className={`${styles.mainColumn}${emptyReady || restoringEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}`}>
       <div className={styles.thread} ref={threadRef}>
         {renderSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
@@ -4272,10 +4278,10 @@ function ChatThread() {
       )}
 
       <form
-        className={`${styles.composer}${emptyReady ? ` ${styles.composerEmptyReady}` : ""}`}
+        className={`${styles.composer}${emptyReady || restoringEmpty ? ` ${styles.composerEmptyReady}` : ""}`}
         onSubmit={onSubmit}
       >
-        {scrolledAway && activeSession && !emptyReady ? (
+        {scrolledAway && activeSession && !emptyReady && !restoringEmpty ? (
           <button
             type="button"
             className={styles.jumpLatest}
@@ -4302,7 +4308,9 @@ function ChatThread() {
           </button>
         ) : null}
         <div className={styles.composerInner}>
-          {emptyReady ? (
+          {restoringEmpty ? (
+            <p className={styles.emptyReadyLead}>{t("chat.sessionRestoring")}</p>
+          ) : emptyReady ? (
             <p className={styles.emptyReadyLead}>{t("chat.emptyReady")}</p>
           ) : null}
           <div className={styles.composerStatusSlot} aria-live="polite">
@@ -4798,6 +4806,27 @@ function ChatThread() {
               showToast(
                 err instanceof Error && err.message === "noAgentsOnline"
                   ? t("common.noAgentsOnline")
+                  : err instanceof Error
+                    ? err.message
+                    : String(err),
+                { tone: "danger" },
+              );
+            }
+          }}
+          onOpenExisting={async (row) => {
+            setFolderPicker(null);
+            try {
+              await importHarnessSession({
+                provider: row.provider,
+                acpSessionId: row.acpSessionId,
+                cwd: row.cwd,
+                title: row.title,
+              });
+              if (shouldAutoFocusComposer()) focusComposer();
+            } catch (err) {
+              showToast(
+                err instanceof Error && err.message === "alreadyInTree"
+                  ? t("chat.alreadyInTree")
                   : err instanceof Error
                     ? err.message
                     : String(err),

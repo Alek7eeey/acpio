@@ -168,6 +168,14 @@ async function probeOmpModels(ctx: AdapterProbeContext): Promise<ModelOption[] |
  * resume (`session/resume`, no history replay); subagent work streams in via
  * `_omp/agents/*` notifications with live transcript polling.
  */
+export {
+  findOmpSessionFile,
+  listOmpSessions,
+  ompSessionsRoot,
+  readOmpSessionTranscript,
+} from "./localSessions.js";
+export type { OmpSessionInfo, OmpSessionTranscript, OmpTranscriptTurn } from "./localSessions.js";
+
 export const ompAdapter: HarnessAdapter = {
   id: "omp",
   label: "OMP",

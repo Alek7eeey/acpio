@@ -918,7 +918,7 @@
 
 /* Intermediate agent text inside the steps block — match the thinking style. */
 .stepsBody .textEmbedded {
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   color: color-mix(in srgb, var(--text) 68%, transparent);
 }
 
@@ -954,7 +954,7 @@
   border: none;
   padding: 0;
   font-family: inherit;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 400;
   white-space: pre-wrap;
 }
@@ -2697,8 +2697,8 @@
 
   .thoughtBody,
   .stepsBody .textEmbedded {
-    font-size: 0.75rem;
-    line-height: 1.45;
+    font-size: 0.82rem;
+    line-height: 1.5;
   }
 
   .toolRow {
@@ -2750,6 +2750,16 @@
   .thread {
     padding-left: 28px;
     padding-right: 28px;
+  }
+
+  .textPart {
+    font-size: 0.8rem;
+  }
+
+  .thoughtBody,
+  .stepsBody .textEmbedded {
+    font-size: 0.86rem;
+    line-height: 1.52;
   }
 }
 

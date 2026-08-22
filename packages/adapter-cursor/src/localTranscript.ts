@@ -247,3 +247,167 @@ export async function readCursorAgentTranscript(
     fs.closeSync(fd);
   }
 }
+
+export type CursorAcpSessionInfo = {
+  sessionId: string;
+  cwd: string;
+  title: string;
+  updatedAt: string;
+};
+
+function normCwd(cwd: string): string {
+  return cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+function cwdRelated(cwd: string, filter: string): boolean {
+  if (!filter) return true;
+  if (!cwd.trim()) return true;
+  const a = normCwd(cwd).toLowerCase();
+  const b = filter;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+function storeBytes(storePath: string): number {
+  try {
+    return fs.statSync(storePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Cursor ACP sessions on disk (`~/.cursor/acp-sessions/<id>/`).
+ * Empty probe folders (no title and tiny/missing store.db) are skipped.
+ */
+export function listCursorAcpSessions(opts?: {
+  root?: string;
+  chatsRoot?: string;
+  cwd?: string;
+  excludeIds?: Iterable<string>;
+  limit?: number;
+}): CursorAcpSessionInfo[] {
+  const exclude = new Set([...(opts?.excludeIds ?? [])].map((s) => s.trim()).filter(Boolean));
+  const cwdFilter = opts?.cwd ? normCwd(opts.cwd).toLowerCase() : "";
+  const limit = opts?.limit ?? 24;
+  const hits: Array<CursorAcpSessionInfo & { mtime: number; prefer: number }> = [];
+
+  const acpRoot = opts?.root ?? path.join(os.homedir(), ".cursor", "acp-sessions");
+  if (fs.existsSync(acpRoot)) {
+    let ents: fs.Dirent[];
+    try {
+      ents = fs.readdirSync(acpRoot, { withFileTypes: true });
+    } catch {
+      ents = [];
+    }
+    for (const ent of ents) {
+      if (!ent.isDirectory()) continue;
+      const sessionId = ent.name.trim();
+      if (!sessionId || exclude.has(sessionId)) continue;
+      const dir = path.join(acpRoot, sessionId);
+      const metaPath = path.join(dir, "meta.json");
+      const storePath = path.join(dir, "store.db");
+      let cwd = "";
+      let title = "";
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { cwd?: unknown; title?: unknown };
+        cwd = typeof meta.cwd === "string" ? meta.cwd : "";
+        title = typeof meta.title === "string" ? meta.title.trim() : "";
+      } catch {
+        /* missing or invalid meta */
+      }
+      const size = storeBytes(storePath);
+      // Probes from this app leave an empty store.db and no title.
+      if (!title && size < 4096) continue;
+      if (cwdFilter && cwd && !cwdRelated(cwd, cwdFilter)) continue;
+      let mtime = 0;
+      try {
+        mtime = fs.statSync(size ? storePath : dir).mtimeMs;
+      } catch {
+        continue;
+      }
+      hits.push({
+        sessionId,
+        cwd,
+        title,
+        updatedAt: new Date(mtime).toISOString(),
+        mtime,
+        prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
+      });
+    }
+  }
+
+  const chatsRoot = opts?.chatsRoot ?? path.join(os.homedir(), ".cursor", "chats");
+  if (fs.existsSync(chatsRoot)) {
+    let hashes: fs.Dirent[];
+    try {
+      hashes = fs.readdirSync(chatsRoot, { withFileTypes: true });
+    } catch {
+      hashes = [];
+    }
+    for (const hashEnt of hashes) {
+      if (!hashEnt.isDirectory()) continue;
+      const hashDir = path.join(chatsRoot, hashEnt.name);
+      let ids: fs.Dirent[];
+      try {
+        ids = fs.readdirSync(hashDir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const idEnt of ids) {
+        if (!idEnt.isDirectory()) continue;
+        const sessionId = idEnt.name.trim();
+        if (!sessionId || exclude.has(sessionId)) continue;
+        const dir = path.join(hashDir, sessionId);
+        const metaPath = path.join(dir, "meta.json");
+        const storePath = path.join(dir, "store.db");
+        if (!fs.existsSync(metaPath)) continue;
+        let cwd = "";
+        let title = "";
+        try {
+          const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as {
+            cwd?: unknown;
+            title?: unknown;
+            name?: unknown;
+          };
+          cwd = typeof meta.cwd === "string" ? meta.cwd : "";
+          title = String(meta.title ?? meta.name ?? "").trim();
+        } catch {
+          continue;
+        }
+        const size = storeBytes(storePath);
+        if (!title && size < 4096) continue;
+        if (cwdFilter && cwd && !cwdRelated(cwd, cwdFilter)) continue;
+        let mtime = 0;
+        try {
+          mtime = fs.statSync(size ? storePath : dir).mtimeMs;
+        } catch {
+          continue;
+        }
+        hits.push({
+          sessionId,
+          cwd,
+          title,
+          updatedAt: new Date(mtime).toISOString(),
+          mtime,
+          prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
+        });
+      }
+    }
+  }
+
+  hits.sort((a, b) => b.prefer - a.prefer || b.mtime - a.mtime);
+  const seen = new Set<string>();
+  const out: CursorAcpSessionInfo[] = [];
+  for (const hit of hits) {
+    if (seen.has(hit.sessionId)) continue;
+    seen.add(hit.sessionId);
+    out.push({
+      sessionId: hit.sessionId,
+      cwd: hit.cwd,
+      title: hit.title,
+      updatedAt: hit.updatedAt,
+    });
+    if (out.length >= limit) break;
+  }
+  return out;
+}

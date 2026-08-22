@@ -246,6 +246,7 @@ export function ChatSidebar({
   const selectSession = useAppStore((s) => s.selectSession);
   const openSessionInNewPane = useAppStore((s) => s.openSessionInNewPane);
   const createSession = useAppStore((s) => s.createSession);
+  const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const deleteSession = useAppStore((s) => s.deleteSession);
@@ -1581,6 +1582,27 @@ export function ChatSidebar({
           onConfirm={async (cwd, provider) => {
             setFolderPicker(null);
             await startNewSession(cwd, provider);
+          }}
+          onOpenExisting={async (row) => {
+            setFolderPicker(null);
+            try {
+              await importHarnessSession({
+                provider: row.provider,
+                acpSessionId: row.acpSessionId,
+                cwd: row.cwd,
+                title: row.title,
+              });
+              goToChat();
+            } catch (err) {
+              showToast(
+                err instanceof Error && err.message === "alreadyInTree"
+                  ? t("chat.alreadyInTree")
+                  : err instanceof Error
+                    ? err.message
+                    : String(err),
+                { tone: "danger" },
+              );
+            }
           }}
         />
       )}

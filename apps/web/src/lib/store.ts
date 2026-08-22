@@ -132,6 +132,8 @@ type AppState = {
   focusMessageId: string | null;
   /** True while a session detail is being fetched (skeleton shown). */
   sessionLoading: boolean;
+  /** Imported harness chat waiting for transcript (ACP replay / disk ingest). */
+  restoringSessionIds: Record<string, true>;
   /** Message currently being read aloud ("" = silent). Drives the stop button. */
   speakingMessageId: string | null;
   /** True while the TTS engine is generating audio (stop button shows a spinner). */
@@ -195,6 +197,12 @@ type AppState = {
   setSpeakingMessageId: (id: string | null) => void;
   setTtsLoading: (loading: boolean) => void;
   createSession: (cwd?: string, provider?: AgentProvider, model?: string) => Promise<SessionDto>;
+  importHarnessSession: (input: {
+    provider: AgentProvider;
+    acpSessionId: string;
+    cwd?: string;
+    title?: string;
+  }) => Promise<SessionDto>;
   deleteSession: (id: string) => Promise<void>;
   renameSession: (id: string, title: string) => Promise<void>;
   /** Toggle pin/archive flags (optimistic PATCH). */
@@ -471,6 +479,44 @@ function rememberSessionDetail(detail: SessionDetailDto | null | undefined) {
   if (oldest) sessionDetailCache.delete(oldest);
 }
 
+function markRestoringDone(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  sessionId: string,
+) {
+  if (!get().restoringSessionIds[sessionId]) return;
+  const next = { ...get().restoringSessionIds };
+  delete next[sessionId];
+  set({ restoringSessionIds: next });
+}
+
+async function pollImportedTranscript(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  for (let i = 0; i < 50; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    if (!get().restoringSessionIds[sessionId]) return;
+    try {
+      const detail = await api.getSession(sessionId);
+      if (!detail.messages.length) continue;
+      const live = liveDetail(get(), sessionId);
+      const merged: SessionDetailDto = {
+        ...detail,
+        messages:
+          live && live.messages.length > detail.messages.length ? live.messages : detail.messages,
+      };
+      commitDetail(get, set, merged);
+      markRestoringDone(get, set, sessionId);
+      return;
+    } catch {
+      /* keep waiting */
+    }
+  }
+  markRestoringDone(get, set, sessionId);
+}
+
 function liveDetail(state: AppState, sessionId: string): SessionDetailDto | null {
   if (state.activeSession?.id === sessionId) return state.activeSession;
   return (state.sessionDetails ?? {})[sessionId] ?? sessionDetailCache.get(sessionId) ?? null;
@@ -497,6 +543,7 @@ function commitDetail(
       : (state.sessionDetails ?? {}),
     ...(state.activeSession?.id === next.id ? { activeSession: next } : {}),
   });
+  if (next.messages.length) markRestoringDone(get, set, next.id);
 }
 
 function persistPanes(ids: ChatPaneSlot[], focus: number) {
@@ -724,6 +771,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionDetails: {},
   focusMessageId: null,
   sessionLoading: false,
+  restoringSessionIds: {},
   speakingMessageId: null,
   ttsLoading: false,
   modelsCatalog: typeof window !== "undefined" ? readStoredModelsCatalog() : null,
@@ -1203,6 +1251,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const detail = await api.getSession(id);
       rememberSessionDetail(detail);
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
+      const live = get().activeSession;
+      if (detail.messages.length === 0 && live?.id === id && live.messages.length > 0) {
+        set({
+          sessionLoading: false,
+          activeSession: { ...detail, messages: live.messages },
+        });
+        return;
+      }
       // Don't clobber an in-flight optimistic turn with a stale GET snapshot —
       // but still deliver the fetched messages so a fresh load of a running
       // session isn't left with an empty thread (skeleton would vanish first).
@@ -1228,6 +1284,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
         sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
       });
+      if (detail.messages.length) markRestoringDone(get, set, id);
       // The fetched detail is server-authoritative: the optimistic aliases for
       // this session are obsolete (their local messages are gone).
       clearMessageIdAliases(id);
@@ -1354,6 +1411,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     // empty-stub → GET refill.
     rememberSessionDetail({ ...session, messages: [], slashCommands: [] });
     await get().selectSession(session.id);
+    return session;
+  },
+
+  async importHarnessSession(input) {
+    const session = await api.importHarnessSession(input);
+    await get().refreshSessions();
+    const detail: SessionDetailDto = {
+      ...session,
+      messages: session.messages ?? [],
+      slashCommands: session.slashCommands ?? [],
+    };
+    rememberSessionDetail(detail);
+    if (!detail.messages.length) {
+      set({ restoringSessionIds: { ...get().restoringSessionIds, [detail.id]: true } });
+    }
+    await get().selectSession(session.id);
+    if (!detail.messages.length) {
+      void pollImportedTranscript(detail.id, get, set);
+    }
     return session;
   },
 
@@ -2064,6 +2140,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
         }
         if (stampActivity) set({ sessions: nextSessions });
+        markRestoringDone(get, set, event.sessionId);
         return;
       }
       const nextActive = {
@@ -2081,6 +2158,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...(stampActivity ? { sessions: nextSessions } : {}),
         activeSession: nextActive,
       });
+      markRestoringDone(get, set, event.sessionId);
       return;
     }
 

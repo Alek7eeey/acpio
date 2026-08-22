@@ -11,7 +11,9 @@ export {
   findCursorAgentTranscript,
   findRecentCursorAgentId,
   findRecentCursorAgentIds,
+  listCursorAcpSessions,
 } from "./localTranscript.js";
+export type { CursorAcpSessionInfo } from "./localTranscript.js";
 
 /** Map a `cursor/task` request to a normalized subagent card. */
 function cursorTaskCard(

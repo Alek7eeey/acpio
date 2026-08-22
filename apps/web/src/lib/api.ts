@@ -9,6 +9,7 @@ import type {
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
+  HarnessSessionDto,
 } from "@acprocess/shared";
 
 export type MessageSearchHit = {
@@ -141,6 +142,21 @@ export const api = {
       body: JSON.stringify({ path: path || undefined, files: opts?.files === true }),
     }),
   listSessions: () => request<SessionDto[]>("/api/sessions"),
+  listHarnessSessions: (provider: AgentProvider, cwd?: string) => {
+    const q = new URLSearchParams({ provider });
+    if (cwd?.trim()) q.set("cwd", cwd.trim());
+    return request<HarnessSessionDto[]>(`/api/sessions/harness?${q.toString()}`);
+  },
+  importHarnessSession: (body: {
+    provider: AgentProvider;
+    acpSessionId: string;
+    cwd?: string;
+    title?: string;
+  }) =>
+    request<SessionDetailDto>("/api/sessions/import", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   createSession: (body?: Partial<SessionDto>) =>
     request<SessionDto>("/api/sessions", {
       method: "POST",

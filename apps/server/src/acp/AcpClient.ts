@@ -449,7 +449,7 @@ export class AcpClient extends EventEmitter {
   /** Capabilities advertised by the agent in `initialize`. */
   private capabilities: {
     loadSession?: boolean;
-    sessionCapabilities?: { resume?: Record<string, unknown> };
+    sessionCapabilities?: { resume?: Record<string, unknown>; list?: unknown };
   } = {};
   /** While true (Cursor session/load replay), drop session/update notifications. */
   private suppressUpdates = false;
@@ -464,6 +464,10 @@ export class AcpClient extends EventEmitter {
   /** Cursor-style restore: agent supports `session/load` (replays history). */
   get canLoadSession(): boolean {
     return this.capabilities.loadSession === true;
+  }
+
+  get canListSessions(): boolean {
+    return this.capabilities.sessionCapabilities?.list != null;
   }
 
   constructor(
@@ -497,6 +501,8 @@ export class AcpClient extends EventEmitter {
       catalogOnly?: boolean;
       /** Reattach an existing agent session instead of creating a new one. */
       resume?: { sessionId: string; mode: "resume" | "load" };
+      /** When loading a session our DB does not yet have, persist the replay. */
+      ingestReplay?: boolean;
       /** Model applied at boot (defaults to settings.defaultModel). */
       model?: string;
       modelParams?: Record<string, string>;
@@ -592,7 +598,7 @@ export class AcpClient extends EventEmitter {
       })) as {
         agentCapabilities?: {
           loadSession?: boolean;
-          sessionCapabilities?: { resume?: Record<string, unknown> };
+          sessionCapabilities?: { resume?: Record<string, unknown>; list?: unknown };
         };
       };
       this.capabilities = initResult?.agentCapabilities ?? {};
@@ -639,7 +645,7 @@ export class AcpClient extends EventEmitter {
         // Load-style harnesses replay the whole stored conversation here; we
         // already have it in our DB, so swallow the notifications instead of
         // double-writing (adapter declares whether the replay must be muted).
-        this.suppressUpdates = this.adapter.suppressReplayOnLoad;
+        this.suppressUpdates = this.adapter.suppressReplayOnLoad && !opts?.ingestReplay;
         try {
           result = (await this.send("session/load", {
             sessionId: resume.sessionId,
@@ -715,6 +721,32 @@ export class AcpClient extends EventEmitter {
         );
       }),
     ]);
+  }
+
+  async listSessions(filter?: { cwd?: string }): Promise<
+    Array<{ sessionId: string; cwd?: string; title?: string; updatedAt?: string }>
+  > {
+    if (!this.canListSessions) {
+      throw new Error("Agent does not support session/list");
+    }
+    const out: Array<{ sessionId: string; cwd?: string; title?: string; updatedAt?: string }> = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 8; page++) {
+      const result = (await this.send("session/list", {
+        ...(filter?.cwd ? { cwd: filter.cwd } : {}),
+        ...(cursor ? { cursor } : {}),
+      })) as {
+        sessions?: Array<{ sessionId?: string; cwd?: string; title?: string; updatedAt?: string }>;
+        nextCursor?: string;
+      };
+      for (const row of result?.sessions ?? []) {
+        const sessionId = String(row.sessionId ?? "").trim();
+        if (sessionId) out.push({ ...row, sessionId });
+      }
+      if (!result?.nextCursor) break;
+      cursor = result.nextCursor;
+    }
+    return out;
   }
 
   async setConfigOption(configId: string, value: string) {

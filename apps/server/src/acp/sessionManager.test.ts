@@ -326,6 +326,8 @@ describe("pickRestoreMode", () => {
     [{ ...base, preferResume: false, toggle: false }, "new"],
     [{ ...base, hasStoredSession: false, cwdMatches: false }, "new"],
     [{ ...base, provider: "cursor", restoreMode: "load", preferResume: false }, "new"],
+    [{ ...base, toggle: false, forceRestore: true }, "resume"],
+    [{ ...base, provider: "cursor", restoreMode: "load", toggle: false, forceRestore: true }, "load"],
   ] as const)("pickRestoreMode(%j) === %j", (input, expected) => {
     expect(pickRestoreMode({ ...input })).toBe(expected);
   });

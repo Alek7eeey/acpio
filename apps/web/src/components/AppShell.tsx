@@ -102,6 +102,7 @@ export function AppShell() {
   const sessions = useAppStore((s) => s.sessions);
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
+  const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const theme = useAppStore((s) => s.settings.theme);
@@ -1274,6 +1275,27 @@ export function AppShell() {
               showToast(
                 err instanceof Error && err.message === "noAgentsOnline"
                   ? t("common.noAgentsOnline")
+                  : err instanceof Error
+                    ? err.message
+                    : String(err),
+                { tone: "danger" },
+              );
+            }
+          }}
+          onOpenExisting={async (row) => {
+            setRailFolderPicker(null);
+            try {
+              await importHarnessSession({
+                provider: row.provider,
+                acpSessionId: row.acpSessionId,
+                cwd: row.cwd,
+                title: row.title,
+              });
+              navigate("/chat");
+            } catch (err) {
+              showToast(
+                err instanceof Error && err.message === "alreadyInTree"
+                  ? t("chat.alreadyInTree")
                   : err instanceof Error
                     ? err.message
                     : String(err),

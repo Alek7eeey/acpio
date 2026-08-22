@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { AgentProvider, SessionDto } from "@acprocess/shared";
+import type { AgentProvider, HarnessSessionDto, SessionDto } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
+import { api } from "../lib/api";
 import { normalizeCwd } from "../lib/pathSegments";
 import { ServerFolderBrowseDialog } from "./ServerFolderBrowseDialog";
 import styles from "./AppShell.module.css";
@@ -109,6 +110,7 @@ type CreateSessionFolderPickerProps = {
   preferredProvider?: AgentProvider | null;
   onClose: () => void;
   onConfirm: (cwd: string, provider: AgentProvider) => void | Promise<void>;
+  onOpenExisting?: (session: HarnessSessionDto) => void | Promise<void>;
 };
 
 export function CreateSessionFolderPicker({
@@ -122,6 +124,7 @@ export function CreateSessionFolderPicker({
   preferredProvider,
   onClose,
   onConfirm,
+  onOpenExisting,
 }: CreateSessionFolderPickerProps) {
   const t = useT();
   const [searchQuery, setSearchQuery] = useState("");
@@ -142,6 +145,12 @@ export function CreateSessionFolderPicker({
   const agentRowRef = useRef<HTMLDivElement>(null);
   const agentSubmenuRef = useRef<HTMLDivElement>(null);
   const agentCloseTimer = useRef<number | null>(null);
+  const existingRowRef = useRef<HTMLDivElement>(null);
+  const existingSubmenuRef = useRef<HTMLDivElement>(null);
+  const existingCloseTimer = useRef<number | null>(null);
+  const [existingMenuOpen, setExistingMenuOpen] = useState(false);
+  const [existing, setExisting] = useState<HarnessSessionDto[]>([]);
+  const [existingLoading, setExistingLoading] = useState(false);
   const mobileSheet = useMobileFolderSheet();
 
   const fallback = defaultCwd.trim();
@@ -159,6 +168,30 @@ export function CreateSessionFolderPicker({
     if (lockFolder || mobileSheet) return;
     searchRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (!provider) {
+      setExisting([]);
+      setExistingLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setExistingLoading(true);
+    void api
+      .listHarnessSessions(provider, lockFolder ? lockedPath : defaultCwd || undefined)
+      .then((rows) => {
+        if (!cancelled) setExisting(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setExisting([]);
+      })
+      .finally(() => {
+        if (!cancelled) setExistingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, lockFolder, lockedPath, defaultCwd]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -182,6 +215,7 @@ export function CreateSessionFolderPicker({
   useEffect(() => {
     return () => {
       if (agentCloseTimer.current != null) window.clearTimeout(agentCloseTimer.current);
+      if (existingCloseTimer.current != null) window.clearTimeout(existingCloseTimer.current);
     };
   }, []);
 
@@ -190,6 +224,7 @@ export function CreateSessionFolderPicker({
       window.clearTimeout(agentCloseTimer.current);
       agentCloseTimer.current = null;
     }
+    setExistingMenuOpen(false);
     setAgentMenuOpen(true);
   };
 
@@ -216,6 +251,38 @@ export function CreateSessionFolderPicker({
     }
   }, [agentMenuOpen, mobileSheet, onlineAgents.length]);
 
+  const openExistingMenu = () => {
+    if (existingCloseTimer.current != null) {
+      window.clearTimeout(existingCloseTimer.current);
+      existingCloseTimer.current = null;
+    }
+    setAgentMenuOpen(false);
+    setExistingMenuOpen(true);
+  };
+
+  const scheduleCloseExistingMenu = () => {
+    if (mobileSheet) return;
+    if (existingCloseTimer.current != null) window.clearTimeout(existingCloseTimer.current);
+    existingCloseTimer.current = window.setTimeout(() => setExistingMenuOpen(false), 160);
+  };
+
+  useLayoutEffect(() => {
+    if (!existingMenuOpen || mobileSheet) return;
+    const row = existingRowRef.current;
+    const menu = existingSubmenuRef.current;
+    if (!row || !menu) return;
+    const r = row.getBoundingClientRect();
+    const w = menu.offsetWidth || 280;
+    const spaceRight = window.innerWidth - r.right - 10;
+    if (spaceRight < w && r.left > w + 10) {
+      menu.style.left = "auto";
+      menu.style.right = "calc(100% + 6px)";
+    } else {
+      menu.style.left = "calc(100% + 6px)";
+      menu.style.right = "auto";
+    }
+  }, [existingMenuOpen, mobileSheet, existing.length, existingLoading]);
+
   const confirmPath = async (path: string, nextProvider?: AgentProvider) => {
     if (busy) return;
     const chosen = nextProvider ?? provider;
@@ -232,6 +299,124 @@ export function CreateSessionFolderPicker({
       setBusy(false);
     }
   };
+
+  const openExisting = async (row: HarnessSessionDto) => {
+    if (busy || !onOpenExisting) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onOpenExisting(row);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  };
+
+  const filteredExisting = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return existing;
+    return existing.filter(
+      (row) =>
+        row.title.toLowerCase().includes(q) ||
+        row.cwd.toLowerCase().includes(q) ||
+        row.acpSessionId.toLowerCase().includes(q),
+    );
+  }, [existing, searchQuery]);
+
+  const existingItems = existingLoading ? (
+    <p className={styles.pickerEmpty}>{t("chat.openExistingLoading")}</p>
+  ) : filteredExisting.length ? (
+    filteredExisting.map((row) => {
+      const label = row.title || t("chat.untitledHarnessSession");
+      const folder = row.cwd ? row.cwd.replace(/\\/g, "/") : "";
+      return (
+        <button
+          key={row.acpSessionId}
+          type="button"
+          className={styles.pickerItem}
+          title={folder ? `${label}\n${folder}` : label}
+          disabled={busy}
+          onClick={() => void openExisting(row)}
+        >
+          <span className={styles.pickerItemIcon} aria-hidden>
+            {agentIcon}
+          </span>
+          <span className={styles.pickerExistingBody}>
+            <span className={styles.pickerItemPath}>{label}</span>
+            {folder ? <span className={styles.pickerExistingMeta}>{folder}</span> : null}
+          </span>
+        </button>
+      );
+    })
+  ) : (
+    <p className={styles.pickerEmpty}>{t("chat.openExistingEmpty")}</p>
+  );
+
+  const existingHover =
+    onOpenExisting && provider ? (
+      <div
+        ref={existingRowRef}
+        className={styles.pickerAgentHover}
+        onPointerEnter={() => {
+          if (!mobileSheet) openExistingMenu();
+        }}
+        onPointerLeave={scheduleCloseExistingMenu}
+      >
+        <button
+          type="button"
+          className={styles.pickerAction}
+          disabled={busy}
+          aria-expanded={existingMenuOpen}
+          aria-haspopup="listbox"
+          onClick={() => setExistingMenuOpen((v) => !v)}
+          onFocus={() => {
+            if (!mobileSheet) openExistingMenu();
+          }}
+        >
+          <span className={styles.pickerItemIcon} aria-hidden>
+            {agentIcon}
+          </span>
+          <span className={styles.pickerActionLabel}>{t("chat.pickExistingSessions")}</span>
+          <span
+            className={`${styles.pickerActionChevron}${
+              existingMenuOpen ? ` ${styles.pickerActionChevronOpen}` : ""
+            }`}
+            aria-hidden
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M9 5l7 7-7 7"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+        {existingMenuOpen && mobileSheet ? (
+          <div
+            className={styles.pickerNestedModels}
+            role="listbox"
+            aria-label={t("chat.openExisting")}
+          >
+            {existingItems}
+          </div>
+        ) : null}
+        {existingMenuOpen && !mobileSheet ? (
+          <div
+            ref={existingSubmenuRef}
+            className={`${styles.pickerSubmenu} ${styles.pickerSubmenuWide}`}
+            role="listbox"
+            aria-label={t("chat.openExisting")}
+            onPointerEnter={openExistingMenu}
+            onPointerLeave={scheduleCloseExistingMenu}
+          >
+            <div className={styles.pickerSubmenuList}>{existingItems}</div>
+          </div>
+        ) : null}
+      </div>
+    ) : null;
 
   const pos = mobileSheet ? null : clampPopover(x, y);
 
@@ -283,6 +468,7 @@ export function CreateSessionFolderPicker({
           ) : (
             <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
           )}
+          {existingHover}
           {error ? <p className={styles.popoverError}>{error}</p> : null}
         </>
       ) : (
@@ -480,6 +666,8 @@ export function CreateSessionFolderPicker({
           </svg>
         </span>
       </button>
+
+      {existingHover}
 
       {error ? <p className={styles.popoverError}>{error}</p> : null}
         </>

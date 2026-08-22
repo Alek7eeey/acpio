@@ -38,6 +38,8 @@ import {
   setSessionMode,
   getAgentAvailability,
   warmAcp,
+  listUnlinkedHarnessSessions,
+  importHarnessSession,
   restartSessionsForMcpChange,
   restartSessionMcp,
 } from "./acp/sessionManager.js";
@@ -323,6 +325,36 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/sessions", async () => listSessions());
+
+  app.get("/api/sessions/harness", async (req, reply) => {
+    const query = z
+      .object({
+        provider: z.enum(["cursor", "omp"]),
+        cwd: z.string().max(4096).optional(),
+      })
+      .parse(req.query ?? {});
+    return listUnlinkedHarnessSessions(query.provider, query.cwd);
+  });
+
+  app.post("/api/sessions/import", async (req, reply) => {
+    const body = z
+      .object({
+        provider: z.enum(["cursor", "omp"]),
+        acpSessionId: z.string().min(1).max(200),
+        cwd: z.string().max(4096).optional(),
+        title: z.string().max(500).optional(),
+      })
+      .parse(req.body ?? {});
+    try {
+      return await importHarnessSession(body);
+    } catch (err) {
+      const status = (err as { statusCode?: number }).statusCode;
+      if (status === 409) {
+        return reply.code(409).send({ error: "alreadyInTree" });
+      }
+      throw err;
+    }
+  });
 
   app.put("/api/sessions/reorder", async (req) => {
     const body = z
