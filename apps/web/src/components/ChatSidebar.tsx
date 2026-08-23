@@ -64,9 +64,7 @@ function folderLabel(cwd: string, noFolderLabel: string) {
   const normalized = normalizeCwd(cwd);
   if (!normalized) return noFolderLabel;
   const parts = normalized.split(/[\\/]/).filter(Boolean);
-  const leaf = parts[parts.length - 1] || normalized;
-  if (normalized.length <= 36) return normalized;
-  return leaf.length <= 36 ? leaf : `…${leaf.slice(-34)}`;
+  return parts[parts.length - 1] || normalized;
 }
 
 export function groupByFolder(list: SessionDto[]) {
@@ -567,24 +565,8 @@ export function ChatSidebar({
         }
       }
     }
-    if (archivedSessions.length > 0) {
-      rows.push({ kind: "archive-head", key: "__archive__", count: archivedSessions.length });
-      if (!collapsedFolders.has("__archive__")) {
-        for (const s of archivedSessions) {
-          rows.push({ kind: "session", key: `a:${s.id}`, session: s, showActivity: true, inArchive: true, indent: false });
-        }
-      }
-    }
-    if (liked.length > 0) {
-      rows.push({ kind: "liked-head", key: "__liked__", count: liked.length });
-      if (!collapsedFolders.has("__liked__")) {
-        for (const item of liked) {
-          rows.push({ kind: "liked", key: `l:${item.messageId}`, item });
-        }
-      }
-    }
     return rows;
-  }, [folders, archivedSessions, liked, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs]);
+  }, [folders, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs]);
 
   const TREE_VIRT_THRESHOLD = 80;
   const treeVirtual = treeRows.length > TREE_VIRT_THRESHOLD;
@@ -1306,6 +1288,8 @@ export function ChatSidebar({
               </div>
             );
           })}
+            </>
+          )}
           {archivedSessions.length > 0 && (
             <div className={styles.archiveGroup}>
               <div className={styles.archiveHead}>
@@ -1339,11 +1323,11 @@ export function ChatSidebar({
                 <span className={styles.archiveLabel}>{t("chat.archiveSection")}</span>
                 <span className={styles.archiveCount}>{archivedSessions.length}</span>
               </div>
-              {!collapsedFolders.has("__archive__") &&
+              {!collapsedFolders.has("__archive__") && (
                 <div className={styles.ungroupedSessions}>
                   {archivedSessions.map((s) => renderSessionRow(s, true, true))}
                 </div>
-              }
+              )}
             </div>
           )}
           {liked.length > 0 && (
@@ -1403,8 +1387,6 @@ export function ChatSidebar({
                 </div>
               )}
             </div>
-          )}
-            </>
           )}
           {visibleSessions.length === 0 && (
             <p className={styles.emptyHint}>
