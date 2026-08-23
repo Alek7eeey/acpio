@@ -24,6 +24,12 @@ export type {
 } from "./adapters.js";
 
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
+export {
+  SESSION_TITLE_MAX_LEN,
+  sanitizeTitleSource,
+  titleFromUserText,
+  truncateSessionTitle,
+} from "./sessionTitle.js";
 
 /** Extract the first readable text from an unknown tool/subagent payload. */
 export function textFromUnknown(value: unknown): string {
@@ -262,10 +268,28 @@ export type McpServerConfig = {
   url?: string;
   /** Bearer token for remote servers (never displayed in full). */
   token?: string;
+  /** Optional HTTP headers (Authorization can also be set via token). */
+  headers?: Array<{ name: string; value: string }>;
   /** @deprecated Local stdio servers are no longer configured in the UI. */
   command?: string;
   args?: string[];
 };
+
+export function mcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
+  const out: Array<{ name: string; value: string }> = [];
+  if (server.type === "remote" && server.token?.trim()) {
+    out.push({ name: "Authorization", value: `Bearer ${server.token.trim()}` });
+  }
+  for (const row of server.headers ?? []) {
+    const name = row.name?.trim();
+    if (!name) continue;
+    const value = row.value ?? "";
+    const idx = out.findIndex((h) => h.name.toLowerCase() === name.toLowerCase());
+    if (idx >= 0) out[idx] = { name, value };
+    else out.push({ name, value });
+  }
+  return out;
+}
 
 export type Theme = "light" | "dark";
 export type AppLocale = "ru" | "en";
@@ -388,6 +412,8 @@ export interface AppSettings {
   chatActions: ChatActionId[];
   /** Chips shown in the composer bar above the input. */
   chatMetaChips: ChatMetaChipId[];
+  /** Thinking chip style in the composer bar. */
+  thoughtsChipStyle: "full" | "icon";
   /** Optional composer buttons (attach, mic, model, mode picker). */
   chatComposerButtons: ChatComposerButtonId[];
   /** Tree sidebar controls shown (search, per-row actions). */
@@ -455,6 +481,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
   chatMetaChips: ["folder", "thoughts", "mcp", "context"],
+  thoughtsChipStyle: "full",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],

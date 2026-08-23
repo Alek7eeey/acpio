@@ -423,6 +423,7 @@ describe("DEFAULT_SETTINGS", () => {
     ttsVoiceGender: "",
     chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
     chatMetaChips: ["folder", "thoughts", "mcp", "context"],
+    thoughtsChipStyle: "full",
     chatComposerButtons: ["attach", "mic", "model", "mode"],
     chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
     chatTreeMenu: ["rename", "move", "export", "delete"],
