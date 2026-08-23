@@ -1988,6 +1988,11 @@
     background var(--motion);
 }
 
+.metaChipIconOnly {
+  padding: 6px 8px;
+  gap: 0;
+}
+
 .metaChipSkeleton {
   display: inline-block;
   flex: 0 0 auto;

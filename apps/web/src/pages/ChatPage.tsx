@@ -280,6 +280,7 @@ function MessageArticle({
   onRegenerate,
   activeSession,
   autoExpandSteps,
+  onManualStepsToggle,
   keepComposerFocus,
   textareaRef,
 }: {
@@ -289,6 +290,7 @@ function MessageArticle({
   onRegenerate: () => void;
   activeSession: SessionDetailDto | null;
   autoExpandSteps: boolean;
+  onManualStepsToggle?: (open: boolean) => void;
   keepComposerFocus: RefObject<boolean>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 }) {
@@ -321,6 +323,7 @@ function MessageArticle({
           onRegenerate={onRegenerate}
           streaming={!!isLiveAssistant}
           autoExpandSteps={autoExpandSteps}
+          onManualStepsToggle={onManualStepsToggle}
         />
       )}
     </article>
@@ -1420,7 +1423,7 @@ const TOOL_OUTPUT_CAP = 20000;
 // when scrolled out of the virtual window, so local useState would lose which
 // tool outputs / thought spoilers / steps blocks the user opened.
 const expandedPartIds = new Map<string, boolean>();
-const expandedStepsByMessage = new Map<string, boolean>();
+import { expandedStepsByMessage } from "../lib/expandedSteps";
 
 /** Initial height guess for a virtualized message row; refined by measurement. */
 function estimateMessageRowHeight(msg: MessageDto | undefined): number {
@@ -1581,12 +1584,14 @@ function StepsSpoiler({
   autoExpand,
   startedAt,
   messageId,
+  onManualToggle,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   startedAt: string;
   messageId: string;
+  onManualToggle?: (open: boolean) => void;
 }) {
   const t = useT();
   const [open, setOpenState] = useState(
@@ -1596,6 +1601,7 @@ function StepsSpoiler({
     setOpenState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
       expandedStepsByMessage.set(messageId, value);
+      onManualToggle?.(value);
       return value;
     });
   };
@@ -1637,8 +1643,14 @@ function StepsSpoiler({
   useEffect(() => {
     if (prevAutoExpandRef.current === autoExpand) return;
     prevAutoExpandRef.current = autoExpand;
+    if (expandedStepsByMessage.has(messageId)) return;
     setOpen(autoExpand);
-  }, [autoExpand, setOpen]);
+  }, [autoExpand, setOpen, messageId]);
+
+  useEffect(() => {
+    if (streaming) return;
+    if (expandedStepsByMessage.get(messageId) === false) setOpen(false);
+  }, [streaming, messageId, setOpen]);
 
   const liveHeader = streaming || holdEmptyLive;
 
@@ -2645,12 +2657,14 @@ function AssistantParts({
   onRegenerate,
   streaming,
   autoExpandSteps,
+  onManualStepsToggle,
 }: {
   message: MessageDto;
   session: SessionDetailDto | null;
   onRegenerate: () => void;
   streaming: boolean;
   autoExpandSteps: boolean;
+  onManualStepsToggle?: (open: boolean) => void;
 }) {
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
@@ -2717,6 +2731,7 @@ function AssistantParts({
         autoExpand={autoExpandSteps}
         startedAt={message.createdAt}
         messageId={message.id}
+        onManualToggle={onManualStepsToggle}
       />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
@@ -2928,6 +2943,21 @@ function ChatThread() {
       return true;
     }
   });
+  const syncAutoExpandSteps = useCallback((open: boolean) => {
+    setAutoExpandSteps(open);
+    try {
+      localStorage.setItem("acprocess.autoExpandSteps.v2", open ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const onManualStepsToggle = useCallback(
+    (open: boolean) => {
+      syncAutoExpandSteps(open);
+    },
+    [syncAutoExpandSteps],
+  );
+  const [composerCentered, setComposerCentered] = useState(true);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3200,7 +3230,6 @@ function ChatThread() {
   }, [slashCommands, slashCtx]);
   const slashMenuOpen =
     !slashMenuDismissed &&
-    !composerLocked &&
     !streaming &&
     slashCtx != null &&
     filteredSlashCommands.length > 0;
@@ -3256,6 +3285,7 @@ function ChatThread() {
       keepComposerFocus.current = false;
     }
     userJustSentRef.current = true;
+    setComposerCentered(false);
     const editId = editingMessageId;
     const attach = editId ? undefined : pendingFiles;
     forgetComposerDraft(composerSessionRef.current);
@@ -3661,7 +3691,13 @@ function ChatThread() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
-  const emptyReady = Boolean(activeSession) && !renderSkeleton && messageCount === 0 && !restoring;
+  useEffect(() => {
+    const count = activeSession?.messages.length ?? 0;
+    setComposerCentered(count === 0);
+  }, [activeSession?.id, activeSession?.messages.length]);
+
+  const emptyReady =
+    Boolean(activeSession) && !renderSkeleton && !restoring && composerCentered;
   const restoringEmpty = Boolean(activeSession) && !renderSkeleton && messageCount === 0 && restoring;
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
@@ -3749,6 +3785,7 @@ function ChatThread() {
         onRegenerate={() => regenerate(msg)}
         activeSession={activeSession}
         autoExpandSteps={autoExpandSteps}
+        onManualStepsToggle={onManualStepsToggle}
         keepComposerFocus={keepComposerFocus}
         textareaRef={textareaRef}
       />
@@ -4427,16 +4464,20 @@ function ChatThread() {
               {settings.chatMetaChips.includes("thoughts") ? (
               <button
                 type="button"
-                className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}`}
+                className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}${
+                  settings.thoughtsChipStyle === "icon" ? ` ${styles.metaChipIconOnly}` : ""
+                }`}
                 aria-pressed={autoExpandSteps}
                 aria-label={t("common.autoSteps")}
                 title={t("common.autoStepsHint")}
-                onClick={() => setAutoExpandSteps((v) => !v)}
+                onClick={() => syncAutoExpandSteps(!autoExpandSteps)}
               >
                 <span className={styles.metaChipIcon} aria-hidden>
                   <ThoughtSparkIcon size={15} />
                 </span>
-                <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
+                {settings.thoughtsChipStyle !== "icon" ? (
+                  <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
+                ) : null}
               </button>
               ) : null}
               {settings.chatMetaChips.includes("mcp") && activeSession && enabledMcp.length > 0 ? (

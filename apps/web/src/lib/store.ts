@@ -19,6 +19,7 @@ import {
   type AdapterMetaDto,
 } from "@acprocess/shared";
 import { api } from "./api";
+import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
 import {
   CHAT_PANE_MAX,
@@ -493,7 +494,10 @@ function upsertMessage(messages: MessageDto[], message: MessageDto) {
       // `message.created` is intentionally empty; never wipe locally received parts.
       parts: message.parts.length ? message.parts : previous.parts,
     };
-    if (message.role === "assistant") pendingOptimisticPair = null;
+    if (message.role === "assistant") {
+      migrateExpandedStepsMessageId(message.id, pendingId);
+      pendingOptimisticPair = null;
+    }
     return next;
   }
 
@@ -632,8 +636,7 @@ function pollSlashCommands(
         const cur = hydrateSessionSlashCommands(liveDetail(get(), sessionId), slashCommandsCache);
         const next = { ...(cur ?? fetched), slashCommands: fetched.slashCommands };
         rememberSessionDetail(next);
-        if (cur) commitDetail(get, set, next);
-        else commitDetail(get, set, fetched);
+        commitDetail(get, set, next);
         return;
       } catch {
         return;
@@ -1508,7 +1511,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().refreshSessions();
     // Seed cache so selectSession paints once (empty new chat) instead of
     // empty-stub → GET refill.
-    rememberSessionDetail({ ...session, messages: [], slashCommands: [] });
+    rememberSessionDetail({ ...session, messages: [] });
     await get().selectSession(session.id);
     if (slashListStillLoading(get().activeSession?.slashCommands)) {
       pollSlashCommands(session.id, get, set);

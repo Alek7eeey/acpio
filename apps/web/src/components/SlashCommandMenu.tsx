@@ -36,11 +36,20 @@ function SlashCommandMenuInner({
       const rect = anchor.getBoundingClientRect();
       const width = Math.min(420, window.innerWidth - 24);
       const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
-      const maxH = Math.max(160, Math.min(window.innerHeight * 0.7, rect.top - 12));
+      const spaceAbove = rect.top - 12;
+      const spaceBelow = window.innerHeight - rect.bottom - 12;
+      const preferBelow = spaceAbove < 180 || rect.top > window.innerHeight * 0.38;
       menu.style.left = `${left}px`;
       menu.style.width = `${width}px`;
-      menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
-      menu.style.maxHeight = `${maxH}px`;
+      if (preferBelow) {
+        menu.style.top = `${rect.bottom + 8}px`;
+        menu.style.bottom = "auto";
+        menu.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.7, spaceBelow))}px`;
+      } else {
+        menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+        menu.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.7, spaceAbove))}px`;
+      }
       menu.scrollTop = 0;
     };
     place();
