@@ -19,6 +19,7 @@ import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
+import { firstUserTitleLine, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
@@ -49,34 +50,16 @@ function headerFolderLabel(cwd: string | null | undefined) {
   return leaf.length <= 28 ? leaf : `…${leaf.slice(-26)}`;
 }
 
-function firstUserMessageLine(messages: MessageDto[] | undefined): string {
-  if (!messages?.length) return "";
-  const user = messages.find((m) => m.role === "user");
-  if (!user) return "";
-  const text = user.parts
-    .filter((p) => p.type === "text")
-    .map((p) => String(p.payload.text ?? ""))
-    .join("\n")
-    .trim();
-  return text.split(/\r?\n/)[0]?.trim() ?? "";
-}
-
-/** Prefer the full first user line when the stored title was clipped (~80 chars). */
 function headerChatTitle(
   session: SessionDto,
   messages: MessageDto[] | undefined,
 ): string {
   const stored = session.title.trim();
-  const fromMsg = firstUserMessageLine(messages);
-  if (
-    fromMsg &&
-    fromMsg.startsWith(stored) &&
-    fromMsg.length > stored.length &&
-    stored.length >= 60
-  ) {
-    return fromMsg;
+  const fromMsg = firstUserTitleLine(messages);
+  if (fromMsg && stored && fromMsg.startsWith(stored) && fromMsg.length > stored.length) {
+    return truncateSessionTitle(fromMsg);
   }
-  return stored || fromMsg;
+  return stored || (fromMsg ? truncateSessionTitle(fromMsg) : "");
 }
 
 function readStoredWidth() {

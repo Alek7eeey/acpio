@@ -31,6 +31,8 @@ import {
   type SessionDto,
   type SlashCommandDto,
   type SubagentCardUpdate,
+  titleFromUserText,
+  mcpHttpHeaders,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
@@ -2180,11 +2182,7 @@ export async function runPrompt(
   }
 
   if (opts.titleHint) {
-    const title = opts.titleHint
-      .trim()
-      .split(/\r?\n/)[0]
-      ?.trim()
-      .slice(0, 500);
+    const title = titleFromUserText(opts.titleHint);
     if (title) {
       await updateSession(sessionId, { title });
     }
@@ -2255,6 +2253,9 @@ async function runTurn(
 
   try {
     const client = await acpReady;
+    if (!client.sessionId) {
+      throw new Error("Agent session is not ready");
+    }
     let promptText = isAgentSlashPrompt(promptUserText) ? promptUserText.trim() : promptUserText;
     if (priorTranscript && !isAgentSlashPrompt(promptUserText)) {
       promptText =
@@ -2522,6 +2523,13 @@ export async function probeAgent(
   });
   probeInflight.set(selected, work);
   return work;
+}
+
+export function resetAllAgentSessions() {
+  for (const rt of runtimes.values()) {
+    resetAcpClient(rt);
+  }
+  rememberedSlashCommands.clear();
 }
 
 function resetAcpClient(rt: SessionRuntime) {
