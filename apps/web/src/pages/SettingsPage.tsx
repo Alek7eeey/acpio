@@ -29,6 +29,7 @@ import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import { showToast } from "../lib/toast";
+import { truncateSessionTitle } from "../lib/sessionTitle";
 import styles from "./SettingsPage.module.css";
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
@@ -126,6 +127,30 @@ function ChatConfigRows({
                 onClick={() =>
                   patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
                 }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.thoughtsChipStyle")} hint={t("settings.thoughtsChipStyleHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["full", t("settings.thoughtsChipStyleFull")],
+              ["icon", t("settings.thoughtsChipStyleIcon")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.thoughtsChipStyle ?? "full") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patch("thoughtsChipStyle", id)}
               >
                 {label}
               </button>
@@ -656,6 +681,10 @@ export function SettingsPage() {
       name,
       url,
       token: mcpDraft.type === "remote" && token ? token : undefined,
+      headers:
+        mcpDraft.type === "remote"
+          ? (mcpDraft.headers ?? []).filter((h) => h.name.trim())
+          : undefined,
       command: undefined,
       args: undefined,
     };
@@ -1563,6 +1592,21 @@ export function SettingsPage() {
                   label={t("settings.resumeAgentContext")}
                 />
               </SettingRow>
+              <SettingRow label={t("settings.resetAgents")} hint={t("settings.resetAgentsHint")}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    void api.resetAgents().then(() => {
+                      showToast(t("settings.resetAgentsDone"), { tone: "success" });
+                    }).catch((err) => {
+                      showToast(err instanceof Error ? err.message : String(err), { tone: "danger" });
+                    });
+                  }}
+                >
+                  {t("settings.resetAgents")}
+                </button>
+              </SettingRow>
 
               <SettingRow label={t("settings.multitask")} hint={t("settings.multitaskHint")}>
                 <Toggle
@@ -1810,6 +1854,7 @@ export function SettingsPage() {
                   type: "local",
                   url: "",
                   token: "",
+                  headers: [],
                 })
               }
             >
@@ -1847,6 +1892,7 @@ export function SettingsPage() {
                   onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
                 />
                 {mcpDraft.type === "remote" && (
+                  <>
                   <input
                     className={styles.mcpInput}
                     type="password"
@@ -1854,6 +1900,57 @@ export function SettingsPage() {
                     value={mcpDraft.token ?? ""}
                     onChange={(e) => setMcpDraft({ ...mcpDraft, token: e.target.value })}
                   />
+                  <div className={styles.mcpHeadersBlock}>
+                    <div className={styles.mcpHeadersLabel}>{t("settings.mcpHeaders")}</div>
+                    {(mcpDraft.headers ?? []).map((row, index) => (
+                      <div key={index} className={styles.mcpHeaderRow}>
+                        <input
+                          className={styles.mcpInput}
+                          placeholder={t("settings.mcpHeaderName")}
+                          value={row.name}
+                          onChange={(e) => {
+                            const headers = [...(mcpDraft.headers ?? [])];
+                            headers[index] = { ...row, name: e.target.value };
+                            setMcpDraft({ ...mcpDraft, headers });
+                          }}
+                        />
+                        <input
+                          className={styles.mcpInput}
+                          placeholder={t("settings.mcpHeaderValue")}
+                          value={row.value}
+                          onChange={(e) => {
+                            const headers = [...(mcpDraft.headers ?? [])];
+                            headers[index] = { ...row, value: e.target.value };
+                            setMcpDraft({ ...mcpDraft, headers });
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className={styles.secondaryBtn}
+                          aria-label={t("common.delete")}
+                          onClick={() => {
+                            const headers = (mcpDraft.headers ?? []).filter((_, i) => i !== index);
+                            setMcpDraft({ ...mcpDraft, headers });
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() =>
+                        setMcpDraft({
+                          ...mcpDraft,
+                          headers: [...(mcpDraft.headers ?? []), { name: "", value: "" }],
+                        })
+                      }
+                    >
+                      + {t("settings.mcpHeaderAdd")}
+                    </button>
+                  </div>
+                  </>
                 )}
                 <div className={styles.mcpFormActions}>
                   <button
@@ -1932,7 +2029,7 @@ export function SettingsPage() {
                     { value: "", label: t("diagnostics.chatNone") },
                     ...sessions.map((s) => ({
                       value: s.id,
-                      label: s.title || s.id.slice(0, 8),
+                      label: truncateSessionTitle(s.title || s.id.slice(0, 8)),
                       hint:
                         s.id === activeSessionId
                           ? `${s.provider} · ${t("diagnostics.chatActive")}`

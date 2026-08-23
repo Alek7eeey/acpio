@@ -980,6 +980,23 @@
   flex-wrap: wrap;
 }
 
+.mcpHeadersBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.mcpHeadersLabel {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.mcpHeaderRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .primaryBtn {
   justify-self: start;
   border: none;
