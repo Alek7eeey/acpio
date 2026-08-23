@@ -170,7 +170,7 @@ export function CreateSessionFolderPicker({
   }, []);
 
   useEffect(() => {
-    if (!provider || lockFolder || !onOpenExisting) {
+    if (!provider || !onOpenExisting) {
       setExisting([]);
       setExistingLoading(false);
       return;
@@ -353,7 +353,7 @@ export function CreateSessionFolderPicker({
   );
 
   const existingHover =
-    onOpenExisting && provider && !lockFolder ? (
+    onOpenExisting && provider ? (
       <div
         ref={existingRowRef}
         className={styles.pickerAgentHover}
@@ -447,27 +447,114 @@ export function CreateSessionFolderPicker({
           </div>
           <div className={styles.pickerHead}>{t("common.pickAgent")}</div>
           {onlineAgents.length ? (
-            <div className={styles.pickerList}>
-              {onlineAgents.map((a) => (
-                <button
-                  key={a.id}
-                  type="button"
-                  className={`${styles.pickerItem}${
-                    provider === a.id ? ` ${styles.pickerItemActive}` : ""
+            <div
+              ref={agentRowRef}
+              className={styles.pickerAgentHover}
+              onPointerEnter={() => {
+                if (!mobileSheet) openAgentMenu();
+              }}
+              onPointerLeave={scheduleCloseAgentMenu}
+            >
+              <button
+                type="button"
+                className={styles.pickerAction}
+                disabled={busy}
+                aria-expanded={agentMenuOpen}
+                aria-haspopup="listbox"
+                onClick={() => setAgentMenuOpen((v) => !v)}
+                onFocus={() => {
+                  if (!mobileSheet) openAgentMenu();
+                }}
+              >
+                <span className={styles.pickerItemIcon} aria-hidden>
+                  {agentIcon}
+                </span>
+                <span className={styles.pickerActionLabel}>
+                  {onlineAgents.find((a) => a.id === provider)?.label ?? t("common.pickAgent")}
+                </span>
+                <span
+                  className={`${styles.pickerActionChevron}${
+                    agentMenuOpen ? ` ${styles.pickerActionChevronOpen}` : ""
                   }`}
-                  disabled={busy}
-                  onClick={() => void confirmPath(lockedPath, a.id)}
+                  aria-hidden
                 >
-                  <span className={styles.pickerItemIcon} aria-hidden>
-                    {agentIcon}
-                  </span>
-                  <span className={styles.pickerItemPath}>{a.label}</span>
-                </button>
-              ))}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M9 5l7 7-7 7"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+              </button>
+              {agentMenuOpen && mobileSheet ? (
+                <div className={styles.pickerNestedModels} role="listbox" aria-label={t("common.pickAgent")}>
+                  {onlineAgents.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      role="option"
+                      aria-selected={provider === a.id}
+                      className={`${styles.pickerItem}${
+                        provider === a.id ? ` ${styles.pickerItemActive}` : ""
+                      }`}
+                      disabled={busy}
+                      onClick={() => {
+                        setProvider(a.id);
+                        setAgentMenuOpen(false);
+                        void confirmPath(lockedPath, a.id);
+                      }}
+                    >
+                      <span className={styles.pickerItemIcon} aria-hidden>
+                        {agentIcon}
+                      </span>
+                      <span className={styles.pickerItemPath}>{a.label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {agentMenuOpen && !mobileSheet ? (
+                <div
+                  ref={agentSubmenuRef}
+                  className={styles.pickerSubmenu}
+                  role="listbox"
+                  aria-label={t("common.pickAgent")}
+                  onPointerEnter={openAgentMenu}
+                  onPointerLeave={scheduleCloseAgentMenu}
+                >
+                  <div className={styles.pickerSubmenuList}>
+                    {onlineAgents.map((a) => (
+                      <button
+                        key={a.id}
+                        type="button"
+                        role="option"
+                        aria-selected={provider === a.id}
+                        className={`${styles.pickerItem}${
+                          provider === a.id ? ` ${styles.pickerItemActive}` : ""
+                        }`}
+                        disabled={busy}
+                        onClick={() => {
+                          setProvider(a.id);
+                          setAgentMenuOpen(false);
+                          void confirmPath(lockedPath, a.id);
+                        }}
+                      >
+                        <span className={styles.pickerItemIcon} aria-hidden>
+                          {agentIcon}
+                        </span>
+                        <span className={styles.pickerItemPath}>{a.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
           )}
+          {existingHover}
           {error ? <p className={styles.popoverError}>{error}</p> : null}
         </>
       ) : (
