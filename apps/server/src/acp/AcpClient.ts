@@ -22,6 +22,7 @@ import {
   type AppSettings,
   type HarnessAdapter,
   type McpServerConfig,
+  mcpHttpHeaders,
 } from "@acprocess/shared";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
@@ -617,10 +618,7 @@ export class AcpClient extends EventEmitter {
           name: s.name,
           type: "http",
           url: s.url!.trim(),
-          headers:
-            s.type === "remote" && s.token?.trim()
-              ? [{ name: "Authorization", value: `Bearer ${s.token.trim()}` }]
-              : [],
+          headers: mcpHttpHeaders(s),
         }));
 
       const resume = opts?.resume;

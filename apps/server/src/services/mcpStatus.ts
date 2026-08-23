@@ -1,4 +1,5 @@
 import type { McpServerConfig } from "@acprocess/shared";
+import { mcpHttpHeaders } from "@acprocess/shared";
 import { getSettings } from "./settings.js";
 
 const OK_TTL_MS = 30_000;
@@ -29,8 +30,8 @@ async function probeOne(s: McpServerConfig): Promise<boolean> {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
     };
-    if (s.type === "remote" && s.token?.trim()) {
-      headers.authorization = `Bearer ${s.token.trim()}`;
+    for (const row of mcpHttpHeaders(s)) {
+      headers[row.name.toLowerCase()] = row.value;
     }
     try {
       const res = await fetch(url, {

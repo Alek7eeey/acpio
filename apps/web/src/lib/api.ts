@@ -107,6 +107,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ provider }),
     }),
+  resetAgents: () => request<{ ok: boolean }>("/api/agent/reset", { method: "POST" }),
   fetchAdapters: () => request<AdapterMetaDto[]>("/api/adapters"),
   setSessionModel: (id: string, model: string, params?: Record<string, string>) =>
     request<{

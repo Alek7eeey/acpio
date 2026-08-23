@@ -43,6 +43,7 @@ import {
   importHarnessSession,
   restartSessionsForMcpChange,
   restartSessionMcp,
+  resetAllAgentSessions,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -122,6 +123,7 @@ const settingsSchema = z.object({
   ttsVoiceGender: z.enum(["", "female", "male"]).optional(),
   chatActions: z.array(z.string()).optional(),
   chatMetaChips: z.array(z.string()).optional(),
+  thoughtsChipStyle: z.enum(["full", "icon"]).optional(),
   chatComposerButtons: z.array(z.string()).optional(),
   chatTreeElements: z.array(z.string()).optional(),
   chatTreeMenu: z.array(z.string()).optional(),
@@ -143,6 +145,14 @@ const settingsSchema = z.object({
         args: z.array(z.string().max(300)).optional(),
         url: z.string().max(500).optional(),
         token: z.string().max(500).optional(),
+        headers: z
+          .array(
+            z.object({
+              name: z.string().max(80),
+              value: z.string().max(500),
+            }),
+          )
+          .optional(),
       }),
     )
     .optional(),
@@ -341,6 +351,11 @@ export async function registerRoutes(app: FastifyInstance) {
       .object({ provider: z.enum(adapters.ids() as [string, ...string[]]).optional() })
       .parse(req.body ?? {});
     warmModelParamsProbe(body.provider);
+    return { ok: true };
+  });
+
+  app.post("/api/agent/reset", async () => {
+    resetAllAgentSessions();
     return { ok: true };
   });
 

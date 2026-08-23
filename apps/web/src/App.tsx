@@ -52,6 +52,21 @@ export function App() {
 
   useSessionSocket(activeSessionId, remoteLock === "open" && !loading);
 
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const state = useAppStore.getState();
+      const busy =
+        state.sessions.some((s) => s.status === "running" || s.status === "waiting") ||
+        state.activeSession?.status === "running" ||
+        state.activeSession?.status === "waiting";
+      if (!busy) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
   const onSplashDone = useCallback(() => setSplashVisible(false), []);
 
   const checkingRemote = remoteLock === "unknown";
