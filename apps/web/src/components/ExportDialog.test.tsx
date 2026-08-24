@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
+import { useAppStore } from "../lib/store";
 import { ExportDialog } from "./ExportDialog";
 
 const apiMock = vi.hoisted(() => ({
@@ -16,6 +17,11 @@ const apiMock = vi.hoisted(() => ({
   openPath: vi.fn(async () => ({ ok: true, opened: "", kind: null })),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
+
+beforeEach(() => {
+  // Dialog strings are asserted in Russian; the default locale is now en.
+  useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
+});
 
 afterEach(() => {
   cleanup();

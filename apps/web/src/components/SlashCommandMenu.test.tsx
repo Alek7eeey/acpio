@@ -1,16 +1,22 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
 import type { SlashCommandDto } from "@acprocess/shared";
 import { I18nProvider } from "../lib/i18n";
+import { useAppStore } from "../lib/store";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 
 const commands: SlashCommandDto[] = [
   { name: "compact", description: "Сжать тему" },
   { name: "ask", description: "Задать вопрос", inputHint: "текст" },
 ];
+
+beforeEach(() => {
+  // Section labels are asserted in Russian; the default locale is now en.
+  useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
+});
 
 function Harness({
   open,

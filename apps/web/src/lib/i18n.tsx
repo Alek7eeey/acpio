@@ -12,7 +12,7 @@ type I18nContextValue = {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const locale = useAppStore((s) => s.settings.locale ?? "ru");
+  const locale = useAppStore((s) => s.settings.locale ?? "en");
   const t = useMemo(() => createTranslator(locale), [locale]);
 
   useEffect(() => {

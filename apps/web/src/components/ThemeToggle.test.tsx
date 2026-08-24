@@ -11,8 +11,9 @@ const apiMock = vi.hoisted(() => ({
   // Static import is impossible here: vi.mock factories are hoisted above
   // imports, so DEFAULT_SETTINGS is uninitialized at factory runtime.
   updateSettings: vi.fn(async (patch: Record<string, unknown>) => {
-    const { DEFAULT_SETTINGS: defaults } = await import("@acprocess/shared");
-    return { ...defaults, ...patch };
+    // The factory closure captures the top-level import binding, which is
+    // initialized by the time the mock is called (only used inside tests).
+    return { ...useAppStore.getState().settings, ...patch };
   }),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -41,21 +42,21 @@ afterEach(() => {
 
 describe("ThemeToggle", () => {
   it("shows the dark-theme label while in light mode", () => {
-    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "light" } });
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "light", locale: "ru" } });
     renderToggle();
     const button = screen.getByRole("button", { name: "Тёмная тема" });
     expect(button.getAttribute("data-mode")).toBe("light");
   });
 
   it("shows the light-theme label while in dark mode", () => {
-    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "dark" } });
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "dark", locale: "ru" } });
     renderToggle();
     const button = screen.getByRole("button", { name: "Светлая тема" });
     expect(button.getAttribute("data-mode")).toBe("dark");
   });
 
   it("flips the store theme to dark on click", async () => {
-    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "light" } });
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "light", locale: "ru" } });
     const user = userEvent.setup();
     renderToggle();
     await user.click(screen.getByRole("button", { name: "Тёмная тема" }));
@@ -66,7 +67,7 @@ describe("ThemeToggle", () => {
   });
 
   it("flips back to light on a second click", async () => {
-    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "dark" } });
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, theme: "dark", locale: "ru" } });
     const user = userEvent.setup();
     renderToggle();
     await user.click(screen.getByRole("button", { name: "Светлая тема" }));

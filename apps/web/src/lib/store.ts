@@ -799,7 +799,7 @@ async function loadAppData(
   const settings = { ...DEFAULT_SETTINGS, ...(await api.getSettings()) };
   const theme = storedTheme ?? settings.theme ?? "light";
   const locale =
-    storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "ru";
+    storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "en";
   get().applyTheme(theme);
   get().applyLocale(locale);
   applyAppearance(settings);

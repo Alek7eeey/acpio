@@ -10,21 +10,21 @@ const catalogs: Record<AppLocale, Messages> = { en, ru: ru as Messages };
 export const SUPPORTED_LOCALES: AppLocale[] = ["ru", "en"];
 
 export function normalizeLocale(raw?: string | null): AppLocale {
-  if (!raw) return "ru";
+  if (!raw) return "en";
   const lower = raw.trim().toLowerCase();
   if (lower === "en" || lower.startsWith("en-")) return "en";
   if (lower === "ru" || lower.startsWith("ru-")) return "ru";
-  return "ru";
+  return "en";
 }
 
 export function parseAcceptLanguage(header?: string | null): AppLocale {
-  if (!header) return "ru";
+  if (!header) return "en";
   const parts = header.split(",").map((p) => p.trim().split(";")[0]?.toLowerCase() ?? "");
   for (const part of parts) {
     if (part.startsWith("en")) return "en";
     if (part.startsWith("ru")) return "ru";
   }
-  return "ru";
+  return "en";
 }
 
 function getByPath(messages: Messages, key: string): string | undefined {

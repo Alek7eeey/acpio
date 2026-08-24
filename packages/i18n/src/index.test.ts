@@ -13,9 +13,9 @@ import {
 
 describe("normalizeLocale", () => {
   it.each<[string | null | undefined, AppLocale]>([
-    [undefined, "ru"],
-    [null, "ru"],
-    ["", "ru"],
+    [undefined, "en"],
+    [null, "en"],
+    ["", "en"],
     ["ru", "ru"],
     ["ru-RU", "ru"],
     ["ru-ru", "ru"],
@@ -25,9 +25,9 @@ describe("normalizeLocale", () => {
     ["EN", "en"],
     [" EN ", "en"],
     ["EN-us", "en"],
-    ["fr", "ru"],
-    ["de-DE", "ru"],
-    ["zh-CN", "ru"],
+    ["fr", "en"],
+    ["de-DE", "en"],
+    ["zh-CN", "en"],
   ])("normalizeLocale(%j) -> %s", (raw, expected) => {
     expect(normalizeLocale(raw)).toBe(expected);
   });
@@ -35,16 +35,16 @@ describe("normalizeLocale", () => {
 
 describe("parseAcceptLanguage", () => {
   it.each<[string | null | undefined, AppLocale]>([
-    [undefined, "ru"],
-    [null, "ru"],
-    ["", "ru"],
+    [undefined, "en"],
+    [null, "en"],
+    ["", "en"],
     ["en-US,en;q=0.9", "en"],
     ["ru-RU,ru;q=0.9,en;q=0.8", "ru"],
     ["fr-FR,fr;q=0.9,en;q=0.8", "en"],
     ["de,ru;q=0.5", "ru"],
-    ["fr;q=0.9,es;q=0.8", "ru"],
+    ["fr;q=0.9,es;q=0.8", "en"],
     ["zh-CN,en-US", "en"],
-    ["*;q=0.1", "ru"],
+    ["*;q=0.1", "en"],
     ["ru, en", "ru"],
     ["fr-CH, fr;q=0.9, en;q=0.8, ru;q=0.7", "en"],
     ["en;q=0.9,ru;q=0.8", "en"],

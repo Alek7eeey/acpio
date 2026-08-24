@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
+import { useAppStore } from "../lib/store";
 import { ModelPicker } from "./ModelPicker";
 
 const models = [
@@ -22,6 +23,8 @@ function renderPicker(props: Partial<Parameters<typeof ModelPicker>[0]> = {}) {
 }
 
 beforeEach(() => {
+  // Search strings are asserted in Russian; the default locale is now en.
+  useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
   // jsdom lacks both matchMedia and scrollIntoView; the menu placement reads
   // matchMedia on open and the layout effect scrolls the selected row.
   HTMLElement.prototype.scrollIntoView = vi.fn();

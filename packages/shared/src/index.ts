@@ -495,7 +495,7 @@ export interface AppSettings {
 
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
-  locale: "ru",
+  locale: "en",
   displayName: "",
   connectedProvider: null,
   defaultProvider: "cursor",

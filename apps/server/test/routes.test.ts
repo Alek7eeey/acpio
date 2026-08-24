@@ -119,12 +119,12 @@ describe("health & settings", () => {
     expect(res.json()).toEqual({ path: path.join(REPO_ROOT, "exports") });
   });
 
-  it("GET /api/settings returns defaults (theme light, locale ru, no provider)", async () => {
+  it("GET /api/settings returns defaults (theme light, locale en, no provider)", async () => {
     const res = await app.inject({ method: "GET", url: "/api/settings" });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.theme).toBe("light");
-    expect(body.locale).toBe("ru");
+    expect(body.locale).toBe("en");
     expect(body.connectedProvider).toBeNull();
     expect(body.defaultProvider).toBe("cursor");
     expect(body.ompCommand).toBe("omp");
@@ -207,7 +207,7 @@ describe("sessions", () => {
   it("POST /api/sessions without a reachable agent → 400", async () => {
     const res = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe("Агент этого чата сейчас недоступен на этом компьютере");
+    expect(res.json().error).toBe("This chat's agent is not running on this PC");
   });
 
   it("POST /api/sessions with connected agent → 200 with id; detail shows warmed acpSessionId", async () => {
@@ -218,7 +218,7 @@ describe("sessions", () => {
     expect(res.statusCode).toBe(200);
     const session = res.json();
     expect(session.id).toBeTruthy();
-    expect(session.title).toBe("Новый чат");
+    expect(session.title).toBe("New chat");
     expect(session.provider).toBe("omp");
     expect(session.mode).toBe("agent");
     expect(session.pinned).toBe(false);

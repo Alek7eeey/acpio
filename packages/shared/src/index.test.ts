@@ -385,7 +385,7 @@ describe("toolDisplayTitle", () => {
 describe("DEFAULT_SETTINGS", () => {
   const expectedDefaults: Record<string, unknown> = {
     theme: "light",
-    locale: "ru",
+    locale: "en",
     displayName: "",
     connectedProvider: null,
     defaultProvider: "cursor",

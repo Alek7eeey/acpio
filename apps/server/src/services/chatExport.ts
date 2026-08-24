@@ -341,7 +341,7 @@ export async function buildExport(
   const detail = await getSessionDetail(sessionId);
   if (!detail) return null;
   const settings = await getSettings();
-  const locale = settings.locale ?? "ru";
+  const locale = settings.locale ?? "en";
   const content = format === "json" ? renderJson(detail) : renderMarkdown(detail, locale);
   return { detail, content, fileName: exportFileName(detail, format) };
 }

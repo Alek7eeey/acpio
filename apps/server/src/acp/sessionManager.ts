@@ -2122,7 +2122,7 @@ export async function runPrompt(
   opts: TurnOpts,
 ) {
   const settings = await getSettings();
-  const locale = settings.locale ?? "ru";
+  const locale = settings.locale ?? "en";
   let rt = getRuntime(sessionId);
 
   let promptUserText = text;
@@ -2272,7 +2272,7 @@ async function runTurn(
   settings: AppSettings,
   acpReady: Promise<AcpClient>,
 ) {
-  const locale = settings.locale ?? "ru";
+  const locale = settings.locale ?? "en";
   rt.running = true;
   rt.streamGen += 1;
   rt.acceptingStream = true;
