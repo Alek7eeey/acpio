@@ -473,6 +473,68 @@
   color: var(--text-secondary);
 }
 
+.modelSearch {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 2px 4px 6px;
+}
+
+.modelSearchIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.modelSearchInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 7px 28px 7px 32px;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.modelSearchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.modelSearchInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.modelSearchClear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.modelSearchClear:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.modelSearchClear svg {
+  display: block;
+}
+
 .modelEmpty {
   padding: 12px 10px;
   color: var(--text-secondary);

@@ -214,6 +214,9 @@ export function ModelPicker({
   const effortPrefix = t("models.effort");
   const contextPrefix = t("models.context");
   const [open, setOpen] = useState(false);
+  /** Filter typed into the model list. */
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   /** ⋯ popup open for this model value. */
   const [paramsFor, setParamsFor] = useState<string | null>(null);
   const [localParamsBusy, setLocalParamsBusy] = useState(false);
@@ -244,6 +247,13 @@ export function ModelPicker({
       })),
     [models, defaultModelLabel],
   );
+  const q = query.trim().toLowerCase();
+  const visibleOptions = useMemo(() => {
+    if (!q) return options;
+    return options.filter(
+      (m) => m.name.toLowerCase().includes(q) || m.value.toLowerCase().includes(q),
+    );
+  }, [options, q]);
   const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
   const paramChips = useMemo(
     () => (paramsBusy ? [] : activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix)),
@@ -308,8 +318,21 @@ export function ModelPicker({
     if (!open) {
       closeParams();
       setLocalParamsBusy(false);
+      setQuery("");
     }
   }, [open]);
+
+  // Focus the filter when the dropdown opens, and drop the params flyout
+  // while the user types (its row may be filtered out from under it).
+  useEffect(() => {
+    if (!open) return;
+    if (options.length > 0) searchRef.current?.focus();
+  }, [open, options.length]);
+
+  useEffect(() => {
+    if (q) closeParams();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
 
   // On phones, pin the menu to the viewport with side padding so it doesn't hug the left edge.
   useLayoutEffect(() => {
@@ -373,7 +396,7 @@ export function ModelPicker({
     const row = rowRefs.current.get(model);
     if (!row) return;
     row.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [open, model, options.length]);
+  }, [open, model, visibleOptions.length]);
 
   useLayoutEffect(() => {
     if (!paramsFor) return;
@@ -652,11 +675,51 @@ export function ModelPicker({
           role="listbox"
         >
           <div className={styles.modelMenuHead}>{t("common.model")}</div>
-          {options.length === 0 && (
+          {options.length === 0 ? (
             <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
+          ) : (
+            <div className={styles.modelSearch}>
+              <svg className={styles.modelSearchIcon} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                ref={searchRef}
+                className={styles.modelSearchInput}
+                type="text"
+                value={query}
+                placeholder={t("common.modelSearchPlaceholder")}
+                aria-label={t("common.modelSearchPlaceholder")}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && query) {
+                    e.stopPropagation();
+                    setQuery("");
+                  }
+                }}
+              />
+              {query && (
+                <button
+                  type="button"
+                  className={styles.modelSearchClear}
+                  aria-label={t("common.modelSearchClear")}
+                  onClick={() => {
+                    setQuery("");
+                    searchRef.current?.focus();
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          )}
+          {options.length > 0 && q && visibleOptions.length === 0 && (
+            <div className={styles.modelEmpty}>{t("common.modelSearchEmpty")}</div>
           )}
           <div className={styles.modelList} ref={listRef}>
-            {options.map((m) => {
+            {visibleOptions.map((m) => {
               const selected = m.value === model;
               const rowActive = paramsFor === m.value;
               return (
