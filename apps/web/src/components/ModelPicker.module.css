@@ -546,6 +546,12 @@
   line-height: 1.4;
 }
 
+.modelEmptyLoading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .modelOption {
   width: 100%;
   max-width: 100%;

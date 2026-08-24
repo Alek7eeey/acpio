@@ -229,7 +229,6 @@ export function ModelPicker({
   const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const paramsReqRef = useRef(0);
-  const locked = disabled || loading;
   const paramsBusy = paramsLoading || localParamsBusy;
   const resolvedParams = useMemo(
     () => resolveParamValues(params, paramValues),
@@ -307,12 +306,14 @@ export function ModelPicker({
   };
 
   useEffect(() => {
-    if (locked) {
+    // Hard-disabled pickers close; merely loading keeps the menu open so it
+    // can show the loading state and then the populated list.
+    if (disabled) {
       setOpen(false);
       closeParams();
       setLocalParamsBusy(false);
     }
-  }, [locked]);
+  }, [disabled]);
 
   useEffect(() => {
     if (!open) {
@@ -389,7 +390,7 @@ export function ModelPicker({
       window.visualViewport?.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("scroll", place);
     };
-  }, [open, placement, locked]);
+  }, [open, placement, disabled]);
 
   useLayoutEffect(() => {
     if (!open || !model || !listRef.current) return;
@@ -598,18 +599,18 @@ export function ModelPicker({
         type="button"
         className={`${styles.modelTrigger} ${variant === "block" ? styles.modelTriggerBlock : ""} ${
           open ? styles.modelTriggerOpen : ""
-        } ${locked ? styles.modelTriggerDisabled : ""}`}
+        } ${disabled ? styles.modelTriggerDisabled : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-busy={loading || undefined}
-        disabled={locked}
+        disabled={disabled}
         title={
           loading
             ? t("common.loadingModelsList")
             : [model || t("common.model"), paramSummary].filter(Boolean).join(" · ")
         }
         onClick={() => {
-          if (locked) return;
+          if (disabled) return;
           setOpen((v) => {
             const next = !v;
             if (next) onOpen?.();
@@ -668,7 +669,7 @@ export function ModelPicker({
         </span>
       </button>
 
-      {open && !locked && (
+      {open && !disabled && (
         <div
           ref={menuRef}
           className={`${styles.modelMenu} ${placement === "down" ? styles.modelMenuDown : ""}`}
@@ -676,7 +677,14 @@ export function ModelPicker({
         >
           <div className={styles.modelMenuHead}>{t("common.model")}</div>
           {options.length === 0 ? (
-            <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
+            loading ? (
+              <div className={`${styles.modelEmpty} ${styles.modelEmptyLoading}`} aria-busy="true">
+                <span className={styles.paramsSpinner} aria-hidden />
+                <span>{t("common.loadingModels")}</span>
+              </div>
+            ) : (
+              <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
+            )
           ) : (
             <div className={styles.modelSearch}>
               <svg className={styles.modelSearchIcon} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>

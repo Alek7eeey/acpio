@@ -119,4 +119,23 @@ describe("ModelPicker", () => {
     expect(screen.getAllByRole("option")).toHaveLength(3);
     expect((screen.getByPlaceholderText("Поиск моделей…") as HTMLInputElement).value).toBe("");
   });
+
+  it("shows a loading message instead of the empty list while models are loading", async () => {
+    const user = userEvent.setup();
+    // The trigger stays clickable while loading so the menu can show progress.
+    renderPicker({ models: [], loading: true });
+    await user.click(screen.getByRole("button", { name: "Загрузка…" }));
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    expect(screen.getByText("Загрузка моделей…")).toBeTruthy();
+    expect(screen.queryByText("Список пуст")).toBeNull();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+  });
+
+  it("falls back to the empty-list message once loading finishes", async () => {
+    const user = userEvent.setup();
+    renderPicker({ models: [], loading: false, model: "" });
+    await user.click(screen.getByRole("button", { name: "Выбрать модель" }));
+    expect(screen.getByText("Список пуст")).toBeTruthy();
+    expect(screen.queryByText("Загрузка моделей…")).toBeNull();
+  });
 });

@@ -4751,8 +4751,8 @@ function ChatThread() {
                   params={stableParams}
                   paramValues={modelParamValues}
                   paramsLoading={paramsLoading}
-                  loading={composerLocked}
-                  disabled={composerLocked}
+                  loading={composerLocked || modelsLoading}
+                  disabled={agentMissing || agentOffline}
                   onOpen={() => {
                     if (!agentProvider) return;
                     void api.warmModelParams(agentProvider);
