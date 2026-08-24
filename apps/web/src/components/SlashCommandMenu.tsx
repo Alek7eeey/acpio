@@ -11,6 +11,10 @@ type SlashCommandMenuProps = {
   activeIndex: number;
   scrollActiveIntoView?: boolean;
   anchorRef: React.RefObject<HTMLElement | null>;
+  /** Open above the anchor when true (default). */
+  preferAbove?: boolean;
+  loading?: boolean;
+  loadingLabel?: string;
   onSelect: (command: SlashCommandDto) => void;
   onActiveIndexChange: (index: number) => void;
 };
@@ -21,6 +25,9 @@ function SlashCommandMenuInner({
   activeIndex,
   scrollActiveIntoView = false,
   anchorRef,
+  preferAbove = true,
+  loading = false,
+  loadingLabel = "",
   onSelect,
   onActiveIndexChange,
 }: SlashCommandMenuProps) {
@@ -36,26 +43,33 @@ function SlashCommandMenuInner({
       const rect = anchor.getBoundingClientRect();
       const width = Math.min(420, window.innerWidth - 24);
       const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
-      const spaceAbove = rect.top - 12;
-      const spaceBelow = window.innerHeight - rect.bottom - 12;
-      const preferBelow = spaceAbove < 180 || rect.top > window.innerHeight * 0.38;
+      const margin = 12;
+      const headerBottom =
+        Number.parseFloat(
+          getComputedStyle(document.documentElement).getPropertyValue("--header-height"),
+        ) || 52;
+      const spaceAbove = rect.top - Math.max(margin, headerBottom + 8);
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const openAbove = preferAbove
+        ? spaceAbove >= 120 || spaceAbove >= spaceBelow
+        : spaceBelow >= 120 && spaceBelow > spaceAbove;
       menu.style.left = `${left}px`;
       menu.style.width = `${width}px`;
-      if (preferBelow) {
-        menu.style.top = `${rect.bottom + 8}px`;
-        menu.style.bottom = "auto";
-        menu.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.7, spaceBelow))}px`;
-      } else {
+      if (openAbove) {
         menu.style.top = "auto";
         menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
-        menu.style.maxHeight = `${Math.max(160, Math.min(window.innerHeight * 0.7, spaceAbove))}px`;
+        menu.style.maxHeight = `${Math.max(120, spaceAbove - 8)}px`;
+      } else {
+        menu.style.bottom = "auto";
+        menu.style.top = `${rect.bottom + 8}px`;
+        menu.style.maxHeight = `${Math.max(120, spaceBelow - 8)}px`;
       }
       menu.scrollTop = 0;
     };
     place();
     window.addEventListener("resize", place);
     return () => window.removeEventListener("resize", place);
-  }, [open, anchorRef]);
+  }, [open, anchorRef, preferAbove, loading]);
 
   useLayoutEffect(() => {
     if (!open || !scrollActiveIntoView || !menuRef.current) return;
@@ -71,7 +85,18 @@ function SlashCommandMenuInner({
     }
   }, [activeIndex, open, scrollActiveIntoView]);
 
-  if (!open || commands.length === 0) return null;
+  if (!open) return null;
+
+  if (loading) {
+    return createPortal(
+      <div ref={menuRef} className={styles.menu} role="status" aria-live="polite">
+        <div className={styles.loading}>{loadingLabel}</div>
+      </div>,
+      document.body,
+    );
+  }
+
+  if (commands.length === 0) return null;
 
   const items: ReactNode[] = [];
   let skillsHeading = false;
