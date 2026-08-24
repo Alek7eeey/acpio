@@ -86,6 +86,7 @@ import {
   slashCommandRequiresInput,
   splitSlashCommandHighlight,
 } from "../lib/slashCommands";
+import { slashListStillLoading } from "../lib/sessionSlashCommands";
 import styles from "./ChatPage.module.css";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
@@ -280,7 +281,7 @@ function MessageArticle({
   onRegenerate,
   activeSession,
   autoExpandSteps,
-  onManualStepsToggle,
+  stepsGlobalTick,
   keepComposerFocus,
   textareaRef,
 }: {
@@ -290,7 +291,7 @@ function MessageArticle({
   onRegenerate: () => void;
   activeSession: SessionDetailDto | null;
   autoExpandSteps: boolean;
-  onManualStepsToggle?: (open: boolean) => void;
+  stepsGlobalTick: number;
   keepComposerFocus: RefObject<boolean>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
 }) {
@@ -323,7 +324,7 @@ function MessageArticle({
           onRegenerate={onRegenerate}
           streaming={!!isLiveAssistant}
           autoExpandSteps={autoExpandSteps}
-          onManualStepsToggle={onManualStepsToggle}
+          stepsGlobalTick={stepsGlobalTick}
         />
       )}
     </article>
@@ -1423,7 +1424,7 @@ const TOOL_OUTPUT_CAP = 20000;
 // when scrolled out of the virtual window, so local useState would lose which
 // tool outputs / thought spoilers / steps blocks the user opened.
 const expandedPartIds = new Map<string, boolean>();
-import { expandedStepsByMessage } from "../lib/expandedSteps";
+import { expandedStepsByMessage, clearExpandedStepsOverrides } from "../lib/expandedSteps";
 
 /** Initial height guess for a virtualized message row; refined by measurement. */
 function estimateMessageRowHeight(msg: MessageDto | undefined): number {
@@ -1584,14 +1585,14 @@ function StepsSpoiler({
   autoExpand,
   startedAt,
   messageId,
-  onManualToggle,
+  stepsGlobalTick,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   startedAt: string;
   messageId: string;
-  onManualToggle?: (open: boolean) => void;
+  stepsGlobalTick: number;
 }) {
   const t = useT();
   const [open, setOpenState] = useState(
@@ -1601,7 +1602,6 @@ function StepsSpoiler({
     setOpenState((prev) => {
       const value = typeof next === "function" ? next(prev) : next;
       expandedStepsByMessage.set(messageId, value);
-      onManualToggle?.(value);
       return value;
     });
   };
@@ -1643,14 +1643,13 @@ function StepsSpoiler({
   useEffect(() => {
     if (prevAutoExpandRef.current === autoExpand) return;
     prevAutoExpandRef.current = autoExpand;
-    if (expandedStepsByMessage.has(messageId)) return;
     setOpen(autoExpand);
-  }, [autoExpand, setOpen, messageId]);
+  }, [autoExpand, setOpen]);
 
   useEffect(() => {
-    if (streaming) return;
-    if (expandedStepsByMessage.get(messageId) === false) setOpen(false);
-  }, [streaming, messageId, setOpen]);
+    if (stepsGlobalTick === 0) return;
+    setOpen(autoExpand);
+  }, [stepsGlobalTick, autoExpand, setOpen]);
 
   const liveHeader = streaming || holdEmptyLive;
 
@@ -2657,14 +2656,14 @@ function AssistantParts({
   onRegenerate,
   streaming,
   autoExpandSteps,
-  onManualStepsToggle,
+  stepsGlobalTick,
 }: {
   message: MessageDto;
   session: SessionDetailDto | null;
   onRegenerate: () => void;
   streaming: boolean;
   autoExpandSteps: boolean;
-  onManualStepsToggle?: (open: boolean) => void;
+  stepsGlobalTick: number;
 }) {
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
@@ -2731,7 +2730,7 @@ function AssistantParts({
         autoExpand={autoExpandSteps}
         startedAt={message.createdAt}
         messageId={message.id}
-        onManualToggle={onManualStepsToggle}
+        stepsGlobalTick={stepsGlobalTick}
       />
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
@@ -2943,21 +2942,17 @@ function ChatThread() {
       return true;
     }
   });
+  const [stepsGlobalTick, setStepsGlobalTick] = useState(0);
   const syncAutoExpandSteps = useCallback((open: boolean) => {
+    clearExpandedStepsOverrides();
     setAutoExpandSteps(open);
+    setStepsGlobalTick((tick) => tick + 1);
     try {
       localStorage.setItem("acprocess.autoExpandSteps.v2", open ? "1" : "0");
     } catch {
       /* ignore */
     }
   }, []);
-  const onManualStepsToggle = useCallback(
-    (open: boolean) => {
-      syncAutoExpandSteps(open);
-    },
-    [syncAutoExpandSteps],
-  );
-  const [composerCentered, setComposerCentered] = useState(true);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -3214,10 +3209,17 @@ function ChatThread() {
   const sessionMode = activeSession?.mode ?? settings.defaultMode;
   // Block typing while agent missing, or while models are loading with empty list.
   // Once the agent is already answering, don't keep the composer stuck on "loading models".
+  const isEmptyChat = !(activeSession?.messages.some((m) => m.role === "user"));
+  // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
   const composerLocked =
     agentMissing ||
     agentOffline ||
-    (!!agentProvider && !streaming && !agentOffline && modelsLoading && models.length === 0);
+    (!isEmptyChat &&
+      !!agentProvider &&
+      !streaming &&
+      !agentOffline &&
+      modelsLoading &&
+      models.length === 0);
 
   const slashCommands = useMemo(
     () => mergeSlashCommands(activeSession?.slashCommands, t),
@@ -3228,11 +3230,12 @@ function ChatThread() {
     if (!slashCtx) return [];
     return filterSlashCommands(slashCommands, slashCtx.query);
   }, [slashCommands, slashCtx]);
+  const slashLoading = slashListStillLoading(activeSession?.slashCommands);
   const slashMenuOpen =
     !slashMenuDismissed &&
     !streaming &&
     slashCtx != null &&
-    filteredSlashCommands.length > 0;
+    (slashLoading || filteredSlashCommands.length > 0);
 
   const slashInputHint = useMemo(() => {
     const parsed = parseSlashCommandText(text);
@@ -3285,7 +3288,6 @@ function ChatThread() {
       keepComposerFocus.current = false;
     }
     userJustSentRef.current = true;
-    setComposerCentered(false);
     const editId = editingMessageId;
     const attach = editId ? undefined : pendingFiles;
     forgetComposerDraft(composerSessionRef.current);
@@ -3691,14 +3693,10 @@ function ChatThread() {
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
-  useEffect(() => {
-    const count = activeSession?.messages.length ?? 0;
-    setComposerCentered(count === 0);
-  }, [activeSession?.id, activeSession?.messages.length]);
 
-  const emptyReady =
-    Boolean(activeSession) && !renderSkeleton && !restoring && composerCentered;
-  const restoringEmpty = Boolean(activeSession) && !renderSkeleton && messageCount === 0 && restoring;
+  const emptyReady = Boolean(activeSession) && isEmptyChat && !restoring;
+  const restoringEmpty = Boolean(activeSession) && !renderSkeleton && isEmptyChat && restoring;
+  const showThreadSkeleton = renderSkeleton && !isEmptyChat;
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
@@ -3785,7 +3783,7 @@ function ChatThread() {
         onRegenerate={() => regenerate(msg)}
         activeSession={activeSession}
         autoExpandSteps={autoExpandSteps}
-        onManualStepsToggle={onManualStepsToggle}
+        stepsGlobalTick={stepsGlobalTick}
         keepComposerFocus={keepComposerFocus}
         textareaRef={textareaRef}
       />
@@ -3996,6 +3994,10 @@ function ChatThread() {
       pendingBottomPinRef.current = false;
       return;
     }
+    if (isEmptyChat) {
+      pendingBottomPinRef.current = false;
+      return;
+    }
     // Detail for another chat may still be on screen while the new id loads.
     if (activeSession && activeSession.id !== storeActiveSessionId) return;
 
@@ -4018,6 +4020,7 @@ function ChatThread() {
     messageCount,
     lastMessageId,
     streamDigest,
+    isEmptyChat,
   ]);
 
   // Snap on send, stream tokens, and permission prompts.
@@ -4097,7 +4100,7 @@ function ChatThread() {
     >
       <div className={`${styles.mainColumn}${emptyReady || restoringEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}`}>
       <div className={styles.thread} ref={threadRef}>
-        {renderSkeleton ? (
+        {showThreadSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
             <div className={styles.skeletonTurn}>
               <div className={styles.skeletonLine} style={{ "--w": "64%" } as CSSProperties} />
@@ -4399,6 +4402,7 @@ function ChatThread() {
                 </div>
               )}
           </div>
+          {!isEmptyChat ? (
           <div
             className={`${styles.composerMetaShell} ${
               !renderSkeleton && composerMetaEdge.left ? styles.composerMetaFadeLeft : ""
@@ -4409,7 +4413,7 @@ function ChatThread() {
               ref={composerMetaRef}
               aria-busy={renderSkeleton || undefined}
             >
-              {renderSkeleton ? (
+              {renderSkeleton && !isEmptyChat ? (
                 <>
                   <span
                     className={styles.metaChipSkeleton}
@@ -4571,6 +4575,7 @@ function ChatThread() {
               </span>
             ) : null}
           </div>
+          ) : null}
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
@@ -4610,6 +4615,9 @@ function ChatThread() {
           >
             <SlashCommandMenu
               open={slashMenuOpen}
+              preferAbove
+              loading={slashLoading && slashCtx != null}
+              loadingLabel={t("common.slashCommandsLoading")}
               commands={filteredSlashCommands}
               activeIndex={slashIndex}
               scrollActiveIntoView={slashKeyboardNav}
@@ -4647,8 +4655,8 @@ function ChatThread() {
                 if (inner) inner.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
               }}
               onBlur={(e) => {
-                const next = e.relatedTarget as Node | null;
-                if (next?.closest?.('[role="listbox"]')) return;
+                const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
+                if (next?.closest('[role="listbox"]')) return;
                 setSlashMenuDismissed(true);
               }}
               onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}

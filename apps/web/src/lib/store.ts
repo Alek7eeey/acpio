@@ -410,7 +410,7 @@ let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: str
 /** Sessions for which the server has confirmed running/waiting this turn.
  *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
 const serverConfirmedBusy = new Set<string>();
-const delayedIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const delayedIdleTimers = new Map<string, number>();
 const ACTIVE_TURN_PART = new Set(["pending", "in_progress", "running"]);
 
 function sessionHasActiveTurnParts(messages: MessageDto[]) {
@@ -435,7 +435,7 @@ let probeAllAgentsInflight: Promise<void> | null = null;
 let lastProbeAllAgentsAt = 0;
 const PROBE_ALL_COOLDOWN_MS = 45_000;
 const OFFLINE_HOLD_MS = 2500;
-const offlineHoldTimers: Partial<Record<AgentProvider, ReturnType<typeof setTimeout>>> = {};
+const offlineHoldTimers: Partial<Record<AgentProvider, number>> = {};
 
 function resolveClientMessageId(messageId: string, sessionId?: string) {
   const entry = serverToClientMessageId.get(messageId);
@@ -816,7 +816,6 @@ async function loadAppData(
       ? storedId
       : sessions[0]?.id ?? null;
   if (pick) {
-    await get().selectSession(pick);
     const known = new Set(sessions.map((s) => s.id));
     const stored = readStoredChatPanes();
     const splitOn = chatSplitAllowed(get().settings.chatSplit);
@@ -826,16 +825,17 @@ async function loadAppData(
     const focus = splitOn
       ? Math.max(0, Math.min(ids.length - 1, stored?.focus ?? 0))
       : 0;
+    const focusId = ids[focus] ?? pick;
     writeStoredChatPanes(ids, focus);
-    set({ chatPaneIds: ids, focusedPaneIndex: focus });
-    const focusId = ids[focus];
-    if (focusId && focusId !== get().activeSessionId) {
-      await get().selectSession(focusId);
-      set({ chatPaneIds: ids, focusedPaneIndex: focus });
-      writeStoredChatPanes(ids, focus);
-    }
+    set({
+      activeSessionId: focusId,
+      sessionLoading: true,
+      chatPaneIds: ids,
+      focusedPaneIndex: focus,
+    });
+    void get().selectSession(focusId);
     for (const id of ids) {
-      if (!id || id === get().activeSessionId) continue;
+      if (!id || id === focusId) continue;
       void api
         .getSession(id)
         .then((detail) => commitDetail(get, set, detail))
@@ -1508,12 +1508,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
       ...(pinnedModel ? { model: pinnedModel } : {}),
     } as Partial<SessionDto>);
-    await get().refreshSessions();
-    // Seed cache so selectSession paints once (empty new chat) instead of
-    // empty-stub → GET refill.
-    rememberSessionDetail({ ...session, messages: [] });
-    await get().selectSession(session.id);
-    if (slashListStillLoading(get().activeSession?.slashCommands)) {
+    const detail: SessionDetailDto = {
+      ...session,
+      messages: [],
+      slashCommands: [],
+    };
+    rememberSessionDetail(detail);
+    set({
+      sessions: [session, ...get().sessions.filter((s) => s.id !== session.id)],
+      activeSessionId: session.id,
+      activeSession: detail,
+      sessionLoading: false,
+      sessionDetails: { ...(get().sessionDetails ?? {}), [session.id]: detail },
+      error: null,
+    });
+    syncPanesOnSelect(get, set, session.id);
+    void get().refreshSessions();
+    if (slashListStillLoading(detail.slashCommands)) {
       pollSlashCommands(session.id, get, set);
     }
     return session;
@@ -1955,7 +1966,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAgentAvailable(provider, available) {
     const pending = offlineHoldTimers[provider];
     if (pending) {
-      clearTimeout(pending);
+      window.clearTimeout(pending);
       delete offlineHoldTimers[provider];
     }
     const apply = (next: boolean) => {
@@ -1976,7 +1987,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     // Transient spawn/probe failures flip the LED for a second; wait them out.
-    offlineHoldTimers[provider] = setTimeout(() => {
+    offlineHoldTimers[provider] = window.setTimeout(() => {
       delete offlineHoldTimers[provider];
       apply(false);
     }, OFFLINE_HOLD_MS);

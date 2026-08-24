@@ -44,7 +44,7 @@ export function BootSplash({ ready, onDone }: BootSplashProps) {
     if (finishedRef.current || exiting) return;
     setSkipping(true);
     setMinElapsed(true);
-    if (readyRef.current) beginExit();
+    beginExit();
   };
 
   return (

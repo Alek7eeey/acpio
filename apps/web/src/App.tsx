@@ -73,7 +73,7 @@ export function App() {
   const ready = remoteLock === "open";
   const splashBlocking = splashVisible && showBootSplash;
   const app =
-    checkingRemote || !ready || (loading && splashBlocking) ? null : (
+    checkingRemote || !ready ? null : (
       <Routes>
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
