@@ -188,6 +188,7 @@ export const ru = {
     agentResponding: "Агент отвечает",
     waitingInput: "Ожидание ввода",
     messageOrCommand: "Сообщение или /команда…",
+    slashCommandsLoading: "Загружаем список команд…",
     connectAgentInSettings: "Подключите агента в Настройках",
     notConnected: "не подключён",
     users: "пользователей",
@@ -531,6 +532,12 @@ export const ru = {
     allowOnce: "Разрешить",
     allowAlways: "Всегда",
     reject: "Отклонить",
+  },
+  review: {
+    chooseTitle: "Review",
+    choosePrompt: "Какой обзор запустить?",
+    bugbot: "Bugbot (/review-bugbot)",
+    security: "Security Review (/review-security)",
   },
   question: {
     plan: "План",

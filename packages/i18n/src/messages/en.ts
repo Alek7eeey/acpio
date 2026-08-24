@@ -166,6 +166,7 @@ export const en = {
     agentResponding: "Agent is responding",
     waitingInput: "Waiting for input",
     messageOrCommand: "Message or /command…",
+    slashCommandsLoading: "Loading command list…",
     connectAgentInSettings: "Connect an agent in Settings",
     notConnected: "not connected",
     users: "users",
@@ -507,6 +508,12 @@ export const en = {
     allowOnce: "Allow",
     allowAlways: "Always",
     reject: "Reject",
+  },
+  review: {
+    chooseTitle: "Review",
+    choosePrompt: "Which review should run?",
+    bugbot: "Bugbot (/review-bugbot)",
+    security: "Security Review (/review-security)",
   },
   question: {
     plan: "Plan",
