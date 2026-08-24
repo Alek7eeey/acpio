@@ -539,6 +539,9 @@ class SessionRuntime {
   disposing = false;
   /** MCP config changed while a turn was running — restart the agent when it idles. */
   restartOnIdle = false;
+  /** Model+params to apply on the idle restart (set alongside restartOnIdle by setSessionModel). */
+  restartOnIdleModel: { model: string; modelParams?: Record<string, string> } | undefined =
+    undefined;
   private chain: Promise<void> = Promise.resolve();
 
   constructor(public readonly sessionId: string) {}
@@ -2153,25 +2156,12 @@ export async function runPrompt(
     rt = getRuntime(sessionId);
   }
 
-  // A deferred MCP restart (mid-turn MCP edit) must land BEFORE the next turn:
-  // a direct prompt would otherwise run on the stale agent with the old MCP
-  // list (the same race dequeueTurn already guards for queued turns).
+  // A deferred restart (mid-turn MCP/model edit) must land BEFORE the next
+  // turn: a direct prompt would otherwise run on the stale agent with the old
+  // MCP list/model (the same race dequeueTurn already guards for queued turns).
   if (rt.restartOnIdle) {
     rt.restartOnIdle = false;
-    const pendingDetail = await getSessionDetail(sessionId);
-    if (pendingDetail?.provider && pendingDetail.status !== "closed") {
-      const snapshot = liveModelSnapshot(rt);
-      resetAcpClient(rt);
-      try {
-        await ensureAcp(
-          sessionId,
-          { provider: pendingDetail.provider, cwd: pendingDetail.cwd, mode: pendingDetail.mode },
-          snapshot,
-        );
-      } catch (err) {
-        console.error(`[acp:${sessionId}] deferred MCP restart failed`, err);
-      }
-    }
+    await applyDeferredRestart(rt);
   }
 
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
@@ -2388,30 +2378,38 @@ async function runTurn(
   }
 }
 
+/**
+ * Apply a deferred agent restart (MCP list or model changed while a turn was
+ * running). Prefers an explicit pending model (setSessionModel) over the
+ * current live snapshot. No-op when the session is gone/closed.
+ */
+async function applyDeferredRestart(rt: SessionRuntime) {
+  const detail = await getSessionDetail(rt.sessionId);
+  if (!detail?.provider || detail.status === "closed") return;
+  const pendingModel = rt.restartOnIdleModel;
+  rt.restartOnIdleModel = undefined;
+  const snapshot = pendingModel ?? liveModelSnapshot(rt);
+  resetAcpClient(rt);
+  try {
+    await ensureAcp(
+      rt.sessionId,
+      { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
+      snapshot,
+    );
+  } catch (err) {
+    console.error(`[acp:${rt.sessionId}] deferred restart failed`, err);
+  }
+}
+
 /** Start the next FIFO-queued turn, if any (after the current turn finished). */
 async function dequeueTurn(rt: SessionRuntime) {
   if (rt.running) return;
-  // MCP servers were re-configured while the previous turn was running — the
-  // OMP/Cursor protocol only accepts mcpServers at session/new, so swap in a
-  // fresh agent before the next queued turn picks up the old MCP list.
+  // MCP servers / the model were re-configured while the previous turn was
+  // running — the OMP/Cursor protocol only accepts those at session/new, so
+  // swap in a fresh agent before the next queued turn picks up the old ones.
   if (rt.restartOnIdle) {
     rt.restartOnIdle = false;
-    try {
-      const detail = await import("../services/sessions.js").then((m) =>
-        m.getSessionDetail(rt.sessionId),
-      );
-      if (detail?.provider && detail.status !== "closed") {
-        const snapshot = liveModelSnapshot(rt);
-        resetAcpClient(rt);
-        await ensureAcp(
-          rt.sessionId,
-          { provider: detail.provider, cwd: detail.cwd, mode: detail.mode },
-          snapshot,
-        );
-      }
-    } catch (err) {
-      console.error(`[acp:${rt.sessionId}] restart after MCP change failed`, err);
-    }
+    await applyDeferredRestart(rt);
   }
   const next = rt.turnQueue.shift();
   if (!next) return;
@@ -2755,6 +2753,15 @@ export async function setSessionModel(
   });
 
   const rt = runtimes.get(sessionId);
+  if (rt?.running) {
+    // A turn is generating on the live ACP process. Killing it mid-stream
+    // aborts the answer with "ACP process exited (SIGTERM)" — persist the new
+    // model now and restart the agent with it when the turn idles, exactly
+    // like MCP changes. Queued follow-up prompts pick it up automatically.
+    rt.restartOnIdle = true;
+    rt.restartOnIdleModel = { model, ...(params ? { modelParams: params } : {}) };
+    return { ok: true, model, appliedLive: false, pending: true };
+  }
   // Mid-session set_config_option often leaves OMP/Cursor in a broken state
   // ("Model is unavailable"). Restart ACP so the new model applies like a new chat.
   if (rt) resetAcpClient(rt);
