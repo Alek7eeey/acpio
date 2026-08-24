@@ -21,7 +21,14 @@ import {
 import { ExportDialog } from "./ExportDialog";
 import styles from "./AppShell.module.css";
 
-type MenuState = { id: string; x: number; y: number } | null;
+type MenuState = {
+  id: string;
+  x: number;
+  y: number;
+  anchorTop: number;
+  anchorBottom: number;
+  anchorRight?: number;
+} | null;
 
 type FolderPickerState = {
   x: number;
@@ -336,6 +343,7 @@ export function ChatSidebar({
   const prevLikedCount = useRef(0);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
   // Track newly added sessions (e.g. a freshly created chat) so the sidebar
   // can play a subtle entrance animation on just that row, not the whole list.
@@ -505,13 +513,41 @@ export function ChatSidebar({
     const x =
       e.type === "contextmenu"
         ? e.clientX
-        : Math.min(rect.right - 8, window.innerWidth - 200);
+        : Math.max(12, Math.min(rect.right - 8, window.innerWidth - 210));
     const y =
       e.type === "contextmenu"
         ? e.clientY
-        : Math.min(rect.bottom + 6, window.innerHeight - 160);
-    setMenu({ id, x, y });
+        : rect.bottom + 6;
+    setMenuPos(null);
+    setMenu({
+      id,
+      x,
+      y,
+      anchorTop: rect.top,
+      anchorBottom: rect.bottom,
+      ...(e.type === "contextmenu" ? {} : { anchorRight: rect.right }),
+    });
   };
+
+  useLayoutEffect(() => {
+    if (!menu || !menuRef.current) {
+      setMenuPos(null);
+      return;
+    }
+    const el = menuRef.current;
+    const margin = 12;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let x =
+      menu.anchorRight != null ? menu.anchorRight - width : menu.x;
+    x = Math.min(Math.max(margin, x), window.innerWidth - width - margin);
+    let y = menu.y;
+    if (y + height > window.innerHeight - margin) {
+      y = menu.anchorTop - height - 6;
+    }
+    y = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
+    setMenuPos({ x, y });
+  }, [menu, settings.chatTreeMenu, isTouch]);
 
   const showFolderHeaders = folders.length > 1 || (folders.length === 1 && !!folders[0]?.cwd);
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
@@ -1402,7 +1438,11 @@ export function ChatSidebar({
           <div
             ref={menuRef}
             className={styles.contextMenu}
-            style={{ left: Math.min(menu.x, window.innerWidth - 200), top: menu.y }}
+            style={{
+              left: menuPos?.x ?? menu.x,
+              top: menuPos?.y ?? menu.y,
+              visibility: menuPos ? "visible" : "hidden",
+            }}
             role="menu"
           >
             {(settings.chatTreeMenu ?? []).includes("rename") && (

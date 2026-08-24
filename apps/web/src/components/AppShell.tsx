@@ -1371,19 +1371,22 @@ export function AppShell() {
             </span>
           </span>
           {!isSettings && headerSession ? (
-            <HoverTip as="div" wrap className={styles.headerChatCtx} text={headerTitle}>
-              {headerFolderLabel(headerSession.cwd) ? (
-                <>
-                  <span className={styles.headerChatFolder}>
-                    {headerFolderLabel(headerSession.cwd)}
-                  </span>
-                  <span className={styles.headerChatSep} aria-hidden>
-                    /
-                  </span>
-                </>
-              ) : null}
-              <span className={styles.headerChatTitle}>{headerTitle}</span>
-            </HoverTip>
+            <>
+              <HoverTip as="div" wrap className={styles.headerChatCtx} text={headerTitle}>
+                {headerFolderLabel(headerSession.cwd) ? (
+                  <>
+                    <span className={styles.headerChatFolder}>
+                      {headerFolderLabel(headerSession.cwd)}
+                    </span>
+                    <span className={styles.headerChatSep} aria-hidden>
+                      /
+                    </span>
+                  </>
+                ) : null}
+                <span className={styles.headerChatTitle}>{headerTitle}</span>
+              </HoverTip>
+              <div className={styles.headerSpacerMobile} aria-hidden />
+            </>
           ) : (
             <div className={styles.headerSpacer} />
           )}

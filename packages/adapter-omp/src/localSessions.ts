@@ -180,6 +180,7 @@ export function listOmpSessions(opts?: {
       /* filename is enough to list */
     }
     if (exclude.has(sessionId)) continue;
+    if (cwdFilter && (!cwd || !cwdRelated(cwd, cwdFilter))) continue;
     if (!/"role"\s*:\s*"user"/i.test(head) && !title) continue;
     hits.push({
       sessionId,

@@ -162,6 +162,10 @@
   min-width: 0;
 }
 
+.headerSpacerMobile {
+  display: none;
+}
+
 .headerChatCtx {
   display: flex;
   align-items: baseline;
@@ -1526,6 +1530,10 @@
   flex-direction: column;
   gap: 2px;
   animation: rise 0.16s ease;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .contextMenu button {
@@ -2274,6 +2282,61 @@
 .pickerPanelCompact .pickerItem {
   padding: 7px 9px;
   gap: 8px;
+}
+
+.pickerPanelCompact .pickerAction {
+  min-height: 34px;
+  padding: 6px 9px;
+  font-size: 0.8rem;
+}
+
+.pickerPanelCompact .pickerActionLabel {
+  font-size: 0.8rem;
+}
+
+.pickerPanelCompact .pickerSubmenu,
+.pickerPanelCompact .pickerNestedModels {
+  max-height: min(220px, 42dvh);
+}
+
+.pickerPanelCompact .pickerCreateBtn {
+  min-height: 28px;
+  margin: 4px 4px 0;
+  padding: 5px 10px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border-radius: 8px;
+  width: calc(100% - 8px);
+}
+
+.pickerCreateBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin: 6px 4px 2px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pickerCreateBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pickerCreateBtnMeta {
+  font-size: 0.74rem;
+  font-weight: 500;
+  opacity: 0.88;
 }
 
 .pickerSearch {
@@ -3711,6 +3774,22 @@
 
   .headerBrandHideOnMobile {
     display: none;
+  }
+
+  .headerChatCtx {
+    display: none;
+  }
+
+  .headerSpacerMobile {
+    display: block;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .contextMenu {
+    min-width: min(198px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: min(70dvh, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
   }
 
   .headerBackToChat {

@@ -13,6 +13,14 @@ function folderName(pathValue: string, fallback: string) {
   return parts[parts.length - 1] || normalized || fallback;
 }
 
+function cwdMatchesFolder(sessionCwd: string, folderCwd: string) {
+  const a = normalizeCwd(sessionCwd).toLowerCase();
+  const b = normalizeCwd(folderCwd).toLowerCase();
+  if (!b) return true;
+  if (!a) return false;
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
 function parentPath(pathValue: string) {
   const normalized = normalizeCwd(pathValue);
   const cut = normalized.lastIndexOf("/");
@@ -313,15 +321,16 @@ export function CreateSessionFolderPicker({
   };
 
   const filteredExisting = useMemo(() => {
+    const scoped = lockFolder ? existing.filter((row) => cwdMatchesFolder(row.cwd, lockedPath)) : existing;
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return existing;
-    return existing.filter(
+    if (!q) return scoped;
+    return scoped.filter(
       (row) =>
         row.title.toLowerCase().includes(q) ||
         row.cwd.toLowerCase().includes(q) ||
         row.acpSessionId.toLowerCase().includes(q),
     );
-  }, [existing, searchQuery]);
+  }, [existing, searchQuery, lockFolder, lockedPath]);
 
   const existingItems = existingLoading ? (
     <p className={styles.pickerEmpty}>{t("chat.openExistingLoading")}</p>
@@ -445,7 +454,7 @@ export function CreateSessionFolderPicker({
                 : t("common.noFolder")}
             </span>
           </div>
-          <div className={styles.pickerHead}>{t("common.pickAgent")}</div>
+          {existingHover}
           {onlineAgents.length ? (
             <div
               ref={agentRowRef}
@@ -504,7 +513,6 @@ export function CreateSessionFolderPicker({
                       onClick={() => {
                         setProvider(a.id);
                         setAgentMenuOpen(false);
-                        void confirmPath(lockedPath, a.id);
                       }}
                     >
                       <span className={styles.pickerItemIcon} aria-hidden>
@@ -538,7 +546,6 @@ export function CreateSessionFolderPicker({
                         onClick={() => {
                           setProvider(a.id);
                           setAgentMenuOpen(false);
-                          void confirmPath(lockedPath, a.id);
                         }}
                       >
                         <span className={styles.pickerItemIcon} aria-hidden>
@@ -554,7 +561,14 @@ export function CreateSessionFolderPicker({
           ) : (
             <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
           )}
-          {existingHover}
+          <button
+            type="button"
+            className={styles.pickerCreateBtn}
+            disabled={busy || !provider}
+            onClick={() => void confirmPath(lockedPath, provider ?? undefined)}
+          >
+            {t("common.create")}
+          </button>
           {error ? <p className={styles.popoverError}>{error}</p> : null}
         </>
       ) : (
