@@ -13,6 +13,7 @@ import {
   type DiagnosticsDumpMeta,
   type McpServerConfig,
   type ModelParamDto,
+  parseMcpRemoteConfig,
 } from "@acprocess/shared";
 import { api } from "../lib/api";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
@@ -31,6 +32,12 @@ import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes"
 import { showToast } from "../lib/toast";
 import { truncateSessionTitle } from "../lib/sessionTitle";
 import styles from "./SettingsPage.module.css";
+
+function mcpRemoteConfigDraft(server: McpServerConfig): string {
+  if (server.remoteConfig?.trim()) return server.remoteConfig;
+  const merged = parseMcpRemoteConfig(server);
+  return Object.keys(merged).length ? JSON.stringify(merged, null, 2) : "";
+}
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
@@ -672,7 +679,6 @@ export function SettingsPage() {
     if (!mcpDraft) return;
     const name = mcpDraft.name.trim();
     const url = (mcpDraft.url ?? "").trim();
-    const token = (mcpDraft.token ?? "").trim();
     if (!name || !url) return;
     const id = mcpDraft.id || `mcp-${Date.now().toString(36)}`;
     const next: McpServerConfig = {
@@ -680,11 +686,10 @@ export function SettingsPage() {
       id,
       name,
       url,
-      token: mcpDraft.type === "remote" && token ? token : undefined,
-      headers:
-        mcpDraft.type === "remote"
-          ? (mcpDraft.headers ?? []).filter((h) => h.name.trim())
-          : undefined,
+      token: undefined,
+      headers: undefined,
+      remoteConfig:
+        mcpDraft.type === "remote" ? mcpDraft.remoteConfig?.trim() || undefined : undefined,
       command: undefined,
       args: undefined,
     };
@@ -1825,7 +1830,9 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={styles.secondaryBtn}
-                    onClick={() => setMcpDraft({ ...server })}
+                    onClick={() =>
+                      setMcpDraft({ ...server, remoteConfig: mcpRemoteConfigDraft(server) })
+                    }
                   >
                     {t("common.edit")}
                   </button>
@@ -1853,8 +1860,7 @@ export function SettingsPage() {
                   enabled: true,
                   type: "local",
                   url: "",
-                  token: "",
-                  headers: [],
+                  remoteConfig: '{\n  "headers": {\n    "Authorization": "Bearer "\n  }\n}',
                 })
               }
             >
@@ -1892,65 +1898,17 @@ export function SettingsPage() {
                   onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
                 />
                 {mcpDraft.type === "remote" && (
-                  <>
-                  <input
-                    className={styles.mcpInput}
-                    type="password"
-                    placeholder={t("settings.mcpToken")}
-                    value={mcpDraft.token ?? ""}
-                    onChange={(e) => setMcpDraft({ ...mcpDraft, token: e.target.value })}
-                  />
-                  <div className={styles.mcpHeadersBlock}>
-                    <div className={styles.mcpHeadersLabel}>{t("settings.mcpHeaders")}</div>
-                    {(mcpDraft.headers ?? []).map((row, index) => (
-                      <div key={index} className={styles.mcpHeaderRow}>
-                        <input
-                          className={styles.mcpInput}
-                          placeholder={t("settings.mcpHeaderName")}
-                          value={row.name}
-                          onChange={(e) => {
-                            const headers = [...(mcpDraft.headers ?? [])];
-                            headers[index] = { ...row, name: e.target.value };
-                            setMcpDraft({ ...mcpDraft, headers });
-                          }}
-                        />
-                        <input
-                          className={styles.mcpInput}
-                          placeholder={t("settings.mcpHeaderValue")}
-                          value={row.value}
-                          onChange={(e) => {
-                            const headers = [...(mcpDraft.headers ?? [])];
-                            headers[index] = { ...row, value: e.target.value };
-                            setMcpDraft({ ...mcpDraft, headers });
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className={styles.secondaryBtn}
-                          aria-label={t("common.delete")}
-                          onClick={() => {
-                            const headers = (mcpDraft.headers ?? []).filter((_, i) => i !== index);
-                            setMcpDraft({ ...mcpDraft, headers });
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      className={styles.secondaryBtn}
-                      onClick={() =>
-                        setMcpDraft({
-                          ...mcpDraft,
-                          headers: [...(mcpDraft.headers ?? []), { name: "", value: "" }],
-                        })
-                      }
-                    >
-                      + {t("settings.mcpHeaderAdd")}
-                    </button>
-                  </div>
-                  </>
+                  <label className={styles.mcpJsonBlock}>
+                    <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
+                    <textarea
+                      className={styles.mcpJsonInput}
+                      rows={8}
+                      spellCheck={false}
+                      placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
+                      value={mcpDraft.remoteConfig ?? ""}
+                      onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
+                    />
+                  </label>
                 )}
                 <div className={styles.mcpFormActions}>
                   <button

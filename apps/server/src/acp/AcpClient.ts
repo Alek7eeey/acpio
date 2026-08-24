@@ -23,6 +23,7 @@ import {
   type HarnessAdapter,
   type McpServerConfig,
   mcpHttpHeaders,
+  mcpRemoteExtras,
 } from "@acprocess/shared";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
@@ -619,6 +620,7 @@ export class AcpClient extends EventEmitter {
           type: "http",
           url: s.url!.trim(),
           headers: mcpHttpHeaders(s),
+          ...mcpRemoteExtras(s),
         }));
 
       const resume = opts?.resume;

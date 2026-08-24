@@ -266,16 +266,18 @@ export type McpServerConfig = {
   type: "local" | "remote";
   /** Endpoint URL (both types). */
   url?: string;
-  /** Bearer token for remote servers (never displayed in full). */
+  /** Bearer token for remote servers (legacy — prefer remoteConfig JSON). */
   token?: string;
-  /** Optional HTTP headers (Authorization can also be set via token). */
+  /** @deprecated Legacy HTTP headers — prefer remoteConfig JSON. */
   headers?: Array<{ name: string; value: string }>;
+  /** Remote MCP: free-form JSON (headers, token, transport options). */
+  remoteConfig?: string;
   /** @deprecated Local stdio servers are no longer configured in the UI. */
   command?: string;
   args?: string[];
 };
 
-export function mcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
+function legacyMcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
   const out: Array<{ name: string; value: string }> = [];
   if (server.type === "remote" && server.token?.trim()) {
     out.push({ name: "Authorization", value: `Bearer ${server.token.trim()}` });
@@ -289,6 +291,50 @@ export function mcpHttpHeaders(server: McpServerConfig): Array<{ name: string; v
     else out.push({ name, value });
   }
   return out;
+}
+
+/** Parsed remote MCP JSON merged with legacy token/headers fields. */
+export function parseMcpRemoteConfig(server: McpServerConfig): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const raw = server.remoteConfig?.trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        Object.assign(out, parsed as Record<string, unknown>);
+      }
+    } catch {
+      /* invalid JSON — legacy fields still apply */
+    }
+  }
+  const legacy = legacyMcpHttpHeaders(server);
+  if (legacy.length) {
+    const headers =
+      out.headers && typeof out.headers === "object" && !Array.isArray(out.headers)
+        ? { ...(out.headers as Record<string, string>) }
+        : {};
+    for (const row of legacy) headers[row.name] = row.value;
+    out.headers = headers;
+  }
+  return out;
+}
+
+export function mcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
+  const config = parseMcpRemoteConfig(server);
+  const headers = config.headers;
+  if (headers && typeof headers === "object" && !Array.isArray(headers)) {
+    return Object.entries(headers as Record<string, unknown>)
+      .map(([name, value]) => ({ name, value: String(value ?? "") }))
+      .filter((row) => row.name.trim());
+  }
+  return legacyMcpHttpHeaders(server);
+}
+
+/** Extra MCP fields (except url/name/type) passed through to the ACP agent. */
+export function mcpRemoteExtras(server: McpServerConfig): Record<string, unknown> {
+  const config = parseMcpRemoteConfig(server);
+  const { headers: _headers, ...rest } = config;
+  return rest;
 }
 
 export type Theme = "light" | "dark";

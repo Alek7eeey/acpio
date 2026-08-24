@@ -980,9 +980,22 @@
   flex-wrap: wrap;
 }
 
-.mcpHeadersBlock {
+.mcpJsonBlock {
   display: grid;
-  gap: 8px;
+  gap: 6px;
+}
+
+.mcpJsonInput {
+  width: 100%;
+  min-height: 8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 10px 12px;
+  resize: vertical;
+  box-sizing: border-box;
 }
 
 .mcpHeadersLabel {
