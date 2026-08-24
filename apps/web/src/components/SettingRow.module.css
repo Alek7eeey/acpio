@@ -5,6 +5,9 @@
   border-radius: var(--settings-control-radius);
   /* No overflow:hidden — it would clip OptionPicker dropdowns. */
   background: var(--surface);
+  /* As a grid/flex item, allow shrinking below the widest row's min-content
+     (long unbreakable hints) instead of inflating the container. */
+  min-width: 0;
 }
 
 .row {
@@ -58,6 +61,9 @@
   font-weight: var(--settings-hint-weight);
   line-height: var(--settings-hint-line);
   color: var(--text-secondary);
+  /* Let long unbreakable hint content (URLs) shrink and ellipsize instead
+     of forcing the row wider than the table. */
+  min-width: 0;
 }
 
 .control {
