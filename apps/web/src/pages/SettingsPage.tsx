@@ -25,6 +25,7 @@ import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
 import { ChatSettingsPreview } from "../components/ChatSettingsPreview";
+import { MiddleTruncate } from "../components/MiddleTruncate";
 import { getDiagnosticsDump, submitDiagnosticsDump } from "../lib/diagnostics";
 import { startReadAloud, stopReadAloud } from "../lib/tts";
 import { applyAppearance } from "../lib/appearance";
@@ -1513,11 +1514,12 @@ export function SettingsPage() {
         {section === "agent" && leaf === "advanced" && (
           <>
             <SettingTable>
-              <SettingRow label={t("settings.defaultFolder")}>
+              <SettingRow label={t("settings.defaultFolder")} controlClassName={styles.folderControl}>
                 <div className={styles.cwdPickRow}>
-                  <span className={styles.cwdPath} title={form.defaultCwd || undefined}>
-                    {form.defaultCwd || t("common.notSet")}
-                  </span>
+                  <MiddleTruncate
+                    className={styles.cwdPath}
+                    text={form.defaultCwd || t("common.notSet")}
+                  />
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -1542,17 +1544,16 @@ export function SettingsPage() {
 
               <SettingRow
                 label={t("settings.exportDir")}
+                controlClassName={styles.folderControl}
                 hint={t("settings.exportDirHint", {
                   path: form.exportDir || exportDirDefault || "…",
                 })}
               >
                 <div className={styles.cwdPickRow}>
-                  <span
+                  <MiddleTruncate
                     className={styles.cwdPath}
-                    title={form.exportDir || exportDirDefault || undefined}
-                  >
-                    {form.exportDir || exportDirDefault || t("common.notSet")}
-                  </span>
+                    text={form.exportDir || exportDirDefault || t("common.notSet")}
+                  />
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -1937,17 +1938,18 @@ export function SettingsPage() {
             <SettingTable>
               <SettingRow
                 label={t("diagnostics.folder")}
+                controlClassName={styles.folderControl}
                 hint={t("diagnostics.folderHint", {
                   path: diagDirResolved || diagDirDefault || "…",
                 })}
               >
                 <div className={styles.cwdPickRow}>
-                  <span
+                  <MiddleTruncate
                     className={styles.cwdPath}
-                    title={form.diagnosticsDir || diagDirDefault || undefined}
-                  >
-                    {form.diagnosticsDir || diagDirDefault || t("diagnostics.folderDefault")}
-                  </span>
+                    text={
+                      form.diagnosticsDir || diagDirDefault || t("diagnostics.folderDefault")
+                    }
+                  />
                   <button
                     type="button"
                     className={styles.secondaryBtn}
@@ -1976,25 +1978,27 @@ export function SettingsPage() {
                   sessions.length === 0 ? t("diagnostics.noChats") : t("diagnostics.chatHint")
                 }
               >
-                <OptionPicker
-                  value={diagSessionId ?? ""}
-                  placement="down"
-                  menuTitle={t("diagnostics.chat")}
-                  placeholder={t("diagnostics.chatNone")}
-                  emptyLabel={t("diagnostics.noChats")}
-                  onChange={(value) => setDiagSessionId(value)}
-                  options={[
-                    { value: "", label: t("diagnostics.chatNone") },
-                    ...sessions.map((s) => ({
-                      value: s.id,
-                      label: truncateSessionTitle(s.title || s.id.slice(0, 8)),
-                      hint:
-                        s.id === activeSessionId
-                          ? `${s.provider} · ${t("diagnostics.chatActive")}`
-                          : s.provider,
-                    })),
-                  ]}
-                />
+                <div className={styles.diagChatPick}>
+                  <OptionPicker
+                    value={diagSessionId ?? ""}
+                    placement="down"
+                    menuTitle={t("diagnostics.chat")}
+                    placeholder={t("diagnostics.chatNone")}
+                    emptyLabel={t("diagnostics.noChats")}
+                    onChange={(value) => setDiagSessionId(value)}
+                    options={[
+                      { value: "", label: t("diagnostics.chatNone") },
+                      ...sessions.map((s) => ({
+                        value: s.id,
+                        label: truncateSessionTitle(s.title || s.id.slice(0, 8), 44),
+                        hint:
+                          s.id === activeSessionId
+                            ? `${s.provider} · ${t("diagnostics.chatActive")}`
+                            : s.provider,
+                      })),
+                    ]}
+                  />
+                </div>
               </SettingRow>
             </SettingTable>
 

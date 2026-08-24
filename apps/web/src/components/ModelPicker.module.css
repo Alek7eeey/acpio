@@ -60,6 +60,10 @@
   flex: 1;
   text-align: left;
   font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modelTriggerBlock .modelChevron {

@@ -16,6 +16,7 @@ export function SettingRow({
   hint,
   terms,
   layout = "inline",
+  controlClassName,
   children,
 }: {
   label: ReactNode;
@@ -24,6 +25,8 @@ export function SettingRow({
   terms?: string[];
   /** `stack`: label above, control full width (CLI fields, long inputs). */
   layout?: "inline" | "stack";
+  /** Extra class for the control cell (e.g. let it grow to fill the row). */
+  controlClassName?: string;
   children?: ReactNode;
 }) {
   const { active, matches, highlight } = useSettingsSearch();
@@ -41,7 +44,9 @@ export function SettingRow({
           <span className={styles.hint}>{hintText ? highlight(hintText) : hint}</span>
         ) : null}
       </div>
-      <div className={styles.control}>{children}</div>
+      <div className={`${styles.control}${controlClassName ? ` ${controlClassName}` : ""}`}>
+        {children}
+      </div>
     </div>
   );
 }

@@ -294,6 +294,15 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 8px;
   align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Folder rows: let the control grow to the remaining row width so the path
+   field is externally bounded and MiddleTruncate can shorten it. */
+.folderControl {
+  flex: 1 1 60%;
+  min-width: 0;
 }
 
 .cwdPath {
@@ -307,8 +316,9 @@
   font-weight: var(--settings-control-weight);
   font-size: var(--settings-control-size);
   color: var(--text);
-  word-break: break-all;
-  overflow-wrap: anywhere;
+  /* Middle truncation is done by MiddleTruncate; never wrap onto lines. */
+  white-space: nowrap;
+  overflow: hidden;
   line-height: 1.35;
   text-align: left;
   cursor: pointer;
@@ -323,6 +333,14 @@
 }
 
 .cwdPickRow input {
+  min-width: 0;
+}
+
+/* Fixed width for the diagnostics chat picker: a long selected title must
+   truncate inside the block instead of widening the row. */
+.diagChatPick {
+  width: min(320px, 60vw);
+  max-width: 100%;
   min-width: 0;
 }
 
