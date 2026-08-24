@@ -139,6 +139,13 @@ export interface HarnessAdapter {
   // ── Extension methods ────────────────────────────────────────────────────
   /** Raw ACP request method → normalized core request kind. */
   requestKinds: Record<string, "permission" | "ask_question" | "create_plan">;
+  /**
+   * Map a permission-shaped ACP request to an ask_question payload for the UI.
+   * Return null to keep the default permission card (allow/deny).
+   */
+  coercePermissionToQuestion?: (
+    params: Record<string, unknown>,
+  ) => Record<string, unknown> | null;
   /** Raw ACP method → normalized core kind. */
   extensionKinds: Record<string, AdapterExtensionKind>;
   /** Reply envelope for extension requests (undefined → notification). */

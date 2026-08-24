@@ -25,6 +25,12 @@ export type {
 
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
+  isToolPermissionOption,
+  permissionOptionsLookLikeQuestion,
+  questionPayloadFromPermission,
+  type InteractiveOption,
+} from "./interactive.js";
+export {
   SESSION_TITLE_MAX_LEN,
   sanitizeTitleSource,
   titleFromUserText,

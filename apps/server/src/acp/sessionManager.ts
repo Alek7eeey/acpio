@@ -33,6 +33,8 @@ import {
   type SubagentCardUpdate,
   titleFromUserText,
   mcpHttpHeaders,
+  permissionOptionsLookLikeQuestion,
+  questionPayloadFromPermission,
 } from "@acprocess/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
@@ -377,6 +379,8 @@ type PendingRequest = {
   kind: AcpRequest["kind"] | "switch_mode";
   /** Original JSON-RPC id from the agent (number | string) — do not re-parse from the URL key. */
   rpcId: string | number;
+  /** Question UI shown, but the ACP reply must use permission outcome shape. */
+  respondAsPermission?: boolean;
   /** For synthetic switch_mode consents: requested and previous session mode. */
   mode?: AgentMode;
   previousMode?: AgentMode;
@@ -1458,8 +1462,41 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
 
   if (req.kind === "permission") {
     const options =
-      ((req.params as { options?: Array<{ optionId: string; kind?: string }> }).options ??
-        []) as Array<{ optionId: string; kind?: string }>;
+      ((req.params as { options?: Array<{ optionId: string; kind?: string; name?: string }> }).options ??
+        []) as Array<{ optionId: string; kind?: string; name?: string }>;
+
+    const coercedQuestion =
+      rt.adapter?.coercePermissionToQuestion?.(req.params) ??
+      (permissionOptionsLookLikeQuestion(options)
+        ? questionPayloadFromPermission(req.params, options)
+        : null);
+    if (coercedQuestion) {
+      await rt.enqueue(async () => {
+        const messageId = await ensureAssistantMessage(rt);
+        await appendPart(rt.sessionId, messageId, "question", {
+          requestId: reqKey,
+          pending: true,
+          ...coercedQuestion,
+        });
+      });
+      await updateSession(rt.sessionId, { status: "waiting" });
+      broadcastToSession(rt.sessionId, {
+        type: "question.request",
+        sessionId: rt.sessionId,
+        requestId: reqKey,
+        kind: "ask_question",
+        payload: coercedQuestion,
+      });
+      await new Promise<void>((resolve) => {
+        rt.pending.set(reqKey, {
+          kind: "ask_question",
+          rpcId: req.id,
+          respondAsPermission: true,
+          resolve: () => resolve(),
+        });
+      });
+      return;
+    }
 
     const pickAllow = () => {
       const byKind =
@@ -2254,6 +2291,12 @@ async function runTurn(
   try {
     const client = await acpReady;
     if (!client.sessionId) {
+      const deadline = Date.now() + 8_000;
+      while (!client.sessionId && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    if (!client.sessionId) {
       throw new Error("Agent session is not ready");
     }
     let promptText = isAgentSlashPrompt(promptUserText) ? promptUserText.trim() : promptUserText;
@@ -2286,10 +2329,19 @@ async function runTurn(
     await completeDanglingTurnParts(sessionId);
 
     const detail = await import("../services/sessions.js").then((m) => m.getSessionDetail(sessionId));
-    const lastAssistant = detail?.messages.filter((m) => m.role === "assistant").at(-1);
-    const hasContent = lastAssistant?.parts.some((p) =>
-      ["text", "thought", "tool_call"].includes(p.type),
+    let lastAssistant = detail?.messages.filter((m) => m.role === "assistant").at(-1);
+    let hasContent = lastAssistant?.parts.some((p) =>
+      ["text", "thought", "tool_call", "subagent", "plan"].includes(p.type),
     );
+
+    if (!hasContent) {
+      await new Promise((r) => setTimeout(r, 400));
+      const retry = await getSessionDetail(sessionId);
+      lastAssistant = retry?.messages.filter((m) => m.role === "assistant").at(-1);
+      hasContent = lastAssistant?.parts.some((p) =>
+        ["text", "thought", "tool_call", "subagent", "plan"].includes(p.type),
+      );
+    }
 
     if (lastAssistant) {
       const thoughtPart = lastAssistant.parts.find((p) => p.type === "thought");
@@ -2300,7 +2352,7 @@ async function runTurn(
       }
     }
 
-    if (!hasContent) {
+    if (!hasContent && !isAgentSlashPrompt(promptUserText)) {
       const model =
         client.configOptions.find((o) => o.id === "model")?.currentValue ?? "(неизвестно)";
       const hint =
@@ -3140,6 +3192,17 @@ export function answerQuestion(
   }
 
   const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
+
+  if (pending.respondAsPermission) {
+    const outcome = (result as { outcome?: { answers?: Array<{ selectedOptionIds?: string[] }> } })
+      .outcome;
+    const optionId = outcome?.answers?.[0]?.selectedOptionIds?.[0] ?? "allow_once";
+    rt.client?.respond(id, { outcome: { outcome: "selected", optionId } });
+    pending.resolve(result);
+    rt.pending.delete(requestId);
+    void updateSession(sessionId, { status: "running" });
+    return;
+  }
 
   rt.client?.respond(id, result);
   pending.resolve(result);

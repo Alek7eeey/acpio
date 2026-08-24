@@ -202,6 +202,8 @@ export const ompAdapter: HarnessAdapter = {
 
   requestKinds: {
     "session/request_permission": "permission",
+    // When omp-acp bridges OMP select/input/ask elicitation to ACP, register here.
+    "session/ask_question": "ask_question",
   },
   extensionKinds: {
     "_omp/agents/update": "subagent_roster",
