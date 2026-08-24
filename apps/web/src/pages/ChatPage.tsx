@@ -3696,7 +3696,13 @@ function ChatThread() {
 
   const emptyReady = Boolean(activeSession) && isEmptyChat && !restoring;
   const restoringEmpty = Boolean(activeSession) && !renderSkeleton && isEmptyChat && restoring;
-  const showThreadSkeleton = renderSkeleton && !isEmptyChat;
+  // Loading windows (skeleton, session creation, boot) keep the composer out
+  // of the layout so an empty chat's input never renders at the bottom and
+  // then jumps to center — it appears in its final position once ready. The
+  // first-run welcome state (no sessions at all) keeps its composer.
+  const composerHeld =
+    renderSkeleton || (!activeSession && (sessionLoading || loading || hasSessions));
+  const showThreadSkeleton = composerHeld;
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
@@ -4329,7 +4335,9 @@ function ChatThread() {
       )}
 
       <form
-        className={`${styles.composer}${emptyReady || restoringEmpty ? ` ${styles.composerEmptyReady}` : ""}`}
+        className={`${styles.composer}${composerHeld ? ` ${styles.composerSkeleton}` : ""}${
+          emptyReady || restoringEmpty ? ` ${styles.composerEmptyReady}` : ""
+        }`}
         onSubmit={onSubmit}
       >
         {scrolledAway && activeSession && !emptyReady && !restoringEmpty ? (
