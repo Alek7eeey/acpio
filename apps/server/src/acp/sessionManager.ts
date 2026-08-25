@@ -537,6 +537,10 @@ class SessionRuntime {
   usage: AcpUsage | null = null;
   /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
   disposing = false;
+  /** This turn received an answer text chunk (vs. only thinking so far). */
+  turnHasText = false;
+  /** This turn received a thinking chunk. */
+  turnHasThought = false;
   /** MCP config changed while a turn was running — restart the agent when it idles. */
   restartOnIdle = false;
   /** Model+params to apply on the idle restart (set alongside restartOnIdle by setSessionModel). */
@@ -1120,6 +1124,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     }
     const messageId = await ensureAssistantMessage(rt);
     // Continue same text part for the turn; tools may split later via clearing openTextPartId
+    rt.turnHasText = true;
     rt.openTextPartId = await appendTextChunk(
       rt.sessionId,
       messageId,
@@ -1138,6 +1143,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     }
     const messageId = await ensureAssistantMessage(rt);
     if (update.thought) {
+      rt.turnHasThought = true;
       const partId = await appendTextChunk(
         rt.sessionId,
         messageId,
@@ -1149,6 +1155,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       rt.openThoughtPartId = partId;
     }
     if (update.text) {
+      rt.turnHasText = true;
       rt.openTextPartId = await appendTextChunk(
         rt.sessionId,
         messageId,
@@ -1169,6 +1176,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     }
     const messageId = await ensureAssistantMessage(rt);
     // Always one reasoning block per turn
+    rt.turnHasThought = true;
     const partId = await appendTextChunk(
       rt.sessionId,
       messageId,
@@ -2227,6 +2235,15 @@ export async function runPrompt(
 }
 
 const STREAM_SETTLE_QUIET_MS = 450;
+/**
+ * Cursor batches its final answer after a long pause: the thinking stream
+ * stops, then the reply (often with the thinking tail) arrives in one update
+ * seconds later. The short quiet window alone would settle the turn early and
+ * unlock the composer as if answered. While the turn has thinking but no text
+ * yet, tolerate a much longer quiet gap; once the answer text has started
+ * (or nothing arrived at all), the short window applies again.
+ */
+const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
 const STREAM_SETTLE_MAX_MS = 12_000;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
 
@@ -2236,7 +2253,15 @@ async function settlePromptStream(rt: SessionRuntime) {
   rt.lastStreamAt = Math.max(rt.lastStreamAt, started);
   while (rt.acceptingStream) {
     if (Date.now() - started >= STREAM_SETTLE_MAX_MS) break;
-    if (Date.now() - rt.lastStreamAt >= STREAM_SETTLE_QUIET_MS && rt.pending.size === 0) break;
+    const quiet = Date.now() - rt.lastStreamAt;
+    const waitingForAnswer = rt.turnHasThought && !rt.turnHasText;
+    if (
+      quiet >= STREAM_SETTLE_QUIET_MS &&
+      rt.pending.size === 0 &&
+      (!waitingForAnswer || quiet >= STREAM_SETTLE_ANSWER_QUIET_MS)
+    ) {
+      break;
+    }
     await rt.enqueue(async () => undefined);
     await new Promise((r) => setTimeout(r, 50));
   }
@@ -2271,6 +2296,8 @@ async function runTurn(
   rt.openTextPartId = null;
   rt.openThoughtPartId = null;
   rt.turnThoughtPartId = null;
+  rt.turnHasText = false;
+  rt.turnHasThought = false;
   rt.toolPartByCallId.clear();
   rt.toolStartRawByCallId.clear();
   await updateSession(sessionId, { status: "running" });
