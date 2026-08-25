@@ -93,6 +93,15 @@ export async function ensureSchema() {
     )
   `);
 
+  // Folders that have ever held chats — survives deleting the last chat, so
+  // empty folders stay visible across devices until explicitly removed.
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS chat_folders (
+      cwd TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
+  `);
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

@@ -77,6 +77,12 @@ export const messageParts = sqliteTable("message_parts", {
   createdAt: createdAt(),
 });
 
+/** Folders that have ever held chats — keeps empty folders visible. */
+export const chatFolders = sqliteTable("chat_folders", {
+  cwd: text("cwd").primaryKey(),
+  createdAt: createdAt(),
+});
+
 export const users = sqliteTable("users", {
   id: id(),
   username: text("username").notNull().unique(),

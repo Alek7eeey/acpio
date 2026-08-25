@@ -15,6 +15,7 @@ import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
+import { rememberFolders } from "./folders.js";
 
 function mapSession(
   row: typeof sessions.$inferSelect,
@@ -140,7 +141,7 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
  * `E:\proj` and `E:/proj/` are the same folder — the chat tree must not
  * split them into two groups, so every write stores one canonical form.
  */
-function normalizeCwd(cwd: string): string {
+export function normalizeCwd(cwd: string): string {
   return cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
@@ -170,6 +171,8 @@ export async function createSession(input: {
       ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
     })
     .returning();
+  // Keep the folder alive after the last chat in it is deleted.
+  if (row.cwd) await rememberFolders([row.cwd]);
   return mapSession(row);
 }
 

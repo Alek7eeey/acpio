@@ -150,6 +150,17 @@ export const api = {
       body: JSON.stringify({ path: path || undefined, files: opts?.files === true }),
     }),
   listSessions: () => request<SessionDto[]>("/api/sessions"),
+  listFolders: () =>
+    request<{ folders: string[] }>("/api/folders").then((r) => r.folders),
+  rememberFolders: (cwds: string[]) =>
+    request<{ ok: boolean }>("/api/folders", {
+      method: "PUT",
+      body: JSON.stringify({ cwds }),
+    }),
+  deleteFolder: (cwd: string) =>
+    request<{ ok: boolean }>(`/api/folders?cwd=${encodeURIComponent(cwd)}`, {
+      method: "DELETE",
+    }),
   listHarnessSessions: (provider: AgentProvider, cwd?: string) => {
     const q = new URLSearchParams({ provider });
     if (cwd?.trim()) q.set("cwd", cwd.trim());

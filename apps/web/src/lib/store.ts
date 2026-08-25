@@ -130,6 +130,10 @@ type AppState = {
    */
   chatPaneIds: ChatPaneSlot[];
   focusedPaneIndex: number;
+  /** Folders that have ever held chats (server-backed, empty ones kept). */
+  knownFolders: string[];
+  refreshFolders: () => Promise<void>;
+  deleteFolder: (cwd: string) => Promise<void>;
   /** Live details for open split panes (and the focused chat). */
   sessionDetails: Record<string, SessionDetailDto>;
   setChatPaneCount: (count: number) => void;
@@ -869,6 +873,49 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPaneIds: [null],
   focusedPaneIndex: 0,
   sessionDetails: {},
+  knownFolders: [],
+  refreshFolders: async () => {
+    try {
+      const folders = await api.listFolders();
+      // One-time migration: folders remembered in localStorage (the previous
+      // client-only list) are pushed to the server so they survive across
+      // devices, then the local copy is dropped.
+      try {
+        const raw = localStorage.getItem("acprocess.knownFolders.v1");
+        if (raw) {
+          const parsed = JSON.parse(raw) as unknown;
+          const legacy = Array.isArray(parsed)
+            ? parsed.filter((v): v is string => typeof v === "string")
+            : [];
+          const legacyOnly = legacy.filter((f) => !folders.includes(f));
+          if (legacyOnly.length > 0) {
+            void api.rememberFolders(legacyOnly).then(() => {
+              try {
+                localStorage.removeItem("acprocess.knownFolders.v1");
+              } catch {
+                // ignore
+              }
+            });
+          } else {
+            localStorage.removeItem("acprocess.knownFolders.v1");
+          }
+        }
+      } catch {
+        // ignore malformed local data
+      }
+      set({ knownFolders: folders });
+    } catch {
+      // server offline — keep the current list
+    }
+  },
+  deleteFolder: async (cwd) => {
+    try {
+      await api.deleteFolder(cwd);
+      set((s) => ({ knownFolders: s.knownFolders.filter((f) => f !== cwd) }));
+    } catch {
+      // server offline — keep the folder
+    }
+  },
   focusMessageId: null,
   sessionLoading: false,
   restoringSessionIds: {},
@@ -1225,6 +1272,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       void get().loadAdapters();
+      void get().refreshFolders();
       await loadAppData(set, get);
     } catch (err) {
       set({
@@ -1524,6 +1572,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     syncPanesOnSelect(get, set, session.id);
     void get().refreshSessions();
+    void get().refreshFolders();
     if (slashListStillLoading(detail.slashCommands)) {
       pollSlashCommands(session.id, get, set);
     }

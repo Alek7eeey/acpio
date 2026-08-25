@@ -311,32 +311,10 @@ export function ChatSidebar({
     }
   });
 
-  // Folders that have (or had) chats, persisted independently of sessions —
-  // deleting the last chat in a folder must not make the folder vanish.
-  const KNOWN_FOLDERS_KEY = "acprocess.knownFolders.v1";
-  const [knownFolders, setKnownFolders] = useState<string[]>(() => {
-    try {
-      const raw = localStorage.getItem(KNOWN_FOLDERS_KEY);
-      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
-    } catch {
-      return [];
-    }
-  });
-  useEffect(() => {
-    setKnownFolders((prev) => {
-      const next = [
-        ...new Set([...prev, ...sessions.map((s) => normalizeCwd(s.cwd)).filter(Boolean)]),
-      ];
-      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
-      try {
-        localStorage.setItem(KNOWN_FOLDERS_KEY, JSON.stringify(next));
-      } catch {
-        // ignore quota / private mode
-      }
-      return next;
-    });
-  }, [sessions]);
+  // Folders that have (or had) chats, persisted on the server so empty
+  // folders survive deleting the last chat and are visible from any device.
+  const knownFolders = useAppStore((s) => s.knownFolders);
+  const deleteFolder = useAppStore((s) => s.deleteFolder);
 
   const toggleFolder = (key: string) => {
     setCollapsedFolders((prev) => {
@@ -372,6 +350,14 @@ export function ChatSidebar({
   const menuRef = useRef<HTMLDivElement>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
+
+  // Empty folders can be removed from the tree; chats inside are unaffected.
+  const confirmDeleteFolder = (cwd: string) => {
+    const name = folderLabel(cwd, t("common.noFolder"));
+    if (!window.confirm(t("chat.deleteFolderConfirm", { name }))) return;
+    void deleteFolder(cwd);
+    showToast(t("chat.folderDeleted"), { tone: "info" });
+  };
   // Track newly added sessions (e.g. a freshly created chat) so the sidebar
   // can play a subtle entrance animation on just that row, not the whole list.
   const prevSessionIds = useRef<Set<string> | null>(null);
@@ -1047,6 +1033,28 @@ export function ChatSidebar({
             />
           </svg>
         </button>
+        {folder.sessions.length === 0 && folder.cwd ? (
+          <button
+            type="button"
+            className={styles.folderDelete}
+            title={t("chat.deleteFolder")}
+            aria-label={t("chat.deleteFolder")}
+            onClick={(e) => {
+              e.stopPropagation();
+              confirmDeleteFolder(folder.cwd);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -1355,6 +1363,28 @@ export function ChatSidebar({
                         />
                       </svg>
                     </button>
+                    {folder.sessions.length === 0 && folder.cwd ? (
+                      <button
+                        type="button"
+                        className={styles.folderDelete}
+                        title={t("chat.deleteFolder")}
+                        aria-label={t("chat.deleteFolder")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          confirmDeleteFolder(folder.cwd);
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
                   </div>
                 )}
                 {!collapsedFolders.has(fkey) && (

@@ -47,6 +47,7 @@ import {
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
+import { listFolders, rememberFolders, deleteFolder } from "./services/folders.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
@@ -389,6 +390,22 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/sessions", async () => listSessions());
+
+  // Folders that have ever held chats (empty ones included) — survives
+  // deleting the last chat so folders persist across devices.
+  app.get("/api/folders", async () => ({ folders: await listFolders() }));
+
+  app.put("/api/folders", async (req) => {
+    const body = z.object({ cwds: z.array(z.string().min(1)).max(200) }).parse(req.body);
+    await rememberFolders(body.cwds);
+    return { ok: true };
+  });
+
+  app.delete("/api/folders", async (req) => {
+    const query = z.object({ cwd: z.string().min(1) }).parse(req.query);
+    await deleteFolder(query.cwd);
+    return { ok: true, folders: await listFolders() };
+  });
 
   app.get("/api/sessions/harness", async (req, reply) => {
     const query = z

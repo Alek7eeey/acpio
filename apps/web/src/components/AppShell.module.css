@@ -922,6 +922,46 @@
   }
 }
 
+/* Delete button for empty folders — sits next to the plus, red on hover. */
+.folderDelete {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin-left: 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 45%, var(--text-secondary));
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.folderDelete svg {
+  display: block;
+  stroke-width: 1.7;
+}
+
+.folderDelete:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* The delete appears only while hovering the folder itself. */
+@media (hover: hover) and (pointer: fine) {
+  .folderDelete {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .folderHead:hover .folderDelete {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 .folderLead {
   display: inline-flex;
   align-items: center;
