@@ -1365,7 +1365,7 @@
 }
 
 .sessionItem.active {
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
 .sessionItem.active::before,
@@ -1400,7 +1400,7 @@
 }
 
 .sessionItem.active:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 .sessionItem.entering {
   animation: sessionItemIn 0.24s ease both;
@@ -1468,7 +1468,7 @@
   font-size: 0.88rem;
   line-height: 1;
   letter-spacing: -0.01em;
-  color: var(--text-secondary);
+  color: var(--text);
 }
 
 .sessionItem.active .sessionTitleText {
@@ -1599,6 +1599,11 @@
 :global([data-theme="light"]) .sessionItem.active .sessionTitle,
 :global([data-theme="light"]) .sessionItem.active .sessionMore {
   color: var(--text);
+}
+
+:global([data-theme="light"]) .sessionTitleText,
+:global([data-theme="light"]) .sessionItem.active .sessionTitleText {
+  color: #18181b;
 }
 
 .sessionItem.active .sessionActivity {
