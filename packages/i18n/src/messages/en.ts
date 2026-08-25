@@ -248,6 +248,7 @@ export const en = {
     renameSession: "Rename",
     newInFolder: "New chat in folder",
     openExisting: "Open existing session",
+    emptyFolder: "No chats in this folder",
     pickExistingSessions: "Choose from existing sessions",
     sessionRestoring: "Restoring session…",
     openExistingEmpty: "No other sessions on this agent",

@@ -272,6 +272,7 @@ export const ru = {
     renameSession: "Переименовать",
     newInFolder: "Новый чат в папке",
     openExisting: "Открыть существующую сессию",
+    emptyFolder: "В папке нет чатов",
     pickExistingSessions: "Выбрать из существующих сессий",
     sessionRestoring: "Сессия восстанавливается…",
     openExistingEmpty: "Других сессий у агента нет",

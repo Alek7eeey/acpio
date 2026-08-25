@@ -311,6 +311,33 @@ export function ChatSidebar({
     }
   });
 
+  // Folders that have (or had) chats, persisted independently of sessions —
+  // deleting the last chat in a folder must not make the folder vanish.
+  const KNOWN_FOLDERS_KEY = "acprocess.knownFolders.v1";
+  const [knownFolders, setKnownFolders] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(KNOWN_FOLDERS_KEY);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    setKnownFolders((prev) => {
+      const next = [
+        ...new Set([...prev, ...sessions.map((s) => normalizeCwd(s.cwd)).filter(Boolean)]),
+      ];
+      if (next.length === prev.length && next.every((v, i) => v === prev[i])) return prev;
+      try {
+        localStorage.setItem(KNOWN_FOLDERS_KEY, JSON.stringify(next));
+      } catch {
+        // ignore quota / private mode
+      }
+      return next;
+    });
+  }, [sessions]);
+
   const toggleFolder = (key: string) => {
     setCollapsedFolders((prev) => {
       const next = new Set(prev);
@@ -388,10 +415,17 @@ export function ChatSidebar({
         : sortSessions(visibleSessions.filter((s) => s.archived)),
     [visibleSessions, settings.chatTreeShowArchive],
   );
-  const folders = useMemo(
-    () => groupByFolder(visibleSessions.filter((s) => !s.archived)),
-    [visibleSessions],
-  );
+  const folders = useMemo(() => {
+    const grouped = groupByFolder(visibleSessions.filter((s) => !s.archived));
+    // During a search only matching sessions matter; empty folders are noise.
+    if (query) return grouped;
+    const groupedKeys = new Set(grouped.map((f) => f.cwd));
+    const empties = knownFolders
+      .filter((cwd) => !groupedKeys.has(cwd))
+      .map((cwd) => ({ cwd, sessions: [] as SessionDto[], latest: "" }));
+    if (empties.length === 0) return grouped;
+    return [...grouped, ...empties];
+  }, [visibleSessions, knownFolders, query]);
 
   // Newly created sections (archive, liked) appear collapsed by default;
   // the user can expand them afterwards as usual.
@@ -559,6 +593,7 @@ export function ChatSidebar({
   // Small trees keep the plain render (no measurement/scroll subtleties).
   type TreeRow =
     | { kind: "folder-head"; key: string; folder: (typeof folders)[number] }
+    | { kind: "folder-empty"; key: string; cwd: string }
     | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
     | { kind: "liked-head"; key: string; count: number }
@@ -573,6 +608,10 @@ export function ChatSidebar({
         rows.push({ kind: "folder-head", key: `fh:${fkey}`, folder });
       }
       if (collapsedFolders.has(fkey)) continue;
+      if (folder.sessions.length === 0) {
+        rows.push({ kind: "folder-empty", key: `fe:${fkey}`, cwd: folder.cwd });
+        continue;
+      }
       const useTimeGroups = folder.sessions.length > 1;
       if (useTimeGroups) {
         const timeGroups = groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs);
@@ -616,6 +655,8 @@ export function ChatSidebar({
       switch (row.kind) {
         case "folder-head":
           return 28;
+        case "folder-empty":
+          return 26;
         case "session":
           return 34;
         case "archive-head":
@@ -1071,6 +1112,8 @@ export function ChatSidebar({
     switch (row.kind) {
       case "folder-head":
         return renderFolderHead(row.folder);
+      case "folder-empty":
+        return <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>;
       case "session":
         return renderSessionRow(row.session, row.showActivity, row.inArchive);
       case "archive-head":
@@ -1322,13 +1365,17 @@ export function ChatSidebar({
                       showFolderHeaders && isActiveFolder ? ` ${styles.folderBodyActive}` : ""
                     }`}
                   >
-                    {timeGroups
-                      ? timeGroups.map((group) => (
-                          <div key={group.key} className={styles.timeGroup}>
-                            {group.sessions.map((s) => renderSessionRow(s, true))}
-                          </div>
-                        ))
-                      : folder.sessions.map((s) => renderSessionRow(s, true))}
+                    {folder.sessions.length === 0 ? (
+                      <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>
+                    ) : timeGroups ? (
+                      timeGroups.map((group) => (
+                        <div key={group.key} className={styles.timeGroup}>
+                          {group.sessions.map((s) => renderSessionRow(s, true))}
+                        </div>
+                      ))
+                    ) : (
+                      folder.sessions.map((s) => renderSessionRow(s, true))
+                    )}
                   </div>
                 )}
               </div>

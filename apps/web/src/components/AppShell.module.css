@@ -763,6 +763,15 @@
   border-left-color: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
+/* Empty folder (all chats deleted): a muted placeholder keeps the folder alive. */
+.folderEmpty {
+  padding: 6px 10px 8px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  user-select: none;
+}
+
 .treeVirtNested {
   box-sizing: border-box;
   padding-left: 22px;
