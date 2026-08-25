@@ -324,8 +324,9 @@
     "mcpDialogNone": "No MCP servers are configured globally.",
     "mcpManage": "Manage the server list in Settings → MCP",
     "deleteFolder": "Delete folder",
-    "deleteFolderConfirm": "Delete the empty folder «{{name}}»? Chats inside are not affected.",
-    "folderDeleted": "Folder deleted"
+    "folderDeleted": "Folder deleted",
+    "deleteFolderTitle": "Delete folder",
+    "deleteFolderBody": "Folder «{{name}}» and all chats in it will be permanently deleted."
   },
   "settings": {
     "agents": "Agents",

@@ -348,8 +348,9 @@
     "mcpDialogNone": "Глобально не настроено ни одного MCP сервера.",
     "mcpManage": "Управление списком — Настройки → MCP",
     "deleteFolder": "Удалить папку",
-    "deleteFolderConfirm": "Удалить пустую папку «{{name}}»? Чаты в ней не затронуты.",
-    "folderDeleted": "Папка удалена"
+    "folderDeleted": "Папка удалена",
+    "deleteFolderTitle": "Удалить папку",
+    "deleteFolderBody": "Папка «{{name}}» и все чаты в ней будут удалены безвозвратно."
   },
   "settings": {
     "agents": "Агенты",

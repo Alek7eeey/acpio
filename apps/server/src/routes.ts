@@ -403,6 +403,14 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.delete("/api/folders", async (req) => {
     const query = z.object({ cwd: z.string().min(1) }).parse(req.query);
+    const normalized = query.cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    // Tear down live agents of the chats inside before deleting their rows.
+    for (const s of await listSessions()) {
+      if (s.cwd === normalized) {
+        disposeRuntime(s.id);
+        forgetSessionSlashCommands(s.id);
+      }
+    }
     await deleteFolder(query.cwd);
     return { ok: true, folders: await listFolders() };
   });

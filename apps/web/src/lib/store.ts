@@ -912,6 +912,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await api.deleteFolder(cwd);
       set((s) => ({ knownFolders: s.knownFolders.filter((f) => f !== cwd) }));
+      void get().refreshSessions();
     } catch {
       // server offline — keep the folder
     }

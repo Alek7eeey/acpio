@@ -33,10 +33,11 @@ export async function rememberFolders(cwds: string[]): Promise<void> {
   }
 }
 
-/** Forget an empty folder. Returns false if no row existed (e.g. only used by sessions). */
+/** Forget a folder and delete every chat inside it (messages cascade). */
 export async function deleteFolder(cwd: string): Promise<boolean> {
   const normalized = normalizeCwd(cwd);
   if (!normalized) return false;
+  await db.delete(sessions).where(eq(sessions.cwd, normalized));
   const rows = await db
     .delete(chatFolders)
     .where(eq(chatFolders.cwd, normalized))

@@ -351,13 +351,76 @@ export function ChatSidebar({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
 
-  // Empty folders can be removed from the tree; chats inside are unaffected.
-  const confirmDeleteFolder = (cwd: string) => {
-    const name = folderLabel(cwd, t("common.noFolder"));
-    if (!window.confirm(t("chat.deleteFolderConfirm", { name }))) return;
+  // Deleting a folder removes it and every chat inside, confirmed through the
+  // same inline confirm component chat deletion uses.
+  const [confirmDeleteFolderCwd, setConfirmDeleteFolderCwd] = useState<string | null>(null);
+  const folderConfirmRef = useRef<HTMLDivElement>(null);
+  const [folderMenu, setFolderMenu] = useState<{
+    cwd: string;
+    x: number;
+    y: number;
+    anchorTop: number;
+    anchorBottom: number;
+  } | null>(null);
+  const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
+
+  const openFolderMenu = (e: ReactMouseEvent, cwd: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setConfirmDeleteId(null);
+    setConfirmDeleteFolderCwd(null);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setFolderMenuPos(null);
+    setFolderMenu({
+      cwd,
+      x: e.clientX,
+      y: e.clientY,
+      anchorTop: rect.top,
+      anchorBottom: rect.bottom,
+    });
+  };
+
+  const commitDeleteFolder = (cwd: string) => {
+    setConfirmDeleteFolderCwd(null);
     void deleteFolder(cwd);
     showToast(t("chat.folderDeleted"), { tone: "info" });
   };
+
+  const renderFolderDeleteConfirm = (cwd: string) => (
+    <div
+      key={cwd}
+      ref={folderConfirmRef}
+      className={styles.sessionConfirm}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("chat.deleteFolderTitle")}
+    >
+      <div className={styles.sessionConfirmCopy}>
+        <div className={styles.sessionConfirmTitle}>{t("chat.deleteFolderTitle")}</div>
+        <p className={styles.sessionConfirmText}>
+          {t("chat.deleteFolderBody", { name: folderLabel(cwd, t("common.noFolder")) })}
+        </p>
+      </div>
+      <div className={styles.sessionConfirmActions}>
+        <button
+          type="button"
+          className={styles.sessionConfirmCancel}
+          onClick={() => setConfirmDeleteFolderCwd(null)}
+        >
+          {t("common.cancel")}
+        </button>
+        <button
+          type="button"
+          className={styles.sessionConfirmDelete}
+          onClick={() => commitDeleteFolder(cwd)}
+        >
+          {t("common.delete")}
+        </button>
+      </div>
+    </div>
+  );
   // Track newly added sessions (e.g. a freshly created chat) so the sidebar
   // can play a subtle entrance animation on just that row, not the whole list.
   const prevSessionIds = useRef<Set<string> | null>(null);
@@ -483,17 +546,27 @@ export function ChatSidebar({
   }, [renamingId]);
 
   useEffect(() => {
-    if (!menu && !confirmDeleteId) return;
+    if (!menu && !confirmDeleteId && !folderMenu && !confirmDeleteFolderCwd) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
-      if (menuRef.current?.contains(target) || confirmRef.current?.contains(target)) return;
+      if (
+        menuRef.current?.contains(target) ||
+        confirmRef.current?.contains(target) ||
+        folderMenuRef.current?.contains(target) ||
+        folderConfirmRef.current?.contains(target)
+      )
+        return;
       setMenu(null);
       setConfirmDeleteId(null);
+      setFolderMenu(null);
+      setConfirmDeleteFolderCwd(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMenu(null);
         setConfirmDeleteId(null);
+        setFolderMenu(null);
+        setConfirmDeleteFolderCwd(null);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -502,12 +575,17 @@ export function ChatSidebar({
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [menu, confirmDeleteId]);
+  }, [menu, confirmDeleteId, folderMenu, confirmDeleteFolderCwd]);
 
   useEffect(() => {
     if (!confirmDeleteId) return;
     confirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [confirmDeleteId]);
+
+  useEffect(() => {
+    if (!confirmDeleteFolderCwd) return;
+    folderConfirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [confirmDeleteFolderCwd]);
 
   const startRenameSession = (s: SessionDto) => {
     setMenu(null);
@@ -569,6 +647,24 @@ export function ChatSidebar({
     setMenuPos({ x, y });
   }, [menu, settings.chatTreeMenu, isTouch]);
 
+  useLayoutEffect(() => {
+    if (!folderMenu || !folderMenuRef.current) {
+      setFolderMenuPos(null);
+      return;
+    }
+    const el = folderMenuRef.current;
+    const margin = 12;
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let x = Math.min(Math.max(margin, folderMenu.x), window.innerWidth - width - margin);
+    let y = folderMenu.y;
+    if (y + height > window.innerHeight - margin) {
+      y = folderMenu.anchorTop - height - 6;
+    }
+    y = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
+    setFolderMenuPos({ x, y });
+  }, [folderMenu]);
+
   const showFolderHeaders = folders.length > 1 || (folders.length === 1 && !!folders[0]?.cwd);
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
   const dateLocale = settings.locale === "en" ? "en-US" : "ru-RU";
@@ -580,6 +676,7 @@ export function ChatSidebar({
   type TreeRow =
     | { kind: "folder-head"; key: string; folder: (typeof folders)[number] }
     | { kind: "folder-empty"; key: string; cwd: string }
+    | { kind: "folder-confirm"; key: string; cwd: string }
     | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
     | { kind: "liked-head"; key: string; count: number }
@@ -590,6 +687,10 @@ export function ChatSidebar({
     const noFolder = "__no_folder__";
     for (const folder of folders) {
       const fkey = folder.cwd || noFolder;
+      if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
+        rows.push({ kind: "folder-confirm", key: `fc:${fkey}`, cwd: folder.cwd });
+        continue;
+      }
       if (showFolderHeaders) {
         rows.push({ kind: "folder-head", key: `fh:${fkey}`, folder });
       }
@@ -627,7 +728,7 @@ export function ChatSidebar({
       }
     }
     return rows;
-  }, [folders, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs]);
+  }, [folders, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs, confirmDeleteFolderCwd]);
 
   const TREE_VIRT_THRESHOLD = 80;
   const treeVirtual = treeRows.length > TREE_VIRT_THRESHOLD;
@@ -643,6 +744,8 @@ export function ChatSidebar({
           return 28;
         case "folder-empty":
           return 26;
+        case "folder-confirm":
+          return 84;
         case "session":
           return 34;
         case "archive-head":
@@ -990,6 +1093,7 @@ export function ChatSidebar({
         }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
         title={folder.cwd || undefined}
         onClick={() => toggleFolder(fkey)}
+        onContextMenu={(e) => openFolderMenu(e, folder.cwd)}
       >
         <span className={styles.folderLead} aria-hidden>
           <span className={styles.folderChevronIcon}>
@@ -1033,7 +1137,7 @@ export function ChatSidebar({
             />
           </svg>
         </button>
-        {folder.sessions.length === 0 && folder.cwd ? (
+        {folder.cwd ? (
           <button
             type="button"
             className={styles.folderDelete}
@@ -1041,7 +1145,7 @@ export function ChatSidebar({
             aria-label={t("chat.deleteFolder")}
             onClick={(e) => {
               e.stopPropagation();
-              confirmDeleteFolder(folder.cwd);
+              setConfirmDeleteFolderCwd(folder.cwd);
             }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1122,6 +1226,8 @@ export function ChatSidebar({
         return renderFolderHead(row.folder);
       case "folder-empty":
         return <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>;
+      case "folder-confirm":
+        return renderFolderDeleteConfirm(row.cwd);
       case "session":
         return renderSessionRow(row.session, row.showActivity, row.inArchive);
       case "archive-head":
@@ -1300,6 +1406,9 @@ export function ChatSidebar({
           {!treeVirtual && (
             <>
           {folders.map((folder) => {
+            if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
+              return renderFolderDeleteConfirm(folder.cwd);
+            }
             const useTimeGroups = folder.sessions.length > 1;
             const timeGroups = useTimeGroups
               ? groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs)
@@ -1320,6 +1429,7 @@ export function ChatSidebar({
                     }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
                     title={folder.cwd || undefined}
                     onClick={() => toggleFolder(fkey)}
+                    onContextMenu={(e) => openFolderMenu(e, folder.cwd)}
                   >
                     <span className={styles.folderLead} aria-hidden>
                       <span className={styles.folderChevronIcon}>
@@ -1363,7 +1473,7 @@ export function ChatSidebar({
                         />
                       </svg>
                     </button>
-                    {folder.sessions.length === 0 && folder.cwd ? (
+                    {folder.cwd ? (
                       <button
                         type="button"
                         className={styles.folderDelete}
@@ -1371,7 +1481,7 @@ export function ChatSidebar({
                         aria-label={t("chat.deleteFolder")}
                         onClick={(e) => {
                           e.stopPropagation();
-                          confirmDeleteFolder(folder.cwd);
+                          setConfirmDeleteFolderCwd(folder.cwd);
                         }}
                       >
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1673,6 +1783,68 @@ export function ChatSidebar({
             </button>
             </>
             )}
+          </div>,
+          document.body,
+        )}
+
+      {folderMenu &&
+        folderMenu.cwd &&
+        createPortal(
+          <div
+            ref={folderMenuRef}
+            className={styles.contextMenu}
+            style={{
+              left: folderMenuPos?.x ?? folderMenu.x,
+              top: folderMenuPos?.y ?? folderMenu.y,
+              visibility: folderMenuPos ? "visible" : "hidden",
+            }}
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const cwd = folderMenu.cwd;
+                setFolderMenu(null);
+                openFolderPicker({
+                  x: folderMenu.x,
+                  y: folderMenu.y,
+                  lockedCwd: cwd,
+                });
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 5v14M5 12h14"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </MenuIcon>
+              {t("chat.newInFolder")}
+            </button>
+            <div className={styles.contextMenuDivider} aria-hidden />
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuDanger}
+              onClick={() => {
+                const cwd = folderMenu.cwd;
+                setFolderMenu(null);
+                setConfirmDeleteFolderCwd(cwd);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("common.delete")}
+            </button>
           </div>,
           document.body,
         )}
