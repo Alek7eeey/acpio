@@ -244,6 +244,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const unseenFinishedTurns = useAppStore((s) => s.unseenFinishedTurns);
   const chatPaneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
   const chatSplitOn = useAppStore((s) => s.settings.chatSplit !== false);
+  const toolbarMinimal = settings.chatToolbarStyle === "minimal";
   const selectSession = useAppStore((s) => s.selectSession);
   const openSessionInNewPane = useAppStore((s) => s.openSessionInNewPane);
   const createSession = useAppStore((s) => s.createSession);
@@ -1243,17 +1244,36 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             : ` ${styles.treeNoMore}`
         }`}
       >
-        <div className={styles.chatToolbar}>
+        <div
+          className={`${styles.chatToolbar} ${
+            toolbarMinimal ? styles.chatToolbarMinimal : styles.chatToolbarClassic
+          }`}
+        >
           <button
-            className={styles.newChat}
+            className={toolbarMinimal ? styles.chatToolbarAction : styles.newChat}
             type="button"
             onClick={(e) => {
               const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
               openFolderPicker({ x: rect.left, y: rect.bottom + 6 });
             }}
           >
-            <span className={styles.newChatIcon} aria-hidden>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            {!toolbarMinimal ? (
+              <span className={styles.newChatIcon} aria-hidden>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </span>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
                   d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
                   stroke="currentColor"
@@ -1265,34 +1285,38 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                   fill="currentColor"
                 />
               </svg>
+            )}
+            <span className={toolbarMinimal ? undefined : styles.newChatLabel}>
+              {t("common.newChat")}
             </span>
-            <span className={styles.newChatLabel}>{t("common.newChat")}</span>
           </button>
-        </div>
 
-        {isChatSearchEnabled(settings.chatTreeElements) && onOpenSearch ? (
-          <button
-            type="button"
-            className={styles.chatSearchOpen}
-            onClick={onOpenSearch}
-            title={t("chat.searchDialogTitle")}
-            aria-label={t("chat.searchDialogTitle")}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-              <path
-                d="M16 16l4.5 4.5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </svg>
-            <span>{t("chat.searchPlaceholder")}</span>
-            <kbd className={styles.chatSearchKbd} aria-hidden>
-              /
-            </kbd>
-          </button>
-        ) : null}
+          {isChatSearchEnabled(settings.chatTreeElements) && onOpenSearch ? (
+            <button
+              type="button"
+              className={toolbarMinimal ? styles.chatToolbarAction : styles.chatSearchOpen}
+              onClick={onOpenSearch}
+              title={t("chat.searchDialogTitle")}
+              aria-label={t("chat.searchDialogTitle")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                <path
+                  d="M16 16l4.5 4.5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span>{t("chat.searchPlaceholder")}</span>
+              {!toolbarMinimal ? (
+                <kbd className={styles.chatSearchKbd} aria-hidden>
+                  /
+                </kbd>
+              ) : null}
+            </button>
+          ) : null}
+        </div>
 
         <div
           className={styles.sessionList}

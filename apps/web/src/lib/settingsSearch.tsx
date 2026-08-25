@@ -236,6 +236,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatEnterToSend"),
       t("settings.chatShowMessageTime"),
       t("settings.chatSplit"),
+      t("settings.chatToolbarStyle"),
       t("settings.chatAdvanced"),
       t("settings.chatIntro"),
     ],
@@ -296,6 +297,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.chatEnterToSendHint"),
       t("settings.chatShowMessageTimeHint"),
       t("settings.chatSplitHint"),
+      t("settings.chatToolbarStyleHint"),
     ],
   };
 }

@@ -385,6 +385,10 @@ export const ru = {
     chatSplit: "Два чата рядом",
     chatSplitHint:
       "Только на широком экране. Плавающая кнопка под шапкой делит рабочую область на два чата. Ctrl+клик по чату в дереве открывает его во второй панели.",
+    chatToolbarStyle: "Стиль «Новый чат» и поиска",
+    chatToolbarStyleHint: "Как выглядят кнопка нового чата и поиск в дереве чатов.",
+    chatToolbarStyleClassic: "Кнопки",
+    chatToolbarStyleMinimal: "Компактный",
     chatVoiceInput: "Голосовой ввод",
     chatVoiceInputHint: "Кнопка микрофона в панели ввода.",
     chatPreview: "Предпросмотр",

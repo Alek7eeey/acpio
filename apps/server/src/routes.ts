@@ -142,6 +142,7 @@ const settingsSchema = z.object({
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   chatSplit: z.boolean().optional(),
+  chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
   mcpServers: z
     .array(

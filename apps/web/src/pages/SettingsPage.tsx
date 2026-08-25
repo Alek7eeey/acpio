@@ -79,6 +79,31 @@ function ChatConfigRows({
           label={t("settings.chatSplit")}
         />
       </SettingRow>
+
+      <SettingRow label={t("settings.chatToolbarStyle")} hint={t("settings.chatToolbarStyleHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["classic", t("settings.chatToolbarStyleClassic")],
+              ["minimal", t("settings.chatToolbarStyleMinimal")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.chatToolbarStyle ?? "classic") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patch("chatToolbarStyle", id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
       <SettingRow label={t("settings.chatActions")} hint={t("settings.chatActionsHint")}>
         <div className={styles.actionChips}>
           {(

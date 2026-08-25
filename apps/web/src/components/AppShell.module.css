@@ -542,22 +542,141 @@
 }
 
 .chatToolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-  align-items: stretch;
   flex: 0 0 auto;
   padding: 2px 0 8px;
 }
 
-/* Session search opener below "New chat" — matches .settingsSearch in the tree. */
-.chatSearchOpen {
+.chatToolbarMinimal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+/* Cursor-style sidebar rows: icon + label, no full-width chrome. */
+.chatToolbarMinimal .chatToolbarAction {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.chatToolbarMinimal .chatToolbarAction:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+.chatToolbarMinimal .chatToolbarAction svg {
+  flex-shrink: 0;
+  display: block;
+}
+
+.chatToolbarMinimal .chatToolbarAction span {
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+:global([data-theme="light"]) .chatToolbarMinimal .chatToolbarAction {
+  color: rgba(24, 24, 27, 0.62);
+}
+
+:global([data-theme="light"]) .chatToolbarMinimal .chatToolbarAction:hover {
+  color: #18181b;
+  background: color-mix(in srgb, #000 4%, transparent);
+}
+
+.chatToolbarClassic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+}
+
+.chatToolbarClassic .newChat {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: none;
+  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 1px 5px color-mix(in srgb, var(--accent) 14%, transparent);
+  cursor: pointer;
+  transition: background 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+:global([data-theme="light"]) .chatToolbarClassic .newChat {
+  background: color-mix(in srgb, var(--accent) 86%, #ffffff);
+  color: #fff;
+}
+
+:global([data-theme="dark"]) .chatToolbarClassic .newChat {
+  background: color-mix(in srgb, var(--accent) 82%, #000000);
+  color: #fff;
+}
+
+.chatToolbarClassic .newChat:hover {
+  filter: brightness(1.05);
+}
+
+:global([data-theme="light"]) .chatToolbarClassic .newChat:hover {
+  background: color-mix(in srgb, var(--accent) 90%, #ffffff);
+  filter: none;
+}
+
+:global([data-theme="dark"]) .chatToolbarClassic .newChat:hover {
+  background: color-mix(in srgb, var(--accent) 88%, #000000);
+  filter: none;
+}
+
+.chatToolbarClassic .newChatIcon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.chatToolbarClassic .newChatIcon svg {
+  display: block;
+}
+
+.chatToolbarClassic .newChatLabel {
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.chatToolbarClassic .chatSearchOpen {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   min-height: 34px;
-  margin-bottom: 10px;
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -575,47 +694,40 @@
     box-shadow 160ms ease;
 }
 
-.chatSearchOpen:hover {
+.chatToolbarClassic .chatSearchOpen:hover {
   color: var(--text);
   border-color: color-mix(in srgb, var(--text) 18%, var(--border));
 }
 
-.chatSearchOpen svg {
+.chatToolbarClassic .chatSearchOpen svg {
   flex-shrink: 0;
   color: currentColor;
 }
 
-.chatSearchOpen span {
+.chatToolbarClassic .chatSearchOpen span {
   flex: 1;
   min-width: 0;
   text-align: left;
 }
 
-:global([data-theme="light"]) .chatSearchOpen {
+:global([data-theme="light"]) .chatToolbarClassic .chatSearchOpen {
   background: #ffffff;
   color: rgba(24, 24, 27, 0.52);
   border-color: var(--border);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-:global([data-theme="light"]) .chatSearchOpen span {
+:global([data-theme="light"]) .chatToolbarClassic .chatSearchOpen span {
   color: #18181b;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
 }
 
-:global([data-theme="light"]) .chatSearchOpen:hover {
+:global([data-theme="light"]) .chatToolbarClassic .chatSearchOpen:hover {
   color: #18181b;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-:global([data-theme="light"]) .chatSearchKbd {
-  color: rgba(24, 24, 27, 0.45);
-  border-color: color-mix(in srgb, #000 10%, var(--border));
-  background: #ffffff;
-  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
-}
-
-.chatSearchKbd {
+.chatToolbarClassic .chatSearchKbd {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -628,6 +740,13 @@
   font-size: 0.72rem;
   font-weight: 700;
   color: var(--text-tertiary, var(--text-secondary));
+}
+
+:global([data-theme="light"]) .chatToolbarClassic .chatSearchKbd {
+  color: rgba(24, 24, 27, 0.45);
+  border-color: color-mix(in srgb, #000 10%, var(--border));
+  background: #ffffff;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
 }
 
 .chatSearch {
@@ -665,70 +784,6 @@
 
 .chatSearchMsgs svg {
   display: block;
-}
-
-.newChat {
-  width: 100%;
-  min-width: 0;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: none;
-  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
-  color: #fff;
-  border-radius: 999px;
-  padding: 0 16px;
-  font: inherit;
-  font-size: 0.86rem;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent),
-    0 1px 5px color-mix(in srgb, var(--accent) 14%, transparent);
-  cursor: pointer;
-  transition: background 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
-}
-
-:global([data-theme="light"]) .newChat {
-  border: none;
-  background: color-mix(in srgb, var(--accent) 86%, #ffffff);
-  color: #fff;
-}
-
-:global([data-theme="dark"]) .newChat {
-  background: color-mix(in srgb, var(--accent) 82%, #000000);
-  color: #fff;
-}
-
-.newChat:hover {
-  filter: brightness(1.05);
-}
-
-:global([data-theme="light"]) .newChat:hover {
-  background: color-mix(in srgb, var(--accent) 90%, #ffffff);
-  filter: none;
-}
-
-:global([data-theme="dark"]) .newChat:hover {
-  background: color-mix(in srgb, var(--accent) 88%, #000000);
-  filter: none;
-}
-
-.newChatIcon {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  line-height: 0;
-}
-
-.newChatIcon svg {
-  display: block;
-}
-
-.newChatLabel {
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .newTheme {
@@ -4333,19 +4388,32 @@
   }
 
   .chatToolbar {
-    gap: 4px;
     padding: 0 0 6px;
   }
 
-  /* Match chat-search field: same text size and similar control height. */
-  .newChat {
+  .chatToolbarMinimal {
+    gap: 2px;
+  }
+
+  .chatToolbarMinimal .chatToolbarAction {
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: 0.86rem;
+    gap: 9px;
+  }
+
+  .chatToolbarClassic {
+    gap: 4px;
+  }
+
+  .chatToolbarClassic .newChat {
     min-height: 32px;
     padding: 0 14px;
     font-size: 0.86rem;
     gap: 6px;
   }
 
-  .newChatIcon svg {
+  .chatToolbarClassic .newChatIcon svg {
     width: 15px;
     height: 15px;
   }

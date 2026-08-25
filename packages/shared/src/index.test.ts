@@ -434,6 +434,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatEnterToSend: true,
     chatShowMessageTime: false,
     chatSplit: true,
+    chatToolbarStyle: "classic",
     remoteAccessKey: "",
     mcpServers: [],
   };

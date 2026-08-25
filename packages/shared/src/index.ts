@@ -370,6 +370,8 @@ export type ChatMetaChipId = "folder" | "thoughts" | "mcp" | "context" | "consol
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
+export type ChatToolbarStyle = "classic" | "minimal";
+
 export type ChatTreeElementId = "search" | "searchMsgs" | "pin" | "archive" | "more";
 
 /** Commands shown inside the session "⋯" context menu in the tree.
@@ -494,6 +496,8 @@ export interface AppSettings {
   chatShowMessageTime: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
+  /** New chat + search controls in the tree sidebar. */
+  chatToolbarStyle: ChatToolbarStyle;
   /** Internal persisted settings schema version (not shown in UI). */
   settingsSchema?: number;
   /**
@@ -556,6 +560,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatEnterToSend: true,
   chatShowMessageTime: false,
   chatSplit: true,
+  chatToolbarStyle: "classic",
   remoteAccessKey: "",
   mcpServers: [],
 };

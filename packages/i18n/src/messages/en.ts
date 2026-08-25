@@ -361,6 +361,10 @@ export const en = {
     chatSplit: "Two chats side by side",
     chatSplitHint:
       "Desktop only. A small floating button under the header splits the workspace into two chats. Ctrl+click a chat in the tree to open it in the other pane.",
+    chatToolbarStyle: "New chat & search style",
+    chatToolbarStyleHint: "How the new chat button and search opener look in the chat tree.",
+    chatToolbarStyleClassic: "Buttons",
+    chatToolbarStyleMinimal: "Compact",
     chatVoiceInput: "Voice input",
     chatVoiceInputHint: "The microphone button in the composer.",
     chatPreview: "Preview",
