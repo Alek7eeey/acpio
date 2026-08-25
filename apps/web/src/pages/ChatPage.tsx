@@ -1646,7 +1646,14 @@ function StepsSpoiler({
     setOpen(autoExpand);
   }, [autoExpand, setOpen]);
 
+  // Global switch clicked (Размышления chip): force-sync every block exactly
+  // once. The tick value changes only on a chip click — without this guard the
+  // effect re-ran on every render (setOpen is a fresh closure) and instantly
+  // reverted manual per-message toggles after the first global toggle.
+  const prevTickRef = useRef(stepsGlobalTick);
   useEffect(() => {
+    if (prevTickRef.current === stepsGlobalTick) return;
+    prevTickRef.current = stepsGlobalTick;
     if (stepsGlobalTick === 0) return;
     setOpen(autoExpand);
   }, [stepsGlobalTick, autoExpand, setOpen]);
