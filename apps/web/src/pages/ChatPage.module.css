@@ -439,6 +439,14 @@
   pointer-events: none;
 }
 
+/* The floating jump-to-latest pill must not cover an open model/mode dropdown:
+   the picker sits behind display:contents wrappers + isolation, and Chromium
+   hit-tests that stacking incorrectly — z-index alone can't keep the dropdown
+   on top, so hide the pill while any picker in the composer is expanded. */
+.composer:has([aria-haspopup="listbox"][aria-expanded="true"]) .jumpLatest {
+  display: none;
+}
+
 .jumpLatestLabel {
   white-space: nowrap;
 }

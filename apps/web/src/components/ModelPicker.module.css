@@ -9,8 +9,10 @@
 
 /* The menu is inside the picker's stacking context (isolation: isolate), so
    raise the whole picker when open — otherwise the next picker (same z-index,
-   later in DOM) paints over the dropdown. */
-.modelPickerOpen {
+   later in DOM) paints over the dropdown. Two classes beat single-class
+   overrides like `.composerModel { z-index: 20 }`, which would otherwise
+   sink the open picker below the composer's floating jump-to-latest button. */
+.modelPickerOpen.modelPicker {
   z-index: 150;
 }
 
