@@ -7,7 +7,7 @@ import {
   type SubagentCardUpdate,
   type SubagentProgressUpdate,
   type SubagentTranscriptPage,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 
 /** Registry lifecycle status → card status the UI understands. */
 function cardStatus(raw: string): SubagentCardUpdate["status"] {

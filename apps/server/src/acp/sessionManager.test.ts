@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import {
   coerceUiMode,
   normalizePlanPartPayload,
@@ -15,7 +15,7 @@ import {
   pickRestoreMode,
   requestIdFor,
 } from "./sessionManager.js";
-import { subagentFieldsFromRaw, textFromUnknown } from "@acprocess/shared";
+import { subagentFieldsFromRaw, textFromUnknown } from "@acpio/shared";
 
 describe("coerceUiMode", () => {
   it.each([

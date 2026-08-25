@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { toolCallIdVariants } from "@acprocess/shared";
+import { toolCallIdVariants } from "@acpio/shared";
 
 export type CursorStoreEnrichment = {
   description?: string;

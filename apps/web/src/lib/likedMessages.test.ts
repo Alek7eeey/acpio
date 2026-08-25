@@ -29,18 +29,18 @@ describe("listLikedMessages", () => {
   });
 
   it("returns an empty list when stored JSON is invalid", () => {
-    localStorage.setItem("acprocess.likedMessages.v1", "{not json");
+    localStorage.setItem("acpio.likedMessages.v1", "{not json");
     expect(listLikedMessages()).toEqual([]);
   });
 
   it("returns an empty list when stored JSON is not an array", () => {
-    localStorage.setItem("acprocess.likedMessages.v1", JSON.stringify({ messageId: "m1" }));
+    localStorage.setItem("acpio.likedMessages.v1", JSON.stringify({ messageId: "m1" }));
     expect(listLikedMessages()).toEqual([]);
   });
 
   it("sorts stored entries by `at` descending", () => {
     localStorage.setItem(
-      "acprocess.likedMessages.v1",
+      "acpio.likedMessages.v1",
       JSON.stringify([
         entry({ messageId: "old", at: "2026-01-01T00:00:00.000Z" }),
         entry({ messageId: "new", at: "2026-02-01T00:00:00.000Z" }),

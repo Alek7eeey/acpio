@@ -24,7 +24,7 @@ describe("listCursorAcpSessions", () => {
     fs.mkdirSync(real);
     fs.writeFileSync(
       path.join(real, "meta.json"),
-      JSON.stringify({ cwd: "E:/share/acprocess", title: "How are you" }),
+      JSON.stringify({ cwd: "E:/share/acpio", title: "How are you" }),
     );
     fs.writeFileSync(path.join(real, "store.db"), Buffer.alloc(8192, 1));
     const rows = listCursorAcpSessions({ root, chatsRoot: path.join(root, "no-chats") });

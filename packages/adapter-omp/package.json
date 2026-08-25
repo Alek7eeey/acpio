@@ -1,5 +1,5 @@
 {
-  "name": "@acprocess/adapter-omp",
+  "name": "@acpio/adapter-omp",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "dev": "tsc -p tsconfig.json --watch"
   },
   "dependencies": {
-    "@acprocess/shared": "*"
+    "@acpio/shared": "*"
   },
   "devDependencies": {
     "typescript": "^5.8.2"

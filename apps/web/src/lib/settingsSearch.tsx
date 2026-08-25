@@ -1,5 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
-import type { TranslateFn } from "@acprocess/i18n";
+import type { TranslateFn } from "@acpio/i18n";
 import type { SettingsLeaf } from "./settingsNav";
 import searchStyles from "./settingsSearch.module.css";
 

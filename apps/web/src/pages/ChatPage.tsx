@@ -34,7 +34,7 @@ import {
   type ModelParamDto,
   type SessionDetailDto,
   type SlashCommandDto,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
@@ -130,7 +130,7 @@ function shouldAutoFocusComposer() {
   return window.matchMedia("(pointer: fine)").matches;
 }
 
-const MSG_RATING_KEY = "acprocess.msgRating.v1";
+const MSG_RATING_KEY = "acpio.msgRating.v1";
 type MsgRating = "like" | "dislike";
 
 type SpeechRecognitionResultItem = { transcript: string };
@@ -2965,7 +2965,7 @@ function ChatThread() {
   const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
     try {
       // v2: thinking/steps open by default (legacy key defaulted to off).
-      const raw = localStorage.getItem("acprocess.autoExpandSteps.v2");
+      const raw = localStorage.getItem("acpio.autoExpandSteps.v2");
       if (raw === null) return true;
       return raw === "1";
     } catch {
@@ -2978,7 +2978,7 @@ function ChatThread() {
     setAutoExpandSteps(open);
     setStepsGlobalTick((tick) => tick + 1);
     try {
-      localStorage.setItem("acprocess.autoExpandSteps.v2", open ? "1" : "0");
+      localStorage.setItem("acpio.autoExpandSteps.v2", open ? "1" : "0");
     } catch {
       /* ignore */
     }
@@ -3075,7 +3075,7 @@ function ChatThread() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("acprocess.autoExpandSteps.v2", autoExpandSteps ? "1" : "0");
+      localStorage.setItem("acpio.autoExpandSteps.v2", autoExpandSteps ? "1" : "0");
     } catch {
       // ignore
     }

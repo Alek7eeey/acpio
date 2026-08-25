@@ -12,13 +12,13 @@ import type {
   SlashCommandDto,
   Theme,
   WsServerEvent,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import {
   DEFAULT_SETTINGS,
   isModelAccessError,
   mergeClientAppSettings,
   type AdapterMetaDto,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { api } from "./api";
 import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
@@ -46,16 +46,16 @@ import { dispatchShellConsole } from "./shellConsole";
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
   try {
-    localStorage.removeItem("acprocess.consoleLog.v1");
+    localStorage.removeItem("acpio.consoleLog.v1");
   } catch {
     /* ignore */
   }
 }
 
-const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
-const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
-const MODELS_SESSION_KEY = "acprocess.modelsCatalog.session.v1";
-const ACTIVE_SESSION_KEY = "acprocess.activeSessionId";
+const MODELS_CACHE_KEY = "acpio.modelsCatalog.v6";
+const MODELS_CACHE_KEY_LEGACY = "acpio.modelsCatalog.v5";
+const MODELS_SESSION_KEY = "acpio.modelsCatalog.session.v1";
+const ACTIVE_SESSION_KEY = "acpio.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
 const MODELS_CLOUD_SOFT_TTL_MS = 30_000;
@@ -839,8 +839,8 @@ async function loadAppData(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
 ) {
-  const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
-  const storedLocale = localStorage.getItem("acprocess.locale") as AppLocale | null;
+  const storedTheme = localStorage.getItem("acpio.theme") as Theme | null;
+  const storedLocale = localStorage.getItem("acpio.locale") as AppLocale | null;
   const settings = mergeClientAppSettings(await api.getSettings());
   const theme = storedTheme ?? settings.theme ?? "light";
   const locale =
@@ -898,7 +898,7 @@ async function loadAppData(
 // the persisted theme instead of falling back to base variables.
 if (typeof document !== "undefined") {
   try {
-    const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
+    const storedTheme = localStorage.getItem("acpio.theme") as Theme | null;
     document.documentElement.setAttribute("data-theme", storedTheme === "dark" ? "dark" : "light");
   } catch {
     /* ignore */
@@ -939,7 +939,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // client-only list) are pushed to the server so they survive across
       // devices, then the local copy is dropped.
       try {
-        const raw = localStorage.getItem("acprocess.knownFolders.v1");
+        const raw = localStorage.getItem("acpio.knownFolders.v1");
         if (raw) {
           const parsed = JSON.parse(raw) as unknown;
           const legacy = Array.isArray(parsed)
@@ -949,13 +949,13 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (legacyOnly.length > 0) {
             void api.rememberFolders(legacyOnly).then(() => {
               try {
-                localStorage.removeItem("acprocess.knownFolders.v1");
+                localStorage.removeItem("acpio.knownFolders.v1");
               } catch {
                 // ignore
               }
             });
           } else {
-            localStorage.removeItem("acprocess.knownFolders.v1");
+            localStorage.removeItem("acpio.knownFolders.v1");
           }
         }
       } catch {
@@ -1016,12 +1016,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   // default (light) variables with no data-theme attribute.
   applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("acprocess.theme", theme);
+    localStorage.setItem("acpio.theme", theme);
   },
 
   applyLocale(locale) {
     document.documentElement.lang = locale;
-    localStorage.setItem("acprocess.locale", locale);
+    localStorage.setItem("acpio.locale", locale);
   },
 
   async loadAdapters() {

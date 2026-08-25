@@ -1,4 +1,4 @@
-export const CHAT_PANES_KEY = "acprocess.chatPanes.v1";
+export const CHAT_PANES_KEY = "acpio.chatPanes.v1";
 export const CHAT_PANE_MAX = 2;
 export const CHAT_SPLIT_MIN_PX = 900;
 

@@ -1,5 +1,5 @@
 import type { WebSocket } from "ws";
-import type { WsServerEvent } from "@acprocess/shared";
+import type { WsServerEvent } from "@acpio/shared";
 
 type Client = {
   socket: WebSocket;

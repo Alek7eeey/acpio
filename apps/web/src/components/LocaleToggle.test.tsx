@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DEFAULT_SETTINGS } from "@acprocess/shared";
+import { DEFAULT_SETTINGS } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { LocaleToggle } from "./LocaleToggle";
@@ -11,7 +11,7 @@ const apiMock = vi.hoisted(() => ({
   // Static import is impossible here: vi.mock factories are hoisted above
   // imports, so DEFAULT_SETTINGS is uninitialized at factory runtime.
   updateSettings: vi.fn(async (patch: Record<string, unknown>) => {
-    const { DEFAULT_SETTINGS: defaults } = await import("@acprocess/shared");
+    const { DEFAULT_SETTINGS: defaults } = await import("@acpio/shared");
     return { ...defaults, ...patch };
   }),
 }));

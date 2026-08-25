@@ -9,9 +9,9 @@ import * as schema from "./schema.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../");
 dotenv.config({ path: path.join(rootDir, ".env") });
 
-/** Single-file SQLite DB at <repo>/data/acprocess.db; override with DATABASE_PATH
+/** Single-file SQLite DB at <repo>/data/acpio.db; override with DATABASE_PATH
  *  (":memory:" for tests). */
-const dbPath = process.env.DATABASE_PATH ?? path.join(rootDir, "data", "acprocess.db");
+const dbPath = process.env.DATABASE_PATH ?? path.join(rootDir, "data", "acpio.db");
 if (dbPath !== ":memory:") {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 }

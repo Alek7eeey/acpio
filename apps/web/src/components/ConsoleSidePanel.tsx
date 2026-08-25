@@ -19,7 +19,7 @@ import { sendWsMessage } from "../lib/useSessionSocket";
 
 import styles from "./ConsoleSidePanel.module.css";
 
-const WIDTH_KEY = "acprocess.consolePanelWidth.v1";
+const WIDTH_KEY = "acpio.consolePanelWidth.v1";
 const WIDTH_MIN = 280;
 const WIDTH_MAX = 720;
 const WIDTH_DEFAULT = 380;

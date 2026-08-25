@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { SessionDto } from "@acprocess/shared";
+import type { SessionDto } from "@acpio/shared";
 import { groupByFolder, sessionActivityAt } from "./ChatSidebar";
 
 function session(id: string, cwd: string): SessionDto {

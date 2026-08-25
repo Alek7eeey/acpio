@@ -2,7 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import type { AgentProvider, SessionDto } from "@acprocess/shared";
+import type { AgentProvider, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
@@ -296,7 +296,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
     try {
-      const raw = localStorage.getItem("acprocess.collapsedFolders.v1");
+      const raw = localStorage.getItem("acpio.collapsedFolders.v1");
       return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
     } catch {
       return new Set();
@@ -314,7 +314,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       if (next.has(key)) next.delete(key);
       else next.add(key);
       try {
-        localStorage.setItem("acprocess.collapsedFolders.v1", JSON.stringify([...next]));
+        localStorage.setItem("acpio.collapsedFolders.v1", JSON.stringify([...next]));
       } catch {
         // ignore
       }
@@ -329,7 +329,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       const next = new Set(prev);
       next.add(key);
       try {
-        localStorage.setItem("acprocess.collapsedFolders.v1", JSON.stringify([...next]));
+        localStorage.setItem("acpio.collapsedFolders.v1", JSON.stringify([...next]));
       } catch {
         // ignore
       }

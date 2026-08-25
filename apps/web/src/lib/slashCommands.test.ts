@@ -12,7 +12,7 @@ import {
   slashCommandRequiresInput,
   splitSlashCommandHighlight,
 } from "./slashCommands";
-import type { SlashCommandDto } from "@acprocess/shared";
+import type { SlashCommandDto } from "@acpio/shared";
 
 /** Stub translator that echoes the message key. */
 const t = (key: string) => key;

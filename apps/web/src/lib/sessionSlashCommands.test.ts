@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SessionDetailDto, SlashCommandDto } from "@acprocess/shared";
+import type { SessionDetailDto, SlashCommandDto } from "@acpio/shared";
 import {
   hydrateSessionSlashCommands,
   mergeIncomingSlashCommands,

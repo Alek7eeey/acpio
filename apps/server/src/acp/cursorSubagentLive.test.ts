@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cursorProjectSlugs } from "@acprocess/adapter-cursor";
+import { cursorProjectSlugs } from "@acpio/adapter-cursor";
 import { agentIdFromToolText } from "./cursorSubagentLive.js";
 
 describe("agentIdFromToolText", () => {
@@ -22,7 +22,7 @@ describe("cursorProjectSlugs", () => {
   });
 
   it("maps nested share path", () => {
-    const slugs = cursorProjectSlugs("E:\\share\\acprocess");
-    expect(slugs.some((s) => /share-acprocess/i.test(s))).toBe(true);
+    const slugs = cursorProjectSlugs("E:\\share\\acpio");
+    expect(slugs.some((s) => /share-acpio/i.test(s))).toBe(true);
   });
 });

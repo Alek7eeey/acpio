@@ -6,7 +6,7 @@ import type {
   ChatMetaChipId,
   ChatTreeElementId,
   ChatTreeMenuId,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
@@ -469,7 +469,7 @@ export function ChatSettingsPreview({
       <div className={styles.headerWrap}>
         <div className={styles.header} style={{ height: `${headerHeight}px` }}>
           <span className={styles.brand} aria-hidden>
-            {"ACProcess".split("").map((ch, i) => (
+            {"Acpio".split("").map((ch, i) => (
               <span key={i} className={i < 3 ? styles.brandMark : undefined}>
                 {ch}
               </span>
@@ -606,7 +606,7 @@ export function ChatSettingsPreview({
                   strokeLinejoin="round"
                 />
               </svg>
-              <span className={styles.treeFolderLabel}>E:\share\acprocess</span>
+              <span className={styles.treeFolderLabel}>E:\share\acpio</span>
               {/* Mandatory: folder add */}
               <span className={styles.treeAdd} aria-hidden>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
@@ -616,7 +616,7 @@ export function ChatSettingsPreview({
             </div>
 
             {[
-              { title: "Деплой ACProcess на прод", busy: true },
+              { title: "Деплой Acpio на прод", busy: true },
               { title: "Рефакторинг поиска сообщений", busy: false },
             ].map((row, i) => (
               <div

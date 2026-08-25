@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { AppLocale } from "@acprocess/shared";
+import type { AppLocale } from "@acpio/shared";
 import {
   SUPPORTED_LOCALES,
   defaultSessionTitle,
@@ -9,7 +9,7 @@ import {
   parseAcceptLanguage,
   t,
   type ErrorCode,
-} from "@acprocess/i18n";
+} from "@acpio/i18n";
 
 describe("normalizeLocale", () => {
   it.each<[string | null | undefined, AppLocale]>([

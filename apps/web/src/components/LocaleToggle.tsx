@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { AppLocale } from "@acprocess/shared";
+import type { AppLocale } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { LocaleFlag } from "./LocaleFlag";

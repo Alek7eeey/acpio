@@ -24,7 +24,7 @@ import {
   type McpServerConfig,
   mcpHttpHeaders,
   mcpRemoteExtras,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -610,7 +610,7 @@ export class AcpClient extends EventEmitter {
           // (fast/effort/…) as separate config options.
           _meta: { parameterizedModelPicker: this.adapter.parameterizedModelPicker },
         },
-        clientInfo: { name: "acprocess", version: "0.1.0" },
+        clientInfo: { name: "acpio", version: "0.1.0" },
       })) as {
         agentCapabilities?: {
           loadSession?: boolean;

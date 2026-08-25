@@ -1,4 +1,4 @@
-const CONSOLE_OPEN_KEY = "acprocess.consoleOpen.v1";
+const CONSOLE_OPEN_KEY = "acpio.consoleOpen.v1";
 
 /** Which sessions had the terminal panel open (not shell output). */
 export function readConsoleOpenSessions(): Set<string> {

@@ -5,7 +5,7 @@ import {
   SETTINGS_SCHEMA_VERSION,
   normalizeChatMetaChips,
   readSettingsSchema,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
 import { adapters } from "../adapters/registry.js";

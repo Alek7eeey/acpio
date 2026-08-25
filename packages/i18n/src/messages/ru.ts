@@ -123,7 +123,7 @@ export const ru = {
     workingDir: "Рабочая папка",
     selectFolder: "Выбрать папку…",
     installApp: "Установить приложение",
-    installAppHint: "Добавьте ACProcess на домашний экран — будет открываться как обычное приложение.",
+    installAppHint: "Добавьте Acpio на домашний экран — будет открываться как обычное приложение.",
     installAppWaiting:
       "Chrome ещё не готов к установке. Когда service worker активируется, нажмите «Установить» снова — откроется системный диалог.",
     installAppNeedHttps:
@@ -135,7 +135,7 @@ export const ru = {
     installAppIosHint: "На iPhone Safari установка идёт через «На экран „Домой“»:",
     installAppIosStep1: "Нажмите кнопку «Поделиться» внизу Safari.",
     installAppIosStep2: "Пролистайте и выберите «На экран „Домой“».",
-    installAppIosStep3: "Подтвердите — иконка ACProcess появится на домашнем экране.",
+    installAppIosStep3: "Подтвердите — иконка Acpio появится на домашнем экране.",
     installAppDesktop: "Chrome/Edge на ПК: иконка установки в адресной строке или эта кнопка, если браузер предлагает.",
     thisPc: "Этот компьютер",
     quickAccess: "Быстро",
@@ -164,7 +164,7 @@ export const ru = {
     settingsSections: "Разделы настроек",
     skipSplash: "Нажмите, чтобы пропустить",
     continueSplash: "Нажмите, чтобы продолжить",
-    loadingApp: "Загрузка ACProcess",
+    loadingApp: "Загрузка Acpio",
     harnessForAgents: "Harness for agents",
     command: "Команда",
     commands: "Команды",
@@ -253,7 +253,7 @@ export const ru = {
     removeFile: "Убрать файл",
     fileTooLarge: "Файл «{{name}}» больше 15 МБ — он пропущен",
     tooManyFiles: "Можно прикрепить не больше 8 файлов",
-    emptyTitle: "ACProcess",
+    emptyTitle: "Acpio",
     emptyDescription:
       "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются Cursor и OMP.",
     emptyReady: "Начинайте, когда будете готовы",
@@ -394,7 +394,7 @@ export const ru = {
     chatPreview: "Предпросмотр",
     chatPreviewUser: "Привет! Сделай краткую сводку по вчерашнему обсуждению.",
     chatPreviewAssistant: "Готово! Сводка из трёх пунктов уже в заметках — посмотри раздел «Итоги».",
-    chatPreviewTool: "Обзор папки · E:\\share\\acprocess",
+    chatPreviewTool: "Обзор папки · E:\\share\\acpio",
     chatPreviewThought: "Сначала проверю структуру репозитория и соберу прод-версию…",
     chatTree: "Дерево чатов",
     chatActionsOrderHint:
@@ -514,8 +514,8 @@ export const ru = {
     sidebarCollapseRail: "Оставлять панель иконок",
     remoteAccess: "Телефон и VPN",
     remoteAccessTitle: "Доступ с телефона через VPN",
-    remoteAccessDesc: "Как открыть ACProcess с телефона, когда он в одной сети или VPN с компьютером.",
-    remoteStep1Title: "Запустите ACProcess на ПК",
+    remoteAccessDesc: "Как открыть Acpio с телефона, когда он в одной сети или VPN с компьютером.",
+    remoteStep1Title: "Запустите Acpio на ПК",
     remoteStep1Body:
       "В папке проекта выполните `npm run dev`. Web слушает все интерфейсы (порт 5173), API — 3001. Окно терминала не закрывайте.",
     remoteStep2Title: "Подключите телефон к тому же VPN",

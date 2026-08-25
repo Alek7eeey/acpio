@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
-import { DEFAULT_SETTINGS, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acpio/shared";
 import { getAdapter } from "../adapters/registry.js";
 import {
   AcpClient,

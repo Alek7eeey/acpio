@@ -55,13 +55,13 @@ async function main() {
     console.log(`Serving web UI from ${webDist}`);
   } else {
     console.log(
-      "Web UI build not found — API-only on :" + port + ". Build it with: npm run build -w @acprocess/web",
+      "Web UI build not found — API-only on :" + port + ". Build it with: npm run build -w @acpio/web",
     );
   }
 
   const host = process.env.HOST ?? "0.0.0.0";
   await app.listen({ port, host });
-  console.log(`ACProcess server on http://${host}:${port}`);
+  console.log(`Acpio server on http://${host}:${port}`);
 
   // Sessions left "running"/"waiting" by the previous process (crash, kill,
   // hung MCP tool call) have no live runtime — unlock them and stop their

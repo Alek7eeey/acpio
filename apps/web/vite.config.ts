@@ -11,8 +11,8 @@ export default defineConfig({
       injectRegister: false,
       includeAssets: ["icon-180.png", "icon-192.png", "icon-512.png"],
       manifest: {
-        name: "ACProcess",
-        short_name: "ACProcess",
+        name: "Acpio",
+        short_name: "Acpio",
         description: "Self-hosted harness for ACP agents",
         theme_color: "#0866ff",
         background_color: "#f7f8fa",
@@ -59,8 +59,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
-      "@acprocess/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
-      "@acprocess/i18n": path.resolve(__dirname, "../../packages/i18n/src/index.ts"),
+      "@acpio/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts"),
+      "@acpio/i18n": path.resolve(__dirname, "../../packages/i18n/src/index.ts"),
     },
   },
   server: {

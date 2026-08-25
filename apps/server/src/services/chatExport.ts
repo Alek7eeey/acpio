@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { toolDisplayTitle, type AppLocale, type AppSettings, type MessageDto, type SessionDetailDto } from "@acprocess/shared";
-import { t } from "@acprocess/i18n";
+import { toolDisplayTitle, type AppLocale, type AppSettings, type MessageDto, type SessionDetailDto } from "@acpio/shared";
+import { t } from "@acpio/i18n";
 import { REPO_ROOT } from "../db/client.js";
 import { getSettings } from "./settings.js";
 import { getSessionDetail } from "./sessions.js";
@@ -307,7 +307,7 @@ export function renderMarkdown(detail: SessionDetailDto, locale: AppLocale): str
 /** Machine-readable dump of the session: meta + every message with its parts. */
 export function renderJson(detail: SessionDetailDto): string {
   const data = {
-    format: "acprocess-chat",
+    format: "acpio-chat",
     version: 1,
     exportedAt: new Date().toISOString(),
     session: {

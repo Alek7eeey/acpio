@@ -1,5 +1,5 @@
 import { useId } from "react";
-import type { AppLocale } from "@acprocess/shared";
+import type { AppLocale } from "@acpio/shared";
 import styles from "./LocaleFlag.module.css";
 
 export function LocaleFlag({ locale }: { locale: AppLocale }) {

@@ -5,8 +5,8 @@ import {
   type ErrorCode,
   type TranslateFn,
   createTranslator,
-} from "@acprocess/i18n";
-import type { AppLocale } from "@acprocess/shared";
+} from "@acpio/i18n";
+import type { AppLocale } from "@acpio/shared";
 import { getSettings } from "../services/settings.js";
 
 export function localeFromRequest(req: FastifyRequest, settingsLocale?: AppLocale): AppLocale {

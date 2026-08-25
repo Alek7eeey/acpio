@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath =
-  process.env.DATABASE_PATH ?? path.resolve(__dirname, "../../../../data/acprocess.db");
+  process.env.DATABASE_PATH ?? path.resolve(__dirname, "../../../../data/acpio.db");
 
 async function main() {
   const client = new Database(dbPath);

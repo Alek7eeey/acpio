@@ -1,5 +1,5 @@
 {
-  "name": "acprocess",
+  "name": "acpio",
   "private": true,
   "version": "0.1.0",
   "workspaces": [
@@ -7,18 +7,18 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acprocess/server\" \"npm run dev -w @acprocess/web\"",
-    "dev:server": "npm run dev -w @acprocess/server",
-    "dev:web": "npm run dev -w @acprocess/web",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acpio/server\" \"npm run dev -w @acpio/web\"",
+    "dev:server": "npm run dev -w @acpio/server",
+    "dev:web": "npm run dev -w @acpio/web",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "npm run build -w @acprocess/shared && npm run build -w @acprocess/i18n && npm run build -w @acprocess/adapter-cursor && npm run build -w @acprocess/adapter-omp && npm run build -w @acprocess/server && npm run build -w @acprocess/web",
+    "build": "npm run build -w @acpio/shared && npm run build -w @acpio/i18n && npm run build -w @acpio/adapter-cursor && npm run build -w @acpio/adapter-omp && npm run build -w @acpio/server && npm run build -w @acpio/web",
     "prestart": "node scripts/ensure-built.mjs",
-    "start": "npm run start -w @acprocess/server",
+    "start": "npm run start -w @acpio/server",
     "dist": "node scripts/package-dist.mjs",
-    "db:generate": "npm run db:generate -w @acprocess/server",
-    "db:migrate": "npm run db:migrate -w @acprocess/server",
-    "db:push": "npm run db:push -w @acprocess/server",
+    "db:generate": "npm run db:generate -w @acpio/server",
+    "db:migrate": "npm run db:migrate -w @acpio/server",
+    "db:push": "npm run db:push -w @acpio/server",
     "screens": "node scripts/capture-screens.mjs"
   },
   "devDependencies": {

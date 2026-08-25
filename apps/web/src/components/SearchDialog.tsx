@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import type { SessionDto } from "@acprocess/shared";
+import type { SessionDto } from "@acpio/shared";
 import { api, type MessageSearchHit } from "../lib/api";
 import { useLocale, useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";

@@ -1008,7 +1008,7 @@ export interface ModelParamDto {
   options: Array<{ value: string; name: string }>;
 }
 
-/** Agent-side session that is not (yet) a row in the ACProcess tree. */
+/** Agent-side session that is not (yet) a row in the Acpio tree. */
 export interface HarnessSessionDto {
   provider: AgentProvider;
   acpSessionId: string;

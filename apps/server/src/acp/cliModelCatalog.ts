@@ -5,7 +5,7 @@ import {
   type AgentProvider,
   type AppSettings,
   type ModelOption,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { adapterCommand, getAdapter } from "../adapters/registry.js";
 import { resolveCommand } from "./AcpClient.js";
 

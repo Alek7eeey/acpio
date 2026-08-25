@@ -1,4 +1,4 @@
-# ACProcess
+# Acpio
 
 Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
@@ -8,7 +8,7 @@
 - `apps/web` — React + Vite + TypeScript
 - `apps/server` — Fastify + WebSocket + ACP stdio bridge
 - `packages/shared` — общие типы
-- SQLite (один файл `data/acprocess.db`, встроенный через better-sqlite3)
+- SQLite (один файл `data/acpio.db`, встроенный через better-sqlite3)
 
 ## Быстрый старт
 
@@ -16,7 +16,7 @@
 при первом запуске):
 
 ```powershell
-irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
 ```
 
 **Из исходников (прод, один порт):**
@@ -44,7 +44,7 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 - Прод: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
 - Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
-- Файл БД: `data/acprocess.db` (переопределяется через `DATABASE_PATH` в `.env`)
+- Файл БД: `data/acpio.db` (переопределяется через `DATABASE_PATH` в `.env`)
 
 ## Скриншоты
 
@@ -90,7 +90,7 @@ npm run start     # → http://localhost:3001 (UI + API + WebSocket)
 npm run dist
 ```
 
-создаёт `dist-app/acprocess-win-x64.zip` — скомпилированный сервер, веб-UI,
+создаёт `dist-app/acpio-win-x64.zip` — скомпилированный сервер, веб-UI,
 пакеты воркспейсов и production `node_modules` (нативный better-sqlite3
 внутри). Распакуйте куда угодно и запустите `start.cmd` (нужен Node >= 20).
 
@@ -99,24 +99,24 @@ npm run dist
 
 ### Установка в один клик
 
-Прикрепите `dist-app/acprocess-win-x64.zip` к
-[GitHub release](https://github.com/Alek7eeey/acprocess/releases) с именем
-`acprocess-win-x64.zip`, затем на чистой Windows-машине:
+Прикрепите `dist-app/acpio-win-x64.zip` к
+[GitHub release](https://github.com/Alek7eeey/acpio/releases) с именем
+`acpio-win-x64.zip`, затем на чистой Windows-машине:
 
 ```powershell
-irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
 ```
 
 Скрипт проверит/установит Node 20+, скачает релиз, распакует в
-`%LOCALAPPDATA%\acprocess` и запустит приложение (данные — в
-`%LOCALAPPDATA%\acprocess\data`). Локальный бандл вместо скачивания:
+`%LOCALAPPDATA%\acpio` и запустит приложение (данные — в
+`%LOCALAPPDATA%\acpio\data`). Локальный бандл вместо скачивания:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acprocess-win-x64.zip
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acpio-win-x64.zip
 ```
 
 Переменные окружения прода: `PORT` (по умолчанию 3001), `HOST` (по умолчанию
-`0.0.0.0`), `DATABASE_PATH` (по умолчанию `<каталог приложения>/data/acprocess.db`).
+`0.0.0.0`), `DATABASE_PATH` (по умолчанию `<каталог приложения>/data/acpio.db`).
 
 ## Телефон и VPN
 

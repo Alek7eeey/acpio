@@ -18,7 +18,7 @@ export type ShowToastOptions = {
   id?: string;
 };
 
-const EVENT = "acprocess:toast";
+const EVENT = "acpio:toast";
 const MAX_VISIBLE = 4;
 const DEFAULT_DURATION_MS = 2800;
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { modelDisplayName, modelForProvider, type MessageDto, type SessionDto } from "@acprocess/shared";
+import { modelDisplayName, modelForProvider, type MessageDto, type SessionDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
@@ -31,7 +31,7 @@ import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import styles from "./AppShell.module.css";
 
-const SIDEBAR_WIDTH_KEY = "acprocess.sidebarWidth.v2";
+const SIDEBAR_WIDTH_KEY = "acpio.sidebarWidth.v2";
 const SIDEBAR_MIN = 300;
 const SIDEBAR_MAX = 1200;
 const SIDEBAR_DEFAULT = 360;
@@ -718,7 +718,7 @@ export function AppShell() {
       : undefined
   ) as CSSProperties | undefined;
 
-  /** "ACProcess · Chat" brand: shown in the header when the sidebar is
+  /** "Acpio · Chat" brand: shown in the header when the sidebar is
    *  collapsed or on mobile, and inside the tree next to the collapse
    *  button when the desktop sidebar is open. */
   const brandButton = (
@@ -727,10 +727,10 @@ export function AppShell() {
       className={`${styles.headerBrand} ${brandBump ? styles.brandBump : ""}`}
       onClick={goChat}
       title={t("common.goToChat")}
-      aria-label="ACProcess chat"
+      aria-label="Acpio chat"
     >
       <span className={styles.brandLetters} aria-hidden>
-        {"ACProcess".split("").map((ch, i) => (
+        {"Acpio".split("").map((ch, i) => (
           <span
             key={`${ch}-${i}`}
             className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}

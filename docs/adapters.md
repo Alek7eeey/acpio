@@ -1,9 +1,9 @@
 # Harness Plugins: Developer Guide
 
-ACProcess works with any agent speaking [ACP](https://agentclientprotocol.com/)
+Acpio works with any agent speaking [ACP](https://agentclientprotocol.com/)
 (JSON-RPC over stdio). The core (server + web) does not know harness names — it only knows
 the **adapter registry**. Each harness (Cursor, OMP, or your own) is a package implementing
-the `HarnessAdapter` interface from `@acprocess/shared`.
+the `HarnessAdapter` interface from `@acpio/shared`.
 
 ```mermaid
 flowchart LR
@@ -132,7 +132,7 @@ mkdir packages/adapter-my-harness
 
 ```json
 {
-  "name": "@acprocess/adapter-my-harness",
+  "name": "@acpio/adapter-my-harness",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -143,7 +143,7 @@ mkdir packages/adapter-my-harness
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch"
   },
-  "dependencies": { "@acprocess/shared": "*" },
+  "dependencies": { "@acpio/shared": "*" },
   "devDependencies": { "typescript": "^5.8.2" }
 }
 ```
@@ -155,7 +155,7 @@ Copy `packages/adapter-cursor/tsconfig.json` as `packages/adapter-my-harness/tsc
 `packages/adapter-my-harness/src/index.ts`:
 
 ```ts
-import { type HarnessAdapter } from "@acprocess/shared";
+import { type HarnessAdapter } from "@acpio/shared";
 
 export const myHarnessAdapter: HarnessAdapter = {
   id: "my-harness",
@@ -210,7 +210,7 @@ export const myHarnessAdapter: HarnessAdapter = {
 The only core change — `apps/server/src/adapters/registry.ts`:
 
 ```ts
-import { myHarnessAdapter } from "@acprocess/adapter-my-harness";
+import { myHarnessAdapter } from "@acpio/adapter-my-harness";
 
 const ALL: HarnessAdapter[] = [cursorAdapter, ompAdapter, myHarnessAdapter];
 ```

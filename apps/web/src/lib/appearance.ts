@@ -1,4 +1,4 @@
-import type { AppSettings } from "@acprocess/shared";
+import type { AppSettings } from "@acpio/shared";
 import { customScheme, schemeById } from "./themeSchemes";
 
 /** Font family ids selectable in Settings → Interface. "" = default (Figtree). */

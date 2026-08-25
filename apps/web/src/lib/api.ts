@@ -10,7 +10,7 @@ import type {
   SessionDetailDto,
   SessionDto,
   HarnessSessionDto,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 
 export type MessageSearchHit = {
   sessionId: string;

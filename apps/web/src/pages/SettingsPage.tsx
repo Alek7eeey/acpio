@@ -14,7 +14,7 @@ import {
   type McpServerConfig,
   type ModelParamDto,
   parseMcpRemoteConfig,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { api } from "../lib/api";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
 import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";

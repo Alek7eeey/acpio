@@ -1,5 +1,5 @@
-import type { SlashCommandDto } from "@acprocess/shared";
-import type { TranslateFn } from "@acprocess/i18n";
+import type { SlashCommandDto } from "@acpio/shared";
+import type { TranslateFn } from "@acpio/i18n";
 
 export function slashCommandBareName(name: string) {
   return name.trim().replace(/^\//, "").replace(/^skill:/i, "").toLowerCase();

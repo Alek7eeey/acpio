@@ -1,6 +1,6 @@
 {
-  "name": "ACProcess",
-  "short_name": "ACProcess",
+  "name": "Acpio",
+  "short_name": "Acpio",
   "description": "Self-hosted harness for ACP agents",
   "start_url": "/",
   "scope": "/",

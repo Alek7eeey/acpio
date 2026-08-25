@@ -1,6 +1,6 @@
 /**
  * Builds a self-contained production bundle for Windows x64:
- *   dist-app/acprocess-<version>-win-x64.zip
+ *   dist-app/acpio-<version>-win-x64.zip
  *
  * Contents (all platform-specific pieces built on the current machine):
  *   server/        compiled server (apps/server/dist)
@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const distRoot = path.join(repoRoot, "dist-app");
 const version = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
-const pkgName = `acprocess-${version}-win-x64`;
+const pkgName = `acpio-${version}-win-x64`;
 const pkgDir = path.join(distRoot, pkgName);
 const isWindows = process.platform === "win32";
 
@@ -71,17 +71,17 @@ const serverPkg = JSON.parse(
 );
 const dependencies = {};
 for (const [name, ver] of Object.entries(serverPkg.dependencies)) {
-  if (name.startsWith("@acprocess/")) continue;
+  if (name.startsWith("@acpio/")) continue;
   dependencies[name] = ver;
 }
 for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor"]) {
-  dependencies[`@acprocess/${name}`] = `file:packages/${name}`;
+  dependencies[`@acpio/${name}`] = `file:packages/${name}`;
 }
 fs.writeFileSync(
   path.join(pkgDir, "package.json"),
   JSON.stringify(
     {
-      name: "acprocess",
+      name: "acpio",
       version,
       private: true,
       type: "module",
@@ -102,7 +102,7 @@ execSync("npm install --omit=dev --no-audit --no-fund --loglevel=error", {
 // npm installs `file:` workspace deps as symlinks — zip/expand would turn
 // them into empty dirs. Materialize them as real copies.
 for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor"]) {
-  const target = path.join(pkgDir, "node_modules", "@acprocess", name);
+  const target = path.join(pkgDir, "node_modules", "@acpio", name);
   fs.rmSync(target, { recursive: true, force: true });
   fs.cpSync(path.join(pkgDir, "packages", name), target, { recursive: true });
 }
@@ -116,7 +116,7 @@ fs.writeFileSync(
     "setlocal",
     'cd /d "%~dp0"',
     "if not exist data mkdir data",
-    'echo Starting ACProcess at http://localhost:3001',
+    'echo Starting Acpio at http://localhost:3001',
     'start "" http://localhost:3001',
     "node apps/server/dist/index.js",
     "",
@@ -128,7 +128,7 @@ fs.writeFileSync(
     "#!/usr/bin/env sh",
     'cd "$(dirname "$0")"',
     "mkdir -p data",
-    "echo Starting ACProcess at http://localhost:3001",
+    "echo Starting Acpio at http://localhost:3001",
     '(xdg-open http://localhost:3001 >/dev/null 2>&1 || open http://localhost:3001 >/dev/null 2>&1) &',
     "exec node apps/server/dist/index.js",
     "",
@@ -136,8 +136,8 @@ fs.writeFileSync(
 );
 
 // 6. Zip. Stable name (version-independent) so the "latest release" download
-// URL works: https://github.com/Alek7eeey/acprocess/releases/latest/download/acprocess-win-x64.zip
-const zipPath = path.join(distRoot, "acprocess-win-x64.zip");
+// URL works: https://github.com/Alek7eeey/acpio/releases/latest/download/acpio-win-x64.zip
+const zipPath = path.join(distRoot, "acpio-win-x64.zip");
 fs.rmSync(zipPath, { force: true });
 if (isWindows) {
   // Compress-Archive can be slow on huge trees; node_modules first pass is

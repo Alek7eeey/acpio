@@ -1,6 +1,6 @@
 import https from "node:https";
-import type { McpServerConfig } from "@acprocess/shared";
-import { mcpHttpHeaders } from "@acprocess/shared";
+import type { McpServerConfig } from "@acpio/shared";
+import { mcpHttpHeaders } from "@acpio/shared";
 import { getSettings } from "./settings.js";
 
 const OK_TTL_MS = 30_000;
@@ -41,7 +41,7 @@ async function probeOne(s: McpServerConfig): Promise<boolean> {
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "acprocess", version: "0.1.0" },
+        clientInfo: { name: "acpio", version: "0.1.0" },
       },
     });
     let text: string;

@@ -3,10 +3,10 @@ export {
   sanitizeTitleSource,
   titleFromUserText,
   truncateSessionTitle,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 
-import type { MessageDto } from "@acprocess/shared";
-import { sanitizeTitleSource, truncateSessionTitle } from "@acprocess/shared";
+import type { MessageDto } from "@acpio/shared";
+import { sanitizeTitleSource, truncateSessionTitle } from "@acpio/shared";
 
 export function firstUserTitleLine(messages: MessageDto[] | undefined): string {
   if (!messages?.length) return "";

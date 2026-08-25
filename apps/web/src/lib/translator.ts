@@ -1,5 +1,5 @@
-import type { AppLocale } from "@acprocess/shared";
-import type { Messages, TranslateFn, TranslateVars } from "@acprocess/i18n";
+import type { AppLocale } from "@acpio/shared";
+import type { Messages, TranslateFn, TranslateVars } from "@acpio/i18n";
 import en from "./i18n-messages/en.json";
 import ru from "./i18n-messages/ru.json";
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { WsClientEvent, WsServerEvent } from "@acprocess/shared";
+import type { WsClientEvent, WsServerEvent } from "@acpio/shared";
 import { useAppStore } from "./store";
 
 function wsUrl() {

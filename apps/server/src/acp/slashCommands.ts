@@ -1,4 +1,4 @@
-import { type SlashCommandDto } from "@acprocess/shared";
+import { type SlashCommandDto } from "@acpio/shared";
 
 export const SLASH_COMMAND_NAME_RE = /^[a-z][\w.-]*(?::[a-z][\w.-]*)*$/i;
 const SLASH_PROMPT_RE = /^\/([a-z][\w.-]*(?::[a-z][\w.-]*)*)(?:\s+([\s\S]*))?$/i;

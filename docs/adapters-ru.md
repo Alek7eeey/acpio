@@ -1,9 +1,9 @@
 # Плагины харнессов: руководство разработчика
 
-ACProcess умеет работать с любым агентом, говорящим на [ACP](https://agentclientprotocol.com/)
+Acpio умеет работать с любым агентом, говорящим на [ACP](https://agentclientprotocol.com/)
 (JSON-RPC over stdio). Ядро (сервер + веб) не знает имена харнессов — оно знает только
 **реестр адаптеров**. Каждый харнесс (Cursor, OMP или ваш собственный) — это пакет,
-реализующий интерфейс `HarnessAdapter` из `@acprocess/shared`.
+реализующий интерфейс `HarnessAdapter` из `@acpio/shared`.
 
 ```mermaid
 flowchart LR
@@ -133,7 +133,7 @@ mkdir packages/adapter-my-harness
 
 ```json
 {
-  "name": "@acprocess/adapter-my-harness",
+  "name": "@acpio/adapter-my-harness",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -144,7 +144,7 @@ mkdir packages/adapter-my-harness
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch"
   },
-  "dependencies": { "@acprocess/shared": "*" },
+  "dependencies": { "@acpio/shared": "*" },
   "devDependencies": { "typescript": "^5.8.2" }
 }
 ```
@@ -156,7 +156,7 @@ mkdir packages/adapter-my-harness
 `packages/adapter-my-harness/src/index.ts`:
 
 ```ts
-import { type HarnessAdapter } from "@acprocess/shared";
+import { type HarnessAdapter } from "@acpio/shared";
 
 export const myHarnessAdapter: HarnessAdapter = {
   id: "my-harness",
@@ -211,7 +211,7 @@ export const myHarnessAdapter: HarnessAdapter = {
 Единственное изменение ядра — `apps/server/src/adapters/registry.ts`:
 
 ```ts
-import { myHarnessAdapter } from "@acprocess/adapter-my-harness";
+import { myHarnessAdapter } from "@acpio/adapter-my-harness";
 
 const ALL: HarnessAdapter[] = [cursorAdapter, ompAdapter, myHarnessAdapter];
 ```

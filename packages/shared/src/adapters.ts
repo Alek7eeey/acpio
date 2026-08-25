@@ -88,7 +88,7 @@ export interface SubagentTranscriptPage {
 
 /**
  * Everything the core needs to know about a harness. Declarative data plus a
- * few behavior hooks; adapters depend only on `@acprocess/shared`.
+ * few behavior hooks; adapters depend only on `@acpio/shared`.
  */
 export interface HarnessAdapter {
   /** Provider id stored in sessions/settings ("cursor", "omp", …). */

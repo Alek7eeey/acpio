@@ -9,8 +9,8 @@ import type {
   AgentProvider,
   SessionStatus,
   AcpUsage,
-} from "@acprocess/shared";
-import { defaultSessionTitle } from "@acprocess/i18n";
+} from "@acpio/shared";
+import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
 import { broadcastToSession } from "./wsHub.js";

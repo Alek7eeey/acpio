@@ -1,4 +1,4 @@
-import type { TranslateFn } from "@acprocess/i18n";
+import type { TranslateFn } from "@acpio/i18n";
 
 export type SettingsSection = "agent" | "interface";
 export type SettingsAgentLeaf =

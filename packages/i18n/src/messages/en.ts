@@ -105,7 +105,7 @@ export const en = {
     workingDir: "Working directory",
     selectFolder: "Select folder…",
     installApp: "Install app",
-    installAppHint: "Add ACProcess to your home screen to use it like a native app.",
+    installAppHint: "Add Acpio to your home screen to use it like a native app.",
     installAppWaiting:
       "Chrome is not ready to install yet. After the service worker is active, tap Install again — the system dialog should open.",
     installAppNeedHttps:
@@ -117,7 +117,7 @@ export const en = {
     installAppIosHint: "On iPhone Safari installs as an app via Add to Home Screen:",
     installAppIosStep1: "Tap the Share button at the bottom of Safari.",
     installAppIosStep2: "Scroll and choose «Add to Home Screen».",
-    installAppIosStep3: "Confirm — the ACProcess icon will appear on the Home Screen.",
+    installAppIosStep3: "Confirm — the Acpio icon will appear on the Home Screen.",
     installAppDesktop: "Desktop Chrome/Edge: install icon in the address bar, or this button when available.",
     thisPc: "This PC",
     quickAccess: "Quick access",
@@ -146,7 +146,7 @@ export const en = {
     settingsSections: "Settings sections",
     skipSplash: "Click to skip",
     continueSplash: "Click to continue",
-    loadingApp: "Loading ACProcess",
+    loadingApp: "Loading Acpio",
     harnessForAgents: "Harness for agents",
     command: "Command",
     commands: "Commands",
@@ -229,7 +229,7 @@ export const en = {
     removeFile: "Remove file",
     fileTooLarge: "File «{{name}}» exceeds 15 MB — skipped",
     tooManyFiles: "Up to 8 files can be attached",
-    emptyTitle: "ACProcess",
+    emptyTitle: "Acpio",
     emptyDescription:
       "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor and OMP.",
     emptyReady: "Start when you're ready",
@@ -370,7 +370,7 @@ export const en = {
     chatPreview: "Preview",
     chatPreviewUser: "Hi! Give me a short summary of yesterday's discussion.",
     chatPreviewAssistant: "Done! A three-point summary is in the notes — check the “Results” section.",
-    chatPreviewTool: "Browse folder · E:\\share\\acprocess",
+    chatPreviewTool: "Browse folder · E:\\share\\acpio",
     chatPreviewThought: "First I will check the repo layout and build the production bundle…",
     chatTree: "Chat tree",
     chatActionsOrderHint:
@@ -490,8 +490,8 @@ export const en = {
     sidebarCollapseRail: "Keep an icon rail",
     remoteAccess: "Phone & VPN",
     remoteAccessTitle: "Phone access via VPN",
-    remoteAccessDesc: "Open ACProcess from your phone when it shares a VPN or LAN with the PC.",
-    remoteStep1Title: "Start ACProcess on the PC",
+    remoteAccessDesc: "Open Acpio from your phone when it shares a VPN or LAN with the PC.",
+    remoteStep1Title: "Start Acpio on the PC",
     remoteStep1Body:
       "In the project folder run `npm run dev`. The web UI listens on all interfaces (port 5173), the API on 3001. Leave this terminal running.",
     remoteStep2Title: "Connect the phone to the same VPN",

@@ -10,7 +10,7 @@ import { PlanApprovalBody, type PlanPayload } from "./PlanApprovalBody";
 import { useT } from "../lib/i18n";
 import styles from "./PlanSidePanel.module.css";
 
-const WIDTH_KEY = "acprocess.planPanelWidth.v1";
+const WIDTH_KEY = "acpio.planPanelWidth.v1";
 const WIDTH_MIN = 280;
 const WIDTH_MAX = 720;
 const WIDTH_DEFAULT = 380;

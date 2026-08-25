@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-One-click ACProcess installer (Windows): downloads the release bundle from
-GitHub, unpacks it to %LOCALAPPDATA%\acprocess and starts the app.
+One-click Acpio installer (Windows): downloads the release bundle from
+GitHub, unpacks it to %LOCALAPPDATA%\acpio and starts the app.
 
 Quick start (run in PowerShell):
-    irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+    irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
 
 Or use a local build:
-    powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acprocess-win-x64.zip
+    powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acpio-win-x64.zip
 #>
 param(
-    [string]$ZipUrl   = "https://github.com/Alek7eeey/acprocess/releases/latest/download/acprocess-win-x64.zip",
+    [string]$ZipUrl   = "https://github.com/Alek7eeey/acpio/releases/latest/download/acpio-win-x64.zip",
     [string]$ZipPath  = "",
-    [string]$InstallDir = "$env:LOCALAPPDATA\acprocess",
+    [string]$InstallDir = "$env:LOCALAPPDATA\acpio",
     [switch]$NoLaunch
 )
 
@@ -39,7 +39,7 @@ if (-not $nodeOk) {
 
 # --- 2. Get the bundle ------------------------------------------------------
 if ($ZipPath -eq "") {
-    $tmp = Join-Path $env:TEMP "acprocess-win-x64.zip"
+    $tmp = Join-Path $env:TEMP "acpio-win-x64.zip"
     Write-Host "Downloading $ZipUrl ..."
     Invoke-WebRequest -UseBasicParsing -Uri $ZipUrl -OutFile $tmp
     $ZipPath = $tmp
@@ -57,7 +57,7 @@ Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
 # --- 4. Launch --------------------------------------------------------------
 $startCmd = Join-Path $InstallDir "start.cmd"
 if (-not $NoLaunch) {
-    Write-Host "Starting ACProcess — it opens http://localhost:3001 in your browser."
+    Write-Host "Starting Acpio — it opens http://localhost:3001 in your browser."
     Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$startCmd`"" -WindowStyle Hidden
 }
 Write-Host "Installed. Restart later with: $startCmd"

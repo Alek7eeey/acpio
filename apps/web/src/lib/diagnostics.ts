@@ -4,11 +4,11 @@ import type {
   DiagnosticsDumpMeta,
   MessageDto,
   SessionDetailDto,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { api } from "./api";
 import { useAppStore } from "./store";
 
-const RECENT_ERRORS_KEY = "acprocess.diagnostics.recentErrors";
+const RECENT_ERRORS_KEY = "acpio.diagnostics.recentErrors";
 const MAX_RECENT_ERRORS = 20;
 const MAX_MESSAGES = 40;
 const MAX_PART_TEXT = 1200;

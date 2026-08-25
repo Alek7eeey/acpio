@@ -1,4 +1,4 @@
-import type { ChatTreeElementId } from "@acprocess/shared";
+import type { ChatTreeElementId } from "@acpio/shared";
 
 const CHAT_TREE_STORAGE_ORDER: ChatTreeElementId[] = [
   "search",

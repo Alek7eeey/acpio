@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { SlashCommandDto } from "@acprocess/shared";
+import type { SlashCommandDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { isSlashSkill } from "../lib/slashCommands";
 import styles from "./SlashCommandMenu.module.css";

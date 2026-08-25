@@ -1,4 +1,4 @@
-import type { SessionDetailDto, SlashCommandDto } from "@acprocess/shared";
+import type { SessionDetailDto, SlashCommandDto } from "@acpio/shared";
 import { mergeSlashCommandLists } from "./slashCommands";
 
 export function slashListStillLoading(cmds?: SlashCommandDto[]) {

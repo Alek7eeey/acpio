@@ -1,6 +1,6 @@
 /** Completion notifications: Notification API + a short WebAudio beep. */
 
-const PROMPT_DISMISSED_KEY = "acprocess.notificationsPrompt.v1";
+const PROMPT_DISMISSED_KEY = "acpio.notificationsPrompt.v1";
 
 let audioCtx: AudioContext | null = null;
 
@@ -47,12 +47,12 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 /** Called when an assistant turn finishes while the tab is hidden. */
 export function notifyTurnComplete(sessionTitle: string | undefined): void {
   if (typeof window === "undefined") return;
-  const title = sessionTitle?.trim() ? sessionTitle.trim() : "ACProcess";
+  const title = sessionTitle?.trim() ? sessionTitle.trim() : "Acpio";
   if ("Notification" in window && Notification.permission === "granted") {
     try {
       const n = new Notification(title, {
         body: "Ответ агента готов",
-        tag: "acprocess-turn-complete",
+        tag: "acpio-turn-complete",
         silent: true,
       });
       n.onclick = () => {

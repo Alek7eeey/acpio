@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import type { AppSettings, DiagnosticsDumpDto, DiagnosticsDumpMeta } from "@acprocess/shared";
+import type { AppSettings, DiagnosticsDumpDto, DiagnosticsDumpMeta } from "@acpio/shared";
 import { REPO_ROOT } from "../db/client.js";
 import { getSettings } from "./settings.js";
 
-const DUMP_PREFIX = "acprocess-dump-";
+const DUMP_PREFIX = "acpio-dump-";
 const DUMP_EXT = ".json";
 
 function assertInsideDir(dir: string, filePath: string) {

@@ -15,7 +15,7 @@ import {
   toolDisplayTitle,
   estimateContextUsage,
   extractSubagentLiveContent,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 
 describe("parseModelWire", () => {
   it.each([

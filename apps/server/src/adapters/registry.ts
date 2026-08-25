@@ -1,11 +1,11 @@
 /**
  * Static harness adapter registry — the only place the core knows concrete
  * harnesses. Adding a third-party harness = implement {@link HarnessAdapter}
- * (in a package depending on `@acprocess/shared`) and register it here.
+ * (in a package depending on `@acpio/shared`) and register it here.
  */
-import { cursorAdapter } from "@acprocess/adapter-cursor";
-import { ompAdapter } from "@acprocess/adapter-omp";
-import type { AdapterRegistry, AppSettings, HarnessAdapter } from "@acprocess/shared";
+import { cursorAdapter } from "@acpio/adapter-cursor";
+import { ompAdapter } from "@acpio/adapter-omp";
+import type { AdapterRegistry, AppSettings, HarnessAdapter } from "@acpio/shared";
 
 const ALL: HarnessAdapter[] = [cursorAdapter, ompAdapter];
 const BY_ID = new Map<string, HarnessAdapter>(ALL.map((a) => [a.id, a]));

@@ -731,7 +731,7 @@ describe("export", () => {
     expect(res.headers["content-type"]).toBe("application/json; charset=utf-8");
     expect(res.headers["content-disposition"] as string).toMatch(/^attachment; filename\*=UTF-8''/);
     const body = res.json();
-    expect(body.format).toBe("acprocess-chat");
+    expect(body.format).toBe("acpio-chat");
     expect(body.session.title).toBe(EXPORT_TITLE);
     expect(Array.isArray(body.messages)).toBe(true);
   });
@@ -814,7 +814,7 @@ describe("diagnostics", () => {
     const body = res.json();
     expect(body.ok).toBe(true);
     expect(body.dump.reason).toBe("routes-test");
-    expect(body.dump.fileName).toMatch(/^acprocess-dump-.*\.json$/);
+    expect(body.dump.fileName).toMatch(/^acpio-dump-.*\.json$/);
     expect(body.dump.size).toBeGreaterThan(0);
     expect(body.dump.path.startsWith(path.resolve(dir))).toBe(true);
     await fsp.access(body.dump.path);

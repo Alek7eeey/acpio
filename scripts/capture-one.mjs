@@ -188,13 +188,13 @@ async function main() {
 
     await page.addInitScript(
       ({ locale, theme, sessionId, panePayload }) => {
-        localStorage.setItem("acprocess.locale", locale);
-        localStorage.setItem("acprocess.theme", theme);
-        localStorage.setItem("acprocess.bootSplashDismissed", "1");
-        if (sessionId) localStorage.setItem("acprocess.activeSessionId", sessionId);
-        if (panePayload) localStorage.setItem("acprocess.chatPanes.v1", panePayload);
+        localStorage.setItem("acpio.locale", locale);
+        localStorage.setItem("acpio.theme", theme);
+        localStorage.setItem("acpio.bootSplashDismissed", "1");
+        if (sessionId) localStorage.setItem("acpio.activeSessionId", sessionId);
+        if (panePayload) localStorage.setItem("acpio.chatPanes.v1", panePayload);
         sessionStorage.setItem(
-          "acprocess.agentAvailability.v1",
+          "acpio.agentAvailability.v1",
           JSON.stringify({ cursor: true, omp: false }),
         );
         document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");

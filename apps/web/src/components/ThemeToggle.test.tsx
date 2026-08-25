@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DEFAULT_SETTINGS } from "@acprocess/shared";
+import { DEFAULT_SETTINGS } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ThemeToggle } from "./ThemeToggle";

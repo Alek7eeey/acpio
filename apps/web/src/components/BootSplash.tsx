@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { useT } from "../lib/i18n";
 import styles from "./BootSplash.module.css";
 
-const BRAND = "ACProcess";
+const BRAND = "Acpio";
 const MIN_MS = 2600;
 const EXIT_MS = 320;
 

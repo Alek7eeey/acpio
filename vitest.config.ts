@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // Test pyramid for the whole monorepo:
 //   unit (packages/shared, packages/i18n, server helpers, web libs)
-//   integration (Fastify inject against the acprocess_test schema,
+//   integration (Fastify inject against the acpio_test schema,
 //                AcpClient against a fake ACP agent process)
 //   component (web components in jsdom)
 export default defineConfig({

@@ -14,7 +14,7 @@ import {
   type AcpUpdate,
 } from "../src/acp/AcpClient.js";
 import { getAdapter } from "../src/adapters/registry.js";
-import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
 
 const FAKE_AGENT = fileURLToPath(new URL("./fake-agent.mjs", import.meta.url));
 

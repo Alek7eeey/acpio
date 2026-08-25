@@ -1,4 +1,4 @@
-import type { AppLocale } from "@acprocess/shared";
+import type { AppLocale } from "@acpio/shared";
 import { en } from "./messages/en.js";
 import { ru } from "./messages/ru.js";
 import type { MessageKey, Messages, TranslateFn, TranslateVars } from "./types.js";

@@ -1,8 +1,8 @@
-import type { AgentProvider } from "@acprocess/shared";
+import type { AgentProvider } from "@acpio/shared";
 
 export type AgentAvailabilityMap = Partial<Record<AgentProvider, boolean | null>>;
 
-const AVAIL_KEY = "acprocess.agentAvailability.v1";
+const AVAIL_KEY = "acpio.agentAvailability.v1";
 
 export function readStoredAgentAvailability(): AgentAvailabilityMap {
   if (typeof sessionStorage === "undefined") return {};

@@ -1,6 +1,6 @@
 # Using Harnesses and Plugins
 
-ACProcess connects agents through **harness adapters**. Two are bundled: **Cursor** and
+Acpio connects agents through **harness adapters**. Two are bundled: **Cursor** and
 **OMP**. Any other harness is added as a plugin adapter (see the
 [developer guide](adapters.md)) and shows up in the UI automatically — the core needs no changes.
 

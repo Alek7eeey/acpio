@@ -6,7 +6,7 @@ import {
   modelParamLabel,
   modelParamSectionName,
   type ModelParamDto,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import styles from "./ModelPicker.module.css";
 

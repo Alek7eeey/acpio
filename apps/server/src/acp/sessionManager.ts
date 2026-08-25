@@ -35,8 +35,8 @@ import {
   mcpHttpHeaders,
   permissionOptionsLookLikeQuestion,
   questionPayloadFromPermission,
-} from "@acprocess/shared";
-import { defaultSessionTitle, errorMessage, t } from "@acprocess/i18n";
+} from "@acpio/shared";
+import { defaultSessionTitle, errorMessage, t } from "@acpio/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
 import {
   appendPart,
@@ -69,8 +69,8 @@ import {
   agentIdFromToolText,
   enrichCursorToolFromStore,
 } from "./cursorSubagentLive.js";
-import { findRecentCursorAgentId, findRecentCursorAgentIds, listCursorAcpSessions } from "@acprocess/adapter-cursor";
-import { listOmpSessions, readOmpSessionTranscript } from "@acprocess/adapter-omp";
+import { findRecentCursorAgentId, findRecentCursorAgentIds, listCursorAcpSessions } from "@acpio/adapter-cursor";
+import { listOmpSessions, readOmpSessionTranscript } from "@acpio/adapter-omp";
 import {
   isAgentSlashPrompt,
   mergeSlashCommandLists,
@@ -509,7 +509,7 @@ class SessionRuntime {
   subagentTranscriptDone = new Set<string>();
   /** True once the agent has reported its initial mode — later changes prompt for consent. */
   modeSynced = false;
-  availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
+  availableCommands: import("@acpio/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
   /**
@@ -2730,7 +2730,7 @@ export async function restartSessionsForMcpChange(): Promise<void> {
 
 const rememberedSlashCommands = new Map<
   string,
-  import("@acprocess/shared").SlashCommandDto[]
+  import("@acpio/shared").SlashCommandDto[]
 >();
 
 function rememberSessionCommands(sessionId: string, commands: SlashCommandDto[]) {

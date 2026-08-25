@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createTranslator } from "./translator";
-import type { AppLocale } from "@acprocess/shared";
+import type { AppLocale } from "@acpio/shared";
 
 const ru = createTranslator("ru");
 const en = createTranslator("en");

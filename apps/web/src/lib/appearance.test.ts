@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
 import { FONT_FAMILIES, FONT_SIZES, applyAppearance } from "./appearance";
 
 function settings(overrides: Partial<AppSettings> = {}): AppSettings {

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { AppSettings, MessageDto, MessagePartDto, SessionDetailDto } from "@acprocess/shared";
+import type { AppSettings, MessageDto, MessagePartDto, SessionDetailDto } from "@acpio/shared";
 import type { ExportFormat } from "./chatExport.js";
 import {
   defaultExportDir,
@@ -592,7 +592,7 @@ describe("renderJson", () => {
       session: Record<string, unknown>;
       messages: unknown[];
     };
-    expect(parsed.format).toBe("acprocess-chat");
+    expect(parsed.format).toBe("acpio-chat");
     expect(parsed.version).toBe(1);
     expect(typeof parsed.exportedAt).toBe("string");
     expect(Number.isNaN(Date.parse(parsed.exportedAt))).toBe(false);

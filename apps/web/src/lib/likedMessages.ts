@@ -8,10 +8,10 @@ export type LikedMessage = {
   at: string;
 };
 
-const LIKED_KEY = "acprocess.likedMessages.v1";
+const LIKED_KEY = "acpio.likedMessages.v1";
 const MAX_TEXT = 600;
 
-const LIKED_EVENT = "acprocess:liked-changed";
+const LIKED_EVENT = "acpio:liked-changed";
 
 export function listLikedMessages(): LikedMessage[] {
   try {

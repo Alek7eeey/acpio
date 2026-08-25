@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AdapterTranscriptClient, SubagentTranscriptPage } from "@acprocess/shared";
+import type { AdapterTranscriptClient, SubagentTranscriptPage } from "@acpio/shared";
 
 const REDACTED = /^\[REDACTED\]$/i;
 

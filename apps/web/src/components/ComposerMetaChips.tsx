@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMode, AppSettings, SessionDetailDto } from "@acprocess/shared";
+import type { AgentMode, AppSettings, SessionDetailDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { OptionPicker } from "./OptionPicker";
 import styles from "../pages/ChatPage.module.css";

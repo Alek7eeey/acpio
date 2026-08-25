@@ -1,4 +1,4 @@
-# ACProcess
+# Acpio
 
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
@@ -8,7 +8,7 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 - `apps/web` — React + Vite + TypeScript
 - `apps/server` — Fastify + WebSocket + ACP stdio bridge
 - `packages/shared` — shared types
-- SQLite (single file `data/acprocess.db`, embedded via better-sqlite3)
+- SQLite (single file `data/acpio.db`, embedded via better-sqlite3)
 
 ## Quick start
 
@@ -16,7 +16,7 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 automatically on the first run:
 
 ```powershell
-irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
 ```
 
 **From source (production, single port):**
@@ -44,7 +44,7 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 - Prod: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
 - Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
-- DB file: `data/acprocess.db` (override with `DATABASE_PATH` in `.env`)
+- DB file: `data/acpio.db` (override with `DATABASE_PATH` in `.env`)
 
 ## Screenshots
 
@@ -90,7 +90,7 @@ npm run start     # → http://localhost:3001 (UI + API + WebSocket)
 npm run dist
 ```
 
-produces `dist-app/acprocess-win-x64.zip` — the compiled server, the web UI,
+produces `dist-app/acpio-win-x64.zip` — the compiled server, the web UI,
 the workspace packages and production `node_modules` (native better-sqlite3
 included). Unzip anywhere and run `start.cmd` (Node >= 20 required).
 
@@ -99,24 +99,24 @@ included). Unzip anywhere and run `start.cmd` (Node >= 20 required).
 
 ### One-click install
 
-Attach `dist-app/acprocess-win-x64.zip` to a
-[GitHub release](https://github.com/Alek7eeey/acprocess/releases) named
-`acprocess-win-x64.zip`, then on a fresh Windows machine:
+Attach `dist-app/acpio-win-x64.zip` to a
+[GitHub release](https://github.com/Alek7eeey/acpio/releases) named
+`acpio-win-x64.zip`, then on a fresh Windows machine:
 
 ```powershell
-irm https://raw.githubusercontent.com/Alek7eeey/acprocess/dev/scripts/setup.ps1 | iex
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
 ```
 
 The script checks/installs Node 20+, downloads the release bundle, unpacks it
-to `%LOCALAPPDATA%\acprocess` and starts the app (data goes to
-`%LOCALAPPDATA%\acprocess\data`). For a local bundle instead of a download:
+to `%LOCALAPPDATA%\acpio` and starts the app (data goes to
+`%LOCALAPPDATA%\acpio\data`). For a local bundle instead of a download:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acprocess-win-x64.zip
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acpio-win-x64.zip
 ```
 
 Production env vars: `PORT` (default 3001), `HOST` (default `0.0.0.0`),
-`DATABASE_PATH` (default `<app dir>/data/acprocess.db`).
+`DATABASE_PATH` (default `<app dir>/data/acpio.db`).
 
 ## Phone and VPN
 

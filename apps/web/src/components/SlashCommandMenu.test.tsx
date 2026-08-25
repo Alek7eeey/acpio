@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useRef } from "react";
-import type { SlashCommandDto } from "@acprocess/shared";
+import type { SlashCommandDto } from "@acpio/shared";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { SlashCommandMenu } from "./SlashCommandMenu";

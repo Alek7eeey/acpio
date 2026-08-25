@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_SETTINGS, type AppSettings } from "@acprocess/shared";
+import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
 import { adapterArgs, adapterCommand, adapters, getAdapter } from "./registry.js";
-import { cursorAdapter } from "@acprocess/adapter-cursor";
-import { ompAdapter } from "@acprocess/adapter-omp";
+import { cursorAdapter } from "@acpio/adapter-cursor";
+import { ompAdapter } from "@acpio/adapter-omp";
 
 describe("adapter registry", () => {
   it("registers the two built-in harnesses", () => {

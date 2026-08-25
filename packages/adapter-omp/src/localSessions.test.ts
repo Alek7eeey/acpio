@@ -15,7 +15,7 @@ afterEach(() => {
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-sessions-"));
   dirs.push(root);
-  const folder = path.join(root, "--E--share-acprocess--");
+  const folder = path.join(root, "--E--share-acpio--");
   fs.mkdirSync(folder);
   const id = "019fea5d-fc92-7000-86cd-c486c1ed8a72";
   const file = path.join(folder, `2026-08-10T06-30-55-891Z_${id}.jsonl`);
@@ -27,7 +27,7 @@ function fixture() {
         version: 3,
         id,
         timestamp: "2026-08-10T06:30:55.891Z",
-        cwd: "E:\\share\\acprocess",
+        cwd: "E:\\share\\acpio",
         title: "Restore probe",
       }),
       JSON.stringify({
@@ -61,11 +61,11 @@ function fixture() {
 describe("OMP local sessions", () => {
   it("lists jsonl sessions with cwd and title", () => {
     const { root, id } = fixture();
-    const rows = listOmpSessions({ root, cwd: "E:/share/acprocess" });
+    const rows = listOmpSessions({ root, cwd: "E:/share/acpio" });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.sessionId).toBe(id);
     expect(rows[0]?.title).toBe("Restore probe");
-    expect(rows[0]?.cwd.replace(/\\/g, "/")).toMatch(/share\/acprocess$/i);
+    expect(rows[0]?.cwd.replace(/\\/g, "/")).toMatch(/share\/acpio$/i);
   });
 
   it("reads user/assistant turns and skips tools", () => {

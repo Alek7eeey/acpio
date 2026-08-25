@@ -5,7 +5,7 @@ import { z, ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts } from "./db/schema.js";
-import { defaultSessionTitle, errorMessage } from "@acprocess/i18n";
+import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import { getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
@@ -69,7 +69,7 @@ import {
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
-import type { AgentProvider, AppSettings } from "@acprocess/shared";
+import type { AgentProvider, AppSettings } from "@acpio/shared";
 import {
   isLoopbackHost,
   isRemoteAccessPublicPath,

@@ -1,6 +1,6 @@
 import { asc, eq } from "drizzle-orm";
-import type { ChatThemeDto } from "@acprocess/shared";
-import { defaultThemeName } from "@acprocess/i18n";
+import type { ChatThemeDto } from "@acpio/shared";
+import { defaultThemeName } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { chatThemes } from "../db/schema.js";
 import { getSettings } from "./settings.js";

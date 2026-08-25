@@ -3,7 +3,7 @@ import {
   subagentFieldsFromRaw,
   type HarnessAdapter,
   type SubagentCardUpdate,
-} from "@acprocess/shared";
+} from "@acpio/shared";
 import { readCursorAgentTranscript } from "./localTranscript.js";
 
 export {
