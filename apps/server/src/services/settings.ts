@@ -165,9 +165,8 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
-  if (merged.chatToolbarStyle !== "minimal") {
-    merged.chatToolbarStyle = "classic";
-  }
+  merged.chatToolbarStyle =
+    merged.chatToolbarStyle === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
   if (typeof merged.remoteAccessKey !== "string") {
     merged.remoteAccessKey = "";
   }

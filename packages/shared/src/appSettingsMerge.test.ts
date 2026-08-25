@@ -44,6 +44,12 @@ describe("mergeClientAppSettings", () => {
   it("falls back to defaults for missing payload", () => {
     expect(mergeClientAppSettings(null).chatMetaChips).toEqual(DEFAULT_SETTINGS.chatMetaChips);
   });
+
+  it("defaults chat toolbar style to classic buttons", () => {
+    expect(mergeClientAppSettings({}).chatToolbarStyle).toBe("classic");
+    expect(mergeClientAppSettings({ chatToolbarStyle: "minimal" }).chatToolbarStyle).toBe("minimal");
+    expect(mergeClientAppSettings({ chatToolbarStyle: "weird" }).chatToolbarStyle).toBe("classic");
+  });
 });
 
 describe("readSettingsSchema", () => {

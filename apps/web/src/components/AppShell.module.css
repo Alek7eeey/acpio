@@ -131,6 +131,20 @@
   display: contents;
 }
 
+.headerBrandWrap {
+  display: contents;
+}
+
+@media (min-width: 900px) {
+  .withSidebar:not(.sidebarCollapsed) .headerBrandWrap {
+    display: none;
+  }
+
+  .withSidebar.sidebarCollapsed .headerBrandWrap {
+    display: contents;
+  }
+}
+
 .sidebarBrand {
   flex: 1 1 auto;
   min-width: 0;
@@ -143,11 +157,25 @@
   padding: 4px 12px;
   font-size: 1.12rem;
   justify-content: flex-start;
+  transition: opacity 0.14s ease;
 }
 
 @media (min-width: 900px) {
-  .sidebar.treeBrand.open ~ .main .headerBrandSlot .headerBrand {
-    display: none;
+  .headerBrandSlot .headerBrand {
+    transition: opacity 0.14s ease;
+  }
+
+  .withSidebar.sidebarCollapsed .headerBrandSlot .headerBrand {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0.1s;
+  }
+
+  .withSidebar.sidebarCollapsed .sidebarBrand {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
   }
 }
 
@@ -549,16 +577,17 @@
 .chatToolbarMinimal {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 2px;
 }
 
-/* Cursor-style sidebar rows: icon + label, no full-width chrome. */
+/* Cursor-style sidebar rows: icon + label, full-width hover like chat rows. */
 .chatToolbarMinimal .chatToolbarAction {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
-  width: auto;
+  width: 100%;
   max-width: 100%;
   min-height: 28px;
   padding: 5px 8px;
@@ -1124,8 +1153,8 @@
 
 .archiveChevron {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -1154,34 +1183,34 @@
 .archiveGroup {
   display: grid;
   gap: 2px;
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px dashed var(--border);
 }
 
 .archiveHead {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 10px 4px 8px;
+  gap: 6px;
+  padding: 2px 8px 2px 8px;
 }
 
 .archiveLabel {
-  font-size: 0.74rem;
-  font-weight: 650;
-  letter-spacing: 0.05em;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-secondary);
 }
 
 .archiveCount {
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   font-weight: 600;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   border-radius: 999px;
-  padding: 1px 7px;
-  line-height: 1.4;
+  padding: 0 6px;
+  line-height: 1.35;
 }
 
 .likedGroup {

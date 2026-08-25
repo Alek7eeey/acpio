@@ -225,36 +225,145 @@
   flex: 1;
 }
 
-.treeNewChat {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  width: auto;
-  padding: 5px 8px;
-  border-radius: 6px;
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  font-size: 0.76rem;
+.treeToolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 0 4px;
 }
 
-.treeSearch {
-  display: inline-flex;
+.treeToolbarClassic {
+  gap: 5px;
+}
+
+.treeToolbarMinimal {
+  gap: 2px;
+}
+
+.treeToolbarRow {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  width: auto;
-  padding: 5px 8px;
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: none;
   border-radius: 6px;
   background: transparent;
-  border: none;
   color: var(--text-secondary);
   font-size: 0.76rem;
   box-sizing: border-box;
 }
 
-:global([data-theme="light"]) .treeNewChat,
-:global([data-theme="light"]) .treeSearch {
+.treeToolbarClassicNew {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 88%, #ffffff);
+  color: #fff;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  box-shadow:
+    0 1px 2px color-mix(in srgb, var(--accent) 22%, transparent),
+    0 1px 4px color-mix(in srgb, var(--accent) 14%, transparent);
+  box-sizing: border-box;
+}
+
+:global([data-theme="light"]) .treeToolbarClassicNew {
+  background: color-mix(in srgb, var(--accent) 86%, #ffffff);
+}
+
+:global([data-theme="dark"]) .treeToolbarClassicNew {
+  background: color-mix(in srgb, var(--accent) 82%, #000000);
+}
+
+.treeToolbarClassicNewIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.treeToolbarClassicNewIcon svg {
+  display: block;
+}
+
+.treeToolbarClassicSearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  box-sizing: border-box;
+}
+
+.treeToolbarSearchEl {
+  display: flex;
+  width: 100%;
+  border-radius: 8px;
+}
+
+.treeToolbarSearchLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.treeToolbarSearchKbd {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  padding: 0 5px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-family: inherit;
+  line-height: 1.35;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+:global([data-theme="light"]) .treeToolbarRow {
   color: rgba(24, 24, 27, 0.62);
+}
+
+:global([data-theme="light"]) .treeToolbarClassicSearch {
+  background: #ffffff;
+  color: rgba(24, 24, 27, 0.52);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+:global([data-theme="light"]) .treeToolbarSearchKbd {
+  color: rgba(24, 24, 27, 0.45);
+  border-color: color-mix(in srgb, #000 10%, var(--border));
+  background: #ffffff;
+}
+
+.treeToolbarRow svg,
+.treeToolbarClassicSearch svg {
+  flex-shrink: 0;
+  display: block;
 }
 
 .treeFolder {
@@ -367,21 +476,21 @@
 .treeArchiveHead {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
+  gap: 5px;
+  padding: 3px 8px;
   border-radius: 7px;
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--text-secondary);
-  font-size: 0.74rem;
+  font-size: 0.66rem;
   font-weight: 600;
 }
 
 .treeArchiveCount {
-  font-size: 0.68rem;
+  font-size: 0.6rem;
   background: var(--border-soft, var(--border));
   border-radius: 999px;
-  padding: 0 6px;
+  padding: 0 5px;
 }
 
 /* --- tree "⋯" popover (fixed at the clicked dots) --- */

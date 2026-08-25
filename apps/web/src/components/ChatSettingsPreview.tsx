@@ -4,6 +4,7 @@ import type {
   ChatComposerButtonId,
   ChatHeaderIconId,
   ChatMetaChipId,
+  ChatToolbarStyle,
   ChatTreeElementId,
   ChatTreeMenuId,
 } from "@acpio/shared";
@@ -176,19 +177,51 @@ function El({
   label,
   children,
   variant = "accent",
+  className,
 }: {
   on: boolean;
   onToggle: () => void;
   label: string;
   children: ReactNode;
   variant?: "accent" | "dim";
+  className?: string;
 }) {
   const state =
     variant === "dim" ? (on ? styles.elDimOn : styles.elDimOff) : on ? styles.elOn : styles.elOff;
   return (
-    <span className={`${styles.el} ${state}`} title={label} onClick={onToggle}>
+    <span
+      className={`${styles.el} ${state}${className ? ` ${className}` : ""}`}
+      title={label}
+      onClick={onToggle}
+    >
       {children}
     </span>
+  );
+}
+
+function newChatIcon(size: number) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M16.8 3.2 17.5 5.2 19.5 5.9 17.5 6.6 16.8 8.6 16.1 6.6 14.1 5.9 16.1 5.2 16.8 3.2Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function searchIcon(size: number) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -367,6 +400,7 @@ export function ChatSettingsPreview({
   headerHeight,
   headerIcons,
   chatSplit,
+  chatToolbarStyle,
   onToggleAction,
   onToggleChip,
   onToggleComposerButton,
@@ -388,6 +422,7 @@ export function ChatSettingsPreview({
   headerHeight: number;
   headerIcons: ChatHeaderIconId[];
   chatSplit: boolean;
+  chatToolbarStyle: ChatToolbarStyle;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
   onToggleComposerButton: (id: ChatComposerButtonId) => void;
@@ -462,6 +497,7 @@ export function ChatSettingsPreview({
   const btnOn = (id: ChatComposerButtonId) => composerButtons.includes(id);
   const iconOn = (id: ChatHeaderIconId) => headerIcons.includes(id);
   const menuOn = (id: ChatTreeMenuId) => treeMenu.includes(id);
+  const toolbarMinimal = chatToolbarStyle === "minimal";
 
   return (
     <div className={styles.wrap}>
@@ -474,8 +510,6 @@ export function ChatSettingsPreview({
                 {ch}
               </span>
             ))}
-            <span className={styles.brandDivider} aria-hidden />
-            <span className={styles.brandChat}>Chat</span>
           </span>
           <span className={styles.headerAgent} aria-hidden>
             <span className={`${styles.dot} ${styles.dotOn}`} aria-hidden />
@@ -562,33 +596,55 @@ export function ChatSettingsPreview({
         ) : null}
         <div className={`${styles.column} ${mobileTreeOpen ? styles.columnOpen : ""}`}>
           <div className={styles.tree}>
-            {/* Mandatory: new chat */}
-            <span className={styles.treeNewChat} aria-hidden>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M5.5 4.8h9.2A3.3 3.3 0 0 1 18 8.1v5.2a3.3 3.3 0 0 1-3.3 3.3H10l-3.4 2.6v-2.6H5.5A3.3 3.3 0 0 1 2.2 13.3V8.1A3.3 3.3 0 0 1 5.5 4.8Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              {t("common.newChat")}
-            </span>
-
-            <El
-              on={treeOn("search")}
-              variant="dim"
-              onToggle={() => onToggleTreeElement("search")}
-              label={t("settings.chatTreeElSearch")}
+            <div
+              className={`${styles.treeToolbar} ${
+                toolbarMinimal ? styles.treeToolbarMinimal : styles.treeToolbarClassic
+              }`}
             >
-              <span className={styles.treeSearch} aria-hidden>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-                {t("chat.searchPlaceholder")}
+              <span
+                className={
+                  toolbarMinimal ? styles.treeToolbarRow : styles.treeToolbarClassicNew
+                }
+                aria-hidden
+              >
+                {toolbarMinimal ? (
+                  <>
+                    {newChatIcon(13)}
+                    {t("common.newChat")}
+                  </>
+                ) : (
+                  <>
+                    <span className={styles.treeToolbarClassicNewIcon}>{newChatIcon(14)}</span>
+                    <span>{t("common.newChat")}</span>
+                  </>
+                )}
               </span>
-            </El>
+
+              <El
+                on={treeOn("search")}
+                variant="dim"
+                className={styles.treeToolbarSearchEl}
+                onToggle={() => onToggleTreeElement("search")}
+                label={t("settings.chatTreeElSearch")}
+              >
+                <span
+                  className={
+                    toolbarMinimal ? styles.treeToolbarRow : styles.treeToolbarClassicSearch
+                  }
+                  aria-hidden
+                >
+                  {searchIcon(12)}
+                  <span className={styles.treeToolbarSearchLabel}>
+                    {t("chat.searchPlaceholder")}
+                  </span>
+                  {!toolbarMinimal ? (
+                    <kbd className={styles.treeToolbarSearchKbd} aria-hidden>
+                      /
+                    </kbd>
+                  ) : null}
+                </span>
+              </El>
+            </div>
 
             <div className={styles.treeFolder}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>

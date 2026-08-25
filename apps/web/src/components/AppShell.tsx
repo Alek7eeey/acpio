@@ -272,13 +272,18 @@ export function AppShell() {
   const prevSidebarOpen = useRef(sidebarOpen);
   useEffect(() => {
     if (prevSidebarOpen.current === sidebarOpen) return;
+    const wasOpen = prevSidebarOpen.current;
     prevSidebarOpen.current = sidebarOpen;
-    setBrandBump(true);
-    const id = window.setTimeout(() => setBrandBump(false), 460);
+    if (sidebarOpen && !wasOpen) {
+      setBrandBump(true);
+      const id = window.setTimeout(() => setBrandBump(false), 460);
+      requestAnimationFrame(() => applySheetSnapCss(sheetSnapRef.current));
+      return () => window.clearTimeout(id);
+    }
+    if (!sidebarOpen) setBrandBump(false);
     if (sidebarOpen) {
       requestAnimationFrame(() => applySheetSnapCss(sheetSnapRef.current));
     }
-    return () => window.clearTimeout(id);
   }, [sidebarOpen, applySheetSnapCss]);
 
   const recentSessions = useMemo(() => {
@@ -718,16 +723,13 @@ export function AppShell() {
       : undefined
   ) as CSSProperties | undefined;
 
-  /** "Acpio · Chat" brand: shown in the header when the sidebar is
-   *  collapsed or on mobile, and inside the tree next to the collapse
-   *  button when the desktop sidebar is open. */
-  const brandButton = (
+  const renderBrandButton = (opts?: { bump?: boolean }) => (
     <button
       type="button"
-      className={`${styles.headerBrand} ${brandBump ? styles.brandBump : ""}`}
+      className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
       onClick={goChat}
       title={t("common.goToChat")}
-      aria-label="Acpio chat"
+      aria-label="Acpio"
     >
       <span className={styles.brandLetters} aria-hidden>
         {"Acpio".split("").map((ch, i) => (
@@ -738,12 +740,6 @@ export function AppShell() {
             {ch}
           </span>
         ))}
-      </span>
-      <span className={styles.brandDivider} aria-hidden>
-        ·
-      </span>
-      <span className={styles.brandChatMark} aria-hidden>
-        Chat
       </span>
     </button>
   );
@@ -819,7 +815,7 @@ export function AppShell() {
                 {t("common.backToChat")}
               </button>
             ) : (
-              <span className={styles.sidebarBrand}>{brandButton}</span>
+              <span className={styles.sidebarBrand}>{renderBrandButton()}</span>
             )}
             <span className={styles.sheetTitle}>
               {isSettings ? t("common.openSettingsSheet") : t("common.openChatsSheet")}
@@ -1359,8 +1355,12 @@ export function AppShell() {
                 <span className={styles.headerBackToChatLabel}>{t("common.navChat")}</span>
               </button>
             ) : null}
-            <span className={isSettings ? styles.headerBrandHideOnMobile : undefined}>
-              {brandButton}
+            <span
+              className={
+                isSettings ? styles.headerBrandHideOnMobile : styles.headerBrandWrap
+              }
+            >
+              {renderBrandButton({ bump: true })}
             </span>
           </span>
           {!isSettings && headerSession ? (

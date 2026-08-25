@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, type AppSettings, type ChatMetaChipId } from "./index.js";
+import { DEFAULT_SETTINGS, type AppSettings, type ChatMetaChipId, type ChatToolbarStyle } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
 export const SETTINGS_SCHEMA_VERSION = 2;
@@ -31,6 +31,10 @@ export function normalizeChatMetaChips(
   return valid;
 }
 
+export function normalizeChatToolbarStyle(value: unknown): ChatToolbarStyle {
+  return value === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
+}
+
 /** Client-side merge: defaults + API payload with chip migration. */
 export function mergeClientAppSettings(raw: unknown): AppSettings {
   const partial =
@@ -38,6 +42,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   const schemaVersion = readSettingsSchema(raw);
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...partial };
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
+  merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
   return merged;
 }

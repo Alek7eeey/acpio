@@ -1393,6 +1393,7 @@ export function SettingsPage() {
               headerHeight={form.chatHeaderHeight ?? 52}
               headerIcons={form.chatHeaderIcons ?? []}
               chatSplit={form.chatSplit !== false}
+              chatToolbarStyle={form.chatToolbarStyle ?? "classic"}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
