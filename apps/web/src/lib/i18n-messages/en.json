@@ -326,7 +326,7 @@
     "deleteFolder": "Delete folder",
     "folderDeleted": "Folder deleted",
     "deleteFolderTitle": "Delete folder",
-    "deleteFolderBody": "Folder «{{name}}» and all chats in it will be permanently deleted."
+    "deleteFolderBody": "Folder «{{name}}» and all active chats in it will be permanently deleted. Archived chats are kept."
   },
   "settings": {
     "agents": "Agents",

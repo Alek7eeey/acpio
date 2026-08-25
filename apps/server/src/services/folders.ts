@@ -1,4 +1,4 @@
-import { eq, ne } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { chatFolders, sessions } from "../db/schema.js";
 import { normalizeCwd } from "./sessions.js";
@@ -33,11 +33,18 @@ export async function rememberFolders(cwds: string[]): Promise<void> {
   }
 }
 
-/** Forget a folder and delete every chat inside it (messages cascade). */
+/**
+ * Forget a folder and delete the active chats inside it (messages cascade).
+ * Archived chats are NOT deleted — archiving is a separate, reversible
+ * decision, and a folder whose chats all sit in the archive must not lose
+ * them when its empty shell is removed.
+ */
 export async function deleteFolder(cwd: string): Promise<boolean> {
   const normalized = normalizeCwd(cwd);
   if (!normalized) return false;
-  await db.delete(sessions).where(eq(sessions.cwd, normalized));
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.cwd, normalized), eq(sessions.archived, false)));
   const rows = await db
     .delete(chatFolders)
     .where(eq(chatFolders.cwd, normalized))

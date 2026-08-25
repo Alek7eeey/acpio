@@ -275,7 +275,7 @@ export const ru = {
     emptyFolder: "В папке нет чатов",
     deleteFolder: "Удалить папку",
     deleteFolderTitle: "Удалить папку",
-    deleteFolderBody: "Папка «{{name}}» и все чаты в ней будут удалены безвозвратно.",
+    deleteFolderBody: "Папка «{{name}}» и все активные чаты в ней будут удалены безвозвратно. Архивные чаты останутся.",
     folderDeleted: "Папка удалена",
     pickExistingSessions: "Выбрать из существующих сессий",
     sessionRestoring: "Сессия восстанавливается…",

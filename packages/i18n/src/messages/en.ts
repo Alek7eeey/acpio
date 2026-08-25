@@ -251,7 +251,7 @@ export const en = {
     emptyFolder: "No chats in this folder",
     deleteFolder: "Delete folder",
     deleteFolderTitle: "Delete folder",
-    deleteFolderBody: "Folder «{{name}}» and all chats in it will be permanently deleted.",
+    deleteFolderBody: "Folder «{{name}}» and all active chats in it will be permanently deleted. Archived chats are kept.",
     folderDeleted: "Folder deleted",
     pickExistingSessions: "Choose from existing sessions",
     sessionRestoring: "Restoring session…",
