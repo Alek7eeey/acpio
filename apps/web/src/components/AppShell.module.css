@@ -703,16 +703,16 @@
 .chatToolbarClassic .chatSearchOpen {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--bg);
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 400;
   letter-spacing: 0;
   cursor: pointer;
@@ -730,6 +730,8 @@
 
 .chatToolbarClassic .chatSearchOpen svg {
   flex-shrink: 0;
+  width: 14px;
+  height: 14px;
   color: currentColor;
 }
 
@@ -761,13 +763,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.4em;
-  padding: 1px 6px;
-  border-radius: 6px;
+  min-width: 1.3em;
+  padding: 0 5px;
+  border-radius: 5px;
   border: 1px solid var(--border);
   background: var(--surface);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   font-weight: 700;
+  line-height: 1.35;
   color: var(--text-tertiary, var(--text-secondary));
 }
 
