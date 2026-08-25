@@ -529,10 +529,9 @@ export const en = {
     security: "Security Review (/review-security)",
   },
   console: {
-    title: "Console",
-    hint: "Session console — generation events in real time.",
-    live: "Live",
-    chipHint: "Open session console",
+    title: "Terminal",
+    hint: "Interactive shell in the session folder — type commands at the prompt.",
+    chipHint: "Open terminal",
   },
   question: {
     plan: "Plan",

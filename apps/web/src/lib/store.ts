@@ -40,10 +40,17 @@ import {
   slashCommandsKey,
   slashListStillLoading,
 } from "./sessionSlashCommands";
-import {
-  appendConsoleOutput,
-  clearConsoleOutput,
-} from "./sessionConsole";
+import { readConsoleOpenSessions, removeConsoleOpenSession, persistConsoleOpen } from "./sessionConsole";
+import { dispatchShellConsole } from "./shellConsole";
+
+// Shell output is never persisted — drop legacy log key if present.
+if (typeof window !== "undefined") {
+  try {
+    localStorage.removeItem("acprocess.consoleLog.v1");
+  } catch {
+    /* ignore */
+  }
+}
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
@@ -264,14 +271,10 @@ type AppState = {
   ) => Promise<ModelsCatalog | null>;
   /** Load a harness catalog without blocking the UI when a cache already exists. */
   fetchProviderModels: (provider: AgentProvider) => Promise<ModelsCatalog | null>;
-  /** Agent process console (right panel) — raw stdout/stderr stream. */
+  /** Session shell console panel open state. */
   consoleOpen: boolean;
-  consoleOutput: Record<string, string>;
-  /** Source of the latest console chunk (for shell input unlock). */
-  consoleLastSource: Record<string, "agent" | "shell">;
   setConsoleOpen: (open: boolean) => void;
   toggleConsoleOpen: () => void;
-  clearConsoleForSession: (sessionId: string) => void;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -902,30 +905,19 @@ if (typeof document !== "undefined") {
   }
 }
 
-function applyConsoleFromWs(
-  get: () => AppState,
-  set: (partial: Partial<AppState>) => void,
-  event: WsServerEvent,
-) {
-  if (event.type === "process.output") {
-    set({
-      consoleOutput: appendConsoleOutput(get().consoleOutput, event.sessionId, event.text),
-      consoleLastSource: {
-        ...get().consoleLastSource,
-        [event.sessionId]: event.source ?? "agent",
-      },
-    });
+function routeShellConsoleFromWs(event: WsServerEvent) {
+  if (event.type === "process.output" && event.source === "shell") {
+    dispatchShellConsole({ type: "output", sessionId: event.sessionId, text: event.text });
     return;
   }
   if (event.type === "process.cleared") {
-    const nextLast = { ...get().consoleLastSource };
-    delete nextLast[event.sessionId];
-    set({
-      consoleOutput: clearConsoleOutput(get().consoleOutput, event.sessionId),
-      consoleLastSource: nextLast,
-    });
+    dispatchShellConsole({ type: "cleared", sessionId: event.sessionId });
   }
 }
+
+const initialActiveSessionId =
+  typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
+const initialConsoleOpenSessions = readConsoleOpenSessions();
 
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
@@ -936,9 +928,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPaneIds: [null],
   focusedPaneIndex: 0,
   sessionDetails: {},
-  consoleOpen: false,
-  consoleOutput: {},
-  consoleLastSource: {},
+  consoleOpen: Boolean(
+    initialActiveSessionId && initialConsoleOpenSessions.has(initialActiveSessionId),
+  ),
   knownFolders: [],
   refreshFolders: async () => {
     try {
@@ -1374,20 +1366,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setConsoleOpen(open) {
+    const sessionId = get().activeSessionId;
     set({ consoleOpen: open });
+    if (sessionId) persistConsoleOpen(sessionId, open);
   },
 
   toggleConsoleOpen() {
-    set({ consoleOpen: !get().consoleOpen });
-  },
-
-  clearConsoleForSession(sessionId) {
-    const nextLast = { ...get().consoleLastSource };
-    delete nextLast[sessionId];
-    set({
-      consoleOutput: clearConsoleOutput(get().consoleOutput, sessionId),
-      consoleLastSource: nextLast,
-    });
+    const sessionId = get().activeSessionId;
+    const open = !get().consoleOpen;
+    set({ consoleOpen: open });
+    if (sessionId) persistConsoleOpen(sessionId, open);
   },
 
   async selectSession(id) {
@@ -1407,6 +1395,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
     clearUnseenFinished(id, get, set);
     const seq = ++selectSessionSeq;
+    const prevSessionId = get().activeSessionId;
+    if (prevSessionId && prevSessionId !== id) {
+      void api.detachConsole(prevSessionId).catch(() => {});
+    }
+    set({ consoleOpen: readConsoleOpenSessions().has(id) });
     const cached = readCachedSessionDetail(id);
     const current = get().activeSession;
     const alreadyWarm =
@@ -1715,6 +1708,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionDetailCache.delete(id);
     const unseen = { ...get().unseenFinishedTurns };
     delete unseen[id];
+    removeConsoleOpenSession(id);
     set({ sessionDetails: details, unseenFinishedTurns: unseen });
     if (activeSessionId === id) {
       const next =
@@ -2142,7 +2136,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleWsEvent(event) {
-    applyConsoleFromWs(get, set, event);
+    routeShellConsoleFromWs(event);
 
     if (event.type !== "part.appended" && event.type !== "part.updated") {
       if (pendingPartRaf) {

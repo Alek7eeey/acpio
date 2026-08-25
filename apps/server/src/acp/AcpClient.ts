@@ -525,8 +525,8 @@ export class AcpClient extends EventEmitter {
     child.stderr.on("data", (buf: Buffer) => {
       const text = decodeProcessText(buf);
       this.stderrBuf += text;
+      // Debug/diagnostic traffic only — user-visible output comes from ACP terminals.
       this.emit("log", text);
-      this.emit("output", text);
     });
 
     child.on("exit", (code, signal) => {

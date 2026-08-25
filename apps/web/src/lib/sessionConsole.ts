@@ -1,29 +1,31 @@
-const CONSOLE_OUTPUT_MAX_BYTES = 512_000;
+const CONSOLE_OPEN_KEY = "acprocess.consoleOpen.v1";
 
-/** Append raw process output for a session, trimming from the head when over limit. */
-export function appendConsoleOutput(
-  current: Record<string, string>,
-  sessionId: string,
-  text: string,
-): Record<string, string> {
-  if (!text) return current;
-  const prev = current[sessionId] ?? "";
-  const next = prev + text;
-  if (next.length <= CONSOLE_OUTPUT_MAX_BYTES) {
-    return { ...current, [sessionId]: next };
+/** Which sessions had the terminal panel open (not shell output). */
+export function readConsoleOpenSessions(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(CONSOLE_OPEN_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((id): id is string => typeof id === "string" && id.length > 0));
+  } catch {
+    return new Set();
   }
-  return {
-    ...current,
-    [sessionId]: next.slice(next.length - CONSOLE_OUTPUT_MAX_BYTES),
-  };
 }
 
-export function clearConsoleOutput(
-  current: Record<string, string>,
-  sessionId: string,
-): Record<string, string> {
-  if (!(sessionId in current)) return current;
-  const next = { ...current };
-  delete next[sessionId];
-  return next;
+export function persistConsoleOpen(sessionId: string, open: boolean) {
+  if (typeof window === "undefined" || !sessionId) return;
+  const sessions = readConsoleOpenSessions();
+  if (open) sessions.add(sessionId);
+  else sessions.delete(sessionId);
+  try {
+    localStorage.setItem(CONSOLE_OPEN_KEY, JSON.stringify([...sessions]));
+  } catch {
+    /* quota or private mode */
+  }
+}
+
+export function removeConsoleOpenSession(sessionId: string) {
+  persistConsoleOpen(sessionId, false);
 }

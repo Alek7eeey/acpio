@@ -206,6 +206,8 @@ export const api = {
   getSession: (id: string) => request<SessionDetailDto>(`/api/sessions/${id}`),
   attachConsole: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/console/attach`, { method: "POST" }),
+  detachConsole: (id: string) =>
+    request<{ ok: boolean }>(`/api/sessions/${id}/console/detach`, { method: "POST" }),
   deleteSession: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
   /**

@@ -211,66 +211,6 @@ function argsFromRaw(raw: Record<string, unknown> | undefined): unknown {
   return raw?.rawInput ?? raw?.input ?? raw?.arguments;
 }
 
-function isShellLikeTool(toolName: string | undefined, title: string, kind: string): boolean {
-  const parts = [toolName, title, kind].map((s) => String(s ?? "").trim().toLowerCase());
-  const hay = parts.join(" ");
-  return (
-    /\bshell\b/.test(hay) ||
-    /\bbash\b/.test(hay) ||
-    /\bterminal\b/.test(hay) ||
-    /\brun_terminal/.test(hay) ||
-    hay.includes("run command") ||
-    parts.some((p) => p === "execute" || p.startsWith("run "))
-  );
-}
-
-function shellCommandPreview(args: unknown): string {
-  if (!args || typeof args !== "object") return "";
-  const row = args as Record<string, unknown>;
-  const cmd = row.command ?? row.cmd ?? row.script;
-  return typeof cmd === "string" ? cmd.trim() : "";
-}
-
-function consoleToolOutputText(raw: Record<string, unknown>): string {
-  const rawOutput = (raw.rawOutput ?? {}) as Record<string, unknown>;
-  return textFromUnknown(raw.content ?? rawOutput.content ?? raw.result ?? raw.output);
-}
-
-function mirrorShellToolConsole(
-  rt: SessionRuntime,
-  toolCallId: string,
-  toolName: string | undefined,
-  title: string,
-  kind: string,
-  raw: Record<string, unknown>,
-  opts?: { commandPreview?: string },
-) {
-  if (!rt.pushConsoleOutput || !toolCallId) return;
-  if (!isShellLikeTool(toolName, title, kind)) return;
-  if (opts?.commandPreview) {
-    rt.pushConsoleOutput(`\r\n\x1b[90m$ ${opts.commandPreview}\x1b[0m\r\n`);
-    rt.consoleToolBytesSent.set(toolCallId, 0);
-    return;
-  }
-  const text = consoleToolOutputText(raw);
-  const prev = rt.consoleToolBytesSent.get(toolCallId) ?? 0;
-  if (text.length <= prev) return;
-  rt.pushConsoleOutput(text.slice(prev));
-  rt.consoleToolBytesSent.set(toolCallId, text.length);
-}
-
-function mirrorToolStart(
-  rt: SessionRuntime,
-  toolCallId: string,
-  title: string,
-  toolName: string | undefined,
-) {
-  if (!rt.pushConsoleOutput || !toolCallId || rt.consoleToolAnnounced.has(toolCallId)) return;
-  rt.consoleToolAnnounced.add(toolCallId);
-  const label = (title || toolName || "tool").trim();
-  rt.pushConsoleOutput(`\r\n\x1b[36m▶ ${label}\x1b[0m\r\n`);
-}
-
 function toModelParams(options: ConfigOption[]): ModelParamDto[] {
   const params = listModelParamOptions(options).map((o) => ({
     id: o.id,
@@ -567,12 +507,6 @@ class SessionRuntime {
   cursorStorePoll = new Map<string, { timer: NodeJS.Timeout | undefined; inFlight: boolean }>();
   /** Subagents whose terminal transcript snapshot was already attached. */
   subagentTranscriptDone = new Set<string>();
-  /** Bytes of shell-tool output already mirrored to the session console. */
-  consoleToolBytesSent = new Map<string, number>();
-  /** Tool calls already announced in the session console. */
-  consoleToolAnnounced = new Set<string>();
-  /** Wired when the ACP client starts — streams raw host process output. */
-  pushConsoleOutput: ((text: string) => void) | null = null;
   /** True once the agent has reported its initial mode — later changes prompt for consent. */
   modeSynced = false;
   availableCommands: import("@acprocess/shared").SlashCommandDto[] = [];
@@ -806,34 +740,8 @@ export async function ensureAcp(
     rt.adapter = adapter;
     for (const f of rt.allowedAttachmentFiles) client.allowReadFile(f);
 
-    const pushProcessOutput = (text: string) => {
-      if (!text) return;
-      broadcastToSession(sessionId, { type: "process.output", sessionId, text, source: "agent" });
-    };
-
-    rt.pushConsoleOutput = pushProcessOutput;
-    rt.consoleToolBytesSent.clear();
-    rt.consoleToolAnnounced.clear();
-
     client.on("log", (line: string) => {
       console.log(`[acp:${sessionId}]`, line.trim());
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      if (
-        trimmed.startsWith("update ") ||
-        trimmed.startsWith("starting ") ||
-        trimmed.startsWith("resuming ") ||
-        trimmed.startsWith("terminal/") ||
-        trimmed.startsWith("client method terminal") ||
-        trimmed.includes("spawn error") ||
-        trimmed.includes("failed")
-      ) {
-        pushProcessOutput(`\x1b[90m${trimmed}\x1b[0m\r\n`);
-      }
-    });
-
-    client.on("output", (chunk: string) => {
-      pushProcessOutput(chunk);
     });
 
     client.on("exit", async () => {
@@ -841,7 +749,6 @@ export async function ensureAcp(
       rt.client = null;
       rt.clientReady = null;
       rt.provider = null;
-      rt.pushConsoleOutput = null;
       rt.running = false;
       rt.toolsHintSent = false;
       // One chat's process dying is not "the harness is gone" — a parallel
@@ -958,6 +865,7 @@ export async function ensureAcp(
     } catch (err) {
       rt.client = null;
       rt.clientReady = null;
+      const locale = (await getSettings()).locale ?? "en";
       // Restore is best-effort: an unknown/removed agent session, a CLI build
       // without the capability, or a broken replay must never brick the chat —
       // dispose the failed process and fall back to a fresh session/new.
@@ -970,11 +878,20 @@ export async function ensureAcp(
         console.error(
           `[acp:${sessionId}] ${mode} failed (${err instanceof Error ? err.message : String(err)}) — starting fresh`,
         );
+        const failLabel =
+          locale === "ru"
+            ? "⚠ Не удалось возобновить сессию — запускаем новую…"
+            : "⚠ Resume failed — starting a new session…";
+        console.error(`[acp:${sessionId}] ${failLabel}`);
         // Import/restore must keep the stored harness id. Falling back to
         // session/new would replace it with an empty conversation.
         if (boot?.forceRestore) throw err;
         return startClient("new");
       }
+      const errText = err instanceof Error ? err.message : String(err);
+      const errLabel =
+        locale === "ru" ? `Ошибка запуска агента: ${errText}` : `Agent start failed: ${errText}`;
+      console.error(`[acp:${sessionId}] ${errLabel}`);
       throw err;
     }
   };
@@ -1301,15 +1218,6 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       "Tool";
     const kind = String((update.raw.kind as string) ?? "");
     const toolName = toolNameFromRaw(update.raw);
-    if (toolCallId) {
-      mirrorToolStart(rt, toolCallId, title, toolName);
-      const preview = shellCommandPreview(argsFromRaw(update.raw));
-      if (preview) {
-        mirrorShellToolConsole(rt, toolCallId, toolName, title, kind, update.raw, {
-          commandPreview: preview,
-        });
-      }
-    }
     // OMP Task spawn is redundant with roster cards — skip the shell row.
     if (
       rt.adapter?.id === "omp" &&
@@ -1435,7 +1343,6 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       update.raw.content !== undefined || update.raw.result !== undefined || update.raw.output !== undefined
         ? update.raw
         : mergedRaw;
-    mirrorShellToolConsole(rt, toolCallId, toolName, displayTitle, kind, liveRaw);
     const live = isSubagent ? extractSubagentLiveContent(liveRaw) : { thinking: [], result: "" };
     // Terminal status is final: late async progress must not reopen the card.
     if (status === "completed" || status === "failed") {
@@ -2411,13 +2318,6 @@ async function runTurn(
   rt.streamGen += 1;
   rt.acceptingStream = true;
   rt.lastStreamAt = Date.now();
-  rt.consoleToolAnnounced.clear();
-  rt.consoleToolBytesSent.clear();
-  rt.pushConsoleOutput?.(
-    `\r\n\x1b[32m●\x1b[0m ${
-      locale === "ru" ? "Запрос отправлен агенту…" : "Prompt sent to agent…"
-    }\r\n`,
-  );
   rt.assistantMessageId = null;
   rt.openTextPartId = null;
   rt.openThoughtPartId = null;

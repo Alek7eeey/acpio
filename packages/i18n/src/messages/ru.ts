@@ -553,10 +553,9 @@ export const ru = {
     security: "Security Review (/review-security)",
   },
   console: {
-    title: "Консоль",
-    hint: "Консоль сессии — события генерации в реальном времени.",
-    live: "Live",
-    chipHint: "Открыть консоль сессии",
+    title: "Терминал",
+    hint: "Интерактивная оболочка в папке сессии — вводите команды в приглашении >.",
+    chipHint: "Открыть терминал",
   },
   question: {
     plan: "План",

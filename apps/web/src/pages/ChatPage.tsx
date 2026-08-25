@@ -65,7 +65,7 @@ import {
 } from "../components/CreateSessionFolderPicker";
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
-import { notifyTurnComplete, requestNotificationPermission } from "../lib/notify";
+import { notifyTurnComplete } from "../lib/notify";
 import { isImageFile } from "../lib/pathSegments";
 import {
   prefersHotkeyHints,
@@ -2887,7 +2887,6 @@ function ChatThread() {
   const consoleOpen = useAppStore((s) => s.consoleOpen);
   const setConsoleOpen = useAppStore((s) => s.setConsoleOpen);
   const toggleConsoleOpen = useAppStore((s) => s.toggleConsoleOpen);
-  const consoleLive = activeSession?.status === "running" || activeSession?.status === "waiting";
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
   const sendPrompt = useCallback(
@@ -3306,7 +3305,6 @@ function ChatThread() {
   const submitMessage = (raw: string) => {
     const value = raw.trim();
     if (!value || composerLocked) return;
-    requestNotificationPermission();
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
@@ -4420,7 +4418,6 @@ function ChatThread() {
             contextDisplay={contextDisplay}
             consoleOpen={consoleOpen}
             onToggleConsole={() => toggleConsoleOpen()}
-            consoleLive={consoleLive}
             modeSwitcher={modeSwitcher}
             sessionMode={sessionMode}
             composerLocked={composerLocked}
@@ -4820,7 +4817,6 @@ function ChatThread() {
         <ConsoleSidePanel
           sessionId={activeSession.id}
           open={consoleOpen && (!bind || bind.focused)}
-          live={consoleLive}
           onClose={() => setConsoleOpen(false)}
         />
       ) : null}

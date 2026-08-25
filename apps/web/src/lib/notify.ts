@@ -1,16 +1,46 @@
 /** Completion notifications: Notification API + a short WebAudio beep. */
 
+const PROMPT_DISMISSED_KEY = "acprocess.notificationsPrompt.v1";
+
 let audioCtx: AudioContext | null = null;
 
-/** Ask for notification permission — call from a user gesture (e.g. first send). */
-export function requestNotificationPermission(): void {
+export function notificationsSupported(): boolean {
+  return typeof window !== "undefined" && "Notification" in window;
+}
+
+export function wasNotificationPromptDismissed(): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    return localStorage.getItem(PROMPT_DISMISSED_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function markNotificationPromptDismissed(): void {
   if (typeof window === "undefined") return;
-  if ("Notification" in window && Notification.permission === "default") {
-    try {
-      void Notification.requestPermission();
-    } catch {
-      // ignore — the browser may block the request outside a gesture
-    }
+  try {
+    localStorage.setItem(PROMPT_DISMISSED_KEY, "1");
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Show the first-visit hint while permission is still default and user has not dismissed it. */
+export function shouldShowNotificationPrompt(): boolean {
+  if (!notificationsSupported()) return false;
+  if (Notification.permission !== "default") return false;
+  return !wasNotificationPromptDismissed();
+}
+
+/** Ask for notification permission — call from a user gesture (e.g. Enable button). */
+export async function requestNotificationPermission(): Promise<NotificationPermission | "unsupported"> {
+  if (!notificationsSupported()) return "unsupported";
+  if (Notification.permission !== "default") return Notification.permission;
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    return Notification.permission;
   }
 }
 

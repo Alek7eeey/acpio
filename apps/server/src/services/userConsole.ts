@@ -2,8 +2,6 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import path from "node:path";
 import { broadcastToSession } from "./wsHub.js";
 
-const BUFFER_MAX = 512_000;
-
 type PtyLike = {
   write: (data: string) => void;
   resize: (cols: number, rows: number) => void;
@@ -14,20 +12,15 @@ type PtyLike = {
 
 type ConsoleEntry = {
   cwd: string;
-  buffer: string;
   backend: PtyLike;
 };
 
 const consoles = new Map<string, ConsoleEntry>();
+const attachInFlight = new Map<string, Promise<void>>();
 
 function pushOutput(sessionId: string, chunk: string) {
   if (!chunk) return;
-  const entry = consoles.get(sessionId);
-  if (!entry) return;
-  entry.buffer += chunk;
-  if (entry.buffer.length > BUFFER_MAX) {
-    entry.buffer = entry.buffer.slice(entry.buffer.length - BUFFER_MAX);
-  }
+  if (!consoles.has(sessionId)) return;
   broadcastToSession(sessionId, { type: "process.output", sessionId, text: chunk, source: "shell" });
 }
 
@@ -98,29 +91,31 @@ function spawnPipeBackend(cwd: string): PtyLike {
   };
 }
 
-/** Start (or reuse) an interactive shell in the session workspace. */
-export async function attachUserConsole(sessionId: string, cwd: string): Promise<void> {
+async function spawnConsole(sessionId: string, cwd: string) {
   const root = path.resolve(cwd || process.cwd());
-  const existing = consoles.get(sessionId);
-  if (existing) {
-    existing.backend.write("\r");
-    return;
-  }
-
   const backend = (await spawnPtyBackend(root)) ?? spawnPipeBackend(root);
-  const entry: ConsoleEntry = { cwd: root, buffer: "", backend };
+  const entry: ConsoleEntry = { cwd: root, backend };
   consoles.set(sessionId, entry);
-
   backend.onData((chunk) => pushOutput(sessionId, chunk));
-  backend.onExit(() => {
-    broadcastToSession(sessionId, {
-      type: "process.output",
-      sessionId,
-      text: `\r\n\x1b[90m[shell exited]\x1b[0m\r\n`,
-      source: "shell",
-    });
+  backend.onExit(() => releaseUserConsole(sessionId));
+}
+
+/** Start a fresh interactive shell in the session workspace (no reuse). */
+export async function attachUserConsole(sessionId: string, cwd: string): Promise<void> {
+  const pending = attachInFlight.get(sessionId);
+  if (pending) return pending;
+
+  const task = (async () => {
     releaseUserConsole(sessionId);
-  });
+    await spawnConsole(sessionId, cwd);
+  })();
+
+  attachInFlight.set(sessionId, task);
+  try {
+    await task;
+  } finally {
+    attachInFlight.delete(sessionId);
+  }
 }
 
 export function writeUserConsole(sessionId: string, data: string) {
@@ -142,12 +137,9 @@ export function releaseUserConsole(sessionId: string) {
   consoles.delete(sessionId);
 }
 
-/** Clear buffered output and reset the visible shell screen when attached. */
-export function clearUserConsoleOutput(sessionId: string) {
-  const entry = consoles.get(sessionId);
-  if (entry) {
-    entry.buffer = "";
-    entry.backend.write(process.platform === "win32" ? "cls\r" : "clear\r");
-  }
+/** Kill the shell and spawn a new one — initial state, no scrollback. */
+export async function resetUserConsole(sessionId: string, cwd: string) {
+  releaseUserConsole(sessionId);
   broadcastToSession(sessionId, { type: "process.cleared", sessionId });
+  await attachUserConsole(sessionId, cwd);
 }

@@ -61,8 +61,8 @@ import {
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import {
   attachUserConsole,
-  clearUserConsoleOutput,
   releaseUserConsole,
+  resetUserConsole,
   resizeUserConsole,
   writeUserConsole,
 } from "./services/userConsole.js";
@@ -628,6 +628,14 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  app.post("/api/sessions/:id/console/detach", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    releaseUserConsole(id);
+    return { ok: true };
+  });
+
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = z
@@ -855,7 +863,12 @@ export async function registerRoutes(app: FastifyInstance) {
           return;
         }
         if (msg.type === "process.clear" && msg.sessionId) {
-          clearUserConsoleOutput(msg.sessionId);
+          const sessionId = msg.sessionId;
+          void getSessionDetail(sessionId).then((detail) => {
+            if (!detail) return;
+            void resetUserConsole(sessionId, detail.cwd);
+          });
+          return;
         }
       } catch {
         // ignore

@@ -2143,6 +2143,104 @@
   display: inline;
 }
 
+.composerMetaChipWrap {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+}
+
+@media (min-width: 701px) {
+  .composerMetaShellDesktop {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .composerMetaDesktop {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .composerMetaShellDesktop .composerMetaStart {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .composerMetaChipHidden {
+    display: none;
+  }
+
+  .composerMetaShellDesktop .composerMode {
+    margin-left: 0;
+    flex: 0 0 auto;
+    max-width: none;
+  }
+
+  .composerMetaMoreBtn {
+    flex: 0 0 auto;
+    min-width: 54px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+    background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      border-color var(--motion),
+      color var(--motion),
+      background var(--motion);
+  }
+
+  .composerMetaMoreBtn:hover {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+    color: var(--text);
+  }
+}
+
+.composerMetaOverflowMenu {
+  position: fixed;
+  z-index: 320;
+  min-width: 200px;
+  max-width: min(90vw, 320px);
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.composerMetaOverflowItem {
+  min-width: 0;
+}
+
+.composerMetaOverflowItem .metaChip,
+.composerMetaOverflowItem .sessionCwd {
+  width: 100%;
+  max-width: none;
+  justify-content: flex-start;
+  box-sizing: border-box;
+}
+
+.composerMetaOverflowItem .sessionCwdText {
+  white-space: normal;
+  word-break: break-all;
+}
+
 .pill {
   display: flex;
   flex-direction: row;

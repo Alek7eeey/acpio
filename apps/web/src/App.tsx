@@ -7,6 +7,7 @@ import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
 import { AgentGate, AgentOfflineWarning } from "./components/AgentGate";
 import { BootSplash } from "./components/BootSplash";
+import { NotificationPrompt } from "./components/NotificationPrompt";
 import { ToastHost } from "./components/ToastHost";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -94,6 +95,7 @@ export function App() {
       {showSplash ? <BootSplash ready={ready && !loading} onDone={onSplashDone} /> : null}
       {ready && !loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
       {ready && !loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
+      {ready && !loading && !splashBlocking && agentGateDismissed ? <NotificationPrompt /> : null}
     </I18nProvider>
   );
 }

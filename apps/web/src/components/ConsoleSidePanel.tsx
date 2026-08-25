@@ -14,8 +14,8 @@ import "@xterm/xterm/css/xterm.css";
 
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
+import { subscribeShellConsole } from "../lib/shellConsole";
 import { sendWsMessage } from "../lib/useSessionSocket";
-import { useAppStore } from "../lib/store";
 
 import styles from "./ConsoleSidePanel.module.css";
 
@@ -62,26 +62,18 @@ export function ConsoleSidePanel({
   sessionId,
   open,
   onClose,
-  live,
 }: {
   sessionId: string;
   open: boolean;
   onClose: () => void;
-  live?: boolean;
 }) {
   const t = useT();
-  const clearConsoleForSession = useAppStore((s) => s.clearConsoleForSession);
-  const output = useAppStore((s) => s.consoleOutput[sessionId] ?? "");
-  const lastSource = useAppStore((s) => s.consoleLastSource[sessionId] ?? "agent");
-
   const [isDark, setIsDark] = useState(readIsDark);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const shellAttachedRef = useRef(false);
   const attachPromiseRef = useRef<Promise<boolean> | null>(null);
   const pendingInputRef = useRef("");
-  const inputLockedRef = useRef(false);
-  const unlockTimerRef = useRef<number | null>(null);
 
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
@@ -90,10 +82,9 @@ export function ConsoleSidePanel({
   const menuRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
-  const writtenRef = useRef(0);
-  const prevSessionRef = useRef(sessionId);
-  const outputRef = useRef(output);
-  outputRef.current = output;
+  const lastResizeRef = useRef({ cols: 0, rows: 0 });
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
 
   const mod = modKeyLabel();
 
@@ -159,6 +150,14 @@ export function ConsoleSidePanel({
     sendWsMessage({ type: "process.input", sessionId, data: pending });
   }, [sessionId]);
 
+  const sendShellResize = useCallback((cols: number, rows: number) => {
+    if (!shellAttachedRef.current) return;
+    const prev = lastResizeRef.current;
+    if (prev.cols === cols && prev.rows === rows) return;
+    lastResizeRef.current = { cols, rows };
+    sendWsMessage({ type: "process.resize", sessionId: sessionIdRef.current, cols, rows });
+  }, []);
+
   const ensureShellAttached = useCallback((): Promise<boolean> => {
     if (shellAttachedRef.current) return Promise.resolve(true);
     if (attachPromiseRef.current) return attachPromiseRef.current;
@@ -166,6 +165,15 @@ export function ConsoleSidePanel({
       .attachConsole(sessionId)
       .then(() => {
         shellAttachedRef.current = true;
+        const term = termRef.current;
+        if (term) {
+          try {
+            fitRef.current?.fit();
+          } catch {
+            /* xterm not ready */
+          }
+          sendShellResize(term.cols, term.rows);
+        }
         flushPendingInput();
         return true;
       })
@@ -174,29 +182,7 @@ export function ConsoleSidePanel({
         attachPromiseRef.current = null;
       });
     return attachPromiseRef.current;
-  }, [sessionId, flushPendingInput]);
-
-  const resetTerminalView = useCallback((term: Terminal) => {
-    term.reset();
-    writtenRef.current = 0;
-    inputLockedRef.current = false;
-    term.options.disableStdin = false;
-  }, []);
-
-  const tryUnlockShell = useCallback((chunk: string) => {
-    if (!inputLockedRef.current || !shellAttachedRef.current) return;
-    if (!/(?:\r?\n|^)[^\r\n]*>\s*$/.test(chunk) && !/\$\s*$/.test(chunk)) return;
-    if (unlockTimerRef.current) window.clearTimeout(unlockTimerRef.current);
-    unlockTimerRef.current = window.setTimeout(() => {
-      inputLockedRef.current = false;
-      const term = termRef.current;
-      if (term) {
-        term.options.disableStdin = false;
-        term.focus();
-      }
-      unlockTimerRef.current = null;
-    }, 60);
-  }, []);
+  }, [sessionId, flushPendingInput, sendShellResize]);
 
   const copySelection = useCallback(async () => {
     const term = termRef.current;
@@ -212,7 +198,7 @@ export function ConsoleSidePanel({
 
   const pasteFromClipboard = useCallback(async () => {
     const term = termRef.current;
-    if (!term || inputLockedRef.current) return;
+    if (!term) return;
     let text = "";
     try {
       text = await navigator.clipboard.readText();
@@ -225,13 +211,29 @@ export function ConsoleSidePanel({
   }, [ensureShellAttached]);
 
   const clearConsole = useCallback(() => {
-    const term = termRef.current;
-    if (term) resetTerminalView(term);
-    clearConsoleForSession(sessionId);
+    termRef.current?.reset();
+    shellAttachedRef.current = false;
+    attachPromiseRef.current = null;
+    pendingInputRef.current = "";
+    lastResizeRef.current = { cols: 0, rows: 0 };
     sendWsMessage({ type: "process.clear", sessionId });
     setContextMenu(null);
-    termRef.current?.focus();
-  }, [clearConsoleForSession, resetTerminalView, sessionId]);
+    void ensureShellAttached().then((ok) => {
+      if (!ok) return;
+      termRef.current?.focus();
+    });
+  }, [sessionId, ensureShellAttached]);
+
+  const ensureShellAttachedRef = useRef(ensureShellAttached);
+  ensureShellAttachedRef.current = ensureShellAttached;
+  const copySelectionRef = useRef(copySelection);
+  copySelectionRef.current = copySelection;
+  const pasteFromClipboardRef = useRef(pasteFromClipboard);
+  pasteFromClipboardRef.current = pasteFromClipboard;
+  const clearConsoleRef = useRef(clearConsole);
+  clearConsoleRef.current = clearConsole;
+  const sendShellResizeRef = useRef(sendShellResize);
+  sendShellResizeRef.current = sendShellResize;
 
   const onTerminalContextMenu = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -258,13 +260,25 @@ export function ConsoleSidePanel({
   }, [contextMenu]);
 
   useEffect(() => {
+    if (!open) return;
+    return subscribeShellConsole((event) => {
+      if (event.sessionId !== sessionIdRef.current) return;
+      const term = termRef.current;
+      if (!term) return;
+      if (event.type === "output") term.write(event.text);
+      else term.reset();
+    });
+  }, [open, sessionId]);
+
+  useEffect(() => {
     if (!open || !containerRef.current) return;
+
+    const activeSessionId = sessionId;
 
     const term = new Terminal({
       convertEol: false,
       cursorBlink: true,
       cursorStyle: "bar",
-      disableStdin: false,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 12,
       lineHeight: 1.35,
@@ -275,36 +289,35 @@ export function ConsoleSidePanel({
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(containerRef.current);
-    fit.fit();
 
     termRef.current = term;
     fitRef.current = fit;
-    writtenRef.current = 0;
+    lastResizeRef.current = { cols: 0, rows: 0 };
+    shellAttachedRef.current = false;
+    attachPromiseRef.current = null;
+    pendingInputRef.current = "";
 
-    const buffered = outputRef.current;
-    if (buffered) {
-      term.write(buffered);
-      writtenRef.current = buffered.length;
-    }
-
-    void ensureShellAttached();
-
-    const dataDisposable = term.onData((data) => {
-      if (inputLockedRef.current) return;
-      if (!shellAttachedRef.current) {
-        pendingInputRef.current += data;
-        void ensureShellAttached();
-        return;
-      }
-      sendWsMessage({ type: "process.input", sessionId, data });
-      if (data.includes("\r") || data.includes("\n")) {
-        inputLockedRef.current = true;
-        term.options.disableStdin = true;
+    void ensureShellAttachedRef.current().then((ok) => {
+      if (!ok) return;
+      try {
+        fit.fit();
+        sendShellResizeRef.current(term.cols, term.rows);
+      } catch {
+        /* xterm not ready */
       }
     });
 
+    const dataDisposable = term.onData((data) => {
+      if (!shellAttachedRef.current) {
+        pendingInputRef.current += data;
+        void ensureShellAttachedRef.current();
+        return;
+      }
+      sendWsMessage({ type: "process.input", sessionId: sessionIdRef.current, data });
+    });
+
     const resizeDisposable = term.onResize(({ cols, rows }) => {
-      sendWsMessage({ type: "process.resize", sessionId, cols, rows });
+      sendShellResizeRef.current(cols, rows);
     });
 
     term.attachCustomKeyEventHandler((e) => {
@@ -315,13 +328,13 @@ export function ConsoleSidePanel({
       if (key === "c") {
         const selection = term.getSelection();
         if (selection && e.type === "keydown") {
-          void copySelection();
+          void copySelectionRef.current();
           return false;
         }
         return true;
       }
       if (key === "v" && e.type === "keydown") {
-        void pasteFromClipboard();
+        void pasteFromClipboardRef.current();
         return false;
       }
       if (key === "a" && e.type === "keydown") {
@@ -329,7 +342,7 @@ export function ConsoleSidePanel({
         return false;
       }
       if (key === "l" && e.shiftKey && e.type === "keydown") {
-        clearConsole();
+        clearConsoleRef.current();
         return false;
       }
       return true;
@@ -340,6 +353,7 @@ export function ConsoleSidePanel({
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
+        sendShellResizeRef.current(term.cols, term.rows);
       } catch {
         /* xterm not ready */
       }
@@ -350,50 +364,21 @@ export function ConsoleSidePanel({
       ro.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
-      if (unlockTimerRef.current) window.clearTimeout(unlockTimerRef.current);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
       shellAttachedRef.current = false;
       attachPromiseRef.current = null;
       pendingInputRef.current = "";
+      void api.detachConsole(activeSessionId).catch(() => {});
     };
-  }, [open, sessionId, ensureShellAttached, copySelection, pasteFromClipboard, clearConsole]);
+  }, [open, sessionId]);
 
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
     term.options.theme = readXtermTheme(isDark);
   }, [isDark]);
-
-  useEffect(() => {
-    if (prevSessionRef.current === sessionId) return;
-    prevSessionRef.current = sessionId;
-    shellAttachedRef.current = false;
-    attachPromiseRef.current = null;
-    pendingInputRef.current = "";
-    const term = termRef.current;
-    if (!term) return;
-    resetTerminalView(term);
-    void ensureShellAttached();
-  }, [sessionId, resetTerminalView, ensureShellAttached]);
-
-  useEffect(() => {
-    if (!open) return;
-    const term = termRef.current;
-    if (!term) return;
-
-    if (output.length < writtenRef.current) {
-      resetTerminalView(term);
-    }
-
-    const chunk = output.slice(writtenRef.current);
-    if (!chunk) return;
-
-    term.write(chunk);
-    writtenRef.current = output.length;
-    if (lastSource === "shell") tryUnlockShell(chunk);
-  }, [output, open, resetTerminalView, lastSource, tryUnlockShell]);
 
   if (!open) return null;
 
@@ -420,7 +405,6 @@ export function ConsoleSidePanel({
           <div className={styles.headerText}>
             <div className={styles.headerTitles}>
               <span className={styles.eyebrow}>{t("console.title")}</span>
-              {live ? <span className={styles.liveBadge}>{t("console.live")}</span> : null}
               <p className={styles.hint}>{t("console.hint")}</p>
             </div>
           </div>
