@@ -336,14 +336,6 @@
   min-width: 0;
 }
 
-/* Fixed width for the diagnostics chat picker: a long selected title must
-   truncate inside the block instead of widening the row. */
-.diagChatPick {
-  width: min(320px, 60vw);
-  max-width: 100%;
-  min-width: 0;
-}
-
 .fieldHint {
   margin: 0;
   font-size: var(--settings-hint-size);

@@ -643,6 +643,9 @@ export const en = {
     copyJson: "Copy JSON",
     copied: "Copied",
     copying: "Copying…",
+    deepLogging: "Deep logging",
+    deepLoggingHint:
+      "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl).",
   },
   export: {
     user: "User",

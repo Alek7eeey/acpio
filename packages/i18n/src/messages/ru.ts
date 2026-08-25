@@ -667,6 +667,9 @@ export const ru = {
     copyJson: "Копировать JSON",
     copied: "Скопировано",
     copying: "Копирование…",
+    deepLogging: "Глубокое логирование",
+    deepLoggingHint:
+      "Пишет JSONL в папку дампов: промпты, скиллы, модель, MCP и весь ACP-трафик (acpio-deep-ГГГГ-ММ-ДД.jsonl).",
   },
   export: {
     user: "Пользователь",

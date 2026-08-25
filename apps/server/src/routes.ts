@@ -113,6 +113,7 @@ const settingsSchema = z.object({
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
+  diagnosticsDeepLogging: z.boolean().optional(),
   exportDir: z.string().optional(),
   resumeAgentContext: z.boolean().optional(),
   multitask: z.boolean().optional(),

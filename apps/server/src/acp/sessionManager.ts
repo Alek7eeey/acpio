@@ -38,6 +38,7 @@ import {
 } from "@acpio/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acpio/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
+import { appendDeepLog } from "../services/deepLogging.js";
 import {
   appendPart,
   appendTextChunk,
@@ -75,6 +76,7 @@ import {
   isAgentSlashPrompt,
   mergeSlashCommandLists,
   parseAvailableCommands,
+  parseSlashPrompt,
 } from "./slashCommands.js";
 
 /** Map agent-reported mode ids onto our Agent / Plan / Ask switcher. */
@@ -845,6 +847,29 @@ export async function ensureAcp(
         if (models.length || modelParams.length || modes.length) {
           rememberModels(opts.provider, currentModel, models, modelParams, modes);
         }
+        client.logContext = {
+          sessionId,
+          provider: opts.provider,
+          cwd: opts.cwd,
+          model: currentModel,
+        };
+        appendDeepLog({
+          kind: "session-boot",
+          sessionId,
+          provider: opts.provider,
+          cwd: opts.cwd,
+          model: currentModel,
+          data: {
+            acpSessionId: client.sessionId,
+            mode: opts.mode,
+            restoreMode: mode,
+            mcpServers: mcpServers
+              .filter((s) => s.enabled && s.url?.trim())
+              .map((s) => ({ name: s.name, url: s.url!.trim() })),
+            model: bootModelOpts.model,
+            modelParams: bootModelOpts.modelParams,
+          },
+        });
         setAgentAvailable(opts.provider, true);
         if (paramsProbe?.provider === opts.provider) disposeParamsProbe();
         await updateSession(sessionId, {
@@ -1078,6 +1103,19 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     const parsed = parseAvailableCommands(update.raw);
     rt.availableCommands = mergeSlashCommandLists(rt.availableCommands, parsed);
     rememberSessionCommands(rt.sessionId, rt.availableCommands);
+    appendDeepLog({
+      kind: "available-commands",
+      sessionId: rt.sessionId,
+      provider: rt.provider ?? undefined,
+      data: {
+        commands: parsed.map((cmd) => ({
+          name: cmd.name,
+          kind: cmd.kind,
+          description: cmd.description,
+        })),
+        skills: parsed.filter((cmd) => cmd.kind === "skill").map((cmd) => cmd.name),
+      },
+    });
     broadcastToSession(rt.sessionId, {
       type: "commands.updated",
       sessionId: rt.sessionId,
@@ -2354,9 +2392,41 @@ async function runTurn(
       rt.toolsHintSent = true;
       promptText = `${promptText}\n\n${t(locale, "agent.toolsHint")}`;
     }
+    const modelOpt = findModelConfigOption(client.configOptions);
+    const model = modelOpt?.currentValue ? String(modelOpt.currentValue) : undefined;
+    client.logContext = {
+      sessionId,
+      provider: opts.provider,
+      cwd: opts.cwd,
+      model,
+    };
+    const slash = parseSlashPrompt(promptUserText);
+    appendDeepLog({
+      kind: "user-prompt",
+      sessionId,
+      provider: opts.provider,
+      cwd: opts.cwd,
+      model,
+      data: {
+        userText: promptUserText,
+        promptText,
+        slashCommand: slash?.name,
+        slashArgs: slash?.args,
+        isSkill: slash ? /^skill:/i.test(slash.name) : false,
+        edit: Boolean(opts.editMessageId),
+      },
+    });
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     agentStartedAt = Date.now();
     const result = await client.prompt(promptText);
+    appendDeepLog({
+      kind: "prompt-complete",
+      sessionId,
+      provider: opts.provider,
+      cwd: opts.cwd,
+      model,
+      data: result,
+    });
     setAgentAvailable(opts.provider, true);
     // Stop was pressed — don't peel/append more content for this turn.
     if (!rt.acceptingStream || result.stopReason === "cancelled") {

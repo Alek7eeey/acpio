@@ -1998,17 +1998,28 @@ export function SettingsPage() {
           <>
             <SettingTable>
               <SettingRow
-                label={t("diagnostics.folder")}
-                controlClassName={styles.folderControl}
-                hint={t("diagnostics.folderHint", {
-                  path: diagDirResolved || diagDirDefault || "…",
-                })}
+                label={t("diagnostics.deepLogging")}
+                hint={t("diagnostics.deepLoggingHint")}
               >
+                <Toggle
+                  checked={form.diagnosticsDeepLogging === true}
+                  onChange={(v) => {
+                    patch("diagnosticsDeepLogging", v);
+                    void saveSettings({ diagnosticsDeepLogging: v });
+                  }}
+                  label={t("diagnostics.deepLogging")}
+                />
+              </SettingRow>
+
+              <SettingRow label={t("diagnostics.folder")} controlClassName={styles.folderControl}>
                 <div className={styles.cwdPickRow}>
                   <MiddleTruncate
                     className={styles.cwdPath}
                     text={
-                      form.diagnosticsDir || diagDirDefault || t("diagnostics.folderDefault")
+                      form.diagnosticsDir ||
+                      diagDirResolved ||
+                      diagDirDefault ||
+                      t("common.notSet")
                     }
                   />
                   <button
@@ -2039,30 +2050,30 @@ export function SettingsPage() {
                   sessions.length === 0 ? t("diagnostics.noChats") : t("diagnostics.chatHint")
                 }
               >
-                <div className={styles.diagChatPick}>
-                  <OptionPicker
-                    value={diagSessionId ?? ""}
-                    placement="down"
-                    menuTitle={t("diagnostics.chat")}
-                    placeholder={t("diagnostics.chatNone")}
-                    emptyLabel={t("diagnostics.noChats")}
-                    onChange={(value) => setDiagSessionId(value)}
-                    options={[
-                      { value: "", label: t("diagnostics.chatNone") },
-                      ...sessions.map((s) => ({
-                        value: s.id,
-                        label: truncateSessionTitle(s.title || s.id.slice(0, 8), 44),
-                        hint:
-                          s.id === activeSessionId
-                            ? `${s.provider} · ${t("diagnostics.chatActive")}`
-                            : s.provider,
-                      })),
-                    ]}
-                  />
-                </div>
+                <OptionPicker
+                  value={diagSessionId ?? ""}
+                  placement="down"
+                  variant="block"
+                  menuTitle={t("diagnostics.chat")}
+                  placeholder={t("diagnostics.chatNone")}
+                  emptyLabel={t("diagnostics.noChats")}
+                  onChange={(value) => setDiagSessionId(value)}
+                  options={[
+                    { value: "", label: t("diagnostics.chatNone") },
+                    ...sessions.map((s) => ({
+                      value: s.id,
+                      label: truncateSessionTitle(s.title || s.id.slice(0, 8), 44),
+                      hint:
+                        s.id === activeSessionId
+                          ? `${s.provider} · ${t("diagnostics.chatActive")}`
+                          : s.provider,
+                    })),
+                  ]}
+                />
               </SettingRow>
             </SettingTable>
 
+            <div className={styles.sectionBlock}>
             <SearchGate terms={[t("diagnostics.createNow"), t("diagnostics.saving"), t("common.refresh"), t("diagnostics.savedTo")]}>
             <div className={styles.diagActions}>
               <button
@@ -2101,7 +2112,9 @@ export function SettingsPage() {
               {diagMessage ? <span className={styles.hint}>{diagMessage}</span> : null}
             </div>
             </SearchGate>
+            </div>
 
+            <div className={styles.sectionBlock}>
             <SearchGate terms={[t("diagnostics.dumpsTitle"), t("diagnostics.dumpsHint"), t("diagnostics.empty"), t("diagnostics.copyJson")]}>
               <h2 className={styles.sectionHeading}>{highlightText(t("diagnostics.dumpsTitle"), settingsQuery)}</h2>
             <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
@@ -2173,6 +2186,7 @@ export function SettingsPage() {
               ))}
             </ul>
             </SearchGate>
+            </div>
           </>
         )}
 

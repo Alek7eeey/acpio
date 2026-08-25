@@ -9,6 +9,7 @@ import {
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
 import { adapters } from "../adapters/registry.js";
+import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
 const SETTINGS_KEY = "app";
 
@@ -56,6 +57,9 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   if (typeof merged.diagnosticsDir !== "string") {
     merged.diagnosticsDir = DEFAULT_SETTINGS.diagnosticsDir;
+  }
+  if (typeof merged.diagnosticsDeepLogging !== "boolean") {
+    merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }
   if (typeof merged.exportDir !== "string") {
     merged.exportDir = DEFAULT_SETTINGS.exportDir;
@@ -231,9 +235,12 @@ export async function getSettings(): Promise<AppSettings> {
       openaiApiKey: process.env.OPENAI_API_KEY ?? "",
     });
     await db.insert(settings).values({ key: SETTINGS_KEY, value: seeded });
+    syncDeepLoggingFromSettings(seeded);
     return seeded;
   }
-  return mergeSettings(rows[0].value);
+  const merged = mergeSettings(rows[0].value);
+  syncDeepLoggingFromSettings(merged);
+  return merged;
 }
 
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
@@ -246,5 +253,6 @@ export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSe
       target: settings.key,
       set: { value: next, updatedAt: new Date() },
     });
+  syncDeepLoggingFromSettings(next);
   return next;
 }

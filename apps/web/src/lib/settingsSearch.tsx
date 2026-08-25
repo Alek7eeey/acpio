@@ -175,6 +175,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.diagnosticsDesc"),
       t("diagnostics.folder"),
       t("diagnostics.chat"),
+      t("diagnostics.deepLogging"),
       t("diagnostics.dumpsTitle"),
       t("diagnostics.dumpsHint"),
       t("diagnostics.createNow"),
@@ -268,6 +269,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
     diagnostics: [
       t("diagnostics.folderHint", { path: "…" }),
       t("diagnostics.chatHint"),
+      t("diagnostics.deepLoggingHint"),
       t("diagnostics.noChats"),
       t("diagnostics.dumpsHint"),
     ],

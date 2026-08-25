@@ -43,6 +43,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...partial };
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
+  if (typeof partial.diagnosticsDeepLogging !== "boolean") {
+    merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
+  }
   merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
   return merged;
 }

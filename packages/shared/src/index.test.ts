@@ -405,6 +405,7 @@ describe("DEFAULT_SETTINGS", () => {
     permissionPolicy: "always",
     permissionAllowlist: [],
     diagnosticsDir: "",
+    diagnosticsDeepLogging: false,
     exportDir: "",
     resumeAgentContext: true,
     multitask: false,

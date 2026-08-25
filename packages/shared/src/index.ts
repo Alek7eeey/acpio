@@ -428,6 +428,8 @@ export interface AppSettings {
   permissionAllowlist: string[];
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
   diagnosticsDir: string;
+  /** Append verbose agent traffic logs (JSONL) into the diagnostics folder. */
+  diagnosticsDeepLogging: boolean;
   /** Folder on the server where chat exports are written. Empty → default under repo. */
   exportDir: string;
   /**
@@ -531,6 +533,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   permissionPolicy: "always",
   permissionAllowlist: [],
   diagnosticsDir: "",
+  diagnosticsDeepLogging: false,
   exportDir: "",
   resumeAgentContext: true,
   multitask: false,

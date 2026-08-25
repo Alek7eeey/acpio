@@ -50,6 +50,11 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatToolbarStyle: "minimal" }).chatToolbarStyle).toBe("minimal");
     expect(mergeClientAppSettings({ chatToolbarStyle: "weird" }).chatToolbarStyle).toBe("classic");
   });
+
+  it("defaults deep logging to off", () => {
+    expect(mergeClientAppSettings({}).diagnosticsDeepLogging).toBe(false);
+    expect(mergeClientAppSettings({ diagnosticsDeepLogging: true }).diagnosticsDeepLogging).toBe(true);
+  });
 });
 
 describe("readSettingsSchema", () => {

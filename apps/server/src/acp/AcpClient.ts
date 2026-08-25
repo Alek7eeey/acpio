@@ -25,6 +25,11 @@ import {
   mcpHttpHeaders,
   mcpRemoteExtras,
 } from "@acpio/shared";
+import {
+  appendDeepLog,
+  rpcMethod,
+  type DeepLogContext,
+} from "../services/deepLogging.js";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
 const execFileAsync = promisify(execFile);
@@ -457,6 +462,8 @@ export class AcpClient extends EventEmitter {
   private suppressUpdates = false;
   /** Last inbound ACP traffic (updates, replies, client method calls). */
   private lastActivityAt = Date.now();
+  /** Optional host context attached to deep-log lines for this client. */
+  logContext: DeepLogContext = {};
 
   /** OMP-style silent restore: agent supports `session/resume`. */
   get canResumeSession(): boolean {
@@ -1225,6 +1232,13 @@ export class AcpClient extends EventEmitter {
 
   private write(msg: unknown) {
     if (!this.proc?.stdin.writable) return;
+    appendDeepLog({
+      kind: "acp-out",
+      direction: "out",
+      method: rpcMethod(msg),
+      ...this.logContext,
+      data: msg,
+    });
     this.proc.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
@@ -1242,6 +1256,14 @@ export class AcpClient extends EventEmitter {
     // Any parsed ACP traffic means the agent is still alive — keep long
     // requests (especially session/prompt) from timing out mid-stream.
     this.markActivity();
+
+    appendDeepLog({
+      kind: "acp-in",
+      direction: "in",
+      method: rpcMethod(msg),
+      ...this.logContext,
+      data: msg,
+    });
 
     if ("id" in msg && (msg.result !== undefined || msg.error !== undefined) && !msg.method) {
       const id = msg.id as JsonRpcId;
