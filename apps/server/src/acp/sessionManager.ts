@@ -2278,6 +2278,22 @@ async function completeDanglingTurnParts(sessionId: string) {
   }
 }
 
+/**
+ * Stamp the measured turn duration onto every thinking block of the last
+ * assistant message. Runs on every end path (success, stop, error) — a turn
+ * whose thoughts lack durationMs would otherwise fall back to an elapsed-
+ * since-createdAt display on the client that grows with every reload.
+ */
+async function stampThoughtDurations(sessionId: string, durationMs: number) {
+  const detail = await getSessionDetail(sessionId);
+  const last = detail?.messages.filter((m) => m.role === "assistant").at(-1);
+  if (!last) return;
+  for (const part of last.parts) {
+    if (part.type !== "thought") continue;
+    await updatePart(sessionId, part.id, { durationMs });
+  }
+}
+
 async function runTurn(
   rt: SessionRuntime,
   sessionId: string,
@@ -2300,6 +2316,8 @@ async function runTurn(
   rt.turnHasThought = false;
   rt.toolPartByCallId.clear();
   rt.toolStartRawByCallId.clear();
+  // Measure the actual ACP request, not time spent creating UI/DB messages.
+  let agentStartedAt = Date.now();
   await updateSession(sessionId, { status: "running" });
   // Create the assistant bubble immediately so the UI can show "Thinking…" without waiting
   // for the first ACP token (spawn/prompt can take a while).
@@ -2327,11 +2345,12 @@ async function runTurn(
       promptText = `${promptText}\n\n${t(locale, "agent.toolsHint")}`;
     }
     // Measure the actual ACP request, not time spent creating UI/DB messages.
-    const agentStartedAt = Date.now();
+    agentStartedAt = Date.now();
     const result = await client.prompt(promptText);
     setAgentAvailable(opts.provider, true);
     // Stop was pressed — don't peel/append more content for this turn.
     if (!rt.acceptingStream || result.stopReason === "cancelled") {
+      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
       await updateSession(sessionId, { status: "idle" });
       return result;
     }
@@ -2340,6 +2359,7 @@ async function runTurn(
     // are dropped and the UI unlocks with spinning tools and no answer.
     await settlePromptStream(rt);
     if (!rt.acceptingStream) {
+      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
       await updateSession(sessionId, { status: "idle" });
       return result;
     }
@@ -2360,14 +2380,7 @@ async function runTurn(
       );
     }
 
-    if (lastAssistant) {
-      const thoughtPart = lastAssistant.parts.find((p) => p.type === "thought");
-      if (thoughtPart) {
-        await updatePart(sessionId, thoughtPart.id, {
-          durationMs: Math.max(0, Date.now() - agentStartedAt),
-        });
-      }
-    }
+    await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
 
     if (!hasContent && !isAgentSlashPrompt(promptUserText)) {
       const model =
@@ -2383,6 +2396,7 @@ async function runTurn(
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
     if (isModelAccessError(message)) {
       const currentModel =
         (rt.client && findModelConfigOption(rt.client.configOptions)?.currentValue) ||

@@ -1692,12 +1692,20 @@ function StepsSpoiler({
   const showSubagentsOutside = !open && subagentParts.length > 0;
 
   // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
+  // The elapsed-since-createdAt fallback is only trustworthy while the
+  // message is fresh (the server's durationMs stamp may not have arrived
+  // yet). Older messages without durationMs — stopped, errored, or imported
+  // turns — must not show a number that grows with every reload.
+  const fallbackRecent =
+    Date.now() - (Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : Date.now()) <
+    10 * 60_000;
+  const shownSeconds = agentDurationSec || (fallbackRecent ? elapsedSec : 0);
   const label = liveHeader
     ? t("common.steps")
-    : (agentDurationSec || elapsedSec) > 0
+    : shownSeconds > 0
       ? t("common.thoughtFor", {
-          seconds: agentDurationSec || elapsedSec,
-          count: agentDurationSec || elapsedSec,
+          seconds: shownSeconds,
+          count: shownSeconds,
         })
       : t("common.steps");
 
