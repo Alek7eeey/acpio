@@ -241,6 +241,18 @@
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
 }
 
+/* Split panes are narrow: the fixed 380px plan panel would leave a useless
+   sliver of chat (153px in a 533px pane). The plan takes the whole pane —
+   the chat returns when the plan closes. */
+.pageInSplit.pageWithPlan > :last-child {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.pageInSplit.pageWithPlan .mainColumn {
+  display: none;
+}
+
 .thread {
   flex: 1;
   overflow: auto;
