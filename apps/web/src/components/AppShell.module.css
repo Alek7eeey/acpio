@@ -1079,6 +1079,9 @@
   margin-top: 0;
   opacity: 1;
   pointer-events: auto;
+  /* Paint above the row-filling session button. */
+  position: relative;
+  z-index: 1;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1131,6 +1134,9 @@
   min-width: 0;
   min-height: var(--session-row-h);
   margin-top: 0;
+  /* Paint above the row-filling session button so their clicks stay commands. */
+  position: relative;
+  z-index: 1;
 }
 
 /* Pin / archive actions — revealed only on row hover. */
@@ -1236,6 +1242,9 @@
   padding: 6px 8px 6px 0;
   box-sizing: border-box;
   transition: background 0.12s ease;
+  /* The session button is absolute (covers the row); the badge/actions/time
+     keep their right-side position. */
+  justify-content: flex-end;
 }
 
 .sessionItem.active {
@@ -1309,6 +1318,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  /* The whole row opens the chat: cover the item completely instead of a
+     24px-tall strip — the row's padding and the badge/time zones used to be
+     dead space that forced precise clicks on the title. */
+  position: absolute;
+  inset: 0;
 }
 
 .sessionTitle {
@@ -1370,6 +1384,10 @@
   line-height: 1;
   letter-spacing: 0.02em;
   color: var(--text-secondary);
+  /* Not a command: paint above the row button but let clicks open the chat. */
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .sessionAgentBadgeOff {
@@ -1453,7 +1471,10 @@
   background: transparent;
   white-space: nowrap;
   max-width: none;
-  min-width: max-content;
+  /* Not a command: paint above the row button but let clicks open the chat. */
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
   box-sizing: border-box;
   overflow: visible;
 }
