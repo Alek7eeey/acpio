@@ -16,6 +16,7 @@ import type {
 import {
   DEFAULT_SETTINGS,
   isModelAccessError,
+  mergeClientAppSettings,
   type AdapterMetaDto,
 } from "@acprocess/shared";
 import { api } from "./api";
@@ -39,6 +40,10 @@ import {
   slashCommandsKey,
   slashListStillLoading,
 } from "./sessionSlashCommands";
+import {
+  appendConsoleOutput,
+  clearConsoleOutput,
+} from "./sessionConsole";
 
 const MODELS_CACHE_KEY = "acprocess.modelsCatalog.v6";
 const MODELS_CACHE_KEY_LEGACY = "acprocess.modelsCatalog.v5";
@@ -197,6 +202,8 @@ type AppState = {
   inflightBySession: Record<string, number>;
   promptEpochBySession: Record<string, number>;
   cancelledPromptEpochBySession: Record<string, number>;
+  /** Background chats whose turn finished while the user was elsewhere. */
+  unseenFinishedTurns: Record<string, true>;
   loading: boolean;
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
@@ -257,6 +264,14 @@ type AppState = {
   ) => Promise<ModelsCatalog | null>;
   /** Load a harness catalog without blocking the UI when a cache already exists. */
   fetchProviderModels: (provider: AgentProvider) => Promise<ModelsCatalog | null>;
+  /** Agent process console (right panel) — raw stdout/stderr stream. */
+  consoleOpen: boolean;
+  consoleOutput: Record<string, string>;
+  /** Source of the latest console chunk (for shell input unlock). */
+  consoleLastSource: Record<string, "agent" | "shell">;
+  setConsoleOpen: (open: boolean) => void;
+  toggleConsoleOpen: () => void;
+  clearConsoleForSession: (sessionId: string) => void;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -794,13 +809,36 @@ function reconcileFinishedTurn(
   }, 120);
 }
 
+function markUnseenFinishedIfAway(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  const state = get();
+  if (state.activeSessionId === sessionId) return;
+  if (state.unseenFinishedTurns[sessionId]) return;
+  set({ unseenFinishedTurns: { ...state.unseenFinishedTurns, [sessionId]: true } });
+}
+
+function clearUnseenFinished(
+  sessionId: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  const state = get();
+  if (!state.unseenFinishedTurns[sessionId]) return;
+  const next = { ...state.unseenFinishedTurns };
+  delete next[sessionId];
+  set({ unseenFinishedTurns: next });
+}
+
 async function loadAppData(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
 ) {
   const storedTheme = localStorage.getItem("acprocess.theme") as Theme | null;
   const storedLocale = localStorage.getItem("acprocess.locale") as AppLocale | null;
-  const settings = { ...DEFAULT_SETTINGS, ...(await api.getSettings()) };
+  const settings = mergeClientAppSettings(await api.getSettings());
   const theme = storedTheme ?? settings.theme ?? "light";
   const locale =
     storedLocale === "en" || storedLocale === "ru" ? storedLocale : settings.locale ?? "en";
@@ -864,6 +902,31 @@ if (typeof document !== "undefined") {
   }
 }
 
+function applyConsoleFromWs(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  event: WsServerEvent,
+) {
+  if (event.type === "process.output") {
+    set({
+      consoleOutput: appendConsoleOutput(get().consoleOutput, event.sessionId, event.text),
+      consoleLastSource: {
+        ...get().consoleLastSource,
+        [event.sessionId]: event.source ?? "agent",
+      },
+    });
+    return;
+  }
+  if (event.type === "process.cleared") {
+    const nextLast = { ...get().consoleLastSource };
+    delete nextLast[event.sessionId];
+    set({
+      consoleOutput: clearConsoleOutput(get().consoleOutput, event.sessionId),
+      consoleLastSource: nextLast,
+    });
+  }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   sessions: [],
@@ -873,6 +936,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPaneIds: [null],
   focusedPaneIndex: 0,
   sessionDetails: {},
+  consoleOpen: false,
+  consoleOutput: {},
+  consoleLastSource: {},
   knownFolders: [],
   refreshFolders: async () => {
     try {
@@ -948,6 +1014,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inflightBySession: {},
   promptEpochBySession: {},
   cancelledPromptEpochBySession: {},
+  unseenFinishedTurns: {},
   loading: false,
   error: null,
 
@@ -1306,6 +1373,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ ttsLoading: loading });
   },
 
+  setConsoleOpen(open) {
+    set({ consoleOpen: open });
+  },
+
+  toggleConsoleOpen() {
+    set({ consoleOpen: !get().consoleOpen });
+  },
+
+  clearConsoleForSession(sessionId) {
+    const nextLast = { ...get().consoleLastSource };
+    delete nextLast[sessionId];
+    set({
+      consoleOutput: clearConsoleOutput(get().consoleOutput, sessionId),
+      consoleLastSource: nextLast,
+    });
+  },
+
   async selectSession(id) {
     if (!id) {
       localStorage.removeItem(ACTIVE_SESSION_KEY);
@@ -1321,6 +1405,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
+    clearUnseenFinished(id, get, set);
     const seq = ++selectSessionSeq;
     const cached = readCachedSessionDetail(id);
     const current = get().activeSession;
@@ -1464,6 +1549,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     if (!chatSplitAllowed(state.settings.chatSplit)) return;
+    const wasSingle = paneSlots(state).length <= 1;
     let ids = [...paneSlots(state)];
     if (ids.length === 0) ids = [state.activeSessionId];
     const known = state.sessions.filter((s) => !s.archived);
@@ -1474,7 +1560,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     ids = ids.slice(0, n);
     const focus = Math.min(state.focusedPaneIndex, n - 1);
     persistPanes(ids, focus);
-    set({ chatPaneIds: ids, focusedPaneIndex: focus });
+    if (wasSingle) set({ chatPaneIds: ids, focusedPaneIndex: focus, consoleOpen: false });
+    else set({ chatPaneIds: ids, focusedPaneIndex: focus });
     const focusId = ids[focus];
     if (focusId && focusId !== state.activeSessionId) void get().selectSession(focusId);
     for (const paneId of ids) {
@@ -1512,6 +1599,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     const ids = [...paneSlots(get())];
+    const wasSingle = ids.length <= 1;
     const existing = ids.findIndex((slot) => slot === id);
     if (existing >= 0) {
       persistPanes(ids, existing);
@@ -1523,14 +1611,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (empty >= 0) {
       ids[empty] = id;
       persistPanes(ids, empty);
-      set({ chatPaneIds: ids, focusedPaneIndex: empty });
+      set({
+        chatPaneIds: ids,
+        focusedPaneIndex: empty,
+        ...(wasSingle && ids.length > 1 ? { consoleOpen: false } : {}),
+      });
       await get().selectSession(id);
       return;
     }
     if (ids.length < CHAT_PANE_MAX) {
       ids.push(id);
       persistPanes(ids, ids.length - 1);
-      set({ chatPaneIds: ids, focusedPaneIndex: ids.length - 1 });
+      set({
+        chatPaneIds: ids,
+        focusedPaneIndex: ids.length - 1,
+        ...(wasSingle ? { consoleOpen: false } : {}),
+      });
       await get().selectSession(id);
       return;
     }
@@ -1617,7 +1713,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     delete details[id];
     slashCommandsCache.delete(id);
     sessionDetailCache.delete(id);
-    set({ sessionDetails: details });
+    const unseen = { ...get().unseenFinishedTurns };
+    delete unseen[id];
+    set({ sessionDetails: details, unseenFinishedTurns: unseen });
     if (activeSessionId === id) {
       const next =
         panes.find((slot) => slot && slot !== id) ?? get().sessions[0]?.id ?? null;
@@ -2044,6 +2142,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleWsEvent(event) {
+    applyConsoleFromWs(get, set, event);
+
     if (event.type !== "part.appended" && event.type !== "part.updated") {
       if (pendingPartRaf) {
         cancelAnimationFrame(pendingPartRaf);
@@ -2143,6 +2243,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               s.id === event.sessionId ? { ...s, status: "idle" as const } : s,
             );
             const inflightBySession = { ...latest.inflightBySession, [event.sessionId]: 0 };
+            markUnseenFinishedIfAway(event.sessionId, get, set);
             set({
               sessions: nextSessions,
               inflightBySession,
@@ -2165,6 +2266,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const prevActive = state.activeSession;
       const wasBusy =
         listedBefore?.status === "running" || listedBefore?.status === "waiting";
+      if (busy) clearUnseenFinished(event.sessionId, get, set);
+      if (
+        !busy &&
+        wasBusy &&
+        !cancelled &&
+        (session.status === "idle" || session.status === "error")
+      ) {
+        markUnseenFinishedIfAway(event.sessionId, get, set);
+      }
       const nextSessions = state.sessions.map((s) => {
         if (s.id !== event.sessionId) return s;
         // Tree activity (lastMessageAt) is owned by message.created — never by

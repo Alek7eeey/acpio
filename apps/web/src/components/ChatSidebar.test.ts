@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SessionDto } from "@acprocess/shared";
-import { groupByFolder } from "./ChatSidebar";
+import { groupByFolder, sessionActivityAt } from "./ChatSidebar";
 
 function session(id: string, cwd: string): SessionDto {
   return {
@@ -37,5 +37,16 @@ describe("groupByFolder", () => {
   it("keeps distinct folders separate", () => {
     const groups = groupByFolder([session("a", "E:/one"), session("b", "E:\\two")]);
     expect(groups.map((g) => g.cwd).sort()).toEqual(["E:/one", "E:/two"]);
+  });
+});
+
+describe("sessionActivityAt", () => {
+  it("uses lastMessageAt when present", () => {
+    expect(sessionActivityAt(session("a", "E:/x"))).toBe("2026-08-16T10:00:00.000Z");
+  });
+
+  it("falls back to createdAt for empty chats", () => {
+    const empty = { ...session("a", "E:/x"), lastMessageAt: "" };
+    expect(sessionActivityAt(empty)).toBe("2026-08-16T10:00:00.000Z");
   });
 });

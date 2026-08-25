@@ -255,6 +255,7 @@ export const ru = {
     promptQueue: "Очередь запросов",
     queueCount: "В очереди: {{count}}",
     sessionRunning: "Работает…",
+    sessionUnseen: "Ответ готов",
     parallelTurn: "Параллельный запрос",
     pin: "Закрепить",
     unpin: "Открепить",
@@ -368,6 +369,7 @@ export const ru = {
     chatMetaChipThoughts: "Размышления",
     chatMetaChipMcp: "MCP-серверы",
     chatMetaChipContext: "Контекст",
+    chatMetaChipConsole: "Консоль",
     chatEnterToSend: "Enter отправляет сообщение",
     chatEnterToSendHint: "Выкл: Enter — новая строка, отправка по Ctrl+Enter.",
     chatShowMessageTime: "Время сообщений",
@@ -549,6 +551,12 @@ export const ru = {
     choosePrompt: "Какой обзор запустить?",
     bugbot: "Bugbot (/review-bugbot)",
     security: "Security Review (/review-security)",
+  },
+  console: {
+    title: "Консоль",
+    hint: "Консоль сессии — события генерации в реальном времени.",
+    live: "Live",
+    chipHint: "Открыть консоль сессии",
   },
   question: {
     plan: "План",

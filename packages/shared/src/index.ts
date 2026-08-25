@@ -25,6 +25,12 @@ export type {
 
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
+  SETTINGS_SCHEMA_VERSION,
+  mergeClientAppSettings,
+  normalizeChatMetaChips,
+  readSettingsSchema,
+} from "./appSettingsMerge.js";
+export {
   isToolPermissionOption,
   permissionOptionsLookLikeQuestion,
   questionPayloadFromPermission,
@@ -360,7 +366,7 @@ export type ChatActionId =
   | "readAloud";
 
 /** Chips shown in the composer bar above the input. */
-export type ChatMetaChipId = "folder" | "thoughts" | "mcp" | "context";
+export type ChatMetaChipId = "folder" | "thoughts" | "mcp" | "context" | "console";
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
@@ -468,6 +474,8 @@ export interface AppSettings {
   chatMetaChips: ChatMetaChipId[];
   /** Thinking chip style in the composer bar. */
   thoughtsChipStyle: "full" | "icon";
+  /** Console chip style in the composer bar. */
+  consoleChipStyle: "full" | "icon";
   /** Optional composer buttons (attach, mic, model, mode picker). */
   chatComposerButtons: ChatComposerButtonId[];
   /** Tree sidebar controls shown (search, per-row actions). */
@@ -486,6 +494,8 @@ export interface AppSettings {
   chatShowMessageTime: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
+  /** Internal persisted settings schema version (not shown in UI). */
+  settingsSchema?: number;
   /**
    * Optional shared key for opening the UI from a phone or another PC.
    * Empty = anyone on the VPN/LAN can connect. Localhost never asks.
@@ -534,8 +544,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "thoughts", "mcp", "context"],
+  chatMetaChips: ["folder", "thoughts", "mcp", "context", "console"],
   thoughtsChipStyle: "full",
+  consoleChipStyle: "full",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
@@ -973,12 +984,17 @@ export type WsServerEvent =
       messages: MessageDto[];
     }
   | { type: "error"; sessionId?: string; message: string }
+  | { type: "process.output"; sessionId: string; text: string; source?: "agent" | "shell" }
+  | { type: "process.cleared"; sessionId: string }
   | { type: "pong" };
 
 export type WsClientEvent =
   | { type: "ping" }
   | { type: "subscribe"; sessionId: string }
-  | { type: "unsubscribe"; sessionId: string };
+  | { type: "unsubscribe"; sessionId: string }
+  | { type: "process.input"; sessionId: string; data: string }
+  | { type: "process.resize"; sessionId: string; cols: number; rows: number }
+  | { type: "process.clear"; sessionId: string };
 
 export interface ModelParamDto {
   id: string;

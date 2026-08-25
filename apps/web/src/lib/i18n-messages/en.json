@@ -241,6 +241,7 @@
     "promptQueue": "Request queue",
     "queueCount": "Queued: {{count}}",
     "sessionRunning": "Working…",
+    "sessionUnseen": "Response ready",
     "splitLayout": "Chat layout",
     "splitColumns": "{{count}} chats side by side",
     "splitHint": "Split",
@@ -317,6 +318,8 @@
     "exportOpenFolder": "Open folder",
     "exportEmpty": "No messages to export",
     "mcpChipCount": "MCP · {{count}}",
+    "metaChipsMore": "More +{{count}}",
+    "metaChipsMoreTitle": "{{count}} more chips",
     "mcpChipTitle": "This chat's MCP servers: {{names}}",
     "mcpChipNone": "all disabled for this chat — click to enable",
     "mcpDialogTitle": "Chat MCP servers",
@@ -408,6 +411,10 @@
     "thoughtsChipStyleHint": "Show the thinking toggle as a full chip or icon only.",
     "thoughtsChipStyleFull": "Label + icon",
     "thoughtsChipStyleIcon": "Icon only",
+    "consoleChipStyle": "Console chip style",
+    "consoleChipStyleHint": "Show the console toggle as a full chip or icon only.",
+    "consoleChipStyleFull": "Label + icon",
+    "consoleChipStyleIcon": "Icon only",
     "cliAndPermissions": "CLI & permissions",
     "permissionPolicy": "Permission policy",
     "permissionPrompt": "Ask",
@@ -488,6 +495,7 @@
     "chatMetaChipThoughts": "Thinking",
     "chatMetaChipMcp": "MCP servers",
     "chatMetaChipContext": "Context",
+    "chatMetaChipConsole": "Console",
     "chatEnterToSend": "Enter sends the message",
     "chatEnterToSendHint": "Off: Enter inserts a newline, Ctrl+Enter sends.",
     "chatShowMessageTime": "Message timestamps",
@@ -563,6 +571,19 @@
     "choosePrompt": "Which review should run?",
     "bugbot": "Bugbot (/review-bugbot)",
     "security": "Security Review (/review-security)"
+  },
+  "console": {
+    "title": "Terminal",
+    "hint": "Live agent activity — tools, shell output, process logs. Type to run your own command in the session folder.",
+    "live": "Live",
+    "chipHint": "Open terminal",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select all",
+    "clear": "Clear terminal"
+  },
+  "planPanel": {
+    "title": "Outline"
   },
   "question": {
     "plan": "Plan",

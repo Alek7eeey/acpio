@@ -497,6 +497,58 @@ export class AcpClient extends EventEmitter {
     return this.stderrBuf.slice(-4000);
   }
 
+  private isConnected() {
+    return !this.closed && Boolean(this.proc);
+  }
+
+  private bindPipeAgentProcess(
+    child: ChildProcessWithoutNullStreams,
+    commandName: string,
+  ) {
+    this.proc = child;
+
+    child.on("error", (err) => {
+      const msg =
+        (err as NodeJS.ErrnoException).code === "ENOENT"
+          ? installHintFor(this.adapter, commandName)
+          : `spawn error: ${err.message}`;
+      this.emit("log", msg);
+      this.emit("output", `${msg}\n`);
+      const wrapped = new Error(msg);
+      for (const [, p] of this.pending) {
+        clearTimeout(p.timer);
+        p.reject(wrapped);
+      }
+      this.pending.clear();
+    });
+
+    child.stderr.on("data", (buf: Buffer) => {
+      const text = decodeProcessText(buf);
+      this.stderrBuf += text;
+      this.emit("log", text);
+      this.emit("output", text);
+    });
+
+    child.on("exit", (code, signal) => {
+      this.closed = true;
+      const tail = this.stderrBuf.slice(-500);
+      const message = looksLikeCommandNotFound(tail)
+        ? installHintFor(this.adapter, commandName)
+        : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`;
+      const err = new Error(message);
+      for (const [, p] of this.pending) {
+        clearTimeout(p.timer);
+        p.reject(err);
+      }
+      this.pending.clear();
+      this.killAllTerminals();
+      this.emit("exit", { code, signal });
+    });
+
+    const rl = readline.createInterface({ input: child.stdout });
+    rl.on("line", (line) => this.onLine(line));
+  }
+
   async start(
     timeoutMs = 45000,
     opts?: {
@@ -539,52 +591,14 @@ export class AcpClient extends EventEmitter {
 
     this.emit("log", `starting ${resolved.cmd} ${args.join(" ")} cwd=${cwd}`);
 
-    this.proc = spawn(resolved.cmd, args, {
+    const child = spawn(resolved.cmd, args, {
       cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
       shell: resolved.shell,
       windowsHide: true,
     });
-
-    this.proc.on("error", (err) => {
-      const msg =
-        (err as NodeJS.ErrnoException).code === "ENOENT"
-          ? installHintFor(this.adapter, commandName)
-          : `spawn error: ${err.message}`;
-      this.emit("log", msg);
-      const wrapped = new Error(msg);
-      for (const [, p] of this.pending) {
-        clearTimeout(p.timer);
-        p.reject(wrapped);
-      }
-      this.pending.clear();
-    });
-
-    this.proc.stderr.on("data", (buf: Buffer) => {
-      const text = decodeProcessText(buf);
-      this.stderrBuf += text;
-      this.emit("log", text);
-    });
-
-    this.proc.on("exit", (code, signal) => {
-      this.closed = true;
-      const tail = this.stderrBuf.slice(-500);
-      const message = looksLikeCommandNotFound(tail)
-          ? installHintFor(this.adapter, commandName)
-          : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`;
-      const err = new Error(message);
-      for (const [, p] of this.pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.pending.clear();
-      this.killAllTerminals();
-      this.emit("exit", { code, signal });
-    });
-
-    const rl = readline.createInterface({ input: this.proc.stdout });
-    rl.on("line", (line) => this.onLine(line));
+    this.bindPipeAgentProcess(child, commandName);
 
     const boot = async () => {
       const initResult = (await this.send("initialize", {
@@ -884,7 +898,7 @@ export class AcpClient extends EventEmitter {
   }
 
   async cancel(): Promise<void> {
-    if (!this.sessionId || !this.proc) return;
+    if (!this.sessionId || !this.isConnected()) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
     // Child tools must stop too: host-side terminals spawned for this session
     // would otherwise keep running even after the agent's prompt is cancelled.
@@ -957,13 +971,17 @@ export class AcpClient extends EventEmitter {
     throw new Error(`Path outside session cwd: ${resolved}`);
   }
 
+  private killTerminalEntry(entry: TerminalEntry) {
+    try {
+      entry.proc.kill();
+    } catch {
+      // ignore
+    }
+  }
+
   private killAllTerminals() {
     for (const [, t] of this.terminals) {
-      try {
-        t.proc.kill();
-      } catch {
-        // ignore
-      }
+      this.killTerminalEntry(t);
     }
     this.terminals.clear();
   }
@@ -974,6 +992,7 @@ export class AcpClient extends EventEmitter {
       entry.truncated = true;
       entry.output = entry.output.slice(entry.output.length - entry.byteLimit);
     }
+    if (chunk) this.emit("output", chunk);
   }
 
   private async handleFsRead(params: Record<string, unknown>) {
@@ -1011,7 +1030,6 @@ export class AcpClient extends EventEmitter {
     }
 
     const id = randomUUID();
-    // Avoid shell:true on Windows — it can hang or mangle argv for curl/web fetches.
     const child = spawn(command, args, {
       cwd,
       env,
@@ -1030,11 +1048,19 @@ export class AcpClient extends EventEmitter {
       byteLimit,
     };
     this.terminals.set(id, entry);
+    const label = [command, ...args].filter(Boolean).join(" ").trim();
+    if (label) this.emit("output", `\r\n\x1b[90m$ ${label}\x1b[0m\r\n`);
     this.emit("log", `terminal/create ${id} ${command} ${args.join(" ")}`.trim());
 
-    child.stdout.on("data", (buf: Buffer) => this.appendTerminalOutput(entry, buf.toString("utf8")));
-    child.stderr.on("data", (buf: Buffer) => this.appendTerminalOutput(entry, buf.toString("utf8")));
-    child.on("error", (err) => this.appendTerminalOutput(entry, `\n[spawn error] ${err.message}\n`));
+    child.stdout?.on("data", (buf: Buffer) =>
+      this.appendTerminalOutput(entry, buf.toString("utf8")),
+    );
+    child.stderr?.on("data", (buf: Buffer) =>
+      this.appendTerminalOutput(entry, buf.toString("utf8")),
+    );
+    child.on("error", (err) =>
+      this.appendTerminalOutput(entry, `\n[spawn error] ${err.message}\n`),
+    );
     child.on("close", (code, signal) => {
       entry.exitCode = code;
       entry.signal = signal;
@@ -1061,11 +1087,7 @@ export class AcpClient extends EventEmitter {
     const id = String(params.terminalId ?? "");
     const entry = this.terminals.get(id);
     if (entry) {
-      try {
-        entry.proc.kill();
-      } catch {
-        // ignore
-      }
+      this.killTerminalEntry(entry);
       this.terminals.delete(id);
     }
     return {};
@@ -1084,11 +1106,7 @@ export class AcpClient extends EventEmitter {
     );
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
-        try {
-          entry.proc.kill();
-        } catch {
-          // ignore
-        }
+        this.killTerminalEntry(entry);
         this.appendTerminalOutput(entry, `\n[timeout after ${timeoutMs}ms]\n`);
         reject(new Error(`Terminal timed out after ${timeoutMs}ms`));
       }, timeoutMs);
@@ -1103,13 +1121,7 @@ export class AcpClient extends EventEmitter {
   private handleTerminalKill(params: Record<string, unknown>) {
     const id = String(params.terminalId ?? "");
     const entry = this.terminals.get(id);
-    if (entry) {
-      try {
-        entry.proc.kill();
-      } catch {
-        // ignore
-      }
-    }
+    if (entry) this.killTerminalEntry(entry);
     return {};
   }
 
@@ -1154,7 +1166,7 @@ export class AcpClient extends EventEmitter {
     method: string,
     params: unknown,
   ): { id: JsonRpcId; promise: Promise<unknown> } {
-    if (!this.proc || this.closed) {
+    if (!this.isConnected()) {
       return {
         id: -1,
         promise: Promise.reject(new Error("ACP client is closed")),
@@ -1182,7 +1194,7 @@ export class AcpClient extends EventEmitter {
           if (!this.pending.has(id)) return;
           // Agent still streaming / answering → do not kill an active turn.
           const idleMs = Date.now() - this.lastActivityAt;
-          if (!this.closed && this.proc && idleMs < AcpClient.requestTimeoutMs) {
+          if (!this.closed && this.isConnected() && idleMs < AcpClient.requestTimeoutMs) {
             this.emit(
               "log",
               `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,

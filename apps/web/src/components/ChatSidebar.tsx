@@ -62,9 +62,14 @@ function sortSessions(list: SessionDto[]) {
   return [...list].sort(
     (a, b) =>
       Number(b.pinned) - Number(a.pinned) ||
-      (b.lastMessageAt || b.createdAt).localeCompare(a.lastMessageAt || a.createdAt) ||
+      sessionActivityAt(b).localeCompare(sessionActivityAt(a)) ||
       b.createdAt.localeCompare(a.createdAt),
   );
+}
+
+/** Last user message time, or creation time when the chat is still empty. */
+export function sessionActivityAt(session: Pick<SessionDto, "lastMessageAt" | "createdAt">): string {
+  return session.lastMessageAt || session.createdAt;
 }
 
 function folderLabel(cwd: string, noFolderLabel: string) {
@@ -87,7 +92,7 @@ export function groupByFolder(list: SessionDto[]) {
     sessions: sortSessions(sessions),
     latest: sessions.reduce(
       (max, s) => {
-        const key = s.lastMessageAt || s.createdAt;
+        const key = sessionActivityAt(s);
         return key > max ? key : max;
       },
       "",
@@ -206,12 +211,7 @@ function groupSessionsByActivity(
 ): TimeGroup[] {
   const groups: TimeGroup[] = [];
   for (const session of sessions) {
-    const bucket = activityBucket(
-      session.lastMessageAt || session.createdAt,
-      locale,
-      t,
-      nowMs,
-    );
+    const bucket = activityBucket(sessionActivityAt(session), locale, t, nowMs);
     const key = bucket?.key ?? `id:${session.id}`;
     const label = bucket?.label ?? "";
     const last = groups[groups.length - 1];
@@ -246,6 +246,7 @@ export function ChatSidebar({
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const unseenFinishedTurns = useAppStore((s) => s.unseenFinishedTurns);
   const chatPaneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
   const chatSplitOn = useAppStore((s) => s.settings.chatSplit !== false);
   const selectSession = useAppStore((s) => s.selectSession);
@@ -828,13 +829,17 @@ export function ChatSidebar({
 
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
+    const away = s.id !== activeSessionId;
+    const showRunning = away && (s.status === "running" || s.status === "waiting");
+    const showUnseen = away && !showRunning && Boolean(unseenFinishedTurns[s.id]);
     const inPane = chatSplitOn && chatPaneIds.length > 1 && chatPaneIds.includes(s.id);
     const isRenaming = renamingId === s.id;
     const menuOpen = menu?.id === s.id;
     const confirming = confirmDeleteId === s.id;
+    const activityAt = sessionActivityAt(s);
     const activity =
-      showActivity && s.lastMessageAt
-        ? formatRelativeActivity(s.lastMessageAt, dateLocale, t, nowMs)
+      showActivity && activityAt
+        ? formatRelativeActivity(activityAt, dateLocale, t, nowMs)
         : "";
 
     if (confirming) {
@@ -927,8 +932,8 @@ export function ChatSidebar({
                 <span className={styles.sessionTitleText} title={s.title}>
                   {s.title}
                 </span>
-                {(s.status === "running" || s.status === "waiting") &&
-                  s.id !== activeSessionId && (
+                {(showRunning || showUnseen) && (
+                  showRunning ? (
                     <span
                       className={styles.sessionRunning}
                       title={t("chat.sessionRunning")}
@@ -938,7 +943,14 @@ export function ChatSidebar({
                       <span className={styles.sessionRunningBar} />
                       <span className={styles.sessionRunningBar} />
                     </span>
-                  )}
+                  ) : (
+                    <span
+                      className={styles.sessionUnseen}
+                      title={t("chat.sessionUnseen")}
+                      aria-label={t("chat.sessionUnseen")}
+                    />
+                  )
+                )}
               </span>
             </button>
             {s.provider ? (
@@ -1036,14 +1048,14 @@ export function ChatSidebar({
               <span
                 className={styles.sessionActivity}
                 title={
-                  s.lastMessageAt
+                  activityAt
                     ? new Intl.DateTimeFormat(dateLocale, {
                         day: "numeric",
                         month: "long",
                         year: "numeric",
                         hour: "2-digit",
                         minute: "2-digit",
-                      }).format(new Date(s.lastMessageAt))
+                      }).format(new Date(activityAt))
                     : undefined
                 }
               >

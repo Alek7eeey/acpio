@@ -231,6 +231,7 @@ export const en = {
     promptQueue: "Request queue",
     queueCount: "Queued: {{count}}",
     sessionRunning: "Working…",
+    sessionUnseen: "Response ready",
     parallelTurn: "Parallel request",
     pin: "Pin",
     unpin: "Unpin",
@@ -344,6 +345,7 @@ export const en = {
     chatMetaChipThoughts: "Thinking",
     chatMetaChipMcp: "MCP servers",
     chatMetaChipContext: "Context",
+    chatMetaChipConsole: "Console",
     chatEnterToSend: "Enter sends the message",
     chatEnterToSendHint: "Off: Enter inserts a newline, Ctrl+Enter sends.",
     chatShowMessageTime: "Message timestamps",
@@ -525,6 +527,12 @@ export const en = {
     choosePrompt: "Which review should run?",
     bugbot: "Bugbot (/review-bugbot)",
     security: "Security Review (/review-security)",
+  },
+  console: {
+    title: "Console",
+    hint: "Session console — generation events in real time.",
+    live: "Live",
+    chipHint: "Open session console",
   },
   question: {
     plan: "Plan",

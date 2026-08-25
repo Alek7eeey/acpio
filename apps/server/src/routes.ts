@@ -59,6 +59,13 @@ import {
   writeDiagnosticsDump,
 } from "./services/diagnostics.js";
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
+import {
+  attachUserConsole,
+  clearUserConsoleOutput,
+  releaseUserConsole,
+  resizeUserConsole,
+  writeUserConsole,
+} from "./services/userConsole.js";
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
@@ -125,6 +132,7 @@ const settingsSchema = z.object({
   chatActions: z.array(z.string()).optional(),
   chatMetaChips: z.array(z.string()).optional(),
   thoughtsChipStyle: z.enum(["full", "icon"]).optional(),
+  consoleChipStyle: z.enum(["full", "icon"]).optional(),
   chatComposerButtons: z.array(z.string()).optional(),
   chatTreeElements: z.array(z.string()).optional(),
   chatTreeMenu: z.array(z.string()).optional(),
@@ -606,8 +614,17 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     disposeRuntime(id);
     forgetSessionSlashCommands(id);
+    releaseUserConsole(id);
     const ok = await deleteSession(id);
     if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
+  });
+
+  app.post("/api/sessions/:id/console/attach", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    await attachUserConsole(id, detail.cwd);
     return { ok: true };
   });
 
@@ -808,6 +825,9 @@ export async function registerRoutes(app: FastifyInstance) {
         const msg = JSON.parse(String(raw)) as {
           type?: string;
           sessionId?: string;
+          data?: string;
+          cols?: number;
+          rows?: number;
         };
         if (msg.type === "ping") {
           socket.send(JSON.stringify({ type: "pong" }));
@@ -819,6 +839,23 @@ export async function registerRoutes(app: FastifyInstance) {
         }
         if (msg.type === "unsubscribe" && msg.sessionId) {
           unsubscribeClient(client, msg.sessionId);
+          return;
+        }
+        if (msg.type === "process.input" && msg.sessionId && typeof msg.data === "string") {
+          writeUserConsole(msg.sessionId, msg.data);
+          return;
+        }
+        if (
+          msg.type === "process.resize" &&
+          msg.sessionId &&
+          typeof msg.cols === "number" &&
+          typeof msg.rows === "number"
+        ) {
+          resizeUserConsole(msg.sessionId, msg.cols, msg.rows);
+          return;
+        }
+        if (msg.type === "process.clear" && msg.sessionId) {
+          clearUserConsoleOutput(msg.sessionId);
         }
       } catch {
         // ignore

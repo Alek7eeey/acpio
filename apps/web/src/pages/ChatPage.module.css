@@ -225,6 +225,10 @@
   display: none;
 }
 
+.splitSingle:has(.pageWithConsole) .splitFab {
+  display: none;
+}
+
 .mainColumn {
   --chat-col: min(800px, 100%);
   flex: 1;
@@ -241,6 +245,12 @@
   box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
 }
 
+.pageWithConsole .mainColumn {
+  min-width: 0;
+  border-right: none;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+
 /* Split panes are narrow: the fixed 380px plan panel would leave a useless
    sliver of chat (153px in a 533px pane). The plan takes the whole pane —
    the chat returns when the plan closes. */
@@ -250,6 +260,15 @@
 }
 
 .pageInSplit.pageWithPlan .mainColumn {
+  display: none;
+}
+
+.pageInSplit.pageWithConsole > :last-child {
+  flex: 1 1 auto;
+  width: auto;
+}
+
+.pageInSplit.pageWithConsole .mainColumn {
   display: none;
 }
 
@@ -2076,6 +2095,26 @@
 .metaChipActive:hover {
   border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
   color: var(--accent);
+}
+
+.metaChipLiveDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 25%, transparent);
+  animation: metaChipLivePulse 1.4s ease-in-out infinite;
+}
+
+@keyframes metaChipLivePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 .metaChipIcon {

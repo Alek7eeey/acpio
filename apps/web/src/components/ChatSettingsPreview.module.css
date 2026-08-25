@@ -283,7 +283,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   font-weight: 500;
   color: var(--text);
 }
@@ -304,10 +304,10 @@
   display: flex;
   align-items: center;
   gap: 3px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border-radius: 6px;
   background: transparent;
-  min-height: 35px;
+  min-height: 31px;
 }
 
 .treeRowActive {
@@ -330,7 +330,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 400;
   color: var(--text-secondary);
   display: inline-flex;
@@ -914,6 +914,19 @@
 
 .composerTopRow .chips {
   flex: 1 1 auto;
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.composerTopRow .chip {
+  padding: 5px 9px;
+  font-size: 0.7rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* --- mobile: stacked card layout with big touch targets --- */

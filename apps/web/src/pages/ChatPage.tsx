@@ -55,6 +55,8 @@ import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
 import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
 import { PlanSidePanel, PlanTabButton } from "../components/PlanSidePanel";
+import { ConsoleSidePanel } from "../components/ConsoleSidePanel";
+import { ComposerMetaChips } from "../components/ComposerMetaChips";
 import { coercePlanPayload, type PlanPayload } from "../components/PlanApprovalBody";
 import { OptionPicker } from "../components/OptionPicker";
 import {
@@ -2882,6 +2884,10 @@ function ChatThread() {
   }, [showSkeleton]);
   const renderSkeleton = showSkeleton || skeletonHold;
   const settings = useAppStore((s) => s.settings);
+  const consoleOpen = useAppStore((s) => s.consoleOpen);
+  const setConsoleOpen = useAppStore((s) => s.setConsoleOpen);
+  const toggleConsoleOpen = useAppStore((s) => s.toggleConsoleOpen);
+  const consoleLive = activeSession?.status === "running" || activeSession?.status === "waiting";
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
   const sendPrompt = useCallback(
@@ -2942,6 +2948,16 @@ function ChatThread() {
   const [slashKeyboardNav, setSlashKeyboardNav] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [planPanelOpen, setPlanPanelOpen] = useState(false);
+  const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
+
+  useEffect(() => {
+    const n = bind?.paneCount ?? 1;
+    if (prevPaneCountRef.current <= 1 && n > 1) {
+      setPlanPanelOpen(false);
+      setConsoleOpen(false);
+    }
+    prevPaneCountRef.current = n;
+  }, [bind?.paneCount, setConsoleOpen]);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => modelParamsForSession(settings, null),
   );
@@ -2972,8 +2988,6 @@ function ChatThread() {
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerHighlightInnerRef = useRef<HTMLDivElement>(null);
-  const composerMetaRef = useRef<HTMLDivElement>(null);
-  const [composerMetaEdge, setComposerMetaEdge] = useState({ left: false, right: false });
   const threadRef = useRef<HTMLDivElement>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
@@ -3875,36 +3889,6 @@ function ChatThread() {
     return { label, title };
   }, [activeSession?.usage, contextUsage, t]);
 
-  useEffect(() => {
-    const el = composerMetaRef.current;
-    if (!el) return;
-    const sync = () => {
-      const max = el.scrollWidth - el.clientWidth;
-      const left = el.scrollLeft > 2;
-      const right = max > 2 && el.scrollLeft < max - 2;
-      setComposerMetaEdge((prev) =>
-        prev.left === left && prev.right === right ? prev : { left, right },
-      );
-    };
-    sync();
-    el.addEventListener("scroll", sync, { passive: true });
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
-    return () => {
-      el.removeEventListener("scroll", sync);
-      ro.disconnect();
-    };
-  }, [
-    activeSession?.cwd,
-    activeSession?.id,
-    chatMcp.length,
-    contextDisplay.label,
-    enabledMcp.length,
-    modeSwitcher.length,
-    settings.chatMetaChips,
-    sessionMode,
-  ]);
-
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
@@ -4113,8 +4097,8 @@ function ChatThread() {
   return (
     <div
       className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""} ${
-        bind && bind.paneCount > 1 ? styles.pageInSplit : ""
-      }`}
+        consoleOpen ? styles.pageWithConsole : ""
+      } ${bind && bind.paneCount > 1 ? styles.pageInSplit : ""}`}
       onPointerDown={() => {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
@@ -4425,178 +4409,25 @@ function ChatThread() {
                 </div>
               )}
           </div>
-          <div
-            className={`${styles.composerMetaShell} ${
-              !renderSkeleton && composerMetaEdge.left ? styles.composerMetaFadeLeft : ""
-            } ${!renderSkeleton && composerMetaEdge.right ? styles.composerMetaFadeRight : ""}`}
-          >
-            <div
-              className={styles.composerMeta}
-              ref={composerMetaRef}
-              aria-busy={renderSkeleton || undefined}
-            >
-              {renderSkeleton ? (
-                <>
-                  <span
-                    className={styles.metaChipSkeleton}
-                    style={{ "--w": "7.2rem" } as CSSProperties}
-                    aria-hidden
-                  />
-                  <span
-                    className={styles.metaChipSkeleton}
-                    style={{ "--w": "6.4rem" } as CSSProperties}
-                    aria-hidden
-                  />
-                  <span
-                    className={styles.metaChipSkeleton}
-                    style={{ "--w": "4.2rem" } as CSSProperties}
-                    aria-hidden
-                  />
-                  <span
-                    className={styles.metaChipSkeleton}
-                    style={{ "--w": "5.6rem" } as CSSProperties}
-                    aria-hidden
-                  />
-                  <span
-                    className={`${styles.metaChipSkeleton} ${styles.metaChipSkeletonMode}`}
-                    style={{ "--w": "4.8rem" } as CSSProperties}
-                    aria-hidden
-                  />
-                </>
-              ) : (
-                <>
-              {settings.chatMetaChips.includes("folder") && activeSession?.cwd?.trim() ? (
-                <div className={styles.sessionCwd} title={activeSession.cwd}>
-                  <span className={styles.sessionCwdIcon} aria-hidden>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
-                </div>
-              ) : null}
-              {settings.chatMetaChips.includes("thoughts") ? (
-              <button
-                type="button"
-                className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}${
-                  settings.thoughtsChipStyle === "icon" ? ` ${styles.metaChipIconOnly}` : ""
-                }`}
-                aria-pressed={autoExpandSteps}
-                aria-label={t("common.autoSteps")}
-                title={t("common.autoStepsHint")}
-                onClick={() => syncAutoExpandSteps(!autoExpandSteps)}
-              >
-                <span className={styles.metaChipIcon} aria-hidden>
-                  <ThoughtSparkIcon size={15} />
-                </span>
-                {settings.thoughtsChipStyle !== "icon" ? (
-                  <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
-                ) : null}
-              </button>
-              ) : null}
-              {settings.chatMetaChips.includes("mcp") && activeSession && enabledMcp.length > 0 ? (
-                <button
-                  type="button"
-                  className={styles.metaChip}
-                  aria-label={t("chat.mcpChipTitle", {
-                    names:
-                      chatMcp.length > 0
-                        ? chatMcp.map((s) => s.name).join(", ")
-                        : t("chat.mcpChipNone"),
-                  })}
-                  title={t("chat.mcpChipTitle", {
-                    names:
-                      chatMcp.length > 0
-                        ? chatMcp.map((s) => s.name).join(", ")
-                        : t("chat.mcpChipNone"),
-                  })}
-                  onClick={() => setMcpDialogOpen(true)}
-                >
-                  <span className={styles.metaChipIcon} aria-hidden>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M9 2v5M15 2v5M7 7h10v3a5 5 0 0 1-5 5 5 5 0 0 1-5-5V7ZM12 15v6"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className={styles.metaChipLabel}>
-                    {t("chat.mcpChipCount", { count: chatMcp.length })}
-                  </span>
-                </button>
-              ) : null}
-              {settings.chatMetaChips.includes("context") && activeSession ? (
-                <span
-                className={`${styles.metaChip} ${styles.metaChipForceLabel}`}
-                  title={contextDisplay.title}
-                >
-                  <span className={styles.metaChipIcon} aria-hidden>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M12 3 3 8l9 5 9-5-9-5ZM3 16l9 5 9-5M3 12l9 5 9-5"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span className={styles.metaChipLabel}>
-                    {contextDisplay.label}
-                  </span>
-                </span>
-              ) : null}
-              {modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode") ? (
-                <OptionPicker
-                  className={styles.composerMode}
-                  variant="quiet"
-                  placement="up"
-                  menuTitle={t("modes.label")}
-                  value={
-                    modeSwitcher.some((m) => m.value === sessionMode)
-                      ? sessionMode
-                      : modeSwitcher[0]?.value ?? "agent"
-                  }
-                  disabled={composerLocked}
-                  onChange={(v) => void onModeChange(v)}
-                  options={modeSwitcher.map((m) => ({
-                    value: m.value,
-                    label: modeLabel(m.value, m.name),
-                  }))}
-                />
-              ) : null}
-                </>
-              )}
-            </div>
-            {!renderSkeleton && composerMetaEdge.right ? (
-              <span className={styles.composerMetaMore} aria-hidden>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M9 6l6 6-6 6"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
-            ) : null}
-          </div>
+          <ComposerMetaChips
+            renderSkeleton={renderSkeleton}
+            settings={settings}
+            activeSession={activeSession}
+            autoExpandSteps={autoExpandSteps}
+            onToggleAutoExpandSteps={() => syncAutoExpandSteps(!autoExpandSteps)}
+            chatMcp={chatMcp}
+            enabledMcpCount={enabledMcp.length}
+            contextDisplay={contextDisplay}
+            consoleOpen={consoleOpen}
+            onToggleConsole={() => toggleConsoleOpen()}
+            consoleLive={consoleLive}
+            modeSwitcher={modeSwitcher}
+            sessionMode={sessionMode}
+            composerLocked={composerLocked}
+            onModeChange={onModeChange}
+            onOpenMcpDialog={() => setMcpDialogOpen(true)}
+            modeLabel={modeLabel}
+          />
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
@@ -4984,12 +4815,22 @@ function ChatThread() {
         </button>
       )}
       {(!bind || bind.focused) && (
+        <>
+      {activeSession ? (
+        <ConsoleSidePanel
+          sessionId={activeSession.id}
+          open={consoleOpen && (!bind || bind.focused)}
+          live={consoleLive}
+          onClose={() => setConsoleOpen(false)}
+        />
+      ) : null}
       <PlanTabButton
         visible={Boolean(activePlan) && !planPanelOpen}
         open={planPanelOpen}
         pending={planPending}
         onClick={() => setPlanPanelOpen(true)}
       />
+        </>
       )}
       <PlanSidePanel
         plan={activePlan}

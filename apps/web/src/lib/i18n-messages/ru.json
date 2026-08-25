@@ -265,6 +265,7 @@
     "promptQueue": "Очередь запросов",
     "queueCount": "В очереди: {{count}}",
     "sessionRunning": "Работает…",
+    "sessionUnseen": "Ответ готов",
     "splitLayout": "Раскладка чатов",
     "splitColumns": "{{count}} чатов рядом",
     "splitHint": "Сплит",
@@ -341,6 +342,8 @@
     "exportOpenFolder": "Открыть папку",
     "exportEmpty": "Нечего экспортировать — в чате нет сообщений",
     "mcpChipCount": "MCP · {{count}}",
+    "metaChipsMore": "Ещё +{{count}}",
+    "metaChipsMoreTitle": "Ещё {{count}} чипов",
     "mcpChipTitle": "MCP серверы этого чата: {{names}}",
     "mcpChipNone": "все отключены для этого чата — нажмите, чтобы включить",
     "mcpDialogTitle": "MCP серверы чата",
@@ -432,6 +435,10 @@
     "thoughtsChipStyleHint": "Показывать переключатель размышлений с подписью или только иконкой.",
     "thoughtsChipStyleFull": "Иконка и текст",
     "thoughtsChipStyleIcon": "Только иконка",
+    "consoleChipStyle": "Вид чипа консоли",
+    "consoleChipStyleHint": "Показывать переключатель консоли с подписью или только иконкой.",
+    "consoleChipStyleFull": "Иконка и текст",
+    "consoleChipStyleIcon": "Только иконка",
     "cliAndPermissions": "CLI и права",
     "permissionPolicy": "Политика разрешений",
     "permissionPrompt": "Спрашивать",
@@ -512,6 +519,7 @@
     "chatMetaChipThoughts": "Размышления",
     "chatMetaChipMcp": "MCP-серверы",
     "chatMetaChipContext": "Контекст",
+    "chatMetaChipConsole": "Консоль",
     "chatEnterToSend": "Enter отправляет сообщение",
     "chatEnterToSendHint": "Выкл: Enter — новая строка, отправка по Ctrl+Enter.",
     "chatShowMessageTime": "Время сообщений",
@@ -587,6 +595,19 @@
     "choosePrompt": "Какой обзор запустить?",
     "bugbot": "Bugbot (/review-bugbot)",
     "security": "Security Review (/review-security)"
+  },
+  "console": {
+    "title": "Терминал",
+    "hint": "Активность агента в реальном времени — инструменты, shell, логи процесса. Вводите команду, чтобы выполнить её в папке сессии.",
+    "live": "Live",
+    "chipHint": "Открыть терминал",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "selectAll": "Выделить всё",
+    "clear": "Очистить терминал"
+  },
+  "planPanel": {
+    "title": "План работ"
   },
   "question": {
     "plan": "План",

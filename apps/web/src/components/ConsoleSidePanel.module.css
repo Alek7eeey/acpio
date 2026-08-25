@@ -1,0 +1,231 @@
+.panel {
+  --console-panel-width: 380px;
+  position: relative;
+  flex: 0 0 var(--console-panel-width);
+  width: var(--console-panel-width);
+  max-width: min(70vw, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 4%, var(--surface)) 0%,
+      color-mix(in srgb, var(--bg-secondary) 35%, var(--surface)) 100%
+    );
+  box-shadow:
+    -10px 0 24px rgba(0, 0, 0, 0.05),
+    inset 2px 0 0 color-mix(in srgb, var(--text-secondary) 18%, transparent);
+  animation: slideIn 0.2s ease;
+}
+
+:global([data-theme="light"]) .panel {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 3%, #ffffff) 0%,
+      color-mix(in srgb, var(--bg-secondary) 22%, #ffffff) 100%
+    );
+  box-shadow:
+    -8px 0 20px rgba(15, 23, 42, 0.06),
+    inset 2px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--text-secondary) 30%, var(--border));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+}
+
+.headerText {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
+
+.headerTitles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.hint {
+  flex: 1 1 100%;
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.eyebrow {
+  font-family: var(--font);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.liveBadge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #22c55e;
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+  border: 1px solid color-mix(in srgb, #22c55e 28%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.closeBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 6px 8px;
+  background: var(--surface);
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+:global([data-theme="light"]) .terminal {
+  background: color-mix(in srgb, var(--surface) 92%, #ffffff);
+}
+
+.terminal :global(.xterm) {
+  height: 100%;
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: 400;
+  min-width: 210px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextMenu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.contextMenu button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.menuShortcut {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.menuDanger {
+  color: var(--danger);
+}
+
+.menuDanger .menuShortcut {
+  color: color-mix(in srgb, var(--danger) 70%, var(--text-secondary));
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 899px) {
+  .panel {
+    position: absolute;
+    inset: 0;
+    z-index: 28;
+    width: 100%;
+    flex-basis: auto;
+    max-width: none;
+  }
+
+  .splitter {
+    display: none;
+  }
+}

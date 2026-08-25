@@ -2,6 +2,9 @@ import { eq } from "drizzle-orm";
 import {
   AppSettings,
   DEFAULT_SETTINGS,
+  SETTINGS_SCHEMA_VERSION,
+  normalizeChatMetaChips,
+  readSettingsSchema,
 } from "@acprocess/shared";
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
@@ -99,7 +102,17 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.chatMetaChips)) {
     merged.chatMetaChips = [...DEFAULT_SETTINGS.chatMetaChips];
   } else {
-    merged.chatMetaChips = filterValid(merged.chatMetaChips, ["folder", "thoughts", "mcp", "context"]);
+    merged.chatMetaChips = normalizeChatMetaChips(
+      merged.chatMetaChips,
+      readSettingsSchema(raw),
+    );
+  }
+  merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
+  if (merged.thoughtsChipStyle !== "icon") {
+    merged.thoughtsChipStyle = "full";
+  }
+  if (merged.consoleChipStyle !== "icon") {
+    merged.consoleChipStyle = "full";
   }
   if (!Array.isArray(merged.chatComposerButtons)) {
     merged.chatComposerButtons = [...DEFAULT_SETTINGS.chatComposerButtons];
@@ -223,7 +236,7 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
-  const next = { ...current, ...patch };
+  const next = mergeSettings({ ...current, ...patch, settingsSchema: SETTINGS_SCHEMA_VERSION });
   await db
     .insert(settings)
     .values({ key: SETTINGS_KEY, value: next, updatedAt: new Date() })

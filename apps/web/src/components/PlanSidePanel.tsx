@@ -110,7 +110,7 @@ export function PlanSidePanel({
   return (
     <aside
       className={`${styles.panel} ${dragging ? styles.resizing : ""}`}
-      aria-label={t("question.plan")}
+      aria-label={t("planPanel.title")}
       style={{ ["--plan-panel-width"]: `${width}px` } as CSSProperties}
     >
       <div
@@ -127,7 +127,7 @@ export function PlanSidePanel({
       />
       <div className={styles.header}>
         <div className={styles.headerText}>
-          <span className={styles.eyebrow}>{t("question.plan")}</span>
+          <span className={styles.eyebrow}>{t("planPanel.title")}</span>
           {pending ? <span className={styles.pendingBadge}>{t("question.planAwaiting")}</span> : null}
         </div>
         <button type="button" className={styles.closeBtn} onClick={onClose} aria-label={t("common.cancel")}>
@@ -194,9 +194,23 @@ export function PlanTabButton({
       className={`${styles.tab} ${open ? styles.tabActive : ""} ${pending ? styles.tabPending : ""}`}
       onClick={onClick}
       aria-pressed={open}
-      title={t("question.plan")}
+      title={t("planPanel.title")}
+      aria-label={t("planPanel.title")}
     >
-      <span className={styles.tabLabel}>{t("question.plan")}</span>
+      <svg className={styles.tabIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M8 6h13M8 12h13M8 18h9"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+        />
+        <path
+          d="M4 6h.01M4 12h.01M4 18h.01"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+        />
+      </svg>
       {pending ? <span className={styles.tabDot} aria-hidden /> : null}
     </button>
   );

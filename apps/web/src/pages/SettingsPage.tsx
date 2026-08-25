@@ -43,7 +43,7 @@ function mcpRemoteConfigDraft(server: McpServerConfig): string {
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
 /** Canonical display order for composer chips. */
-const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context"];
+const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
 const CHAT_TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
 const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
@@ -123,6 +123,7 @@ function ChatConfigRows({
               ["thoughts", t("settings.chatMetaChipThoughts")],
               ["mcp", t("settings.chatMetaChipMcp")],
               ["context", t("settings.chatMetaChipContext")],
+              ["console", t("settings.chatMetaChipConsole")],
             ] as Array<[ChatMetaChipId, string]>
           ).map(([id, label]) => {
             const on = (form.chatMetaChips ?? []).includes(id);
@@ -159,6 +160,30 @@ function ChatConfigRows({
                 className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
                 aria-pressed={on}
                 onClick={() => patch("thoughtsChipStyle", id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.consoleChipStyle")} hint={t("settings.consoleChipStyleHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["full", t("settings.consoleChipStyleFull")],
+              ["icon", t("settings.consoleChipStyleIcon")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.consoleChipStyle ?? "full") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patch("consoleChipStyle", id)}
               >
                 {label}
               </button>

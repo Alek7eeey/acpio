@@ -204,6 +204,8 @@ export const api = {
       body: JSON.stringify({ items }),
     }),
   getSession: (id: string) => request<SessionDetailDto>(`/api/sessions/${id}`),
+  attachConsole: (id: string) =>
+    request<{ ok: boolean }>(`/api/sessions/${id}/console/attach`, { method: "POST" }),
   deleteSession: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
   /**

@@ -89,11 +89,13 @@
 }
 
 .eyebrow {
-  font-size: 0.78rem;
-  font-weight: 780;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+  font-family: var(--font);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: color-mix(in srgb, var(--accent) 42%, var(--text));
+  line-height: 1.25;
 }
 
 .pendingBadge {
@@ -223,102 +225,70 @@
   top: 96px;
   right: 0;
   z-index: 20;
-  writing-mode: vertical-lr;
-  text-orientation: mixed;
   display: inline-flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 108px;
-  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+  gap: 6px;
+  width: 28px;
+  min-height: 52px;
+  padding: 10px 0;
+  border: 1px solid var(--border-soft);
   border-right: none;
-  border-radius: 12px 0 0 12px;
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%,
-      color-mix(in srgb, var(--accent) 6%, var(--surface)) 55%,
-      var(--surface) 100%
-    );
-  color: color-mix(in srgb, var(--accent) 70%, var(--text));
-  padding: 16px 9px 16px 11px;
-  font-family: var(--font);
-  font-weight: 600;
-  font-size: 0.84rem;
-  letter-spacing: -0.01em;
-  text-transform: none;
+  border-radius: 8px 0 0 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg-secondary));
+  color: var(--text-secondary);
   cursor: pointer;
-  box-shadow:
-    -6px 4px 18px rgba(0, 0, 0, 0.08),
-    inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.04);
+  opacity: 0.82;
   transition:
     background 0.15s ease,
     color 0.15s ease,
     border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease,
-    padding 0.15s ease;
+    opacity 0.15s ease;
 }
 
 .tab:hover {
-  color: var(--accent);
-  transform: translateX(-2px);
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--accent) 20%, var(--surface)) 0%,
-      color-mix(in srgb, var(--accent) 8%, var(--surface)) 60%,
-      var(--surface) 100%
-    );
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow:
-    -8px 6px 22px rgba(0, 0, 0, 0.1),
-    inset 2px 0 0 color-mix(in srgb, var(--accent) 75%, transparent);
-  padding-left: 13px;
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--text) 12%, var(--border-soft));
 }
 
 .tabActive {
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  opacity: 1;
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
 }
 
-.tabPending {
-  color: var(--accent);
-  animation: tabPulse 1.6s ease-in-out infinite;
+.tabPending .tabDot {
+  animation: tabDotPulse 1.4s ease-in-out infinite;
 }
 
-.tabLabel {
-  display: inline-flex;
-  align-items: center;
-  line-height: 1.15;
-  font-family: var(--font);
-  font-weight: 600;
-  letter-spacing: -0.01em;
+.tabIcon {
+  display: block;
+  flex-shrink: 0;
+  opacity: 0.9;
 }
 
 .tabDot {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   flex-shrink: 0;
-  writing-mode: horizontal-tb;
 }
 
-@keyframes tabPulse {
+@keyframes tabDotPulse {
   0%,
   100% {
-    box-shadow:
-      -6px 4px 18px rgba(0, 0, 0, 0.08),
-      inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+    opacity: 0.55;
+    transform: scale(0.92);
   }
   50% {
-    box-shadow:
-      -8px 6px 22px color-mix(in srgb, var(--accent) 18%, transparent),
-      inset 2px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -358,20 +328,11 @@
   .tab {
     top: auto;
     bottom: 120px;
-    writing-mode: horizontal-tb;
-    text-orientation: mixed;
-    transform: none;
+    width: auto;
     min-height: 0;
-    border-radius: 12px 0 0 12px;
-    padding: 12px 14px;
-    letter-spacing: 0.04em;
-    text-transform: none;
-    font-size: 0.84rem;
-    gap: 8px;
-  }
-
-  .tab:hover {
-    transform: none;
-    padding-left: 14px;
+    flex-direction: row;
+    border-radius: 8px 0 0 8px;
+    padding: 8px 10px;
+    gap: 6px;
   }
 }
