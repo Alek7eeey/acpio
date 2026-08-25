@@ -689,8 +689,7 @@ export function SettingsPage() {
       url,
       token: undefined,
       headers: undefined,
-      remoteConfig:
-        mcpDraft.type === "remote" ? mcpDraft.remoteConfig?.trim() || undefined : undefined,
+      remoteConfig: mcpDraft.remoteConfig?.trim() || undefined,
       command: undefined,
       args: undefined,
     };
@@ -1898,28 +1897,28 @@ export function SettingsPage() {
                   value={mcpDraft.url ?? ""}
                   onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
                 />
-                <label className={styles.mcpTlsRow}>
-                  <input
-                    type="checkbox"
-                    checked={mcpDraft.insecureTls === true}
-                    onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
-                  />
-                  <span>{t("settings.mcpInsecureTls")}</span>
-                  <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
-                </label>
-                {mcpDraft.type === "remote" && (
-                  <label className={styles.mcpJsonBlock}>
-                    <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
-                    <textarea
-                      className={styles.mcpJsonInput}
-                      rows={8}
-                      spellCheck={false}
-                      placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
-                      value={mcpDraft.remoteConfig ?? ""}
-                      onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
+                {mcpDraft.type !== "remote" && (
+                  <label className={styles.mcpTlsRow}>
+                    <input
+                      type="checkbox"
+                      checked={mcpDraft.insecureTls === true}
+                      onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
                     />
+                    <span>{t("settings.mcpInsecureTls")}</span>
+                    <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
                   </label>
                 )}
+                <label className={styles.mcpJsonBlock}>
+                  <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
+                  <textarea
+                    className={styles.mcpJsonInput}
+                    rows={8}
+                    spellCheck={false}
+                    placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
+                    value={mcpDraft.remoteConfig ?? ""}
+                    onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
+                  />
+                </label>
                 <div className={styles.mcpFormActions}>
                   <button
                     type="button"

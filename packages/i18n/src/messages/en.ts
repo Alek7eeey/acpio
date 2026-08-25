@@ -415,6 +415,7 @@ export const en = {
     mcpType: "Connection type",
     mcpName: "Name",
     mcpUrl: "Server URL",
+    mcpRemoteConfig: "Connection JSON",
     mcpInsecureTls: "Skip TLS certificate verification",
     mcpInsecureTlsHint: "for self-signed and internal certificates",
     mcpToken: "Token (optional)",

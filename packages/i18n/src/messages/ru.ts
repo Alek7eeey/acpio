@@ -439,6 +439,7 @@ export const ru = {
     mcpType: "Тип подключения",
     mcpName: "Название",
     mcpUrl: "URL сервера",
+    mcpRemoteConfig: "JSON подключения",
     mcpInsecureTls: "Не проверять TLS-сертификат",
     mcpInsecureTlsHint: "для самоподписанных и внутренних сертификатов",
     mcpToken: "Токен (необязательно)",
