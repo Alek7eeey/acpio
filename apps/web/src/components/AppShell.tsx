@@ -15,6 +15,7 @@ import {
   type SettingsLeaf,
 } from "../lib/settingsNav";
 import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSearch";
+import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessShortLabel } from "../lib/harness";
@@ -24,7 +25,7 @@ import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
-import { MessageSearchDialog } from "./MessageSearchDialog";
+import { SearchDialog, type SearchDialogTab } from "./SearchDialog";
 import { ThemeToggle } from "./ThemeToggle";
 import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
@@ -235,7 +236,33 @@ export function AppShell() {
     x: number;
     y: number;
   } | null>(null);
-  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchTab, setSearchTab] = useState<SearchDialogTab>("chats");
+  const openSearch = useCallback((tab: SearchDialogTab = "chats") => {
+    setSearchTab(tab);
+    setSearchOpen(true);
+  }, []);
+  const searchEnabled = isChatSearchEnabled(settings.chatTreeElements);
+
+  useEffect(() => {
+    if (!searchEnabled || searchOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement;
+      if (
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLSelectElement ||
+        (el instanceof HTMLElement && el.isContentEditable)
+      ) {
+        return;
+      }
+      e.preventDefault();
+      openSearch("chats");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [searchEnabled, searchOpen, openSearch]);
   const railRecentsRef = useRef<HTMLDivElement>(null);
   const railSettingsRef = useRef<HTMLDivElement>(null);
 
@@ -328,14 +355,6 @@ export function AppShell() {
     setRailRecentsPos(null);
     setRailFolderPicker({ x: rect.right + 8, y: rect.top });
   };
-
-  const openRailFind = useCallback(() => {
-    setRailRecentsPos(null);
-    setRailFolderPicker(null);
-    setSidebarOpen(true);
-    if (!isChat) navigate("/chat");
-    setSearchFocusToken((n) => n + 1);
-  }, [isChat, navigate]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth));
@@ -663,8 +682,6 @@ export function AppShell() {
   // Live MCP server status (probed by the server), shown as dots in the tooltip.
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const mcpStatusSeq = useRef(0);
-  const [messageSearchOpen, setMessageSearchOpen] = useState(false);
-  /** Keep the puller mounted and hittable while a drag-open is in progress. */
   const [pullerHeld, setPullerHeld] = useState(false);
   useEffect(() => {
     if (!agentTipOpen) return;
@@ -853,10 +870,7 @@ export function AppShell() {
           </div>
 
           {isChat && (
-            <ChatSidebar
-              focusSearchSignal={searchFocusToken}
-              onSearchMessages={() => setMessageSearchOpen(true)}
-            />
+            <ChatSidebar onOpenSearch={() => openSearch("chats")} />
           )}
 
           {isSettings && (
@@ -1099,46 +1113,25 @@ export function AppShell() {
                   />
                 </svg>
               </button>
-              <button
-                type="button"
-                className={styles.railBtn}
-                title={t("common.railFind")}
-                aria-label={t("common.railFind")}
-                onClick={openRailFind}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
-                  <path
-                    d="M16 16l4.5 4.5"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={styles.railBtn}
-                title={t("chat.searchMessages")}
-                aria-label={t("chat.searchMessages")}
-                onClick={() => setMessageSearchOpen(true)}
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M7 3h10a2.5 2.5 0 0 1 2.5 2.5v8A2.5 2.5 0 0 1 17 16h-7.5l-3.5 3.4v-3.4H7A2.5 2.5 0 0 1 4.5 13.5v-8A2.5 2.5 0 0 1 7 3Z"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinejoin="round"
-                  />
-                  <circle cx="16.3" cy="15.7" r="2.7" stroke="currentColor" strokeWidth="1.6" />
-                  <path
-                    d="M18.4 17.8l2.2 2.2"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
+              {searchEnabled ? (
+                <button
+                  type="button"
+                  className={styles.railBtn}
+                  title={t("chat.searchDialogTitle")}
+                  aria-label={t("chat.searchDialogTitle")}
+                  onClick={() => openSearch("chats")}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+                    <path
+                      d="M16 16l4.5 4.5"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
             </>
           )}
           <div className={styles.railSpacer} />
@@ -1567,7 +1560,13 @@ export function AppShell() {
         </button>
       ) : null}
 
-      <MessageSearchDialog open={messageSearchOpen} onClose={() => setMessageSearchOpen(false)} />
+      <SearchDialog
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        initialTab={searchTab}
+        chatsEnabled={isChatSearchEnabled(settings.chatTreeElements)}
+        messagesEnabled={isChatSearchEnabled(settings.chatTreeElements)}
+      />
     </div>
   );
 }

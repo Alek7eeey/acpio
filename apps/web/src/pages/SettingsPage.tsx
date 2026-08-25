@@ -44,7 +44,7 @@ const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider
 
 /** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
-const CHAT_TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
+import { isChatSearchEnabled, toggleChatTreeElement } from "../lib/chatTreeSearch";
 const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
 const CHAT_HEADER_ICON_ORDER: ChatHeaderIconId[] = ["lang", "install", "theme"];
@@ -228,13 +228,15 @@ function ChatConfigRows({
           {(
             [
               ["search", t("settings.chatTreeElSearch")],
-              ["searchMsgs", t("settings.chatTreeElSearchMsgs")],
               ["pin", t("settings.chatTreeElPin")],
               ["archive", t("settings.chatTreeElArchive")],
               ["more", t("settings.chatTreeElMore")],
             ] as Array<[ChatTreeElementId, string]>
           ).map(([id, label]) => {
-            const on = (form.chatTreeElements ?? []).includes(id);
+            const on =
+              id === "search"
+                ? isChatSearchEnabled(form.chatTreeElements)
+                : (form.chatTreeElements ?? []).includes(id);
             return (
               <button
                 key={id}
@@ -244,7 +246,7 @@ function ChatConfigRows({
                 onClick={() =>
                   patch(
                     "chatTreeElements",
-                    toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
+                    toggleChatTreeElement(form.chatTreeElements ?? [], id),
                   )
                 }
               >
@@ -1385,7 +1387,7 @@ export function SettingsPage() {
               onToggleTreeElement={(id) =>
                 patch(
                   "chatTreeElements",
-                  toggleInOrder(form.chatTreeElements ?? [], id, CHAT_TREE_ORDER),
+                  toggleChatTreeElement(form.chatTreeElements ?? [], id),
                 )
               }
               onToggleShowArchive={() => patch("chatTreeShowArchive", !form.chatTreeShowArchive)}

@@ -7,6 +7,7 @@ import { useT } from "../lib/i18n";
 import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
+import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { useAppStore } from "../lib/store";
 import {
   listLikedMessages,
@@ -234,13 +235,7 @@ function MenuIcon({ children }: { children: ReactNode }) {
   );
 }
 
-export function ChatSidebar({
-  focusSearchSignal = 0,
-  onSearchMessages,
-}: {
-  focusSearchSignal?: number;
-  onSearchMessages?: () => void;
-}) {
+export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const t = useT();
   const navigate = useNavigate();
   const sessions = useAppStore((s) => s.sessions);
@@ -283,8 +278,6 @@ export function ChatSidebar({
   const [exportDialogId, setExportDialogId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Touch devices hide the inline pin/archive actions (no hover to reveal
   // them), so the ⋮ menu carries those items there. On desktop the hover
@@ -300,9 +293,6 @@ export function ChatSidebar({
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  useEffect(() => {
-    if (focusSearchSignal > 0) searchInputRef.current?.focus();
-  }, [focusSearchSignal]);
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem("acprocess.collapsedFolders.v1");
@@ -448,15 +438,7 @@ export function ChatSidebar({
     [sessions, settings.defaultCwd],
   );
 
-  const query = searchQuery.trim().toLowerCase();
-  const visibleSessions = useMemo(() => {
-    if (!query) return sessions;
-    return sessions.filter(
-      (s) =>
-        s.title.toLowerCase().includes(query) ||
-        (s.cwd ?? "").toLowerCase().includes(query),
-    );
-  }, [sessions, query]);
+  const visibleSessions = sessions;
 
   const archivedSessions = useMemo(
     () =>
@@ -467,15 +449,13 @@ export function ChatSidebar({
   );
   const folders = useMemo(() => {
     const grouped = groupByFolder(visibleSessions.filter((s) => !s.archived));
-    // During a search only matching sessions matter; empty folders are noise.
-    if (query) return grouped;
     const groupedKeys = new Set(grouped.map((f) => f.cwd));
     const empties = knownFolders
       .filter((cwd) => !groupedKeys.has(cwd))
       .map((cwd) => ({ cwd, sessions: [] as SessionDto[], latest: "" }));
     if (empties.length === 0) return grouped;
     return [...grouped, ...empties];
-  }, [visibleSessions, knownFolders, query]);
+  }, [visibleSessions, knownFolders]);
 
   // Newly created sections (archive, liked) appear collapsed by default;
   // the user can expand them afterwards as usual.
@@ -1290,16 +1270,15 @@ export function ChatSidebar({
           </button>
         </div>
 
-        {settings.chatTreeElements.includes("search") && (
-        <div className={styles.chatSearch}>
-          <div className={styles.settingsSearch}>
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              aria-hidden
-            >
+        {isChatSearchEnabled(settings.chatTreeElements) && onOpenSearch ? (
+          <button
+            type="button"
+            className={styles.chatSearchOpen}
+            onClick={onOpenSearch}
+            title={t("chat.searchDialogTitle")}
+            aria-label={t("chat.searchDialogTitle")}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
               <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
               <path
                 d="M16 16l4.5 4.5"
@@ -1308,57 +1287,12 @@ export function ChatSidebar({
                 strokeLinecap="round"
               />
             </svg>
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t("chat.searchPlaceholder")}
-              aria-label={t("chat.searchPlaceholder")}
-            />
-            {searchQuery ? (
-              <button
-                type="button"
-                className={styles.settingsSearchClear}
-                aria-label={t("chat.clearSearch")}
-                title={t("chat.clearSearch")}
-                onClick={() => {
-                  setSearchQuery("");
-                  searchInputRef.current?.focus();
-                }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M6 6l12 12M18 6 6 18"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            ) : null}
-          </div>
-          {onSearchMessages && settings.chatTreeElements.includes("searchMsgs") ? (
-            <button
-              type="button"
-              className={styles.chatSearchMsgs}
-              title={t("chat.searchMessages")}
-              aria-label={t("chat.searchMessages")}
-              onClick={onSearchMessages}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                <path
-                  d="M16 16l4.5 4.5"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          ) : null}
-        </div>
-        )}
+            <span>{t("chat.searchPlaceholder")}</span>
+            <kbd className={styles.chatSearchKbd} aria-hidden>
+              /
+            </kbd>
+          </button>
+        ) : null}
 
         <div
           className={styles.sessionList}
@@ -1635,7 +1569,7 @@ export function ChatSidebar({
           )}
           {visibleSessions.length === 0 && (
             <p className={styles.emptyHint}>
-              {query ? t("chat.searchEmpty") : t("chat.emptyDescription")}
+              {t("chat.emptyDescription")}
             </p>
           )}
         </div>

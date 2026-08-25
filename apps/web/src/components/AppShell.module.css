@@ -550,9 +550,86 @@
   padding: 2px 0 8px;
 }
 
-/* Session search box below the "New chat" toolbar button. Uses the same
-   field recipe as the settings search (.settingsSearch) so both searches
-   look identical. */
+/* Session search opener below "New chat" — matches .settingsSearch in the tree. */
+.chatSearchOpen {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  margin-bottom: 10px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.chatSearchOpen:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 18%, var(--border));
+}
+
+.chatSearchOpen svg {
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.chatSearchOpen span {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+:global([data-theme="light"]) .chatSearchOpen {
+  background: #ffffff;
+  color: rgba(24, 24, 27, 0.52);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+:global([data-theme="light"]) .chatSearchOpen span {
+  color: #18181b;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.08);
+}
+
+:global([data-theme="light"]) .chatSearchOpen:hover {
+  color: #18181b;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+:global([data-theme="light"]) .chatSearchKbd {
+  color: rgba(24, 24, 27, 0.45);
+  border-color: color-mix(in srgb, #000 10%, var(--border));
+  background: #ffffff;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+}
+
+.chatSearchKbd {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
 .chatSearch {
   display: flex;
   align-items: center;

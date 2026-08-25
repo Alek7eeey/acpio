@@ -8,10 +8,11 @@ import type {
   ChatTreeMenuId,
 } from "@acprocess/shared";
 import { useT } from "../lib/i18n";
+import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
 const CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
-const TREE_ORDER: ChatTreeElementId[] = ["search", "searchMsgs", "pin", "archive", "more"];
+const TREE_ORDER: ChatTreeElementId[] = ["search", "pin", "archive", "more"];
 const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "model", "mode", "mic"];
 const TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 
@@ -27,9 +28,8 @@ const ACTION_LABEL_KEY: Record<ChatActionId, string> = {
 };
 
 /** i18n key for each optional tree control. */
-const TREE_LABEL_KEY: Record<ChatTreeElementId, string> = {
+const TREE_LABEL_KEY: Record<Exclude<ChatTreeElementId, "searchMsgs">, string> = {
   search: "settings.chatTreeElSearch",
-  searchMsgs: "settings.chatTreeElSearchMsgs",
   pin: "settings.chatTreeElPin",
   archive: "settings.chatTreeElArchive",
   more: "settings.chatTreeElMore",
@@ -455,7 +455,10 @@ export function ChatSettingsPreview({
     return () => document.removeEventListener("mousedown", onDown);
   }, [treeMenuPos]);
   const now = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const treeOn = (id: ChatTreeElementId) => treeElements.includes(id);
+  const treeOn = (id: ChatTreeElementId) =>
+    id === "search" || id === "searchMsgs"
+      ? isChatSearchEnabled(treeElements)
+      : treeElements.includes(id);
   const btnOn = (id: ChatComposerButtonId) => composerButtons.includes(id);
   const iconOn = (id: ChatHeaderIconId) => headerIcons.includes(id);
   const menuOn = (id: ChatTreeMenuId) => treeMenu.includes(id);
@@ -572,33 +575,20 @@ export function ChatSettingsPreview({
               {t("common.newChat")}
             </span>
 
-            <div className={styles.treeRowWrap}>
-              <El
-                on={treeOn("search")} variant="dim"
-                onToggle={() => onToggleTreeElement("search")}
-                label={t("settings.chatTreeElSearch")}
-              >
-                <span className={styles.treeSearch} aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                    <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                  {t("settings.chatTreeElSearch")}
-                </span>
-              </El>
-              <El
-                on={treeOn("searchMsgs")} variant="dim"
-                onToggle={() => onToggleTreeElement("searchMsgs")}
-                label={t("settings.chatTreeElSearchMsgs")}
-              >
-                <span className={styles.treeSearchMsgs} aria-hidden>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                    <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                  </svg>
-                </span>
-              </El>
-            </div>
+            <El
+              on={treeOn("search")}
+              variant="dim"
+              onToggle={() => onToggleTreeElement("search")}
+              label={t("settings.chatTreeElSearch")}
+            >
+              <span className={styles.treeSearch} aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                  <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+                {t("chat.searchPlaceholder")}
+              </span>
+            </El>
 
             <div className={styles.treeFolder}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
