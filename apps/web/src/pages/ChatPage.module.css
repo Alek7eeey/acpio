@@ -218,6 +218,13 @@
   display: none;
 }
 
+/* The floating split button floats at top-right of the workspace — when the
+   plan panel opens it lands exactly on the panel's close button. Hide it
+   while a pane shows the plan. */
+.splitSingle:has(.pageWithPlan) .splitFab {
+  display: none;
+}
+
 .mainColumn {
   --chat-col: min(800px, 100%);
   flex: 1;
