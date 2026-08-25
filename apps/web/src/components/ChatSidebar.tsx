@@ -753,6 +753,27 @@ export function ChatSidebar({
         } ${
           menuOpen ? styles.sessionMenuOpen : ""
         } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}`}
+        onPointerDown={(e) => {
+          // Open the chat from anywhere on the row — not just the title. The
+          // command buttons (pin/archive/⋯) stop propagation themselves.
+          if (e.button !== 0) return;
+          if (e.ctrlKey || e.metaKey) {
+            void openSessionInNewPane(s.id);
+            return;
+          }
+          void selectSession(s.id);
+          if (window.innerWidth < 900) {
+            navigate("/chat");
+            setSidebarOpen(false);
+          }
+        }}
+        onClick={() => {
+          goToChat();
+        }}
+        onDoubleClick={(e) => {
+          e.preventDefault();
+          startRenameSession(s);
+        }}
         onContextMenu={(e) => openSessionMenu(e, s.id)}
       >
         {isRenaming ? (
@@ -762,6 +783,8 @@ export function ChatSidebar({
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => void commitRenameSession()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => {
               if (e.key === "Enter") void commitRenameSession();
               if (e.key === "Escape") setRenamingId(null);
@@ -769,29 +792,7 @@ export function ChatSidebar({
           />
         ) : (
           <>
-            <button
-              type="button"
-              className={styles.sessionBtn}
-              onPointerDown={(e) => {
-                if (e.button !== 0) return;
-                if (e.ctrlKey || e.metaKey) {
-                  void openSessionInNewPane(s.id);
-                  return;
-                }
-                void selectSession(s.id);
-                if (window.innerWidth < 900) {
-                  navigate("/chat");
-                  setSidebarOpen(false);
-                }
-              }}
-              onClick={() => {
-                goToChat();
-              }}
-              onDoubleClick={(e) => {
-                e.preventDefault();
-                startRenameSession(s);
-              }}
-            >
+            <button type="button" className={styles.sessionBtn}>
               <span className={styles.sessionTitle}>
                 <span className={styles.sessionTitleText} title={s.title}>
                   {s.title}
@@ -826,6 +827,8 @@ export function ChatSidebar({
               className={`${styles.sessionRowAction} ${styles.sessionPin}`}
               title={s.pinned ? t("chat.unpin") : t("chat.pin")}
               aria-label={s.pinned ? t("chat.unpin") : t("chat.pin")}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 void setSessionFlags(s.id, { pinned: !s.pinned });
@@ -853,6 +856,8 @@ export function ChatSidebar({
               className={`${styles.sessionRowAction} ${styles.sessionArchive}`}
               title={inArchive ? t("chat.unarchive") : t("chat.archive")}
               aria-label={inArchive ? t("chat.unarchive") : t("chat.archive")}
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 const next = !s.archived;
@@ -921,7 +926,12 @@ export function ChatSidebar({
                 type="button"
                 className={styles.sessionMore}
                 aria-label={t("common.chatMenu")}
-                onClick={(e) => openSessionMenu(e, s.id)}
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openSessionMenu(e, s.id);
+                }}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                   <circle cx="5" cy="12" r="1.5" />
