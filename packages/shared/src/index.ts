@@ -274,6 +274,8 @@ export type McpServerConfig = {
   url?: string;
   /** Bearer token for remote servers (legacy — prefer remoteConfig JSON). */
   token?: string;
+  /** Skip TLS certificate verification (self-signed / internal CA endpoints). */
+  insecureTls?: boolean;
   /** @deprecated Legacy HTTP headers — prefer remoteConfig JSON. */
   headers?: Array<{ name: string; value: string }>;
   /** Remote MCP: free-form JSON (headers, token, transport options). */

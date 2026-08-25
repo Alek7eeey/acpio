@@ -1,3 +1,4 @@
+import https from "node:https";
 import type { McpServerConfig } from "@acprocess/shared";
 import { mcpHttpHeaders } from "@acprocess/shared";
 import { getSettings } from "./settings.js";
@@ -33,24 +34,32 @@ async function probeOne(s: McpServerConfig): Promise<boolean> {
     for (const row of mcpHttpHeaders(s)) {
       headers[row.name.toLowerCase()] = row.value;
     }
+    const body = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "acprocess", version: "0.1.0" },
+      },
+    });
+    let text: string;
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            protocolVersion: "2024-11-05",
-            capabilities: {},
-            clientInfo: { name: "acprocess", version: "0.1.0" },
-          },
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) return false;
-      const text = await res.text();
+      if (s.insecureTls && url.startsWith("https://")) {
+        // Node's fetch cannot disable cert verification per request; use the
+        // https module for self-signed / internal-CA endpoints.
+        text = await probeHttpsInsecure(url, headers, body, controller.signal);
+      } else {
+        const res = await fetch(url, {
+          method: "POST",
+          headers,
+          body,
+          signal: controller.signal,
+        });
+        if (!res.ok) return false;
+        text = await res.text();
+      }
       return text.includes("jsonrpc") && text.includes("result");
     } finally {
       clearTimeout(timer);
@@ -58,6 +67,37 @@ async function probeOne(s: McpServerConfig): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Raw https POST with TLS verification disabled (probe-only). */
+function probeHttpsInsecure(
+  url: string,
+  headers: Record<string, string>,
+  body: string,
+  signal: AbortSignal,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: `${u.pathname}${u.search}`,
+        method: "POST",
+        headers,
+        rejectUnauthorized: false,
+        signal,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      },
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
 }
 
 /** Probe the currently enabled MCP servers; returns id → ok. */

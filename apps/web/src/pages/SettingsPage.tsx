@@ -1898,6 +1898,15 @@ export function SettingsPage() {
                   value={mcpDraft.url ?? ""}
                   onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
                 />
+                <label className={styles.mcpTlsRow}>
+                  <input
+                    type="checkbox"
+                    checked={mcpDraft.insecureTls === true}
+                    onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
+                  />
+                  <span>{t("settings.mcpInsecureTls")}</span>
+                  <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
+                </label>
                 {mcpDraft.type === "remote" && (
                   <label className={styles.mcpJsonBlock}>
                     <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>

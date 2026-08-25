@@ -146,6 +146,8 @@ const settingsSchema = z.object({
         args: z.array(z.string().max(300)).optional(),
         url: z.string().max(500).optional(),
         token: z.string().max(500).optional(),
+        insecureTls: z.boolean().optional(),
+        remoteConfig: z.string().max(20_000).optional(),
         headers: z
           .array(
             z.object({

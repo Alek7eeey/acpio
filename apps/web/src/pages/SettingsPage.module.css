@@ -999,6 +999,29 @@
   box-shadow: var(--settings-focus-ring);
 }
 
+.mcpTlsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--settings-control-size);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.mcpTlsRow input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.mcpTlsHint {
+  color: var(--text-secondary);
+  font-size: var(--settings-hint-size);
+}
+
 .mcpFormActions {
   display: flex;
   gap: 8px;

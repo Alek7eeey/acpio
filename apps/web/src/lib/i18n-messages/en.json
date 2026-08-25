@@ -547,7 +547,9 @@
     "searchResultsCount": "{{count}} matches found",
     "section": "Section",
     "subsection": "Subsection",
-    "searchBackToResults": "Back to results"
+    "searchBackToResults": "Back to results",
+    "mcpInsecureTls": "Skip TLS certificate verification",
+    "mcpInsecureTlsHint": "for self-signed and internal certificates"
   },
   "permission": {
     "title": "Permission needed",

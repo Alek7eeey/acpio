@@ -439,6 +439,8 @@ export const ru = {
     mcpType: "Тип подключения",
     mcpName: "Название",
     mcpUrl: "URL сервера",
+    mcpInsecureTls: "Не проверять TLS-сертификат",
+    mcpInsecureTlsHint: "для самоподписанных и внутренних сертификатов",
     mcpToken: "Токен (необязательно)",
     mcpTokenSet: "токен задан",
     mcpNone: "Нет",

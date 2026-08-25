@@ -620,6 +620,9 @@ export class AcpClient extends EventEmitter {
           type: "http",
           url: s.url!.trim(),
           headers: mcpHttpHeaders(s),
+          // Self-signed / internal-CA endpoints: let the harness skip cert
+          // verification for this server only.
+          ...(s.insecureTls ? { insecureTls: true } : {}),
           ...mcpRemoteExtras(s),
         }));
 

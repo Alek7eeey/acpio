@@ -571,7 +571,9 @@
     "searchResultsCount": "Найдено {{count}} совпадений",
     "section": "Раздел",
     "subsection": "Подраздел",
-    "searchBackToResults": "К результатам поиска"
+    "searchBackToResults": "К результатам поиска",
+    "mcpInsecureTls": "Не проверять TLS-сертификат",
+    "mcpInsecureTlsHint": "для самоподписанных и внутренних сертификатов"
   },
   "permission": {
     "title": "Нужно разрешение",
