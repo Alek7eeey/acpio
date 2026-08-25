@@ -4417,7 +4417,6 @@ function ChatThread() {
                 </div>
               )}
           </div>
-          {!isEmptyChat ? (
           <div
             className={`${styles.composerMetaShell} ${
               !renderSkeleton && composerMetaEdge.left ? styles.composerMetaFadeLeft : ""
@@ -4428,7 +4427,7 @@ function ChatThread() {
               ref={composerMetaRef}
               aria-busy={renderSkeleton || undefined}
             >
-              {renderSkeleton && !isEmptyChat ? (
+              {renderSkeleton ? (
                 <>
                   <span
                     className={styles.metaChipSkeleton}
@@ -4590,7 +4589,6 @@ function ChatThread() {
               </span>
             ) : null}
           </div>
-          ) : null}
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
