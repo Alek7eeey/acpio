@@ -66,6 +66,26 @@ import {
   resizeUserConsole,
   writeUserConsole,
 } from "./services/userConsole.js";
+import {
+  applyGitCommitAction,
+  checkoutGitBranch,
+  checkoutGitRevision,
+  commitGit,
+  createGitBranchAt,
+  createGitTagAt,
+  deleteGitFiles,
+  discardGitChanges,
+  getGitBlame,
+  getGitCommitDetail,
+  getGitDiff,
+  getGitFileLines,
+  getGitLog,
+  getGitShow,
+  getGitStatus,
+  setGitStage,
+  stashGit,
+  syncGit,
+} from "./services/git.js";
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
@@ -636,6 +656,235 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!detail) return reply.code(404).send({ error: "Not found" });
     releaseUserConsole(id);
     return { ok: true };
+  });
+
+  app.get("/api/sessions/:id/git/status", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    return getGitStatus(detail.cwd);
+  });
+
+  app.get("/api/sessions/:id/git/diff", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z.object({ path: z.string().max(4096).optional() }).parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    return { diff: getGitDiff(detail.cwd, q.path) };
+  });
+
+  app.get("/api/sessions/:id/git/log", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    return getGitLog(detail.cwd, q.limit ?? 60);
+  });
+
+  app.get("/api/sessions/:id/git/show", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z
+      .object({
+        rev: z.string().min(4).max(64),
+        path: z.string().min(1).max(4096).optional(),
+      })
+      .parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    return { diff: getGitShow(detail.cwd, q.rev, q.path) };
+  });
+
+  app.get("/api/sessions/:id/git/commit", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z.object({ rev: z.string().min(4).max(64) }).parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const commit = getGitCommitDetail(detail.cwd, q.rev);
+    if (!commit) return reply.code(404).send({ error: "Commit not found" });
+    return { detail: commit };
+  });
+
+  app.post("/api/sessions/:id/git/checkout", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .union([
+        z.object({ branch: z.string().min(1).max(255), create: z.boolean().optional() }),
+        z.object({ rev: z.string().min(7).max(64) }),
+      ])
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result =
+      "rev" in body
+        ? checkoutGitRevision(detail.cwd, body.rev)
+        : checkoutGitBranch(detail.cwd, body.branch, { create: body.create });
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Checkout failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/stage", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+        staged: z.boolean(),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = setGitStage(detail.cwd, body.paths, body.staged);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Stage failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/commit", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ message: z.string().min(1).max(5000) }).parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = commitGit(detail.cwd, body.message);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Commit failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/sync", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z.object({ action: z.enum(["fetch", "pull", "push"]) }).parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = await syncGit(detail.cwd, body.action);
+    if (!result.ok && !result.conflict) return reply.code(400).send({ error: result.error ?? "Sync failed" });
+    return {
+      ok: result.ok,
+      conflict: result.conflict ?? false,
+      output: result.output ?? "",
+      status: getGitStatus(detail.cwd),
+    };
+  });
+
+  app.post("/api/sessions/:id/git/stash", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        action: z.enum(["push", "pop"]),
+        message: z.string().max(500).optional(),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = stashGit(detail.cwd, body.action, body.message);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Stash failed" });
+    return { ok: true, output: result.output ?? "", status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/commit-action", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        action: z.enum(["revert", "cherry-pick"]),
+        rev: z.string().min(7).max(64),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = applyGitCommitAction(detail.cwd, body.action, body.rev);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Git action failed" });
+    return { ok: true, output: result.output ?? "", status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/create-branch", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        rev: z.string().min(7).max(64),
+        branch: z.string().min(1).max(255),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = createGitBranchAt(detail.cwd, body.branch, body.rev);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Create branch failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/create-tag", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        rev: z.string().min(7).max(64),
+        tag: z.string().min(1).max(255),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = createGitTagAt(detail.cwd, body.tag, body.rev);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Create tag failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/discard", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = discardGitChanges(detail.cwd, body.paths);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Discard failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/delete", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = deleteGitFiles(detail.cwd, body.paths);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Delete failed" });
+    return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.get("/api/sessions/:id/git/lines", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z
+      .object({
+        path: z.string().min(1).max(4096),
+        start: z.coerce.number().int().min(1),
+        end: z.coerce.number().int().min(1),
+        side: z.enum(["old", "new"]),
+        mode: z.enum(["working", "commit"]),
+        rev: z.string().min(4).max(64).optional(),
+      })
+      .parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    if (q.mode === "commit" && !q.rev) return reply.code(400).send({ error: "rev required" });
+    const result = getGitFileLines(
+      detail.cwd,
+      q.path,
+      q.start,
+      q.end,
+      q.side,
+      q.mode === "commit" ? { mode: "commit", rev: q.rev! } : { mode: "working" },
+    );
+    if (!result) return reply.code(404).send({ error: "Lines not available" });
+    return result;
+  });
+
+  app.get("/api/sessions/:id/git/blame", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z.object({ path: z.string().min(1).max(4096) }).parse(req.query ?? {});
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const blame = getGitBlame(detail.cwd, q.path);
+    if (!blame) return reply.code(404).send({ error: "Blame not available" });
+    return { blame };
   });
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {

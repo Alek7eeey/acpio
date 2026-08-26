@@ -12,7 +12,17 @@ import { useT } from "../lib/i18n";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
-const CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
+const CHIP_ORDER: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
+const ALL_META_CHIPS: ChatMetaChipId[] = [...CHIP_ORDER];
+
+const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
+  folder: "settings.chatMetaChipFolder",
+  git: "settings.chatMetaChipGit",
+  thoughts: "settings.chatMetaChipThoughts",
+  mcp: "settings.chatMetaChipMcp",
+  context: "settings.chatMetaChipContext",
+  console: "settings.chatMetaChipConsole",
+};
 const TREE_ORDER: ChatTreeElementId[] = ["search", "pin", "archive", "more"];
 const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "model", "mode", "mic"];
 const TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
@@ -384,6 +394,104 @@ function PreviewActions({
   );
 }
 
+function PreviewMetaChips({
+  chips,
+  ordered,
+  onToggle,
+  onReorder,
+}: {
+  chips: ChatMetaChipId[];
+  ordered: ChatMetaChipId[];
+  onToggle: (id: ChatMetaChipId) => void;
+  onReorder: (dragged: ChatMetaChipId, target: ChatMetaChipId) => void;
+}) {
+  const t = useT();
+  const [overId, setOverId] = useState<ChatMetaChipId | null>(null);
+  const [draggingId, setDraggingId] = useState<ChatMetaChipId | null>(null);
+  const skipClickRef = useRef(false);
+  const onReorderRef = useRef(onReorder);
+  onReorderRef.current = onReorder;
+  const isOn = (id: ChatMetaChipId) => chips.includes(id);
+
+  const onPointerDown = (id: ChatMetaChipId) => (e: ReactPointerEvent<HTMLSpanElement>) => {
+    if (e.button !== 0) return;
+    const pointerId = e.pointerId;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const bar = e.currentTarget.parentElement;
+    let moved = false;
+
+    const hit = (x: number, y: number): ChatMetaChipId | null => {
+      if (!bar) return null;
+      for (const el of bar.querySelectorAll<HTMLElement>("[data-chip-id]")) {
+        const r = el.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          return el.dataset.chipId as ChatMetaChipId;
+        }
+      }
+      return null;
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+        moved = true;
+        skipClickRef.current = true;
+        setDraggingId(id);
+      }
+      setOverId(hit(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      const target = moved ? hit(ev.clientX, ev.clientY) : null;
+      setDraggingId(null);
+      setOverId(null);
+      if (moved && target && target !== id) onReorderRef.current(id, target);
+      if (moved) {
+        window.setTimeout(() => {
+          skipClickRef.current = false;
+        }, 0);
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
+
+  return (
+    <div className={styles.chips}>
+      {ordered.map((id) => (
+        <span
+          key={id}
+          data-chip-id={id}
+          className={`${styles.dragSlot}${overId === id ? ` ${styles.dragSlotOver}` : ""}${
+            draggingId === id ? ` ${styles.dragSlotDragging}` : ""
+          }`}
+          onPointerDown={onPointerDown(id)}
+        >
+          <El
+            on={isOn(id)}
+            variant="dim"
+            onToggle={() => {
+              if (skipClickRef.current) return;
+              onToggle(id);
+            }}
+            label={t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
+          >
+            <span className={styles.chip} aria-hidden>
+              {t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
+            </span>
+          </El>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /**
  * Interactive full-app mock: header + chat tree + chat thread + composer.
  * Every configurable element is always visible — active elements get the
@@ -403,6 +511,7 @@ export function ChatSettingsPreview({
   chatToolbarStyle,
   onToggleAction,
   onToggleChip,
+  onReorderChip,
   onToggleComposerButton,
   onToggleTreeElement,
   onToggleTreeMenu,
@@ -425,6 +534,7 @@ export function ChatSettingsPreview({
   chatToolbarStyle: ChatToolbarStyle;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
+  onReorderChip: (nextOrder: ChatMetaChipId[]) => void;
   onToggleComposerButton: (id: ChatComposerButtonId) => void;
   onToggleTreeElement: (id: ChatTreeElementId) => void;
   onToggleTreeMenu: (id: ChatTreeMenuId) => void;
@@ -462,6 +572,10 @@ export function ChatSettingsPreview({
     ...actions,
     ...ALL_ACTIONS.filter((id) => !actions.includes(id)),
   ]);
+  const [chipDisplayOrder, setChipDisplayOrder] = useState<ChatMetaChipId[]>(() => [
+    ...chips,
+    ...ALL_META_CHIPS.filter((id) => !chips.includes(id)),
+  ]);
   const orderedFor = (applicable: ChatActionId[]): ChatActionId[] =>
     applicable
       .filter((id) => displayOrder.includes(id))
@@ -475,6 +589,17 @@ export function ChatSettingsPreview({
     next.splice(to, 0, dragged);
     setDisplayOrder(next);
     onReorderAction(next);
+  };
+  const handleChipReorder = (dragged: ChatMetaChipId, target: ChatMetaChipId) => {
+    const from = chipDisplayOrder.indexOf(dragged);
+    const to = chipDisplayOrder.indexOf(target);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...chipDisplayOrder];
+    next.splice(from, 1);
+    next.splice(to, 0, dragged);
+    setChipDisplayOrder(next);
+    const enabled = new Set(chips);
+    onReorderChip(next.filter((id) => enabled.has(id)));
   };
   const [treeMenuPos, setTreeMenuPos] = useState<{ top: number; left: number } | null>(null);
   const treeMenuRef = useRef<HTMLDivElement>(null);
@@ -888,34 +1013,12 @@ export function ChatSettingsPreview({
 
             <div className={styles.composer}>
               <div className={styles.composerTopRow}>
-                <div className={styles.chips}>
-                  {CHIP_ORDER.map((id) => (
-                    <El
-                      key={id}
-                      on={chips.includes(id)} variant="dim"
-                      onToggle={() => onToggleChip(id)}
-                      label={
-                        id === "folder"
-                          ? t("settings.chatMetaChipFolder")
-                          : id === "thoughts"
-                            ? t("settings.chatMetaChipThoughts")
-                            : id === "context"
-                              ? t("settings.chatMetaChipContext")
-                              : id === "console"
-                                ? t("settings.chatMetaChipConsole")
-                                : t("settings.chatMetaChipMcp")
-                      }
-                    >
-                      <span className={styles.chip} aria-hidden>
-                        {id === "folder" ? t("settings.chatMetaChipFolder") : null}
-                        {id === "thoughts" ? t("settings.chatMetaChipThoughts") : null}
-                        {id === "mcp" ? t("settings.chatMetaChipMcp") : null}
-                        {id === "context" ? t("settings.chatMetaChipContext") : null}
-                        {id === "console" ? t("settings.chatMetaChipConsole") : null}
-                      </span>
-                    </El>
-                  ))}
-                </div>
+                <PreviewMetaChips
+                  chips={chips}
+                  ordered={chipDisplayOrder}
+                  onToggle={onToggleChip}
+                  onReorder={handleChipReorder}
+                />
                 <El
                   on={btnOn("mode")}
                   variant="dim"

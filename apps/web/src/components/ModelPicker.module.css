@@ -219,6 +219,13 @@
   pointer-events: auto;
 }
 
+.modelMenuPortal {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 1100;
+}
+
 .modelMenuDown {
   bottom: auto;
   top: calc(100% + 8px);

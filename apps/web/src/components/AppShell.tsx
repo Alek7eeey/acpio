@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -291,6 +291,12 @@ export function AppShell() {
       requestAnimationFrame(() => applySheetSnapCss(sheetSnapRef.current));
     }
   }, [sidebarOpen, applySheetSnapCss]);
+
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle("sidebar-tree-open", sidebarOpen);
+    root.classList.toggle("sidebar-tree-collapsed", !sidebarOpen);
+  }, [sidebarOpen]);
 
   const recentSessions = useMemo(() => {
     const sorted = [...sessions].sort((a, b) =>

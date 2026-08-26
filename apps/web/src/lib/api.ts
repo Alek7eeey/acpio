@@ -6,6 +6,9 @@ import type {
   ChatThemeDto,
   DiagnosticsDumpDto,
   DiagnosticsDumpMeta,
+  GitStatusDto,
+  GitCommitDto,
+  GitCommitDetailDto,
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
@@ -208,6 +211,105 @@ export const api = {
     request<{ ok: boolean }>(`/api/sessions/${id}/console/attach`, { method: "POST" }),
   detachConsole: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/console/detach`, { method: "POST" }),
+  gitStatus: (id: string) => request<GitStatusDto>(`/api/sessions/${id}/git/status`),
+  gitDiff: (id: string, filePath?: string) => {
+    const q = filePath ? `?path=${encodeURIComponent(filePath)}` : "";
+    return request<{ diff: string }>(`/api/sessions/${id}/git/diff${q}`);
+  },
+  gitLog: (id: string, limit?: number) => {
+    const q = limit ? `?limit=${limit}` : "";
+    return request<{ commits: GitCommitDto[] }>(`/api/sessions/${id}/git/log${q}`);
+  },
+  gitShow: (id: string, rev: string, filePath?: string) => {
+    const params = new URLSearchParams({ rev });
+    if (filePath) params.set("path", filePath);
+    return request<{ diff: string }>(`/api/sessions/${id}/git/show?${params.toString()}`);
+  },
+  gitFileLines: (
+    id: string,
+    filePath: string,
+    start: number,
+    end: number,
+    side: "old" | "new",
+    mode: "working" | "commit",
+    rev?: string,
+  ) => {
+    const params = new URLSearchParams({
+      path: filePath,
+      start: String(start),
+      end: String(end),
+      side,
+      mode,
+    });
+    if (rev) params.set("rev", rev);
+    return request<{ lines: string[]; startLine: number; endLine: number; totalLines: number }>(
+      `/api/sessions/${id}/git/lines?${params.toString()}`,
+    );
+  },
+  gitCommitDetail: (id: string, rev: string) =>
+    request<{ detail: GitCommitDetailDto }>(
+      `/api/sessions/${id}/git/commit?rev=${encodeURIComponent(rev)}`,
+    ),
+  gitCheckout: (id: string, branch: string, create?: boolean) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/checkout`, {
+      method: "POST",
+      body: JSON.stringify({ branch, create }),
+    }),
+  gitCheckoutRev: (id: string, rev: string) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/checkout`, {
+      method: "POST",
+      body: JSON.stringify({ rev }),
+    }),
+  gitStage: (id: string, paths: string[], staged: boolean) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/stage`, {
+      method: "POST",
+      body: JSON.stringify({ paths, staged }),
+    }),
+  gitCommit: (id: string, message: string) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/commit`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+  gitSync: (id: string, action: "fetch" | "pull" | "push") =>
+    request<{ ok: boolean; conflict?: boolean; output: string; status: GitStatusDto }>(
+      `/api/sessions/${id}/git/sync`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      },
+    ),
+  gitStash: (id: string, action: "push" | "pop", message?: string) =>
+    request<{ ok: boolean; output: string; status: GitStatusDto }>(`/api/sessions/${id}/git/stash`, {
+      method: "POST",
+      body: JSON.stringify({ action, message }),
+    }),
+  gitCommitAction: (id: string, action: "revert" | "cherry-pick", rev: string) =>
+    request<{ ok: boolean; output: string; status: GitStatusDto }>(`/api/sessions/${id}/git/commit-action`, {
+      method: "POST",
+      body: JSON.stringify({ action, rev }),
+    }),
+  gitCreateBranchAt: (id: string, rev: string, branch: string) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/create-branch`, {
+      method: "POST",
+      body: JSON.stringify({ rev, branch }),
+    }),
+  gitCreateTagAt: (id: string, rev: string, tag: string) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/create-tag`, {
+      method: "POST",
+      body: JSON.stringify({ rev, tag }),
+    }),
+  gitDiscard: (id: string, paths: string[]) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/discard`, {
+      method: "POST",
+      body: JSON.stringify({ paths }),
+    }),
+  gitDelete: (id: string, paths: string[]) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/delete`, {
+      method: "POST",
+      body: JSON.stringify({ paths }),
+    }),
+  gitBlame: (id: string, filePath: string) =>
+    request<{ blame: string }>(`/api/sessions/${id}/git/blame?path=${encodeURIComponent(filePath)}`),
   deleteSession: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
   /**

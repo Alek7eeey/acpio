@@ -41,6 +41,14 @@ import {
   slashListStillLoading,
 } from "./sessionSlashCommands";
 import { readConsoleOpenSessions, removeConsoleOpenSession, persistConsoleOpen } from "./sessionConsole";
+import {
+  readGitPanelOpenSessions,
+  removeGitPanelOpenSession,
+  persistGitPanelOpen,
+  readGitPanelPresentation,
+  persistGitPanelPresentation,
+  type GitPanelPresentation,
+} from "./sessionGitPanel";
 import { dispatchShellConsole } from "./shellConsole";
 
 // Shell output is never persisted — drop legacy log key if present.
@@ -275,6 +283,13 @@ type AppState = {
   consoleOpen: boolean;
   setConsoleOpen: (open: boolean) => void;
   toggleConsoleOpen: () => void;
+  /** Git changes side panel open state. */
+  gitPanelOpen: boolean;
+  setGitPanelOpen: (open: boolean) => void;
+  toggleGitPanelOpen: () => void;
+  gitPanelPresentation: GitPanelPresentation;
+  setGitPanelPresentation: (presentation: GitPanelPresentation) => void;
+  toggleGitPanelPresentation: () => void;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -918,6 +933,20 @@ function routeShellConsoleFromWs(event: WsServerEvent) {
 const initialActiveSessionId =
   typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
 const initialConsoleOpenSessions = readConsoleOpenSessions();
+const initialGitPanelOpenSessions = readGitPanelOpenSessions();
+
+function resolveExclusiveSidePanels(
+  consoleOpen: boolean,
+  gitPanelOpen: boolean,
+): { consoleOpen: boolean; gitPanelOpen: boolean } {
+  if (consoleOpen && gitPanelOpen) return { consoleOpen: true, gitPanelOpen: false };
+  return { consoleOpen, gitPanelOpen };
+}
+
+const initialSidePanels = resolveExclusiveSidePanels(
+  Boolean(initialActiveSessionId && initialConsoleOpenSessions.has(initialActiveSessionId)),
+  Boolean(initialActiveSessionId && initialGitPanelOpenSessions.has(initialActiveSessionId)),
+);
 
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
@@ -928,9 +957,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPaneIds: [null],
   focusedPaneIndex: 0,
   sessionDetails: {},
-  consoleOpen: Boolean(
-    initialActiveSessionId && initialConsoleOpenSessions.has(initialActiveSessionId),
-  ),
+  consoleOpen: initialSidePanels.consoleOpen,
+  gitPanelOpen: initialSidePanels.gitPanelOpen,
+  gitPanelPresentation: readGitPanelPresentation(),
   knownFolders: [],
   refreshFolders: async () => {
     try {
@@ -1367,15 +1396,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setConsoleOpen(open) {
     const sessionId = get().activeSessionId;
-    set({ consoleOpen: open });
+    set({ consoleOpen: open, ...(open ? { gitPanelOpen: false } : {}) });
     if (sessionId) persistConsoleOpen(sessionId, open);
+    if (open && sessionId) persistGitPanelOpen(sessionId, false);
   },
 
   toggleConsoleOpen() {
-    const sessionId = get().activeSessionId;
     const open = !get().consoleOpen;
-    set({ consoleOpen: open });
-    if (sessionId) persistConsoleOpen(sessionId, open);
+    get().setConsoleOpen(open);
+  },
+
+  setGitPanelOpen(open) {
+    const sessionId = get().activeSessionId;
+    set({ gitPanelOpen: open, ...(open ? { consoleOpen: false } : {}) });
+    if (sessionId) persistGitPanelOpen(sessionId, open);
+    if (open && sessionId) persistConsoleOpen(sessionId, false);
+  },
+
+  toggleGitPanelOpen() {
+    const open = !get().gitPanelOpen;
+    get().setGitPanelOpen(open);
+  },
+
+  setGitPanelPresentation(presentation) {
+    persistGitPanelPresentation(presentation);
+    set({ gitPanelPresentation: presentation });
+  },
+
+  toggleGitPanelPresentation() {
+    const next = get().gitPanelPresentation === "modal" ? "side" : "modal";
+    persistGitPanelPresentation(next);
+    set({ gitPanelPresentation: next });
   },
 
   async selectSession(id) {
@@ -1399,7 +1450,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (prevSessionId && prevSessionId !== id) {
       void api.detachConsole(prevSessionId).catch(() => {});
     }
-    set({ consoleOpen: readConsoleOpenSessions().has(id) });
+    set({
+      ...resolveExclusiveSidePanels(
+        readConsoleOpenSessions().has(id),
+        readGitPanelOpenSessions().has(id),
+      ),
+    });
     const cached = readCachedSessionDetail(id);
     const current = get().activeSession;
     const alreadyWarm =
@@ -1553,7 +1609,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     ids = ids.slice(0, n);
     const focus = Math.min(state.focusedPaneIndex, n - 1);
     persistPanes(ids, focus);
-    if (wasSingle) set({ chatPaneIds: ids, focusedPaneIndex: focus, consoleOpen: false });
+    if (wasSingle) set({ chatPaneIds: ids, focusedPaneIndex: focus, consoleOpen: false, gitPanelOpen: false });
     else set({ chatPaneIds: ids, focusedPaneIndex: focus });
     const focusId = ids[focus];
     if (focusId && focusId !== state.activeSessionId) void get().selectSession(focusId);
@@ -1607,7 +1663,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         chatPaneIds: ids,
         focusedPaneIndex: empty,
-        ...(wasSingle && ids.length > 1 ? { consoleOpen: false } : {}),
+        ...(wasSingle && ids.length > 1 ? { consoleOpen: false, gitPanelOpen: false } : {}),
       });
       await get().selectSession(id);
       return;
@@ -1618,7 +1674,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         chatPaneIds: ids,
         focusedPaneIndex: ids.length - 1,
-        ...(wasSingle ? { consoleOpen: false } : {}),
+        ...(wasSingle ? { consoleOpen: false, gitPanelOpen: false } : {}),
       });
       await get().selectSession(id);
       return;
@@ -1709,6 +1765,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const unseen = { ...get().unseenFinishedTurns };
     delete unseen[id];
     removeConsoleOpenSession(id);
+    removeGitPanelOpenSession(id);
     set({ sessionDetails: details, unseenFinishedTurns: unseen });
     if (activeSessionId === id) {
       const next =

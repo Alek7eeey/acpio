@@ -1,0 +1,262 @@
+.wrap {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.head {
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 45%, var(--surface));
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-height: 36px;
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+}
+
+.rowActive {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+
+.rowActive:hover {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+}
+
+.rail {
+  position: relative;
+  flex: 0 0 auto;
+  width: calc(26px + var(--rail-indent, 0px));
+  min-width: 26px;
+  align-self: stretch;
+}
+
+.rail::before {
+  content: "";
+  position: absolute;
+  left: calc(11px + var(--rail-indent, 0px));
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--rail-color, var(--accent)) 70%, var(--border));
+}
+
+.railFirst::before {
+  top: 50%;
+}
+
+.railLast::before {
+  bottom: 50%;
+}
+
+.railDot {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: calc(7px + var(--rail-indent, 0px));
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 2px solid var(--rail-color, var(--accent));
+  background: var(--surface);
+  box-sizing: border-box;
+}
+
+.railMerge {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: calc(7px + var(--rail-indent, 0px));
+  width: 9px;
+  height: 9px;
+  margin-top: -5px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--rail-color, var(--accent));
+  border: 2px solid var(--surface);
+  box-sizing: border-box;
+  box-shadow: 0 0 0 1px var(--rail-color, var(--accent));
+}
+
+.railWip {
+  --rail-color: #f59e0b;
+}
+
+.railWip .railDot {
+  border-style: dashed;
+  background: color-mix(in srgb, #f59e0b 18%, var(--surface));
+}
+
+.main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 10px 6px 0;
+}
+
+.topLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.branchPill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--pill-color, var(--border));
+  color: var(--pill-color, var(--text-secondary));
+  background: color-mix(in srgb, var(--pill-color, var(--border)) 10%, var(--surface));
+  font-size: 0.6rem;
+  font-weight: 650;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.branchPillCurrent {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pill-color, var(--accent)) 35%, transparent);
+}
+
+.subject {
+  min-width: 0;
+  flex: 1 1 120px;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+}
+
+.hash {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-weight: 600;
+}
+
+.metaSep {
+  opacity: 0.55;
+}
+
+.author,
+.date {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wipBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 5px;
+  border: 1px dashed color-mix(in srgb, #f59e0b 55%, var(--border));
+  color: color-mix(in srgb, #f59e0b 88%, var(--text));
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
+  font-size: 0.62rem;
+  font-weight: 700;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.contextMenu {
+  position: fixed;
+  z-index: 520;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextMenu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  width: 100%;
+}
+
+.contextMenu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.contextMenu button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+}

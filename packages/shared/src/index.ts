@@ -367,7 +367,7 @@ export type ChatActionId =
   | "readAloud";
 
 /** Chips shown in the composer bar above the input. */
-export type ChatMetaChipId = "folder" | "thoughts" | "mcp" | "context" | "console";
+export type ChatMetaChipId = "folder" | "git" | "thoughts" | "mcp" | "context" | "console";
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
@@ -552,7 +552,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "thoughts", "mcp", "context", "console"],
+  chatMetaChips: ["folder", "git", "thoughts", "mcp", "context", "console"],
   thoughtsChipStyle: "full",
   consoleChipStyle: "full",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
@@ -919,6 +919,80 @@ export interface SessionDto {
   updatedAt: string;
   /** Timestamp of the latest message in the session (falls back to createdAt). */
   lastMessageAt: string;
+}
+
+export interface GitChangedFileDto {
+  path: string;
+  index: string;
+  worktree: string;
+  staged: boolean;
+  unstaged: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface GitStatusDto {
+  repo: boolean;
+  root: string;
+  branch: string;
+  dirty: boolean;
+  conflict: boolean;
+  branches: string[];
+  files: GitChangedFileDto[];
+  stagedCount: number;
+  unstagedCount: number;
+  additions: number;
+  deletions: number;
+  stashCount: number;
+}
+
+export interface GitCommitDto {
+  hash: string;
+  shortHash: string;
+  parents: string[];
+  subject: string;
+  author: string;
+  date: string;
+  /** 0 = main line, deeper = side branches / merges. */
+  depth: number;
+  merge: boolean;
+  /** Branch and remote ref tips pointing at this commit. */
+  refs: string[];
+}
+
+export type GitCommitFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "typeChanged"
+  | "other";
+
+export interface GitCommitFileDto {
+  path: string;
+  oldPath?: string;
+  status: GitCommitFileStatus;
+  additions: number;
+  deletions: number;
+}
+
+export interface GitCommitDetailDto {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  body: string;
+  author: string;
+  authorEmail: string;
+  date: string;
+  parents: string[];
+  parentShortHashes: string[];
+  files: GitCommitFileDto[];
+  additions: number;
+  deletions: number;
+  modifiedCount: number;
+  addedCount: number;
+  deletedCount: number;
 }
 
 export interface MessagePartDto {

@@ -1,0 +1,91 @@
+.plain,
+.diff {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.line {
+  padding: 0 2px;
+}
+
+.file {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.hunk {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.add {
+  background: color-mix(in srgb, #22c55e 16%, transparent);
+}
+
+.ctx {
+  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+}
+
+.del {
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+}
+
+.fileBlock {
+  min-width: 0;
+}
+
+.hunkBlock {
+  min-width: 0;
+}
+
+.expandRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin: 1px 0;
+  padding: 1px 2px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+}
+
+.expandRowUp {
+  margin-bottom: 0;
+}
+
+.expandRowDown {
+  margin-top: 0;
+}
+
+.expandRule {
+  flex: 1;
+  min-width: 12px;
+  height: 0;
+  border-top: 1px dotted color-mix(in srgb, var(--text-secondary) 45%, transparent);
+}
+
+.expandBtn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 88%, var(--text));
+  cursor: pointer;
+}
+
+.expandBtn:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.expandBtn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}

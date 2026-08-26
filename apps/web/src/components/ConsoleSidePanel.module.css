@@ -215,7 +215,7 @@
   }
 }
 
-@media (max-width: 899px) {
+@media (max-width: 1180px) {
   .panel {
     position: absolute;
     inset: 0;
@@ -227,5 +227,21 @@
 
   .splitter {
     display: none;
+  }
+}
+
+@media (min-width: 1200px) {
+  html.sidebar-tree-collapsed .panel {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+  }
+}
+
+@media (min-width: 1600px) {
+  html.sidebar-tree-open .panel {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
   }
 }

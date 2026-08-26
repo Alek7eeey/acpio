@@ -1,0 +1,1104 @@
+.panel {
+  --git-panel-width: 460px;
+  position: relative;
+  flex: 0 0 var(--git-panel-width);
+  width: var(--git-panel-width);
+  max-width: min(72vw, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 10%, var(--surface)) 0%,
+      color-mix(in srgb, var(--bg-secondary) 50%, var(--surface)) 180px,
+      var(--surface) 100%
+    );
+  box-shadow:
+    -16px 0 36px rgba(0, 0, 0, 0.08),
+    inset 4px 0 0 color-mix(in srgb, var(--accent) 65%, transparent);
+  animation: slideIn 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.resizingBody,
+.resizingBody * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.splitter:hover::before,
+.resizing .splitter::before {
+  width: 4px;
+  background: color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.header {
+  position: relative;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-soft));
+  flex-shrink: 0;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.headerGlow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at 12% 20%,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    transparent 72%
+  );
+}
+
+.headerTop {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px 6px;
+  min-width: 0;
+}
+
+.headerLead {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.headerBranchIcon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+
+.headerKicker {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-secondary));
+  line-height: 1.1;
+}
+
+.headerTitle {
+  margin: 2px 0 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+}
+
+.headerIconRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.headerMetaRow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 6px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.headerStatsGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.statAdd {
+  color: #22c55e;
+}
+
+.statDel {
+  color: #ef4444;
+}
+
+.headerClean {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.countPills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 100px;
+  max-width: 100%;
+}
+
+.countPill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 50%, var(--surface));
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.countPillStaged {
+  color: color-mix(in srgb, #22c55e 78%, var(--text));
+  border-color: color-mix(in srgb, #22c55e 28%, var(--border));
+  background: color-mix(in srgb, #22c55e 10%, var(--surface));
+}
+
+.countPillUnstaged {
+  color: color-mix(in srgb, #f59e0b 82%, var(--text));
+  border-color: color-mix(in srgb, #f59e0b 30%, var(--border));
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
+}
+
+.countPillConflict {
+  color: #fff;
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.conflictBanner {
+  position: relative;
+  z-index: 1;
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, #dc2626 35%, var(--border));
+  background: color-mix(in srgb, #dc2626 12%, var(--surface));
+  color: color-mix(in srgb, #dc2626 82%, var(--text));
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.headerToolbar {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  justify-content: flex-start;
+  padding: 2px 10px 10px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+}
+
+.actionBar {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-tertiary) 52%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  box-shadow: var(--shadow-soft);
+}
+
+.actionBtn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 54px;
+  padding: 7px 10px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background 0.12s ease,
+    opacity 0.12s ease;
+}
+
+.actionBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.actionBtn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.actionBtn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.actionLabel {
+  font-size: 0.62rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: color-mix(in srgb, var(--warning) 82%, #9a3412);
+  white-space: nowrap;
+}
+
+.actionIcon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text);
+}
+
+.actionDivider {
+  align-self: stretch;
+  width: 1px;
+  margin: 6px 4px;
+  background: color-mix(in srgb, var(--border) 92%, transparent);
+}
+
+:global([data-theme="dark"]) .actionBar {
+  background: color-mix(in srgb, var(--bg-secondary) 72%, #0a0d12);
+  border-color: color-mix(in srgb, var(--border) 78%, #1a2030);
+  box-shadow: none;
+}
+
+:global([data-theme="dark"]) .actionLabel {
+  color: #d4a574;
+}
+
+:global([data-theme="dark"]) .actionIcon {
+  color: color-mix(in srgb, var(--text) 96%, #fff);
+}
+
+:global([data-theme="dark"]) .actionDivider {
+  background: color-mix(in srgb, var(--border) 80%, #334155);
+}
+
+.closeBtn,
+.iconBtn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.closeBtn:hover,
+.iconBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  color: var(--text);
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(160px, 38%) minmax(0, 1fr);
+}
+
+.bodyHistory {
+  grid-template-columns: 1fr;
+}
+
+.bodyChanges {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.changesLayout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(200px, var(--changes-tree-width, 320px)) 4px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "tree splitter diff"
+    "commit commit commit";
+}
+
+.changesSplitter {
+  grid-area: splitter;
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.changesSplitter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.changesResizing {
+  user-select: none;
+}
+
+.changesLayout .diffPane {
+  grid-area: diff;
+  min-height: 0;
+  border-left: 1px solid var(--border-soft);
+}
+
+.panelInModal {
+  --git-panel-width: 100%;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  box-shadow: none;
+  animation: none;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 480;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(2px);
+}
+
+.modalShell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
+}
+
+.modalResizing {
+  user-select: none;
+}
+
+.modalResizeE,
+.modalResizeS,
+.modalResizeSE {
+  position: absolute;
+  z-index: 8;
+  touch-action: none;
+}
+
+.modalResizeE {
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+}
+
+.modalResizeS {
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.modalResizeSE {
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.historyLayout {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(140px, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.historyListPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.historySplitter {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.historySplitter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.historyRightPane {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  border-left: 1px solid var(--border-soft);
+}
+
+.historyLayoutWithDiff .historyRightPane {
+  grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+}
+
+.historyDetailPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.historyDiffSplitter {
+  position: relative;
+  cursor: row-resize;
+  touch-action: none;
+  background: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.historyDiffSplitter::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+
+.historyResizing {
+  user-select: none;
+}
+
+.historyPane {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  border-right: 1px solid var(--border-soft);
+}
+
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-soft);
+}
+
+.viewToggleRow {
+  position: relative;
+  z-index: 1;
+  padding: 2px 12px 10px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.viewTabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--surface));
+  border: 1px solid var(--border-soft);
+}
+
+.viewTab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.viewTab svg {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.viewTab:hover {
+  color: var(--text);
+}
+
+.viewTab:hover svg {
+  opacity: 1;
+}
+
+.viewTabActive {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 50%, transparent) inset,
+    0 4px 14px color-mix(in srgb, #000 8%, transparent);
+}
+
+:global([data-theme="dark"]) .viewTabActive {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset,
+    0 6px 18px color-mix(in srgb, #000 32%, transparent);
+}
+
+.viewTabActive svg {
+  opacity: 1;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.viewTab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.sidebarScroll {
+  overflow: auto;
+  padding: 8px;
+  min-height: 0;
+  flex: 1;
+}
+
+.emptyInline {
+  padding: 16px 10px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.commitTree {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 2px;
+}
+
+.commitRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 58px;
+  padding-left: calc(var(--commit-depth, 0) * 12px);
+}
+
+.commitRowActive {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border-radius: 10px;
+}
+
+.commitGutter {
+  position: relative;
+  width: 18px;
+  flex: 0 0 18px;
+}
+
+.commitLine {
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.commitLineFirst {
+  top: 16px;
+}
+
+.commitLineLast {
+  bottom: auto;
+  height: 16px;
+}
+
+.commitDot {
+  position: absolute;
+  left: 4px;
+  top: 12px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.commitDotMerge {
+  border-radius: 3px;
+  transform: rotate(45deg);
+  width: 9px;
+  height: 9px;
+  left: 4.5px;
+  top: 12.5px;
+}
+
+.commitBranchLine {
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  width: calc(var(--commit-depth, 0) * 12px + 8px);
+  max-width: 28px;
+  height: 2px;
+  transform: translateX(-100%);
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.commitBtn {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 8px 8px 4px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.commitTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.commitHash {
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+}
+
+.commitMerge {
+  font-size: 0.58rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 75%, var(--surface));
+}
+
+.commitDate {
+  margin-left: auto;
+  font-size: 0.62rem;
+  color: var(--text-secondary);
+}
+
+.commitSubject {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.commitAuthor {
+  font-size: 0.64rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.fileList {
+  overflow: auto;
+  border-right: 1px solid var(--border-soft);
+  padding: 8px;
+}
+
+.allBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  margin-bottom: 6px;
+}
+
+.allBtn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+}
+
+.allBtnActive {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.allStats {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.68rem;
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.sectionLabel {
+  padding: 8px 8px 4px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.fileRow {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 10px;
+}
+
+.fileRowActive {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.stageCheck {
+  display: grid;
+  place-items: center;
+  padding: 0 2px 0 6px;
+  cursor: pointer;
+}
+
+.stageCheck input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.fileBtn {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: start;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 7px 8px 7px 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.fileStatus {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.filePath {
+  min-width: 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.fileStats {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.64rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.diffPane {
+  overflow: auto;
+  padding: 12px;
+  min-width: 0;
+}
+
+.empty {
+  padding: 24px 16px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.emptyLoading,
+.headerLoading {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.headerLoading {
+  min-height: 1.4rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.loaderSpin {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: gitPanelLoaderSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes gitPanelLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 55%, var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.footer textarea {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.82rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.commitBtn {
+  border: none;
+  border-radius: 999px;
+  padding: 11px 16px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.commitBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .panel,
+  .panelMobile {
+    position: absolute;
+    inset: 0;
+    z-index: 28;
+    width: 100%;
+    flex: 1 1 auto;
+    flex-basis: auto;
+    max-width: none;
+    border-left: none;
+    box-shadow: none;
+    animation: none;
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .body,
+  .bodyHistory {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+  }
+
+  .historyLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+  }
+
+  .historySplitter {
+    display: none;
+  }
+
+  .historyRightPane {
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .changesLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 42%) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "tree"
+      "diff"
+      "commit";
+  }
+
+  .changesSplitter {
+    display: none;
+  }
+
+  .changesLayout .diffPane {
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .paneWorkspace .filesArea {
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .fileList {
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .footer {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1200px) {
+  html.sidebar-tree-collapsed .panel,
+  html.sidebar-tree-collapsed .panelMobile {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+  }
+}
+
+@media (min-width: 1600px) {
+  html.sidebar-tree-open .panel,
+  html.sidebar-tree-open .panelMobile {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+  }
+}

@@ -47,11 +47,13 @@ fs.writeFileSync(
 function updateReadmeVersion(filePath, pattern, line) {
   const abs = path.join(repoRoot, filePath);
   const text = fs.readFileSync(abs, "utf8");
-  const next = text.replace(pattern, line);
-  if (next === text) {
+  if (!pattern.test(text)) {
     throw new Error(`Version line not found in ${filePath}`);
   }
-  fs.writeFileSync(abs, next);
+  const next = text.replace(pattern, line);
+  if (next !== text) {
+    fs.writeFileSync(abs, next);
+  }
 }
 
 updateReadmeVersion("README.md", /\*\*Current version:\*\* \d+\.\d+\.\d+/, `**Current version:** ${version}`);

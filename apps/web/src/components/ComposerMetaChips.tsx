@@ -9,9 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMode, AppSettings, SessionDetailDto } from "@acpio/shared";
+import type { AgentMode, AppSettings, ChatMetaChipId, SessionDetailDto, GitStatusDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { OptionPicker } from "./OptionPicker";
+import { ComposerGitChangesButton, GitChangesChipLoader } from "./ComposerGitBar";
+import gitBarStyles from "./ComposerGitBar.module.css";
+import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
 
 const DESKTOP_MQ = "(min-width: 701px)";
@@ -82,7 +85,7 @@ function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
   );
 }
 
-type MetaChipId = "folder" | "thoughts" | "mcp" | "context" | "console";
+type MetaChipId = ChatMetaChipId | "plan";
 
 type MetaChipItem = {
   id: MetaChipId;
@@ -106,6 +109,9 @@ export function ComposerMetaChips({
   onModeChange,
   onOpenMcpDialog,
   modeLabel,
+  planChip,
+  gitChip,
+  trailing,
 }: {
   renderSkeleton: boolean;
   settings: AppSettings;
@@ -123,6 +129,22 @@ export function ComposerMetaChips({
   onModeChange: (value: string) => void;
   onOpenMcpDialog: () => void;
   modeLabel: (value: string, fallback?: string) => string;
+  planChip?: {
+    visible: boolean;
+    open: boolean;
+    pending?: boolean;
+    onClick: () => void;
+  };
+  gitChip?: {
+    status: GitStatusDto | null;
+    loading?: boolean;
+    awaiting?: boolean;
+    branchBusy: boolean;
+    onCheckout: (branch: string, create?: boolean) => Promise<void>;
+    changesOpen: boolean;
+    onOpenChanges: () => void;
+  };
+  trailing?: ReactNode;
 }) {
   const t = useT();
   const isDesktop = useDesktopMetaLayout();
@@ -146,11 +168,48 @@ export function ComposerMetaChips({
   const chipItems = useMemo((): MetaChipItem[] => {
     const items: MetaChipItem[] = [];
 
-    if (settings.chatMetaChips.includes("folder") && activeSession?.cwd?.trim()) {
+    if (planChip?.visible && !isDesktop) {
       items.push({
-        id: "folder",
+        id: "plan",
         node: (
-          <div className={styles.sessionCwd} title={activeSession.cwd}>
+          <button
+            type="button"
+            className={`${styles.metaChip} ${styles.metaChipIconOnly}${
+              planChip.open ? ` ${styles.metaChipActive}` : ""
+            }${planChip.pending ? ` ${styles.metaChipPending}` : ""}`}
+            aria-pressed={planChip.open}
+            aria-label={t("planPanel.title")}
+            title={t("planPanel.title")}
+            onClick={planChip.onClick}
+          >
+            <span className={styles.metaChipIcon} aria-hidden>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M8 6h13M8 12h13M8 18h9"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+                <path
+                  d="M4 6h.01M4 12h.01M4 18h.01"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            {planChip.pending ? <span className={styles.metaChipLiveDot} aria-hidden /> : null}
+          </button>
+        ),
+      });
+    }
+
+    for (const id of settings.chatMetaChips) {
+      let node: ReactNode | null = null;
+
+      if (id === "folder" && activeSession?.cwd?.trim()) {
+        node = (
+          <div className={styles.sessionCwd}>
             <span className={styles.sessionCwdIcon} aria-hidden>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <path
@@ -168,16 +227,28 @@ export function ComposerMetaChips({
                 />
               </svg>
             </span>
-            <span className={styles.sessionCwdText}>{activeSession.cwd}</span>
+            <MiddleTruncate text={activeSession.cwd} className={styles.sessionCwdText} />
           </div>
-        ),
-      });
-    }
-
-    if (settings.chatMetaChips.includes("thoughts")) {
-      items.push({
-        id: "thoughts",
-        node: (
+        );
+      } else if (id === "git" && (gitChip?.awaiting || gitChip?.loading)) {
+        node = (
+          <div className={gitBarStyles.barComposerFooter}>
+            <GitChangesChipLoader premium />
+          </div>
+        );
+      } else if (id === "git" && gitChip?.status?.repo) {
+        node = (
+          <div className={gitBarStyles.barComposerFooter}>
+            <ComposerGitChangesButton
+              status={gitChip.status}
+              changesOpen={gitChip.changesOpen}
+              onOpenChanges={gitChip.onOpenChanges}
+              premium
+            />
+          </div>
+        );
+      } else if (id === "thoughts") {
+        node = (
           <button
             type="button"
             className={`${styles.metaChip} ${autoExpandSteps ? styles.metaChipActive : ""}${
@@ -195,14 +266,9 @@ export function ComposerMetaChips({
               <span className={styles.metaChipLabel}>{t("common.autoSteps")}</span>
             ) : null}
           </button>
-        ),
-      });
-    }
-
-    if (settings.chatMetaChips.includes("mcp") && activeSession && enabledMcpCount > 0) {
-      items.push({
-        id: "mcp",
-        node: (
+        );
+      } else if (id === "mcp" && activeSession && enabledMcpCount > 0) {
+        node = (
           <button
             type="button"
             className={styles.metaChip}
@@ -231,14 +297,9 @@ export function ComposerMetaChips({
               {t("chat.mcpChipCount", { count: chatMcp.length })}
             </span>
           </button>
-        ),
-      });
-    }
-
-    if (settings.chatMetaChips.includes("context") && activeSession) {
-      items.push({
-        id: "context",
-        node: (
+        );
+      } else if (id === "context" && activeSession) {
+        node = (
           <span
             className={`${styles.metaChip} ${styles.metaChipForceLabel}`}
             title={contextDisplay.title}
@@ -256,14 +317,9 @@ export function ComposerMetaChips({
             </span>
             <span className={styles.metaChipLabel}>{contextDisplay.label}</span>
           </span>
-        ),
-      });
-    }
-
-    if (settings.chatMetaChips.includes("console") && activeSession) {
-      items.push({
-        id: "console",
-        node: (
+        );
+      } else if (id === "console" && activeSession) {
+        node = (
           <button
             type="button"
             className={`${styles.metaChip} ${consoleOpen ? styles.metaChipActive : ""}${
@@ -288,8 +344,10 @@ export function ComposerMetaChips({
               <span className={styles.metaChipLabel}>{t("console.title")}</span>
             ) : null}
           </button>
-        ),
-      });
+        );
+      }
+
+      if (node) items.push({ id, node });
     }
 
     return items;
@@ -301,9 +359,12 @@ export function ComposerMetaChips({
     contextDisplay.label,
     contextDisplay.title,
     enabledMcpCount,
+    gitChip,
+    isDesktop,
     onOpenMcpDialog,
     onToggleAutoExpandSteps,
     onToggleConsole,
+    planChip,
     settings.chatMetaChips,
     settings.consoleChipStyle,
     settings.thoughtsChipStyle,
@@ -406,7 +467,7 @@ export function ComposerMetaChips({
       el.removeEventListener("scroll", sync);
       ro.disconnect();
     };
-  }, [chipKey, isDesktop, renderSkeleton]);
+  }, [chipKey, isDesktop, renderSkeleton, trailing]);
 
   useLayoutEffect(() => {
     if (!overflowOpen || !menuAnchorRef.current) return;
@@ -538,6 +599,11 @@ export function ComposerMetaChips({
               );
             })
           )}
+          {!renderSkeleton && trailing && !isDesktop ? (
+            <div className={`${styles.composerMetaChipWrap} ${styles.composerMetaTrailing}`}>
+              {trailing}
+            </div>
+          ) : null}
           {!renderSkeleton && isDesktop && overflowCount > 0 ? (
             <button
               type="button"

@@ -1,9 +1,9 @@
 import { DEFAULT_SETTINGS, type AppSettings, type ChatMetaChipId, type ChatToolbarStyle } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 2;
+export const SETTINGS_SCHEMA_VERSION = 3;
 
-const CHAT_META_CHIP_IDS: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
+const CHAT_META_CHIP_IDS: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
 const DEFAULT_CHAT_META_CHIPS: ChatMetaChipId[] = [...CHAT_META_CHIP_IDS];
 
 export function readSettingsSchema(raw: unknown): number {
@@ -25,10 +25,18 @@ export function normalizeChatMetaChips(
       )
     : [...DEFAULT_CHAT_META_CHIPS];
 
-  if (schemaVersion < SETTINGS_SCHEMA_VERSION && !valid.includes("console")) {
-    return [...valid, "console"];
+  let next = valid;
+  if (schemaVersion < 2 && !next.includes("console")) {
+    next = [...next, "console"];
   }
-  return valid;
+  if (schemaVersion < 3 && !next.includes("git")) {
+    const folderIdx = next.indexOf("folder");
+    next =
+      folderIdx >= 0
+        ? [...next.slice(0, folderIdx + 1), "git", ...next.slice(folderIdx + 1)]
+        : ["git", ...next];
+  }
+  return next;
 }
 
 export function normalizeChatToolbarStyle(value: unknown): ChatToolbarStyle {

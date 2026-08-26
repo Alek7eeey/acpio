@@ -38,7 +38,8 @@ import {
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
-import { CHAT_SPLIT_MIN_PX, FALLBACK_CHAT_PANES } from "../lib/chatPanes";
+import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
+import { useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
@@ -56,6 +57,12 @@ import { HoverTip } from "../components/HoverTip";
 import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
 import { PlanSidePanel, PlanTabButton } from "../components/PlanSidePanel";
 import { ConsoleSidePanel } from "../components/ConsoleSidePanel";
+import {
+  ComposerGitBranchBar,
+  GitComposerLoadingBar,
+  useGitStatus,
+} from "../components/ComposerGitBar";
+import { GitChangesSidePanel } from "../components/GitChangesSidePanel";
 import { ComposerMetaChips } from "../components/ComposerMetaChips";
 import { coercePlanPayload, type PlanPayload } from "../components/PlanApprovalBody";
 import { OptionPicker } from "../components/OptionPicker";
@@ -66,6 +73,7 @@ import {
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
+import { useCompactPanelLayout } from "../lib/panelLayout";
 import { isImageFile } from "../lib/pathSegments";
 import {
   prefersHotkeyHints,
@@ -2823,20 +2831,11 @@ function forgetComposerDraft(sessionId: string | null | undefined) {
 }
 
 function useDesktopSplit() {
-  const [desktop, setDesktop] = useState(
-    () => typeof window !== "undefined" && window.innerWidth >= CHAT_SPLIT_MIN_PX,
-  );
+  const desktop = useChatSplitAllowed();
   const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
   useEffect(() => {
-    const mq = window.matchMedia(`(min-width: ${CHAT_SPLIT_MIN_PX}px)`);
-    const onChange = () => {
-      setDesktop(mq.matches);
-      if (!mq.matches) collapseToSinglePane();
-    };
-    mq.addEventListener("change", onChange);
-    if (!mq.matches) collapseToSinglePane();
-    return () => mq.removeEventListener("change", onChange);
-  }, [collapseToSinglePane]);
+    if (!desktop) collapseToSinglePane();
+  }, [collapseToSinglePane, desktop]);
   return desktop;
 }
 
@@ -2886,7 +2885,11 @@ function ChatThread() {
   const settings = useAppStore((s) => s.settings);
   const consoleOpen = useAppStore((s) => s.consoleOpen);
   const setConsoleOpen = useAppStore((s) => s.setConsoleOpen);
-  const toggleConsoleOpen = useAppStore((s) => s.toggleConsoleOpen);
+  const gitPanelOpen = useAppStore((s) => s.gitPanelOpen);
+  const gitPanelPresentation = useAppStore((s) => s.gitPanelPresentation);
+  const compactPanelLayout = useCompactPanelLayout();
+  const gitPanelDockedLayout = gitPanelPresentation === "side" || compactPanelLayout;
+  const setGitPanelOpen = useAppStore((s) => s.setGitPanelOpen);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
   const sendPrompt = useCallback(
@@ -2949,14 +2952,37 @@ function ChatThread() {
   const [planPanelOpen, setPlanPanelOpen] = useState(false);
   const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
 
+  const openPlanPanel = useCallback(() => {
+    setConsoleOpen(false);
+    setGitPanelOpen(false);
+    setPlanPanelOpen(true);
+  }, [setConsoleOpen, setGitPanelOpen]);
+
+  const toggleConsolePanel = useCallback(() => {
+    if (consoleOpen) {
+      setConsoleOpen(false);
+      return;
+    }
+    setPlanPanelOpen(false);
+    setGitPanelOpen(false);
+    setConsoleOpen(true);
+  }, [consoleOpen, setConsoleOpen, setGitPanelOpen]);
+
+  const openGitChangesPanel = useCallback(() => {
+    setPlanPanelOpen(false);
+    setConsoleOpen(false);
+    setGitPanelOpen(true);
+  }, [setConsoleOpen, setGitPanelOpen]);
+
   useEffect(() => {
     const n = bind?.paneCount ?? 1;
     if (prevPaneCountRef.current <= 1 && n > 1) {
       setPlanPanelOpen(false);
       setConsoleOpen(false);
+      setGitPanelOpen(false);
     }
     prevPaneCountRef.current = n;
-  }, [bind?.paneCount, setConsoleOpen]);
+  }, [bind?.paneCount, setConsoleOpen, setGitPanelOpen]);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => modelParamsForSession(settings, null),
   );
@@ -3124,8 +3150,22 @@ function ChatThread() {
   }, [activePlan, pendingQuestion?.requestId]);
 
   useEffect(() => {
-    if (planPending || planSignature) setPlanPanelOpen(true);
-  }, [planPending, pendingQuestion?.requestId, planSignature]);
+    if (planPending || planSignature) {
+      setConsoleOpen(false);
+      setGitPanelOpen(false);
+      setPlanPanelOpen(true);
+    }
+  }, [planPending, pendingQuestion?.requestId, planSignature, setConsoleOpen, setGitPanelOpen]);
+
+  useEffect(() => {
+    if (consoleOpen || gitPanelOpen) setPlanPanelOpen(false);
+  }, [consoleOpen, gitPanelOpen]);
+
+  useEffect(() => {
+    if (!planPanelOpen) return;
+    if (consoleOpen) setConsoleOpen(false);
+    if (gitPanelOpen) setGitPanelOpen(false);
+  }, [planPanelOpen, consoleOpen, gitPanelOpen, setConsoleOpen, setGitPanelOpen]);
 
   useEffect(() => {
     setPlanPanelOpen(false);
@@ -3141,57 +3181,36 @@ function ChatThread() {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 160)}px`;
   };
 
+  const syncComposerInputScroll = (el: HTMLTextAreaElement) => {
+    const inner = composerHighlightInnerRef.current;
+    if (el.value.includes("\n")) {
+      if (inner) inner.style.transform = `translateY(-${el.scrollTop}px)`;
+      return;
+    }
+    if (inner) inner.style.transform = el.scrollLeft > 0 ? `translateX(-${el.scrollLeft}px)` : "";
+    if (el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
+      el.scrollLeft = el.scrollWidth;
+      if (inner) inner.style.transform = el.scrollLeft > 0 ? `translateX(-${el.scrollLeft}px)` : "";
+    }
+  };
+
   const syncComposerSize = (el: HTMLTextAreaElement) => {
     const value = el.value;
     // Never poke width — that flicker + single↔multi oscillation is what made the pill "dance".
     el.style.width = "";
 
-    if (!value) {
-      el.style.height = "";
-      setComposerMultilineIfNeeded(false);
-      return;
-    }
-
     const hasNewline = value.includes("\n");
-    const pillW = (el.closest(`.${styles.pill}`) as HTMLElement | null)?.clientWidth ?? el.clientWidth;
-    const textBudget = Math.max(96, pillW - 230);
-    const approxFit = Math.max(8, Math.floor(textBudget / 7.2));
-    // Hysteresis: enter early, leave only when clearly short again (no bounce at the edge).
-    const enterAt = Math.min(approxFit, 36);
-    const exitAt = Math.max(4, Math.floor(enterAt * 0.45));
-
-    if (composerMultilineRef.current) {
-      if (!hasNewline && value.length <= exitAt) {
-        setComposerMultilineIfNeeded(false);
-        requestAnimationFrame(() => {
-          const node = textareaRef.current;
-          if (!node) return;
-          applyComposerHeight(node);
-        });
-        return;
-      }
-      applyComposerHeight(el);
+    if (!hasNewline) {
+      el.style.height = "";
+      el.style.overflowY = "hidden";
+      el.scrollTop = 0;
+      setComposerMultilineIfNeeded(false);
+      syncComposerInputScroll(el);
       return;
     }
 
-    if (hasNewline) {
-      setComposerMultilineIfNeeded(true);
-      applyComposerHeight(el);
-      return;
-    }
-
-    el.style.height = "auto";
-    const wrapsNow = el.scrollHeight > 44;
-    if (wrapsNow || value.length >= enterAt) {
-      setComposerMultilineIfNeeded(true);
-      requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        applyComposerHeight(node);
-      });
-      return;
-    }
-
+    setComposerMultilineIfNeeded(true);
+    el.style.overflowY = "auto";
     applyComposerHeight(el);
   };
 
@@ -3238,6 +3257,12 @@ function ChatThread() {
   // Block typing while agent missing, or while models are loading with empty list.
   // Once the agent is already answering, don't keep the composer stuck on "loading models".
   const isEmptyChat = !(activeSession?.messages.some((m) => m.role === "user"));
+  const git = useGitStatus(composerSessionId, undefined, {
+    hasCwd: Boolean(activeSession?.cwd?.trim()),
+    sessionStatus: activeSession?.status,
+    streaming,
+    isEmptyChat,
+  });
   // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
   const composerLocked =
     agentMissing ||
@@ -4092,10 +4117,22 @@ function ChatThread() {
     submitMessage(text);
   };
 
+  const paneFocused = !bind || bind.focused;
+  const activeRightPanel =
+    planPanelOpen && activePlan
+      ? "plan"
+      : consoleOpen
+        ? "console"
+        : gitPanelOpen && gitPanelDockedLayout
+          ? "git"
+          : null;
+
   return (
     <div
-      className={`${styles.page} ${planPanelOpen && activePlan ? styles.pageWithPlan : ""} ${
-        consoleOpen ? styles.pageWithConsole : ""
+      className={`${styles.page} ${
+        activeRightPanel === "plan" ? styles.pageWithPlan : ""
+      } ${activeRightPanel === "console" ? styles.pageWithConsole : ""} ${
+        activeRightPanel === "git" ? styles.pageWithGit : ""
       } ${bind && bind.paneCount > 1 ? styles.pageInSplit : ""}`}
       onPointerDown={() => {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
@@ -4253,7 +4290,7 @@ function ChatThread() {
       (!pendingPermission || pendingPermission.sessionId === activeSession?.id) &&
       (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
         <div className={styles.inlinePromptDock}>
-          <ChatInlinePrompt onOpenPlan={() => setPlanPanelOpen(true)} />
+          <ChatInlinePrompt onOpenPlan={openPlanPanel} />
         </div>
       ) : null}
 
@@ -4416,14 +4453,33 @@ function ChatThread() {
             chatMcp={chatMcp}
             enabledMcpCount={enabledMcp.length}
             contextDisplay={contextDisplay}
-            consoleOpen={consoleOpen}
-            onToggleConsole={() => toggleConsoleOpen()}
+            consoleOpen={activeRightPanel === "console"}
+            onToggleConsole={() => toggleConsolePanel()}
             modeSwitcher={modeSwitcher}
             sessionMode={sessionMode}
             composerLocked={composerLocked}
             onModeChange={onModeChange}
             onOpenMcpDialog={() => setMcpDialogOpen(true)}
             modeLabel={modeLabel}
+            planChip={{
+              visible: Boolean(activePlan) && activeRightPanel !== "plan",
+              open: activeRightPanel === "plan",
+              pending: planPending,
+              onClick: openPlanPanel,
+            }}
+            gitChip={
+              activeSession?.cwd?.trim()
+                ? {
+                    status: git.status,
+                    loading: git.loading,
+                    awaiting: git.awaiting,
+                    branchBusy: git.branchBusy,
+                    onCheckout: git.checkout,
+                    changesOpen: activeRightPanel === "git",
+                    onOpenChanges: openGitChangesPanel,
+                  }
+                : undefined
+            }
           />
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
@@ -4498,18 +4554,24 @@ function ChatThread() {
                 setText(e.target.value);
                 setCursorPos(e.target.selectionStart);
                 syncComposerSize(e.currentTarget);
+                syncComposerInputScroll(e.currentTarget);
               }}
               onScroll={(e) => {
-                const inner = composerHighlightInnerRef.current;
-                if (inner) inner.style.transform = `translateY(-${e.currentTarget.scrollTop}px)`;
+                syncComposerInputScroll(e.currentTarget);
               }}
               onBlur={(e) => {
                 const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
                 if (next?.closest('[role="listbox"]')) return;
                 setSlashMenuDismissed(true);
               }}
-              onClick={(e) => setCursorPos(e.currentTarget.selectionStart)}
-              onKeyUp={(e) => setCursorPos(e.currentTarget.selectionStart)}
+              onClick={(e) => {
+                setCursorPos(e.currentTarget.selectionStart);
+                syncComposerInputScroll(e.currentTarget);
+              }}
+              onKeyUp={(e) => {
+                setCursorPos(e.currentTarget.selectionStart);
+                syncComposerInputScroll(e.currentTarget);
+              }}
               placeholder={
                 slashInputHint ??
                 (composerLocked && !agentMissing && !agentOffline
@@ -4711,6 +4773,20 @@ function ChatThread() {
               </div>
             </div>
           </div>
+          {git.awaiting ? (
+            <div className={styles.gitComposerFooter}>
+              <GitComposerLoadingBar variant="composerSubtle" />
+            </div>
+          ) : git.status?.repo ? (
+            <div className={styles.gitComposerFooter}>
+              <ComposerGitBranchBar
+                variant="composerSubtle"
+                status={git.status}
+                branchBusy={git.branchBusy}
+                onCheckout={git.checkout}
+              />
+            </div>
+          ) : null}
         </div>
       </form>
 
@@ -4789,6 +4865,36 @@ function ChatThread() {
         mcpDisabledIds={activeSession?.mcpDisabledIds}
         onClose={() => setMcpDialogOpen(false)}
       />
+      {paneFocused ? (
+        <PlanTabButton
+          visible={Boolean(activePlan) && activeRightPanel !== "plan"}
+          open={activeRightPanel === "plan"}
+          pending={planPending}
+          onClick={openPlanPanel}
+        />
+      ) : null}
+      </div>
+
+      <div className={styles.planPanelDock}>
+        <PlanSidePanel
+          plan={activePlan}
+          open={activeRightPanel === "plan" && (!bind || bind.focused)}
+          pending={planPending}
+          onClose={() => setPlanPanelOpen(false)}
+          onAccept={
+            planPending
+              ? () => void answerQuestion({ outcome: { outcome: "accepted" } })
+              : undefined
+          }
+          onReject={
+            planPending
+              ? () =>
+                  void answerQuestion({
+                    outcome: { outcome: "rejected", reason: "rejected by user" },
+                  })
+              : undefined
+          }
+        />
       </div>
 
       {(!bind || bind.focused) && speakingMessageId && (
@@ -4813,40 +4919,27 @@ function ChatThread() {
       )}
       {(!bind || bind.focused) && (
         <>
-      {activeSession ? (
-        <ConsoleSidePanel
-          sessionId={activeSession.id}
-          open={consoleOpen && (!bind || bind.focused)}
-          onClose={() => setConsoleOpen(false)}
-        />
-      ) : null}
-      <PlanTabButton
-        visible={Boolean(activePlan) && !planPanelOpen}
-        open={planPanelOpen}
-        pending={planPending}
-        onClick={() => setPlanPanelOpen(true)}
-      />
+          {activeSession ? (
+            <ConsoleSidePanel
+              sessionId={activeSession.id}
+              open={activeRightPanel === "console" && (!bind || bind.focused)}
+              onClose={() => setConsoleOpen(false)}
+            />
+          ) : null}
         </>
       )}
-      <PlanSidePanel
-        plan={activePlan}
-        open={planPanelOpen && (!bind || bind.focused)}
-        pending={planPending}
-        onClose={() => setPlanPanelOpen(false)}
-        onAccept={
-          planPending
-            ? () => void answerQuestion({ outcome: { outcome: "accepted" } })
-            : undefined
-        }
-        onReject={
-          planPending
-            ? () =>
-                void answerQuestion({
-                  outcome: { outcome: "rejected", reason: "rejected by user" },
-                })
-            : undefined
-        }
-      />
+      {activeSession ? (
+        <GitChangesSidePanel
+          sessionId={activeSession.id}
+          open={activeRightPanel === "git" && (!bind || bind.focused)}
+          status={git.status}
+          awaitingGit={git.awaiting}
+          branchBusy={git.branchBusy}
+          onClose={() => setGitPanelOpen(false)}
+          onStatusChange={git.applyStatus}
+          onCheckout={git.checkout}
+        />
+      ) : null}
     </div>
   );
 }

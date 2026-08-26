@@ -1,0 +1,590 @@
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  position: relative;
+  flex-wrap: nowrap;
+  overflow: visible;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.switcher {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 auto;
+}
+
+.switcherPanelHeader {
+  display: block;
+  width: 100%;
+  margin: 2px 0 0;
+}
+
+.branchBtnPanelHeader {
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  color: var(--text);
+}
+
+.branchBtnPanelHeader:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+.branchBtnPanelHeader .branchName {
+  font-size: 0.88rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.menuFixed {
+  position: fixed;
+  z-index: 520;
+}
+
+.branchBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  flex: 0 1 auto;
+}
+
+.branchBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
+  color: var(--text);
+}
+
+.branchBtn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.branchIcon,
+.chevron {
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+
+.branchName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+}
+
+.conflictBadge {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #fff;
+  background: #dc2626;
+}
+
+.changesChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, var(--surface));
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+  flex: 0 0 auto;
+}
+
+.changesChip:hover,
+.changesChipActive {
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+}
+
+.changesChipQuiet {
+  opacity: 0.62;
+}
+
+.changesChipMetrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 1em;
+  font-size: 0.64rem;
+  font-weight: 600;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.changesChipSep {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  line-height: 1;
+  opacity: 0.45;
+  user-select: none;
+}
+
+.changesChipCount {
+  flex: 0 0 auto;
+  min-width: 0.8em;
+  line-height: 1;
+  text-align: center;
+}
+
+.changesChipIconOnly {
+  position: relative;
+  padding: 6px 8px;
+  min-width: 32px;
+  justify-content: center;
+}
+
+.changesChipIcon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.changesChipBadge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  font-size: 0.56rem;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: #fff;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--surface);
+}
+
+.barMetaChip {
+  gap: 8px;
+}
+
+.barMetaChip .branchBtn {
+  margin: 0;
+}
+
+.barMetaChip .branchName,
+.barMetaChip .chevron {
+  display: none;
+}
+
+.barMetaChip .changesChip {
+  padding: 7px 10px;
+}
+
+.barMetaChip .conflictBadge {
+  padding: 2px 6px;
+  font-size: 0.62rem;
+}
+
+.barComposerMeta {
+  gap: 4px;
+  min-height: 0;
+}
+
+.barComposerMeta .branchBtnComposerMeta {
+  gap: 5px;
+  padding: 2px 4px 2px 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 72%, var(--text-secondary));
+}
+
+.barComposerMeta .branchBtnComposerMeta:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
+.barComposerMeta .branchIcon {
+  width: 13px;
+  height: 13px;
+  opacity: 0.72;
+}
+
+.barComposerMeta .branchName {
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  letter-spacing: -0.01em;
+  color: inherit;
+}
+
+.barComposerMeta .chevron {
+  width: 10px;
+  height: 10px;
+  opacity: 0.55;
+}
+
+.barComposerMeta .changesChip {
+  padding: 2px 4px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.barComposerMeta .changesChip:hover,
+.barComposerMeta .changesChipActive {
+  border: none;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.barComposerMeta .changesChipBadge {
+  top: -2px;
+  right: -4px;
+}
+
+.barComposerSubtle {
+  gap: 6px;
+  min-height: 0;
+  padding: 0 2px;
+}
+
+.branchBtnComposerSubtle {
+  gap: 5px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  box-shadow: none;
+}
+
+.branchBtnComposerSubtle:hover:not(:disabled) {
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 92%, var(--text));
+}
+
+.branchBtnComposerSubtle:disabled {
+  opacity: 0.55;
+}
+
+.branchBtnComposerSubtle .branchIcon {
+  width: 12px;
+  height: 12px;
+  opacity: 0.5;
+}
+
+.branchBtnComposerSubtle .branchName {
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 500;
+}
+
+.branchBtnComposerSubtle .chevron {
+  width: 9px;
+  height: 9px;
+  opacity: 0.42;
+}
+
+.barComposerSubtle .conflictBadge {
+  padding: 1px 6px;
+  font-size: 0.58rem;
+  font-weight: 600;
+}
+
+.barComposerFooter {
+  gap: 8px;
+  min-height: 0;
+}
+
+.barComposerFooter .branchBtn,
+.barComposerFooter .changesChip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 7px 13px;
+  min-height: 30px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--surface) 92%, white 8%) 0%,
+    color-mix(in srgb, var(--bg-secondary) 58%, var(--surface)) 100%
+  );
+  backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 1px 2px color-mix(in srgb, var(--bg) 24%, transparent),
+    0 6px 18px color-mix(in srgb, var(--bg) 16%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color var(--motion),
+    color var(--motion),
+    background var(--motion),
+    box-shadow var(--motion),
+    transform 0.18s ease;
+}
+
+.barComposerFooter .branchBtn {
+  max-width: min(300px, 44vw);
+}
+
+.barComposerFooter .branchBtn:hover:not(:disabled),
+.barComposerFooter .changesChip:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: var(--text);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
+    0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent),
+    0 8px 22px color-mix(in srgb, var(--bg) 20%, transparent);
+}
+
+.barComposerFooter .branchIcon {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  opacity: 1;
+}
+
+.barComposerFooter .branchName {
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.barComposerFooter .chevron {
+  opacity: 0.72;
+}
+
+.barComposerFooter .changesChipLeadIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+}
+
+.barComposerFooter .changesChipLeadIcon svg {
+  display: block;
+}
+
+.barComposerFooter .changesChipMetrics {
+  font-size: 0.72rem;
+  font-weight: 650;
+  gap: 5px;
+}
+
+.barComposerFooter .changesChipSep {
+  font-size: 0.68rem;
+}
+
+.barComposerFooter .changesChipActive {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  color: var(--text);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%,
+    color-mix(in srgb, var(--accent) 7%, var(--bg-secondary)) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 8px 22px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.barComposerFooter .changesChipQuiet {
+  opacity: 0.78;
+}
+
+.changesChipPremium {
+  gap: 8px;
+}
+
+.changesChipLoading {
+  justify-content: center;
+  cursor: wait;
+  opacity: 0.88;
+}
+
+.loaderSpin {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: gitLoaderSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.barLoading {
+  opacity: 0.92;
+}
+
+.loadingBranch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 5.5rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+@keyframes gitLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+:global([data-theme="light"]) .barComposerFooter .branchBtn,
+:global([data-theme="light"]) .barComposerFooter .changesChip {
+  background: color-mix(in srgb, var(--surface) 96%, var(--bg-secondary));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
+    0 1px 3px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+:global([data-theme="light"]) .barComposerFooter .changesChipActive {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 85%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.menu {
+  position: absolute;
+  left: 0;
+  z-index: 40;
+  min-width: min(260px, 80vw);
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.menuItem:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
+}
+
+.menuItemActive {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.menuItem:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.createBranch {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 8px 4px 4px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.createBranch input {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.78rem;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.createBranch button {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 650;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.createBranch button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (max-width: 700px) {
+  .bar {
+    gap: 6px;
+  }
+
+  .branchBtn:not(.branchBtnComposerSubtle) .branchName,
+  .branchBtn:not(.branchBtnComposerSubtle) .chevron {
+    display: none;
+  }
+
+  .branchBtn:not(.branchBtnComposerSubtle) {
+    padding: 6px 8px;
+    border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  }
+
+  .changesChipMetrics > :first-child,
+  .changesChipSep {
+    display: none;
+  }
+
+  .changesChip {
+    padding: 6px 10px;
+    min-width: 32px;
+    justify-content: center;
+  }
+
+  .changesChipCount {
+    font-size: 0.72rem;
+  }
+}

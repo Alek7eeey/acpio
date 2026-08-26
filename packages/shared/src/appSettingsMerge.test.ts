@@ -8,9 +8,21 @@ import {
 } from "./appSettingsMerge.js";
 
 describe("normalizeChatMetaChips", () => {
-  it("keeps console when schema is current", () => {
-    const chips = ["folder", "thoughts", "mcp", "context"] as const;
+  it("keeps chips when schema is current", () => {
+    const chips = ["folder", "git", "thoughts", "mcp", "context", "console"] as const;
     expect(normalizeChatMetaChips(chips, SETTINGS_SCHEMA_VERSION)).toEqual([...chips]);
+  });
+
+  it("adds git after folder for legacy settings without it", () => {
+    const chips = ["folder", "thoughts", "mcp", "context", "console"];
+    expect(normalizeChatMetaChips(chips, 2)).toEqual([
+      "folder",
+      "git",
+      "thoughts",
+      "mcp",
+      "context",
+      "console",
+    ]);
   });
 
   it("adds console for legacy settings without it", () => {

@@ -21,6 +21,13 @@ export type ShowToastOptions = {
 const EVENT = "acpio:toast";
 const MAX_VISIBLE = 4;
 const DEFAULT_DURATION_MS = 2800;
+const DANGER_MIN_DURATION_MS = 8000;
+const DANGER_MAX_DURATION_MS = 14000;
+
+function defaultDurationMs(tone: ToastTone, message: string) {
+  if (tone !== "danger") return DEFAULT_DURATION_MS;
+  return Math.min(DANGER_MAX_DURATION_MS, Math.max(DANGER_MIN_DURATION_MS, 5000 + message.length * 28));
+}
 
 type ToastListener = (items: ToastItem[]) => void;
 
@@ -61,7 +68,7 @@ export function showToast(message: string, options: ShowToastOptions = {}): stri
   const text = message.trim();
   if (!text) return "";
   const tone = options.tone ?? "info";
-  const durationMs = options.durationMs ?? DEFAULT_DURATION_MS;
+  const durationMs = options.durationMs ?? defaultDurationMs(tone, text);
   const id = options.id ?? uid();
 
   const next: ToastItem = {

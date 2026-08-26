@@ -423,7 +423,7 @@ describe("DEFAULT_SETTINGS", () => {
     darkSurface: "",
     ttsVoiceGender: "",
     chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-    chatMetaChips: ["folder", "thoughts", "mcp", "context", "console"],
+    chatMetaChips: ["folder", "git", "thoughts", "mcp", "context", "console"],
     thoughtsChipStyle: "full",
     consoleChipStyle: "full",
     chatComposerButtons: ["attach", "mic", "model", "mode"],

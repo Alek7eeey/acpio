@@ -1,6 +1,7 @@
+import { isChatSplitAllowed } from "./panelLayout";
+
 export const CHAT_PANES_KEY = "acpio.chatPanes.v1";
 export const CHAT_PANE_MAX = 2;
-export const CHAT_SPLIT_MIN_PX = 900;
 
 export type ChatPaneSlot = string | null;
 
@@ -13,7 +14,7 @@ export type StoredChatPanes = {
 };
 
 export function isDesktopChatSplit() {
-  return typeof window !== "undefined" && window.innerWidth >= CHAT_SPLIT_MIN_PX;
+  return isChatSplitAllowed();
 }
 
 /** Setting defaults on; only desktop width actually shows the split. */

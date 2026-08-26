@@ -3,5 +3,5 @@ export const BUILD_INFO = {
   "version": "0.1.2",
   "baseVersion": "0.1.0",
   "commitsToday": 2,
-  "sha": "85602aa"
+  "sha": "1740082"
 } as const;

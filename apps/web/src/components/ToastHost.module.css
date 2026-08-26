@@ -8,15 +8,15 @@
   align-items: flex-end;
   gap: 8px;
   pointer-events: none;
-  max-width: min(340px, calc(100vw - 28px));
+  max-width: min(440px, calc(100vw - 28px));
 }
 
 .toast {
   pointer-events: auto;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  width: max-content;
+  width: 100%;
   max-width: 100%;
   padding: 11px 12px 11px 11px;
   border-radius: 14px;
@@ -51,6 +51,7 @@
   justify-content: center;
   width: 26px;
   height: 26px;
+  margin-top: 1px;
   border-radius: 9px;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--text) 6%, transparent);
@@ -64,6 +65,9 @@
   flex: 1;
   min-width: 0;
   padding-right: 2px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .close {

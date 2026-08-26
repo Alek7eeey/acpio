@@ -8,6 +8,7 @@ import {
 } from "react";
 import { PlanApprovalBody, type PlanPayload } from "./PlanApprovalBody";
 import { useT } from "../lib/i18n";
+import { isSidePanelResizeAllowed } from "../lib/panelLayout";
 import styles from "./PlanSidePanel.module.css";
 
 const WIDTH_KEY = "acpio.planPanelWidth.v1";
@@ -56,7 +57,7 @@ export function PlanSidePanel({
 
   const onSplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (window.innerWidth < 900) return;
+      if (!isSidePanelResizeAllowed()) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       dragRef.current = { startX: e.clientX, startWidth: width };
@@ -66,7 +67,7 @@ export function PlanSidePanel({
   );
 
   const onSplitterDoubleClick = useCallback(() => {
-    if (window.innerWidth < 900) return;
+    if (!isSidePanelResizeAllowed()) return;
     setWidth(WIDTH_DEFAULT);
   }, []);
 

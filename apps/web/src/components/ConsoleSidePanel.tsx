@@ -13,6 +13,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
 import { useT } from "../lib/i18n";
+import { isSidePanelResizeAllowed } from "../lib/panelLayout";
 import { api } from "../lib/api";
 import { subscribeShellConsole } from "../lib/shellConsole";
 import { sendWsMessage } from "../lib/useSessionSocket";
@@ -106,7 +107,7 @@ export function ConsoleSidePanel({
 
   const onSplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (window.innerWidth < 900) return;
+      if (!isSidePanelResizeAllowed()) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       dragRef.current = { startX: e.clientX, startWidth: width };
@@ -116,7 +117,7 @@ export function ConsoleSidePanel({
   );
 
   const onSplitterDoubleClick = useCallback(() => {
-    if (window.innerWidth < 900) return;
+    if (!isSidePanelResizeAllowed()) return;
     setWidth(WIDTH_DEFAULT);
   }, []);
 

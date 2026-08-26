@@ -43,7 +43,7 @@ function mcpRemoteConfigDraft(server: McpServerConfig): string {
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
 /** Canonical display order for composer chips. */
-const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "thoughts", "mcp", "context", "console"];
+const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
 import { isChatSearchEnabled, toggleChatTreeElement } from "../lib/chatTreeSearch";
 const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
@@ -145,6 +145,7 @@ function ChatConfigRows({
           {(
             [
               ["folder", t("settings.chatMetaChipFolder")],
+              ["git", t("settings.chatMetaChipGit")],
               ["thoughts", t("settings.chatMetaChipThoughts")],
               ["mcp", t("settings.chatMetaChipMcp")],
               ["context", t("settings.chatMetaChipContext")],
@@ -1401,9 +1402,14 @@ export function SettingsPage() {
                   cur.includes(id) ? cur.filter((a) => a !== id) : [...cur, id],
                 );
               }}
-              onToggleChip={(id) =>
-                patch("chatMetaChips", toggleInOrder(form.chatMetaChips ?? [], id, CHAT_CHIP_ORDER))
-              }
+              onToggleChip={(id) => {
+                const cur = form.chatMetaChips ?? [];
+                patch(
+                  "chatMetaChips",
+                  cur.includes(id) ? cur.filter((chip) => chip !== id) : [...cur, id],
+                );
+              }}
+              onReorderChip={(nextOrder) => patch("chatMetaChips", nextOrder)}
               onToggleComposerButton={(id) =>
                 patch(
                   "chatComposerButtons",

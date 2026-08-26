@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import styles from "./ModelPicker.module.css";
 
 export type OptionPickerItem = {
@@ -33,6 +34,7 @@ export function OptionPicker({
   className,
 }: OptionPickerProps) {
   const [open, setOpen] = useState(false);
+  const [menuReady, setMenuReady] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -51,47 +53,61 @@ export function OptionPicker({
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  useEffect(() => {
+    if (!open) setMenuReady(false);
+  }, [open]);
+
   useLayoutEffect(() => {
     const menu = menuRef.current;
     const root = rootRef.current;
     if (!open || !menu || !root) return;
 
-    const clear = () => {
-      menu.style.position = "";
-      menu.style.left = "";
-      menu.style.right = "";
-      menu.style.top = "";
-      menu.style.bottom = "";
-      menu.style.width = "";
-      menu.style.maxWidth = "";
-    };
+    const pad = 12;
+    const gap = placement === "down" ? 8 : 10;
 
     const place = () => {
-      const narrow = window.matchMedia("(max-width: 700px)").matches;
-      if (!narrow) {
-        clear();
-        // Prefer left alignment; if the content-sized menu clips the viewport, pin to the right.
-        const rootRect = root.getBoundingClientRect();
-        const menuRect = menu.getBoundingClientRect();
-        if (menuRect.right > window.innerWidth - 12 && menuRect.width > rootRect.width + 1) {
-          menu.style.left = "auto";
-          menu.style.right = "0";
-        }
-        return;
-      }
       const trigger = root.getBoundingClientRect();
+
       menu.style.position = "fixed";
-      menu.style.left = "max(12px, env(safe-area-inset-left, 0px))";
-      menu.style.right = "max(12px, env(safe-area-inset-right, 0px))";
-      menu.style.width = "auto";
-      menu.style.maxWidth = "none";
+      menu.style.zIndex = "1100";
+      menu.style.margin = "0";
+
       if (placement === "down") {
-        menu.style.top = `${Math.min(trigger.bottom + 8, window.innerHeight - 80)}px`;
+        menu.style.top = `${trigger.bottom + gap}px`;
         menu.style.bottom = "auto";
+        menu.style.left = `${trigger.left}px`;
+        menu.style.right = "auto";
+        menu.style.width = "max-content";
+        menu.style.minWidth = `${Math.max(trigger.width, 0)}px`;
+        menu.style.maxWidth = `${Math.min(420, window.innerWidth - pad * 2)}px`;
       } else {
-        menu.style.bottom = `${Math.max(12, window.innerHeight - trigger.top + 10)}px`;
         menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - trigger.top + gap}px`;
+        menu.style.left = `${trigger.left}px`;
+        menu.style.right = "auto";
+        menu.style.width = "max-content";
+        menu.style.minWidth = `${Math.max(trigger.width, 120)}px`;
+        menu.style.maxWidth = `${Math.min(320, window.innerWidth - pad * 2)}px`;
       }
+
+      let left = menu.getBoundingClientRect().left;
+      const width = menu.getBoundingClientRect().width;
+      if (left + width > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - pad - width);
+      }
+      if (left < pad) left = pad;
+      menu.style.left = `${left}px`;
+
+      const rect = menu.getBoundingClientRect();
+      if (placement === "down" && rect.bottom > window.innerHeight - pad) {
+        menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - trigger.top + gap}px`;
+      } else if (placement !== "down" && rect.top < pad) {
+        menu.style.bottom = "auto";
+        menu.style.top = `${trigger.bottom + gap}px`;
+      }
+
+      setMenuReady(true);
     };
 
     place();
@@ -99,12 +115,11 @@ export function OptionPicker({
     window.visualViewport?.addEventListener("resize", place);
     window.visualViewport?.addEventListener("scroll", place);
     return () => {
-      clear();
       window.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("scroll", place);
     };
-  }, [open, placement, disabled]);
+  }, [open, placement, disabled, options.length]);
 
   useLayoutEffect(() => {
     if (!open || !listRef.current) return;
@@ -116,7 +131,9 @@ export function OptionPicker({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: globalThis.MouseEvent) => {
-      if (rootRef.current?.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -169,51 +186,57 @@ export function OptionPicker({
         </span>
       </button>
 
-      {open && !disabled ? (
-        <div
-          ref={menuRef}
-          className={`${styles.modelMenu} ${placement === "down" ? styles.modelMenuDown : ""}`}
-          role="listbox"
-        >
-          {menuTitle ? <div className={styles.modelMenuHead}>{menuTitle}</div> : null}
-          {options.length === 0 ? (
-            <div className={styles.modelEmpty}>{emptyLabel ?? "—"}</div>
-          ) : (
-            <div className={styles.modelList} ref={listRef}>
-              {options.map((opt) => {
-                const isSelected = opt.value === value;
-                return (
-                  <div
-                    key={opt.value || "__empty"}
-                    className={`${styles.modelRow} ${isSelected ? styles.modelRowActive : ""}`}
-                    ref={(el) => {
-                      if (el) rowRefs.current.set(opt.value, el);
-                      else rowRefs.current.delete(opt.value);
-                    }}
-                  >
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={isSelected}
-                      className={styles.modelRowMain}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        onChange(opt.value);
-                        setOpen(false);
-                      }}
-                    >
-                      <span className={styles.modelOptionName}>{opt.label}</span>
-                      {opt.hint ? (
-                        <span className={styles.modelOptionMeta}>{opt.hint}</span>
-                      ) : null}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : null}
+      {open && !disabled
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className={`${styles.modelMenu} ${styles.modelMenuPortal} ${
+                placement === "down" ? styles.modelMenuDown : ""
+              }`}
+              style={{ visibility: menuReady ? "visible" : "hidden" }}
+              role="listbox"
+            >
+              {menuTitle ? <div className={styles.modelMenuHead}>{menuTitle}</div> : null}
+              {options.length === 0 ? (
+                <div className={styles.modelEmpty}>{emptyLabel ?? "—"}</div>
+              ) : (
+                <div className={styles.modelList} ref={listRef}>
+                  {options.map((opt) => {
+                    const isSelected = opt.value === value;
+                    return (
+                      <div
+                        key={opt.value || "__empty"}
+                        className={`${styles.modelRow} ${isSelected ? styles.modelRowActive : ""}`}
+                        ref={(el) => {
+                          if (el) rowRefs.current.set(opt.value, el);
+                          else rowRefs.current.delete(opt.value);
+                        }}
+                      >
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          className={styles.modelRowMain}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            onChange(opt.value);
+                            setOpen(false);
+                          }}
+                        >
+                          <span className={styles.modelOptionName}>{opt.label}</span>
+                          {opt.hint ? (
+                            <span className={styles.modelOptionMeta}>{opt.hint}</span>
+                          ) : null}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
