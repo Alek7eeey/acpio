@@ -18,21 +18,34 @@ export function useGitStatus(
   },
 ) {
   const t = useT();
+  const sessionRef = useRef(sessionId);
+  sessionRef.current = sessionId;
   const [status, setStatus] = useState<GitStatusDto | null>(null);
-  const [loading, setLoading] = useState(Boolean(sessionId));
+  const [resolvedSessionId, setResolvedSessionId] = useState<string | null>(null);
   const [branchBusy, setBranchBusy] = useState(false);
+
+  const boundStatus = resolvedSessionId === sessionId ? status : null;
+  const pending = resolvedSessionId !== sessionId;
 
   const applyStatus = useCallback(
     (next: GitStatusDto | null) => {
+      const sid = sessionRef.current;
+      if (!sid) {
+        setStatus(null);
+        setResolvedSessionId(null);
+        onStatusChange?.(null);
+        return;
+      }
       setStatus(next);
+      setResolvedSessionId(sid);
       onStatusChange?.(next);
     },
     [onStatusChange],
   );
 
   const awaiting = shouldAwaitGitRepo({
-    loading,
-    status,
+    loading: pending,
+    status: boundStatus,
     hasCwd: context?.hasCwd ?? Boolean(sessionId),
     sessionStatus: context?.sessionStatus,
     streaming: context?.streaming,
@@ -40,55 +53,60 @@ export function useGitStatus(
   });
 
   const refresh = useCallback(async () => {
-    if (!sessionId) {
-      setLoading(false);
-      applyStatus(null);
+    const sid = sessionRef.current;
+    if (!sid) {
+      setStatus(null);
+      setResolvedSessionId(null);
+      onStatusChange?.(null);
       return null;
     }
     try {
-      const next = await api.gitStatus(sessionId);
+      const next = await api.gitStatus(sid);
+      if (sessionRef.current !== sid) return null;
       applyStatus(next);
       return next;
     } catch {
+      if (sessionRef.current !== sid) return null;
       applyStatus(null);
       return null;
-    } finally {
-      setLoading(false);
     }
-  }, [applyStatus, sessionId]);
+  }, [applyStatus, onStatusChange]);
 
-  useEffect(() => {
-    setLoading(Boolean(sessionId));
+  useLayoutEffect(() => {
+    setResolvedSessionId(null);
     setStatus(null);
   }, [sessionId]);
 
   useEffect(() => {
     void refresh();
+  }, [refresh, sessionId]);
+
+  useEffect(() => {
     if (!sessionId) return;
     const interval = awaiting ? 2000 : 8000;
     const timer = window.setInterval(() => void refresh(), interval);
     return () => window.clearInterval(timer);
   }, [awaiting, refresh, sessionId]);
 
-  const checkout = useCallback(    async (branch: string, create = false) => {
-      if (!sessionId || branchBusy) return;
-      if (!create && branch === status?.branch) return;
-      setBranchBusy(true);
-      try {
-        const result = await api.gitCheckout(sessionId, branch, create);
-        applyStatus(result.status);
-        showToast(t("git.checkoutOk"), { tone: "success" });
-      } catch (e) {
-        const raw = e instanceof Error ? e.message : t("git.checkoutFailed");
-        showToast(formatGitErrorToast(raw, t, { context: "checkout" }), { tone: "danger" });
-      } finally {
-        setBranchBusy(false);
-      }
-    },
-    [applyStatus, branchBusy, sessionId, status?.branch, t],
-  );
+  const checkout = useCallback(async (branch: string, create = false) => {
+    const sid = sessionRef.current;
+    if (!sid || branchBusy) return;
+    if (!create && branch === boundStatus?.branch) return;
+    setBranchBusy(true);
+    try {
+      const result = await api.gitCheckout(sid, branch, create);
+      if (sessionRef.current !== sid) return;
+      applyStatus(result.status);
+      showToast(t("git.checkoutOk"), { tone: "success" });
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : t("git.checkoutFailed");
+      showToast(formatGitErrorToast(raw, t, { context: "checkout" }), { tone: "danger" });
+    } finally {
+      setBranchBusy(false);
+    }
+  }, [applyStatus, boundStatus?.branch, branchBusy, t]);
 
-  return { status, loading, awaiting, refresh, checkout, branchBusy, applyStatus };
+  return { status: boundStatus, loading: pending, awaiting, refresh, checkout, branchBusy, applyStatus };
 }
 
 export function GitChangesChipLoader({

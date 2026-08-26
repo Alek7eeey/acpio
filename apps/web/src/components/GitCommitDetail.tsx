@@ -384,10 +384,7 @@ export function GitCommitDetail({
                 key={file.path}
                 file={file}
                 active={selectedFilePath === file.path}
-                onSelect={() => {
-                  if (selectedFilePath === file.path) return;
-                  onSelectFile(file.path);
-                }}
+                onSelect={() => onSelectFile(file.path)}
                 onContextMenu={(e) => openFileMenu(file.path, file.status === "deleted", e)}
               />
             ))
@@ -396,10 +393,7 @@ export function GitCommitDetail({
                 key={file.path}
                 file={file}
                 active={selectedFilePath === file.path}
-                onSelect={() => {
-                  if (selectedFilePath === file.path) return;
-                  onSelectFile(file.path);
-                }}
+                onSelect={() => onSelectFile(file.path)}
                 onContextMenu={(e) =>
                   openFileMenu(
                     file.path,

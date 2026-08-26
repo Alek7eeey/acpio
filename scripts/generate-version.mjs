@@ -1,13 +1,22 @@
 /**
  * Builds APP version from package.json semver + today's git commit count.
  * Each commit since local midnight bumps the patch segment by one.
+ * With --record-release, appends new versions to VERSIONS.md during production builds.
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  formatReleaseDate,
+  parseVersionsMarkdown,
+  renderVersionsMarkdown,
+  upsertReleaseEntry,
+} from "./versionHistory.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const VERSIONS_FILE = path.join(repoRoot, "VERSIONS.md");
+const recordRelease = process.argv.includes("--record-release");
 
 function git(cmd) {
   try {
@@ -19,6 +28,24 @@ function git(cmd) {
   } catch {
     return "";
   }
+}
+
+function readVersionsFile() {
+  if (!fs.existsSync(VERSIONS_FILE)) {
+    return [];
+  }
+  return parseVersionsMarkdown(fs.readFileSync(VERSIONS_FILE, "utf8"));
+}
+
+function writeVersionsFile(entries) {
+  fs.writeFileSync(VERSIONS_FILE, renderVersionsMarkdown(entries));
+}
+
+function recordVersionRelease(version, date) {
+  const released = formatReleaseDate(date);
+  const next = upsertReleaseEntry(readVersionsFile(), version, released);
+  writeVersionsFile(next);
+  return released;
 }
 
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
@@ -62,5 +89,14 @@ updateReadmeVersion(
   /\*\*Актуальная версия:\*\* \d+\.\d+\.\d+/,
   `**Актуальная версия:** ${version}`,
 );
+
+if (recordRelease) {
+  const before = readVersionsFile();
+  const released = recordVersionRelease(version, now);
+  const added = !before.some((entry) => entry.version === version);
+  if (added) {
+    console.log(`Recorded release ${version} (${released}) in VERSIONS.md`);
+  }
+}
 
 console.log(`Version: ${version} (${commitsToday} commit(s) today, ${sha})`);

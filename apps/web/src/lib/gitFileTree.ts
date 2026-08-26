@@ -24,3 +24,26 @@ export function sortGitFiles(files: GitChangedFileDto[]): GitChangedFileDto[] {
     normalizeGitPath(a.path).localeCompare(normalizeGitPath(b.path), undefined, { sensitivity: "base" }),
   );
 }
+
+/** First file in the same order as the changes tree (conflicts → unstaged → staged). */
+export function firstChangedFilePath(input: {
+  conflictFiles?: GitChangedFileDto[];
+  unstagedFiles?: GitChangedFileDto[];
+  stagedFiles?: GitChangedFileDto[];
+  files?: GitChangedFileDto[];
+}): string | null {
+  for (const list of [input.conflictFiles, input.unstagedFiles, input.stagedFiles, input.files]) {
+    if (!list?.length) continue;
+    const first = sortGitFiles(list)[0];
+    if (first) return first.path;
+  }
+  return null;
+}
+
+export function firstCommitFilePath(files: { path: string }[]): string | null {
+  if (files.length === 0) return null;
+  return [...files]
+    .sort((a, b) =>
+      normalizeGitPath(a.path).localeCompare(normalizeGitPath(b.path), undefined, { sensitivity: "base" }),
+    )[0]!.path;
+}

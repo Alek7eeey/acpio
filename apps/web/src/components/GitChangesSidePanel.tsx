@@ -9,6 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitStatusDto } from "@acpio/shared";
 import { DiffTextView, type DiffContextSource } from "./DiffTextView";
 import { GitChangesCommitPane } from "./GitChangesCommitPane";
@@ -20,38 +21,14 @@ import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
 import { isSidePanelResizeAllowed, useNarrowPanelLayout } from "../lib/panelLayout";
+import { firstChangedFilePath, firstCommitFilePath } from "../lib/gitFileTree";
 import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitSyncSuccessMessage, isGitConflictFile } from "../lib/gitUi";
 import styles from "./GitChangesSidePanel.module.css";
 
 const WIDTH_KEY = "acpio.gitPanelWidth.v1";
-const MODAL_WIDTH_KEY = "acpio.gitPanelModalWidth.v1";
-const MODAL_HEIGHT_KEY = "acpio.gitPanelModalHeight.v1";
 const WIDTH_MIN = 320;
 const WIDTH_MAX = 920;
 const WIDTH_DEFAULT = 520;
-const MODAL_MARGIN = 12;
-const MODAL_WIDTH_MIN = 720;
-const MODAL_HEIGHT_MIN = 480;
-
-function viewportModalMax() {
-  if (typeof window === "undefined") return { width: 1600, height: 960 };
-  return {
-    width: Math.max(MODAL_WIDTH_MIN, window.innerWidth - MODAL_MARGIN * 2),
-    height: Math.max(MODAL_HEIGHT_MIN, window.innerHeight - MODAL_MARGIN * 2),
-  };
-}
-
-function defaultModalSize() {
-  return viewportModalMax();
-}
-
-function clampModalSize(width: number, height: number) {
-  const max = viewportModalMax();
-  return {
-    width: Math.min(max.width, Math.max(MODAL_WIDTH_MIN, width)),
-    height: Math.min(max.height, Math.max(MODAL_HEIGHT_MIN, height)),
-  };
-}
 const HISTORY_LIST_WIDTH_KEY = "acpio.gitHistoryListWidth.v1";
 const HISTORY_LIST_WIDTH_MIN = 140;
 const HISTORY_LIST_WIDTH_MAX = 520;
@@ -78,24 +55,6 @@ function readStoredWidth() {
     /* ignore */
   }
   return WIDTH_DEFAULT;
-}
-
-function readStoredModalSize() {
-  try {
-    const rawW = localStorage.getItem(MODAL_WIDTH_KEY);
-    const rawH = localStorage.getItem(MODAL_HEIGHT_KEY);
-    const hasStored = Boolean(rawW || rawH);
-    if (!hasStored) return defaultModalSize();
-    const nW = rawW ? Number(rawW) : NaN;
-    const nH = rawH ? Number(rawH) : NaN;
-    return clampModalSize(
-      Number.isFinite(nW) ? nW : defaultModalSize().width,
-      Number.isFinite(nH) ? nH : defaultModalSize().height,
-    );
-  } catch {
-    /* ignore */
-  }
-  return defaultModalSize();
 }
 
 function readHistoryListWidth() {
@@ -154,6 +113,7 @@ export function GitChangesSidePanel({
   sessionId,
   open,
   status,
+  statusLoading = false,
   awaitingGit = false,
   branchBusy,
   onClose,
@@ -163,6 +123,7 @@ export function GitChangesSidePanel({
   sessionId: string;
   open: boolean;
   status: GitStatusDto | null;
+  statusLoading?: boolean;
   awaitingGit?: boolean;
   branchBusy: boolean;
   onClose: () => void;
@@ -174,15 +135,12 @@ export function GitChangesSidePanel({
   const togglePresentation = useAppStore((s) => s.toggleGitPanelPresentation);
   const narrowPanel = useNarrowPanelLayout();
   const [width, setWidth] = useState(readStoredWidth);
-  const [modalSize, setModalSize] = useState(readStoredModalSize);
   const [dragging, setDragging] = useState(false);
-  const [modalDragging, setModalDragging] = useState<"e" | "s" | "se" | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const historyListDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const historyDetailDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const changesTreeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const syncInFlightRef = useRef(false);
-  const modalDragRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
   const [tab, setTab] = useState<PanelTab>("changes");
   const [selection, setSelection] = useState<Selection>({ kind: "working", path: null });
   const [diff, setDiff] = useState("");
@@ -204,6 +162,8 @@ export function GitChangesSidePanel({
   const inflightDiffKeyRef = useRef<string | null>(null);
   const diffCacheRef = useRef(new Map<string, string>());
   const diffRequestRef = useRef(0);
+  const diffDismissedRef = useRef(false);
+  const diffAutoSelectScopeRef = useRef("");
 
   const clearLoadedDiff = useCallback(() => {
     loadedDiffKeyRef.current = null;
@@ -269,16 +229,6 @@ export function GitChangesSidePanel({
       /* ignore */
     }
   }, [presentation, width]);
-
-  useEffect(() => {
-    if (presentation !== "modal") return;
-    try {
-      localStorage.setItem(MODAL_WIDTH_KEY, String(modalSize.width));
-      localStorage.setItem(MODAL_HEIGHT_KEY, String(modalSize.height));
-    } catch {
-      /* ignore */
-    }
-  }, [modalSize.height, modalSize.width, presentation]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -442,6 +392,14 @@ export function GitChangesSidePanel({
     diffRequestRef.current += 1;
     setDiff("");
     setLoadingDiff(false);
+    setCommits([]);
+    setCommitDetail(null);
+    setSelection({ kind: "working", path: null });
+    setTab("changes");
+    setCommitSummary("");
+    setCommitDescription("");
+    setLoadingCommits(false);
+    setLoadingCommitDetail(false);
   }, [clearLoadedDiff, sessionId]);
 
   useEffect(() => {
@@ -451,11 +409,57 @@ export function GitChangesSidePanel({
     diffRequestRef.current += 1;
     setDiff("");
     setLoadingDiff(false);
+    diffDismissedRef.current = false;
     setSelection({ kind: "working", path: null });
     void refreshStatus().then(() => {
       void refreshCommits();
     });
   }, [clearLoadedDiff, open, sessionId, refreshStatus, refreshCommits]);
+
+  const clearWorkingFileSelection = useCallback(() => {
+    diffDismissedRef.current = true;
+    diffRequestRef.current += 1;
+    clearLoadedDiff();
+    setDiff("");
+    setLoadingDiff(false);
+    setSelection({ kind: "working", path: null });
+  }, [clearLoadedDiff]);
+
+  const clearCommitFileSelection = useCallback(
+    (hash: string) => {
+      diffDismissedRef.current = true;
+      diffRequestRef.current += 1;
+      clearLoadedDiff();
+      setDiff("");
+      setLoadingDiff(false);
+      setSelection({ kind: "commit", hash, filePath: null });
+    },
+    [clearLoadedDiff],
+  );
+
+  const toggleWorkingFile = useCallback(
+    (path: string) => {
+      if (selection.kind === "working" && selection.path === path) {
+        clearWorkingFileSelection();
+        return;
+      }
+      diffDismissedRef.current = false;
+      void loadWorkingDiff(path);
+    },
+    [clearWorkingFileSelection, loadWorkingDiff, selection],
+  );
+
+  const toggleCommitFile = useCallback(
+    (hash: string, filePath: string) => {
+      if (selection.kind === "commit" && selection.hash === hash && selection.filePath === filePath) {
+        clearCommitFileSelection(hash);
+        return;
+      }
+      diffDismissedRef.current = false;
+      void loadCommitFileDiff(hash, filePath);
+    },
+    [clearCommitFileSelection, loadCommitFileDiff, selection],
+  );
 
   const setFilesStage = useCallback(
     async (paths: string[], staged: boolean) => {
@@ -828,22 +832,6 @@ export function GitChangesSidePanel({
     setChangesTreeWidth(CHANGES_TREE_WIDTH_DEFAULT);
   }, []);
 
-  const onModalResizeDown = useCallback(
-    (edge: "e" | "s" | "se", e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      modalDragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        startW: modalSize.width,
-        startH: modalSize.height,
-      };
-      setModalDragging(edge);
-    },
-    [modalSize.height, modalSize.width],
-  );
-
   useEffect(() => {
     if (!dragging) return;
     const onMove = (e: PointerEvent) => {
@@ -934,61 +922,59 @@ export function GitChangesSidePanel({
   }, [changesTreeDragging]);
 
   useEffect(() => {
-    if (!modalDragging) return;
-    const onMove = (e: PointerEvent) => {
-      const drag = modalDragRef.current;
-      if (!drag) return;
-      const max = viewportModalMax();
-      if (modalDragging === "e" || modalDragging === "se") {
-        const nextW = drag.startW + (e.clientX - drag.startX);
-        setModalSize((prev) => ({
-          ...prev,
-          width: Math.min(max.width, Math.max(MODAL_WIDTH_MIN, nextW)),
-        }));
-      }
-      if (modalDragging === "s" || modalDragging === "se") {
-        const nextH = drag.startH + (e.clientY - drag.startY);
-        setModalSize((prev) => ({
-          ...prev,
-          height: Math.min(max.height, Math.max(MODAL_HEIGHT_MIN, nextH)),
-        }));
-      }
-    };
-    const onUp = () => {
-      modalDragRef.current = null;
-      setModalDragging(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [modalDragging]);
-
-  useEffect(() => {
-    if (!dragging && !modalDragging && !historyListDragging && !historyDetailDragging && !changesTreeDragging)
-      return;
+    if (!dragging && !historyListDragging && !historyDetailDragging && !changesTreeDragging) return;
     const prev = document.body.style.cursor;
     if (dragging || historyListDragging || changesTreeDragging) document.body.style.cursor = "col-resize";
     else if (historyDetailDragging) document.body.style.cursor = "row-resize";
-    else if (modalDragging === "se") document.body.style.cursor = "nwse-resize";
-    else if (modalDragging === "e") document.body.style.cursor = "ew-resize";
-    else if (modalDragging === "s") document.body.style.cursor = "ns-resize";
     document.body.classList.add(styles.resizingBody);
     return () => {
       document.body.style.cursor = prev;
       document.body.classList.remove(styles.resizingBody);
     };
-  }, [dragging, modalDragging, historyListDragging, historyDetailDragging, changesTreeDragging]);
+  }, [dragging, historyListDragging, historyDetailDragging, changesTreeDragging]);
+
+  const diffAutoSelectScope =
+    selection.kind === "commit" ? `commit:${selection.hash}` : "working";
+
+  useEffect(() => {
+    if (diffAutoSelectScopeRef.current !== diffAutoSelectScope) {
+      diffAutoSelectScopeRef.current = diffAutoSelectScope;
+      diffDismissedRef.current = false;
+    }
+  }, [diffAutoSelectScope]);
+
+  useEffect(() => {
+    diffDismissedRef.current = false;
+    diffAutoSelectScopeRef.current = "";
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!open || !status?.dirty || selection.kind !== "working") return;
+    if (diffDismissedRef.current && !selection.path) return;
+    const filePaths = status.files.map((f) => f.path);
+    if (selection.path && filePaths.includes(selection.path)) return;
+    const first = firstChangedFilePath({
+      conflictFiles: status.files.filter(isGitConflictFile),
+      unstagedFiles: status.files.filter((f) => f.unstaged && !isGitConflictFile(f)),
+      stagedFiles: status.files.filter((f) => f.staged && !isGitConflictFile(f)),
+      files: status.files,
+    });
+    if (first) void loadWorkingDiff(first);
+  }, [loadWorkingDiff, open, selection, status]);
+
+  useEffect(() => {
+    if (!open || selection.kind !== "commit" || !commitDetail?.files.length) return;
+    if (diffDismissedRef.current && !selection.filePath) return;
+    if (selection.filePath && commitDetail.files.some((f) => f.path === selection.filePath)) return;
+    const first = firstCommitFilePath(commitDetail.files);
+    if (first) void loadCommitFileDiff(selection.hash, first);
+  }, [commitDetail, loadCommitFileDiff, open, selection]);
 
   const selectWorkingFile = useCallback(
     (path: string) => {
-      void loadWorkingDiff(path);
+      toggleWorkingFile(path);
     },
-    [loadWorkingDiff],
+    [toggleWorkingFile],
   );
 
   const diffContextSource = useMemo((): DiffContextSource | undefined => {
@@ -1001,6 +987,7 @@ export function GitChangesSidePanel({
 
   if (!open) return null;
 
+  const repoPending = statusLoading || (awaitingGit && !status);
   const files = status?.files ?? [];
   const repo = status?.repo ?? false;
   const conflictFiles = files.filter(isGitConflictFile);
@@ -1057,7 +1044,7 @@ export function GitChangesSidePanel({
           </span>
           <div className={styles.headerLead}>
             <span className={styles.headerKicker}>{t("git.title")}</span>
-            {awaitingGit ? (
+            {repoPending ? (
               <span className={styles.headerLoading}>
                 <span className={styles.loaderSpin} aria-hidden />
                 {t("git.initializing")}
@@ -1074,35 +1061,6 @@ export function GitChangesSidePanel({
             )}
           </div>
           <div className={styles.headerIconRow}>
-            {!narrowPanel ? (
-              <button
-                type="button"
-                className={styles.iconBtn}
-                onClick={() => {
-                  if (presentation === "side") setModalSize(defaultModalSize());
-                  togglePresentation();
-                }}
-                title={presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}
-                aria-label={presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}
-              >
-                {presentation === "modal" ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <rect x="4" y="5" width="10" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                    <path
-                      d="M16 8h4v11a2 2 0 0 1-2 2h-2"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <rect x="5" y="7" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                    <path d="M9 5h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                  </svg>
-                )}
-              </button>
-            ) : null}
             <button
               type="button"
               className={styles.iconBtn}
@@ -1140,7 +1098,45 @@ export function GitChangesSidePanel({
           </div>
         </div>
 
-        {status && !awaitingGit ? (
+        {!narrowPanel ? (
+          <div className={styles.headerPresentationRow}>
+            <button
+              type="button"
+              className={`${styles.presentationBtn}${
+                presentation === "modal" ? ` ${styles.presentationBtnActive}` : ""
+              }`}
+              onClick={() => togglePresentation()}
+              title={presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}
+              aria-pressed={presentation === "modal"}
+            >
+              {presentation === "modal" ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <rect x="4" y="5" width="10" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+                  <path
+                    d="M16 8h4v11a2 2 0 0 1-2 2h-2"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
+                  <path d="M8 3h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  <path
+                    d="M9 9h6M9 12h6M9 15h4"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              )}
+              <span>{presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}</span>
+            </button>
+          </div>
+        ) : null}
+
+        {status && !repoPending ? (
           <div className={styles.headerMetaRow}>
             <div className={styles.headerStatsGroup}>
               {status.dirty ? (
@@ -1178,7 +1174,7 @@ export function GitChangesSidePanel({
           </div>
         ) : null}
 
-        {repo ? (
+        {repo && !repoPending ? (
           <div className={styles.viewToggleRow}>
             <div className={styles.viewTabs} role="tablist" aria-label={t("git.title")}>
               <button
@@ -1294,7 +1290,7 @@ export function GitChangesSidePanel({
         </div>
       </div>
 
-      {awaitingGit ? (
+      {repoPending ? (
         <div className={`${styles.empty} ${styles.emptyLoading}`}>
           <span className={styles.loaderSpin} aria-hidden />
           {t("git.initializing")}
@@ -1349,6 +1345,7 @@ export function GitChangesSidePanel({
                     onSelectCommit={(hash) => void selectCommit(hash)}
                     onSelectWip={() => {
                       clearLoadedDiff();
+                      diffDismissedRef.current = false;
                       setTab("history");
                       setSelection({ kind: "working", path: null });
                       setCommitDetail(null);
@@ -1388,8 +1385,8 @@ export function GitChangesSidePanel({
                         commitSelected ? selection.filePath : workingSelected ? selection.path : null
                       }
                       onSelectFile={(path) => {
-                        if (commitSelected) void loadCommitFileDiff(selection.hash, path);
-                        else void loadWorkingDiff(path);
+                        if (commitSelected) toggleCommitFile(selection.hash, path);
+                        else toggleWorkingFile(path);
                       }}
                       onSelectParent={(hash) => void selectCommit(hash)}
                       onBlameFile={loadWorkingBlame}
@@ -1428,8 +1425,8 @@ export function GitChangesSidePanel({
     </>
   );
 
-  if (presentation === "modal" && !narrowPanel) {
-    return (
+  if (presentation === "modal") {
+    return createPortal(
       <div
         className={styles.modalOverlay}
         role="presentation"
@@ -1438,34 +1435,15 @@ export function GitChangesSidePanel({
         }}
       >
         <div
-          className={`${styles.modalShell}${modalDragging ? ` ${styles.modalResizing}` : ""}`}
-          style={{ width: `${modalSize.width}px`, height: `${modalSize.height}px` }}
+          className={styles.modalShell}
           role="dialog"
           aria-modal="true"
           aria-label={t("git.title")}
         >
           <aside className={`${styles.panel} ${styles.panelInModal}`}>{panelInner}</aside>
-          <div
-            className={styles.modalResizeE}
-            onPointerDown={(e) => onModalResizeDown("e", e)}
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t("common.resizePlan")}
-          />
-          <div
-            className={styles.modalResizeS}
-            onPointerDown={(e) => onModalResizeDown("s", e)}
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label={t("common.resizePlan")}
-          />
-          <div
-            className={styles.modalResizeSE}
-            onPointerDown={(e) => onModalResizeDown("se", e)}
-            aria-hidden
-          />
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 

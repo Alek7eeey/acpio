@@ -143,6 +143,56 @@
   flex: 0 0 auto;
 }
 
+.headerPresentationRow {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 12px 8px;
+}
+
+.presentationBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 1px 4px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.presentationBtn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  color: var(--text);
+}
+
+.presentationBtnActive {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  color: var(--text);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
+    0 2px 8px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 .headerMetaRow {
   position: relative;
   z-index: 1;
@@ -349,7 +399,8 @@
   transition:
     color 0.15s ease,
     border-color 0.15s ease,
-    background 0.15s ease;
+    background 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .closeBtn:hover,
@@ -433,11 +484,8 @@
 .modalOverlay {
   position: fixed;
   inset: 0;
-  z-index: 480;
+  z-index: 520;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
   background: rgba(0, 0, 0, 0.42);
   backdrop-filter: blur(2px);
 }
@@ -445,47 +493,16 @@
 .modalShell {
   position: relative;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
-  border-radius: 14px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.28);
-}
-
-.modalResizing {
-  user-select: none;
-}
-
-.modalResizeE,
-.modalResizeS,
-.modalResizeSE {
-  position: absolute;
-  z-index: 8;
-  touch-action: none;
-}
-
-.modalResizeE {
-  top: 0;
-  right: 0;
-  width: 8px;
-  height: 100%;
-  cursor: ew-resize;
-}
-
-.modalResizeS {
-  left: 0;
-  bottom: 0;
   width: 100%;
-  height: 8px;
-  cursor: ns-resize;
-}
-
-.modalResizeSE {
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
+  height: 100%;
+  max-width: 100vw;
+  max-height: 100dvh;
+  overflow: hidden;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .historyLayout {

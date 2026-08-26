@@ -20,24 +20,33 @@
 }
 
 .scroll {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   min-height: 0;
   flex: 1;
+  padding: 0 2px;
 }
 
 .row {
   display: flex;
   align-items: stretch;
-  width: 100%;
+  width: calc(100% - 4px);
   min-height: 36px;
+  margin: 0 2px;
   border: none;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 8px;
   background: transparent;
   color: var(--text);
   text-align: left;
   cursor: pointer;
   font: inherit;
   padding: 0;
+  overflow: hidden;
+}
+
+.row:last-child {
+  border-bottom: none;
 }
 
 .row:hover {
@@ -46,6 +55,7 @@
 
 .rowActive {
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
 .rowActive:hover {

@@ -7,6 +7,7 @@ import {
   isGitConflictFile,
   parseGitSyncOutput,
   shouldAwaitGitRepo,
+  shouldShowGitComposerUi,
 } from "./gitUi";
 
 const samplePushOutput = `remote:
@@ -52,7 +53,7 @@ describe("shouldAwaitGitRepo", () => {
     expect(
       shouldAwaitGitRepo({
         loading: false,
-        status: { repo: false } as never,
+        status: null,
         hasCwd: true,
         sessionStatus: "running",
         isEmptyChat: true,
@@ -70,6 +71,54 @@ describe("shouldAwaitGitRepo", () => {
         isEmptyChat: true,
       }),
     ).toBe(false);
+  });
+
+  it("stops waiting when folder has no git repo", () => {
+    expect(
+      shouldAwaitGitRepo({
+        loading: false,
+        status: { repo: false } as never,
+        hasCwd: true,
+        sessionStatus: "running",
+        streaming: true,
+        isEmptyChat: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("shouldShowGitComposerUi", () => {
+  it("shows git ui for repos", () => {
+    expect(
+      shouldShowGitComposerUi({
+        loading: false,
+        awaiting: false,
+        status: { repo: true } as never,
+        hasCwd: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("hides git ui when folder has no repo", () => {
+    expect(
+      shouldShowGitComposerUi({
+        loading: false,
+        awaiting: false,
+        status: { repo: false } as never,
+        hasCwd: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows loader while git status is still loading", () => {
+    expect(
+      shouldShowGitComposerUi({
+        loading: true,
+        awaiting: true,
+        status: null,
+        hasCwd: true,
+      }),
+    ).toBe(true);
   });
 });
 

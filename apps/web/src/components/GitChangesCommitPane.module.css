@@ -455,7 +455,9 @@
 
 .primaryBtn {
   margin: 8px 10px 0;
-  width: calc(100% - 20px);
+  width: auto;
+  max-width: calc(100% - 20px);
+  align-self: flex-start;
   border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border));
   border-radius: 8px;
   padding: 9px 12px;

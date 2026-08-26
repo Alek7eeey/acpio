@@ -1,10 +1,57 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewToolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.viewBtn {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.68rem;
+  cursor: pointer;
+}
+
+.viewBtn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.viewBtnActive {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
 .plain,
-.diff {
+.diff,
+.diffSplit {
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
   font-size: 0.72rem;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.diff,
+.diffSplit {
+  min-width: 0;
 }
 
 .line {
@@ -21,7 +68,7 @@
 }
 
 .add {
-  background: color-mix(in srgb, #22c55e 16%, transparent);
+  background: color-mix(in srgb, #22c55e 12%, transparent);
 }
 
 .ctx {
@@ -29,7 +76,17 @@
 }
 
 .del {
-  background: color-mix(in srgb, #ef4444 14%, transparent);
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.wordAdd {
+  background: color-mix(in srgb, #22c55e 58%, transparent);
+  border-radius: 2px;
+}
+
+.wordDel {
+  background: color-mix(in srgb, #ef4444 52%, transparent);
+  border-radius: 2px;
 }
 
 .fileBlock {
@@ -38,6 +95,65 @@
 
 .hunkBlock {
   min-width: 0;
+}
+
+.splitHeadRow,
+.splitRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.splitHeadRow {
+  position: sticky;
+  top: 34px;
+  z-index: 1;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg-secondary));
+}
+
+.splitHeadLabel {
+  padding: 4px 8px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.splitGutter {
+  padding: 0 6px;
+  text-align: right;
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  user-select: none;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+}
+
+.splitCell {
+  padding: 0 8px;
+  min-width: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 55%, transparent);
+}
+
+.splitRow .splitCell:last-child,
+.splitHeadRow .splitHeadLabel:last-child {
+  border-right: none;
+}
+
+.splitCtx {
+  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+}
+
+.splitAdd {
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+}
+
+.splitDel {
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.splitEmpty {
+  background: color-mix(in srgb, var(--bg-secondary) 35%, transparent);
 }
 
 .expandRow {

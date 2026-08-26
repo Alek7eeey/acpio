@@ -97,6 +97,7 @@ import {
   splitSlashCommandHighlight,
 } from "../lib/slashCommands";
 import { slashListStillLoading } from "../lib/sessionSlashCommands";
+import { shouldShowGitComposerUi } from "../lib/gitUi";
 import styles from "./ChatPage.module.css";
 
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/g;
@@ -2888,7 +2889,9 @@ function ChatThread() {
   const gitPanelOpen = useAppStore((s) => s.gitPanelOpen);
   const gitPanelPresentation = useAppStore((s) => s.gitPanelPresentation);
   const compactPanelLayout = useCompactPanelLayout();
-  const gitPanelDockedLayout = gitPanelPresentation === "side" || compactPanelLayout;
+  const sidePanelResizeAllowed = useChatSplitAllowed();
+  const gitPanelDockedLayout =
+    gitPanelPresentation === "side" && (compactPanelLayout || sidePanelResizeAllowed);
   const setGitPanelOpen = useAppStore((s) => s.setGitPanelOpen);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
@@ -3263,6 +3266,16 @@ function ChatThread() {
     streaming,
     isEmptyChat,
   });
+  const showGitComposer = useMemo(
+    () =>
+      shouldShowGitComposerUi({
+        loading: git.loading,
+        awaiting: git.awaiting,
+        status: git.status,
+        hasCwd: Boolean(activeSession?.cwd?.trim()),
+      }),
+    [activeSession?.cwd, git.awaiting, git.loading, git.status],
+  );
   // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
   const composerLocked =
     agentMissing ||
@@ -4468,7 +4481,7 @@ function ChatThread() {
               onClick: openPlanPanel,
             }}
             gitChip={
-              activeSession?.cwd?.trim()
+              showGitComposer
                 ? {
                     status: git.status,
                     loading: git.loading,
@@ -4773,19 +4786,21 @@ function ChatThread() {
               </div>
             </div>
           </div>
-          {git.awaiting ? (
-            <div className={styles.gitComposerFooter}>
-              <GitComposerLoadingBar variant="composerSubtle" />
-            </div>
-          ) : git.status?.repo ? (
-            <div className={styles.gitComposerFooter}>
-              <ComposerGitBranchBar
-                variant="composerSubtle"
-                status={git.status}
-                branchBusy={git.branchBusy}
-                onCheckout={git.checkout}
-              />
-            </div>
+          {showGitComposer ? (
+            git.status?.repo ? (
+              <div className={styles.gitComposerFooter}>
+                <ComposerGitBranchBar
+                  variant="composerSubtle"
+                  status={git.status}
+                  branchBusy={git.branchBusy}
+                  onCheckout={git.checkout}
+                />
+              </div>
+            ) : git.loading || git.awaiting ? (
+              <div className={styles.gitComposerFooter}>
+                <GitComposerLoadingBar variant="composerSubtle" />
+              </div>
+            ) : null
           ) : null}
         </div>
       </form>
@@ -4931,8 +4946,9 @@ function ChatThread() {
       {activeSession ? (
         <GitChangesSidePanel
           sessionId={activeSession.id}
-          open={activeRightPanel === "git" && (!bind || bind.focused)}
+          open={gitPanelOpen && (!bind || bind.focused)}
           status={git.status}
+          statusLoading={git.loading}
           awaitingGit={git.awaiting}
           branchBusy={git.branchBusy}
           onClose={() => setGitPanelOpen(false)}

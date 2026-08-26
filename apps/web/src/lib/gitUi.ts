@@ -42,12 +42,27 @@ export function shouldAwaitGitRepo(input: {
   isEmptyChat?: boolean;
 }) {
   if (input.loading) return true;
-  if (!input.hasCwd || input.status?.repo) return false;
+  if (!input.hasCwd) return false;
+  if (input.status?.repo) return false;
+  if (input.status && input.status.repo === false) return false;
   if (input.sessionStatus === "error" || input.sessionStatus === "closed") return false;
   if (input.streaming || input.sessionStatus === "running" || input.sessionStatus === "waiting") return true;
   if (input.isEmptyChat && input.sessionStatus === "idle") return false;
   if (input.isEmptyChat) return true;
   return false;
+}
+
+/** Show git chip / composer branch bar only for repos, or while status is still loading. */
+export function shouldShowGitComposerUi(input: {
+  loading: boolean;
+  awaiting: boolean;
+  status: GitStatusDto | null;
+  hasCwd?: boolean;
+}) {
+  if (!input.hasCwd) return false;
+  if (input.status?.repo) return true;
+  if (input.status && input.status.repo === false) return false;
+  return input.loading || input.awaiting;
 }
 
 export function formatDiffStats(additions: number, deletions: number): string {

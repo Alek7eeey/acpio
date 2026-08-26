@@ -1,10 +1,18 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
+import {
+  buildSideBySideRows,
+  buildUnifiedDiffRows,
+  diffInlineSegments,
+  type InlineSegment,
+  type SideBySideRow,
+} from "../lib/gitDiffInline";
 import { isUnifiedDiff, parseUnifiedDiff, type ParsedDiffFile, type ParsedDiffLine } from "../lib/gitDiffParse";
 import styles from "./DiffTextView.module.css";
 
 const EXPAND_CHUNK = 100;
+const DIFF_VIEW_KEY = "acpio.gitDiffView.v1";
 
 export type DiffContextSource = {
   sessionId: string;
@@ -12,11 +20,23 @@ export type DiffContextSource = {
   commitRev?: string;
 };
 
+type DiffViewMode = "unified" | "split";
+
 type HunkExpansion = {
   aboveLines: string[];
   belowLines: string[];
   totalLines?: number;
 };
+
+function readDiffViewMode(): DiffViewMode {
+  try {
+    const raw = localStorage.getItem(DIFF_VIEW_KEY);
+    if (raw === "split" || raw === "unified") return raw;
+  } catch {
+    /* ignore */
+  }
+  return "unified";
+}
 
 function splitPlain(text: string) {
   return text.split("\n").map((line, idx) => (
@@ -34,6 +54,55 @@ function lineClass(line: ParsedDiffLine) {
   return styles.line;
 }
 
+function splitCellClass(kind: SideBySideRow["kind"], side: "old" | "new") {
+  if (kind === "context") return `${styles.splitCell} ${styles.splitCtx}`;
+  if (kind === "delete" && side === "old") return `${styles.splitCell} ${styles.splitDel}`;
+  if (kind === "insert" && side === "new") return `${styles.splitCell} ${styles.splitAdd}`;
+  if (kind === "change") {
+    return `${styles.splitCell} ${side === "old" ? styles.splitDel : styles.splitAdd}`;
+  }
+  return `${styles.splitCell} ${styles.splitEmpty}`;
+}
+
+function renderInlineSegments(segments: InlineSegment[] | undefined, side: "old" | "new", plain: string) {
+  if (!segments?.length) return plain === "" ? "\u00A0" : plain;
+  return segments.map((seg, idx) => {
+    if (seg.type === "equal") return <span key={idx}>{seg.text}</span>;
+    if (seg.type === "delete" && side === "old") {
+      return (
+        <span key={idx} className={styles.wordDel}>
+          {seg.text}
+        </span>
+      );
+    }
+    if (seg.type === "insert" && side === "new") {
+      return (
+        <span key={idx} className={styles.wordAdd}>
+          {seg.text}
+        </span>
+      );
+    }
+    return <span key={idx}>{seg.text}</span>;
+  });
+}
+
+function InlineDiffLine({
+  line,
+  side,
+  segments,
+}: {
+  line: ParsedDiffLine;
+  side: "old" | "new";
+  segments?: InlineSegment[];
+}) {
+  const text = line.text.length > 0 ? line.text.slice(1) : "";
+  return (
+    <div className={lineClass(line)}>
+      {renderInlineSegments(segments, side, text)}
+    </div>
+  );
+}
+
 function DiffLineRow({ line, keyId }: { line: ParsedDiffLine; keyId: string }) {
   return (
     <div key={keyId} className={lineClass(line)}>
@@ -46,6 +115,17 @@ function ContextLines({ lines, prefix }: { lines: string[]; prefix: string }) {
   return lines.map((text, idx) => (
     <div key={`${prefix}-${idx}`} className={`${styles.line} ${styles.ctx}`}>
       {text === "" ? " " : ` ${text}`}
+    </div>
+  ));
+}
+
+function SplitContextLines({ lines, prefix }: { lines: string[]; prefix: string }) {
+  return lines.map((text, idx) => (
+    <div key={`${prefix}-${idx}`} className={styles.splitRow}>
+      <div className={styles.splitGutter} aria-hidden />
+      <div className={`${styles.splitCell} ${styles.splitCtx}`}>{text === "" ? "\u00A0" : text}</div>
+      <div className={styles.splitGutter} aria-hidden />
+      <div className={`${styles.splitCell} ${styles.splitCtx}`}>{text === "" ? "\u00A0" : text}</div>
     </div>
   ));
 }
@@ -92,12 +172,121 @@ function ExpandDownRow({ busy, onClick }: { busy: boolean; onClick: () => void }
   );
 }
 
+function DiffViewToolbar({
+  mode,
+  onChange,
+}: {
+  mode: DiffViewMode;
+  onChange: (mode: DiffViewMode) => void;
+}) {
+  const t = useT();
+  return (
+    <div className={styles.viewToolbar} role="toolbar" aria-label={t("git.diffViewMode")}>
+      <button
+        type="button"
+        className={`${styles.viewBtn}${mode === "unified" ? ` ${styles.viewBtnActive}` : ""}`}
+        aria-pressed={mode === "unified"}
+        onClick={() => onChange("unified")}
+      >
+        {t("git.diffViewUnified")}
+      </button>
+      <button
+        type="button"
+        className={`${styles.viewBtn}${mode === "split" ? ` ${styles.viewBtnActive}` : ""}`}
+        aria-pressed={mode === "split"}
+        onClick={() => onChange("split")}
+      >
+        {t("git.diffViewSplit")}
+      </button>
+    </div>
+  );
+}
+
+function SplitColumnHeaders() {
+  const t = useT();
+  return (
+    <div className={styles.splitHeadRow}>
+      <span className={styles.splitGutter} aria-hidden />
+      <span className={styles.splitHeadLabel}>{t("git.diffOriginal")}</span>
+      <span className={styles.splitGutter} aria-hidden />
+      <span className={styles.splitHeadLabel}>{t("git.diffModified")}</span>
+    </div>
+  );
+}
+
+function SplitDiffRow({ row }: { row: SideBySideRow }) {
+  let oldSegments: InlineSegment[] | undefined;
+  let newSegments: InlineSegment[] | undefined;
+  if (row.oldText !== null && row.newText !== null) {
+    const inline = diffInlineSegments(row.oldText, row.newText);
+    oldSegments = inline.old;
+    newSegments = inline.new;
+  } else if (row.oldText !== null) {
+    oldSegments = [{ type: "delete", text: row.oldText }];
+  } else if (row.newText !== null) {
+    newSegments = [{ type: "insert", text: row.newText }];
+  }
+
+  return (
+    <div className={styles.splitRow}>
+      <div className={styles.splitGutter}>{row.oldLineNo ?? ""}</div>
+      <div className={splitCellClass(row.kind, "old")}>
+        {row.oldText === null ? "\u00A0" : renderInlineSegments(oldSegments, "old", row.oldText)}
+      </div>
+      <div className={styles.splitGutter}>{row.newLineNo ?? ""}</div>
+      <div className={splitCellClass(row.kind, "new")}>
+        {row.newText === null ? "\u00A0" : renderInlineSegments(newSegments, "new", row.newText)}
+      </div>
+    </div>
+  );
+}
+
 function resolveFilePath(file: ParsedDiffFile) {
   return file.newPath ?? file.oldPath;
 }
 
 function hunkKey(fileIndex: number, hunkIndex: number) {
   return `${fileIndex}-${hunkIndex}`;
+}
+
+function renderUnifiedHunkBody(lines: ParsedDiffLine[], keyPrefix: string) {
+  const rows = buildUnifiedDiffRows(lines);
+  const nodes: ReactNode[] = [];
+
+  for (let idx = 0; idx < rows.length; idx += 1) {
+    const row = rows[idx]!;
+    if (row.kind === "change") {
+      nodes.push(
+        <InlineDiffLine
+          key={`${keyPrefix}-old-${idx}`}
+          line={row.oldLine}
+          side="old"
+          segments={row.oldSegments}
+        />,
+      );
+      nodes.push(
+        <InlineDiffLine
+          key={`${keyPrefix}-new-${idx}`}
+          line={row.newLine}
+          side="new"
+          segments={row.newSegments}
+        />,
+      );
+      continue;
+    }
+
+    const side = row.line.kind === "del" ? "old" : "new";
+    nodes.push(
+      <InlineDiffLine
+        key={`${keyPrefix}-line-${idx}`}
+        line={row.line}
+        side={side}
+        segments={side === "old" ? row.oldSegments : row.newSegments}
+      />,
+    );
+  }
+
+  return nodes;
 }
 
 export const DiffTextView = memo(function DiffTextView({
@@ -108,6 +297,7 @@ export const DiffTextView = memo(function DiffTextView({
   contextSource?: DiffContextSource;
 }) {
   const trimmed = text.trim();
+  const [viewMode, setViewMode] = useState<DiffViewMode>(() => readDiffViewMode());
   const [expansions, setExpansions] = useState<Record<string, HunkExpansion>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
@@ -117,6 +307,15 @@ export const DiffTextView = memo(function DiffTextView({
   }, [trimmed, contextSource?.sessionId, contextSource?.mode, contextSource?.commitRev]);
 
   const parsed = useMemo(() => (trimmed && isUnifiedDiff(trimmed) ? parseUnifiedDiff(trimmed) : null), [trimmed]);
+
+  const setMode = useCallback((mode: DiffViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem(DIFF_VIEW_KEY, mode);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const fetchLines = useCallback(
     async (filePath: string, start: number, end: number) => {
@@ -205,64 +404,87 @@ export const DiffTextView = memo(function DiffTextView({
   const canExpand = Boolean(contextSource);
 
   return (
-    <div className={styles.diff}>
-      {parsed.map((file, fileIndex) => {
-        const filePath = resolveFilePath(file);
+    <div className={styles.root}>
+      <DiffViewToolbar mode={viewMode} onChange={setMode} />
+      <div className={viewMode === "split" ? styles.diffSplit : styles.diff}>
+        {parsed.map((file, fileIndex) => {
+          const filePath = resolveFilePath(file);
 
-        return (
-          <div key={`file-${fileIndex}`} className={styles.fileBlock}>
-            {file.headerLines.map((line, idx) => (
-              <DiffLineRow key={`h-${fileIndex}-${idx}`} line={line} keyId={`h-${fileIndex}-${idx}`} />
-            ))}
+          return (
+            <div key={`file-${fileIndex}`} className={styles.fileBlock}>
+              {file.hunks.map((hunk, hunkIndex) => {
+                const key = hunkKey(fileIndex, hunkIndex);
+                const expansion = expansions[key];
+                const aboveCount = expansion?.aboveLines.length ?? 0;
+                const belowCount = expansion?.belowLines.length ?? 0;
+                const totalLines = expansion?.totalLines;
+                const canExpandUp = canExpand && Boolean(filePath) && hunk.newStart - 1 - aboveCount >= 1;
+                const canExpandDown =
+                  canExpand &&
+                  Boolean(filePath) &&
+                  (totalLines === undefined || hunk.newEnd + belowCount < totalLines);
+                const busyUp = loadingKey === `${key}-up`;
+                const busyDown = loadingKey === `${key}-down`;
 
-            {file.hunks.map((hunk, hunkIndex) => {
-              const key = hunkKey(fileIndex, hunkIndex);
-              const expansion = expansions[key];
-              const aboveCount = expansion?.aboveLines.length ?? 0;
-              const belowCount = expansion?.belowLines.length ?? 0;
-              const totalLines = expansion?.totalLines;
-              const canExpandUp = canExpand && Boolean(filePath) && hunk.newStart - 1 - aboveCount >= 1;
-              const canExpandDown =
-                canExpand &&
-                Boolean(filePath) &&
-                (totalLines === undefined || hunk.newEnd + belowCount < totalLines);
-              const busyUp = loadingKey === `${key}-up`;
-              const busyDown = loadingKey === `${key}-down`;
-
-              return (
-                <div key={`hunk-${fileIndex}-${hunkIndex}`} className={styles.hunkBlock}>
-                  {expansion?.aboveLines.length ? (
-                    <ContextLines lines={expansion.aboveLines} prefix={`${key}-above`} />
-                  ) : null}
-                  {canExpandUp ? (
-                    <ExpandUpRow
-                      busy={busyUp}
-                      onClick={() => void expandHunk(key, filePath!, "up", hunk.newStart, hunk.newEnd, expansion)}
-                    />
-                  ) : null}
-                  <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
-                  {hunk.lines.map((line, lineIndex) => (
-                    <DiffLineRow
-                      key={`hl-${fileIndex}-${hunkIndex}-${lineIndex}`}
-                      line={line}
-                      keyId={`hl-${fileIndex}-${hunkIndex}-${lineIndex}`}
-                    />
-                  ))}
-                  {canExpandDown ? (
-                    <ExpandDownRow
-                      busy={busyDown}
-                      onClick={() => void expandHunk(key, filePath!, "down", hunk.newStart, hunk.newEnd, expansion)}
-                    />
-                  ) : null}
-                  {expansion?.belowLines.length ? (
-                    <ContextLines lines={expansion.belowLines} prefix={`${key}-below`} />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
+                return (
+                  <div key={`hunk-${fileIndex}-${hunkIndex}`} className={styles.hunkBlock}>
+                    {viewMode === "split" ? (
+                      <>
+                        {expansion?.aboveLines.length ? (
+                          <SplitContextLines lines={expansion.aboveLines} prefix={`${key}-above`} />
+                        ) : null}
+                        {canExpandUp ? (
+                          <ExpandUpRow
+                            busy={busyUp}
+                            onClick={() => void expandHunk(key, filePath!, "up", hunk.newStart, hunk.newEnd, expansion)}
+                          />
+                        ) : null}
+                        <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
+                        <SplitColumnHeaders />
+                        {buildSideBySideRows(hunk).map((row, rowIndex) => (
+                          <SplitDiffRow key={`split-${fileIndex}-${hunkIndex}-${rowIndex}`} row={row} />
+                        ))}
+                        {canExpandDown ? (
+                          <ExpandDownRow
+                            busy={busyDown}
+                            onClick={() => void expandHunk(key, filePath!, "down", hunk.newStart, hunk.newEnd, expansion)}
+                          />
+                        ) : null}
+                        {expansion?.belowLines.length ? (
+                          <SplitContextLines lines={expansion.belowLines} prefix={`${key}-below`} />
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        {expansion?.aboveLines.length ? (
+                          <ContextLines lines={expansion.aboveLines} prefix={`${key}-above`} />
+                        ) : null}
+                        {canExpandUp ? (
+                          <ExpandUpRow
+                            busy={busyUp}
+                            onClick={() => void expandHunk(key, filePath!, "up", hunk.newStart, hunk.newEnd, expansion)}
+                          />
+                        ) : null}
+                        <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
+                        {renderUnifiedHunkBody(hunk.lines, `hl-${fileIndex}-${hunkIndex}`)}
+                        {canExpandDown ? (
+                          <ExpandDownRow
+                            busy={busyDown}
+                            onClick={() => void expandHunk(key, filePath!, "down", hunk.newStart, hunk.newEnd, expansion)}
+                          />
+                        ) : null}
+                        {expansion?.belowLines.length ? (
+                          <ContextLines lines={expansion.belowLines} prefix={`${key}-below`} />
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 });

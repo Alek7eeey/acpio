@@ -540,6 +540,7 @@ export function GitChangesCommitPane({
     (file: GitChangedFileDto, zone: StageZone, zoneVisible: GitChangedFileDto[], e: MouseEvent) => {
       const multiSelect = e.shiftKey || e.ctrlKey || e.metaKey;
       if (!multiSelect && selectionPath === file.path) {
+        onSelectFile(file.path);
         lastClickRef.current = { path: file.path, zone };
         return;
       }

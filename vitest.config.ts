@@ -14,6 +14,7 @@ export default defineConfig({
       "packages/*/src/**/*.test.{ts,tsx}",
       "apps/*/src/**/*.test.{ts,tsx}",
       "apps/server/test/**/*.test.{ts,tsx}",
+      "scripts/**/*.test.mjs",
     ],
     // Each worker process gets its own private in-memory SQLite DB
     // (db/client.ts picks up DATABASE_PATH; setup-env re-asserts it before
