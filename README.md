@@ -3,6 +3,8 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
+**Current version:** 0.1.2
+
 ## Stack
 
 - `apps/web` — React + Vite + TypeScript

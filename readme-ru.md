@@ -3,6 +3,8 @@
 Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
+**Актуальная версия:** 0.1.2
+
 ## Стек
 
 - `apps/web` — React + Vite + TypeScript

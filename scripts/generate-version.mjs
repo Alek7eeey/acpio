@@ -44,4 +44,21 @@ fs.writeFileSync(
     `export const BUILD_INFO = ${JSON.stringify(buildInfo, null, 2)} as const;\n`,
 );
 
+function updateReadmeVersion(filePath, pattern, line) {
+  const abs = path.join(repoRoot, filePath);
+  const text = fs.readFileSync(abs, "utf8");
+  const next = text.replace(pattern, line);
+  if (next === text) {
+    throw new Error(`Version line not found in ${filePath}`);
+  }
+  fs.writeFileSync(abs, next);
+}
+
+updateReadmeVersion("README.md", /\*\*Current version:\*\* \d+\.\d+\.\d+/, `**Current version:** ${version}`);
+updateReadmeVersion(
+  "readme-ru.md",
+  /\*\*Актуальная версия:\*\* \d+\.\d+\.\d+/,
+  `**Актуальная версия:** ${version}`,
+);
+
 console.log(`Version: ${version} (${commitsToday} commit(s) today, ${sha})`);
