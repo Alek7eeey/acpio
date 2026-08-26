@@ -5,6 +5,8 @@
 
 **Актуальная версия:** 0.1.1
 
+> **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
+
 ## Стек
 
 - `apps/web` — React + Vite + TypeScript
@@ -169,3 +171,7 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 Браузер ↔ REST/WS сервер ↔ запуск CLI харнесса через реестр адаптеров (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ SQLite.
 
 События `session/update`, permissions, вопросы, планы и карточки субагентов отображаются в ленте чата через нормализованные события адаптеров.
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).

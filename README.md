@@ -5,6 +5,8 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 
 **Current version:** 0.1.1
 
+> **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
+
 ## Stack
 
 - `apps/web` — React + Vite + TypeScript
@@ -169,3 +171,7 @@ automatically (provider list, CLI/API-key fields, models) from `GET /api/adapter
 Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent acp` / `omp acp`, JSON-RPC NDJSON) ↔ SQLite.
 
 `session/update` events, permissions, questions, plans and subagent cards are rendered in the chat feed via normalized adapter events.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
