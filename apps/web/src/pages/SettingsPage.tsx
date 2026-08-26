@@ -898,10 +898,10 @@ export function SettingsPage() {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    // Never send defaultProvider or theme from the form submit — the agent is
-    // bound via "Connect", and the theme is toggled only from the toolbar, so
-    // a stale form value must not flip the interface on a settings save.
-    const { defaultProvider: _provider, theme: _theme, ...rest } = form;
+    // Never send defaultProvider, theme, or locale from the form submit — the
+    // agent is bound via "Connect", and theme/locale are toggled from the
+    // shell, so stale form values must not flip the interface on save.
+    const { defaultProvider: _provider, theme: _theme, locale: _locale, ...rest } = form;
     await saveSettings(rest);
     // The MCP probes fire server-side on save — fetch once so the dots turn
     // green right away instead of waiting for the next poll tick.
@@ -919,7 +919,7 @@ export function SettingsPage() {
   ) => {
     const next = { ...form, [key]: "" };
     setForm(next);
-    const { defaultProvider: _provider, theme: _theme, ...rest } = next;
+    const { defaultProvider: _provider, theme: _theme, locale: _locale, ...rest } = next;
     await saveSettings(rest);
     showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
   };

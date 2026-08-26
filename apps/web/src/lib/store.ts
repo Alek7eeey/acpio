@@ -2709,10 +2709,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         ? { ...patch, defaultModel: "", defaultModelParams: {} }
         : patch;
     const settings = await api.updateSettings(nextPatch);
-    const nextSettings =
+    let nextSettings =
       typeof nextPatch.chatSplit === "boolean"
         ? { ...settings, chatSplit: nextPatch.chatSplit }
         : settings;
+    // Theme/locale are toggled live from the shell; partial saves must not
+    // clobber them with stale form values or an older server snapshot.
+    if (nextPatch.theme === undefined) {
+      nextSettings = { ...nextSettings, theme: current.theme };
+    }
+    if (nextPatch.locale === undefined) {
+      nextSettings = { ...nextSettings, locale: current.locale };
+    }
     if (nextPatch.theme) get().applyTheme(nextPatch.theme);
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings: nextSettings });
