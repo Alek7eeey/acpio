@@ -1,6 +1,7 @@
 # Release history
 
 Release dates use `DD.MM.YY` (local date when the build ran).
+Patch increments once per calendar day with commits (not per commit).
 
 | Version | Released |
 |---------|----------|

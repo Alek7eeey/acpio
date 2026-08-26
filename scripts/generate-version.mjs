@@ -1,6 +1,6 @@
 /**
- * Builds APP version from package.json semver + today's git commit count.
- * Each commit since local midnight bumps the patch segment by one.
+ * Builds APP version from package.json semver + release days with git activity.
+ * Each local calendar day with at least one commit bumps patch by one (not per commit).
  * With --record-release, appends new versions to VERSIONS.md during production builds.
  */
 import { execSync } from "node:child_process";
@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  computeAppVersion,
+  DEFAULT_VERSION_EPOCH,
   formatReleaseDate,
   parseVersionsMarkdown,
   renderVersionsMarkdown,
@@ -50,7 +52,10 @@ function recordVersionRelease(version, date) {
 
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const baseVersion = pkg.version;
-const [major, minor, patch = "0"] = baseVersion.split(".");
+const versionEpoch =
+  typeof pkg.versionEpoch === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pkg.versionEpoch)
+    ? pkg.versionEpoch
+    : DEFAULT_VERSION_EPOCH;
 
 const now = new Date();
 const since =
@@ -59,10 +64,15 @@ const since =
   `${String(now.getDate()).padStart(2, "0")} 00:00:00`;
 
 const commitsToday = parseInt(git(`git rev-list --count --since="${since}" HEAD`) || "0", 10);
+const commitDates = git('git log --format=%cd --date=format-local:%Y-%m-%d HEAD').split("\n");
+const { version, daysWithCommits } = computeAppVersion({
+  baseVersion,
+  commitDates,
+  epochDate: versionEpoch,
+});
 const sha = (git("git rev-parse --short HEAD") || "unknown").slice(0, 7);
-const version = `${major}.${minor}.${parseInt(patch, 10) + commitsToday}`;
 
-const buildInfo = { version, baseVersion, commitsToday, sha };
+const buildInfo = { version, baseVersion, versionEpoch, daysWithCommits, commitsToday, sha };
 
 const target = path.join(repoRoot, "packages", "shared", "src", "buildInfo.ts");
 fs.writeFileSync(
@@ -99,4 +109,6 @@ if (recordRelease) {
   }
 }
 
-console.log(`Version: ${version} (${commitsToday} commit(s) today, ${sha})`);
+console.log(
+  `Version: ${version} (${daysWithCommits} release day(s) since ${versionEpoch}, ${commitsToday} commit(s) today, ${sha})`,
+);
