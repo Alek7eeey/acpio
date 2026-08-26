@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { modelDisplayName, modelForProvider, type MessageDto, type SessionDto } from "@acpio/shared";
+import {
+  BUILD_INFO,
+  modelDisplayName,
+  modelForProvider,
+  type MessageDto,
+  type SessionDto,
+} from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
@@ -729,7 +735,7 @@ export function AppShell() {
       className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
       onClick={goChat}
       title={t("common.goToChat")}
-      aria-label="Acpio"
+      aria-label={`Acpio ${BUILD_INFO.version}`}
     >
       <span className={styles.brandLetters} aria-hidden>
         {"Acpio".split("").map((ch, i) => (
@@ -740,6 +746,9 @@ export function AppShell() {
             {ch}
           </span>
         ))}
+      </span>
+      <span className={styles.brandVersion} aria-hidden>
+        {BUILD_INFO.version}
       </span>
     </button>
   );

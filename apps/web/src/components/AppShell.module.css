@@ -531,6 +531,18 @@
   color: var(--accent);
 }
 
+.brandVersion {
+  margin-left: 6px;
+  font-size: 0.58em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  letter-spacing: 0;
+  flex-shrink: 0;
+  user-select: none;
+}
+
 .brandFlip {
   display: inline-block;
   line-height: 1;

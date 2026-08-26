@@ -23,6 +23,7 @@ export type {
   SubagentTranscriptPage,
 } from "./adapters.js";
 
+export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
   SETTINGS_SCHEMA_VERSION,
