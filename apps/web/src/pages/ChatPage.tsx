@@ -148,27 +148,6 @@ function shouldAutoFocusComposer() {
 const MSG_RATING_KEY = "acpio.msgRating.v1";
 type MsgRating = "like" | "dislike";
 
-type SpeechRecognitionResultItem = { transcript: string };
-type SpeechRecognitionResult = {
-  isFinal: boolean;
-  0: SpeechRecognitionResultItem;
-};
-type SpeechRecognitionLike = {
-  lang: string;
-  interimResults: boolean;
-  continuous: boolean;
-  onresult: ((event: { resultIndex: number; results: ArrayLike<SpeechRecognitionResult> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((event: { error: string }) => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-};
-type SpeechRecognitionWindow = Window & {
-  SpeechRecognition?: new () => SpeechRecognitionLike;
-  webkitSpeechRecognition?: new () => SpeechRecognitionLike;
-};
-
 function readMessageRating(messageId: string): MsgRating | null {
   try {
     const raw = localStorage.getItem(MSG_RATING_KEY);
@@ -3358,78 +3337,65 @@ function ChatThread() {
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState<string | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const voiceInputRef = useRef<import("../lib/audioDevice").VoiceInputController | null>(null);
+  const micComposerEnabled = (settings.chatComposerButtons ?? []).includes("mic");
+  const [voiceSupported, setVoiceSupported] = useState(true);
 
-  const voiceSupported = useMemo(
-    () =>
-      typeof window !== "undefined" &&
-      Boolean(
-        (window as SpeechRecognitionWindow).SpeechRecognition ??
-          (window as SpeechRecognitionWindow).webkitSpeechRecognition,
-      ),
-    [],
-  );
+  useEffect(() => {
+    if (!micComposerEnabled) return;
+    let cancelled = false;
+    void import("../lib/audioDevice").then((m) => {
+      if (!cancelled) setVoiceSupported(m.supportsSpeechRecognition());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [micComposerEnabled]);
 
   const toggleVoiceInput = () => {
     if (listening) {
-      recognitionRef.current?.stop();
+      voiceInputRef.current?.stop();
       return;
     }
-    const Ctor =
-      (window as SpeechRecognitionWindow).SpeechRecognition ??
-      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
-    if (!Ctor) {
-      setVoiceHint(t("chat.voiceUnsupported"));
-      window.setTimeout(() => setVoiceHint(null), 3000);
-      return;
-    }
-    try {
-      const rec = new Ctor();
-      rec.lang = settings.locale === "en" ? "en-US" : "ru-RU";
-      rec.interimResults = true;
-      rec.continuous = false;
-      let finalText = "";
-      rec.onresult = (event) => {
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const result = event.results[i];
-          if (result.isFinal) finalText += result[0].transcript;
-          else interim += result[0].transcript;
-        }
-        const next = (finalText + interim).trim();
-        setText(next);
-        setCursorPos(next.length);
-        setComposerMultilineIfNeeded(next.includes("\n"));
-        requestAnimationFrame(() => {
-          const el = textareaRef.current;
-          if (el) syncComposerSize(el);
-        });
-      };
-      rec.onend = () => {
-        setListening(false);
-        recognitionRef.current = null;
-        focusComposer();
-      };
-      rec.onerror = (event) => {
-        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+    void import("../lib/audioDevice").then((m) => {
+      if (!m.supportsSpeechRecognition()) {
+        setVoiceSupported(false);
+        setVoiceHint(t("chat.voiceUnsupported"));
+        window.setTimeout(() => setVoiceHint(null), 3000);
+        return;
+      }
+      voiceInputRef.current = m.startVoiceInput(settings.locale === "en" ? "en" : "ru", {
+        onTranscript: (next) => {
+          setText(next);
+          setCursorPos(next.length);
+          setComposerMultilineIfNeeded(next.includes("\n"));
+          requestAnimationFrame(() => {
+            const el = textareaRef.current;
+            if (el) syncComposerSize(el);
+          });
+        },
+        onListeningChange: (active) => {
+          setListening(active);
+          if (!active) voiceInputRef.current = null;
+        },
+        onBlocked: () => {
           setVoiceHint(t("chat.voiceBlocked"));
           window.setTimeout(() => setVoiceHint(null), 3000);
-        }
-        setListening(false);
-        recognitionRef.current = null;
-      };
-      recognitionRef.current = rec;
-      setListening(true);
-      rec.start();
-    } catch {
-      setVoiceHint(t("chat.voiceUnsupported"));
-      window.setTimeout(() => setVoiceHint(null), 3000);
-    }
+        },
+        onUnsupported: () => {
+          setVoiceSupported(false);
+          setVoiceHint(t("chat.voiceUnsupported"));
+          window.setTimeout(() => setVoiceHint(null), 3000);
+        },
+        onEnd: () => focusComposer(),
+      });
+    });
   };
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.abort();
+      voiceInputRef.current?.abort();
+      voiceInputRef.current = null;
     };
   }, []);
 

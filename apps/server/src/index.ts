@@ -19,6 +19,19 @@ const corsOrigin = process.env.CORS_ORIGIN;
 /** Set CORS_STRICT=1 to pin origins from CORS_ORIGIN again. */
 const corsStrict = process.env.CORS_STRICT === "1";
 
+/** Self-hosted UI: always fetch fresh assets after deploy/pull — no browser SW cache. */
+const WEB_NO_CACHE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+} as const;
+
+function applyWebNoCacheHeaders(res: { setHeader: (name: string, value: string) => void }) {
+  for (const [name, value] of Object.entries(WEB_NO_CACHE_HEADERS)) {
+    res.setHeader(name, value);
+  }
+}
+
 async function main() {
   await ensureSchema();
   const app = Fastify({ logger: true });
@@ -44,10 +57,14 @@ async function main() {
       fs.existsSync(p),
     ) ?? null;
   if (webDist) {
-    await app.register(fastifyStatic, { root: webDist });
+    await app.register(fastifyStatic, {
+      root: webDist,
+      setHeaders: (res) => applyWebNoCacheHeaders(res),
+    });
     // SPA fallback: unknown GET paths render the app shell; /api and /ws stay JSON/WS.
     app.setNotFoundHandler((req, reply) => {
       if (req.method === "GET" && !req.url.startsWith("/api") && !req.url.startsWith("/ws")) {
+        applyWebNoCacheHeaders(reply.raw);
         return reply.sendFile("index.html");
       }
       return reply.code(404).send({ error: "Not Found", message: "Not Found", statusCode: 404 });

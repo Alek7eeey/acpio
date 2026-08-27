@@ -9,6 +9,13 @@ import "./styles/settingsUi.css";
 
 initPwaInstallCapture();
 
+if (!import.meta.env.DEV && "caches" in window) {
+  // Drop legacy Workbox precache entries from older builds.
+  void caches.keys().then((keys) =>
+    Promise.all(keys.filter((key) => key.startsWith("workbox-")).map((key) => caches.delete(key))),
+  );
+}
+
 if (import.meta.env.DEV) {
   // Full Workbox SW is off in vite PWA devOptions (corrupts binary /api).
   // Register a tiny SW + static public/manifest.webmanifest for installability.
@@ -17,7 +24,12 @@ if (import.meta.env.DEV) {
     .then((reg) => reg.update())
     .catch(() => {});
 } else {
-  registerSW({ immediate: true });
+  registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      window.location.reload();
+    },
+  });
 }
 
 createRoot(document.getElementById("root")!).render(

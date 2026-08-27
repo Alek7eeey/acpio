@@ -43,9 +43,21 @@ export default defineConfig({
         ],
       },
       workbox: {
-        navigateFallback: "/index.html",
-        navigateFallbackDenylist: [/^\/api/, /^\/ws/],
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
+        // Server serves SPA routes; avoid precached shell that survives deploys.
+        navigateFallback: null,
+        globPatterns: ["**/*.{ico,png,svg,woff2}"],
+        runtimeCaching: [
+          {
+            urlPattern: ({ sameOrigin, url }) =>
+              sameOrigin &&
+              !url.pathname.startsWith("/api") &&
+              !url.pathname.startsWith("/ws"),
+            handler: "NetworkOnly",
+          },
+        ],
       },
       // Full Workbox SW stays off in dev — its fetch path intermittently corrupted
       // binary /api (TTS). Installability in `npm run dev` uses public/pwa-dev-sw.js
@@ -86,5 +98,17 @@ export default defineConfig({
   preview: {
     host: "0.0.0.0",
     allowedHosts: true,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("audioDevice")) return "audio-device";
+        },
+      },
+    },
   },
 });
