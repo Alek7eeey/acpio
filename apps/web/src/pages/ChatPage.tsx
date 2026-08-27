@@ -55,6 +55,11 @@ import { AppDialog } from "../components/AppDialog";
 import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
 import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
+import {
+  ChatQuestionAnswered,
+  ChatQuestionPrompt,
+  type QuestionPromptPayload,
+} from "../components/ChatQuestionPrompt";
 import { PlanSidePanel, PlanTabButton } from "../components/PlanSidePanel";
 import { ConsoleSidePanel } from "../components/ConsoleSidePanel";
 import {
@@ -89,6 +94,7 @@ import { showToast } from "../lib/toast";
 import {
   buildSlashInsertion,
   filterSlashCommands,
+  findSlashCommand,
   getSlashContext,
   isSlashCommandReadyToSend,
   mergeSlashCommands,
@@ -195,6 +201,26 @@ function messagePlainText(message: MessageDto): string {
     .trim();
 }
 
+function composerCaretOnFirstLine(el: HTMLTextAreaElement): boolean {
+  const pos = el.selectionStart;
+  return pos === 0 || !el.value.slice(0, pos).includes("\n");
+}
+
+function composerCaretOnLastLine(el: HTMLTextAreaElement): boolean {
+  const pos = el.selectionEnd;
+  return pos === el.value.length || !el.value.slice(pos).includes("\n");
+}
+
+function userMessageHistory(messages: MessageDto[]): Array<{ id: string; text: string }> {
+  const out: Array<{ id: string; text: string }> = [];
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    const text = messagePlainText(msg);
+    if (text) out.push({ id: msg.id, text });
+  }
+  return out;
+}
+
 type MessageCtxHandle = {
   openAt: (x: number, y: number) => void;
 };
@@ -295,6 +321,7 @@ function MessageArticle({
   stepsGlobalTick,
   keepComposerFocus,
   textareaRef,
+  onSlashCommandClick,
 }: {
   msg: MessageDto;
   isLiveAssistant: boolean;
@@ -305,6 +332,7 @@ function MessageArticle({
   stepsGlobalTick: number;
   keepComposerFocus: RefObject<boolean>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
+  onSlashCommandClick?: (command: string) => void;
 }) {
   return (
     <article
@@ -327,7 +355,7 @@ function MessageArticle({
       }}
     >
       {msg.role === "user" ? (
-        <UserMessage message={msg} onEdit={onEditUser} />
+        <UserMessage message={msg} onEdit={onEditUser} onSlashCommandClick={onSlashCommandClick} />
       ) : (
         <AssistantParts
           message={msg}
@@ -342,12 +370,34 @@ function MessageArticle({
   );
 }
 
-function highlightUserText(text: string, knownNames?: Iterable<string>) {
+function highlightUserText(
+  text: string,
+  knownNames?: Iterable<string>,
+  onSlashClick?: (command: string) => void,
+  slashClickTitle?: string,
+) {
   return splitSlashCommandHighlight(text, knownNames).map((seg, i) =>
     seg.kind === "command" ? (
-      <span key={`${i}-${seg.value}`} className={styles.userSlashCmd}>
-        {seg.value}
-      </span>
+      onSlashClick ? (
+        <button
+          key={`${i}-${seg.value}`}
+          type="button"
+          className={styles.userSlashCmd}
+          title={slashClickTitle}
+          aria-label={slashClickTitle ? `${slashClickTitle}: ${seg.value}` : seg.value}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSlashClick(seg.value);
+          }}
+        >
+          {seg.value}
+        </button>
+      ) : (
+        <span key={`${i}-${seg.value}`} className={styles.userSlashCmd}>
+          {seg.value}
+        </span>
+      )
     ) : (
       <Fragment key={i}>{seg.value}</Fragment>
     ),
@@ -357,10 +407,13 @@ function highlightUserText(text: string, knownNames?: Iterable<string>) {
 function UserMessage({
   message,
   onEdit,
+  onSlashCommandClick,
 }: {
   message: MessageDto;
   onEdit: (messageId: string, text: string) => void;
+  onSlashCommandClick?: (command: string) => void;
 }) {
+  const t = useT();
   const text = messagePlainText(message);
   const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
@@ -371,7 +424,14 @@ function UserMessage({
     <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
       {message.parts.map((part) =>
         part.type === "text" ? (
-          <div key={part.id}>{highlightUserText(String(part.payload.text ?? ""))}</div>
+          <div key={part.id}>
+            {highlightUserText(
+              String(part.payload.text ?? ""),
+              undefined,
+              onSlashCommandClick,
+              t("common.insertSlashCommand"),
+            )}
+          </div>
         ) : (
           <PartView key={part.id} part={part} />
         ),
@@ -1154,13 +1214,31 @@ function PartView({
     return <SubagentPartView part={part} streaming={streaming} />;
   }
 
-  // Regular tool calls stay hidden — only thoughts + subagent cards + answer text.
+  // Question parts render from AssistantMessageView.questionParts, not here.
   // Errors are shown only in the composer banner (store.error), never in-thread.
   if (part.type === "tool_call" || part.type === "error") {
     return null;
   }
 
   return null;
+}
+
+function QuestionPartView({ part, sessionId }: { part: MessagePartDto; sessionId: string }) {
+  const answerQuestionFor = useAppStore((s) => s.answerQuestionFor);
+  const payload = part.payload as QuestionPromptPayload & { requestId?: string };
+  const requestId = String(payload.requestId ?? "");
+
+  if (payload.pending) {
+    return (
+      <ChatQuestionPrompt
+        embedded
+        payload={payload}
+        onAnswer={(result) => void answerQuestionFor(sessionId, requestId, result)}
+      />
+    );
+  }
+
+  return <ChatQuestionAnswered payload={payload} />;
 }
 
 /** Icon for thinking toggle (composer) and in-message thinking header. */
@@ -1787,6 +1865,7 @@ function StepsSpoiler({
 
 function hasRenderableAssistantContent(parts: MessagePartDto[]) {
   return parts.some((p) => {
+    if (p.type === "question") return true;
     if (p.type === "text" || p.type === "thought") {
       return Boolean(String(p.payload.text ?? "").trim());
     }
@@ -2722,8 +2801,9 @@ function AssistantParts({
   // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return parts.filter((p) => p !== finalText && p.type !== "error");
+    return parts.filter((p) => p !== finalText && p.type !== "error" && p.type !== "question");
   }, [parts]);
+  const questionParts = useMemo(() => parts.filter((p) => p.type === "question"), [parts]);
   const mainParts = useMemo(() => {
     const finalText = lastTextPart(parts);
     return parts.filter((p) => p === finalText && p.type !== "error");
@@ -2758,6 +2838,9 @@ function AssistantParts({
         messageId={message.id}
         stepsGlobalTick={stepsGlobalTick}
       />
+      {questionParts.map((part) => (
+        <QuestionPartView key={part.id} part={part} sessionId={message.sessionId} />
+      ))}
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -3016,6 +3099,10 @@ function ChatThread() {
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerHighlightInnerRef = useRef<HTMLDivElement>(null);
+  /** -1 = composer draft; 0..n-1 = browsing sent user messages (oldest→newest). */
+  const composerHistoryIndexRef = useRef(-1);
+  const composerHistoryDraftRef = useRef("");
+  const composerHistoryApplyingRef = useRef(false);
   const threadRef = useRef<HTMLDivElement>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
@@ -3197,6 +3284,59 @@ function ChatThread() {
     }
   };
 
+  const resetComposerHistory = () => {
+    composerHistoryIndexRef.current = -1;
+    composerHistoryDraftRef.current = "";
+  };
+
+  const applyComposerHistoryText = (value: string) => {
+    composerHistoryApplyingRef.current = true;
+    setSlashMenuDismissed(true);
+    setText(value);
+    setCursorPos(value.length);
+    setComposerMultilineIfNeeded(value.includes("\n"));
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) {
+        el.focus({ preventScroll: true });
+        el.setSelectionRange(value.length, value.length);
+        syncComposerSize(el);
+        syncComposerInputScroll(el);
+      }
+      composerHistoryApplyingRef.current = false;
+    });
+  };
+
+  const navigateComposerHistory = (direction: "prev" | "next") => {
+    if (editingMessageId || composerLocked) return false;
+    const history = userMessageHistory(activeSession?.messages ?? []);
+    if (history.length === 0) return false;
+
+    let idx = composerHistoryIndexRef.current;
+    if (direction === "prev") {
+      if (idx === -1) {
+        composerHistoryDraftRef.current = textRef.current;
+        idx = history.length - 1;
+      } else if (idx > 0) {
+        idx -= 1;
+      } else {
+        return false;
+      }
+    } else if (idx === -1) {
+      return false;
+    } else if (idx < history.length - 1) {
+      idx += 1;
+    } else {
+      resetComposerHistory();
+      applyComposerHistoryText(composerHistoryDraftRef.current);
+      return true;
+    }
+
+    composerHistoryIndexRef.current = idx;
+    applyComposerHistoryText(history[idx]!.text);
+    return true;
+  };
+
   const syncComposerSize = (el: HTMLTextAreaElement) => {
     const value = el.value;
     // Never poke width — that flicker + single↔multi oscillation is what made the pill "dance".
@@ -3204,6 +3344,26 @@ function ChatThread() {
 
     const hasNewline = value.includes("\n");
     if (!hasNewline) {
+      if (composerMultilineRef.current) {
+        el.style.overflowY = "auto";
+        applyComposerHeight(el);
+        if (!value.trim()) {
+          el.style.height = "";
+          el.style.overflowY = "hidden";
+          el.scrollTop = 0;
+          setComposerMultilineIfNeeded(false);
+          syncComposerInputScroll(el);
+        }
+        return;
+      }
+
+      if (el.scrollWidth > el.clientWidth + 1) {
+        setComposerMultilineIfNeeded(true);
+        el.style.overflowY = "auto";
+        requestAnimationFrame(() => applyComposerHeight(el));
+        return;
+      }
+
       el.style.height = "";
       el.style.overflowY = "hidden";
       el.scrollTop = 0;
@@ -3228,6 +3388,7 @@ function ChatThread() {
     rememberComposerDraft(composerSessionRef.current, textRef.current);
     composerSessionRef.current = composerSessionId;
     const next = composerSessionId ? (composerDrafts.get(composerSessionId) ?? "") : "";
+    resetComposerHistory();
     setText(next);
     setCursorPos(next.length);
     setSlashMenuDismissed(false);
@@ -3265,6 +3426,7 @@ function ChatThread() {
     sessionStatus: activeSession?.status,
     streaming,
     isEmptyChat,
+    gitPanelOpen,
   });
   const showGitComposer = useMemo(
     () =>
@@ -3294,7 +3456,9 @@ function ChatThread() {
   const slashCtx = useMemo(() => getSlashContext(text, cursorPos), [text, cursorPos]);
   const filteredSlashCommands = useMemo(() => {
     if (!slashCtx) return [];
-    return filterSlashCommands(slashCommands, slashCtx.query);
+    return filterSlashCommands(slashCommands, slashCtx.query, {
+      midPromptSkillOnly: slashCtx.midPrompt,
+    });
   }, [slashCommands, slashCtx]);
   const slashLoading = slashListStillLoading(activeSession?.slashCommands);
   const slashMenuOpen =
@@ -3306,7 +3470,7 @@ function ChatThread() {
   const slashInputHint = useMemo(() => {
     const parsed = parseSlashCommandText(text);
     if (!parsed || parsed.args) return null;
-    const cmd = slashCommands.find((c) => c.name.toLowerCase() === parsed.name.toLowerCase());
+    const cmd = findSlashCommand(slashCommands, parsed.name);
     if (!cmd || !slashCommandRequiresInput(cmd)) return null;
     return cmd.inputHint ?? cmd.description;
   }, [text, slashCommands]);
@@ -3333,12 +3497,37 @@ function ChatThread() {
   useEffect(() => {
     setSlashIndex(0);
     setSlashKeyboardNav(false);
-    if (slashCtx) setSlashMenuDismissed(false);
+    if (slashCtx && composerHistoryIndexRef.current === -1) {
+      setSlashMenuDismissed(false);
+    }
   }, [slashCtx?.query, slashCtx?.start]);
 
   const applySlashCommand = (cmd: SlashCommandDto) => {
     insertSlashCommand(cmd);
   };
+
+  const insertComposerSlashCommand = useCallback(
+    (cmdToken: string) => {
+      const name = cmdToken.replace(/^\//, "").trim();
+      const cmd = findSlashCommand(slashCommands, name);
+      const next = cmd ? buildSlashInsertion(cmd) : `${cmdToken.trim()} `;
+      resetComposerHistory();
+      setEditingMessageId(null);
+      setText(next);
+      setCursorPos(next.length);
+      setComposerMultilineIfNeeded(next.includes("\n"));
+      setSlashMenuDismissed(true);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus({ preventScroll: true });
+        el.setSelectionRange(next.length, next.length);
+        syncComposerSize(el);
+        syncComposerInputScroll(el);
+      });
+    },
+    [slashCommands],
+  );
 
   const submitMessage = (raw: string) => {
     const value = raw.trim();
@@ -3356,6 +3545,7 @@ function ChatThread() {
     const editId = editingMessageId;
     const attach = editId ? undefined : pendingFiles;
     forgetComposerDraft(composerSessionRef.current);
+    resetComposerHistory();
     setText("");
     setEditingMessageId(null);
     setCursorPos(0);
@@ -3857,6 +4047,7 @@ function ChatThread() {
         stepsGlobalTick={stepsGlobalTick}
         keepComposerFocus={keepComposerFocus}
         textareaRef={textareaRef}
+        onSlashCommandClick={insertComposerSlashCommand}
       />
     );
   };
@@ -4069,9 +4260,11 @@ function ChatThread() {
     const thread = threadRef.current;
     if (!thread) return;
     if (pendingBottomPinRef.current) return;
-    const promptId =
-      pendingPermission?.requestId ?? pendingQuestion?.requestId ?? null;
-    if (userJustSentRef.current || promptId) {
+    const scrollPromptId =
+      pendingPermission?.requestId ??
+      (pendingQuestion?.kind !== "ask_question" ? pendingQuestion?.requestId : null) ??
+      null;
+    if (userJustSentRef.current || scrollPromptId) {
       stickToBottomRef.current = true;
       userJustSentRef.current = false;
       scrollThreadToEnd();
@@ -4091,6 +4284,7 @@ function ChatThread() {
     streamDigest,
     streaming,
     pendingPermission?.requestId,
+    pendingQuestion?.kind,
     pendingQuestion?.requestId,
   ]);
 
@@ -4104,7 +4298,7 @@ function ChatThread() {
       // Don't steal focus from permission / question actions or other controls in the thread.
       if (
         target.closest(
-          "button, a, input, textarea, select, [role='button'], [role='option'], [role='menuitem']",
+          "button, a, input, textarea, select, [role='button'], [role='option'], [role='menuitem'], [data-question-prompt]",
         )
       ) {
         return;
@@ -4299,7 +4493,9 @@ function ChatThread() {
         )}
       </div>
 
-      {(pendingPermission || pendingQuestion) &&
+      {(pendingPermission ||
+        (pendingQuestion &&
+          pendingQuestion.kind !== "ask_question")) &&
       (!pendingPermission || pendingPermission.sessionId === activeSession?.id) &&
       (!pendingQuestion || pendingQuestion.sessionId === activeSession?.id) ? (
         <div className={styles.inlinePromptDock}>
@@ -4428,6 +4624,7 @@ function ChatThread() {
                   className={styles.editCancel}
                   onClick={() => {
                     setEditingMessageId(null);
+                    resetComposerHistory();
                     forgetComposerDraft(composerSessionRef.current);
                     setText("");
                     setComposerMultilineIfNeeded(false);
@@ -4564,6 +4761,9 @@ function ChatThread() {
               value={text}
               onChange={(e) => {
                 if (composerLocked) return;
+                if (!composerHistoryApplyingRef.current && composerHistoryIndexRef.current !== -1) {
+                  resetComposerHistory();
+                }
                 setText(e.target.value);
                 setCursorPos(e.target.selectionStart);
                 syncComposerSize(e.currentTarget);
@@ -4600,7 +4800,9 @@ function ChatThread() {
                   e.preventDefault();
                   return;
                 }
-                if (slashMenuOpen) {
+                const slashMenuHandlesArrows =
+                  slashMenuOpen && filteredSlashCommands.length > 1;
+                if (slashMenuHandlesArrows) {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     setSlashKeyboardNav(true);
@@ -4613,6 +4815,40 @@ function ChatThread() {
                     setSlashIndex((i) => Math.max(i - 1, 0));
                     return;
                   }
+                  if (e.key === "Tab" || e.key === "Enter") {
+                    e.preventDefault();
+                    const cmd = filteredSlashCommands[slashIndex];
+                    if (cmd) applySlashCommand(cmd);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSlashMenuDismissed(true);
+                    return;
+                  }
+                }
+                if (
+                  !e.altKey &&
+                  !e.ctrlKey &&
+                  !e.metaKey &&
+                  !e.shiftKey &&
+                  (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+                  (!slashMenuOpen || filteredSlashCommands.length <= 1)
+                ) {
+                  const el = e.currentTarget;
+                  const onFirst = e.key === "ArrowUp" && composerCaretOnFirstLine(el);
+                  const onLast = e.key === "ArrowDown" && composerCaretOnLastLine(el);
+                  if (onFirst || onLast) {
+                    const moved = navigateComposerHistory(
+                      e.key === "ArrowUp" ? "prev" : "next",
+                    );
+                    if (moved) {
+                      e.preventDefault();
+                      return;
+                    }
+                  }
+                }
+                if (slashMenuOpen && filteredSlashCommands.length === 1) {
                   if (e.key === "Tab" || e.key === "Enter") {
                     e.preventDefault();
                     const cmd = filteredSlashCommands[slashIndex];

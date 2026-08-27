@@ -3,6 +3,8 @@ import {
   DEFAULT_SETTINGS,
   isGenericToolTitle,
   isModelAccessError,
+  isTokenizerEncodingError,
+  tokenizerEncodingErrorHint,
   isSubagentToolCall,
   mapEffortParamValue,
   migrateModelParamValues,
@@ -236,6 +238,18 @@ describe("isModelAccessError", () => {
   });
 });
 
+describe("isTokenizerEncodingError", () => {
+  it.each([
+    ['value `"DeepSeekV3"` does not match any variant of enum `Encoding`', true],
+    ["Unknown encoding", true],
+    ["unknown tokenizer for model", true],
+    ["Internal error", false],
+    ["timeout", false],
+  ])("isTokenizerEncodingError(%j)", (message, expected) => {
+    expect(isTokenizerEncodingError(message)).toBe(expected);
+  });
+});
+
 describe("modelParamLabel", () => {
   it.each([
     // fast family
@@ -426,6 +440,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatMetaChips: ["folder", "git", "thoughts", "mcp", "context", "console"],
     thoughtsChipStyle: "full",
     consoleChipStyle: "full",
+    terminalShell: "cmd",
     chatComposerButtons: ["attach", "mic", "model", "mode"],
     chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
     chatTreeMenu: ["rename", "move", "export", "delete"],

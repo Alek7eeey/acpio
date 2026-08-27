@@ -98,6 +98,10 @@ export function AppShell() {
   const theme = useAppStore((s) => s.settings.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const settings = useAppStore((s) => s.settings);
+  const headerHeightPx = settings.chatHeaderHeight ?? 52;
+  useEffect(() => {
+    document.documentElement.style.setProperty("--header-height", `${headerHeightPx}px`);
+  }, [headerHeightPx]);
   const activeSession = useAppStore((s) => s.activeSession);
   const sessionDetails = useAppStore((s) => s.sessionDetails);
   const chatPaneIds = useAppStore((s) => s.chatPaneIds);
@@ -1321,12 +1325,7 @@ export function AppShell() {
       )}
 
       <div className={styles.main}>
-        <header
-          className={styles.header}
-          style={
-            settings.chatHeaderHeight ? { height: `${settings.chatHeaderHeight}px` } : undefined
-          }
-        >
+        <header className={styles.header}>
           {/* Desktop: header burger. Mobile: bottom sheet puller. */}
           {showSidebar ? (
             <button

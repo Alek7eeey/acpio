@@ -1,6 +1,19 @@
 import { useEffect, useRef } from "react";
 import type { WsClientEvent, WsServerEvent } from "@acpio/shared";
+import { dispatchShellConsole } from "./shellConsole";
 import { useAppStore } from "./store";
+
+function routeShellConsoleWsEvent(event: WsServerEvent): boolean {
+  if (event.type === "process.output" && event.source === "shell") {
+    dispatchShellConsole({ type: "output", sessionId: event.sessionId, text: event.text });
+    return true;
+  }
+  if (event.type === "process.cleared") {
+    dispatchShellConsole({ type: "cleared", sessionId: event.sessionId });
+    return true;
+  }
+  return false;
+}
 
 function wsUrl() {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
@@ -59,6 +72,7 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       socket.onmessage = (ev) => {
         try {
           const data = JSON.parse(String(ev.data)) as WsServerEvent;
+          if (routeShellConsoleWsEvent(data)) return;
           handleWsEventRef.current(data);
         } catch {
           // ignore

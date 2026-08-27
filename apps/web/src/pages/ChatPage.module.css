@@ -185,7 +185,7 @@
   box-shadow: 0 6px 18px color-mix(in srgb, var(--bg) 28%, transparent);
   backdrop-filter: blur(10px);
   cursor: pointer;
-  opacity: 0.72;
+  opacity: 0.88;
   transition:
     opacity 0.15s ease,
     color 0.15s ease,
@@ -1197,6 +1197,30 @@
   font-weight: inherit;
 }
 
+button.userSlashCmd {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  line-height: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--slash-cmd) 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+button.userSlashCmd:hover {
+  text-decoration-color: var(--slash-cmd);
+}
+
+button.userSlashCmd:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--slash-cmd) 40%, var(--border));
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .parts {
   display: grid;
   gap: 10px;
@@ -2012,17 +2036,12 @@
   box-sizing: border-box;
   overflow: hidden;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 92%, white 8%) 0%,
-    color-mix(in srgb, var(--bg-secondary) 58%, var(--surface)) 100%
-  );
-  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
-    0 1px 2px color-mix(in srgb, var(--bg) 24%, transparent),
-    0 6px 18px color-mix(in srgb, var(--bg) 16%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   color: var(--text-secondary);
 }
 
@@ -2061,7 +2080,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   max-width: 100%;
 }
@@ -2070,7 +2089,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -2095,17 +2114,12 @@
   padding: 7px 13px;
   min-height: 30px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface) 92%, white 8%) 0%,
-    color-mix(in srgb, var(--bg-secondary) 58%, var(--surface)) 100%
-  );
-  backdrop-filter: blur(14px);
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
-    0 1px 2px color-mix(in srgb, var(--bg) 24%, transparent),
-    0 6px 18px color-mix(in srgb, var(--bg) 16%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   color: var(--text-secondary);
   font: inherit;
   font-size: 0.78rem;
@@ -2149,10 +2163,10 @@
 .metaChip:hover {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
   color: var(--text);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
-    0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent),
-    0 8px 22px color-mix(in srgb, var(--bg) 20%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+    0 2px 8px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .metaChip:hover .metaChipIcon {
@@ -2162,15 +2176,11 @@
 .metaChipActive {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   color: var(--text);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 14%, var(--surface)) 0%,
-    color-mix(in srgb, var(--accent) 7%, var(--bg-secondary)) 100%
-  );
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface) 40%);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
-    0 8px 22px color-mix(in srgb, var(--accent) 12%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 4px 14px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .metaChipActive:hover {
@@ -2225,18 +2235,18 @@
 
 :global([data-theme="light"]) .metaChip,
 :global([data-theme="light"]) .sessionCwd {
-  background: color-mix(in srgb, var(--surface) 96%, var(--bg-secondary));
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
-    0 1px 3px color-mix(in srgb, var(--text) 7%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+    0 1px 3px color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 :global([data-theme="light"]) .metaChipActive {
-  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface) 52%);
   box-shadow:
-    inset 0 1px 0 color-mix(in srgb, white 85%, transparent),
-    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
-    0 4px 14px color-mix(in srgb, var(--accent) 10%, transparent);
+    inset 0 1px 0 color-mix(in srgb, white 70%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 3px 10px color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 @media (max-width: 700px) {
@@ -2279,7 +2289,7 @@
   .composerMetaShellDesktop {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
   .composerMetaDesktop {
@@ -2312,17 +2322,12 @@
     min-height: 30px;
     padding: 0 13px;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--surface) 92%, white 8%) 0%,
-      color-mix(in srgb, var(--bg-secondary) 58%, var(--surface)) 100%
-    );
-    backdrop-filter: blur(14px);
+    border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+    background: color-mix(in srgb, var(--surface) 46%, transparent);
+    backdrop-filter: blur(16px) saturate(1.08);
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
-      0 1px 2px color-mix(in srgb, var(--bg) 24%, transparent),
-      0 6px 18px color-mix(in srgb, var(--bg) 16%, transparent);
+      inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+      0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
     color: var(--text-secondary);
     font: inherit;
     font-size: 0.78rem;
@@ -2341,17 +2346,17 @@
   .composerMetaMoreBtn:hover {
     border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
     color: var(--text);
+    background: color-mix(in srgb, var(--surface) 62%, transparent);
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 12%, transparent),
-      0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent),
-      0 8px 22px color-mix(in srgb, var(--bg) 20%, transparent);
+      inset 0 1px 0 color-mix(in srgb, white 10%, transparent),
+      0 2px 8px color-mix(in srgb, var(--accent) 8%, transparent);
   }
 
   :global([data-theme="light"]) .composerMetaMoreBtn {
-    background: color-mix(in srgb, var(--surface) 96%, var(--bg-secondary));
+    background: color-mix(in srgb, var(--surface) 58%, transparent);
     box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 90%, transparent),
-      0 1px 3px color-mix(in srgb, var(--text) 7%, transparent);
+      inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+      0 1px 3px color-mix(in srgb, var(--text) 5%, transparent);
   }
 }
 
@@ -2478,7 +2483,6 @@
   display: block;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .pillInput {
@@ -2497,7 +2501,6 @@
   overflow-y: hidden;
   white-space: nowrap;
   scrollbar-width: none;
-  text-overflow: ellipsis;
 }
 
 .pill:not(.pillMultiline) .pillInput::-webkit-scrollbar {

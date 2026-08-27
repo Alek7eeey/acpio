@@ -135,6 +135,84 @@ export function mergeSlashCommands(agentCommands: SlashCommandDto[] = [], t: Tra
   return [...out].sort((a, b) => slashMenuRank(a) - slashMenuRank(b));
 }
 
+const SKILL_NAMESPACE = "skill:";
+
+function fuzzyMatch(query: string, target: string) {
+  if (query.length === 0) return true;
+  if (query.length > target.length) return false;
+  let qi = 0;
+  for (let ti = 0; ti < target.length && qi < query.length; ti += 1) {
+    if (query[qi] === target[ti]) qi += 1;
+  }
+  return qi === query.length;
+}
+
+function fuzzyScore(query: string, target: string) {
+  if (query.length === 0) return 1;
+  if (target === query) return 100;
+  if (target.startsWith(query)) return 80;
+  if (target.includes(query)) return 60;
+  let qi = 0;
+  let gaps = 0;
+  let lastMatchIdx = -1;
+  for (let ti = 0; ti < target.length && qi < query.length; ti += 1) {
+    if (query[qi] === target[ti]) {
+      if (lastMatchIdx >= 0 && ti - lastMatchIdx > 1) gaps += 1;
+      lastMatchIdx = ti;
+      qi += 1;
+    }
+  }
+  if (qi !== query.length) return 0;
+  return Math.max(1, 40 - gaps * 5);
+}
+
+function scoreCommandTextMatch(lowerPrefix: string, lowerTarget: string) {
+  if (lowerPrefix.length === 0) return 1;
+  if (lowerPrefix === lowerTarget) return 1000;
+  if (lowerTarget.startsWith(lowerPrefix)) return 900;
+  return fuzzyMatch(lowerPrefix, lowerTarget) ? fuzzyScore(lowerPrefix, lowerTarget) : 0;
+}
+
+/** Mirrors OMP `midPromptSkillTokenMatches` — mid-prompt `/tok` only surfaces skill commands. */
+function midPromptSkillTokenMatches(lowerToken: string, name: string, description: string) {
+  if (SKILL_NAMESPACE.startsWith(lowerToken)) return true;
+  const lowerName = name.toLowerCase();
+  if (lowerToken.startsWith(SKILL_NAMESPACE)) {
+    if (scoreCommandTextMatch(lowerToken, lowerName) > 0) return true;
+    const lowerDesc = description.toLowerCase();
+    return lowerDesc.length > 0 && scoreCommandTextMatch(lowerToken, lowerDesc) > 0;
+  }
+  return (
+    lowerName.startsWith(SKILL_NAMESPACE) &&
+    lowerName.slice(SKILL_NAMESPACE.length).startsWith(lowerToken)
+  );
+}
+
+function scoreSlashCommandSearch(
+  query: string,
+  cmd: SlashCommandDto,
+  opts?: { midPromptSkillOnly?: boolean },
+) {
+  const name = cmd.name.trim();
+  if (!name) return 0;
+  const lowerQuery = query.trim().toLowerCase();
+  const lowerName = name.toLowerCase();
+  const description = cmd.description.trim();
+  const lowerDesc = description.toLowerCase();
+
+  if (opts?.midPromptSkillOnly) {
+    if (!lowerName.startsWith(SKILL_NAMESPACE)) return 0;
+    return midPromptSkillTokenMatches(lowerQuery, lowerName, description) ? 1 : 0;
+  }
+
+  const isSkillCommand = lowerName.startsWith(SKILL_NAMESPACE);
+  const nameScore =
+    lowerQuery.length === 0 && isSkillCommand ? 950 : scoreCommandTextMatch(lowerQuery, lowerName);
+  const descScore =
+    lowerDesc && fuzzyMatch(lowerQuery, lowerDesc) ? fuzzyScore(lowerQuery, lowerDesc) * 0.5 : 0;
+  return Math.max(nameScore, descScore);
+}
+
 export function getSlashContext(text: string, cursor: number) {
   const before = text.slice(0, cursor);
   // Token start: beginning, newline, or whitespace — so "/cmd" still works
@@ -143,17 +221,23 @@ export function getSlashContext(text: string, cursor: number) {
   if (!match) return null;
   const query = match[1] ?? "";
   const start = before.lastIndexOf("/");
-  return { query, start };
+  const lineStart = before.lastIndexOf("\n") + 1;
+  const midPrompt = before.slice(lineStart, start).trim().length > 0;
+  return { query, start, midPrompt };
 }
 
-export function filterSlashCommands(commands: SlashCommandDto[], query: string) {
+export function filterSlashCommands(
+  commands: SlashCommandDto[],
+  query: string,
+  opts?: { midPromptSkillOnly?: boolean },
+) {
   const q = query.trim().toLowerCase();
-  if (!q) return commands;
-  return commands.filter(
-    (cmd) =>
-      cmd.name.toLowerCase().startsWith(q) ||
-      cmd.description.toLowerCase().includes(q),
-  );
+  if (!q && !opts?.midPromptSkillOnly) return commands;
+  const scored = commands
+    .map((cmd) => ({ cmd, score: scoreSlashCommandSearch(q, cmd, opts) }))
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.cmd.name.localeCompare(b.cmd.name));
+  return scored.map((row) => row.cmd);
 }
 
 export function buildSlashInsertion(cmd: SlashCommandDto) {
@@ -161,8 +245,12 @@ export function buildSlashInsertion(cmd: SlashCommandDto) {
 }
 
 export function findSlashCommand(commands: SlashCommandDto[], name: string) {
-  const key = name.toLowerCase();
-  return commands.find((cmd) => cmd.name.toLowerCase() === key) ?? null;
+  const key = name.trim().toLowerCase();
+  if (!key) return null;
+  const exact = commands.find((cmd) => cmd.name.toLowerCase() === key);
+  if (exact) return exact;
+  const skillKey = `${SKILL_NAMESPACE}${key}`;
+  return commands.find((cmd) => cmd.name.toLowerCase() === skillKey) ?? null;
 }
 
 export function isSlashCommandReadyToSend(_text: string, _commands: SlashCommandDto[]) {

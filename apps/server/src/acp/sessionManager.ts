@@ -3,6 +3,8 @@ import { stat } from "node:fs/promises";
 import {
   isGenericToolTitle,
   isModelAccessError,
+  isTokenizerEncodingError,
+  tokenizerEncodingErrorHint,
   isPlaceholderSubagentTitle,
   extractSubagentLiveContent,
   modelDisplayName,
@@ -35,6 +37,11 @@ import {
   mcpHttpHeaders,
   permissionOptionsLookLikeQuestion,
   questionPayloadFromPermission,
+  elicitationResponseFromUiOutcome,
+  elicitationSchemaToQuestionPayload,
+  summarizeQuestionAnswer,
+  type ElicitationQuestionPayload,
+  type ElicitationRequestedSchema,
 } from "@acpio/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acpio/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
@@ -383,6 +390,11 @@ type PendingRequest = {
   rpcId: string | number;
   /** Question UI shown, but the ACP reply must use permission outcome shape. */
   respondAsPermission?: boolean;
+  /** Form elicitation/create mapped to the inline question UI. */
+  respondAsElicitation?: boolean;
+  elicitationPayload?: ElicitationQuestionPayload;
+  /** Set when this turn showed at least one form elicitation prompt. */
+  elicitationTurn?: boolean;
   /** For synthetic switch_mode consents: requested and previous session mode. */
   mode?: AgentMode;
   previousMode?: AgentMode;
@@ -535,6 +547,8 @@ class SessionRuntime {
   ingestUserMessageId: string | null = null;
   ingestUserPartId: string | null = null;
   toolsHintSent = false;
+  /** True when the current turn registered an ACP form elicitation prompt. */
+  elicitationThisTurn = false;
   /** Latest ACP-reported token/context usage (null until/if the harness sends it). */
   usage: AcpUsage | null = null;
   /** True while we intentionally tear down ACP (e.g. edit/regenerate). */
@@ -543,6 +557,9 @@ class SessionRuntime {
   turnHasText = false;
   /** This turn received a thinking chunk. */
   turnHasThought = false;
+  /** In-flight tool/subagent calls for this turn (drives stream settle). */
+  inFlightToolCalls = 0;
+  toolStatusByCallId = new Map<string, string>();
   /** MCP config changed while a turn was running — restart the agent when it idles. */
   restartOnIdle = false;
   /** Model+params to apply on the idle restart (set alongside restartOnIdle by setSessionModel). */
@@ -1261,6 +1278,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       rt.adapter?.id === "omp" &&
       (toolName?.trim().toLowerCase() === "task" || /^task\s*:/i.test((update.title ?? title).trim()))
     ) {
+      trackToolFlight(rt, toolCallId, update.status ?? "pending");
       return;
     }
     const isSubagent = isSubagentToolUpdate(
@@ -1324,6 +1342,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       rt.subagentPartByAgentId.set(toolCallId, part.id);
       startCursorStorePoll(rt, toolCallId, part.id);
     }
+    trackToolFlight(rt, toolCallId, String(payload.status ?? "pending"));
     return;
   }
 
@@ -1356,6 +1375,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       !partId &&
       (toolName?.trim().toLowerCase() === "task" || /^task\s*:/i.test(String(mergedRaw.title ?? title).trim()))
     ) {
+      trackToolFlight(rt, toolCallId, status);
       return;
     }
     const isSubagent = isSubagentToolUpdate(
@@ -1423,6 +1443,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       });
       rt.toolPartByCallId.set(toolCallId, part.id);
       if (isSubagent) startCursorStorePoll(rt, toolCallId, part.id);
+      trackToolFlight(rt, toolCallId, String(normalizedStatus));
       return;
     }
     const named =
@@ -1466,6 +1487,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         startCursorStorePoll(rt, toolCallId, partId);
       }
     }
+    trackToolFlight(rt, toolCallId, String(normalizedStatus));
     return;
   }
 
@@ -1519,6 +1541,61 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
   const settings = await getSettings();
   const reqKey = requestIdFor(rt.sessionId, req.id);
 
+  if (req.kind === "elicitation") {
+    rt.lastStreamAt = Date.now();
+    rt.elicitationThisTurn = true;
+    const mode = String(req.params.mode ?? "form");
+    if (mode !== "form") {
+      rt.client?.respond(req.id, { action: "decline" });
+      return;
+    }
+    const boundSessionId = String(req.params.sessionId ?? "");
+    if (boundSessionId && rt.client?.sessionId && boundSessionId !== rt.client.sessionId) {
+      rt.client?.respond(req.id, { action: "cancel" });
+      return;
+    }
+    const message = String(req.params.message ?? "");
+    const requestedSchema = (req.params.requestedSchema ?? {
+      type: "object",
+      properties: {},
+    }) as ElicitationRequestedSchema;
+    const elicitationPayload = elicitationSchemaToQuestionPayload(message, requestedSchema);
+    const uiPayload = {
+      title: elicitationPayload.title,
+      questions: elicitationPayload.questions,
+      elicitation: true,
+    };
+    // Register pending before any await — runTurn can return from session/prompt
+    // while elicitation is still in flight; settlePromptStream must see pending>0.
+    const answered = registerInteractivePending(rt, reqKey, {
+      kind: "elicitation",
+      rpcId: req.id,
+      respondAsElicitation: true,
+      elicitationPayload,
+    });
+    appendDeepLog({
+      kind: "elicitation-create",
+      sessionId: rt.sessionId,
+      data: { requestId: reqKey, message, requestedSchema },
+    });
+    const messageId = await ensureAssistantMessage(rt);
+    await appendPart(rt.sessionId, messageId, "question", {
+      requestId: reqKey,
+      pending: true,
+      ...uiPayload,
+    });
+    await updateSession(rt.sessionId, { status: "waiting" });
+    broadcastToSession(rt.sessionId, {
+      type: "question.request",
+      sessionId: rt.sessionId,
+      requestId: reqKey,
+      kind: "ask_question",
+      payload: uiPayload,
+    });
+    await answered;
+    return;
+  }
+
   if (req.kind === "permission") {
     const options =
       ((req.params as { options?: Array<{ optionId: string; kind?: string; name?: string }> }).options ??
@@ -1530,6 +1607,11 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
         ? questionPayloadFromPermission(req.params, options)
         : null);
     if (coercedQuestion) {
+      const answered = registerInteractivePending(rt, reqKey, {
+        kind: "ask_question",
+        rpcId: req.id,
+        respondAsPermission: true,
+      });
       await rt.enqueue(async () => {
         const messageId = await ensureAssistantMessage(rt);
         await appendPart(rt.sessionId, messageId, "question", {
@@ -1546,14 +1628,7 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
         kind: "ask_question",
         payload: coercedQuestion,
       });
-      await new Promise<void>((resolve) => {
-        rt.pending.set(reqKey, {
-          kind: "ask_question",
-          rpcId: req.id,
-          respondAsPermission: true,
-          resolve: () => resolve(),
-        });
-      });
+      await answered;
       return;
     }
 
@@ -1619,6 +1694,11 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
       return;
     }
 
+    console.log(`[acp:${rt.sessionId}] permission pending rpcId=${String(req.id)}`);
+    const permissionAnswered = registerInteractivePending(rt, reqKey, {
+      kind: "permission",
+      rpcId: req.id,
+    });
     await rt.enqueue(async () => {
       const messageId = await ensureAssistantMessage(rt);
       await appendPart(rt.sessionId, messageId, "permission", {
@@ -1634,18 +1714,14 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
       requestId: reqKey,
       payload: { ...req.params, options },
     });
-
-    console.log(`[acp:${rt.sessionId}] permission pending rpcId=${String(req.id)}`);
-    await new Promise<void>((resolve) => {
-      rt.pending.set(reqKey, {
-        kind: "permission",
-        rpcId: req.id,
-        resolve: () => resolve(),
-      });
-    });
+    await permissionAnswered;
     return;
   }
 
+  const interactiveAnswered = registerInteractivePending(rt, reqKey, {
+    kind: req.kind,
+    rpcId: req.id,
+  });
   await rt.enqueue(async () => {
     const messageId = await ensureAssistantMessage(rt);
     const kind = req.kind === "ask_question" ? "question" : "plan";
@@ -1667,13 +1743,7 @@ async function handleIncomingRequest(rt: SessionRuntime, req: AcpRequest) {
         : req.params,
   });
 
-  await new Promise<void>((resolve) => {
-    rt.pending.set(reqKey, {
-      kind: req.kind,
-      rpcId: req.id,
-      resolve: () => resolve(),
-    });
-  });
+  await interactiveAnswered;
 }
 
 const MAX_SUBAGENT_THINKING_BLOCKS = 30;
@@ -2293,19 +2363,56 @@ const STREAM_SETTLE_QUIET_MS = 450;
  */
 const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
 const STREAM_SETTLE_MAX_MS = 12_000;
+/** OMP /review can keep tool/subagent traffic going for many minutes. */
+const STREAM_SETTLE_TOOL_MAX_MS = 600_000;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
+
+function isActiveToolStatus(status: string | undefined): boolean {
+  const s = String(status ?? "pending").toLowerCase();
+  if (!s) return true;
+  return STUCK_TURN_PART.has(s);
+}
+
+function trackToolFlight(rt: SessionRuntime, toolCallId: string, status: string | undefined) {
+  if (!toolCallId) return;
+  const next = String(status ?? "pending").toLowerCase();
+  const prev = rt.toolStatusByCallId.get(toolCallId);
+  rt.toolStatusByCallId.set(toolCallId, next);
+  const wasActive = prev != null ? isActiveToolStatus(prev) : false;
+  const nowActive = isActiveToolStatus(next);
+  if (nowActive && !wasActive) rt.inFlightToolCalls++;
+  else if (!nowActive && wasActive) rt.inFlightToolCalls = Math.max(0, rt.inFlightToolCalls - 1);
+}
 
 /** Wait until ACP updates stop arriving after session/prompt returns. */
 async function settlePromptStream(rt: SessionRuntime) {
   const started = Date.now();
   rt.lastStreamAt = Math.max(rt.lastStreamAt, started);
   while (rt.acceptingStream) {
-    if (Date.now() - started >= STREAM_SETTLE_MAX_MS) break;
+    if (rt.pending.size > 0 || rt.client?.isPromptPending()) {
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
+    if (rt.inFlightToolCalls > 0) {
+      const elapsed = Date.now() - started;
+      if (elapsed >= STREAM_SETTLE_TOOL_MAX_MS) {
+        const stalled = Date.now() - rt.lastStreamAt;
+        if (stalled >= STREAM_SETTLE_QUIET_MS * 8) break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
+    if (Date.now() - started >= STREAM_SETTLE_MAX_MS) {
+      // Absolute cap only when the stream is already quiet — long /review runs
+      // can stream for minutes after an elicitation answer.
+      const stalled = Date.now() - rt.lastStreamAt;
+      if (stalled >= STREAM_SETTLE_QUIET_MS) break;
+    }
     const quiet = Date.now() - rt.lastStreamAt;
-    const waitingForAnswer = rt.turnHasThought && !rt.turnHasText;
+    const waitingForAnswer =
+      rt.turnHasThought && !rt.turnHasText && rt.inFlightToolCalls === 0;
     if (
       quiet >= STREAM_SETTLE_QUIET_MS &&
-      rt.pending.size === 0 &&
       (!waitingForAnswer || quiet >= STREAM_SETTLE_ANSWER_QUIET_MS)
     ) {
       break;
@@ -2313,6 +2420,71 @@ async function settlePromptStream(rt: SessionRuntime) {
     await rt.enqueue(async () => undefined);
     await new Promise((r) => setTimeout(r, 50));
   }
+}
+
+async function waitForPendingClientRequests(rt: SessionRuntime) {
+  while (rt.pending.size > 0) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** session/prompt can resolve before elicitation/create is registered on our side. */
+async function waitForLateInteractiveRequests(rt: SessionRuntime, graceMs = 5_000) {
+  const deadline = Date.now() + graceMs;
+  while (rt.pending.size === 0 && Date.now() < deadline && rt.acceptingStream) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+/** OMP often keeps streaming after an elicitation answer while session/prompt already returned. */
+async function drainPostInteractiveStream(rt: SessionRuntime) {
+  if (!rt.acceptingStream) return;
+  rt.lastStreamAt = Date.now();
+  await settlePromptStream(rt);
+  await waitForPendingClientRequests(rt);
+}
+
+/** Re-open the stream window when an interactive answer arrives after runTurn already exited. */
+async function resumeStreamAfterInteractiveAnswer(rt: SessionRuntime, sessionId: string) {
+  rt.lastStreamAt = Date.now();
+  if (rt.acceptingStream) return;
+  rt.streamGen += 1;
+  rt.acceptingStream = true;
+  rt.running = true;
+  await updateSession(sessionId, { status: "running" });
+  try {
+    await drainPostInteractiveStream(rt);
+    await completeDanglingTurnParts(sessionId);
+    await finishTurnSessionStatus(sessionId, rt, "idle");
+  } finally {
+    rt.running = false;
+    rt.acceptingStream = false;
+    void dequeueTurn(rt);
+  }
+}
+
+function registerInteractivePending(
+  rt: SessionRuntime,
+  reqKey: string,
+  entry: Omit<PendingRequest, "resolve">,
+): Promise<void> {
+  let release!: () => void;
+  const done = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  rt.pending.set(reqKey, {
+    ...entry,
+    resolve: () => release(),
+  });
+  return done;
+}
+
+async function finishTurnSessionStatus(sessionId: string, rt: SessionRuntime, status: "idle" | "error") {
+  if (rt.pending.size > 0) {
+    await updateSession(sessionId, { status: "waiting" });
+    return;
+  }
+  await updateSession(sessionId, { status });
 }
 
 async function completeDanglingTurnParts(sessionId: string) {
@@ -2362,6 +2534,9 @@ async function runTurn(
   rt.turnThoughtPartId = null;
   rt.turnHasText = false;
   rt.turnHasThought = false;
+  rt.inFlightToolCalls = 0;
+  rt.toolStatusByCallId.clear();
+  rt.elicitationThisTurn = false;
   rt.toolPartByCallId.clear();
   rt.toolStartRawByCallId.clear();
   // Measure the actual ACP request, not time spent creating UI/DB messages.
@@ -2431,16 +2606,26 @@ async function runTurn(
     // Stop was pressed — don't peel/append more content for this turn.
     if (!rt.acceptingStream || result.stopReason === "cancelled") {
       await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
-      await updateSession(sessionId, { status: "idle" });
+      await finishTurnSessionStatus(sessionId, rt, "idle");
       return result;
     }
     // Agents often resolve session/prompt before the last tool/text updates
     // arrive. Keep the turn live until the stream is quiet, or those chunks
     // are dropped and the UI unlocks with spinning tools and no answer.
+    await waitForLateInteractiveRequests(rt);
     await settlePromptStream(rt);
+    await waitForPendingClientRequests(rt);
     if (!rt.acceptingStream) {
       await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
-      await updateSession(sessionId, { status: "idle" });
+      await finishTurnSessionStatus(sessionId, rt, "idle");
+      return result;
+    }
+    // After elicitation/permission answers, OMP may still stream the rest of
+    // the same turn — don't flip acceptingStream off until that drain finishes.
+    await drainPostInteractiveStream(rt);
+    if (!rt.acceptingStream) {
+      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
+      await finishTurnSessionStatus(sessionId, rt, "idle");
       return result;
     }
     await completeDanglingTurnParts(sessionId);
@@ -2465,14 +2650,37 @@ async function runTurn(
     if (!hasContent && !isAgentSlashPrompt(promptUserText)) {
       const model =
         client.configOptions.find((o) => o.id === "model")?.currentValue ?? "(неизвестно)";
-      const hint =
+      const stderrTail = client.lastStderr?.trim();
+      let hint =
         `Агент завершил ход без текста (stopReason=${result.stopReason ?? "unknown"}). ` +
-        `Модель: ${model}. В Настройках выбери модель с API (не local-ollama, если Ollama не запущена) и сохрани ключ.`;
+        `Модель: ${model}.`;
+      hint +=
+        " В Настройках выбери модель с API (не local-ollama, если Ollama не запущена) и сохрани ключ.";
+      if (stderrTail) {
+        hint += `\n\nПоследние строки stderr агента:\n${stderrTail.slice(-1200)}`;
+      }
+      if (isTokenizerEncodingError(stderrTail ?? "")) {
+        hint += `\n\n${tokenizerEncodingErrorHint(settings.locale === "ru" ? "ru" : "en")}`;
+      }
       // Surface only via the composer banner — do not embed in the message thread.
       broadcastToSession(sessionId, { type: "error", sessionId, message: hint });
+    } else if (!hasContent && isAgentSlashPrompt(promptUserText)) {
+      appendDeepLog({
+        kind: "slash-empty-turn",
+        sessionId,
+        provider: opts.provider,
+        cwd: opts.cwd,
+        model,
+        data: {
+          slashCommand: parseSlashPrompt(promptUserText)?.name,
+          stopReason: result.stopReason,
+          elicitation: rt.elicitationThisTurn,
+          stderrTail: client.lastStderr?.trim()?.slice(-1200),
+        },
+      });
     }
 
-    await updateSession(sessionId, { status: "idle" });
+    await finishTurnSessionStatus(sessionId, rt, "idle");
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2483,8 +2691,11 @@ async function runTurn(
         settings.defaultModel;
       if (currentModel) denyModel(opts.provider, currentModel);
     }
+    const userMessage = isTokenizerEncodingError(message)
+      ? `${message}\n\n${tokenizerEncodingErrorHint(settings.locale === "ru" ? "ru" : "en")}`
+      : message;
     await updateSession(sessionId, { status: "error" });
-    broadcastToSession(sessionId, { type: "error", sessionId, message });
+    broadcastToSession(sessionId, { type: "error", sessionId, message: userMessage });
     // Broken ACP process → recreate next time
     if (/exited|spawn|ENOENT|таймаут|timeout/i.test(message)) {
       rt.client?.dispose();
@@ -2525,6 +2736,7 @@ async function applyDeferredRestart(rt: SessionRuntime) {
 /** Start the next FIFO-queued turn, if any (after the current turn finished). */
 async function dequeueTurn(rt: SessionRuntime) {
   if (rt.running) return;
+  if (rt.pending.size > 0) return;
   // MCP servers / the model were re-configured while the previous turn was
   // running — the OMP/Cursor protocol only accepts those at session/new, so
   // swap in a fresh agent before the next queued turn picks up the old ones.
@@ -2566,6 +2778,8 @@ export async function cancelPrompt(sessionId: string) {
       try {
         if (p.kind === "permission") {
           rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+        } else if (p.kind === "elicitation") {
+          rt.client?.respond(id, { action: "cancel" });
         } else {
           // ask_question / create_plan
           rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
@@ -3300,6 +3514,30 @@ export function answerPermission(sessionId: string, requestId: string, optionId:
   void updateSession(sessionId, { status: "running" });
 }
 
+async function markQuestionPartAnswered(
+  sessionId: string,
+  requestId: string,
+  result: Record<string, unknown>,
+) {
+  const detail = await getSessionDetail(sessionId);
+  if (!detail) return;
+  for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
+    const msg = detail.messages[mi];
+    if (!msg) continue;
+    for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
+      const part = msg.parts[pi];
+      if (part?.type !== "question") continue;
+      if (String(part.payload.requestId ?? "") !== requestId) continue;
+      const answerSummary = summarizeQuestionAnswer({
+        ...(part.payload as Record<string, unknown>),
+        result,
+      });
+      await updatePart(sessionId, part.id, { pending: false, result, answerSummary });
+      return;
+    }
+  }
+}
+
 export function answerQuestion(
   sessionId: string,
   requestId: string,
@@ -3316,10 +3554,12 @@ export function answerQuestion(
     pending.resolve(result);
     rt.pending.delete(requestId);
     void updateSession(sessionId, { status: "running" });
+    void markQuestionPartAnswered(sessionId, requestId, result);
     return;
   }
 
   const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
+  rt.lastStreamAt = Date.now();
 
   if (pending.respondAsPermission) {
     const outcome = (result as { outcome?: { answers?: Array<{ selectedOptionIds?: string[] }> } })
@@ -3329,6 +3569,33 @@ export function answerQuestion(
     pending.resolve(result);
     rt.pending.delete(requestId);
     void updateSession(sessionId, { status: "running" });
+    void markQuestionPartAnswered(sessionId, requestId, result).then(() => {
+      void resumeStreamAfterInteractiveAnswer(rt, sessionId);
+    });
+    return;
+  }
+
+  if (pending.respondAsElicitation && pending.elicitationPayload) {
+    const response = elicitationResponseFromUiOutcome(
+      pending.elicitationPayload,
+      result as { outcome?: Record<string, unknown> },
+    );
+    appendDeepLog({
+      kind: "elicitation-answer",
+      sessionId,
+      data: { requestId, response },
+    });
+    const content = (response as { content?: Record<string, unknown> }).content;
+    console.log(
+      `[acp:${sessionId}] elicitation answer rpcId=${String(id)} action=${String((response as { action?: string }).action ?? "")} value=${String(content?.value ?? "")}`,
+    );
+    rt.client?.respond(id, response);
+    pending.resolve(result);
+    rt.pending.delete(requestId);
+    void updateSession(sessionId, { status: "running" });
+    void markQuestionPartAnswered(sessionId, requestId, result).then(() => {
+      void resumeStreamAfterInteractiveAnswer(rt, sessionId);
+    });
     return;
   }
 
@@ -3336,6 +3603,7 @@ export function answerQuestion(
   pending.resolve(result);
   rt.pending.delete(requestId);
   void updateSession(sessionId, { status: "running" });
+  void markQuestionPartAnswered(sessionId, requestId, result);
 }
 
 export function disposeRuntime(sessionId: string) {

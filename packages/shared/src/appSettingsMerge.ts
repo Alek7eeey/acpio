@@ -1,4 +1,9 @@
-import { DEFAULT_SETTINGS, type AppSettings, type ChatMetaChipId, type ChatToolbarStyle } from "./index.js";
+import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type ChatMetaChipId,
+  type ChatToolbarStyle,
+} from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
 export const SETTINGS_SCHEMA_VERSION = 3;
@@ -54,6 +59,8 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }
+  merged.terminalShell =
+    partial.terminalShell === "powershell" ? "powershell" : DEFAULT_SETTINGS.terminalShell;
   merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
   return merged;
 }

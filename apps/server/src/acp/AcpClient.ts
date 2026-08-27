@@ -72,7 +72,8 @@ export type AcpUpdate =
 export type AcpRequest =
   | { kind: "permission"; id: JsonRpcId; params: Record<string, unknown> }
   | { kind: "ask_question"; id: JsonRpcId; params: Record<string, unknown> }
-  | { kind: "create_plan"; id: JsonRpcId; params: Record<string, unknown> };
+  | { kind: "create_plan"; id: JsonRpcId; params: Record<string, unknown> }
+  | { kind: "elicitation"; id: JsonRpcId; params: Record<string, unknown> };
 
 export type ConfigOption = {
   id: string;
@@ -613,6 +614,7 @@ export class AcpClient extends EventEmitter {
         clientCapabilities: {
           fs: { readTextFile: true, writeTextFile: true },
           terminal: true,
+          elicitation: { form: {} },
           // Harnesses with a parameterized model picker expose model params
           // (fast/effort/…) as separate config options.
           _meta: { parameterizedModelPicker: this.adapter.parameterizedModelPicker },
@@ -919,6 +921,11 @@ export class AcpClient extends EventEmitter {
     this.pending.delete(id);
     this.promptRequestId = null;
     waiter.resolve({ stopReason: "cancelled" });
+  }
+
+  /** True while a `session/prompt` RPC is awaiting the agent's response. */
+  isPromptPending(): boolean {
+    return this.promptRequestId != null;
   }
 
   respond(id: JsonRpcId, result: unknown) {
@@ -1298,6 +1305,15 @@ export class AcpClient extends EventEmitter {
     if (requestKind && msg.id !== undefined) {
       this.emit("request", {
         kind: requestKind,
+        id: msg.id as JsonRpcId,
+        params: (msg.params ?? {}) as Record<string, unknown>,
+      } satisfies AcpRequest);
+      return;
+    }
+
+    if (method === "elicitation/create" && msg.id !== undefined) {
+      this.emit("request", {
+        kind: "elicitation",
         id: msg.id as JsonRpcId,
         params: (msg.params ?? {}) as Record<string, unknown>,
       } satisfies AcpRequest);

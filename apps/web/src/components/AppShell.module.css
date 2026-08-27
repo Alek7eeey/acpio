@@ -76,20 +76,33 @@
   font-size: 1.18rem;
   letter-spacing: -0.03em;
   line-height: 1;
-  padding: 6px 10px;
-  border: none;
-  background: transparent;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   color: var(--text);
-  border-radius: 10px;
+  border-radius: 999px;
   cursor: pointer;
   perspective: 80px;
   text-decoration: none;
   flex-shrink: 1;
   min-width: 0;
+  transition:
+    background var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
+}
+
+.headerBrandSlot .headerBrand {
+  border-radius: 999px;
 }
 
 .headerBrand:hover {
-  background: var(--bg-tertiary);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
 }
 /* App title hops when the tree (sidebar) collapses or expands (desktop only). */
 @media (min-width: 900px) {
@@ -158,6 +171,16 @@
   font-size: 1.12rem;
   justify-content: flex-start;
   transition: opacity 0.14s ease;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
+  box-shadow: none;
+  border-radius: 10px;
+}
+
+.sidebarBrand .headerBrand:hover {
+  background: var(--bg-tertiary);
+  border-color: transparent;
 }
 
 @media (min-width: 900px) {
@@ -202,6 +225,14 @@
   min-width: 0;
   max-width: min(42%, 28rem);
   overflow: hidden;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   font-size: 0.82rem;
   font-weight: 400;
   letter-spacing: 0;
@@ -3073,6 +3104,12 @@
   .iconBtnGhost {
     display: none;
   }
+
+  /* Pill header buttons set `.header .iconBtn { display: grid }` — beat that
+     when the desktop tree is already open. */
+  .header .iconBtn.iconBtnGhost {
+    display: none;
+  }
 }
 
 @media (max-width: 899px) {
@@ -3258,6 +3295,7 @@
 }
 
 .main {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -3318,9 +3356,13 @@
   height: calc(var(--toolbar-btn-size) + 6px);
   min-width: calc(var(--toolbar-btn-size) + 6px);
   padding: 0;
-  border: none;
-  border-radius: 12px;
-  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
@@ -3329,11 +3371,16 @@
   line-height: 1;
   cursor: pointer;
   box-sizing: border-box;
-  transition: background var(--motion), color var(--motion);
+  transition:
+    background var(--motion),
+    color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
 }
 
 .agentChip:hover {
-  background: var(--bg-tertiary);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
   color: var(--text);
 }
 
@@ -3587,11 +3634,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--surface);
+  gap: 10px;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
   height: calc(var(--toolbar-btn-size) + 6px);
   box-sizing: border-box;
   overflow: visible;
@@ -3614,10 +3661,13 @@
   min-height: var(--toolbar-btn-size) !important;
   display: grid !important;
   place-items: center !important;
-  border: none !important;
-  background: transparent !important;
-  border-radius: 9px !important;
-  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
+  background: color-mix(in srgb, var(--surface) 46%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.08);
+  border-radius: 999px !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent) !important;
   color: var(--text-secondary);
   padding: 0 !important;
   margin: 0 !important;
@@ -3627,7 +3677,9 @@
   box-sizing: border-box;
   transition:
     background var(--motion),
-    color var(--motion);
+    color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
 }
 
 .toolClusterLocale {
@@ -3639,10 +3691,13 @@
   align-items: center !important;
   justify-content: center !important;
   gap: 0 !important;
-  border: none !important;
-  background: transparent !important;
-  border-radius: 9px !important;
-  box-shadow: none !important;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
+  background: color-mix(in srgb, var(--surface) 46%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.08);
+  border-radius: 999px !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent) !important;
   color: var(--text-secondary);
   padding: 0 !important;
   margin: 0 !important;
@@ -3653,11 +3708,14 @@
   align-self: center;
   transition:
     background var(--motion),
-    color var(--motion);
+    color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
 }
 
 .toolClusterLocale:hover {
-  background: var(--bg-tertiary) !important;
+  background: color-mix(in srgb, var(--surface) 62%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border)) !important;
   color: var(--text);
 }
 
@@ -3671,7 +3729,8 @@
 }
 
 .toolClusterBtn:hover {
-  background: var(--bg-tertiary) !important;
+  background: color-mix(in srgb, var(--surface) 62%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border)) !important;
   color: var(--text);
 }
 
@@ -3687,8 +3746,58 @@
 }
 
 .toolClusterBtnActive {
-  background: var(--accent-soft) !important;
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface) 40%) !important;
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border)) !important;
   color: var(--accent) !important;
+}
+
+.header .iconBtn {
+  width: var(--toolbar-btn-size);
+  height: var(--toolbar-btn-size);
+  min-width: var(--toolbar-btn-size);
+  min-height: var(--toolbar-btn-size);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
+  transition:
+    background var(--motion),
+    color var(--motion),
+    border-color var(--motion),
+    box-shadow var(--motion);
+}
+
+.header .iconBtn:hover {
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  color: var(--text);
+}
+
+:global([data-theme="light"]) .toolClusterBtn,
+:global([data-theme="light"]) .toolClusterLocale,
+:global([data-theme="light"]) .agentChip,
+:global([data-theme="light"]) .header .iconBtn,
+:global([data-theme="light"]) .headerBrandSlot .headerBrand,
+:global([data-theme="light"]) .headerChatCtx,
+:global([data-theme="light"]) .headerBackToChat {
+  background: color-mix(in srgb, var(--surface) 58%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
+    0 1px 3px color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+:global([data-theme="light"]) .toolClusterBtnActive {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface) 52%) !important;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 70%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 3px 10px color-mix(in srgb, var(--accent) 8%, transparent) !important;
 }
 
 .headerIconActive {
@@ -4039,9 +4148,10 @@
     height: 30px;
     margin: 0;
     padding: 0 12px 0 4px;
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
     border-radius: 999px;
-    background: var(--surface);
+    background: color-mix(in srgb, var(--surface) 46%, transparent);
+    backdrop-filter: blur(16px) saturate(1.08);
     color: var(--text);
     font: inherit;
     font-size: 0.82rem;
@@ -4049,13 +4159,16 @@
     letter-spacing: -0.02em;
     line-height: 1;
     cursor: pointer;
-    box-shadow: var(--shadow-soft);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+      0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
     -webkit-tap-highlight-color: transparent;
     animation: headerBackIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
     transition:
       background var(--motion),
       border-color var(--motion),
-      transform 0.18s ease;
+      transform 0.18s ease,
+      box-shadow var(--motion);
   }
 
   .headerBackToChatIcon {
@@ -4084,7 +4197,7 @@
   }
 
   .headerBackToChat:active {
-    background: var(--bg-tertiary);
+    background: color-mix(in srgb, var(--surface) 62%, transparent);
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
     transform: scale(0.97);
   }
@@ -4366,9 +4479,9 @@
   }
 
   .toolCluster {
-    gap: 2px;
-    padding: 3px;
-    border-radius: 12px;
+    gap: 8px;
+    padding: 0;
+    border-radius: 0;
     flex-shrink: 0;
   }
 

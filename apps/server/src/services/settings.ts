@@ -118,6 +118,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.consoleChipStyle !== "icon") {
     merged.consoleChipStyle = "full";
   }
+  if (merged.terminalShell !== "powershell") {
+    merged.terminalShell = "cmd";
+  }
   if (!Array.isArray(merged.chatComposerButtons)) {
     merged.chatComposerButtons = [...DEFAULT_SETTINGS.chatComposerButtons];
   } else {

@@ -17,6 +17,7 @@ import {
   DEFAULT_SETTINGS,
   isModelAccessError,
   mergeClientAppSettings,
+  summarizeQuestionAnswer,
   type AdapterMetaDto,
 } from "@acpio/shared";
 import { api } from "./api";
@@ -49,7 +50,6 @@ import {
   persistGitPanelPresentation,
   type GitPanelPresentation,
 } from "./sessionGitPanel";
-import { dispatchShellConsole } from "./shellConsole";
 
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
@@ -132,6 +132,28 @@ type PendingQuestion = {
   payload: Record<string, unknown>;
 };
 
+function pendingQuestionFromDetail(detail: SessionDetailDto): PendingQuestion | null {
+  if (detail.status !== "waiting") return null;
+  for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
+    const msg = detail.messages[mi];
+    if (!msg) continue;
+    for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
+      const part = msg.parts[pi];
+      if (part?.type !== "question") continue;
+      if (!part.payload.pending) continue;
+      const requestId = String(part.payload.requestId ?? "");
+      if (!requestId) continue;
+      return {
+        sessionId: detail.id,
+        requestId,
+        kind: "ask_question",
+        payload: part.payload as Record<string, unknown>,
+      };
+    }
+  }
+  return null;
+}
+
 /** File pending in the composer — always a path on the server machine. */
 export type PendingAttachment = {
   name: string;
@@ -140,6 +162,8 @@ export type PendingAttachment = {
 
 type AppState = {
   settings: AppSettings;
+  /** Server OS from /api/health (null until loaded). */
+  serverPlatform: string | null;
   sessions: SessionDto[];
   themes: ChatThemeDto[];
   activeSessionId: string | null;
@@ -271,6 +295,11 @@ type AppState = {
   handleWsEvent: (event: WsServerEvent) => void;
   answerPermission: (optionId: string) => Promise<void>;
   answerQuestion: (result: Record<string, unknown>) => Promise<void>;
+  answerQuestionFor: (
+    sessionId: string,
+    requestId: string,
+    result: Record<string, unknown>,
+  ) => Promise<void>;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
   rememberModelsCatalog: (catalog: ModelsCatalog) => void;
   ensureModels: (
@@ -388,8 +417,76 @@ function upsertPart(parts: MessagePartDto[], part: MessagePartDto) {
   const idx = parts.findIndex((p) => p.id === part.id);
   if (idx === -1) return [...parts, part].sort((a, b) => a.order - b.order);
   const next = [...parts];
-  next[idx] = part;
+  next[idx] = mergeMessagePart(parts[idx]!, part);
   return next;
+}
+
+function mergeMessagePart(existing: MessagePartDto, incoming: MessagePartDto): MessagePartDto {
+  const prev = existing.payload ?? {};
+  const patch = incoming.payload ?? {};
+  const mergedPayload = { ...prev, ...patch };
+  if (existing.type === "question" && incoming.type === "question") {
+    if (prev.result && patch.result == null) mergedPayload.result = prev.result;
+    if (prev.answerSummary && patch.answerSummary == null) {
+      mergedPayload.answerSummary = prev.answerSummary;
+    }
+    if (prev.questions && patch.questions == null) mergedPayload.questions = prev.questions;
+    if (prev.title && patch.title == null) mergedPayload.title = prev.title;
+    if (prev.pending === false && patch.pending === true) {
+      mergedPayload.pending = false;
+      mergedPayload.result = prev.result ?? mergedPayload.result;
+      mergedPayload.answerSummary = prev.answerSummary ?? mergedPayload.answerSummary;
+    }
+  }
+  return { ...incoming, payload: mergedPayload };
+}
+
+function applyQuestionAnswerLocally(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  sessionId: string,
+  requestId: string,
+  result: Record<string, unknown>,
+) {
+  const state = get();
+  const current = liveDetail(state, sessionId);
+  if (!current) return;
+  let touched = false;
+  const messages = current.messages.map((message) => {
+    if (message.role !== "assistant") return message;
+    const parts = message.parts.map((part) => {
+      if (part.type !== "question") return part;
+      if (String(part.payload.requestId ?? "") !== requestId) return part;
+      touched = true;
+      const payload = {
+        ...part.payload,
+        pending: false,
+        result,
+        answerSummary: summarizeQuestionAnswer({ ...part.payload, result }),
+      };
+      return { ...part, payload };
+    });
+    return touched ? { ...message, parts } : message;
+  });
+  if (!touched) return;
+  commitDetail(get, set, { ...current, messages });
+}
+
+function mergeSessionQuestionAnswers(
+  local: SessionDetailDto,
+  remote: SessionDetailDto,
+): SessionDetailDto {
+  const messages = remote.messages.map((remoteMsg) => {
+    const localMsg = local.messages.find((m) => m.id === remoteMsg.id);
+    if (!localMsg) return remoteMsg;
+    const parts = remoteMsg.parts.map((remotePart) => {
+      const localPart = localMsg.parts.find((p) => p.id === remotePart.id);
+      if (!localPart) return remotePart;
+      return mergeMessagePart(localPart, remotePart);
+    });
+    return { ...remoteMsg, parts };
+  });
+  return { ...remote, messages };
 }
 
 function upsertMessagePart(message: MessageDto, part: MessagePartDto): MessagePartDto[] {
@@ -818,7 +915,7 @@ function reconcileFinishedTurn(
         const state = get();
         const current = liveDetail(state, sessionId);
         if (!current) return;
-        commitDetail(get, set, detail);
+        commitDetail(get, set, mergeSessionQuestionAnswers(current, detail));
         clearMessageIdAliases(sessionId);
       })
       .catch(() => {
@@ -864,7 +961,14 @@ async function loadAppData(
   get().applyLocale(locale);
   applyAppearance(settings);
   const sessions = await api.listSessions();
-  set({ settings: { ...settings, theme, locale }, sessions, themes: [] });
+  let serverPlatform: string | null = null;
+  try {
+    const health = await api.health();
+    serverPlatform = health.platform;
+  } catch {
+    /* ignore */
+  }
+  set({ settings: { ...settings, theme, locale }, sessions, themes: [], serverPlatform });
   void get().probeAllAgents({
     quiet: hasStoredAgentAvailability(get().agentAvailability),
     reportOffline: hasStoredAgentAvailability(get().agentAvailability),
@@ -920,16 +1024,6 @@ if (typeof document !== "undefined") {
   }
 }
 
-function routeShellConsoleFromWs(event: WsServerEvent) {
-  if (event.type === "process.output" && event.source === "shell") {
-    dispatchShellConsole({ type: "output", sessionId: event.sessionId, text: event.text });
-    return;
-  }
-  if (event.type === "process.cleared") {
-    dispatchShellConsole({ type: "cleared", sessionId: event.sessionId });
-  }
-}
-
 const initialActiveSessionId =
   typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
 const initialConsoleOpenSessions = readConsoleOpenSessions();
@@ -950,6 +1044,7 @@ const initialSidePanels = resolveExclusiveSidePanels(
 
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
+  serverPlatform: null,
   sessions: [],
   themes: [],
   activeSessionId: null,
@@ -1568,6 +1663,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         sessionLoading: false,
         error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
         sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
+        pendingQuestion: pendingQuestionFromDetail(detail) ?? get().pendingQuestion,
       });
       if (detail.messages.length) markRestoringDone(get, set, id);
       // The fetched detail is server-authoritative: the optimistic aliases for
@@ -2193,8 +2289,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   handleWsEvent(event) {
-    routeShellConsoleFromWs(event);
-
     if (event.type !== "part.appended" && event.type !== "part.updated") {
       if (pendingPartRaf) {
         cancelAnimationFrame(pendingPartRaf);
@@ -2556,6 +2650,17 @@ export const useAppStore = create<AppState>((set, get) => ({
           void submitAutoErrorDump(message);
         }
       }
+      if (event.type === "part.updated" && event.part.type === "question" && !event.part.payload.pending) {
+        const pending = get().pendingQuestion;
+        const requestId = String(event.part.payload.requestId ?? "");
+        if (
+          pending?.sessionId === event.sessionId &&
+          pending.requestId === requestId &&
+          pending.kind === "ask_question"
+        ) {
+          set({ pendingQuestion: null });
+        }
+      }
       queuePartEvent(event, get, set);
       return;
     }
@@ -2689,11 +2794,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  async answerQuestionFor(sessionId, requestId, result) {
+    applyQuestionAnswerLocally(get, set, sessionId, requestId, result);
+    try {
+      await api.answerQuestion(sessionId, requestId, result);
+      const pending = get().pendingQuestion;
+      if (pending?.sessionId === sessionId && pending.requestId === requestId) {
+        set({ pendingQuestion: null });
+      }
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+
   async answerQuestion(result) {
     const pending = get().pendingQuestion;
     if (!pending) return;
-    await api.answerQuestion(pending.sessionId, pending.requestId, result);
-    set({ pendingQuestion: null });
+    await get().answerQuestionFor(pending.sessionId, pending.requestId, result);
   },
 
   async saveSettings(patch) {

@@ -182,6 +182,7 @@
     "waitingInput": "Waiting for input",
     "messageOrCommand": "Message or /command…",
     "slashCommandsLoading": "Loading command list…",
+    "insertSlashCommand": "Insert into input",
     "connectAgentInSettings": "Connect an agent in Settings",
     "notConnected": "not connected",
     "users": "users",
@@ -427,6 +428,10 @@
     "consoleChipStyleHint": "Show the console toggle as a full chip or icon only.",
     "consoleChipStyleFull": "Label + icon",
     "consoleChipStyleIcon": "Icon only",
+    "terminalShell": "Terminal shell",
+    "terminalShellHint": "Default shell for the session terminal panel. Applies immediately to open terminals.",
+    "terminalShellCmd": "Command Prompt (cmd)",
+    "terminalShellPowerShell": "PowerShell",
     "cliAndPermissions": "CLI & permissions",
     "permissionPolicy": "Permission policy",
     "permissionPrompt": "Ask",
@@ -735,13 +740,15 @@
   "question": {
     "plan": "Plan",
     "agentQuestion": "Agent question",
+    "yourAnswer": "Your answer",
     "todos": "Todos",
     "planReady": "Plan ready for approval",
     "planAwaiting": "Awaiting",
     "openPlan": "Open plan",
     "modeSwitch": "Mode switch suggested",
     "modeSwitchTitle": "Switch to {{mode}}?",
-    "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode."
+    "modeSwitchHint": "The agent wants to change the session mode. Approve to switch, or reject to stay in the current mode.",
+    "other": "Other"
   },
   "modes": {
     "label": "Mode",

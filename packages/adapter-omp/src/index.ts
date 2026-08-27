@@ -202,7 +202,7 @@ export const ompAdapter: HarnessAdapter = {
 
   requestKinds: {
     "session/request_permission": "permission",
-    // When omp-acp bridges OMP select/input/ask elicitation to ACP, register here.
+    // OMP ask/select/input/confirm use ACP elicitation/create when client advertises form support.
     "session/ask_question": "ask_question",
   },
   extensionKinds: {

@@ -115,8 +115,9 @@ function parsePorcelain(output: string, numstat: Map<string, { additions: number
     let filePath = match[3]!.trim();
     if (filePath.includes(" -> ")) filePath = filePath.split(" -> ").pop()!.trim();
     const stats = numstat.get(filePath) ?? { additions: 0, deletions: 0 };
-    const staged = index !== " " && index !== "?";
-    const unstaged = worktree !== " " && worktree !== "?";
+    const untracked = index === "?" && worktree === "?";
+    const staged = !untracked && index !== " ";
+    const unstaged = untracked || (worktree !== " " && worktree !== "?");
     files.push({
       path: filePath,
       index,

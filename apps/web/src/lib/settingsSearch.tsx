@@ -240,6 +240,9 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatToolbarStyle"),
       t("settings.chatAdvanced"),
       t("settings.chatIntro"),
+      t("settings.terminalShell"),
+      t("settings.terminalShellCmd"),
+      t("settings.terminalShellPowerShell"),
     ],
   };
   const hints = settingsRowHints(t);
@@ -300,6 +303,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.chatShowMessageTimeHint"),
       t("settings.chatSplitHint"),
       t("settings.chatToolbarStyleHint"),
+      t("settings.terminalShellHint"),
     ],
   };
 }

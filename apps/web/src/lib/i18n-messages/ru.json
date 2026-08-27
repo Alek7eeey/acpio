@@ -204,6 +204,7 @@
     "waitingInput": "Ожидание ввода",
     "messageOrCommand": "Сообщение или /команда…",
     "slashCommandsLoading": "Загружаем список команд…",
+    "insertSlashCommand": "Вставить в поле ввода",
     "connectAgentInSettings": "Подключите агента в Настройках",
     "notConnected": "не подключён",
     "users": "пользователей",
@@ -451,6 +452,10 @@
     "consoleChipStyleHint": "Показывать переключатель консоли с подписью или только иконкой.",
     "consoleChipStyleFull": "Иконка и текст",
     "consoleChipStyleIcon": "Только иконка",
+    "terminalShell": "Оболочка терминала",
+    "terminalShellHint": "Оболочка по умолчанию для панели терминала в чате. Применяется сразу к открытым терминалам.",
+    "terminalShellCmd": "Командная строка (cmd)",
+    "terminalShellPowerShell": "PowerShell",
     "cliAndPermissions": "CLI и права",
     "permissionPolicy": "Политика разрешений",
     "permissionPrompt": "Спрашивать",
@@ -759,13 +764,15 @@
   "question": {
     "plan": "План",
     "agentQuestion": "Вопрос агента",
+    "yourAnswer": "Ваш ответ",
     "todos": "Задачи",
     "planReady": "План готов к подтверждению",
     "planAwaiting": "Ожидает",
     "openPlan": "Открыть план",
     "modeSwitch": "Предложено переключение режима",
     "modeSwitchTitle": "Переключиться в «{{mode}}»?",
-    "modeSwitchHint": "Агент хочет сменить режим сессии. Подтвердите, чтобы переключиться, или отклоните, чтобы остаться в текущем режиме."
+    "modeSwitchHint": "Агент хочет сменить режим сессии. Подтвердите, чтобы переключиться, или отклоните, чтобы остаться в текущем режиме.",
+    "other": "Другое"
   },
   "modes": {
     "label": "Режим",

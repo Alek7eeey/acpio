@@ -15,6 +15,7 @@ export function useGitStatus(
     sessionStatus?: SessionStatus;
     streaming?: boolean;
     isEmptyChat?: boolean;
+    gitPanelOpen?: boolean;
   },
 ) {
   const t = useT();
@@ -83,10 +84,10 @@ export function useGitStatus(
 
   useEffect(() => {
     if (!sessionId) return;
-    const interval = awaiting ? 2000 : 8000;
+    const interval = awaiting ? 2000 : context?.gitPanelOpen ? 3000 : 8000;
     const timer = window.setInterval(() => void refresh(), interval);
     return () => window.clearInterval(timer);
-  }, [awaiting, refresh, sessionId]);
+  }, [awaiting, context?.gitPanelOpen, refresh, sessionId]);
 
   const checkout = useCallback(async (branch: string, create = false) => {
     const sid = sessionRef.current;

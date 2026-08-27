@@ -1,4 +1,4 @@
-/** Live shell PTY stream for the session console panel (not persisted). */
+/** Live shell PTY stream for the session console panel (buffered in xterm until F5). */
 
 export type ShellConsoleEvent =
   | { type: "output"; sessionId: string; text: string }

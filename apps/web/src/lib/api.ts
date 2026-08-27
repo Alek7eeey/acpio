@@ -49,6 +49,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<{ ok: boolean; platform: string }>("/api/health"),
   getSettings: () => request<AppSettings>("/api/settings"),
   remoteAccessStatus: () =>
     request<{ required: boolean; unlocked: boolean }>("/api/remote-access"),

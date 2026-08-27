@@ -86,8 +86,55 @@ export function ConsoleSidePanel({
   const lastResizeRef = useRef({ cols: 0, rows: 0 });
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const openRef = useRef(open);
+  openRef.current = open;
+  const hiddenOutputRef = useRef("");
+  const frameOutputRef = useRef("");
+  const outputRafRef = useRef(0);
+  const resizeRafRef = useRef(0);
 
   const mod = modKeyLabel();
+
+  const flushFrameOutput = useCallback(() => {
+    outputRafRef.current = 0;
+    const term = termRef.current;
+    const chunk = frameOutputRef.current;
+    frameOutputRef.current = "";
+    if (!term || !chunk) return;
+    term.write(chunk);
+  }, []);
+
+  const queueShellOutput = useCallback(
+    (text: string) => {
+      if (!text) return;
+      if (!openRef.current) {
+        hiddenOutputRef.current += text;
+        return;
+      }
+      frameOutputRef.current += text;
+      if (!outputRafRef.current) {
+        outputRafRef.current = requestAnimationFrame(flushFrameOutput);
+      }
+    },
+    [flushFrameOutput],
+  );
+
+  const flushHiddenOutput = useCallback(() => {
+    const term = termRef.current;
+    const hidden = hiddenOutputRef.current;
+    hiddenOutputRef.current = "";
+    if (!term || !hidden) return;
+    term.write(hidden);
+  }, []);
+
+  const resetOutputBuffers = useCallback(() => {
+    hiddenOutputRef.current = "";
+    frameOutputRef.current = "";
+    if (outputRafRef.current) {
+      cancelAnimationFrame(outputRafRef.current);
+      outputRafRef.current = 0;
+    }
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -261,18 +308,47 @@ export function ConsoleSidePanel({
   }, [contextMenu]);
 
   useEffect(() => {
-    if (!open) return;
     return subscribeShellConsole((event) => {
       if (event.sessionId !== sessionIdRef.current) return;
       const term = termRef.current;
       if (!term) return;
-      if (event.type === "output") term.write(event.text);
-      else term.reset();
+      if (event.type === "output") {
+        queueShellOutput(event.text);
+        return;
+      }
+      resetOutputBuffers();
+      term.reset();
+      shellAttachedRef.current = false;
+      attachPromiseRef.current = null;
+      lastResizeRef.current = { cols: 0, rows: 0 };
+      void ensureShellAttachedRef.current().then((ok) => {
+        if (!ok) return;
+        try {
+          fitRef.current?.fit();
+          sendShellResizeRef.current(term.cols, term.rows);
+        } catch {
+          /* xterm not ready */
+        }
+      });
     });
-  }, [open, sessionId]);
+  }, [queueShellOutput, resetOutputBuffers, sessionId]);
 
   useEffect(() => {
     if (!open || !containerRef.current) return;
+    try {
+      fitRef.current?.fit();
+    } catch {
+      /* xterm not ready */
+    }
+    flushHiddenOutput();
+    const term = termRef.current;
+    if (term && shellAttachedRef.current) {
+      sendShellResize(term.cols, term.rows);
+    }
+  }, [flushHiddenOutput, open, sendShellResize]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
 
     const activeSessionId = sessionId;
 
@@ -283,7 +359,8 @@ export function ConsoleSidePanel({
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 12,
       lineHeight: 1.35,
-      scrollback: 8000,
+      scrollback: 5000,
+      smoothScrollDuration: 0,
       theme: readXtermTheme(isDark),
     });
 
@@ -297,6 +374,7 @@ export function ConsoleSidePanel({
     shellAttachedRef.current = false;
     attachPromiseRef.current = null;
     pendingInputRef.current = "";
+    resetOutputBuffers();
 
     void ensureShellAttachedRef.current().then((ok) => {
       if (!ok) return;
@@ -352,16 +430,22 @@ export function ConsoleSidePanel({
     term.focus();
 
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-        sendShellResizeRef.current(term.cols, term.rows);
-      } catch {
-        /* xterm not ready */
-      }
+      if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
+      resizeRafRef.current = requestAnimationFrame(() => {
+        resizeRafRef.current = 0;
+        try {
+          fit.fit();
+          sendShellResizeRef.current(term.cols, term.rows);
+        } catch {
+          /* xterm not ready */
+        }
+      });
     });
     ro.observe(containerRef.current);
 
     return () => {
+      if (resizeRafRef.current) cancelAnimationFrame(resizeRafRef.current);
+      resetOutputBuffers();
       ro.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
@@ -373,7 +457,7 @@ export function ConsoleSidePanel({
       pendingInputRef.current = "";
       void api.detachConsole(activeSessionId).catch(() => {});
     };
-  }, [open, sessionId]);
+  }, [resetOutputBuffers, sessionId]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -381,13 +465,13 @@ export function ConsoleSidePanel({
     term.options.theme = readXtermTheme(isDark);
   }, [isDark]);
 
-  if (!open) return null;
-
   return (
     <>
       <aside
-        className={`${styles.panel} ${dragging ? styles.resizing : ""}`}
+        className={`${styles.panel} ${dragging ? styles.resizing : ""} ${!open ? styles.panelHidden : ""}`}
         aria-label={t("console.title")}
+        aria-hidden={!open}
+        hidden={!open}
         style={{ ["--console-panel-width"]: `${width}px` } as CSSProperties}
       >
         <div
@@ -406,7 +490,6 @@ export function ConsoleSidePanel({
           <div className={styles.headerText}>
             <div className={styles.headerTitles}>
               <span className={styles.eyebrow}>{t("console.title")}</span>
-              <p className={styles.hint}>{t("console.hint")}</p>
             </div>
           </div>
           <button type="button" className={styles.closeBtn} onClick={onClose} aria-label={t("common.cancel")}>

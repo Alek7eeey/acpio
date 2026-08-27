@@ -61,6 +61,7 @@ import {
 import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import {
   attachUserConsole,
+  reconcileUserConsolesShell,
   releaseUserConsole,
   resetUserConsole,
   resizeUserConsole,
@@ -154,6 +155,7 @@ const settingsSchema = z.object({
   chatMetaChips: z.array(z.string()).optional(),
   thoughtsChipStyle: z.enum(["full", "icon"]).optional(),
   consoleChipStyle: z.enum(["full", "icon"]).optional(),
+  terminalShell: z.enum(["cmd", "powershell"]).optional(),
   chatComposerButtons: z.array(z.string()).optional(),
   chatTreeElements: z.array(z.string()).optional(),
   chatTreeMenu: z.array(z.string()).optional(),
@@ -230,7 +232,7 @@ export async function registerRoutes(app: FastifyInstance) {
     return reply.code(401).send({ error: "remote_key_required", code: "remote_key_required" });
   });
 
-  app.get("/api/health", async () => ({ ok: true }));
+  app.get("/api/health", async () => ({ ok: true, platform: process.platform }));
 
   app.get("/api/remote-access", async (req) => {
     const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
@@ -418,7 +420,11 @@ export async function registerRoutes(app: FastifyInstance) {
       // Warm the status cache so the indicator reflects the new list quickly.
       void refreshMcpStatus();
     }
-    return updateSettings(patch as Partial<AppSettings>);
+    const next = await updateSettings(patch as Partial<AppSettings>);
+    if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {
+      void reconcileUserConsolesShell();
+    }
+    return next;
   });
 
   app.get("/api/sessions", async () => listSessions());

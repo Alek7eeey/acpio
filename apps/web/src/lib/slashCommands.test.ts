@@ -117,15 +117,15 @@ describe("parseSlashCommandText", () => {
 
 describe("getSlashContext", () => {
   it("captures the in-progress command name at the cursor", () => {
-    expect(getSlashContext("/st", 3)).toEqual({ query: "st", start: 0 });
+    expect(getSlashContext("/st", 3)).toEqual({ query: "st", start: 0, midPrompt: false });
   });
 
   it("captures the full command name when the cursor sits right after it", () => {
-    expect(getSlashContext("/stop now", 5)).toEqual({ query: "stop", start: 0 });
+    expect(getSlashContext("/stop now", 5)).toEqual({ query: "stop", start: 0, midPrompt: false });
   });
 
   it("captures a partial name when the cursor is mid-word", () => {
-    expect(getSlashContext("/stop", 4)).toEqual({ query: "sto", start: 0 });
+    expect(getSlashContext("/stop", 4)).toEqual({ query: "sto", start: 0, midPrompt: false });
   });
 
   it("returns null once whitespace separates the args", () => {
@@ -133,15 +133,15 @@ describe("getSlashContext", () => {
   });
 
   it("captures a command typed on a new line", () => {
-    expect(getSlashContext("foo\n/st", 7)).toEqual({ query: "st", start: 4 });
+    expect(getSlashContext("foo\n/st", 7)).toEqual({ query: "st", start: 4, midPrompt: false });
   });
 
   it("captures a command after existing draft text", () => {
-    expect(getSlashContext("hello /st", 9)).toEqual({ query: "st", start: 6 });
+    expect(getSlashContext("hello /st", 9)).toEqual({ query: "st", start: 6, midPrompt: true });
   });
 
   it("returns an empty query for a bare slash after a space", () => {
-    expect(getSlashContext("hello /", 7)).toEqual({ query: "", start: 6 });
+    expect(getSlashContext("hello /", 7)).toEqual({ query: "", start: 6, midPrompt: true });
   });
 
   it("returns null for empty text", () => {
@@ -153,15 +153,15 @@ describe("getSlashContext", () => {
   });
 
   it("returns an empty query for a bare slash at the start", () => {
-    expect(getSlashContext("/", 1)).toEqual({ query: "", start: 0 });
+    expect(getSlashContext("/", 1)).toEqual({ query: "", start: 0, midPrompt: false });
   });
 
   it("returns an empty query for a bare slash on a new line", () => {
-    expect(getSlashContext("a\n/", 3)).toEqual({ query: "", start: 2 });
+    expect(getSlashContext("a\n/", 3)).toEqual({ query: "", start: 2, midPrompt: false });
   });
 
   it("captures a slash after a space mid-line", () => {
-    expect(getSlashContext("a /b", 4)).toEqual({ query: "b", start: 2 });
+    expect(getSlashContext("a /b", 4)).toEqual({ query: "b", start: 2, midPrompt: true });
   });
 
   it("returns null when there is no slash at all", () => {
@@ -172,6 +172,7 @@ describe("getSlashContext", () => {
     expect(getSlashContext("/a-b_c:d", 10)).toEqual({
       query: "a-b_c:d",
       start: 0,
+      midPrompt: false,
     });
   });
 
@@ -220,6 +221,37 @@ describe("filterSlashCommands", () => {
 
   it("matches a description term even when it does not prefix the name", () => {
     expect(filterSlashCommands(cmds, "hist")).toEqual([cmds[0]]);
+  });
+
+  it("matches skill commands by bare skill name prefix", () => {
+    const skills: SlashCommandDto[] = [
+      { name: "skill:humanizer", description: "Remove signs of AI writing" },
+      { name: "compact", description: "Compact" },
+    ];
+    expect(filterSlashCommands(skills, "hum").map((c) => c.name)).toEqual(["skill:humanizer"]);
+  });
+
+  it("fuzzy-matches skill: command names at the line start", () => {
+    const skills: SlashCommandDto[] = [
+      { name: "skill:security-scan", description: "Security scan" },
+      { name: "stop", description: "Stop" },
+    ];
+    expect(filterSlashCommands(skills, "sec").map((c) => c.name)).toEqual(["skill:security-scan"]);
+  });
+
+  it("mid-prompt search only surfaces skill commands", () => {
+    const skills: SlashCommandDto[] = [
+      { name: "skill:humanizer", description: "Humanizer" },
+      { name: "skill:reviewer", description: "Reviewer" },
+      { name: "compact", description: "Compact" },
+    ];
+    expect(
+      filterSlashCommands(skills, "hum", { midPromptSkillOnly: true }).map((c) => c.name),
+    ).toEqual(["skill:humanizer"]);
+    expect(
+      filterSlashCommands(skills, "", { midPromptSkillOnly: true }).map((c) => c.name),
+    ).toEqual(["skill:humanizer", "skill:reviewer"]);
+    expect(filterSlashCommands(skills, "sign", { midPromptSkillOnly: true })).toEqual([]);
   });
 });
 
@@ -494,6 +526,11 @@ describe("findSlashCommand", () => {
 
   it("matches case-insensitively", () => {
     expect(findSlashCommand(cmds, "STOP")).toEqual(cmds[0]);
+  });
+
+  it("resolves bare skill names to skill: commands", () => {
+    const skills: SlashCommandDto[] = [{ name: "skill:humanizer", description: "Humanizer" }];
+    expect(findSlashCommand(skills, "humanizer")).toEqual(skills[0]);
   });
 
   it("returns null when the command is unknown", () => {

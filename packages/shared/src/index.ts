@@ -38,6 +38,16 @@ export {
   type InteractiveOption,
 } from "./interactive.js";
 export {
+  elicitationContentFromUiAnswers,
+  elicitationResponseFromUiOutcome,
+  elicitationSchemaToQuestionPayload,
+  type ElicitationFormQuestion,
+  type ElicitationQuestionPayload,
+  type ElicitationRequestedSchema,
+  type ElicitationUiAnswer,
+} from "./elicitationForm.js";
+export { summarizeQuestionAnswer, type QuestionAnswerPayload } from "./questionAnswer.js";
+export {
   SESSION_TITLE_MAX_LEN,
   sanitizeTitleSource,
   titleFromUserText,
@@ -401,6 +411,9 @@ export type MessagePartType =
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
+/** Windows shell for the in-app session terminal. */
+export type TerminalShell = "cmd" | "powershell";
+
 export interface AppSettings {
   theme: Theme;
   locale: AppLocale;
@@ -481,6 +494,8 @@ export interface AppSettings {
   thoughtsChipStyle: "full" | "icon";
   /** Console chip style in the composer bar. */
   consoleChipStyle: "full" | "icon";
+  /** Default shell for the session terminal (Windows server only). */
+  terminalShell: TerminalShell;
   /** Optional composer buttons (attach, mic, model, mode picker). */
   chatComposerButtons: ChatComposerButtonId[];
   /** Tree sidebar controls shown (search, per-row actions). */
@@ -555,6 +570,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatMetaChips: ["folder", "git", "thoughts", "mcp", "context", "console"],
   thoughtsChipStyle: "full",
   consoleChipStyle: "full",
+  terminalShell: "cmd",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
@@ -613,6 +629,30 @@ export function modelParamsForSession(
 export function isModelAccessError(message: string): boolean {
   return /Insufficient balance|CreditsError|insufficient.?credits|payment required|billing/i.test(
     message,
+  );
+}
+
+/** OMP pi-natives JS/Rust mismatch — common with DeepSeek/Qwen tokenizer models on stale `.node` builds. */
+export function isTokenizerEncodingError(message: string): boolean {
+  return /does not match any variant of enum [`']Encoding[`']|Unknown encoding|unknown tokenizer/i.test(
+    message,
+  );
+}
+
+export function tokenizerEncodingErrorHint(locale: "en" | "ru" = "en"): string {
+  if (locale === "ru") {
+    return (
+      "Устаревший native-модуль pi-natives: JS ожидает токенизатор (DeepSeekV3 и др.), а загруженный `.node` его не поддерживает. " +
+      "Обнови OMP (`bun install -g @oh-my-pi/pi-coding-agent@latest`) и в Настройках укажи `omp` + `acp`, " +
+      "либо пересобери natives в dev-клоне OMP (`bun --cwd=packages/natives run build`). " +
+      "Временный обходной путь — модель без deepseek-v3/qwen3 токенизатора."
+    );
+  }
+  return (
+    "Stale pi-natives binary: JS expects a tokenizer (DeepSeekV3, etc.) that the loaded `.node` does not support. " +
+    "Update OMP (`bun install -g @oh-my-pi/pi-coding-agent@latest`) and set Settings to `omp` + `acp`, " +
+    "or rebuild natives in a dev OMP clone (`bun --cwd=packages/natives run build`). " +
+    "Workaround: pick a model that does not use the deepseek-v3/qwen3 tokenizer."
   );
 }
 
