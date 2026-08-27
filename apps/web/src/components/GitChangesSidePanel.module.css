@@ -411,7 +411,10 @@
 }
 
 .bodyHistory {
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .bodyChanges {
@@ -492,6 +495,7 @@
 }
 
 .historyLayout {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -531,7 +535,7 @@
 }
 
 .historyLayoutWithDiff .historyRightPane {
-  grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+  grid-template-rows: minmax(120px, min(var(--history-detail-height, 240px), 42%)) 4px minmax(120px, 1fr);
 }
 
 .historyDetailPane {
@@ -584,7 +588,7 @@
 }
 
 .historyLayoutStacked.historyLayoutWithDiff .historyRightPane {
-  grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+  grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
 }
 
 .historyPane {
@@ -953,9 +957,14 @@
 
 .diffPane {
   overflow: auto;
-  padding: 12px;
+  padding: 0;
   min-width: 0;
+  min-height: 0;
   background: var(--surface);
+}
+
+.diffPane > .empty {
+  padding: 24px 16px;
 }
 
 .empty {
@@ -1078,7 +1087,7 @@
   }
 
   .historyLayout.historyLayoutWithDiff .historyRightPane {
-    grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+    grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
   }
 
   .changesLayout {
@@ -1161,7 +1170,7 @@
   }
 
   .historyLayout.historyLayoutWithDiff .historyRightPane {
-    grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+    grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
   }
 
   .changesLayout {
