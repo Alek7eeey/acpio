@@ -282,6 +282,7 @@
   box-sizing: border-box;
   overflow-x: auto;
   background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .actionBar {
@@ -290,8 +291,8 @@
   gap: 2px;
   padding: 2px 4px;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-tertiary) 52%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
   box-shadow: var(--shadow-soft);
 }
 
@@ -314,11 +315,11 @@
 }
 
 .actionBtn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+  background: var(--bg-tertiary);
 }
 
 .actionBtn:active:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 12%, transparent);
+  background: var(--surface-2);
 }
 
 .actionBtn:disabled {
@@ -347,12 +348,12 @@
   align-self: stretch;
   width: 1px;
   margin: 6px 4px;
-  background: color-mix(in srgb, var(--border) 92%, transparent);
+  background: var(--border-soft);
 }
 
 :global([data-theme="dark"]) .actionBar {
-  background: color-mix(in srgb, var(--bg-secondary) 72%, #0a0d12);
-  border-color: color-mix(in srgb, var(--border) 78%, #1a2030);
+  background: var(--bg-secondary);
+  border-color: var(--border-soft);
   box-shadow: none;
 }
 
@@ -365,7 +366,7 @@
 }
 
 :global([data-theme="dark"]) .actionDivider {
-  background: color-mix(in srgb, var(--border) 80%, #334155);
+  background: var(--border-soft);
 }
 
 .closeBtn,
@@ -561,6 +562,31 @@
   user-select: none;
 }
 
+.historyLayoutStacked {
+  grid-template-columns: 1fr;
+  grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
+}
+
+.historyLayoutStacked .historySplitter {
+  cursor: row-resize;
+}
+
+.historyLayoutStacked .historySplitter::after {
+  left: 0;
+  right: 0;
+  top: -3px;
+  bottom: -3px;
+}
+
+.historyLayoutStacked .historyRightPane {
+  border-left: none;
+  border-top: 1px solid var(--border-soft);
+}
+
+.historyLayoutStacked.historyLayoutWithDiff .historyRightPane {
+  grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
+}
+
 .historyPane {
   min-width: 0;
   min-height: 0;
@@ -580,7 +606,7 @@
 .viewToggleRow {
   position: relative;
   z-index: 1;
-  padding: 2px 12px 10px;
+  padding: 2px 12px 8px;
   min-width: 0;
   box-sizing: border-box;
   background: var(--surface);
@@ -588,10 +614,10 @@
 
 .viewTabs {
   display: flex;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--surface));
+  gap: 4px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-soft);
 }
 
@@ -600,16 +626,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 28px;
+  padding: 0 8px;
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 650;
   letter-spacing: -0.01em;
   line-height: 1.1;
@@ -623,6 +649,8 @@
 
 .viewTab svg {
   flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
   opacity: 0.85;
 }
 
@@ -1021,7 +1049,7 @@
 }
 
 /* Stack two-column git layouts when the panel itself is narrow (docked beside chat). */
-@container git-panel (max-width: 640px) {
+@container git-panel (max-width: 768px) {
   .body,
   .bodyHistory {
     grid-template-columns: 1fr;
@@ -1030,20 +1058,27 @@
 
   .historyLayout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+    grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
   }
 
-  .historySplitter {
-    display: none;
+  .historyLayout .historySplitter {
+    cursor: row-resize;
   }
 
-  .historyRightPane {
+  .historyLayout .historySplitter::after {
+    left: 0;
+    right: 0;
+    top: -3px;
+    bottom: -3px;
+  }
+
+  .historyLayout .historyRightPane {
     border-left: none;
     border-top: 1px solid var(--border-soft);
   }
 
-  .historyLayoutWithDiff .historyRightPane {
-    grid-template-rows: minmax(120px, 35%) 4px minmax(0, 1fr);
+  .historyLayout.historyLayoutWithDiff .historyRightPane {
+    grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
   }
 
   .changesLayout {
@@ -1106,16 +1141,27 @@
 
   .historyLayout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+    grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
   }
 
-  .historySplitter {
-    display: none;
+  .historyLayout .historySplitter {
+    cursor: row-resize;
   }
 
-  .historyRightPane {
+  .historyLayout .historySplitter::after {
+    left: 0;
+    right: 0;
+    top: -3px;
+    bottom: -3px;
+  }
+
+  .historyLayout .historyRightPane {
     border-left: none;
     border-top: 1px solid var(--border-soft);
+  }
+
+  .historyLayout.historyLayoutWithDiff .historyRightPane {
+    grid-template-rows: var(--history-detail-height, 240px) 4px minmax(0, 1fr);
   }
 
   .changesLayout {

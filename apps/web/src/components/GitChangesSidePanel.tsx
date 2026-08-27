@@ -41,6 +41,8 @@ const CHANGES_TREE_WIDTH_KEY = "acpio.gitChangesTreeWidth.v1";
 const CHANGES_TREE_WIDTH_MIN = 200;
 const CHANGES_TREE_WIDTH_MAX = 560;
 const CHANGES_TREE_WIDTH_DEFAULT = 320;
+/** History list stacks above detail below this width (matches @container git-panel). */
+const GIT_HISTORY_STACKED_MAX = 768;
 type PanelTab = "changes" | "history";
 type Selection =
   | { kind: "working"; path: string | null }
@@ -137,7 +139,11 @@ export function GitChangesSidePanel({
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const historyListDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const historyListDragRef = useRef<
+    | { axis: "x"; startX: number; startWidth: number }
+    | { axis: "y"; startY: number; startHeight: number }
+    | null
+  >(null);
   const historyDetailDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
   const changesTreeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const syncInFlightRef = useRef(false);
@@ -158,6 +164,9 @@ export function GitChangesSidePanel({
   const [historyDetailDragging, setHistoryDetailDragging] = useState(false);
   const [changesTreeWidth, setChangesTreeWidth] = useState(readChangesTreeWidth);
   const [changesTreeDragging, setChangesTreeDragging] = useState(false);
+  const panelBodyRef = useRef<HTMLDivElement>(null);
+  const historyLayoutRef = useRef<HTMLDivElement>(null);
+  const [historyStacked, setHistoryStacked] = useState(false);
   const loadedDiffKeyRef = useRef<string | null>(null);
   const inflightDiffKeyRef = useRef<string | null>(null);
   const diffCacheRef = useRef(new Map<string, string>());
@@ -790,13 +799,16 @@ export function GitChangesSidePanel({
 
   const onHistorySplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (window.innerWidth <= 700) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
-      historyListDragRef.current = { startX: e.clientX, startWidth: historyListWidth };
+      if (historyStacked) {
+        historyListDragRef.current = { axis: "y", startY: e.clientY, startHeight: historyListWidth };
+      } else {
+        historyListDragRef.current = { axis: "x", startX: e.clientX, startWidth: historyListWidth };
+      }
       setHistoryListDragging(true);
     },
-    [historyListWidth],
+    [historyListWidth, historyStacked],
   );
 
   const onHistorySplitterDoubleClick = useCallback(() => {
@@ -860,7 +872,10 @@ export function GitChangesSidePanel({
     const onMove = (e: PointerEvent) => {
       const drag = historyListDragRef.current;
       if (!drag) return;
-      const next = drag.startWidth + (e.clientX - drag.startX);
+      const next =
+        drag.axis === "y"
+          ? drag.startHeight + (e.clientY - drag.startY)
+          : drag.startWidth + (e.clientX - drag.startX);
       setHistoryListWidth(Math.min(HISTORY_LIST_WIDTH_MAX, Math.max(HISTORY_LIST_WIDTH_MIN, next)));
     };
     const onUp = () => {
@@ -924,14 +939,40 @@ export function GitChangesSidePanel({
   useEffect(() => {
     if (!dragging && !historyListDragging && !historyDetailDragging && !changesTreeDragging) return;
     const prev = document.body.style.cursor;
-    if (dragging || historyListDragging || changesTreeDragging) document.body.style.cursor = "col-resize";
+    if (dragging || changesTreeDragging) document.body.style.cursor = "col-resize";
+    else if (historyListDragging) document.body.style.cursor = historyStacked ? "row-resize" : "col-resize";
     else if (historyDetailDragging) document.body.style.cursor = "row-resize";
     document.body.classList.add(styles.resizingBody);
     return () => {
       document.body.style.cursor = prev;
       document.body.classList.remove(styles.resizingBody);
     };
-  }, [dragging, historyListDragging, historyDetailDragging, changesTreeDragging]);
+  }, [dragging, historyListDragging, historyDetailDragging, changesTreeDragging, historyStacked]);
+
+  useEffect(() => {
+    if (!open) {
+      setHistoryStacked(false);
+      return;
+    }
+    const measureEl =
+      tab === "history" ? historyLayoutRef.current ?? panelBodyRef.current : panelBodyRef.current;
+    if (!measureEl) return;
+
+    const sync = () => {
+      const el =
+        tab === "history" ? historyLayoutRef.current ?? panelBodyRef.current : panelBodyRef.current;
+      if (!el) return;
+      setHistoryStacked(narrowPanel || el.clientWidth <= GIT_HISTORY_STACKED_MAX);
+    };
+
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(measureEl);
+    if (panelBodyRef.current && panelBodyRef.current !== measureEl) {
+      ro.observe(panelBodyRef.current);
+    }
+    return () => ro.disconnect();
+  }, [narrowPanel, open, tab]);
 
   const diffAutoSelectScope =
     selection.kind === "commit" ? `commit:${selection.hash}` : "working";
@@ -1183,7 +1224,7 @@ export function GitChangesSidePanel({
                 className={`${styles.viewTab}${tab === "changes" ? ` ${styles.viewTabActive}` : ""}`}
                 onClick={() => setTab("changes")}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
                     d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
                     stroke="currentColor"
@@ -1201,7 +1242,7 @@ export function GitChangesSidePanel({
                 className={`${styles.viewTab}${tab === "history" ? ` ${styles.viewTabActive}` : ""}`}
                 onClick={() => setTab("history")}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
                   <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
@@ -1297,7 +1338,7 @@ export function GitChangesSidePanel({
       ) : !repo ? (
         <div className={styles.empty}>{t("git.noRepo")}</div>
       ) : (
-        <div className={styles.panelBody}>
+        <div className={styles.panelBody} ref={panelBodyRef}>
           <div className={`${styles.body}${tab === "history" ? ` ${styles.bodyHistory}` : ` ${styles.bodyChanges}`}`}>
             {tab === "changes" ? (
               <div
@@ -1328,10 +1369,18 @@ export function GitChangesSidePanel({
               </div>
             ) : (
               <div
+                ref={historyLayoutRef}
                 className={`${styles.historyLayout}${
+                  historyStacked ? ` ${styles.historyLayoutStacked}` : ""
+                }${
                   historyListDragging || historyDetailDragging ? ` ${styles.historyResizing}` : ""
                 }${historyFileSelected ? ` ${styles.historyLayoutWithDiff}` : ""}`}
-                style={{ ["--history-list-width" as string]: `${historyListWidth}px` } as CSSProperties}
+                style={
+                  {
+                    ["--history-list-width" as string]: `${historyListWidth}px`,
+                    ["--history-list-height" as string]: `${historyListWidth}px`,
+                  } as CSSProperties
+                }
               >
                 <div className={styles.historyListPane}>
                   <GitCommitHistory
@@ -1362,7 +1411,7 @@ export function GitChangesSidePanel({
                   onPointerDown={onHistorySplitterDown}
                   onDoubleClick={onHistorySplitterDoubleClick}
                   role="separator"
-                  aria-orientation="vertical"
+                  aria-orientation={historyStacked ? "horizontal" : "vertical"}
                   aria-label={t("common.resizePlan")}
                   title={t("common.resizePlanHint")}
                 />

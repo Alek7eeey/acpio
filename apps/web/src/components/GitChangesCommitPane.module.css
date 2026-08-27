@@ -61,7 +61,7 @@
 }
 
 .section {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .sectionHead {
@@ -70,7 +70,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 10px 8px 8px;
-  background: color-mix(in srgb, var(--bg-secondary) 40%, var(--surface));
+  background: var(--bg-secondary);
 }
 
 .sectionToggle {
@@ -88,7 +88,7 @@
 }
 
 .sectionToggle:hover {
-  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  background: var(--bg-tertiary);
 }
 
 .sectionChevron {
@@ -386,6 +386,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 12px 6px;
+  background: var(--bg-secondary);
 }
 
 .commitHeadTitle {

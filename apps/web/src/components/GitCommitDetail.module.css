@@ -54,9 +54,9 @@
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border: 1px solid var(--border-soft);
   border-radius: 7px;
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  background: var(--surface-2);
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -151,6 +151,7 @@
   padding: 8px 14px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 .stats {
@@ -195,15 +196,16 @@
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  background: var(--surface-2);
   color: var(--text-secondary);
   cursor: pointer;
 }
 
 .sortBtn:hover {
   color: var(--text);
+  background: var(--bg-tertiary);
 }
 
 .fileList {
