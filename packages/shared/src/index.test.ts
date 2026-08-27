@@ -449,6 +449,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatHeaderIcons: ["lang", "install", "theme"],
     chatEnterToSend: true,
     chatShowMessageTime: false,
+    chatAgentTurnTimeline: false,
     chatSplit: true,
     chatToolbarStyle: "classic",
     remoteAccessKey: "",

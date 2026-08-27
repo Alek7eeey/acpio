@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "predev": "node scripts/generate-version.mjs",
-    "prebuild": "node scripts/generate-version.mjs --record-release",
+    "prebuild": "node scripts/generate-version.mjs",
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acpio/server\" \"npm run dev -w @acpio/web\"",
     "dev:server": "npm run dev -w @acpio/server",
     "dev:web": "npm run dev -w @acpio/web",

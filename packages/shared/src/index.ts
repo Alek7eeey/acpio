@@ -512,6 +512,8 @@ export interface AppSettings {
   chatEnterToSend: boolean;
   /** Show the send time next to each message. */
   chatShowMessageTime: boolean;
+  /** Interleave thinking phases and actions (Cursor-style) instead of one steps spoiler. */
+  chatAgentTurnTimeline: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
   /** New chat + search controls in the tree sidebar. */
@@ -579,6 +581,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
   chatShowMessageTime: false,
+  chatAgentTurnTimeline: false,
   chatSplit: true,
   chatToolbarStyle: "classic",
   remoteAccessKey: "",

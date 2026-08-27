@@ -560,6 +560,12 @@ class SessionRuntime {
   /** In-flight tool/subagent calls for this turn (drives stream settle). */
   inFlightToolCalls = 0;
   toolStatusByCallId = new Map<string, string>();
+  /** Set when the user answers an elicitation — OMP may spawn /review work seconds later. */
+  interactiveAnswerAt: number | null = null;
+  /** True once ACP streamed thought/text/tools after the interactive answer. */
+  streamedAfterInteractiveAnswer = false;
+  /** Text to re-prompt with if the harness aborted the ask tool after our accept. */
+  interactiveFollowUpText: string | null = null;
   /** MCP config changed while a turn was running — restart the agent when it idles. */
   restartOnIdle = false;
   /** Model+params to apply on the idle restart (set alongside restartOnIdle by setSessionModel). */
@@ -800,6 +806,17 @@ export async function ensureAcp(
           // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
           if (isStream && !rt.ingestingReplay && (!rt.acceptingStream || rt.streamGen !== gen)) {
             return;
+          }
+          if (
+            rt.interactiveAnswerAt != null &&
+            (update.kind === "agent_message_chunk" ||
+              update.kind === "agent_thought_chunk" ||
+              update.kind === "mixed_chunks" ||
+              update.kind === "tool_call" ||
+              update.kind === "tool_call_update" ||
+              update.kind === "tool_call_content_chunk")
+          ) {
+            rt.streamedAfterInteractiveAnswer = true;
           }
           await handleUpdate(rt, update);
         } catch (err) {
@@ -1347,7 +1364,10 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
   }
 
   if (update.kind === "tool_call_update") {
-    if (!rt.acceptingStream) return;
+    const status = update.status ?? "in_progress";
+    const terminal = status === "completed" || status === "failed";
+    // Late completion can arrive after runTurn flipped acceptingStream off (elicitation race).
+    if (!rt.acceptingStream && !terminal) return;
     const messageId = await ensureAssistantMessage(rt);
     // Tool boundary — same reasoning-phase split as `tool_call` (idempotent;
     // consecutive thought parts still coalesce on the client).
@@ -1366,7 +1386,6 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         toolNameFromRaw(mergedRaw),
         argsFromRaw(mergedRaw),
       ) || "Tool";
-    const status = update.status ?? "in_progress";
     const kind = String(mergedRaw.kind ?? "");
     const toolName = toolNameFromRaw(mergedRaw);
     // OMP Task spawn shell — no card/row; roster+progress own the UI.
@@ -2365,6 +2384,9 @@ const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
 const STREAM_SETTLE_MAX_MS = 12_000;
 /** OMP /review can keep tool/subagent traffic going for many minutes. */
 const STREAM_SETTLE_TOOL_MAX_MS = 600_000;
+/** After elicitation answer, OMP often pauses before spawning review subagents. */
+const POST_ELICITATION_SPAWN_WAIT_MS = 8_000;
+const POST_ELICITATION_IDLE_BREAK_MS = 4_000;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
 
 function isActiveToolStatus(status: string | undefined): boolean {
@@ -2382,6 +2404,55 @@ function trackToolFlight(rt: SessionRuntime, toolCallId: string, status: string 
   const nowActive = isActiveToolStatus(next);
   if (nowActive && !wasActive) rt.inFlightToolCalls++;
   else if (!nowActive && wasActive) rt.inFlightToolCalls = Math.max(0, rt.inFlightToolCalls - 1);
+}
+
+function syncInFlightToolCalls(rt: SessionRuntime) {
+  let count = 0;
+  for (const status of rt.toolStatusByCallId.values()) {
+    if (isActiveToolStatus(status)) count += 1;
+  }
+  rt.inFlightToolCalls = count;
+}
+
+function isInteractiveAskToolPayload(payload: Record<string, unknown>): boolean {
+  const raw = (payload.raw ?? {}) as Record<string, unknown>;
+  const toolName = String(raw.toolName ?? raw.name ?? payload.toolName ?? "").trim().toLowerCase();
+  const title = String(payload.title ?? payload.description ?? raw.title ?? "").trim();
+  return toolName === "ask" || /^ask\b/i.test(title) || /asking about/i.test(title);
+}
+
+/** OMP ask elicitations finish the ask tool without a terminal tool_call_update. */
+async function completeInteractiveAskTools(rt: SessionRuntime, sessionId: string) {
+  const detail = await getSessionDetail(sessionId);
+  const last = detail?.messages.filter((m) => m.role === "assistant").at(-1);
+  for (const part of last?.parts ?? []) {
+    if (part.type !== "tool_call" && part.type !== "subagent") continue;
+    if (!isInteractiveAskToolPayload(part.payload as Record<string, unknown>)) continue;
+    if (!isActiveToolStatus(String(part.payload.status ?? "").toLowerCase())) continue;
+    await updatePart(sessionId, part.id, { status: "completed" });
+    const toolCallId = normalizeToolCallId(
+      String(
+        part.payload.toolCallId ??
+          (part.payload.raw as { toolCallId?: string } | undefined)?.toolCallId ??
+          "",
+      ),
+    );
+    if (toolCallId) rt.toolStatusByCallId.set(toolCallId, "completed");
+  }
+  syncInFlightToolCalls(rt);
+  rt.lastStreamAt = Date.now();
+}
+
+function markInteractiveAnswer(rt: SessionRuntime) {
+  rt.interactiveAnswerAt = Date.now();
+  rt.streamedAfterInteractiveAnswer = false;
+  rt.lastStreamAt = Date.now();
+}
+
+/** Legacy alias — only completes ask tools, never review subagents. */
+async function finalizeInteractiveToolWait(rt: SessionRuntime, sessionId: string) {
+  markInteractiveAnswer(rt);
+  await completeInteractiveAskTools(rt, sessionId);
 }
 
 /** Wait until ACP updates stop arriving after session/prompt returns. */
@@ -2402,7 +2473,7 @@ async function settlePromptStream(rt: SessionRuntime) {
       await new Promise((r) => setTimeout(r, 50));
       continue;
     }
-    if (Date.now() - started >= STREAM_SETTLE_MAX_MS) {
+    if (Date.now() - started >= STREAM_SETTLE_MAX_MS && rt.interactiveAnswerAt == null) {
       // Absolute cap only when the stream is already quiet — long /review runs
       // can stream for minutes after an elicitation answer.
       const stalled = Date.now() - rt.lastStreamAt;
@@ -2415,6 +2486,18 @@ async function settlePromptStream(rt: SessionRuntime) {
       quiet >= STREAM_SETTLE_QUIET_MS &&
       (!waitingForAnswer || quiet >= STREAM_SETTLE_ANSWER_QUIET_MS)
     ) {
+      if (rt.interactiveAnswerAt != null && rt.inFlightToolCalls === 0) {
+        const sinceAnswer = Date.now() - rt.interactiveAnswerAt;
+        if (sinceAnswer < POST_ELICITATION_SPAWN_WAIT_MS) {
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
+        }
+        if (quiet < POST_ELICITATION_IDLE_BREAK_MS) {
+          await new Promise((r) => setTimeout(r, 50));
+          continue;
+        }
+        rt.interactiveAnswerAt = null;
+      }
       break;
     }
     await rt.enqueue(async () => undefined);
@@ -2446,7 +2529,7 @@ async function drainPostInteractiveStream(rt: SessionRuntime) {
 
 /** Re-open the stream window when an interactive answer arrives after runTurn already exited. */
 async function resumeStreamAfterInteractiveAnswer(rt: SessionRuntime, sessionId: string) {
-  rt.lastStreamAt = Date.now();
+  await finalizeInteractiveToolWait(rt, sessionId);
   if (rt.acceptingStream) return;
   rt.streamGen += 1;
   rt.acceptingStream = true;
@@ -2454,6 +2537,14 @@ async function resumeStreamAfterInteractiveAnswer(rt: SessionRuntime, sessionId:
   await updateSession(sessionId, { status: "running" });
   try {
     await drainPostInteractiveStream(rt);
+    const followUp = rt.interactiveFollowUpText;
+    if (followUp && !rt.streamedAfterInteractiveAnswer && rt.client?.sessionId && rt.acceptingStream) {
+      rt.interactiveFollowUpText = null;
+      rt.lastStreamAt = Date.now();
+      await rt.client.prompt(followUp);
+      await settlePromptStream(rt);
+      await waitForPendingClientRequests(rt);
+    }
     await completeDanglingTurnParts(sessionId);
     await finishTurnSessionStatus(sessionId, rt, "idle");
   } finally {
@@ -2536,6 +2627,9 @@ async function runTurn(
   rt.turnHasThought = false;
   rt.inFlightToolCalls = 0;
   rt.toolStatusByCallId.clear();
+  rt.interactiveAnswerAt = null;
+  rt.streamedAfterInteractiveAnswer = false;
+  rt.interactiveFollowUpText = null;
   rt.elicitationThisTurn = false;
   rt.toolPartByCallId.clear();
   rt.toolStartRawByCallId.clear();
@@ -2603,8 +2697,7 @@ async function runTurn(
       data: result,
     });
     setAgentAvailable(opts.provider, true);
-    // Stop was pressed — don't peel/append more content for this turn.
-    if (!rt.acceptingStream || result.stopReason === "cancelled") {
+    if (!rt.acceptingStream) {
       await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
       await finishTurnSessionStatus(sessionId, rt, "idle");
       return result;
@@ -2620,9 +2713,28 @@ async function runTurn(
       await finishTurnSessionStatus(sessionId, rt, "idle");
       return result;
     }
-    // After elicitation/permission answers, OMP may still stream the rest of
-    // the same turn — don't flip acceptingStream off until that drain finishes.
     await drainPostInteractiveStream(rt);
+    const followUp = rt.interactiveFollowUpText;
+    if (
+      followUp &&
+      rt.elicitationThisTurn &&
+      !rt.streamedAfterInteractiveAnswer &&
+      rt.acceptingStream
+    ) {
+      appendDeepLog({
+        kind: "elicitation-follow-up",
+        sessionId,
+        provider: opts.provider,
+        cwd: opts.cwd,
+        model,
+        data: { followUp, stopReason: result.stopReason },
+      });
+      rt.interactiveFollowUpText = null;
+      rt.lastStreamAt = Date.now();
+      await client.prompt(followUp);
+      await settlePromptStream(rt);
+      await waitForPendingClientRequests(rt);
+    }
     if (!rt.acceptingStream) {
       await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
       await finishTurnSessionStatus(sessionId, rt, "idle");
@@ -3569,7 +3681,8 @@ export function answerQuestion(
     pending.resolve(result);
     rt.pending.delete(requestId);
     void updateSession(sessionId, { status: "running" });
-    void markQuestionPartAnswered(sessionId, requestId, result).then(() => {
+    void markQuestionPartAnswered(sessionId, requestId, result).then(async () => {
+      await finalizeInteractiveToolWait(rt, sessionId);
       void resumeStreamAfterInteractiveAnswer(rt, sessionId);
     });
     return;
@@ -3592,8 +3705,15 @@ export function answerQuestion(
     rt.client?.respond(id, response);
     pending.resolve(result);
     rt.pending.delete(requestId);
+    if (response.action === "accept") {
+      const bits = Object.values(response.content).flatMap((value) =>
+        Array.isArray(value) ? value.map(String) : [String(value)],
+      );
+      rt.interactiveFollowUpText = bits.filter(Boolean).join("\n") || null;
+    }
     void updateSession(sessionId, { status: "running" });
-    void markQuestionPartAnswered(sessionId, requestId, result).then(() => {
+    void markQuestionPartAnswered(sessionId, requestId, result).then(async () => {
+      await finalizeInteractiveToolWait(rt, sessionId);
       void resumeStreamAfterInteractiveAnswer(rt, sessionId);
     });
     return;

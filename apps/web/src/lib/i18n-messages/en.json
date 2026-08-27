@@ -518,6 +518,8 @@
     "chatEnterToSendHint": "Off: Enter inserts a newline, Ctrl+Enter sends.",
     "chatShowMessageTime": "Message timestamps",
     "chatShowMessageTimeHint": "Show the send time next to each message.",
+    "chatAgentTurnTimeline": "Agent turn timeline",
+    "chatAgentTurnTimelineHint": "Show separate thinking phases and actions interleaved (Cursor-style) instead of one collapsible steps block.",
     "chatSplit": "Two chats side by side",
     "chatSplitHint": "Desktop only. A small floating button at the top left of the chat splits the workspace into two chats. Ctrl+click a chat in the tree to open it in the other pane.",
     "chatToolbarStyle": "New chat & search style",

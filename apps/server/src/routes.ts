@@ -164,6 +164,7 @@ const settingsSchema = z.object({
   chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
+  chatAgentTurnTimeline: z.boolean().optional(),
   chatSplit: z.boolean().optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),

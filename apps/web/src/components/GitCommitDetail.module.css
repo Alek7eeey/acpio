@@ -5,7 +5,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: color-mix(in srgb, var(--bg-secondary) 22%, var(--surface));
+  background: var(--surface);
 }
 
 .empty,
@@ -18,7 +18,8 @@
 
 .header {
   padding: 12px 14px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
 }
 
 .headerTop {
@@ -107,7 +108,7 @@
   font-size: 0.62rem;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(135deg, #6366f1, #22d3ee);
+  background: color-mix(in srgb, var(--accent) 82%, #6366f1);
   flex-shrink: 0;
 }
 
@@ -148,8 +149,8 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 35%, var(--surface));
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
 }
 
 .stats {
@@ -210,6 +211,7 @@
   min-height: 0;
   overflow: auto;
   padding: 4px 0;
+  background: var(--surface);
 }
 
 .fileRow {
@@ -220,7 +222,7 @@
   min-height: 28px;
   padding: 4px 14px;
   border: none;
-  background: transparent;
+  background: var(--surface);
   color: var(--text);
   text-align: left;
   cursor: pointer;
@@ -228,7 +230,7 @@
 }
 
 .fileRow:hover {
-  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  background: var(--bg-tertiary);
 }
 
 .fileRowActive {

@@ -1,6 +1,10 @@
 export const VERSIONS_HEADER = `# Release history
 
-Release dates use \`DD.MM.YY\` (local date when the build ran).
+Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (\`versionEpoch\` in \`package.json\`, default \`2026-08-26\`).
+
+The number is taken from git history, so clones and local builds of the same revision show the same version. Local \`npm run dev\` / \`npm run build\` do not bump it.
+
+Release dates use \`DD.MM.YY\` (author date of that day's commits).
 
 | Version | Released |
 |---------|----------|
@@ -36,17 +40,45 @@ export function upsertReleaseEntry(entries, version, released) {
 /** Default epoch for daily release numbering (versioning feature introduction). */
 export const DEFAULT_VERSION_EPOCH = "2026-08-26";
 
-export function countUniqueCommitDays(commitDates) {
-  return new Set(commitDates.filter(Boolean)).size;
+export function parseLocalDateKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
-/** Patch bumps once per local calendar day with commits (since epoch), not per commit. */
-export function computeAppVersion({ baseVersion, commitDates, epochDate = DEFAULT_VERSION_EPOCH }) {
-  const filtered = epochDate
-    ? commitDates.filter((date) => date >= epochDate)
-    : commitDates;
-  const daysWithCommits = countUniqueCommitDays(filtered);
+export function uniqueCommitDays(commitDates, epochDate = DEFAULT_VERSION_EPOCH) {
+  return [...new Set(commitDates.filter((date) => date && date >= epochDate))].sort();
+}
+
+/**
+ * Patch = unique git author-days since epoch, minus one so the epoch day stays at base (0.1.0).
+ * Same git history ⇒ same version on every machine.
+ */
+export function computeAppVersion({
+  baseVersion,
+  commitDates,
+  epochDate = DEFAULT_VERSION_EPOCH,
+}) {
+  const days = uniqueCommitDays(commitDates, epochDate);
+  const uniqueDays = days.length;
   const [major, minor, patch = "0"] = baseVersion.split(".");
-  const version = `${major}.${minor}.${parseInt(patch, 10) + daysWithCommits}`;
-  return { version, daysWithCommits, epochDate };
+  const bump = Math.max(0, uniqueDays - 1);
+  const version = `${major}.${minor}.${parseInt(patch, 10) + bump}`;
+  return { version, uniqueDays, epochDate, days };
+}
+
+/** Newest-first history rows derived from git commit days (for VERSIONS.md). */
+export function releaseEntriesFromCommitDates({
+  baseVersion,
+  commitDates,
+  epochDate = DEFAULT_VERSION_EPOCH,
+}) {
+  const days = uniqueCommitDays(commitDates, epochDate);
+  const [major, minor, patch = "0"] = baseVersion.split(".");
+  const basePatch = parseInt(patch, 10);
+  return days
+    .map((day, index) => ({
+      version: `${major}.${minor}.${basePatch + index}`,
+      released: formatReleaseDate(parseLocalDateKey(day)),
+    }))
+    .reverse();
 }

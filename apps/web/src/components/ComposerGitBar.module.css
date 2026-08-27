@@ -27,14 +27,14 @@
 .branchBtnPanelHeader {
   max-width: 100%;
   padding: 3px 8px 3px 6px;
-  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
-  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  background: transparent;
   color: var(--text);
 }
 
 .branchBtnPanelHeader:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
 }
 
 .branchBtnPanelHeader .branchName {

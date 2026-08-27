@@ -357,6 +357,14 @@ function ChatConfigRows({
           label={t("settings.chatShowMessageTime")}
         />
       </SettingRow>
+
+      <SettingRow label={t("settings.chatAgentTurnTimeline")} hint={t("settings.chatAgentTurnTimelineHint")}>
+        <Toggle
+          checked={Boolean(form.chatAgentTurnTimeline)}
+          onChange={(v) => patch("chatAgentTurnTimeline", v)}
+          label={t("settings.chatAgentTurnTimeline")}
+        />
+      </SettingRow>
     </SettingTable>
   );
 }

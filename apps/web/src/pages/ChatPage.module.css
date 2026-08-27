@@ -742,6 +742,20 @@
   box-sizing: border-box;
 }
 
+.agentTimeline {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.agentPhase {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .stepsOpen {
   width: 100%;
   background: transparent;

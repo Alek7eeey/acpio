@@ -1,43 +1,65 @@
 import { describe, expect, it } from "vitest";
 import {
   computeAppVersion,
-  countUniqueCommitDays,
   formatReleaseDate,
   parseVersionsMarkdown,
+  releaseEntriesFromCommitDates,
   renderVersionsMarkdown,
+  uniqueCommitDays,
   upsertReleaseEntry,
 } from "./versionHistory.mjs";
 
+describe("uniqueCommitDays", () => {
+  it("keeps unique days on or after the epoch", () => {
+    expect(
+      uniqueCommitDays(["2026-08-27", "2026-08-27", "2026-08-26", "2026-08-25"], "2026-08-26"),
+    ).toEqual(["2026-08-26", "2026-08-27"]);
+  });
+});
+
 describe("computeAppVersion", () => {
-  it("bumps patch once per calendar day with commits, not per commit", () => {
+  it("keeps base version on the first git day", () => {
     const result = computeAppVersion({
       baseVersion: "0.1.0",
       epochDate: "2026-08-26",
-      commitDates: [
-        "2026-08-26",
-        "2026-08-26",
-        "2026-08-26",
-        "2026-08-25",
-      ],
+      commitDates: ["2026-08-26", "2026-08-26"],
+    });
+    expect(result.version).toBe("0.1.0");
+    expect(result.uniqueDays).toBe(1);
+  });
+
+  it("bumps patch once per later git day, not per commit", () => {
+    const result = computeAppVersion({
+      baseVersion: "0.1.0",
+      epochDate: "2026-08-26",
+      commitDates: ["2026-08-27", "2026-08-27", "2026-08-26"],
     });
     expect(result.version).toBe("0.1.1");
-    expect(result.daysWithCommits).toBe(1);
+    expect(result.uniqueDays).toBe(2);
   });
 
-  it("counts each active day since the epoch", () => {
+  it("does not bump for a local calendar day with no git commits", () => {
     const result = computeAppVersion({
       baseVersion: "0.1.0",
       epochDate: "2026-08-26",
-      commitDates: ["2026-08-27", "2026-08-26", "2026-08-26"],
+      commitDates: ["2026-08-26"],
     });
-    expect(result.version).toBe("0.1.2");
-    expect(result.daysWithCommits).toBe(2);
+    expect(result.version).toBe("0.1.0");
   });
+});
 
-  it("ignores days before the epoch", () => {
+describe("releaseEntriesFromCommitDates", () => {
+  it("lists newest git day first", () => {
     expect(
-      countUniqueCommitDays(["2026-08-25", "2026-08-26"].filter((d) => d >= "2026-08-26")),
-    ).toBe(1);
+      releaseEntriesFromCommitDates({
+        baseVersion: "0.1.0",
+        epochDate: "2026-08-26",
+        commitDates: ["2026-08-27", "2026-08-26", "2026-08-26"],
+      }),
+    ).toEqual([
+      { version: "0.1.1", released: "27.08.26" },
+      { version: "0.1.0", released: "26.08.26" },
+    ]);
   });
 });
 
@@ -50,25 +72,17 @@ describe("formatReleaseDate", () => {
 describe("version history markdown", () => {
   it("parses and renders release rows", () => {
     const raw = renderVersionsMarkdown([
-      { version: "0.1.2", released: "26.08.26" },
-      { version: "0.1.1", released: "25.08.26" },
+      { version: "0.1.1", released: "27.08.26" },
+      { version: "0.1.0", released: "26.08.26" },
     ]);
     expect(parseVersionsMarkdown(raw)).toEqual([
-      { version: "0.1.2", released: "26.08.26" },
-      { version: "0.1.1", released: "25.08.26" },
+      { version: "0.1.1", released: "27.08.26" },
+      { version: "0.1.0", released: "26.08.26" },
     ]);
   });
 
   it("does not duplicate an existing version", () => {
-    const entries = upsertReleaseEntry([{ version: "0.1.2", released: "26.08.26" }], "0.1.2", "26.08.26");
-    expect(entries).toEqual([{ version: "0.1.2", released: "26.08.26" }]);
-  });
-
-  it("prepends new versions", () => {
-    const entries = upsertReleaseEntry([{ version: "0.1.1", released: "25.08.26" }], "0.1.2", "26.08.26");
-    expect(entries).toEqual([
-      { version: "0.1.2", released: "26.08.26" },
-      { version: "0.1.1", released: "25.08.26" },
-    ]);
+    const entries = upsertReleaseEntry([{ version: "0.1.1", released: "27.08.26" }], "0.1.1", "27.08.26");
+    expect(entries).toEqual([{ version: "0.1.1", released: "27.08.26" }]);
   });
 });

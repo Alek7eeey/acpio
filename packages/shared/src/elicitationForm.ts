@@ -133,21 +133,40 @@ export function elicitationSchemaToQuestionPayload(
 }
 
 /** Convert inline UI answers back to ACP `elicitation/create` accept content. */
+function matchOptionValue(question: ElicitationFormQuestion, raw: string): string | undefined {
+  const value = raw.trim();
+  if (!value) return undefined;
+  const options = question.options ?? [];
+  const byId = options.find((opt) => opt.id === value);
+  if (byId) return byId.id;
+  const byLabel = options.find((opt) => opt.label === value);
+  if (byLabel) return byLabel.id;
+  const byPrefix = options.find(
+    (opt) => opt.label.startsWith(value) || value.startsWith(opt.label) || opt.id.startsWith(value),
+  );
+  return byPrefix?.id ?? value;
+}
+
+function answerForQuestion(question: ElicitationFormQuestion, answers: ElicitationUiAnswer[]) {
+  return answers.find((row) => row.questionId === question.id) ?? (answers.length === 1 ? answers[0] : undefined);
+}
+
 export function elicitationContentFromUiAnswers(
   payload: ElicitationQuestionPayload,
   answers: ElicitationUiAnswer[],
 ): Record<string, unknown> {
-  const byId = new Map(answers.map((row) => [row.questionId, row]));
   const content: Record<string, unknown> = {};
 
   for (const question of payload.questions) {
-    const answer = byId.get(question.id);
-    const selected = answer?.selectedOptionIds ?? [];
+    const answer = answerForQuestion(question, answers);
+    const selected = (answer?.selectedOptionIds ?? [])
+      .map((id) => matchOptionValue(question, id))
+      .filter((id): id is string => Boolean(id));
     const freeText = answer?.freeText?.trim() ?? "";
 
     if (question.booleanChoice) {
       const pick = selected[0];
-      content[question.id] = pick === "true";
+      content[question.id] = pick === "true" || pick === "1";
       continue;
     }
 
@@ -174,7 +193,22 @@ export function elicitationContentFromUiAnswers(
     }
   }
 
+  if (Object.keys(content).length === 0 && answers.length > 0 && payload.questions[0]) {
+    const question = payload.questions[0];
+    const fallback = answers[0]?.selectedOptionIds?.[0] ?? answers[0]?.freeText?.trim();
+    const matched = fallback ? matchOptionValue(question, fallback) : undefined;
+    if (matched) content[question.id] = matched;
+  }
+
   return content;
+}
+
+function unwrapQuestionOutcome(outcome: Record<string, unknown>): Record<string, unknown> {
+  const nested = outcome.outcome;
+  if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+    return nested as Record<string, unknown>;
+  }
+  return outcome;
 }
 
 export function elicitationResponseFromUiOutcome(
@@ -184,7 +218,7 @@ export function elicitationResponseFromUiOutcome(
   | { action: "accept"; content: Record<string, unknown> }
   | { action: "decline" }
   | { action: "cancel" } {
-  const inner = (outcome.outcome ?? outcome) as Record<string, unknown>;
+  const inner = unwrapQuestionOutcome(outcome);
   const kind = String(inner.outcome ?? "");
 
   if (kind === "skipped" || kind === "cancelled") {
@@ -204,8 +238,9 @@ export function elicitationResponseFromUiOutcome(
       }))
     : [];
 
-  return {
-    action: "accept",
-    content: elicitationContentFromUiAnswers(payload, answers),
-  };
+  const content = elicitationContentFromUiAnswers(payload, answers);
+  if (Object.keys(content).length === 0) {
+    return { action: "cancel" };
+  }
+  return { action: "accept", content };
 }

@@ -3308,6 +3308,8 @@
 .header {
   position: relative;
   z-index: 200;
+  --header-tool-size: 32px;
+  --header-tool-icon: 15px;
   height: var(--header-height);
   display: flex;
   flex-wrap: nowrap;
@@ -3351,10 +3353,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  width: calc(var(--toolbar-btn-size) + 6px);
-  height: calc(var(--toolbar-btn-size) + 6px);
-  min-width: calc(var(--toolbar-btn-size) + 6px);
+  gap: 4px;
+  width: calc(var(--header-tool-size) + 4px);
+  height: calc(var(--header-tool-size) + 4px);
+  min-width: calc(var(--header-tool-size) + 4px);
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
   border-radius: 999px;
@@ -3364,7 +3366,7 @@
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
     0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
@@ -3389,14 +3391,14 @@
   align-items: center;
   justify-content: center;
   min-width: 0.7em;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1;
 }
 
 .agentPip {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
   background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
 }
@@ -3634,12 +3636,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 0;
   border-radius: 0;
   border: none;
   background: transparent;
-  height: calc(var(--toolbar-btn-size) + 6px);
+  height: calc(var(--header-tool-size) + 4px);
   box-sizing: border-box;
   overflow: visible;
 }
@@ -3649,16 +3651,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--toolbar-btn-size);
-  height: var(--toolbar-btn-size);
+  width: var(--header-tool-size);
+  height: var(--header-tool-size);
   align-self: center;
 }
 
 .toolClusterBtn {
-  width: var(--toolbar-btn-size) !important;
-  height: var(--toolbar-btn-size) !important;
-  min-width: var(--toolbar-btn-size) !important;
-  min-height: var(--toolbar-btn-size) !important;
+  width: var(--header-tool-size) !important;
+  height: var(--header-tool-size) !important;
+  min-width: var(--header-tool-size) !important;
+  min-height: var(--header-tool-size) !important;
   display: grid !important;
   place-items: center !important;
   border: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
@@ -3683,10 +3685,10 @@
 }
 
 .toolClusterLocale {
-  width: var(--toolbar-btn-size) !important;
-  min-width: var(--toolbar-btn-size) !important;
-  height: var(--toolbar-btn-size) !important;
-  min-height: var(--toolbar-btn-size) !important;
+  width: var(--header-tool-size) !important;
+  min-width: var(--header-tool-size) !important;
+  height: var(--header-tool-size) !important;
+  min-height: var(--header-tool-size) !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -3720,8 +3722,8 @@
 }
 
 .toolClusterBtn svg {
-  width: 18px;
-  height: 18px;
+  width: var(--header-tool-icon);
+  height: var(--header-tool-icon);
   display: block;
   flex-shrink: 0;
   transform-origin: center;
@@ -3752,10 +3754,10 @@
 }
 
 .header .iconBtn {
-  width: var(--toolbar-btn-size);
-  height: var(--toolbar-btn-size);
-  min-width: var(--toolbar-btn-size);
-  min-height: var(--toolbar-btn-size);
+  width: var(--header-tool-size);
+  height: var(--header-tool-size);
+  min-width: var(--header-tool-size);
+  min-height: var(--header-tool-size);
   display: grid;
   place-items: center;
   padding: 0;

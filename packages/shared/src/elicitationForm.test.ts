@@ -89,7 +89,32 @@ describe("elicitationContentFromUiAnswers", () => {
 });
 
 describe("elicitationResponseFromUiOutcome", () => {
-  it("maps skip to cancel and answered to accept", () => {
+  it("maps OMP askDialog Review Mode choice onto q0", () => {
+    const payload = elicitationSchemaToQuestionPayload("Review Mode", {
+      type: "object",
+      properties: {
+        q0: {
+          type: "string",
+          title: "Review Mode",
+          oneOf: [
+            { const: "1. Review against a base branch (PR Style)", title: "1. Review against a base branch (PR Style)" },
+            { const: "2. Review uncommitted changes", title: "2. Review uncommitted changes" },
+          ],
+        },
+        q0__other: { type: "string", title: "Other" },
+      },
+    });
+    expect(
+      elicitationResponseFromUiOutcome(payload, {
+        outcome: {
+          outcome: "answered",
+          answers: [{ questionId: "q0", selectedOptionIds: ["2. Review uncommitted changes"] }],
+        },
+      }),
+    ).toEqual({ action: "accept", content: { q0: "2. Review uncommitted changes" } });
+  });
+
+  it("still accepts a nested UI envelope", () => {
     const payload = elicitationSchemaToQuestionPayload("Continue?", {
       type: "object",
       properties: { value: { type: "boolean" } },

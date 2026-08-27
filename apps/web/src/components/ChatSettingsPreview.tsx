@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import type {
-  ChatActionId,
-  ChatComposerButtonId,
-  ChatHeaderIconId,
-  ChatMetaChipId,
-  ChatToolbarStyle,
-  ChatTreeElementId,
-  ChatTreeMenuId,
+import {
+  BUILD_INFO,
+  type ChatActionId,
+  type ChatComposerButtonId,
+  type ChatHeaderIconId,
+  type ChatMetaChipId,
+  type ChatToolbarStyle,
+  type ChatTreeElementId,
+  type ChatTreeMenuId,
 } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
@@ -629,76 +630,95 @@ export function ChatSettingsPreview({
       {/* ── Header (height + icons configurable) ─────────────── */}
       <div className={styles.headerWrap}>
         <div className={styles.header} style={{ height: `${headerHeight}px` }}>
-          <span className={styles.brand} aria-hidden>
-            {"Acpio".split("").map((ch, i) => (
-              <span key={i} className={i < 3 ? styles.brandMark : undefined}>
-                {ch}
-              </span>
-            ))}
+          <span className={styles.headerBrand} aria-hidden>
+            <span className={styles.brandLetters}>
+              {"Acpio".split("").map((ch, i) => (
+                <span key={i} className={i < 3 ? styles.brandMark : undefined}>
+                  {ch}
+                </span>
+              ))}
+            </span>
+            <span className={styles.brandVersion}>{BUILD_INFO.version}</span>
           </span>
-          <span className={styles.headerAgent} aria-hidden>
-            <span className={`${styles.dot} ${styles.dotOn}`} aria-hidden />
-            <span className={styles.agentModel}>{t("models.auto")}</span>
+          <span className={styles.headerChatCtx} aria-hidden>
+            <span className={styles.headerChatFolder}>acprocess</span>
+            <span className={styles.headerChatSep}>/</span>
+            <span className={styles.headerChatTitle}>Деплой Acpio на прод</span>
           </span>
-          <span className={styles.headerIcons}>
-            <El
-              on={iconOn("lang")}
-              onToggle={() => onToggleHeaderIcon("lang")}
-              label={t("settings.chatHeaderIconLang")}
-            >
-              <span className={`${styles.headerIcon} ${styles.headerIconLang}`} aria-hidden>
-                ru
+          <div className={styles.headerActions}>
+            <span className={styles.agentChipWrap} aria-hidden>
+              <span className={`${styles.agentChip} ${styles.agentChipOn}`}>
+                <span className={styles.agentCount}>1</span>
+                <span className={styles.agentPip} />
               </span>
-            </El>
-            <El
-              on={iconOn("install")}
-              onToggle={() => onToggleHeaderIcon("install")}
-              label={t("settings.chatHeaderIconInstall")}
-            >
-              <span className={styles.headerIcon} aria-hidden>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            </span>
+            <span className={styles.toolCluster}>
+              <El
+                className={styles.headerToolEl}
+                on={iconOn("lang")}
+                onToggle={() => onToggleHeaderIcon("lang")}
+                label={t("settings.chatHeaderIconLang")}
+              >
+                <span className={styles.toolClusterBtn}>
+                  <span className={styles.toolClusterLang}>ru</span>
+                </span>
+              </El>
+              <El
+                className={styles.headerToolEl}
+                on={iconOn("install")}
+                onToggle={() => onToggleHeaderIcon("install")}
+                label={t("settings.chatHeaderIconInstall")}
+              >
+                <span className={styles.toolClusterBtn} aria-hidden>
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M12 3v10m0 0-3.5-3.5M12 13l3.5-3.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M5 17.5V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </span>
+              </El>
+              <El
+                className={styles.headerToolEl}
+                on={iconOn("theme")}
+                onToggle={() => onToggleHeaderIcon("theme")}
+                label={t("settings.chatHeaderIconTheme")}
+              >
+                <span className={styles.toolClusterBtn} aria-hidden>
+                  <svg viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="4" fill="currentColor" />
+                    <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
+                      <path d="M12 2.6v2M12 19.4v2M2.6 12h2M19.4 12h2M5.15 5.15l1.4 1.4M17.45 17.45l1.4 1.4M5.15 18.85l1.4-1.4M17.45 6.55l1.4-1.4" />
+                    </g>
+                  </svg>
+                </span>
+              </El>
+              <span className={`${styles.toolClusterBtn} ${styles.headerStatic}`} aria-hidden>
+                <svg viewBox="0 0 24 24" fill="none">
                   <path
-                    d="M12 3v10m0 0-3.5-3.5M12 13l3.5-3.5"
+                    d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
                     stroke="currentColor"
                     strokeWidth="1.8"
-                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M19.4 13a7.9 7.9 0 0 0 .1-2l2-1.5-2-3.5-2.3.7a8 8 0 0 0-1.7-1L15 3h-6l-.5 2.7a8 8 0 0 0-1.7 1L4.5 6 2.5 9.5l2 1.5a7.9 7.9 0 0 0 0 2l-2 1.5 2 3.5 2.3-.7a8 8 0 0 0 1.7 1L9 21h6l.5-2.7a8 8 0 0 0 1.7-1l2.3.7 2-3.5-2-1.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
                     strokeLinejoin="round"
                   />
-                  <path
-                    d="M5 17.5V19a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
                 </svg>
               </span>
-            </El>
-            <El
-              on={iconOn("theme")}
-              onToggle={() => onToggleHeaderIcon("theme")}
-              label={t("settings.chatHeaderIconTheme")}
-            >
-              <span className={styles.headerIcon} aria-hidden>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                  <circle cx="12" cy="12" r="4" fill="currentColor" />
-                  <g stroke="currentColor" strokeWidth="1.7" strokeLinecap="round">
-                    <path d="M12 2.6v2M12 19.4v2M2.6 12h2M19.4 12h2M5.15 5.15l1.4 1.4M17.45 17.45l1.4 1.4M5.15 18.85l1.4-1.4M17.45 6.55l1.4-1.4" />
-                  </g>
-                </svg>
-              </span>
-            </El>
-            <span className={`${styles.headerIcon} ${styles.headerStatic}`} aria-hidden>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-                <path
-                  d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.3.65.85 1.09 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinejoin="round"
-                />
-              </svg>
             </span>
-          </span>
+          </div>
         </div>
         <DragBar
           label={t("settings.chatHeaderSizeHint")}

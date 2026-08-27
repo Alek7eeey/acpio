@@ -1,7 +1,7 @@
 /**
- * Builds APP version from package.json semver + release days with git activity.
- * Each local calendar day with at least one commit bumps patch by one (not per commit).
- * With --record-release, appends new versions to VERSIONS.md during production builds.
+ * App version from git history: +0.0.1 per calendar day that has a commit (since versionEpoch).
+ * Same revision ⇒ same version on every machine. Local dev/build does not bump.
+ * --record-release rewrites VERSIONS.md from git (for a commit you intend to push).
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -10,10 +10,8 @@ import { fileURLToPath } from "node:url";
 import {
   computeAppVersion,
   DEFAULT_VERSION_EPOCH,
-  formatReleaseDate,
-  parseVersionsMarkdown,
+  releaseEntriesFromCommitDates,
   renderVersionsMarkdown,
-  upsertReleaseEntry,
 } from "./versionHistory.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,24 +30,6 @@ function git(cmd) {
   }
 }
 
-function readVersionsFile() {
-  if (!fs.existsSync(VERSIONS_FILE)) {
-    return [];
-  }
-  return parseVersionsMarkdown(fs.readFileSync(VERSIONS_FILE, "utf8"));
-}
-
-function writeVersionsFile(entries) {
-  fs.writeFileSync(VERSIONS_FILE, renderVersionsMarkdown(entries));
-}
-
-function recordVersionRelease(version, date) {
-  const released = formatReleaseDate(date);
-  const next = upsertReleaseEntry(readVersionsFile(), version, released);
-  writeVersionsFile(next);
-  return released;
-}
-
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const baseVersion = pkg.version;
 const versionEpoch =
@@ -64,15 +44,15 @@ const since =
   `${String(now.getDate()).padStart(2, "0")} 00:00:00`;
 
 const commitsToday = parseInt(git(`git rev-list --count --since="${since}" HEAD`) || "0", 10);
-const commitDates = git('git log --format=%cd --date=format-local:%Y-%m-%d HEAD').split("\n");
-const { version, daysWithCommits } = computeAppVersion({
+const commitDates = git("git log --format=%as HEAD").split("\n").filter(Boolean);
+const { version, uniqueDays } = computeAppVersion({
   baseVersion,
   commitDates,
   epochDate: versionEpoch,
 });
 const sha = (git("git rev-parse --short HEAD") || "unknown").slice(0, 7);
 
-const buildInfo = { version, baseVersion, versionEpoch, daysWithCommits, commitsToday, sha };
+const buildInfo = { version, baseVersion, versionEpoch, uniqueDays, commitsToday, sha };
 
 const target = path.join(repoRoot, "packages", "shared", "src", "buildInfo.ts");
 fs.writeFileSync(
@@ -101,14 +81,19 @@ updateReadmeVersion(
 );
 
 if (recordRelease) {
-  const before = readVersionsFile();
-  const released = recordVersionRelease(version, now);
-  const added = !before.some((entry) => entry.version === version);
-  if (added) {
-    console.log(`Recorded release ${version} (${released}) in VERSIONS.md`);
+  const entries = releaseEntriesFromCommitDates({
+    baseVersion,
+    commitDates,
+    epochDate: versionEpoch,
+  });
+  const next = renderVersionsMarkdown(entries);
+  const prev = fs.existsSync(VERSIONS_FILE) ? fs.readFileSync(VERSIONS_FILE, "utf8") : "";
+  if (next !== prev) {
+    fs.writeFileSync(VERSIONS_FILE, next);
+    console.log(`Updated VERSIONS.md (${entries[0]?.version ?? version})`);
   }
 }
 
 console.log(
-  `Version: ${version} (${daysWithCommits} release day(s) since ${versionEpoch}, ${commitsToday} commit(s) today, ${sha})`,
+  `Version: ${version} (${uniqueDays} git day(s) since ${versionEpoch}, ${commitsToday} commit(s) today, ${sha})`,
 );

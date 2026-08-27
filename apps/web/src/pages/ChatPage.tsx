@@ -319,6 +319,7 @@ function MessageArticle({
   activeSession,
   autoExpandSteps,
   stepsGlobalTick,
+  agentTurnTimeline,
   keepComposerFocus,
   textareaRef,
   onSlashCommandClick,
@@ -330,6 +331,7 @@ function MessageArticle({
   activeSession: SessionDetailDto | null;
   autoExpandSteps: boolean;
   stepsGlobalTick: number;
+  agentTurnTimeline: boolean;
   keepComposerFocus: RefObject<boolean>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   onSlashCommandClick?: (command: string) => void;
@@ -364,6 +366,7 @@ function MessageArticle({
           streaming={!!isLiveAssistant}
           autoExpandSteps={autoExpandSteps}
           stepsGlobalTick={stepsGlobalTick}
+          agentTurnTimeline={agentTurnTimeline}
         />
       )}
     </article>
@@ -1214,7 +1217,7 @@ function PartView({
     return <SubagentPartView part={part} streaming={streaming} />;
   }
 
-  // Question parts render from AssistantMessageView.questionParts, not here.
+  // Question parts render inside StepsSpoiler / AgentTurnTimeline, not here.
   // Errors are shown only in the composer banner (store.error), never in-thread.
   if (part.type === "tool_call" || part.type === "error") {
     return null;
@@ -1674,6 +1677,7 @@ function StepsSpoiler({
   autoExpand,
   startedAt,
   messageId,
+  sessionId,
   stepsGlobalTick,
 }: {
   parts: MessagePartDto[];
@@ -1681,6 +1685,7 @@ function StepsSpoiler({
   autoExpand: boolean;
   startedAt: string;
   messageId: string;
+  sessionId: string;
   stepsGlobalTick: number;
 }) {
   const t = useT();
@@ -1694,8 +1699,6 @@ function StepsSpoiler({
       return value;
     });
   };
-  // Keep the empty "Размышления" header mounted across brief streaming→idle
-  //→streaming flaps (stale session.updated) so the section never remounts.
   const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
   useEffect(() => {
     if (streaming) {
@@ -1710,6 +1713,12 @@ function StepsSpoiler({
     return () => window.clearTimeout(id);
   }, [streaming, parts.length]);
   const thoughts = parts.filter(isThoughtPart);
+  const hasPendingQuestion = parts.some(
+    (p) => p.type === "question" && Boolean(p.payload.pending),
+  );
+  useEffect(() => {
+    if (hasPendingQuestion) setOpen(true);
+  }, [hasPendingQuestion, setOpen]);
   const agentDurationSec = thoughts.reduce((max, part) => {
     const ms = Number(part.payload.durationMs);
     return Number.isFinite(ms) && ms > 0 ? Math.max(max, Math.max(1, Math.round(ms / 1000))) : max;
@@ -1724,10 +1733,6 @@ function StepsSpoiler({
     return Number.isFinite(value) ? Math.max(1, Math.round((Date.now() - value) / 1000)) : 0;
   });
 
-  // The toggle is the global switch: on → open, off → collapse.
-  // Manual per-block toggles survive (incl. virtualization remounts) until the
-  // switch value actually changes — a plain `useEffect(setOpen(autoExpand))`
-  // would reset every manual toggle on every remount.
   const prevAutoExpandRef = useRef(autoExpand);
   useEffect(() => {
     if (prevAutoExpandRef.current === autoExpand) return;
@@ -1735,10 +1740,6 @@ function StepsSpoiler({
     setOpen(autoExpand);
   }, [autoExpand, setOpen]);
 
-  // Global switch clicked (Размышления chip): force-sync every block exactly
-  // once. The tick value changes only on a chip click — without this guard the
-  // effect re-ran on every render (setOpen is a fresh closure) and instantly
-  // reverted manual per-message toggles after the first global toggle.
   const prevTickRef = useRef(stepsGlobalTick);
   useEffect(() => {
     if (prevTickRef.current === stepsGlobalTick) return;
@@ -1771,20 +1772,12 @@ function StepsSpoiler({
     setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
   }, [startedAt, liveHeader]);
 
-  // Show the thinking header immediately while the turn is live (even before the
-  // first thought token). Hide only when idle with nothing to show.
   if (parts.length === 0 && !liveHeader) return null;
 
   const stepsLength = parts.length;
   const subagentParts = parts.filter((p) => p.type === "subagent");
-  // Keep subagents reachable while thinking — even if the steps spoiler is collapsed.
   const showSubagentsOutside = !open && subagentParts.length > 0;
 
-  // Same title while live — don't flip "Thinking…" ↔ "Thoughts".
-  // The elapsed-since-createdAt fallback is only trustworthy while the
-  // message is fresh (the server's durationMs stamp may not have arrived
-  // yet). Older messages without durationMs — stopped, errored, or imported
-  // turns — must not show a number that grows with every reload.
   const fallbackRecent =
     Date.now() - (Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : Date.now()) <
     10 * 60_000;
@@ -1799,6 +1792,9 @@ function StepsSpoiler({
       : t("common.steps");
 
   const renderPart = (part: MessagePartDto, idx: number, listLength: number) => {
+    if (part.type === "question") {
+      return <QuestionPartView key={part.id} part={part} sessionId={sessionId} />;
+    }
     const status = String(part.payload.status ?? "").toLowerCase();
     const toolLive =
       status === "in_progress" || status === "pending" || status === "running";
@@ -1859,6 +1855,244 @@ function StepsSpoiler({
             .map((part, idx) => renderPart(part, idx, stepsLength))}
         </div>
       )}
+    </div>
+  );
+}
+
+function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[] {
+  const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const items: AgentTimelineItem[] = [];
+  let thoughtBuf: MessagePartDto[] = [];
+
+  const flushThoughts = () => {
+    if (thoughtBuf.length === 0) return;
+    items.push({ kind: "thought", parts: thoughtBuf, key: thoughtBuf[0]!.id });
+    thoughtBuf = [];
+  };
+
+  for (const part of sorted) {
+    if (isThoughtPart(part)) {
+      thoughtBuf.push(part);
+      continue;
+    }
+    flushThoughts();
+    if (part.type === "tool_call" || part.type === "subagent") {
+      items.push({ kind: "action", part, key: part.id });
+    } else if (part.type === "text" && String(part.payload.text ?? "").trim()) {
+      items.push({ kind: "text", part, key: part.id });
+    } else if (part.type === "question") {
+      items.push({ kind: "question", part, key: part.id });
+    }
+  }
+  flushThoughts();
+  return items;
+}
+
+type AgentTimelineItem =
+  | { kind: "thought"; parts: MessagePartDto[]; key: string }
+  | { kind: "action"; part: MessagePartDto; key: string }
+  | { kind: "text"; part: MessagePartDto; key: string }
+  | { kind: "question"; part: MessagePartDto; key: string };
+
+function ThoughtPhaseBlock({
+  parts,
+  streaming,
+  autoExpand,
+  phaseKey,
+  stepsGlobalTick,
+}: {
+  parts: MessagePartDto[];
+  streaming: boolean;
+  autoExpand: boolean;
+  phaseKey: string;
+  stepsGlobalTick: number;
+}) {
+  const t = useT();
+  const openKey = `thought-phase:${phaseKey}`;
+  const [open, setOpenState] = useState(() => expandedPartIds.get(openKey) ?? autoExpand);
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    setOpenState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      expandedPartIds.set(openKey, value);
+      return value;
+    });
+  };
+  const phaseStartedRef = useRef(Date.now());
+  const [liveSec, setLiveSec] = useState(1);
+  const [frozenSec, setFrozenSec] = useState<number | null>(null);
+
+  const prevAutoExpandRef = useRef(autoExpand);
+  useEffect(() => {
+    if (prevAutoExpandRef.current === autoExpand) return;
+    prevAutoExpandRef.current = autoExpand;
+    setOpen(autoExpand);
+  }, [autoExpand, setOpen]);
+
+  const prevTickRef = useRef(stepsGlobalTick);
+  useEffect(() => {
+    if (prevTickRef.current === stepsGlobalTick) return;
+    prevTickRef.current = stepsGlobalTick;
+    if (stepsGlobalTick === 0) return;
+    setOpen(autoExpand);
+  }, [stepsGlobalTick, autoExpand, setOpen]);
+
+  useEffect(() => {
+    if (streaming) {
+      const tick = () => {
+        setLiveSec(Math.max(1, Math.round((Date.now() - phaseStartedRef.current) / 1000)));
+      };
+      tick();
+      const id = window.setInterval(tick, 1000);
+      return () => window.clearInterval(id);
+    }
+    setFrozenSec(Math.max(1, Math.round((Date.now() - phaseStartedRef.current) / 1000)));
+  }, [streaming]);
+
+  const payloadDurationSec = parts.reduce((max, part) => {
+    const ms = Number(part.payload.durationMs);
+    return Number.isFinite(ms) && ms > 0 ? Math.max(max, Math.max(1, Math.round(ms / 1000))) : max;
+  }, 0);
+  const shownSeconds = streaming ? liveSec : frozenSec ?? payloadDurationSec;
+  const label = streaming
+    ? t("common.steps")
+    : shownSeconds > 0
+      ? t("common.thoughtFor", { seconds: shownSeconds, count: shownSeconds })
+      : t("common.steps");
+  const mergedText = parts
+    .map((part) => String(part.payload.text ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+  return (
+    <div className={styles.agentPhase}>
+      <button
+        type="button"
+        tabIndex={-1}
+        className={styles.stepsToggle}
+        aria-expanded={open}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={styles.stepsIcon}>
+          <ThoughtSparkIcon size={16} />
+        </span>
+        <span className={styles.stepsTitle}>
+          {streaming ? <span className={styles.pulseDot} /> : null}
+          {label}
+        </span>
+        <span
+          className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
+          aria-hidden
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+            <path
+              d="M9 6l6 6-6 6"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      </button>
+      {open && mergedText ? (
+        <div className={styles.stepsBody}>
+          <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
+            <div className={styles.thoughtBody}>{renderThoughtText(mergedText)}</div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AgentTurnTimeline({
+  parts,
+  streaming,
+  autoExpand,
+  messageId,
+  sessionId,
+  stepsGlobalTick,
+}: {
+  parts: MessagePartDto[];
+  streaming: boolean;
+  autoExpand: boolean;
+  messageId: string;
+  sessionId: string;
+  stepsGlobalTick: number;
+}) {
+  const items = useMemo(() => buildAgentTimeline(parts), [parts]);
+  const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
+  useEffect(() => {
+    if (streaming) {
+      setHoldEmptyLive(true);
+      return;
+    }
+    if (parts.length > 0) {
+      setHoldEmptyLive(false);
+      return;
+    }
+    const id = window.setTimeout(() => setHoldEmptyLive(false), 160);
+    return () => window.clearTimeout(id);
+  }, [streaming, parts.length]);
+
+  const liveHeader = streaming || holdEmptyLive;
+  if (items.length === 0 && !liveHeader) return null;
+
+  if (items.length === 0 && liveHeader) {
+    return (
+      <div className={styles.agentTimeline}>
+        <ThoughtPhaseBlock
+          parts={[]}
+          streaming
+          autoExpand={autoExpand}
+          phaseKey={`${messageId}:live`}
+          stepsGlobalTick={stepsGlobalTick}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.agentTimeline}>
+      {items.map((item, idx) => {
+        const isLast = idx === items.length - 1;
+        if (item.kind === "thought") {
+          return (
+            <ThoughtPhaseBlock
+              key={item.key}
+              parts={item.parts}
+              streaming={streaming && isLast}
+              autoExpand={autoExpand}
+              phaseKey={item.key}
+              stepsGlobalTick={stepsGlobalTick}
+            />
+          );
+        }
+        if (item.kind === "text") {
+          return (
+            <PartView
+              key={item.key}
+              part={item.part}
+              embedded
+              streaming={streaming && isLast}
+            />
+          );
+        }
+        if (item.kind === "question") {
+          return (
+            <QuestionPartView key={item.key} part={item.part} sessionId={sessionId} />
+          );
+        }
+        const status = String(item.part.payload.status ?? "").toLowerCase();
+        const toolLive =
+          status === "in_progress" || status === "pending" || status === "running";
+        const live = streaming && isLast && toolLive;
+        if (item.part.type === "subagent") {
+          return <SubagentPartView key={item.key} part={item.part} streaming={live} />;
+        }
+        return <ToolCallRow key={item.key} part={item.part} streaming={live} />;
+      })}
     </div>
   );
 }
@@ -2762,6 +2996,7 @@ function AssistantParts({
   streaming,
   autoExpandSteps,
   stepsGlobalTick,
+  agentTurnTimeline,
 }: {
   message: MessageDto;
   session: SessionDetailDto | null;
@@ -2769,6 +3004,7 @@ function AssistantParts({
   streaming: boolean;
   autoExpandSteps: boolean;
   stepsGlobalTick: number;
+  agentTurnTimeline: boolean;
 }) {
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
@@ -2801,9 +3037,8 @@ function AssistantParts({
   // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
     const finalText = lastTextPart(parts);
-    return parts.filter((p) => p !== finalText && p.type !== "error" && p.type !== "question");
+    return parts.filter((p) => p !== finalText && p.type !== "error");
   }, [parts]);
-  const questionParts = useMemo(() => parts.filter((p) => p.type === "question"), [parts]);
   const mainParts = useMemo(() => {
     const finalText = lastTextPart(parts);
     return parts.filter((p) => p === finalText && p.type !== "error");
@@ -2830,17 +3065,26 @@ function AssistantParts({
         actionsCtxRef.current?.openAt(e.clientX, e.clientY);
       }}
     >
-      <StepsSpoiler
-        parts={stepsParts}
-        streaming={streaming}
-        autoExpand={autoExpandSteps}
-        startedAt={message.createdAt}
-        messageId={message.id}
-        stepsGlobalTick={stepsGlobalTick}
-      />
-      {questionParts.map((part) => (
-        <QuestionPartView key={part.id} part={part} sessionId={message.sessionId} />
-      ))}
+      {agentTurnTimeline ? (
+        <AgentTurnTimeline
+          parts={stepsParts}
+          streaming={streaming}
+          autoExpand={autoExpandSteps}
+          messageId={message.id}
+          sessionId={message.sessionId}
+          stepsGlobalTick={stepsGlobalTick}
+        />
+      ) : (
+        <StepsSpoiler
+          parts={stepsParts}
+          streaming={streaming}
+          autoExpand={autoExpandSteps}
+          startedAt={message.createdAt}
+          messageId={message.id}
+          sessionId={message.sessionId}
+          stepsGlobalTick={stepsGlobalTick}
+        />
+      )}
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -4045,6 +4289,7 @@ function ChatThread() {
         activeSession={activeSession}
         autoExpandSteps={autoExpandSteps}
         stepsGlobalTick={stepsGlobalTick}
+        agentTurnTimeline={settings.chatAgentTurnTimeline === true}
         keepComposerFocus={keepComposerFocus}
         textareaRef={textareaRef}
         onSlashCommandClick={insertComposerSlashCommand}

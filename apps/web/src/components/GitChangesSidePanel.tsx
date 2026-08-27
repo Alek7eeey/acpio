@@ -1028,7 +1028,6 @@ export function GitChangesSidePanel({
   const panelInner = (
     <>
       <div className={styles.header}>
-        <div className={styles.headerGlow} aria-hidden />
         <div className={styles.headerTop}>
           <span className={styles.headerBranchIcon} aria-hidden>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">

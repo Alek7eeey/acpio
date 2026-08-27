@@ -5,12 +5,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg-secondary);
 }
 
 .head {
   padding: 7px 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 45%, var(--surface));
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
   flex-shrink: 0;
   font-size: 0.58rem;
   font-weight: 700;
@@ -25,6 +26,7 @@
   min-height: 0;
   flex: 1;
   padding: 0 2px;
+  background: var(--bg-secondary);
 }
 
 .row {
@@ -34,9 +36,9 @@
   min-height: 36px;
   margin: 0 2px;
   border: none;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-bottom: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: transparent;
+  background: var(--bg-secondary);
   color: var(--text);
   text-align: left;
   cursor: pointer;
@@ -50,7 +52,7 @@
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--bg-tertiary) 55%, transparent);
+  background: var(--bg-tertiary);
 }
 
 .rowActive {

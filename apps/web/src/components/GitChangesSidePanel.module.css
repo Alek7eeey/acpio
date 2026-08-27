@@ -1,5 +1,7 @@
 .panel {
   --git-panel-width: 460px;
+  container-type: inline-size;
+  container-name: git-panel;
   position: relative;
   flex: 0 0 var(--git-panel-width);
   width: var(--git-panel-width);
@@ -10,17 +12,14 @@
   flex-direction: column;
   z-index: 4;
   overflow: hidden;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--accent) 10%, var(--surface)) 0%,
-      color-mix(in srgb, var(--bg-secondary) 50%, var(--surface)) 180px,
-      var(--surface) 100%
-    );
-  box-shadow:
-    -16px 0 36px rgba(0, 0, 0, 0.08),
-    inset 4px 0 0 color-mix(in srgb, var(--accent) 65%, transparent);
+  background: var(--surface);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: -8px 0 20px rgba(0, 0, 0, 0.04);
   animation: slideIn 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:global([data-theme="light"]) .panel {
+  box-shadow: -8px 0 20px rgba(15, 23, 42, 0.04);
 }
 
 .resizing {
@@ -55,33 +54,23 @@
   left: 50%;
   width: 3px;
   transform: translateX(-50%);
-  background: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--text-secondary) 30%, var(--border));
 }
 
 .splitter:hover::before,
 .resizing .splitter::before {
   width: 4px;
-  background: color-mix(in srgb, var(--accent) 75%, transparent);
+  background: color-mix(in srgb, var(--text-secondary) 52%, var(--border));
 }
 
 .header {
   position: relative;
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border-soft));
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
   flex-shrink: 0;
   overflow: hidden;
   max-width: 100%;
-}
-
-.headerGlow {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(
-    circle at 12% 20%,
-    color-mix(in srgb, var(--accent) 22%, transparent),
-    transparent 72%
-  );
+  isolation: isolate;
 }
 
 .headerTop {
@@ -108,9 +97,9 @@
   width: 26px;
   height: 26px;
   border-radius: 8px;
-  color: color-mix(in srgb, var(--accent) 72%, var(--text));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
 }
 
 .headerKicker {
@@ -119,7 +108,7 @@
   font-weight: 700;
   letter-spacing: 0.07em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--accent) 55%, var(--text-secondary));
+  color: var(--text-secondary);
   line-height: 1.1;
 }
 
@@ -160,10 +149,10 @@
   flex: 0 0 auto;
   min-height: 32px;
   padding: 0 12px;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+  background: var(--surface-2);
+  color: var(--text-secondary);
   font: inherit;
   font-size: 0.72rem;
   font-weight: 650;
@@ -171,26 +160,19 @@
   transition:
     color 0.15s ease,
     border-color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent),
-    0 1px 4px color-mix(in srgb, var(--accent) 10%, transparent);
+    background 0.15s ease;
 }
 
 .presentationBtn:hover {
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  background: var(--bg-tertiary);
+  border-color: var(--border);
   color: var(--text);
 }
 
 .presentationBtnActive {
-  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   color: var(--text);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
-    0 2px 8px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .headerMetaRow {
@@ -299,6 +281,7 @@
   max-width: 100%;
   box-sizing: border-box;
   overflow-x: auto;
+  background: var(--surface);
 }
 
 .actionBar {
@@ -391,9 +374,9 @@
   place-items: center;
   width: 30px;
   height: 30px;
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border: 1px solid var(--border-soft);
   border-radius: 9px;
-  background: color-mix(in srgb, var(--surface) 78%, transparent);
+  background: var(--surface-2);
   color: var(--text-secondary);
   cursor: pointer;
   transition:
@@ -405,7 +388,7 @@
 
 .closeBtn:hover,
 .iconBtn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  background: var(--bg-tertiary);
   color: var(--text);
 }
 
@@ -416,6 +399,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--surface);
 }
 
 .body {
@@ -469,6 +453,7 @@
   grid-area: diff;
   min-height: 0;
   border-left: 1px solid var(--border-soft);
+  background: var(--surface);
 }
 
 .panelInModal {
@@ -518,6 +503,7 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  background: var(--bg-secondary);
 }
 
 .historySplitter {
@@ -540,6 +526,7 @@
   grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   border-left: 1px solid var(--border-soft);
+  background: var(--surface);
 }
 
 .historyLayoutWithDiff .historyRightPane {
@@ -551,6 +538,7 @@
   min-height: 0;
   display: flex;
   overflow: hidden;
+  background: var(--surface);
 }
 
 .historyDiffSplitter {
@@ -595,6 +583,7 @@
   padding: 2px 12px 10px;
   min-width: 0;
   box-sizing: border-box;
+  background: var(--surface);
 }
 
 .viewTabs {
@@ -828,6 +817,7 @@
   overflow: auto;
   border-right: 1px solid var(--border-soft);
   padding: 8px;
+  background: var(--bg-secondary);
 }
 
 .allBtn {
@@ -937,6 +927,7 @@
   overflow: auto;
   padding: 12px;
   min-width: 0;
+  background: var(--surface);
 }
 
 .empty {
@@ -984,7 +975,7 @@
   align-items: end;
   padding: 12px 14px 14px;
   border-top: 1px solid var(--border-soft);
-  background: color-mix(in srgb, var(--surface) 55%, var(--bg-secondary));
+  background: var(--surface);
   flex-shrink: 0;
 }
 
@@ -1011,7 +1002,6 @@
   background: var(--accent);
   color: #fff;
   cursor: pointer;
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
 .commitBtn:disabled {
@@ -1027,6 +1017,65 @@
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+/* Stack two-column git layouts when the panel itself is narrow (docked beside chat). */
+@container git-panel (max-width: 640px) {
+  .body,
+  .bodyHistory {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+  }
+
+  .historyLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+  }
+
+  .historySplitter {
+    display: none;
+  }
+
+  .historyRightPane {
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .historyLayoutWithDiff .historyRightPane {
+    grid-template-rows: minmax(120px, 35%) 4px minmax(0, 1fr);
+  }
+
+  .changesLayout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(180px, 42%) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "tree"
+      "diff"
+      "commit";
+  }
+
+  .changesSplitter {
+    display: none;
+  }
+
+  .changesLayout .diffPane {
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+  }
+
+  .paneWorkspace .filesArea {
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .fileList {
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .footer {
+    grid-template-columns: 1fr;
   }
 }
 

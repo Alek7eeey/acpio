@@ -169,6 +169,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatShowMessageTime !== "boolean") {
     merged.chatShowMessageTime = DEFAULT_SETTINGS.chatShowMessageTime;
   }
+  if (typeof merged.chatAgentTurnTimeline !== "boolean") {
+    merged.chatAgentTurnTimeline = DEFAULT_SETTINGS.chatAgentTurnTimeline;
+  }
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
