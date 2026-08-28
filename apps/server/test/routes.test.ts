@@ -150,7 +150,10 @@ describe("health & settings", () => {
   });
 
   it("optional remote access key is skipped on localhost and empty key", async () => {
-    const lan = { host: "192.168.1.9:5173" };
+    const lan = {
+      host: "192.168.1.9:5173",
+      "x-forwarded-for": "192.168.1.50",
+    };
     expect((await app.inject({ method: "GET", url: "/api/settings", headers: lan })).statusCode).toBe(
       200,
     );

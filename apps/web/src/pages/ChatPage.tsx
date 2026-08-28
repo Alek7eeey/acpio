@@ -401,27 +401,24 @@ function UserMessage({
   const text = messagePlainText(message);
   const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
+  const textParts = message.parts.filter((p) => p.type === "text");
 
   if (!text && fileParts.length === 0) return null;
 
-  const body = (
+  const body = text ? (
     <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
-      {message.parts.map((part) =>
-        part.type === "text" ? (
-          <div key={part.id}>
-            {highlightUserText(
-              String(part.payload.text ?? ""),
-              undefined,
-              onSlashCommandClick,
-              t("common.insertSlashCommand"),
-            )}
-          </div>
-        ) : (
-          <PartView key={part.id} part={part} />
-        ),
-      )}
+      {textParts.map((part) => (
+        <div key={part.id}>
+          {highlightUserText(
+            String(part.payload.text ?? ""),
+            undefined,
+            onSlashCommandClick,
+            t("common.insertSlashCommand"),
+          )}
+        </div>
+      ))}
     </div>
-  );
+  ) : null;
 
   return (
     <div
@@ -482,8 +479,7 @@ function UserMessage({
                       loading="lazy"
                     />
                   </a>
-                ) : null}
-                {href ? (
+                ) : href ? (
                   <a
                     className={styles.userFileChip}
                     href={href}
@@ -3162,8 +3158,6 @@ function useDesktopSplit() {
 function ChatThread() {
   const bind = useContext(ChatPaneContext);
   const t = useT();
-  const navigate = useNavigate();
-  const { search } = useBrowserLocation();
   const activeSession = useAppStore((s) =>
     bind?.sessionId ? selectLiveSessionDetail(s, bind.sessionId) : s.activeSession,
   );
@@ -3189,6 +3183,8 @@ function ChatThread() {
   // the data arriving early (no cleanup on showSkeleton flip).
   const [skeletonHold, setSkeletonHold] = useState(false);
   const skeletonTimerRef = useRef<number | null>(null);
+  const focusScrollKeyRef = useRef<string | null>(null);
+  const focusScrollTriesRef = useRef(0);
   const showSkeleton = bind?.sessionId
     ? sessionLoading || (!activeSession && (loading || hasSessions))
     : sessionLoading || (!activeSession && (loading || hasSessions));
@@ -3291,10 +3287,14 @@ function ChatThread() {
   }, [consoleOpen, setConsoleOpen, setGitPanelOpen]);
 
   const openGitChangesPanel = useCallback(() => {
+    if (gitPanelOpen) {
+      setGitPanelOpen(false);
+      return;
+    }
     setPlanPanelOpen(false);
     setConsoleOpen(false);
     setGitPanelOpen(true);
-  }, [setConsoleOpen, setGitPanelOpen]);
+  }, [gitPanelOpen, setConsoleOpen, setGitPanelOpen]);
 
   useEffect(() => {
     const n = bind?.paneCount ?? 1;
@@ -3838,49 +3838,6 @@ function ChatThread() {
     }
   };
 
-  // Deep link ?session=<id>&message=<id> (share links, liked messages):
-  // open the chat and jump to the message, then clean the URL.
-  useEffect(() => {
-    const params = new URLSearchParams(search);
-    const targetSession = params.get("session");
-    const targetMessage = params.get("message");
-    if (!targetSession && !targetMessage) return;
-    if (targetSession && targetSession !== useAppStore.getState().activeSessionId) {
-      void selectSession(targetSession);
-    }
-    if (targetMessage) setFocusMessageId(targetMessage);
-    navigate("/chat", { replace: true });
-  }, [search, navigate, selectSession, setFocusMessageId]);
-
-  // Scroll to + highlight the focused message once its session has rendered.
-  useEffect(() => {
-    if (!focusMessageId) return;
-    // In virtual mode the target may be windowed out — bring it into view
-    // first, then the DOM poll below finds and highlights it.
-    if (chatVirtual) {
-      const idx = messageRows.findIndex((r) => r.msg.id === focusMessageId);
-      if (idx >= 0) chatVirtualizer.scrollToIndex(idx, { align: "center" });
-    }
-    let tries = 0;
-    const timer = window.setInterval(() => {
-      tries += 1;
-      const el = document.querySelector(
-        `[data-message-id="${CSS.escape(focusMessageId)}"]`,
-      );
-      if (el) {
-        window.clearInterval(timer);
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
-        el.classList.add(styles.msgFocus);
-        window.setTimeout(() => el.classList.remove(styles.msgFocus), 2400);
-        setFocusMessageId(null);
-      } else if (tries >= 25) {
-        window.clearInterval(timer);
-        setFocusMessageId(null);
-      }
-    }, 120);
-    return () => window.clearInterval(timer);
-  }, [focusMessageId, setFocusMessageId]);
-
   // Rebuild only when the set of folder paths changes — not on every
   // lastMessageAt bump (tree promote), so the chat pane stays still.
   const recentCwdsKey = useAppStore((s) => {
@@ -3990,12 +3947,73 @@ function ChatThread() {
       modelParams.length === 0
         ? nextParams
         : migrateModelParamValues(nextParams, modelParams);
+    const sessionId = activeSession?.id ?? null;
+    const prevModel = model;
+    const prevParams = modelParamValues;
+    const prevSettings = settings;
+
     setModel(nextModel);
     setModelParamValues(supported);
+
+    // Mirror onModeChange: keep session + defaults in sync immediately so the
+    // catalog sync effect does not revert the pick while ACP restarts.
+    useAppStore.setState((s) => {
+      const provider = agentProvider;
+      const settingsPatch: Partial<typeof s.settings> = {};
+      if (provider) {
+        settingsPatch.defaultModelByProvider = {
+          ...s.settings.defaultModelByProvider,
+          [provider]: nextModel,
+        };
+        settingsPatch.defaultModelParamsByProvider = {
+          ...s.settings.defaultModelParamsByProvider,
+          [provider]: supported,
+        };
+        if (s.settings.defaultProvider === provider) {
+          settingsPatch.defaultModel = nextModel;
+          settingsPatch.defaultModelParams = supported;
+        }
+      }
+      return {
+        settings: { ...s.settings, ...settingsPatch },
+        sessions: sessionId
+          ? s.sessions.map((row) =>
+              row.id === sessionId
+                ? { ...row, model: nextModel, modelParams: supported }
+                : row,
+            )
+          : s.sessions,
+        activeSession:
+          sessionId && s.activeSession?.id === sessionId
+            ? { ...s.activeSession, model: nextModel, modelParams: supported }
+            : s.activeSession,
+      };
+    });
+
     if (!agentProvider) return modelParams;
-    if (activeSession?.id) {
+
+    const rollbackModelSelection = () => {
+      setModel(prevModel);
+      setModelParamValues(prevParams);
+      useAppStore.setState((s) => ({
+        settings: prevSettings,
+        sessions: sessionId
+          ? s.sessions.map((row) =>
+              row.id === sessionId
+                ? { ...row, model: prevModel, modelParams: prevParams }
+                : row,
+            )
+          : s.sessions,
+        activeSession:
+          sessionId && s.activeSession?.id === sessionId
+            ? { ...s.activeSession, model: prevModel, modelParams: prevParams }
+            : s.activeSession,
+      }));
+    };
+
+    if (sessionId) {
       try {
-        const res = await api.setSessionModel(activeSession.id, nextModel, supported);
+        const res = await api.setSessionModel(sessionId, nextModel, supported);
         // Prefer agent-refreshed params, but keep prior Effort if the payload is empty.
         const nextModelParams =
           res.modelParams && res.modelParams.length > 0 ? res.modelParams : modelParams;
@@ -4012,10 +4030,34 @@ function ChatThread() {
           setModelParamValues((prev) => migrateModelParamValues(prev, nextModelParams));
           return nextModelParams;
         }
-      } catch {
-        // settings already saved; live apply optional
+      } catch (err) {
+        rollbackModelSelection();
+        useAppStore.setState({
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     } else {
+      try {
+        await saveSettings({
+          defaultModelByProvider: {
+            ...settings.defaultModelByProvider,
+            [agentProvider]: nextModel,
+          },
+          defaultModelParamsByProvider: {
+            ...settings.defaultModelParamsByProvider,
+            [agentProvider]: supported,
+          },
+          ...(settings.defaultProvider === agentProvider
+            ? { defaultModel: nextModel, defaultModelParams: supported }
+            : {}),
+        });
+      } catch (err) {
+        rollbackModelSelection();
+        useAppStore.setState({
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return modelParams;
+      }
       const cat = await ensureModels(agentProvider, { force: true });
       return cat?.modelParams ?? modelParams;
     }
@@ -4253,6 +4295,67 @@ function ChatThread() {
     // New messages while at the end auto-scroll to the bottom.
     followOnAppend: true,
   });
+
+  // Scroll to + highlight the focused message once its session has rendered.
+  useEffect(() => {
+    if (!focusMessageId) return;
+    const paneSessionId = bind?.sessionId ?? storeActiveSessionId;
+    if (paneSessionId && storeActiveSessionId && paneSessionId !== storeActiveSessionId) return;
+    if (sessionLoading || showSkeleton) return;
+
+    const idx = messageRows.findIndex((r) => r.msg.id === focusMessageId);
+    if (idx < 0) return;
+
+    if (focusScrollKeyRef.current !== focusMessageId) {
+      focusScrollKeyRef.current = focusMessageId;
+      focusScrollTriesRef.current = 0;
+    }
+
+    if (chatVirtual) {
+      chatVirtualizer.scrollToIndex(idx, { align: "center" });
+    }
+
+    let cancelled = false;
+    const tryFocus = () => {
+      if (cancelled) return;
+      focusScrollTriesRef.current += 1;
+      const el = document.querySelector(
+        `[data-message-id="${CSS.escape(focusMessageId)}"]`,
+      );
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add(styles.msgFocus);
+        window.setTimeout(() => el.classList.remove(styles.msgFocus), 2400);
+        setFocusMessageId(null);
+        focusScrollKeyRef.current = null;
+        return;
+      }
+      if (focusScrollTriesRef.current >= 40) {
+        setFocusMessageId(null);
+        focusScrollKeyRef.current = null;
+        return;
+      }
+      window.setTimeout(tryFocus, 120);
+    };
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(tryFocus);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    focusMessageId,
+    setFocusMessageId,
+    messageRows,
+    chatVirtual,
+    chatVirtualizer,
+    sessionLoading,
+    showSkeleton,
+    storeActiveSessionId,
+    bind?.sessionId,
+  ]);
 
   const renderArticle = (msg: MessageDto, isLiveAssistant: boolean) => {
     if (msg.role === "assistant" && !hasRenderableAssistantContent(msg.parts) && !isLiveAssistant) {
@@ -4972,7 +5075,7 @@ function ChatThread() {
                     awaiting: git.awaiting,
                     branchBusy: git.branchBusy,
                     onCheckout: git.checkout,
-                    changesOpen: activeRightPanel === "git",
+                    changesOpen: gitPanelOpen,
                     onOpenChanges: openGitChangesPanel,
                   }
                 : undefined
@@ -5600,15 +5703,42 @@ function SplitPaneChrome({
 
 export function ChatPage() {
   const t = useT();
+  const navigate = useNavigate();
+  const { search } = useBrowserLocation();
   const desktop = useDesktopSplit();
   const splitSetting = useAppStore((s) => s.settings.chatSplit !== false);
   const paneIds = useAppStore((s) => s.chatPaneIds) ?? FALLBACK_CHAT_PANES;
   const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const selectSession = useAppStore((s) => s.selectSession);
+  const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
   const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
   const slots = desktop && splitSetting && paneIds.length > 1 ? paneIds : [activeSessionId];
   const paneCount = slots.length;
   const split = desktop && splitSetting && paneCount > 1;
+
+  // Deep link ?session=<id>&message=<id> (share links, liked messages):
+  // open the chat and jump to the message, then clean the URL.
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const targetSession = params.get("session");
+    const targetMessage = params.get("message");
+    if (!targetSession && !targetMessage) return;
+
+    let cancelled = false;
+    void (async () => {
+      if (targetSession && targetSession !== useAppStore.getState().activeSessionId) {
+        await selectSession(targetSession);
+      }
+      if (cancelled) return;
+      if (targetMessage) setFocusMessageId(targetMessage);
+      navigate("/chat", { replace: true });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [search, navigate, selectSession, setFocusMessageId]);
 
   useEffect(() => {
     if (!desktop || !splitSetting) collapseToSinglePane();

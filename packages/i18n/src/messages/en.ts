@@ -505,10 +505,10 @@ export const en = {
       "In the phone browser open `http://PC_IP:5173`. Example: `http://192.168.100.209:5173`. Do not use `http://0.0.0.0:5173` — that is only a listen address. `localhost` works only on the PC itself.",
     remoteStep4Title: "Optional access key",
     remoteStep4Body:
-      "The key is optional: without it, opening the address on the same VPN/LAN is enough. If you set one, the phone or another PC will ask for it once (the browser remembers it). The PC itself (localhost) never asks.",
+      "The key is optional: without it, opening the address on the same VPN/LAN is enough. If you set one, click Save, then the phone or another PC will ask for it once (the browser remembers it). The PC itself (localhost) never asks.",
     remoteKeyTitle: "Access key",
     remoteKeyHint:
-      "Optional. Protects the UI when a phone or another computer is on the same network. Leave empty for no extra lock.",
+      "Optional. Protects the UI when a phone or another computer is on the same network. After generating or editing, click Save. Leave empty for no extra lock.",
     remoteKeyPlaceholder: "e.g. 7K3MNPQ2",
     remoteKeyGenerate: "Generate",
     remoteUnlockTitle: "Access key",

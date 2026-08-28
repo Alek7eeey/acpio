@@ -227,12 +227,15 @@
 .mainColumnShell {
   overflow: hidden;
   background: var(--bg);
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .shellConsoleMain {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   min-width: 0;
+  height: 0;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -240,6 +243,13 @@
   padding: 12px;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+.shellConsoleMain > aside {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
 }
 
 /* Clear the split-into-two-panes FAB in single-pane mode. */
@@ -2472,6 +2482,10 @@ button.userSlashCmd:focus-visible {
   pointer-events: none;
 }
 
+.pillLoading .composerModel {
+  pointer-events: auto;
+}
+
 .pillLoading .pillInput {
   color: var(--text-secondary);
   cursor: wait;
@@ -2605,7 +2619,7 @@ button.userSlashCmd:focus-visible {
   flex: 0 1 auto;
   min-width: 0;
   max-width: min(200px, 100%);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .attachBtn,

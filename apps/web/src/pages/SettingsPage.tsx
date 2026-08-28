@@ -609,6 +609,8 @@ export function SettingsPage() {
   );
   const [diagCopyId, setDiagCopyId] = useState<string | null>(null);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
+  /** Blocks catalog ingest from clobbering an in-flight default-model save. */
+  const pendingModelPickRef = useRef<Partial<Record<AgentProvider, string>>>({});
 
   // NOTE: removed the `useEffect(() => setForm(settings), [settings])` that
   // was here — it overwrites the local form state every time the store's
@@ -834,7 +836,21 @@ export function SettingsPage() {
         paramsCacheRef.current.set(`${id}:${currentPick}`, catalog.modelParams);
       }
       setForm((prev) => {
+        if (pendingModelPickRef.current[id]) return prev;
+        const models = catalog.models ?? [];
         const exposed = catalog.modelParams ?? [];
+        const current = prev.defaultModelByProvider?.[id] || "";
+        const currentValid = Boolean(current && models.some((m) => m.value === current));
+        const catalogPick =
+          catalog.currentModel && models.some((m) => m.value === catalog.currentModel)
+            ? catalog.currentModel
+            : models[0]?.value || "";
+        let defaultModelByProvider = prev.defaultModelByProvider;
+        if (!current) {
+          defaultModelByProvider = { ...prev.defaultModelByProvider, [id]: catalogPick };
+        } else if (!currentValid && catalogPick) {
+          defaultModelByProvider = { ...prev.defaultModelByProvider, [id]: catalogPick };
+        }
         const mapped = prev.defaultModelParamsByProvider?.[id] ?? {};
         const migrated = migrateModelParamValues(mapped, exposed);
         const nextProviderParams =
@@ -845,23 +861,17 @@ export function SettingsPage() {
                   .filter((p) => p.currentValue != null && p.currentValue !== "")
                   .map((p) => [p.id, p.currentValue!]),
               );
-        const current = prev.defaultModelByProvider?.[id] || "";
-        const pick =
-          current ||
-          (catalog.currentModel &&
-          (catalog.models ?? []).some((m) => m.value === catalog.currentModel)
-            ? catalog.currentModel
-            : "");
+        const seedingModel =
+          !current || (!currentValid && Boolean(catalogPick));
         return {
           ...prev,
-          defaultModelByProvider: {
-            ...prev.defaultModelByProvider,
-            [id]: pick,
-          },
-          defaultModelParamsByProvider: {
-            ...prev.defaultModelParamsByProvider,
-            [id]: nextProviderParams,
-          },
+          defaultModelByProvider,
+          defaultModelParamsByProvider: seedingModel
+            ? {
+                ...prev.defaultModelParamsByProvider,
+                [id]: nextProviderParams,
+              }
+            : prev.defaultModelParamsByProvider,
         };
       });
     };
@@ -1507,27 +1517,38 @@ export function SettingsPage() {
                         paramsLoading={loadingParams}
                         showParamsMenu={parameterized || modelParams.length > 0}
                         onChange={(value) => {
-                          const defaultModelByProvider = {
-                            ...form.defaultModelByProvider,
-                            [item.id]: value,
-                          };
-                          const defaultModelParamsByProvider = {
-                            ...form.defaultModelParamsByProvider,
-                            [item.id]: {},
-                          };
-                          patch("defaultModelByProvider", defaultModelByProvider);
-                          patch("defaultModelParamsByProvider", defaultModelParamsByProvider);
-                          if (form.defaultProvider === item.id) {
-                            patch("defaultModel", value);
-                            patch("defaultModelParams", {});
-                          }
-                          void saveSettings({
-                            defaultModelByProvider,
-                            defaultModelParamsByProvider,
-                            ...(form.defaultProvider === item.id
-                              ? { defaultModel: value, defaultModelParams: {} }
-                              : {}),
+                          pendingModelPickRef.current[item.id] = value;
+                          let savePatch: Partial<AppSettings> | null = null;
+                          setForm((prev) => {
+                            const defaultModelByProvider = {
+                              ...prev.defaultModelByProvider,
+                              [item.id]: value,
+                            };
+                            const defaultModelParamsByProvider = {
+                              ...prev.defaultModelParamsByProvider,
+                              [item.id]: {},
+                            };
+                            savePatch = {
+                              defaultModelByProvider,
+                              defaultModelParamsByProvider,
+                              ...(prev.defaultProvider === item.id
+                                ? { defaultModel: value, defaultModelParams: {} }
+                                : {}),
+                            };
+                            return {
+                              ...prev,
+                              defaultModelByProvider,
+                              defaultModelParamsByProvider,
+                              ...(prev.defaultProvider === item.id
+                                ? { defaultModel: value, defaultModelParams: {} }
+                                : {}),
+                            };
                           });
+                          if (savePatch) {
+                            void saveSettings(savePatch).finally(() => {
+                              delete pendingModelPickRef.current[item.id];
+                            });
+                          }
                           void loadParamsForModel(item.id, value);
                         }}
                         onParamsChange={(next) => {
@@ -1535,20 +1556,32 @@ export function SettingsPage() {
                             modelParams.length === 0
                               ? next
                               : migrateModelParamValues(next, modelParams);
-                          const defaultModelParamsByProvider = {
-                            ...form.defaultModelParamsByProvider,
-                            [item.id]: migrated,
-                          };
-                          patch("defaultModelParamsByProvider", defaultModelParamsByProvider);
-                          if (form.defaultProvider === item.id) {
-                            patch("defaultModelParams", migrated);
-                          }
-                          void saveSettings({
-                            defaultModelParamsByProvider,
-                            ...(form.defaultProvider === item.id
-                              ? { defaultModelParams: migrated }
-                              : {}),
+                          pendingModelPickRef.current[item.id] = model;
+                          let savePatch: Partial<AppSettings> | null = null;
+                          setForm((prev) => {
+                            const defaultModelParamsByProvider = {
+                              ...prev.defaultModelParamsByProvider,
+                              [item.id]: migrated,
+                            };
+                            savePatch = {
+                              defaultModelParamsByProvider,
+                              ...(prev.defaultProvider === item.id
+                                ? { defaultModelParams: migrated }
+                                : {}),
+                            };
+                            return {
+                              ...prev,
+                              defaultModelParamsByProvider,
+                              ...(prev.defaultProvider === item.id
+                                ? { defaultModelParams: migrated }
+                                : {}),
+                            };
                           });
+                          if (savePatch) {
+                            void saveSettings(savePatch).finally(() => {
+                              delete pendingModelPickRef.current[item.id];
+                            });
+                          }
                         }}
                         onParamsOpen={(value) => void loadParamsForModel(item.id, value)}
                         onOpen={() => {
@@ -2248,11 +2281,6 @@ export function SettingsPage() {
                     spellCheck={false}
                     value={form.remoteAccessKey ?? ""}
                     onChange={(e) => patch("remoteAccessKey", e.target.value)}
-                    onBlur={(e) => {
-                      const next = e.currentTarget.value.trim();
-                      patch("remoteAccessKey", next);
-                      void saveSettings({ remoteAccessKey: next });
-                    }}
                     placeholder={t("settings.remoteKeyPlaceholder")}
                     aria-label={t("settings.remoteKeyTitle")}
                   />
@@ -2265,10 +2293,25 @@ export function SettingsPage() {
                       crypto.getRandomValues(bytes);
                       const next = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
                       patch("remoteAccessKey", next);
-                      void saveSettings({ remoteAccessKey: next });
                     }}
                   >
                     {t("settings.remoteKeyGenerate")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryBtn}
+                    disabled={
+                      (form.remoteAccessKey ?? "") === (settings.remoteAccessKey ?? "")
+                    }
+                    onClick={() => {
+                      const next = (form.remoteAccessKey ?? "").trim();
+                      patch("remoteAccessKey", next);
+                      void saveSettings({ remoteAccessKey: next }).then(() => {
+                        showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
+                      });
+                    }}
+                  >
+                    {t("common.save")}
                   </button>
                   {(form.remoteAccessKey ?? "").trim() ? (
                     <button

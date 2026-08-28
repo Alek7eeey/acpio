@@ -93,7 +93,7 @@ import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./
 import { adapters } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
 import {
-  isLoopbackHost,
+  isLoopbackClient,
   isRemoteAccessPublicPath,
   REMOTE_ACCESS_COOKIE,
   remoteAccessProtected,
@@ -224,7 +224,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (isRemoteAccessPublicPath(req.url) || !remoteAccessProtected(req.url)) return;
     const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
     if (!expected) return;
-    if (isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined)) {
+    if (isLoopbackClient(req)) {
       return;
     }
     const cookie = req.cookies?.[REMOTE_ACCESS_COOKIE];
@@ -238,7 +238,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/remote-access", async (req) => {
     const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";
-    const loopback = isLoopbackHost(typeof req.headers.host === "string" ? req.headers.host : undefined);
+    const loopback = isLoopbackClient(req);
     const cookie = req.cookies?.[REMOTE_ACCESS_COOKIE];
     const unlocked = !expected || loopback || remoteKeysMatch(cookie, expected);
     return { required: Boolean(expected) && !loopback, unlocked };

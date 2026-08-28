@@ -1116,6 +1116,28 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <span className={styles.folderLabel}>
           {folderLabel(folder.cwd, t("common.noFolder"))}
         </span>
+        {folder.cwd ? (
+          <button
+            type="button"
+            className={styles.folderDelete}
+            title={t("chat.deleteFolder")}
+            aria-label={t("chat.deleteFolder")}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirmDeleteFolderCwd(folder.cwd);
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
         <button
           type="button"
           className={styles.folderAdd}
@@ -1139,28 +1161,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             />
           </svg>
         </button>
-        {folder.cwd ? (
-          <button
-            type="button"
-            className={styles.folderDelete}
-            title={t("chat.deleteFolder")}
-            aria-label={t("chat.deleteFolder")}
-            onClick={(e) => {
-              e.stopPropagation();
-              setConfirmDeleteFolderCwd(folder.cwd);
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        ) : null}
       </div>
     );
   };
@@ -1429,6 +1429,28 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                     <span className={styles.folderLabel}>
                       {folderLabel(folder.cwd, t("common.noFolder"))}
                     </span>
+                    {folder.cwd ? (
+                      <button
+                        type="button"
+                        className={styles.folderDelete}
+                        title={t("chat.deleteFolder")}
+                        aria-label={t("chat.deleteFolder")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteFolderCwd(folder.cwd);
+                        }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className={styles.folderAdd}
@@ -1452,28 +1474,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                         />
                       </svg>
                     </button>
-                    {folder.cwd ? (
-                      <button
-                        type="button"
-                        className={styles.folderDelete}
-                        title={t("chat.deleteFolder")}
-                        aria-label={t("chat.deleteFolder")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDeleteFolderCwd(folder.cwd);
-                        }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                          <path
-                            d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
-                            stroke="currentColor"
-                            strokeWidth="1.7"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
-                    ) : null}
                   </div>
                 )}
                 {!collapsedFolders.has(fkey) && (

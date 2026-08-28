@@ -30,14 +30,14 @@ export function App() {
       window.clearTimeout(timer);
       setRemoteLock(next);
     };
-    // If the status probe hangs (proxy down, flaky tunnel), don't leave a blank page.
+    // If the status probe hangs, stay locked — do not fail open over LAN/VPN.
     const timer = window.setTimeout(() => {
-      if (!cancelled) setRemoteLock((cur) => (cur === "unknown" ? "open" : cur));
+      if (!cancelled) setRemoteLock((cur) => (cur === "unknown" ? "locked" : cur));
     }, 5000);
     void api
       .remoteAccessStatus()
       .then((s) => unlock(s.required && !s.unlocked ? "locked" : "open"))
-      .catch(() => unlock("open"));
+      .catch(() => unlock("locked"));
     return () => {
       cancelled = true;
       window.clearTimeout(timer);

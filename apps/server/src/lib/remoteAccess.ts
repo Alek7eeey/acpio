@@ -2,6 +2,24 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 export const REMOTE_ACCESS_COOKIE = "acp_remote";
 
+type RequestLike = {
+  ip?: string;
+  headers: Record<string, unknown>;
+  socket?: { remoteAddress?: string | null };
+};
+
+export function normalizeClientIp(raw: string): string {
+  const ip = raw.trim().toLowerCase();
+  if (ip.startsWith("::ffff:")) return ip.slice(7);
+  return ip;
+}
+
+export function isLoopbackIp(ip: string): boolean {
+  const normalized = normalizeClientIp(ip);
+  return normalized === "127.0.0.1" || normalized === "::1";
+}
+
+/** @deprecated Prefer isLoopbackClient — Host can be localhost behind a LAN proxy. */
 export function isLoopbackHost(hostHeader: string | undefined): boolean {
   const host = (hostHeader ?? "").trim().toLowerCase();
   if (!host) return false;
@@ -14,6 +32,25 @@ export function isLoopbackHost(hostHeader: string | undefined): boolean {
     hostname === "::1" ||
     hostname.endsWith(".localhost")
   );
+}
+
+export function getRequestClientIp(req: RequestLike): string {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.trim()) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return normalizeClientIp(first);
+  }
+  const xReal = req.headers["x-real-ip"];
+  if (typeof xReal === "string" && xReal.trim()) {
+    return normalizeClientIp(xReal);
+  }
+  if (req.ip) return normalizeClientIp(req.ip);
+  return normalizeClientIp(req.socket?.remoteAddress ?? "");
+}
+
+/** True when the TCP client is the same machine (localhost / loopback). */
+export function isLoopbackClient(req: RequestLike): boolean {
+  return isLoopbackIp(getRequestClientIp(req));
 }
 
 export function remoteKeysMatch(provided: string | undefined, expected: string): boolean {

@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  getRequestClientIp,
+  isLoopbackClient,
   isLoopbackHost,
+  isLoopbackIp,
   isRemoteAccessPublicPath,
   remoteAccessProtected,
   remoteKeysMatch,
@@ -22,6 +25,50 @@ describe("isLoopbackHost", () => {
     [undefined, false],
   ])("%j → %s", (host, expected) => {
     expect(isLoopbackHost(host)).toBe(expected);
+  });
+});
+
+describe("isLoopbackIp", () => {
+  it.each([
+    ["127.0.0.1", true],
+    ["::1", true],
+    ["::ffff:127.0.0.1", true],
+    ["192.168.1.5", false],
+    ["10.0.0.2", false],
+    ["", false],
+  ])("%j → %s", (ip, expected) => {
+    expect(isLoopbackIp(ip)).toBe(expected);
+  });
+});
+
+describe("isLoopbackClient", () => {
+  it("uses the forwarded client IP behind dev proxy", () => {
+    expect(
+      isLoopbackClient({
+        ip: "127.0.0.1",
+        headers: { host: "192.168.1.9:5173", "x-forwarded-for": "192.168.1.50" },
+      }),
+    ).toBe(false);
+  });
+
+  it("treats direct localhost connections as local", () => {
+    expect(
+      isLoopbackClient({
+        ip: "127.0.0.1",
+        headers: { host: "localhost:5173" },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("getRequestClientIp", () => {
+  it("prefers the first X-Forwarded-For hop", () => {
+    expect(
+      getRequestClientIp({
+        ip: "127.0.0.1",
+        headers: { "x-forwarded-for": "192.168.1.50, 127.0.0.1" },
+      }),
+    ).toBe("192.168.1.50");
   });
 });
 

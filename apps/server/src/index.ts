@@ -35,7 +35,7 @@ function applyWebNoCacheHeaders(res: ServerResponse) {
 
 async function main() {
   await ensureSchema();
-  const app = Fastify({ logger: true });
+  const app = Fastify({ logger: true, trustProxy: true });
   await app.register(cors, {
     // TEMPORARY: reflect any browser Origin so LAN / alternate hostnames work.
     origin:

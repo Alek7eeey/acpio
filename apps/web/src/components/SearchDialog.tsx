@@ -56,6 +56,7 @@ export function SearchDialog({
   const navigate = useNavigate();
   const sessions = useAppStore((s) => s.sessions);
   const selectSession = useAppStore((s) => s.selectSession);
+  const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
 
   const [tab, setTab] = useState<SearchDialogTab>(initialTab);
   const [query, setQuery] = useState("");
@@ -146,9 +147,10 @@ export function SearchDialog({
 
   const openMessage = (hit: MessageSearchHit) => {
     onClose();
-    navigate(
-      `/chat?session=${encodeURIComponent(hit.sessionId)}&message=${encodeURIComponent(hit.messageId)}`,
-    );
+    void selectSession(hit.sessionId).then(() => {
+      setFocusMessageId(hit.messageId);
+      navigate("/chat");
+    });
   };
 
   const activateAt = (index: number) => {

@@ -3,7 +3,7 @@
   flex: 0 1 auto;
   align-self: center;
   z-index: 30;
-  overflow: hidden;
+  overflow: visible;
   isolation: isolate;
   min-width: 0;
   max-width: 100%;

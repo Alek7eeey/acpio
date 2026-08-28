@@ -214,6 +214,7 @@ export function ModelPicker({
   const effortPrefix = t("models.effort");
   const contextPrefix = t("models.context");
   const [open, setOpen] = useState(false);
+  const [menuReady, setMenuReady] = useState(false);
   /** Filter typed into the model list. */
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
@@ -320,6 +321,7 @@ export function ModelPicker({
       closeParams();
       setLocalParamsBusy(false);
       setQuery("");
+      setMenuReady(false);
     }
   }, [open]);
 
@@ -335,49 +337,84 @@ export function ModelPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  // On phones, pin the menu to the viewport with side padding so it doesn't hug the left edge.
+  // Portal the menu to document.body (like OptionPicker) so parent overflow:hidden
+  // and display:contents wrappers in the composer cannot clip or block it.
   useLayoutEffect(() => {
     const menu = menuRef.current;
     const root = rootRef.current;
     if (!open || !menu || !root) return;
 
-    const clear = () => {
-      menu.style.position = "";
-      menu.style.left = "";
-      menu.style.right = "";
-      menu.style.top = "";
-      menu.style.bottom = "";
-      menu.style.width = "";
-      menu.style.maxWidth = "";
-    };
+    const pad = 12;
+    const gap = placement === "down" ? 8 : 10;
 
     const place = () => {
-      const narrow = window.matchMedia("(max-width: 700px)").matches;
-      if (!narrow) {
-        clear();
-        if (placement === "down") {
-          const rootRect = root.getBoundingClientRect();
-          const menuRect = menu.getBoundingClientRect();
-          if (menuRect.right > window.innerWidth - 12 && menuRect.width > rootRect.width + 1) {
-            menu.style.left = "auto";
-            menu.style.right = "0";
-          }
-        }
-        return;
-      }
       const trigger = root.getBoundingClientRect();
+      const narrow = window.matchMedia("(max-width: 700px)").matches;
+
       menu.style.position = "fixed";
-      menu.style.left = "max(12px, env(safe-area-inset-left, 0px))";
-      menu.style.right = "max(12px, env(safe-area-inset-right, 0px))";
-      menu.style.width = "auto";
-      menu.style.maxWidth = "none";
+      menu.style.zIndex = "1100";
+      menu.style.margin = "0";
+      menu.style.right = "auto";
+
       if (placement === "down") {
-        menu.style.top = `${Math.min(trigger.bottom + 8, window.innerHeight - 80)}px`;
+        menu.style.top = `${trigger.bottom + gap}px`;
         menu.style.bottom = "auto";
-      } else {
-        menu.style.bottom = `${Math.max(12, window.innerHeight - trigger.top + 10)}px`;
+        menu.style.left = `${trigger.left}px`;
+        menu.style.width = "max-content";
+        menu.style.minWidth = `${Math.max(trigger.width, 0)}px`;
+        menu.style.maxWidth = `${Math.min(420, window.innerWidth - pad * 2)}px`;
+      } else if (narrow) {
         menu.style.top = "auto";
+        menu.style.bottom = `${Math.max(pad, window.innerHeight - trigger.top + gap)}px`;
+        menu.style.left = "max(12px, env(safe-area-inset-left, 0px))";
+        menu.style.right = "max(12px, env(safe-area-inset-right, 0px))";
+        menu.style.width = "auto";
+        menu.style.maxWidth = "none";
+      } else {
+        menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - trigger.top + gap}px`;
+        menu.style.left = `${trigger.left}px`;
+        menu.style.width = `${Math.min(320, window.innerWidth - pad * 2)}px`;
+        menu.style.maxWidth = `${Math.min(320, window.innerWidth - pad * 2)}px`;
       }
+
+      let left = menu.getBoundingClientRect().left;
+      const width = menu.getBoundingClientRect().width;
+      if (!(placement === "up" && narrow)) {
+        if (left + width > window.innerWidth - pad) {
+          left = Math.max(pad, window.innerWidth - pad - width);
+        }
+        if (left < pad) left = pad;
+        menu.style.left = `${left}px`;
+      }
+
+      if (placement === "up" && !narrow) {
+        const menuWidth = menu.getBoundingClientRect().width;
+        let aligned = trigger.right - menuWidth;
+        if (aligned < pad) aligned = pad;
+        if (aligned + menuWidth > window.innerWidth - pad) {
+          aligned = Math.max(pad, window.innerWidth - pad - menuWidth);
+        }
+        menu.style.left = `${aligned}px`;
+      }
+
+      const rect = menu.getBoundingClientRect();
+      if (placement === "down" && rect.bottom > window.innerHeight - pad) {
+        menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - trigger.top + gap}px`;
+      } else if (placement !== "down" && rect.top < pad) {
+        menu.style.bottom = "auto";
+        menu.style.top = `${trigger.bottom + gap}px`;
+      }
+
+      const menuRect = menu.getBoundingClientRect();
+      setMenuAnchor({
+        top: menuRect.top,
+        left: menuRect.left,
+        bottom: menuRect.bottom,
+        right: menuRect.right,
+      });
+      setMenuReady(true);
     };
 
     place();
@@ -385,12 +422,11 @@ export function ModelPicker({
     window.visualViewport?.addEventListener("resize", place);
     window.visualViewport?.addEventListener("scroll", place);
     return () => {
-      clear();
       window.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("scroll", place);
     };
-  }, [open, placement, disabled]);
+  }, [open, placement, disabled, options.length, visibleOptions.length]);
 
   useLayoutEffect(() => {
     if (!open || !model || !listRef.current) return;
@@ -453,6 +489,7 @@ export function ModelPicker({
     const onDoc = (e: globalThis.MouseEvent) => {
       const t = e.target as Node;
       if (rootRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
       if (paramsPopupRef.current?.contains(t)) return;
       setOpen(false);
     };
@@ -669,128 +706,134 @@ export function ModelPicker({
         </span>
       </button>
 
-      {open && !disabled && (
-        <div
-          ref={menuRef}
-          className={`${styles.modelMenu} ${placement === "down" ? styles.modelMenuDown : ""}`}
-          role="listbox"
-        >
-          <div className={styles.modelMenuHead}>{t("common.model")}</div>
-          {options.length === 0 ? (
-            loading ? (
-              <div className={`${styles.modelEmpty} ${styles.modelEmptyLoading}`} aria-busy="true">
-                <span className={styles.paramsSpinner} aria-hidden />
-                <span>{t("common.loadingModels")}</span>
-              </div>
+      {open &&
+        !disabled &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`${styles.modelMenu} ${styles.modelMenuPortal} ${
+              placement === "down" ? styles.modelMenuDown : ""
+            }`}
+            style={{ visibility: menuReady ? "visible" : "hidden" }}
+            role="listbox"
+          >
+            <div className={styles.modelMenuHead}>{t("common.model")}</div>
+            {options.length === 0 ? (
+              loading ? (
+                <div className={`${styles.modelEmpty} ${styles.modelEmptyLoading}`} aria-busy="true">
+                  <span className={styles.paramsSpinner} aria-hidden />
+                  <span>{t("common.loadingModels")}</span>
+                </div>
+              ) : (
+                <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
+              )
             ) : (
-              <div className={styles.modelEmpty}>{t("common.emptyList")}</div>
-            )
-          ) : (
-            <div className={styles.modelSearch}>
-              <svg className={styles.modelSearchIcon} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-                <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-              <input
-                ref={searchRef}
-                className={styles.modelSearchInput}
-                type="text"
-                value={query}
-                placeholder={t("common.modelSearchPlaceholder")}
-                aria-label={t("common.modelSearchPlaceholder")}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Escape" && query) {
-                    e.stopPropagation();
-                    setQuery("");
-                  }
-                }}
-              />
-              {query && (
-                <button
-                  type="button"
-                  className={styles.modelSearchClear}
-                  aria-label={t("common.modelSearchClear")}
-                  onClick={() => {
-                    setQuery("");
-                    searchRef.current?.focus();
+              <div className={styles.modelSearch}>
+                <svg className={styles.modelSearchIcon} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                  <path d="m20 20-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+                <input
+                  ref={searchRef}
+                  className={styles.modelSearchInput}
+                  type="text"
+                  value={query}
+                  placeholder={t("common.modelSearchPlaceholder")}
+                  aria-label={t("common.modelSearchPlaceholder")}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" && query) {
+                      e.stopPropagation();
+                      setQuery("");
+                    }
                   }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          )}
-          {options.length > 0 && q && visibleOptions.length === 0 && (
-            <div className={styles.modelEmpty}>{t("common.modelSearchEmpty")}</div>
-          )}
-          <div className={styles.modelList} ref={listRef}>
-            {visibleOptions.map((m) => {
-              const selected = m.value === model;
-              const rowActive = paramsFor === m.value;
-              return (
-                <div
-                  key={m.value}
-                  ref={(el) => {
-                    if (el) rowRefs.current.set(m.value, el);
-                    else rowRefs.current.delete(m.value);
-                  }}
-                  className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
-                    rowActive ? styles.modelRowExpanded : ""
-                  }`}
-                >
+                />
+                {query && (
                   <button
                     type="button"
-                    role="option"
-                    aria-selected={selected}
-                    title={m.name}
-                    className={styles.modelRowMain}
-                    onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                      onChange(m.value);
-                      closeParams();
-                      setOpen(false);
+                    className={styles.modelSearchClear}
+                    aria-label={t("common.modelSearchClear")}
+                    onClick={() => {
+                      setQuery("");
+                      searchRef.current?.focus();
                     }}
                   >
-                    <span className={styles.modelOptionName}>{m.name}</span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
                   </button>
-                  {showMore && (
+                )}
+              </div>
+            )}
+            {options.length > 0 && q && visibleOptions.length === 0 && (
+              <div className={styles.modelEmpty}>{t("common.modelSearchEmpty")}</div>
+            )}
+            <div className={styles.modelList} ref={listRef}>
+              {visibleOptions.map((m) => {
+                const selected = m.value === model;
+                const rowActive = paramsFor === m.value;
+                return (
+                  <div
+                    key={m.value}
+                    ref={(el) => {
+                      if (el) rowRefs.current.set(m.value, el);
+                      else rowRefs.current.delete(m.value);
+                    }}
+                    className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
+                      rowActive ? styles.modelRowExpanded : ""
+                    }`}
+                  >
                     <button
                       type="button"
-                      ref={(el) => {
-                        if (el) moreBtnRefs.current.set(m.value, el);
-                        else moreBtnRefs.current.delete(m.value);
-                      }}
-                      className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
-                      aria-label={paramsLabel || t("common.params")}
-                      aria-expanded={rowActive}
-                      aria-haspopup="dialog"
-                      title={paramsLabel || t("common.params")}
+                      role="option"
+                      aria-selected={selected}
+                      title={m.name}
+                      className={styles.modelRowMain}
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (paramsFor === m.value) {
-                          closeParams();
-                          return;
-                        }
-                        void openParamsFor(m.value, e.currentTarget);
+                      onClick={() => {
+                        onChange(m.value);
+                        closeParams();
+                        setOpen(false);
                       }}
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                        <circle cx="5" cy="12" r="1.7" />
-                        <circle cx="12" cy="12" r="1.7" />
-                        <circle cx="19" cy="12" r="1.7" />
-                      </svg>
+                      <span className={styles.modelOptionName}>{m.name}</span>
                     </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                    {showMore && (
+                      <button
+                        type="button"
+                        ref={(el) => {
+                          if (el) moreBtnRefs.current.set(m.value, el);
+                          else moreBtnRefs.current.delete(m.value);
+                        }}
+                        className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
+                        aria-label={paramsLabel || t("common.params")}
+                        aria-expanded={rowActive}
+                        aria-haspopup="dialog"
+                        title={paramsLabel || t("common.params")}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (paramsFor === m.value) {
+                            closeParams();
+                            return;
+                          }
+                          void openParamsFor(m.value, e.currentTarget);
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                          <circle cx="5" cy="12" r="1.7" />
+                          <circle cx="12" cy="12" r="1.7" />
+                          <circle cx="19" cy="12" r="1.7" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>,
+          document.body,
+        )}
 
       {paramsPopupOpen &&
         createPortal(
