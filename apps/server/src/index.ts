@@ -1,3 +1,4 @@
+import type { ServerResponse } from "node:http";
 import dotenv from "dotenv";
 import fs from "node:fs";
 import path from "node:path";
@@ -26,7 +27,7 @@ const WEB_NO_CACHE_HEADERS = {
   Expires: "0",
 } as const;
 
-function applyWebNoCacheHeaders(res: { setHeader: (name: string, value: string) => void }) {
+function applyWebNoCacheHeaders(res: ServerResponse) {
   for (const [name, value] of Object.entries(WEB_NO_CACHE_HEADERS)) {
     res.setHeader(name, value);
   }
@@ -59,7 +60,7 @@ async function main() {
   if (webDist) {
     await app.register(fastifyStatic, {
       root: webDist,
-      setHeaders: (res) => applyWebNoCacheHeaders(res),
+      setHeaders: (res) => applyWebNoCacheHeaders(res.raw),
     });
     // SPA fallback: unknown GET paths render the app shell; /api and /ws stay JSON/WS.
     app.setNotFoundHandler((req, reply) => {

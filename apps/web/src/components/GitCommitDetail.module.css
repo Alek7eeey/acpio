@@ -18,8 +18,47 @@
 
 .header {
   padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--border-soft);
   background: var(--surface);
+}
+
+.descriptionPane {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: auto;
+  border-bottom: none;
+}
+
+.detailSplitter {
+  flex: 0 0 auto;
+  height: 5px;
+  cursor: row-resize;
+  touch-action: none;
+  background: color-mix(in srgb, var(--border) 75%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.detailSplitter:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
+}
+
+.filesPane {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wrapResizing {
+  user-select: none;
+}
+
+.wrapResizing .fileRow,
+.wrapResizing .sortBtn,
+.wrapResizing .parentBtn,
+.wrapResizing .copyBtn {
+  pointer-events: none;
 }
 
 .headerTop {

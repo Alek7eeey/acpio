@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { TerminalShell } from "@acpio/shared";
+import { clampConsoleTerminalSize } from "@acpio/shared";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
 
@@ -85,13 +86,18 @@ function shellCommand(kind: ConsoleShell): { file: string; args: string[] } {
   return resolveWindowsShell(kind);
 }
 
-async function resolveConsoleShell(): Promise<ConsoleShell> {
+async function resolveConsoleShell(preferred?: TerminalShell): Promise<ConsoleShell> {
   if (process.platform !== "win32") return "unix";
+  if (preferred === "powershell" || preferred === "cmd") return preferred;
   const settings = await getSettings();
   return settings.terminalShell === "powershell" ? "powershell" : "cmd";
 }
 
-async function spawnPtyBackend(cwd: string, shell: ConsoleShell): Promise<PtyLike | null> {
+async function spawnPtyBackend(
+  cwd: string,
+  shell: ConsoleShell,
+  initialSize?: { cols?: number; rows?: number },
+): Promise<PtyLike | null> {
   try {
     const pty = await import("node-pty");
     const { file, args } = shellCommand(shell);
@@ -99,8 +105,8 @@ async function spawnPtyBackend(cwd: string, shell: ConsoleShell): Promise<PtyLik
       name: "xterm-256color",
       cwd,
       env: process.env as Record<string, string>,
-      cols: 100,
-      rows: 28,
+      cols: clampConsoleTerminalSize({ cols: initialSize?.cols ?? 100, rows: 28 }).cols,
+      rows: clampConsoleTerminalSize({ cols: 100, rows: initialSize?.rows ?? 28 }).rows,
     });
     return {
       write: (data) => proc.write(data),
@@ -150,9 +156,15 @@ function spawnPipeBackend(cwd: string, shell: ConsoleShell): PtyLike {
   };
 }
 
-async function spawnConsole(sessionId: string, cwd: string, shell: ConsoleShell) {
+async function spawnConsole(
+  sessionId: string,
+  cwd: string,
+  shell: ConsoleShell,
+  initialSize?: { cols?: number; rows?: number },
+) {
   const root = path.resolve(cwd || process.cwd());
-  const backend = (await spawnPtyBackend(root, shell)) ?? spawnPipeBackend(root, shell);
+  const backend =
+    (await spawnPtyBackend(root, shell, initialSize)) ?? spawnPipeBackend(root, shell);
   const entry: ConsoleEntry = { cwd: root, backend, shell };
   consoles.set(sessionId, entry);
   backend.onData((chunk) => pushOutput(sessionId, chunk));
@@ -160,8 +172,13 @@ async function spawnConsole(sessionId: string, cwd: string, shell: ConsoleShell)
 }
 
 /** Start a fresh interactive shell in the session workspace (reuse if already running). */
-export async function attachUserConsole(sessionId: string, cwd: string): Promise<void> {
-  const shell = await resolveConsoleShell();
+export async function attachUserConsole(
+  sessionId: string,
+  cwd: string,
+  preferredShell?: TerminalShell,
+  initialSize?: { cols?: number; rows?: number },
+): Promise<void> {
+  const shell = await resolveConsoleShell(preferredShell);
   const root = path.resolve(cwd || process.cwd());
   const existing = consoles.get(sessionId);
   if (existing && existing.shell === shell && existing.cwd === root) return;
@@ -170,12 +187,12 @@ export async function attachUserConsole(sessionId: string, cwd: string): Promise
   if (pending) return pending;
 
   const task = (async () => {
-    const latestShell = await resolveConsoleShell();
+    const latestShell = await resolveConsoleShell(preferredShell);
     const latestRoot = path.resolve(cwd || process.cwd());
     const current = consoles.get(sessionId);
     if (current && current.shell === latestShell && current.cwd === latestRoot) return;
     if (current) releaseUserConsole(sessionId);
-    await spawnConsole(sessionId, cwd, latestShell);
+    await spawnConsole(sessionId, cwd, latestShell, initialSize);
   })();
 
   attachInFlight.set(sessionId, task);
@@ -193,9 +210,8 @@ export function writeUserConsole(sessionId: string, data: string) {
 export function resizeUserConsole(sessionId: string, cols: number, rows: number) {
   const entry = consoles.get(sessionId);
   if (!entry) return;
-  const c = Math.max(20, Math.min(240, Math.round(cols)));
-  const r = Math.max(5, Math.min(80, Math.round(rows)));
-  entry.backend.resize(c, r);
+  const size = clampConsoleTerminalSize({ cols, rows });
+  entry.backend.resize(size.cols, size.rows);
 }
 
 export function releaseUserConsole(sessionId: string) {

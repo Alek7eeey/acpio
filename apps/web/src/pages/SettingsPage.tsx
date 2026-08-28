@@ -70,8 +70,6 @@ function ChatConfigRows({
   persistChatSplit: (value: boolean) => void;
 }) {
   const t = useT();
-  const serverPlatform = useAppStore((s) => s.serverPlatform);
-  const showTerminalShell = serverPlatform === "win32";
   return (
     <SettingTable>
       <SettingRow label={t("settings.chatSplit")} hint={t("settings.chatSplitHint")}>
@@ -219,32 +217,6 @@ function ChatConfigRows({
           })}
         </div>
       </SettingRow>
-
-      {showTerminalShell ? (
-        <SettingRow label={t("settings.terminalShell")} hint={t("settings.terminalShellHint")}>
-          <div className={styles.actionChips}>
-            {(
-              [
-                ["cmd", t("settings.terminalShellCmd")],
-                ["powershell", t("settings.terminalShellPowerShell")],
-              ] as const
-            ).map(([id, label]) => {
-              const on = (form.terminalShell ?? "cmd") === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
-                  aria-pressed={on}
-                  onClick={() => patch("terminalShell", id)}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </SettingRow>
-      ) : null}
 
       <SettingRow label={t("settings.chatComposerButtons")} hint={t("settings.chatComposerButtonsHint")}>
         <div className={styles.actionChips}>
@@ -571,6 +543,8 @@ export function SettingsPage() {
   }, [settingsQuery]);
   const sessions = useAppStore((s) => s.sessions);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
+  const serverPlatform = useAppStore((s) => s.serverPlatform);
+  const showTerminalShell = serverPlatform === "win32";
   const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
   /** Leaves whose label or index terms match the active search. */
   const searchHits = useMemo(() => {
@@ -1715,6 +1689,32 @@ export function SettingsPage() {
                   label={t("settings.multitask")}
                 />
               </SettingRow>
+
+              {showTerminalShell ? (
+                <SettingRow label={t("settings.terminalShell")} hint={t("settings.terminalShellHint")}>
+                  <div className={styles.actionChips}>
+                    {(
+                      [
+                        ["cmd", t("settings.terminalShellCmd")],
+                        ["powershell", t("settings.terminalShellPowerShell")],
+                      ] as const
+                    ).map(([id, label]) => {
+                      const on = (form.terminalShell ?? "cmd") === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                          aria-pressed={on}
+                          onClick={() => patch("terminalShell", id)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </SettingRow>
+              ) : null}
             </SettingTable>
 
             {form.permissionPolicy === "allowlist" && (

@@ -22,6 +22,18 @@
   animation: slideIn 0.2s ease;
 }
 
+.panelFill {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  box-shadow: none;
+  border-left: none;
+}
+
+.panelFill .body {
+  padding: 16px clamp(16px, 4vw, 48px);
+}
+
 .resizing {
   transition: none;
   user-select: none;

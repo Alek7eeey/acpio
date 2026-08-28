@@ -26,7 +26,7 @@ import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
-import { firstUserTitleLine, truncateSessionTitle } from "../lib/sessionTitle";
+import { firstUserTitleLine, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
@@ -1176,7 +1176,9 @@ export function AppShell() {
                         navigate("/chat");
                       }}
                     >
-                      <span className={styles.railMenuItemText}>{s.title}</span>
+                      <span className={styles.railMenuItemText}>
+                        {sessionTreeDisplayTitle(s.title, s.provider)}
+                      </span>
                     </button>
                   ))
                 )}

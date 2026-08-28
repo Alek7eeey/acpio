@@ -31,6 +31,7 @@ export function PlanSidePanel({
   plan,
   open,
   pending,
+  fillPane = false,
   onClose,
   onAccept,
   onReject,
@@ -38,6 +39,8 @@ export function PlanSidePanel({
   plan: PlanPayload | null;
   open: boolean;
   pending?: boolean;
+  /** Take the full chat column instead of a fixed side width. */
+  fillPane?: boolean;
   onClose: () => void;
   onAccept?: () => void;
   onReject?: () => void;
@@ -110,10 +113,11 @@ export function PlanSidePanel({
 
   return (
     <aside
-      className={`${styles.panel} ${dragging ? styles.resizing : ""}`}
+      className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""} ${dragging ? styles.resizing : ""}`}
       aria-label={t("planPanel.title")}
-      style={{ ["--plan-panel-width"]: `${width}px` } as CSSProperties}
+      style={fillPane ? undefined : ({ ["--plan-panel-width"]: `${width}px` } as CSSProperties)}
     >
+      {!fillPane ? (
       <div
         className={styles.splitter}
         onPointerDown={onSplitterDown}
@@ -126,6 +130,7 @@ export function PlanSidePanel({
         aria-valuemax={WIDTH_MAX}
         title={t("common.resizePlanHint")}
       />
+      ) : null}
       <div className={styles.header}>
         <div className={styles.headerText}>
           <span className={styles.eyebrow}>{t("planPanel.title")}</span>

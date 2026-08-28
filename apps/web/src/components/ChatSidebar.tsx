@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 import type { AgentProvider, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { harnessShortLabel } from "../lib/harness";
+import { isShellSession } from "@acpio/shared";
+import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import { normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
@@ -910,8 +912,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           <>
             <button type="button" className={styles.sessionBtn}>
               <span className={styles.sessionTitle}>
-                <span className={styles.sessionTitleText} title={s.title}>
-                  {s.title}
+                <span
+                  className={styles.sessionTitleText}
+                  title={sessionTreeDisplayTitle(s.title, s.provider)}
+                >
+                  {sessionTreeDisplayTitle(s.title, s.provider)}
                 </span>
                 {(showRunning || showUnseen) && (
                   showRunning ? (
@@ -937,7 +942,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             {s.provider ? (
               <span
                 className={`${styles.sessionAgentBadge}${
-                  agentAvailability[s.provider] === false ? ` ${styles.sessionAgentBadgeOff}` : ""
+                  isShellSession(s.provider) ? ` ${styles.sessionAgentBadgeShell}` : ""
+                }${
+                  !isShellSession(s.provider) && agentAvailability[s.provider] === false
+                    ? ` ${styles.sessionAgentBadgeOff}`
+                    : ""
                 }`}
                 title={harnessShortLabel(s.provider)}
               >

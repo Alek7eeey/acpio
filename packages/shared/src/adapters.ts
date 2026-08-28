@@ -12,6 +12,13 @@ import type { AppSettings } from "./index.js";
 /** Provider id — built-ins plus any registered adapter id. */
 export type AgentProvider = "cursor" | "omp" | (string & {});
 
+/** Terminal-only chat: no ACP agent, interactive shell in the session folder. */
+export const SHELL_SESSION_PROVIDER = "shell" as const;
+
+export function isShellSession(provider: string | null | undefined): boolean {
+  return provider === SHELL_SESSION_PROVIDER;
+}
+
 export type AgentMode = "agent" | "plan" | "ask";
 
 export interface AgentModeOption {

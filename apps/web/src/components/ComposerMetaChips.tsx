@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { AgentMode, AppSettings, ChatMetaChipId, SessionDetailDto, GitStatusDto } from "@acpio/shared";
+import { isShellSession } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { OptionPicker } from "./OptionPicker";
 import { ComposerGitChangesButton, GitChangesChipLoader } from "./ComposerGitBar";
@@ -318,7 +319,7 @@ export function ComposerMetaChips({
             <span className={styles.metaChipLabel}>{contextDisplay.label}</span>
           </span>
         );
-      } else if (id === "console" && activeSession) {
+      } else if (id === "console" && activeSession && !isShellSession(activeSession.provider)) {
         node = (
           <button
             type="button"

@@ -16,7 +16,9 @@ import type {
 import {
   DEFAULT_SETTINGS,
   isModelAccessError,
+  isShellSession,
   mergeClientAppSettings,
+  SHELL_SESSION_PROVIDER,
   summarizeQuestionAnswer,
   type AdapterMetaDto,
 } from "@acpio/shared";
@@ -42,6 +44,7 @@ import {
   slashListStillLoading,
 } from "./sessionSlashCommands";
 import { readConsoleOpenSessions, removeConsoleOpenSession, persistConsoleOpen } from "./sessionConsole";
+import { destroyConsoleTerminal } from "./consoleTerminalCache";
 import {
   readGitPanelOpenSessions,
   removeGitPanelOpenSession,
@@ -1491,6 +1494,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setConsoleOpen(open) {
     const sessionId = get().activeSessionId;
+    const active = get().activeSession;
+    const listRow = sessionId ? get().sessions.find((s) => s.id === sessionId) : undefined;
+    if (isShellSession(active?.provider ?? listRow?.provider)) return;
     set({ consoleOpen: open, ...(open ? { gitPanelOpen: false } : {}) });
     if (sessionId) persistConsoleOpen(sessionId, open);
     if (open && sessionId) persistGitPanelOpen(sessionId, false);
@@ -1541,17 +1547,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem(ACTIVE_SESSION_KEY, id);
     clearUnseenFinished(id, get, set);
     const seq = ++selectSessionSeq;
-    const prevSessionId = get().activeSessionId;
-    if (prevSessionId && prevSessionId !== id) {
-      void api.detachConsole(prevSessionId).catch(() => {});
-    }
+    const listRow = get().sessions.find((s) => s.id === id);
+    const cachedForPanels = readCachedSessionDetail(id);
+    const shellSession = isShellSession(listRow?.provider ?? cachedForPanels?.provider);
+    if (shellSession) removeConsoleOpenSession(id);
     set({
       ...resolveExclusiveSidePanels(
-        readConsoleOpenSessions().has(id),
+        !shellSession && readConsoleOpenSessions().has(id),
         readGitPanelOpenSessions().has(id),
       ),
     });
-    const cached = readCachedSessionDetail(id);
+    const cached = cachedForPanels;
     const current = get().activeSession;
     const alreadyWarm =
       get().activeSessionId === id &&
@@ -1780,6 +1786,34 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createSession(cwd, provider, model) {
     const trimmedCwd = cwd?.trim();
+    if (isShellSession(provider)) {
+      const session = await api.createSession({
+        themeId: null,
+        provider: SHELL_SESSION_PROVIDER,
+        ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+      } as Partial<SessionDto>);
+      const detail: SessionDetailDto = {
+        ...session,
+        messages: [],
+        slashCommands: [],
+      };
+      rememberSessionDetail(detail);
+      removeConsoleOpenSession(session.id);
+      set({
+        sessions: [session, ...get().sessions.filter((s) => s.id !== session.id)],
+        activeSessionId: session.id,
+        activeSession: detail,
+        sessionLoading: false,
+        sessionDetails: { ...(get().sessionDetails ?? {}), [session.id]: detail },
+        error: null,
+        consoleOpen: false,
+        gitPanelOpen: false,
+      });
+      syncPanesOnSelect(get, set, session.id);
+      void get().refreshSessions();
+      void get().refreshFolders();
+      return session;
+    }
     const ids = (
       get().adapters.length
         ? get().adapters.map((a) => a.id)
@@ -1841,6 +1875,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async deleteSession(id) {
+    await destroyConsoleTerminal(id);
     await api.deleteSession(id);
     const { activeSessionId } = get();
     await get().refreshSessions();

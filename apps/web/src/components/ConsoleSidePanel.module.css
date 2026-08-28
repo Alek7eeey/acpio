@@ -21,7 +21,21 @@
   animation: slideIn 0.2s ease;
 }
 
-:global([data-theme="light"]) .panel {
+.panelTerminal {
+  --term-surface-bg: var(--bg);
+  --term-splitter: color-mix(in srgb, #ffffff 18%, #3a3a3a);
+
+  background: var(--term-surface-bg);
+  box-shadow: none;
+  animation: slideIn 0.2s ease;
+}
+
+:global([data-theme="light"]) .panelTerminal {
+  --term-surface-bg: var(--bg);
+  --term-splitter: color-mix(in srgb, var(--text-secondary) 28%, var(--border));
+}
+
+:global([data-theme="light"]) .panel:not(.panelTerminal) {
   background:
     linear-gradient(
       180deg,
@@ -59,95 +73,97 @@
   left: 50%;
   width: 3px;
   transform: translateX(-50%);
-  background: color-mix(in srgb, var(--text-secondary) 30%, var(--border));
+  background: var(--term-splitter, color-mix(in srgb, #ffffff 18%, #3a3a3a));
 }
 
 .panelHidden {
   display: none;
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border-soft);
-  flex-shrink: 0;
-}
-
-.headerText {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: flex-start;
-  min-width: 0;
-  flex: 1;
-}
-
-.headerTitles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.hint {
-  flex: 1 1 100%;
+.panelInline {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  max-height: none;
   margin: 0;
-  font-size: 0.72rem;
-  line-height: 1.35;
-  color: var(--text-secondary);
-  font-weight: 400;
+  padding: 6px;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-soft);
+  animation: none;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  --term-surface-bg: var(--surface);
+  display: flex;
+  flex-direction: column;
 }
 
-.eyebrow {
-  font-family: var(--font);
-  font-size: 0.84rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  text-transform: none;
-  color: var(--text);
-  line-height: 1.25;
+.panelInline .terminal {
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.liveBadge {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #22c55e;
-  background: color-mix(in srgb, #22c55e 12%, transparent);
-  border: 1px solid color-mix(in srgb, #22c55e 28%, transparent);
-  border-radius: 999px;
-  padding: 3px 8px;
-}
-
-.closeBtn {
-  width: 32px;
-  height: 32px;
+.sideCloseBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
   color: var(--text-secondary);
-  border-radius: 10px;
   cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--bg) 12%, transparent);
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.sideCloseBtn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 18%, var(--border));
+  background: var(--surface);
+}
+
+.sideCloseBtn svg {
+  display: block;
 }
 
 .terminal {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  padding: 4px 6px 8px;
-  background: var(--surface);
-  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--term-surface-bg);
 }
 
-:global([data-theme="light"]) .terminal {
-  background: color-mix(in srgb, var(--surface) 92%, #ffffff);
-}
-
-.terminal :global(.xterm) {
+.panelTerminal .terminal :global(.xterm) {
+  flex: 1 1 auto;
+  min-height: 0;
   height: 100%;
+  padding: 0;
+}
+
+.panelTerminal .terminal :global(.xterm-viewport) {
+  overflow-y: auto !important;
+  background-color: var(--term-surface-bg) !important;
+}
+
+.panelTerminal .terminal :global(.xterm-screen),
+.panelTerminal .terminal :global(.xterm-scroll-area) {
+  background-color: var(--term-surface-bg) !important;
 }
 
 .contextMenu {

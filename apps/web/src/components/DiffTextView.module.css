@@ -104,28 +104,10 @@
   min-width: 0;
 }
 
-.splitHeadRow,
 .splitRow {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
   align-items: stretch;
-}
-
-.splitHeadRow {
-  position: sticky;
-  top: 33px;
-  z-index: 1;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--bg-secondary);
-}
-
-.splitHeadLabel {
-  padding: 4px 8px;
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
 }
 
 .splitGutter {
@@ -142,8 +124,7 @@
   border-right: 1px solid color-mix(in srgb, var(--border-soft) 55%, transparent);
 }
 
-.splitRow .splitCell:last-child,
-.splitHeadRow .splitHeadLabel:last-child {
+.splitRow .splitCell:last-child {
   border-right: none;
 }
 

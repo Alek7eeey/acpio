@@ -34,6 +34,7 @@ import {
   type ModelParamDto,
   type SessionDetailDto,
   type SlashCommandDto,
+  isShellSession,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
@@ -80,6 +81,7 @@ import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
 import { useCompactPanelLayout } from "../lib/panelLayout";
 import { isImageFile } from "../lib/pathSegments";
+import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
   prefersHotkeyHints,
   registerMessageHotkeys,
@@ -3115,6 +3117,17 @@ function modelParamsEqual(a: Record<string, string>, b: Record<string, string>) 
   return true;
 }
 
+const EMPTY_MODEL_PARAMS: ModelParamDto[] = [];
+
+function modelParamListsEqual(a: ModelParamDto[], b: ModelParamDto[]) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].currentValue !== b[i].currentValue) return false;
+  }
+  return true;
+}
+
 type ChatPaneBind = {
   sessionId: string | null;
   paneIndex: number;
@@ -3613,9 +3626,11 @@ function ChatThread() {
     });
   }, [composerSessionId]);
 
-  const agentProvider = activeSession?.provider ?? null;
+  const isShellSessionActive = isShellSession(activeSession?.provider);
+  const agentProvider = isShellSessionActive ? null : (activeSession?.provider ?? null);
   const agentOffline = Boolean(agentProvider && agentAvailability[agentProvider] === false);
   const noOnlineAgents =
+    !isShellSessionActive &&
     !agentProvider &&
     !(adapters.length
       ? adapters.some((a) => agentAvailability[a.id] === true)
@@ -3624,7 +3639,7 @@ function ChatThread() {
   const catalog =
     agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
   const models = catalog?.models ?? [];
-  const modelParams = catalog?.modelParams ?? [];
+  const modelParams = catalog?.modelParams ?? EMPTY_MODEL_PARAMS;
   const modeOptions = agentProvider
     ? sanitizeCatalogModes(agentProvider, catalog?.modes)
     : [];
@@ -3894,7 +3909,7 @@ function ChatThread() {
 
   useEffect(() => {
     if (paramsLoading) return;
-    setStableParams(modelParams);
+    setStableParams((prev) => (modelParamListsEqual(prev, modelParams) ? prev : modelParams));
     if (model && modelParams.length) {
       paramsCacheRef.current.set(model, modelParams);
     }
@@ -4019,7 +4034,7 @@ function ChatThread() {
         setStableParams(modelParams);
         return;
       }
-      const catParams = catalog?.modelParams ?? [];
+      const catParams = catalog?.modelParams ?? EMPTY_MODEL_PARAMS;
       if (catParams.length) {
         paramsCacheRef.current.set(nextModel, catParams);
         setStableParams(catParams);
@@ -4125,6 +4140,7 @@ function ChatThread() {
 
   const focusComposer = () => {
     if (!shouldAutoFocusComposer()) return;
+    if (useAppStore.getState().consoleOpen) return;
     const el = textareaRef.current;
     if (!el) return;
     if (document.activeElement !== el) {
@@ -4138,6 +4154,12 @@ function ChatThread() {
     }
     // Don't syncComposerSize here during stream — height thrash makes the thread jump.
   };
+
+  useEffect(() => {
+    if (!consoleOpen) return;
+    keepComposerFocus.current = false;
+    textareaRef.current?.blur();
+  }, [consoleOpen]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -4161,7 +4183,7 @@ function ChatThread() {
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
 
-  const emptyReady = Boolean(activeSession) && isEmptyChat && !restoring;
+  const emptyReady = Boolean(activeSession) && isEmptyChat && !restoring && !isShellSessionActive;
   const restoringEmpty = Boolean(activeSession) && !renderSkeleton && isEmptyChat && restoring;
   // Loading windows (skeleton, session creation, boot) keep the composer out
   // of the layout so an empty chat's input never renders at the bottom and
@@ -4437,6 +4459,10 @@ function ChatThread() {
 
   useEffect(() => {
     if (!pendingEmptyChatFocusRef.current) return;
+    if (useAppStore.getState().consoleOpen) {
+      pendingEmptyChatFocusRef.current = false;
+      return;
+    }
     if (!storeActiveSessionId || !isEmptyChat) {
       pendingEmptyChatFocusRef.current = false;
       return;
@@ -4446,6 +4472,7 @@ function ChatThread() {
     const id = storeActiveSessionId;
     const focus = () => {
       if (useAppStore.getState().activeSessionId !== id) return;
+      if (useAppStore.getState().consoleOpen) return;
       focusComposer();
     };
     const raf = window.requestAnimationFrame(focus);
@@ -4567,7 +4594,7 @@ function ChatThread() {
   const activeRightPanel =
     planPanelOpen && activePlan
       ? "plan"
-      : consoleOpen
+      : consoleOpen && !isShellSessionActive
         ? "console"
         : gitPanelOpen && gitPanelDockedLayout
           ? "git"
@@ -4584,7 +4611,27 @@ function ChatThread() {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
     >
-      <div className={`${styles.mainColumn}${emptyReady || restoringEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}`}>
+      <div className={`${styles.mainColumn}${emptyReady || restoringEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}${isShellSessionActive ? ` ${styles.mainColumnShell}` : ""}`}>
+      {isShellSessionActive && activeSession ? (
+        <div className={styles.shellConsoleMain}>
+          {!showThreadSkeleton ? (
+            <ConsoleSidePanel
+              sessionId={activeSession.id}
+              open
+              variant="inline"
+              cwd={activeSession.cwd}
+            />
+          ) : (
+            <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
+              <div className={styles.skeletonTurn}>
+                <div className={styles.skeletonLine} style={{ "--w": "64%" } as CSSProperties} />
+                <div className={styles.skeletonLine} style={{ "--w": "86%" } as CSSProperties} />
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+      <>
       <div className={styles.thread} ref={threadRef}>
         {showThreadSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
@@ -4816,6 +4863,7 @@ function ChatThread() {
         </div>
       )}
 
+      {!isShellSessionActive ? (
       <form
         className={`${styles.composer}${composerHeld ? ` ${styles.composerSkeleton}` : ""}${
           emptyReady || restoringEmpty ? ` ${styles.composerEmptyReady}` : ""
@@ -5279,6 +5327,7 @@ function ChatThread() {
           ) : null}
         </div>
       </form>
+      ) : null}
 
       {folderPicker && (
         <CreateSessionFolderPicker
@@ -5363,6 +5412,8 @@ function ChatThread() {
           onClick={openPlanPanel}
         />
       ) : null}
+      </>
+      )}
       </div>
 
       <div className={styles.planPanelDock}>
@@ -5370,6 +5421,7 @@ function ChatThread() {
           plan={activePlan}
           open={activeRightPanel === "plan" && (!bind || bind.focused)}
           pending={planPending}
+          fillPane
           onClose={() => setPlanPanelOpen(false)}
           onAccept={
             planPending
@@ -5409,7 +5461,7 @@ function ChatThread() {
       )}
       {(!bind || bind.focused) && (
         <>
-          {activeSession ? (
+          {activeSession && !isShellSessionActive ? (
             <ConsoleSidePanel
               sessionId={activeSession.id}
               open={activeRightPanel === "console" && (!bind || bind.focused)}
@@ -5471,13 +5523,17 @@ function SplitPaneChrome({
   showUnsplit: boolean;
 }) {
   const t = useT();
-  const title = useAppStore((s) => {
+  const sessionTitle = useAppStore((s) => {
     if (!sessionId) return null;
-    return (
-      s.sessionDetails?.[sessionId]?.title ??
-      s.sessions.find((x) => x.id === sessionId)?.title ??
-      null
-    );
+    const detail = s.sessionDetails?.[sessionId];
+    const row = s.sessions.find((x) => x.id === sessionId);
+    return detail?.title ?? row?.title ?? null;
+  });
+  const sessionProvider = useAppStore((s) => {
+    if (!sessionId) return undefined;
+    const detail = s.sessionDetails?.[sessionId];
+    const row = s.sessions.find((x) => x.id === sessionId);
+    return detail?.provider ?? row?.provider;
   });
   const running = useAppStore((s) => {
     if (!sessionId) return false;
@@ -5495,7 +5551,11 @@ function SplitPaneChrome({
     >
       <span className={styles.splitChromeTitle}>
         {running ? <span className={styles.splitChromeLive} aria-hidden /> : null}
-        <span className={styles.splitChromeName}>{title || t("chat.splitEmptyTitle")}</span>
+        <span className={styles.splitChromeName}>
+          {sessionTitle
+            ? sessionTreeDisplayTitle(sessionTitle, sessionProvider)
+            : t("chat.splitEmptyTitle")}
+        </span>
       </span>
       {showUnsplit ? (
         <button

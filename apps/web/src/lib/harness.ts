@@ -1,4 +1,5 @@
 import type { AgentProvider } from "@acpio/shared";
+import { isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 
 export type AgentAvailabilityMap = Partial<Record<AgentProvider, boolean | null>>;
 
@@ -57,6 +58,7 @@ export function pickCreateProvider(
 }
 
 export function harnessShortLabel(provider: AgentProvider | string | null | undefined): string {
+  if (isShellSession(provider)) return "Shell";
   if (provider === "cursor") return "Cursor";
   if (provider === "omp") return "OMP";
   return provider ? String(provider) : "";

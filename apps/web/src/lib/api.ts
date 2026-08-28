@@ -208,8 +208,11 @@ export const api = {
       body: JSON.stringify({ items }),
     }),
   getSession: (id: string) => request<SessionDetailDto>(`/api/sessions/${id}`),
-  attachConsole: (id: string) =>
-    request<{ ok: boolean }>(`/api/sessions/${id}/console/attach`, { method: "POST" }),
+  attachConsole: (id: string, size?: { cols: number; rows: number }) =>
+    request<{ ok: boolean }>(`/api/sessions/${id}/console/attach`, {
+      method: "POST",
+      body: size ? JSON.stringify(size) : undefined,
+    }),
   detachConsole: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/console/detach`, { method: "POST" }),
   gitStatus: (id: string) => request<GitStatusDto>(`/api/sessions/${id}/git/status`),

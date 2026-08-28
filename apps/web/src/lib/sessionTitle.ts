@@ -6,7 +6,21 @@ export {
 } from "@acpio/shared";
 
 import type { MessageDto } from "@acpio/shared";
-import { sanitizeTitleSource, truncateSessionTitle } from "@acpio/shared";
+import { isShellSession, sanitizeTitleSource, truncateSessionTitle } from "@acpio/shared";
+
+const SHELL_TREE_SUFFIX = "-shell";
+
+/** Tree label for shell chats: append `-shell` to the stored title (badge stays "Shell"). */
+export function sessionTreeDisplayTitle(
+  title: string,
+  provider: string | null | undefined,
+): string {
+  if (!isShellSession(provider)) return title;
+  const base = title.trim();
+  if (!base) return "shell";
+  if (base.toLowerCase().endsWith(SHELL_TREE_SUFFIX)) return base;
+  return `${base}${SHELL_TREE_SUFFIX}`;
+}
 
 export function firstUserTitleLine(messages: MessageDto[] | undefined): string {
   if (!messages?.length) return "";

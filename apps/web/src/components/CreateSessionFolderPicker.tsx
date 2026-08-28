@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { AgentProvider, HarnessSessionDto, SessionDto } from "@acpio/shared";
+import { SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { normalizeCwd } from "../lib/pathSegments";
@@ -98,6 +99,8 @@ const folderIcon = (
   </svg>
 );
 
+type SessionTarget = AgentProvider | typeof SHELL_SESSION_PROVIDER;
+
 type AgentOption = { id: AgentProvider; label: string; online: boolean };
 
 type CreateSessionFolderPickerProps = {
@@ -117,7 +120,7 @@ type CreateSessionFolderPickerProps = {
   /** Pre-select this harness when it is online. */
   preferredProvider?: AgentProvider | null;
   onClose: () => void;
-  onConfirm: (cwd: string, provider: AgentProvider) => void | Promise<void>;
+  onConfirm: (cwd: string, provider: SessionTarget) => void | Promise<void>;
   onOpenExisting?: (session: HarnessSessionDto) => void | Promise<void>;
 };
 
@@ -148,6 +151,7 @@ export function CreateSessionFolderPicker({
     return onlineAgents[0]?.id ?? null;
   });
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
+  const [sessionKind, setSessionKind] = useState<"agent" | "terminal">("agent");
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const agentRowRef = useRef<HTMLDivElement>(null);
@@ -178,7 +182,7 @@ export function CreateSessionFolderPicker({
   }, []);
 
   useEffect(() => {
-    if (!provider || !onOpenExisting) {
+    if (sessionKind === "terminal" || !provider || !onOpenExisting || provider === SHELL_SESSION_PROVIDER) {
       setExisting([]);
       setExistingLoading(false);
       return;
@@ -199,7 +203,7 @@ export function CreateSessionFolderPicker({
     return () => {
       cancelled = true;
     };
-  }, [provider, lockFolder, lockedPath, defaultCwd, onOpenExisting]);
+  }, [sessionKind, provider, lockFolder, lockedPath, defaultCwd, onOpenExisting]);
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -291,11 +295,11 @@ export function CreateSessionFolderPicker({
     }
   }, [existingMenuOpen, mobileSheet, existing.length, existingLoading]);
 
-  const confirmPath = async (path: string, nextProvider?: AgentProvider) => {
+  const confirmPath = async (path: string, nextProvider?: SessionTarget) => {
     if (busy) return;
-    const chosen = nextProvider ?? provider;
+    const chosen = nextProvider ?? (sessionKind === "terminal" ? SHELL_SESSION_PROVIDER : provider);
     if (!chosen) {
-      setError(t("common.noAgentsOnline"));
+      setError(t("common.pickAgent"));
       return;
     }
     setBusy(true);
@@ -361,220 +365,49 @@ export function CreateSessionFolderPicker({
     <p className={styles.pickerEmpty}>{t("chat.openExistingEmpty")}</p>
   );
 
-  const existingHover =
-    onOpenExisting && provider ? (
-      <div
-        ref={existingRowRef}
-        className={styles.pickerAgentHover}
-        onPointerEnter={() => {
-          if (!mobileSheet) openExistingMenu();
-        }}
-        onPointerLeave={scheduleCloseExistingMenu}
+  const selectSessionKind = (kind: "agent" | "terminal") => {
+    setSessionKind(kind);
+    if (kind === "terminal") {
+      setAgentMenuOpen(false);
+      setExistingMenuOpen(false);
+    }
+  };
+
+  const sessionKindSwitch = (
+    <div className={styles.pickerKindInline} role="tablist" aria-label={t("common.pickAgent")}>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={sessionKind === "agent"}
+        className={`${styles.pickerKindLink}${
+          sessionKind === "agent" ? ` ${styles.pickerKindLinkOn}` : ""
+        }`}
+        disabled={busy}
+        onClick={() => selectSessionKind("agent")}
       >
-        <button
-          type="button"
-          className={styles.pickerAction}
-          disabled={busy}
-          aria-expanded={existingMenuOpen}
-          aria-haspopup="listbox"
-          onClick={() => setExistingMenuOpen((v) => !v)}
-          onFocus={() => {
-            if (!mobileSheet) openExistingMenu();
-          }}
-        >
-          <span className={styles.pickerItemIcon} aria-hidden>
-            {agentIcon}
-          </span>
-          <span className={styles.pickerActionLabel}>{t("chat.pickExistingSessions")}</span>
-          <span
-            className={`${styles.pickerActionChevron}${
-              existingMenuOpen ? ` ${styles.pickerActionChevronOpen}` : ""
-            }`}
-            aria-hidden
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M9 5l7 7-7 7"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-        </button>
-        {existingMenuOpen && mobileSheet ? (
-          <div
-            className={styles.pickerNestedModels}
-            role="listbox"
-            aria-label={t("chat.openExisting")}
-          >
-            {existingItems}
-          </div>
-        ) : null}
-        {existingMenuOpen && !mobileSheet ? (
-          <div
-            ref={existingSubmenuRef}
-            className={`${styles.pickerSubmenu} ${styles.pickerSubmenuWide}`}
-            role="listbox"
-            aria-label={t("chat.openExisting")}
-            onPointerEnter={openExistingMenu}
-            onPointerLeave={scheduleCloseExistingMenu}
-          >
-            <div className={styles.pickerSubmenuList}>{existingItems}</div>
-          </div>
-        ) : null}
-      </div>
-    ) : null;
+        {t("common.sessionKindAgent")}
+      </button>
+      <span className={styles.pickerKindSep} aria-hidden>
+        /
+      </span>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={sessionKind === "terminal"}
+        className={`${styles.pickerKindLink}${
+          sessionKind === "terminal" ? ` ${styles.pickerKindLinkOn}` : ""
+        }`}
+        disabled={busy}
+        onClick={() => selectSessionKind("terminal")}
+      >
+        {t("common.sessionKindTerminal")}
+      </button>
+    </div>
+  );
 
-  const pos = mobileSheet ? null : clampPopover(x, y);
-
-  const pickerPanel = (
-    <div
-      ref={panelRef}
-      className={`${styles.pickerPanel}${
-        mobileSheet ? ` ${styles.folderPickerModal}` : ""
-      }${lockFolder ? ` ${styles.pickerPanelCompact}` : ""}`}
-      style={pos ? { left: pos.left, top: pos.top, width: pos.width } : undefined}
-      role="dialog"
-      aria-modal="true"
-      aria-label={lockFolder ? t("chat.newInFolder") : t("common.workingDir")}
-      onClick={(e) => e.stopPropagation()}
-    >
-      {lockFolder ? (
-        <>
-          <div className={styles.pickerHead}>{t("chat.newInFolder")}</div>
-          <div className={styles.pickerLockedCwd} title={lockedPath || undefined}>
-            <span className={styles.pickerItemIcon} aria-hidden>
-              {folderIcon}
-            </span>
-            <span className={styles.pickerItemPath}>
-              {lockedPath
-                ? folderName(lockedPath, t("common.noFolder"))
-                : t("common.noFolder")}
-            </span>
-          </div>
-          {existingHover}
-          {onlineAgents.length ? (
-            <div
-              ref={agentRowRef}
-              className={styles.pickerAgentHover}
-              onPointerEnter={() => {
-                if (!mobileSheet) openAgentMenu();
-              }}
-              onPointerLeave={scheduleCloseAgentMenu}
-            >
-              <button
-                type="button"
-                className={styles.pickerAction}
-                disabled={busy}
-                aria-expanded={agentMenuOpen}
-                aria-haspopup="listbox"
-                onClick={() => setAgentMenuOpen((v) => !v)}
-                onFocus={() => {
-                  if (!mobileSheet) openAgentMenu();
-                }}
-              >
-                <span className={styles.pickerItemIcon} aria-hidden>
-                  {agentIcon}
-                </span>
-                <span className={styles.pickerActionLabel}>
-                  {onlineAgents.find((a) => a.id === provider)?.label ?? t("common.pickAgent")}
-                </span>
-                <span
-                  className={`${styles.pickerActionChevron}${
-                    agentMenuOpen ? ` ${styles.pickerActionChevronOpen}` : ""
-                  }`}
-                  aria-hidden
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path
-                      d="M9 5l7 7-7 7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </span>
-              </button>
-              {agentMenuOpen && mobileSheet ? (
-                <div className={styles.pickerNestedModels} role="listbox" aria-label={t("common.pickAgent")}>
-                  {onlineAgents.map((a) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      role="option"
-                      aria-selected={provider === a.id}
-                      className={`${styles.pickerItem}${
-                        provider === a.id ? ` ${styles.pickerItemActive}` : ""
-                      }`}
-                      disabled={busy}
-                      onClick={() => {
-                        setProvider(a.id);
-                        setAgentMenuOpen(false);
-                      }}
-                    >
-                      <span className={styles.pickerItemIcon} aria-hidden>
-                        {agentIcon}
-                      </span>
-                      <span className={styles.pickerItemPath}>{a.label}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {agentMenuOpen && !mobileSheet ? (
-                <div
-                  ref={agentSubmenuRef}
-                  className={styles.pickerSubmenu}
-                  role="listbox"
-                  aria-label={t("common.pickAgent")}
-                  onPointerEnter={openAgentMenu}
-                  onPointerLeave={scheduleCloseAgentMenu}
-                >
-                  <div className={styles.pickerSubmenuList}>
-                    {onlineAgents.map((a) => (
-                      <button
-                        key={a.id}
-                        type="button"
-                        role="option"
-                        aria-selected={provider === a.id}
-                        className={`${styles.pickerItem}${
-                          provider === a.id ? ` ${styles.pickerItemActive}` : ""
-                        }`}
-                        disabled={busy}
-                        onClick={() => {
-                          setProvider(a.id);
-                          setAgentMenuOpen(false);
-                        }}
-                      >
-                        <span className={styles.pickerItemIcon} aria-hidden>
-                          {agentIcon}
-                        </span>
-                        <span className={styles.pickerItemPath}>{a.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
-          )}
-          <button
-            type="button"
-            className={styles.pickerCreateBtn}
-            disabled={busy || !provider}
-            onClick={() => void confirmPath(lockedPath, provider ?? undefined)}
-          >
-            {t("common.create")}
-          </button>
-          {error ? <p className={styles.popoverError}>{error}</p> : null}
-        </>
-      ) : (
-        <>
-      <div className={styles.pickerHead}>{t("common.pickAgent")}</div>
-      {onlineAgents.length ? (
+  const agentPicker =
+    sessionKind === "agent" ? (
+      onlineAgents.length ? (
         <div
           ref={agentRowRef}
           className={styles.pickerAgentHover}
@@ -679,7 +512,121 @@ export function CreateSessionFolderPicker({
         </div>
       ) : (
         <p className={styles.pickerEmpty}>{t("common.noAgentsOnline")}</p>
-      )}
+      )
+    ) : null;
+
+  const existingHover =
+    onOpenExisting && sessionKind === "agent" && provider && provider !== SHELL_SESSION_PROVIDER ? (
+      <div
+        ref={existingRowRef}
+        className={styles.pickerAgentHover}
+        onPointerEnter={() => {
+          if (!mobileSheet) openExistingMenu();
+        }}
+        onPointerLeave={scheduleCloseExistingMenu}
+      >
+        <button
+          type="button"
+          className={styles.pickerAction}
+          disabled={busy}
+          aria-expanded={existingMenuOpen}
+          aria-haspopup="listbox"
+          onClick={() => setExistingMenuOpen((v) => !v)}
+          onFocus={() => {
+            if (!mobileSheet) openExistingMenu();
+          }}
+        >
+          <span className={styles.pickerItemIcon} aria-hidden>
+            {agentIcon}
+          </span>
+          <span className={styles.pickerActionLabel}>{t("chat.pickExistingSessions")}</span>
+          <span
+            className={`${styles.pickerActionChevron}${
+              existingMenuOpen ? ` ${styles.pickerActionChevronOpen}` : ""
+            }`}
+            aria-hidden
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M9 5l7 7-7 7"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+        </button>
+        {existingMenuOpen && mobileSheet ? (
+          <div
+            className={styles.pickerNestedModels}
+            role="listbox"
+            aria-label={t("chat.openExisting")}
+          >
+            {existingItems}
+          </div>
+        ) : null}
+        {existingMenuOpen && !mobileSheet ? (
+          <div
+            ref={existingSubmenuRef}
+            className={`${styles.pickerSubmenu} ${styles.pickerSubmenuWide}`}
+            role="listbox"
+            aria-label={t("chat.openExisting")}
+            onPointerEnter={openExistingMenu}
+            onPointerLeave={scheduleCloseExistingMenu}
+          >
+            <div className={styles.pickerSubmenuList}>{existingItems}</div>
+          </div>
+        ) : null}
+      </div>
+    ) : null;
+
+  const pos = mobileSheet ? null : clampPopover(x, y);
+
+  const pickerPanel = (
+    <div
+      ref={panelRef}
+      className={`${styles.pickerPanel}${
+        mobileSheet ? ` ${styles.folderPickerModal}` : ""
+      }${lockFolder ? ` ${styles.pickerPanelCompact}` : ""}`}
+      style={pos ? { left: pos.left, top: pos.top, width: pos.width } : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-label={lockFolder ? t("chat.newInFolder") : t("common.workingDir")}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {lockFolder ? (
+        <>
+          <div className={styles.pickerHeadRow}>
+            <div className={styles.pickerHead}>{t("chat.newInFolder")}</div>
+            {sessionKindSwitch}
+          </div>
+          <div className={styles.pickerLockedCwd} title={lockedPath || undefined}>
+            <span className={styles.pickerItemIcon} aria-hidden>
+              {folderIcon}
+            </span>
+            <span className={styles.pickerItemPath}>
+              {lockedPath
+                ? folderName(lockedPath, t("common.noFolder"))
+                : t("common.noFolder")}
+            </span>
+          </div>
+          {agentPicker}
+          {existingHover}
+          <button
+            type="button"
+            className={styles.pickerCreateBtn}
+            disabled={busy || (sessionKind === "agent" && !provider)}
+            onClick={() => void confirmPath(lockedPath)}
+          >
+            {t("common.create")}
+          </button>
+          {error ? <p className={styles.popoverError}>{error}</p> : null}
+        </>
+      ) : (
+        <>
+      <div className={styles.pickerKindBar}>{sessionKindSwitch}</div>
+      {agentPicker}
 
       {/* Search */}
       <div className={styles.pickerSearch}>
@@ -799,8 +746,13 @@ export function CreateSessionFolderPicker({
         open={browseDialogOpen}
         mode={browseDialogMode}
         initialPath={dialogStartPath.trim() || fallback || undefined}
-        onClose={() => setBrowseDialogOpen(false)}
-        onSelect={(path) => { setBrowseDialogOpen(false); void confirmPath(path); }}
+        onClose={() => {
+          setBrowseDialogOpen(false);
+        }}
+        onSelect={(path) => {
+          setBrowseDialogOpen(false);
+          void confirmPath(path);
+        }}
       />
     </>,
     document.body,

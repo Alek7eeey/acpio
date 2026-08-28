@@ -202,18 +202,6 @@ function DiffViewToolbar({
   );
 }
 
-function SplitColumnHeaders() {
-  const t = useT();
-  return (
-    <div className={styles.splitHeadRow}>
-      <span className={styles.splitGutter} aria-hidden />
-      <span className={styles.splitHeadLabel}>{t("git.diffOriginal")}</span>
-      <span className={styles.splitGutter} aria-hidden />
-      <span className={styles.splitHeadLabel}>{t("git.diffModified")}</span>
-    </div>
-  );
-}
-
 function SplitDiffRow({ row }: { row: SideBySideRow }) {
   let oldSegments: InlineSegment[] | undefined;
   let newSegments: InlineSegment[] | undefined;
@@ -440,7 +428,6 @@ export const DiffTextView = memo(function DiffTextView({
                           />
                         ) : null}
                         <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
-                        <SplitColumnHeaders />
                         {buildSideBySideRows(hunk).map((row, rowIndex) => (
                           <SplitDiffRow key={`split-${fileIndex}-${hunkIndex}-${rowIndex}`} row={row} />
                         ))}

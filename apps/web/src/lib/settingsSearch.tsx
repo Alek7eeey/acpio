@@ -157,6 +157,9 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.apiKeys"),
       "api",
       t("settings.cliAndPermissions"),
+      t("settings.terminalShell"),
+      t("settings.terminalShellCmd"),
+      t("settings.terminalShellPowerShell"),
       "cursor",
       "omp",
     ],
@@ -241,9 +244,6 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatToolbarStyle"),
       t("settings.chatAdvanced"),
       t("settings.chatIntro"),
-      t("settings.terminalShell"),
-      t("settings.terminalShellCmd"),
-      t("settings.terminalShellPowerShell"),
     ],
   };
   const hints = settingsRowHints(t);
@@ -268,6 +268,10 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.multitaskHint"),
       t("settings.allowlistHint"),
       t("settings.cliAndPermissions"),
+      t("settings.terminalShell"),
+      t("settings.terminalShellCmd"),
+      t("settings.terminalShellPowerShell"),
+      t("settings.terminalShellHint"),
     ],
     mcp: [t("settings.mcpEmptyHint"), t("settings.mcpApplyHint")],
     diagnostics: [
@@ -305,7 +309,6 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.chatAgentTurnTimelineHint"),
       t("settings.chatSplitHint"),
       t("settings.chatToolbarStyleHint"),
-      t("settings.terminalShellHint"),
     ],
   };
 }

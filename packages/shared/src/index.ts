@@ -22,6 +22,8 @@ export type {
   SubagentToolEvent,
   SubagentTranscriptPage,
 } from "./adapters.js";
+export { SHELL_SESSION_PROVIDER, isShellSession } from "./adapters.js";
+export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";

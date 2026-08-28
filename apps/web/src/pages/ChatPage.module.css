@@ -6,7 +6,8 @@
   min-height: 0;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   position: relative;
 }
 
@@ -213,19 +214,49 @@
 
 .mainColumn {
   --chat-col: min(800px, 100%);
+  --chat-min-width: 360px;
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  min-width: min(var(--chat-min-width), 100%);
   min-height: 0;
   overflow: hidden;
 }
 
-.pageWithPlan .mainColumn {
+.mainColumnShell {
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.shellConsoleMain {
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
-  border-right: none;
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+/* Clear the split-into-two-panes FAB in single-pane mode. */
+.splitSingle .shellConsoleMain {
+  padding-top: 52px;
+}
+
+.pageWithPlan .mainColumn {
+  display: none;
+}
+
+.pageWithPlan .planPanelDock {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
 }
 
 .pageWithConsole .mainColumn {
@@ -241,7 +272,6 @@
 }
 
 @media (max-width: 1180px) {
-  .pageWithPlan .mainColumn,
   .pageWithConsole .mainColumn,
   .pageWithGit .mainColumn {
     display: none;
@@ -254,7 +284,6 @@
 }
 
 @media (min-width: 1200px) {
-  html.sidebar-tree-collapsed .pageWithPlan .mainColumn,
   html.sidebar-tree-collapsed .pageWithConsole .mainColumn,
   html.sidebar-tree-collapsed .pageWithGit .mainColumn {
     display: none;
@@ -262,7 +291,6 @@
 }
 
 @media (min-width: 1600px) {
-  html.sidebar-tree-open .pageWithPlan .mainColumn,
   html.sidebar-tree-open .pageWithConsole .mainColumn,
   html.sidebar-tree-open .pageWithGit .mainColumn {
     display: none;
@@ -1967,6 +1995,8 @@ button.userSlashCmd:focus-visible {
   z-index: 10;
   overflow: visible;
   box-sizing: border-box;
+  container-type: inline-size;
+  container-name: chat-composer;
 }
 
 .mainColumnEmptyReady .thread {
@@ -2419,7 +2449,7 @@ button.userSlashCmd:focus-visible {
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
   transition: border-color var(--motion), box-shadow var(--motion), border-radius var(--motion);
-  overflow: visible;
+  overflow: hidden;
   min-width: 0;
   width: 100%;
   max-width: 100%;
@@ -2449,7 +2479,7 @@ button.userSlashCmd:focus-visible {
 
 .pillInputWrap {
   --composer-pad: 10px 4px;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   order: 2;
   position: relative;
   z-index: 0;
@@ -2544,7 +2574,38 @@ button.userSlashCmd:focus-visible {
 }
 
 .pillFooterEnd {
-  display: contents;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  order: 3;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  margin-left: auto;
+  min-width: 0;
+  max-width: calc(100% - 46px);
+  overflow: visible;
+}
+
+.pillFooterEnd .composerModel,
+.pillFooterEnd .micBtn,
+.pillFooterEnd .sendBtn,
+.pillFooterEnd .stopBtn {
+  order: unset;
+}
+
+.pillFooterEnd .micBtn,
+.pillFooterEnd .sendBtn,
+.pillFooterEnd .stopBtn {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+}
+
+.pillFooterEnd .composerModel {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(200px, 100%);
+  overflow: hidden;
 }
 
 .attachBtn,
@@ -2759,6 +2820,8 @@ button.userSlashCmd:focus-visible {
   align-self: center;
   position: relative;
   z-index: 20;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sendBtn,
@@ -2854,6 +2917,102 @@ button.userSlashCmd:focus-visible {
   order: unset;
   align-self: center;
   margin-bottom: 0;
+}
+
+/* Narrow chat column (side panel open): stack composer controls like mobile. */
+@container chat-composer (max-width: 720px) {
+  .pill:not(.pillMultiline),
+  .pillMultiline {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    padding: 10px 10px 8px;
+    border-radius: 22px;
+    overflow: visible;
+  }
+
+  .pillInputWrap,
+  .pillMultiline .pillInputWrap {
+    --composer-pad: 4px 6px 8px;
+    order: 0;
+    width: 100% !important;
+    max-width: 100%;
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .pillFooter,
+  .pillMultiline .pillFooter {
+    display: flex;
+    order: 1;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .pillFooterEnd,
+  .pillMultiline .pillFooterEnd {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    min-width: 0;
+    flex: 0 0 auto;
+    max-width: 100%;
+    justify-content: flex-end;
+    overflow: visible;
+  }
+
+  .attachBtn,
+  .pillMultiline .attachBtn {
+    order: unset;
+    flex-shrink: 0;
+  }
+
+  .composerModel,
+  .pillMultiline .composerModel {
+    order: unset;
+    min-width: 0;
+    flex: 0 1 auto;
+    max-width: min(200px, calc(100% - 84px));
+  }
+}
+
+@container chat-composer (max-width: 900px) {
+  .pillFooterEnd .composerModel {
+    max-width: min(168px, 100%);
+  }
+}
+
+/* Narrow composer column: scroll meta chips instead of clipping them. */
+@container chat-composer (max-width: 760px) {
+  .composerMetaShellDesktop .composerMetaDesktop {
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .composerMetaShellDesktop .composerMetaDesktop::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .composerMetaShellDesktop .composerMetaChipHidden {
+    display: flex;
+  }
+
+  .composerMetaShellDesktop .composerMetaMoreBtn {
+    display: none;
+  }
+
+  .composerMetaShellDesktop .composerMetaStart {
+    flex-wrap: nowrap;
+  }
 }
 
 @media (max-width: 700px) {

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { and, asc, desc, eq, gt, inArray, lte, max, or, sql } from "drizzle-orm";
 import type {
   MessageDto,
@@ -10,6 +11,7 @@ import type {
   SessionStatus,
   AcpUsage,
 } from "@acpio/shared";
+import { SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
@@ -157,12 +159,17 @@ export async function createSession(input: {
   const siblings = await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
   const settings = await getSettings();
+  const cwd = normalizeCwd(input.cwd);
+  const defaultTitle =
+    input.provider === SHELL_SESSION_PROVIDER
+      ? path.basename(cwd) || defaultSessionTitle(settings.locale)
+      : defaultSessionTitle(settings.locale);
   const [row] = await db
     .insert(sessions)
     .values({
-      title: input.title ?? defaultSessionTitle(settings.locale),
+      title: input.title ?? defaultTitle,
       provider: input.provider,
-      cwd: normalizeCwd(input.cwd),
+      cwd,
       mode: input.mode,
       status: "idle",
       themeId: input.themeId ?? null,

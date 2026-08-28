@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
+import { CONSOLE_TERMINAL_LIMITS, isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
@@ -529,7 +530,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().optional(),
-        provider: z.enum(["cursor", "omp"]).optional(),
+        provider: z.enum(["cursor", "omp", SHELL_SESSION_PROVIDER]).optional(),
         cwd: z.string().optional(),
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
@@ -539,7 +540,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
     const provider = body.provider ?? settings.connectedProvider ?? settings.defaultProvider;
-    if (!getAgentAvailability(provider)) {
+    if (!isShellSession(provider) && !getAgentAvailability(provider)) {
       return sendAgentOffline(req, reply);
     }
     const session = await createSession({
@@ -550,11 +551,13 @@ export async function registerRoutes(app: FastifyInstance) {
       themeId: body.themeId,
       model: body.model,
     });
-    void warmAcp(session.id, {
-      provider: session.provider,
-      cwd: session.cwd,
-      mode: session.mode,
-    });
+    if (!isShellSession(session.provider)) {
+      void warmAcp(session.id, {
+        provider: session.provider,
+        cwd: session.cwd,
+        mode: session.mode,
+      });
+    }
     return session;
   });
 
@@ -594,7 +597,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    if (getAgentAvailability(detail.provider)) {
+    if (!isShellSession(detail.provider) && getAgentAvailability(detail.provider)) {
       void warmAcp(id, {
         provider: detail.provider,
         cwd: detail.cwd,
@@ -653,7 +656,23 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    await attachUserConsole(id, detail.cwd);
+    const body = z
+      .object({
+        cols: z
+          .number()
+          .int()
+          .min(CONSOLE_TERMINAL_LIMITS.cols.min)
+          .max(CONSOLE_TERMINAL_LIMITS.cols.max)
+          .optional(),
+        rows: z
+          .number()
+          .int()
+          .min(CONSOLE_TERMINAL_LIMITS.rows.min)
+          .max(CONSOLE_TERMINAL_LIMITS.rows.max)
+          .optional(),
+      })
+      .parse(req.body ?? {});
+    await attachUserConsole(id, detail.cwd, undefined, body);
     return { ok: true };
   });
 

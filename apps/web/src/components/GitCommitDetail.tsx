@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitFileDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { joinRepoPath, normalizeGitPath, toRepoAbsolutePath } from "../lib/gitFileTree";
@@ -6,6 +6,24 @@ import { api } from "../lib/api";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
 import styles from "./GitCommitDetail.module.css";
+
+const DESCRIPTION_HEIGHT_KEY = "acpio.gitCommitDetailHeaderHeight.v1";
+const DESCRIPTION_HEIGHT_DEFAULT = 168;
+const DESCRIPTION_HEIGHT_MIN = 96;
+const DESCRIPTION_HEIGHT_MAX = 440;
+
+function readDescriptionHeight() {
+  try {
+    const raw = localStorage.getItem(DESCRIPTION_HEIGHT_KEY);
+    const n = raw ? Number(raw) : NaN;
+    if (Number.isFinite(n)) {
+      return Math.min(DESCRIPTION_HEIGHT_MAX, Math.max(DESCRIPTION_HEIGHT_MIN, n));
+    }
+  } catch {
+    /* ignore */
+  }
+  return DESCRIPTION_HEIGHT_DEFAULT;
+}
 
 function formatCommitDate(iso: string) {
   const date = new Date(iso);
@@ -148,6 +166,9 @@ export function GitCommitDetail({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [sortDesc, setSortDesc] = useState(false);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const [descriptionHeight, setDescriptionHeight] = useState(readDescriptionHeight);
+  const [resizing, setResizing] = useState(false);
+  const resizeDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   const closeFileMenu = useCallback(() => setFileMenu(null), []);
 
@@ -175,6 +196,50 @@ export function GitCommitDetail({
       window.removeEventListener("keydown", onKey);
     };
   }, [closeFileMenu, fileMenu]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(DESCRIPTION_HEIGHT_KEY, String(descriptionHeight));
+    } catch {
+      /* ignore */
+    }
+  }, [descriptionHeight]);
+
+  const onDescriptionResizeDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      resizeDragRef.current = { startY: e.clientY, startHeight: descriptionHeight };
+      setResizing(true);
+    },
+    [descriptionHeight],
+  );
+
+  const onDescriptionResizeDoubleClick = useCallback(() => {
+    setDescriptionHeight(DESCRIPTION_HEIGHT_DEFAULT);
+  }, []);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = resizeDragRef.current;
+      if (!drag) return;
+      const next = drag.startHeight + (e.clientY - drag.startY);
+      setDescriptionHeight(Math.min(DESCRIPTION_HEIGHT_MAX, Math.max(DESCRIPTION_HEIGHT_MIN, next)));
+    };
+    const onUp = () => {
+      resizeDragRef.current = null;
+      setResizing(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [resizing]);
 
   const handleCopyRelativePath = useCallback(async () => {
     if (!fileMenu) return;
@@ -275,56 +340,69 @@ export function GitCommitDetail({
   };
 
   return (
-    <div className={styles.wrap}>
-      {detail ? (
-        <div className={styles.header}>
-          <div className={styles.headerTop}>
-            <div>
-              <p className={styles.subject}>{detail.subject}</p>
-              {detail.body ? <p className={styles.body}>{detail.body}</p> : null}
-            </div>
-            <div className={styles.hashRow}>
-              <span className={styles.hashLabel}>{t("git.commitLabel")}</span>
-              <span className={styles.hashValue}>{detail.shortHash}</span>
-              <button type="button" className={styles.copyBtn} onClick={() => void copyHash()} title={t("git.copyCommit")}>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <rect x="8" y="8" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
-                  <path d="M6 16V6a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div className={styles.metaRow}>
-            <span className={styles.authorBlock}>
-              <span className={styles.avatar} aria-hidden>
-                {authorInitials(detail.author)}
-              </span>
-              <span className={styles.authorName}>{detail.author}</span>
-              <span className={styles.authored}>
-                {t("git.authoredAt", { date: formatCommitDate(detail.date) })}
-              </span>
-            </span>
-            {detail.parents[0] ? (
-              <span className={styles.parentBlock}>
-                <span>{t("git.parentLabel")}</span>
-                <button
-                  type="button"
-                  className={styles.parentBtn}
-                  onClick={() => onSelectParent?.(detail.parents[0]!)}
-                  title={detail.parents[0]!}
-                >
-                  {detail.parentShortHashes[0]}
+    <div className={`${styles.wrap}${resizing ? ` ${styles.wrapResizing}` : ""}`}>
+      <div className={styles.descriptionPane} style={{ height: `${descriptionHeight}px` }}>
+        {detail ? (
+          <div className={styles.header}>
+            <div className={styles.headerTop}>
+              <div>
+                <p className={styles.subject}>{detail.subject}</p>
+                {detail.body ? <p className={styles.body}>{detail.body}</p> : null}
+              </div>
+              <div className={styles.hashRow}>
+                <span className={styles.hashLabel}>{t("git.commitLabel")}</span>
+                <span className={styles.hashValue}>{detail.shortHash}</span>
+                <button type="button" className={styles.copyBtn} onClick={() => void copyHash()} title={t("git.copyCommit")}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <rect x="8" y="8" width="11" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+                    <path d="M6 16V6a2 2 0 0 1 2-2h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
                 </button>
+              </div>
+            </div>
+            <div className={styles.metaRow}>
+              <span className={styles.authorBlock}>
+                <span className={styles.avatar} aria-hidden>
+                  {authorInitials(detail.author)}
+                </span>
+                <span className={styles.authorName}>{detail.author}</span>
+                <span className={styles.authored}>
+                  {t("git.authoredAt", { date: formatCommitDate(detail.date) })}
+                </span>
               </span>
-            ) : null}
+              {detail.parents[0] ? (
+                <span className={styles.parentBlock}>
+                  <span>{t("git.parentLabel")}</span>
+                  <button
+                    type="button"
+                    className={styles.parentBtn}
+                    onClick={() => onSelectParent?.(detail.parents[0]!)}
+                    title={detail.parents[0]!}
+                  >
+                    {detail.parentShortHashes[0]}
+                  </button>
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className={styles.header}>
-          <p className={styles.subject}>{t("git.wipHint")}</p>
-        </div>
-      )}
+        ) : (
+          <div className={styles.header}>
+            <p className={styles.subject}>{t("git.wipHint")}</p>
+          </div>
+        )}
+      </div>
 
+      <div
+        className={styles.detailSplitter}
+        onPointerDown={onDescriptionResizeDown}
+        onDoubleClick={onDescriptionResizeDoubleClick}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label={t("git.resizeCommitDescription")}
+        title={t("git.resizeCommitDescription")}
+      />
+
+      <div className={styles.filesPane}>
       <div className={styles.toolbar}>
         <div className={styles.stats}>
           {detail ? (
@@ -403,6 +481,7 @@ export function GitCommitDetail({
                 }
               />
             ))}
+      </div>
       </div>
 
       {fileMenu ? (

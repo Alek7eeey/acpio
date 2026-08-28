@@ -1632,6 +1632,11 @@
   opacity: 0.55;
 }
 
+.sessionAgentBadgeShell {
+  color: color-mix(in srgb, var(--accent) 82%, var(--text-secondary));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
 @media (hover: hover) and (pointer: fine) {
   .sessionAgentBadge {
     display: none;
@@ -2554,7 +2559,7 @@
 }
 
 .pickerPanelCompact .pickerAction {
-  min-height: 34px;
+  min-height: 32px;
   padding: 6px 9px;
   font-size: 0.8rem;
 }
@@ -2606,6 +2611,81 @@
   font-size: 0.74rem;
   font-weight: 500;
   opacity: 0.88;
+}
+
+.pickerHeadRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px 4px;
+  min-width: 0;
+}
+
+.pickerHeadRow .pickerHead {
+  padding: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+.pickerKindBar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 10px 0;
+}
+
+.pickerKindInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.pickerKindLink {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  opacity: 0.72;
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.pickerKindLink:hover:not(:disabled):not(.pickerKindLinkOn) {
+  color: var(--text);
+  opacity: 0.9;
+}
+
+.pickerKindLink:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.pickerKindLink:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pickerKindLinkOn {
+  color: var(--text);
+  opacity: 1;
+  font-weight: 650;
+}
+
+.pickerKindSep {
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  user-select: none;
+  line-height: 1;
 }
 
 .pickerSearch {
@@ -2752,7 +2832,7 @@
   border-radius: 9px;
   color: var(--text);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 1.25;
   cursor: pointer;
@@ -2789,7 +2869,7 @@
   min-width: 0;
   flex: 1;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 1.25;
 }
@@ -2826,7 +2906,7 @@
   display: flex;
   flex-direction: column;
   padding: 6px;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   animation: rise 0.14s ease;
 }
 
@@ -2854,17 +2934,17 @@
 .pickerAction {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   border: none;
   background: transparent;
   text-align: left;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-radius: 9px;
   color: var(--text);
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 1.25;
   cursor: pointer;
@@ -2881,9 +2961,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 400;
   line-height: 1.25;
+}
+
+.pickerAction .pickerItemIcon svg {
+  width: 14px;
+  height: 14px;
 }
 
 .pickerActionChevron {
@@ -2897,6 +2982,8 @@
 
 .pickerActionChevron svg {
   display: block;
+  width: 12px;
+  height: 12px;
 }
 
 .pickerActionChevronOpen {
@@ -3661,8 +3748,9 @@
   height: var(--header-tool-size) !important;
   min-width: var(--header-tool-size) !important;
   min-height: var(--header-tool-size) !important;
-  display: grid !important;
+  display: inline-grid !important;
   place-items: center !important;
+  place-content: center !important;
   border: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
   background: color-mix(in srgb, var(--surface) 46%, transparent) !important;
   backdrop-filter: blur(16px) saturate(1.08);
@@ -3682,6 +3770,12 @@
     color var(--motion),
     border-color var(--motion),
     box-shadow var(--motion);
+}
+
+.toolClusterBtn > * {
+  display: grid;
+  place-items: center;
+  margin: 0;
 }
 
 .toolClusterLocale {
@@ -3758,8 +3852,9 @@
   height: var(--header-tool-size);
   min-width: var(--header-tool-size);
   min-height: var(--header-tool-size);
-  display: grid;
+  display: inline-grid;
   place-items: center;
+  place-content: center;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
   border-radius: 999px;
@@ -3768,11 +3863,19 @@
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
     0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
+  line-height: 0;
   transition:
     background var(--motion),
     color var(--motion),
     border-color var(--motion),
     box-shadow var(--motion);
+}
+
+.header .iconBtn svg {
+  display: block;
+  width: var(--header-tool-icon);
+  height: var(--header-tool-icon);
+  margin: 0;
 }
 
 .header .iconBtn:hover {
