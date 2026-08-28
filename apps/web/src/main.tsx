@@ -16,20 +16,24 @@ if (!import.meta.env.DEV && "caches" in window) {
   );
 }
 
-if (import.meta.env.DEV) {
-  // Full Workbox SW is off in vite PWA devOptions (corrupts binary /api).
-  // Register a tiny SW + static public/manifest.webmanifest for installability.
-  void navigator.serviceWorker
-    .register("/pwa-dev-sw.js", { scope: "/", updateViaCache: "none" })
-    .then((reg) => reg.update())
-    .catch(() => {});
-} else {
-  registerSW({
-    immediate: true,
-    onNeedRefresh() {
-      window.location.reload();
-    },
-  });
+// Service workers require HTTPS or localhost — over LAN HTTP (e.g. 192.168.x.x)
+// navigator.serviceWorker is undefined and must not be touched.
+if ("serviceWorker" in navigator) {
+  if (import.meta.env.DEV) {
+    // Full Workbox SW is off in vite PWA devOptions (corrupts binary /api).
+    // Register a tiny SW + static public/manifest.webmanifest for installability.
+    void navigator.serviceWorker
+      .register("/pwa-dev-sw.js", { scope: "/", updateViaCache: "none" })
+      .then((reg) => reg.update())
+      .catch(() => {});
+  } else {
+    registerSW({
+      immediate: true,
+      onNeedRefresh() {
+        window.location.reload();
+      },
+    });
+  }
 }
 
 createRoot(document.getElementById("root")!).render(
