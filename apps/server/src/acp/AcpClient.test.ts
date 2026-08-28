@@ -542,21 +542,10 @@ describe("buildAgentEnv", () => {
     }
   });
 
-  it("prepends known bin dirs to PATH on win32 and leaves PATH untouched elsewhere", () => {
+  it("sets NO_COLOR and leaves PATH unchanged (rewriting PATH broke OMP /review)", () => {
     const env = buildAgentEnv(getAdapter("cursor"), settingsWith({}));
-    if (process.platform === "win32") {
-      expect(env.PATH).toBeDefined();
-      const local = process.env.LOCALAPPDATA;
-      if (local) {
-        expect(env.PATH).toContain(path.join(local, "cursor-agent"));
-        expect(env.PATH).toContain(path.join(local, "omp"));
-      }
-      if (process.env.PATH) {
-        expect(env.PATH!.endsWith(process.env.PATH)).toBe(true);
-      }
-    } else {
-      expect(env.PATH).toBe(process.env.PATH);
-    }
+    expect(env.NO_COLOR).toBe("1");
+    expect(env.PATH).toBe(process.env.PATH);
   });
 });
 

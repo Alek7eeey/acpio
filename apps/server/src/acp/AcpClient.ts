@@ -338,28 +338,17 @@ function looksLikeCommandNotFound(text: string): boolean {
 }
 
 export function buildAgentEnv(adapter: HarnessAdapter, settings: AppSettings): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
   const apiKey = adapter.apiKeyField ? adapterSetting(settings, adapter.apiKeyField) : undefined;
   if (adapter.envApiKeyName && typeof apiKey === "string" && apiKey) {
     env[adapter.envApiKeyName] = apiKey;
   }
   if (settings.anthropicApiKey) env.ANTHROPIC_API_KEY = settings.anthropicApiKey;
   if (settings.openaiApiKey) env.OPENAI_API_KEY = settings.openaiApiKey;
-  if (process.platform === "win32") {
-    const extras: string[] = [];
-    if (process.env.LOCALAPPDATA) {
-      for (const dir of adapter.binaryDirs) {
-        extras.push(path.join(process.env.LOCALAPPDATA, dir));
-      }
-    }
-    if (process.env.USERPROFILE) {
-      extras.push(path.join(process.env.USERPROFILE, ".local", "bin"));
-    }
-    if (process.env.APPDATA) {
-      extras.push(path.join(process.env.APPDATA, "npm"));
-    }
-    env.PATH = `${extras.join(";")};${env.PATH ?? ""}`;
-  }
+  // Intentionally do not rewrite PATH on Windows. Prepending shim dirs (npm,
+  // LOCALAPPDATA/omp, …) made OMP `/review` accept elicitation and immediately
+  // return empty `end_turn` (native review never started). The harness binary is
+  // already resolved to an absolute path before spawn.
   return env;
 }
 
@@ -599,11 +588,13 @@ export class AcpClient extends EventEmitter {
 
     this.emit("log", `starting ${resolved.cmd} ${args.join(" ")} cwd=${cwd}`);
 
+    // Never shell-wrap .exe harnesses: `shell: true` on Windows can make OMP's
+    // post-elicitation /review path exit with an empty end_turn.
     const child = spawn(resolved.cmd, args, {
       cwd,
       env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: resolved.shell,
+      shell: resolved.shell && !/\.exe$/i.test(resolved.cmd),
       windowsHide: true,
     });
     this.bindPipeAgentProcess(child, commandName);
@@ -889,6 +880,11 @@ export class AcpClient extends EventEmitter {
 
   async prompt(text: string): Promise<{ stopReason?: string; raw: unknown }> {
     if (!this.sessionId) throw new Error("ACP session not started");
+    // A second session/prompt while one is open cancels/queues the in-flight turn in OMP
+    // (e.g. /review after elicitation). Never stack prompts on one client.
+    if (this.promptRequestId != null) {
+      throw new Error("ACP prompt already in flight");
+    }
     const { id, promise } = this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
@@ -1246,6 +1242,17 @@ export class AcpClient extends EventEmitter {
       ...this.logContext,
       data: msg,
     });
+    const wirePath = process.env.ACPIO_ACP_WIRE;
+    if (wirePath) {
+      try {
+        fs.appendFileSync(
+          wirePath,
+          `${JSON.stringify({ ts: new Date().toISOString(), dir: "out", msg })}\n`,
+        );
+      } catch {
+        /* ignore */
+      }
+    }
     this.proc.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
@@ -1271,6 +1278,17 @@ export class AcpClient extends EventEmitter {
       ...this.logContext,
       data: msg,
     });
+    const wirePath = process.env.ACPIO_ACP_WIRE;
+    if (wirePath) {
+      try {
+        fs.appendFileSync(
+          wirePath,
+          `${JSON.stringify({ ts: new Date().toISOString(), dir: "in", msg })}\n`,
+        );
+      } catch {
+        /* ignore */
+      }
+    }
 
     if ("id" in msg && (msg.result !== undefined || msg.error !== undefined) && !msg.method) {
       const id = msg.id as JsonRpcId;

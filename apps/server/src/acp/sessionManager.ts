@@ -564,8 +564,6 @@ class SessionRuntime {
   interactiveAnswerAt: number | null = null;
   /** True once ACP streamed thought/text/tools after the interactive answer. */
   streamedAfterInteractiveAnswer = false;
-  /** Text to re-prompt with if the harness aborted the ask tool after our accept. */
-  interactiveFollowUpText: string | null = null;
   /** MCP config changed while a turn was running — restart the agent when it idles. */
   restartOnIdle = false;
   /** Model+params to apply on the idle restart (set alongside restartOnIdle by setSessionModel). */
@@ -2384,7 +2382,7 @@ const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
 const STREAM_SETTLE_MAX_MS = 12_000;
 /** OMP /review can keep tool/subagent traffic going for many minutes. */
 const STREAM_SETTLE_TOOL_MAX_MS = 600_000;
-/** After elicitation answer, OMP often pauses before spawning review subagents. */
+/** After elicitation answer, OMP may pause before /review (or similar) starts streaming. */
 const POST_ELICITATION_SPAWN_WAIT_MS = 8_000;
 const POST_ELICITATION_IDLE_BREAK_MS = 4_000;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
@@ -2451,7 +2449,7 @@ function markInteractiveAnswer(rt: SessionRuntime) {
 
 /** Legacy alias — only completes ask tools, never review subagents. */
 async function finalizeInteractiveToolWait(rt: SessionRuntime, sessionId: string) {
-  markInteractiveAnswer(rt);
+  if (rt.interactiveAnswerAt == null) markInteractiveAnswer(rt);
   await completeInteractiveAskTools(rt, sessionId);
 }
 
@@ -2531,20 +2529,12 @@ async function drainPostInteractiveStream(rt: SessionRuntime) {
 async function resumeStreamAfterInteractiveAnswer(rt: SessionRuntime, sessionId: string) {
   await finalizeInteractiveToolWait(rt, sessionId);
   if (rt.acceptingStream) return;
-  rt.streamGen += 1;
+  // Same turn as the elicitation — do not bump streamGen (queued chunks would be dropped).
   rt.acceptingStream = true;
   rt.running = true;
   await updateSession(sessionId, { status: "running" });
   try {
     await drainPostInteractiveStream(rt);
-    const followUp = rt.interactiveFollowUpText;
-    if (followUp && !rt.streamedAfterInteractiveAnswer && rt.client?.sessionId && rt.acceptingStream) {
-      rt.interactiveFollowUpText = null;
-      rt.lastStreamAt = Date.now();
-      await rt.client.prompt(followUp);
-      await settlePromptStream(rt);
-      await waitForPendingClientRequests(rt);
-    }
     await completeDanglingTurnParts(sessionId);
     await finishTurnSessionStatus(sessionId, rt, "idle");
   } finally {
@@ -2629,7 +2619,6 @@ async function runTurn(
   rt.toolStatusByCallId.clear();
   rt.interactiveAnswerAt = null;
   rt.streamedAfterInteractiveAnswer = false;
-  rt.interactiveFollowUpText = null;
   rt.elicitationThisTurn = false;
   rt.toolPartByCallId.clear();
   rt.toolStartRawByCallId.clear();
@@ -2714,27 +2703,6 @@ async function runTurn(
       return result;
     }
     await drainPostInteractiveStream(rt);
-    const followUp = rt.interactiveFollowUpText;
-    if (
-      followUp &&
-      rt.elicitationThisTurn &&
-      !rt.streamedAfterInteractiveAnswer &&
-      rt.acceptingStream
-    ) {
-      appendDeepLog({
-        kind: "elicitation-follow-up",
-        sessionId,
-        provider: opts.provider,
-        cwd: opts.cwd,
-        model,
-        data: { followUp, stopReason: result.stopReason },
-      });
-      rt.interactiveFollowUpText = null;
-      rt.lastStreamAt = Date.now();
-      await client.prompt(followUp);
-      await settlePromptStream(rt);
-      await waitForPendingClientRequests(rt);
-    }
     if (!rt.acceptingStream) {
       await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
       await finishTurnSessionStatus(sessionId, rt, "idle");
@@ -3678,6 +3646,7 @@ export function answerQuestion(
       .outcome;
     const optionId = outcome?.answers?.[0]?.selectedOptionIds?.[0] ?? "allow_once";
     rt.client?.respond(id, { outcome: { outcome: "selected", optionId } });
+    markInteractiveAnswer(rt);
     pending.resolve(result);
     rt.pending.delete(requestId);
     void updateSession(sessionId, { status: "running" });
@@ -3703,14 +3672,9 @@ export function answerQuestion(
       `[acp:${sessionId}] elicitation answer rpcId=${String(id)} action=${String((response as { action?: string }).action ?? "")} value=${String(content?.value ?? "")}`,
     );
     rt.client?.respond(id, response);
+    if (response.action === "accept") markInteractiveAnswer(rt);
     pending.resolve(result);
     rt.pending.delete(requestId);
-    if (response.action === "accept") {
-      const bits = Object.values(response.content).flatMap((value) =>
-        Array.isArray(value) ? value.map(String) : [String(value)],
-      );
-      rt.interactiveFollowUpText = bits.filter(Boolean).join("\n") || null;
-    }
     void updateSession(sessionId, { status: "running" });
     void markQuestionPartAnswered(sessionId, requestId, result).then(async () => {
       await finalizeInteractiveToolWait(rt, sessionId);

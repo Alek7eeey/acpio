@@ -3330,6 +3330,8 @@ function ChatThread() {
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
+  /** After selecting/creating a chat, focus the composer once it is empty+ready. */
+  const pendingEmptyChatFocusRef = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -4422,11 +4424,37 @@ function ChatThread() {
     userJustSentRef.current = false;
     pendingBottomPinRef.current = Boolean(storeActiveSessionId);
     if (!shouldAutoFocusComposer()) {
+      pendingEmptyChatFocusRef.current = false;
       textareaRef.current?.blur();
     } else if (keepComposerFocus.current) {
+      pendingEmptyChatFocusRef.current = false;
       focusComposer();
+    } else {
+      // New chat / empty session: focus after the centered composer mounts.
+      pendingEmptyChatFocusRef.current = Boolean(storeActiveSessionId);
     }
   }, [storeActiveSessionId]);
+
+  useEffect(() => {
+    if (!pendingEmptyChatFocusRef.current) return;
+    if (!storeActiveSessionId || !isEmptyChat) {
+      pendingEmptyChatFocusRef.current = false;
+      return;
+    }
+    if (!emptyReady || composerHeld) return;
+    pendingEmptyChatFocusRef.current = false;
+    const id = storeActiveSessionId;
+    const focus = () => {
+      if (useAppStore.getState().activeSessionId !== id) return;
+      focusComposer();
+    };
+    const raf = window.requestAnimationFrame(focus);
+    const t = window.setTimeout(focus, 0);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
+  }, [emptyReady, composerHeld, storeActiveSessionId, isEmptyChat]);
 
   // Snap to bottom once the thread is actually painted (after skeleton), and
   // keep pinning through the first content/layout settles.
