@@ -608,7 +608,8 @@
     "paste": "Paste",
     "selectAll": "Select all",
     "clear": "Clear terminal",
-    "close": "Close terminal"
+    "close": "Close terminal",
+    "loading": "Starting terminal…"
   },
   "git": {
     "title": "Git",

@@ -138,6 +138,15 @@
   display: block;
 }
 
+.terminalWrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .terminal {
   flex: 1 1 auto;
   min-height: 0;
@@ -147,6 +156,40 @@
   display: flex;
   flex-direction: column;
   background: var(--term-surface-bg);
+}
+
+.terminalLoader {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--term-surface-bg) 94%, transparent);
+  pointer-events: none;
+}
+
+.loaderSpin {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: terminalLoaderSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.loaderLabel {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+@keyframes terminalLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .panelTerminal .terminal :global(.xterm) {

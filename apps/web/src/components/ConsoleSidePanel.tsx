@@ -167,8 +167,7 @@ export function ConsoleSidePanel({
   const t = useT();
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-
-
+  const [shellLoading, setShellLoading] = useState(true);
 
   const entryRef = useRef<ConsoleTerminalEntry | null>(null);
 
@@ -527,10 +526,17 @@ export function ConsoleSidePanel({
 
 
   const ensureShellAttached = useCallback((): Promise<boolean> => {
+    if (shellAttachedRef.current) {
+      setShellLoading(false);
+      return Promise.resolve(true);
+    }
 
-    if (shellAttachedRef.current) return Promise.resolve(true);
+    if (attachPromiseRef.current) {
+      setShellLoading(true);
+      return attachPromiseRef.current;
+    }
 
-    if (attachPromiseRef.current) return attachPromiseRef.current;
+    setShellLoading(true);
 
     const initialSize = (() => {
       const entry = entryRef.current;
@@ -545,8 +551,8 @@ export function ConsoleSidePanel({
       .attachConsole(sessionIdRef.current, initialSize)
 
       .then(() => {
-
         shellAttachedRef.current = true;
+        setShellLoading(false);
 
         syncTerminalSize(true);
 
@@ -558,12 +564,13 @@ export function ConsoleSidePanel({
 
       })
 
-      .catch(() => false)
+      .catch(() => {
+        setShellLoading(false);
+        return false;
+      })
 
       .finally(() => {
-
         attachPromiseRef.current = null;
-
       });
 
     return attachPromiseRef.current;
@@ -629,6 +636,7 @@ export function ConsoleSidePanel({
     termRef.current?.reset();
 
     shellAttachedRef.current = false;
+    setShellLoading(true);
 
     attachPromiseRef.current = null;
 
@@ -751,6 +759,7 @@ export function ConsoleSidePanel({
       term.reset();
 
       shellAttachedRef.current = false;
+      setShellLoading(true);
 
       attachPromiseRef.current = null;
 
@@ -811,6 +820,7 @@ export function ConsoleSidePanel({
     fitRef.current = entry.fit;
 
     shellAttachedRef.current = entry.shellAttached;
+    setShellLoading(!entry.shellAttached);
 
     attachPromiseRef.current = entry.attachPromise;
 
@@ -1081,17 +1091,20 @@ export function ConsoleSidePanel({
           </button>
         ) : null}
 
-        <div
-
-          ref={containerRef}
-
-          className={styles.terminal}
-
-          onContextMenu={onTerminalContextMenu}
-
-          onMouseDown={() => scheduleTerminalFocus()}
-
-        />
+        <div className={styles.terminalWrap}>
+          <div
+            ref={containerRef}
+            className={styles.terminal}
+            onContextMenu={onTerminalContextMenu}
+            onMouseDown={() => scheduleTerminalFocus()}
+          />
+          {shellLoading ? (
+            <div className={styles.terminalLoader} role="status" aria-live="polite">
+              <span className={styles.loaderSpin} aria-hidden />
+              <span className={styles.loaderLabel}>{t("console.loading")}</span>
+            </div>
+          ) : null}
+        </div>
 
       </aside>
 
