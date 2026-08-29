@@ -115,7 +115,7 @@ export function PlanSidePanel({
     <aside
       className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""} ${dragging ? styles.resizing : ""}`}
       aria-label={t("planPanel.title")}
-      style={fillPane ? undefined : ({ ["--plan-panel-width"]: `${width}px` } as CSSProperties)}
+      style={{ ["--plan-panel-width"]: `${width}px` } as CSSProperties}
     >
       {!fillPane ? (
       <div

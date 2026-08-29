@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useLayoutEffect, useEffect, useMemo, useState, type RefObject } from "react";
 import { useAppStore } from "./store";
 
 /** Plan / console / git panels overlay the chat below this viewport width. */
@@ -19,9 +19,87 @@ export function wideOverlayPanelMin(sidebarOpen: boolean) {
   return sidebarOpen ? WIDE_OVERLAY_PANEL_MIN_TREE_OPEN : WIDE_OVERLAY_PANEL_MIN_TREE_COLLAPSED;
 }
 
-export function isOverlayPanelLayout(width = window.innerWidth, sidebarOpen = useAppStore.getState().sidebarOpen) {
-  if (width <= COMPACT_PANEL_LAYOUT_MAX) return true;
-  return width >= wideOverlayPanelMin(sidebarOpen);
+export function isOverlayPanelLayout(width = window.innerWidth, _sidebarOpen = useAppStore.getState().sidebarOpen) {
+  return width <= COMPACT_PANEL_LAYOUT_MAX;
+}
+
+/** Hide chat and let the right tab fill when this much (or less) would remain. */
+export const MIN_REMAINING_CHAT_PX = 360;
+/** Stay filled until a bit more space is back, so the layout does not flicker. */
+export const MIN_REMAINING_CHAT_EXIT_PX = 420;
+
+function visiblePageAside(page: HTMLElement): HTMLElement | null {
+  for (const el of page.querySelectorAll("aside")) {
+    if (!(el instanceof HTMLElement)) continue;
+    if (el.hidden) continue;
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    return el;
+  }
+  return null;
+}
+
+function dockedPanelWidthPx(page: HTMLElement): number {
+  const el = visiblePageAside(page);
+  const cap = Math.min(window.innerWidth * 0.72, page.clientWidth);
+  if (!el) return Math.min(520, cap);
+  const cs = getComputedStyle(el);
+  for (const name of ["--git-panel-width", "--console-panel-width", "--plan-panel-width"]) {
+    const n = Number.parseFloat(cs.getPropertyValue(name));
+    if (Number.isFinite(n) && n > 40) return Math.min(n, cap);
+  }
+  return Math.min(520, cap);
+}
+
+/** Full-width right tab only when the leftover chat column would be a sliver (or the viewport is already compact). */
+export function useFillPanelWhenChatTight(pageRef: RefObject<HTMLElement | null>, panelOpen: boolean) {
+  const [fill, setFill] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= COMPACT_PANEL_LAYOUT_MAX,
+  );
+
+  useLayoutEffect(() => {
+    if (!panelOpen) {
+      setFill(typeof window !== "undefined" && window.innerWidth <= COMPACT_PANEL_LAYOUT_MAX);
+      return;
+    }
+    const page = pageRef.current;
+    if (!page) return;
+
+    const measure = () => {
+      if (window.innerWidth <= COMPACT_PANEL_LAYOUT_MAX) {
+        setFill(true);
+        return;
+      }
+      const remaining = page.clientWidth - dockedPanelWidthPx(page);
+      setFill((prev) => {
+        if (remaining < MIN_REMAINING_CHAT_PX) return true;
+        if (remaining >= MIN_REMAINING_CHAT_EXIT_PX) return false;
+        return prev;
+      });
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(page);
+    const watchAside = () => {
+      const aside = visiblePageAside(page);
+      if (aside) ro.observe(aside);
+    };
+    watchAside();
+    const mo = new MutationObserver(() => {
+      watchAside();
+      measure();
+    });
+    mo.observe(page, { childList: true });
+    window.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [pageRef, panelOpen]);
+
+  return panelOpen && fill;
 }
 
 /** Side-docked panels with a draggable splitter (viewport wider than compact overlay). */

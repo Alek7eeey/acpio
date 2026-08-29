@@ -19,8 +19,8 @@ import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
 
 const DESKTOP_MQ = "(min-width: 701px)";
-const META_CHIP_GAP = 8;
-const MORE_BTN_WIDTH = 88;
+const META_CHIP_GAP = 10;
+const MORE_BTN_WIDTH = 96;
 const MENU_VIEWPORT_PAD = 12;
 
 function placeOverflowMenu(menu: HTMLElement, anchor: DOMRect) {
@@ -152,6 +152,8 @@ export function ComposerMetaChips({
 
   const shellRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const startRef = useRef<HTMLDivElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
   const modeRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAnchorRef = useRef<DOMRect | null>(null);
@@ -373,6 +375,10 @@ export function ComposerMetaChips({
   ]);
 
   const chipKey = chipItems.map((item) => item.id).join(",");
+  const gitLayoutSig = gitChip
+    ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
+    : "";
+  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay.label}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;
@@ -381,22 +387,37 @@ export function ComposerMetaChips({
 
   const computeVisibleCount = useCallback(
     (captureWidths: boolean) => {
-      const shell = shellRef.current;
-      if (!shell) return chipItems.length;
+      const start = startRef.current;
+      const row = scrollRef.current;
+      if (!start || !row) return chipItems.length;
 
-      const gap = META_CHIP_GAP;
-      const containerW = shell.clientWidth;
-      const modeW = showMode && modeRef.current ? modeRef.current.offsetWidth + gap : 0;
+      const gapPx = Number.parseFloat(getComputedStyle(start).columnGap || getComputedStyle(start).gap);
+      const gap = Number.isFinite(gapPx) && gapPx > 0 ? gapPx : META_CHIP_GAP;
 
       if (captureWidths) {
         for (const item of chipItems) {
           const el = chipRefs.current.get(item.id);
           if (el) chipWidthsRef.current.set(item.id, el.offsetWidth);
         }
+      } else {
+        for (const item of chipItems) {
+          const el = chipRefs.current.get(item.id);
+          const w = el?.offsetWidth ?? 0;
+          if (w > 0) chipWidthsRef.current.set(item.id, w);
+        }
       }
 
+      const rowRect = row.getBoundingClientRect();
+      const modeEl = showMode ? modeRef.current : null;
+      const modeW = modeEl ? modeEl.offsetWidth + gap : 0;
+      const visibleRight = Math.min(rowRect.left + row.clientWidth, window.innerWidth);
+      const available = visibleRight - rowRect.left - modeW;
+
       const widths = chipItems.map((item) => chipWidthsRef.current.get(item.id) ?? 0);
+      if (available <= 0) return chipItems.length;
       if (widths.some((w) => w <= 0)) return chipItems.length;
+
+      const moreBtnW = moreBtnRef.current?.offsetWidth || MORE_BTN_WIDTH;
 
       for (let visible = chipItems.length; visible >= 0; visible -= 1) {
         const hidden = chipItems.length - visible;
@@ -405,8 +426,8 @@ export function ComposerMetaChips({
           chipsW += widths[i];
           if (i > 0) chipsW += gap;
         }
-        const moreW = hidden > 0 ? MORE_BTN_WIDTH + gap : 0;
-        if (chipsW + modeW + moreW <= containerW + 1) return visible;
+        const moreW = hidden > 0 ? moreBtnW + gap : 0;
+        if (chipsW + moreW <= available) return visible;
       }
       return 0;
     },
@@ -417,7 +438,7 @@ export function ComposerMetaChips({
     chipWidthsRef.current.clear();
     setVisibleCount(null);
     setOverflowOpen(false);
-  }, [chipKey]);
+  }, [chipLayoutKey]);
 
   useEffect(() => {
     if (!isDesktop) setVisibleCount(null);
@@ -432,7 +453,7 @@ export function ComposerMetaChips({
     }
     const next = computeVisibleCount(true);
     setVisibleCount(next);
-  }, [chipItems.length, chipKey, computeVisibleCount, isDesktop, renderSkeleton, visibleCount]);
+  }, [chipLayoutKey, computeVisibleCount, isDesktop, renderSkeleton, visibleCount]);
 
   useEffect(() => {
     if (!isDesktop || renderSkeleton || visibleCount === null) return;
@@ -444,10 +465,16 @@ export function ComposerMetaChips({
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(shell);
+    const start = startRef.current;
+    if (start) ro.observe(start);
     const mode = modeRef.current;
     if (mode) ro.observe(mode);
-    return () => ro.disconnect();
-  }, [chipKey, computeVisibleCount, isDesktop, renderSkeleton, showMode, visibleCount]);
+    window.addEventListener("resize", onResize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
+  }, [chipLayoutKey, computeVisibleCount, isDesktop, renderSkeleton, showMode]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -468,7 +495,7 @@ export function ComposerMetaChips({
       el.removeEventListener("scroll", sync);
       ro.disconnect();
     };
-  }, [chipKey, isDesktop, renderSkeleton, trailing]);
+  }, [chipLayoutKey, isDesktop, renderSkeleton, trailing]);
 
   useLayoutEffect(() => {
     if (!overflowOpen || !menuAnchorRef.current) return;
@@ -558,7 +585,7 @@ export function ComposerMetaChips({
         className={`${styles.composerMeta} ${isDesktop ? styles.composerMetaDesktop : ""}`}
         aria-busy={renderSkeleton || undefined}
       >
-        <div className={styles.composerMetaStart}>
+        <div ref={startRef} className={styles.composerMetaStart}>
           {renderSkeleton ? (
             <>
               <span
@@ -607,6 +634,7 @@ export function ComposerMetaChips({
           ) : null}
           {!renderSkeleton && isDesktop && overflowCount > 0 ? (
             <button
+              ref={moreBtnRef}
               type="button"
               className={styles.composerMetaMoreBtn}
               aria-expanded={overflowOpen}

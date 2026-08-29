@@ -79,7 +79,7 @@ import {
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
-import { useCompactPanelLayout } from "../lib/panelLayout";
+import { useCompactPanelLayout, useFillPanelWhenChatTight } from "../lib/panelLayout";
 import { isImageFile } from "../lib/pathSegments";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
@@ -3207,6 +3207,7 @@ function ChatThread() {
   const sidePanelResizeAllowed = useChatSplitAllowed();
   const gitPanelDockedLayout =
     gitPanelPresentation === "side" && (compactPanelLayout || sidePanelResizeAllowed);
+  const pageRef = useRef<HTMLDivElement>(null);
   const setGitPanelOpen = useAppStore((s) => s.setGitPanelOpen);
   const saveSettings = useAppStore((s) => s.saveSettings);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
@@ -3627,6 +3628,14 @@ function ChatThread() {
   }, [composerSessionId]);
 
   const isShellSessionActive = isShellSession(activeSession?.provider);
+  const panelFillsChat = useFillPanelWhenChatTight(
+    pageRef,
+    Boolean(
+      (planPanelOpen && activePlan) ||
+        (consoleOpen && !isShellSessionActive) ||
+        (gitPanelOpen && gitPanelDockedLayout),
+    ),
+  );
   const agentProvider = isShellSessionActive ? null : (activeSession?.provider ?? null);
   const agentOffline = Boolean(agentProvider && agentAvailability[agentProvider] === false);
   const noOnlineAgents =
@@ -4705,11 +4714,12 @@ function ChatThread() {
 
   return (
     <div
+      ref={pageRef}
       className={`${styles.page} ${
         activeRightPanel === "plan" ? styles.pageWithPlan : ""
       } ${activeRightPanel === "console" ? styles.pageWithConsole : ""} ${
         activeRightPanel === "git" ? styles.pageWithGit : ""
-      } ${bind && bind.paneCount > 1 ? styles.pageInSplit : ""}`}
+      } ${panelFillsChat ? styles.pagePanelFill : ""} ${bind && bind.paneCount > 1 ? styles.pageInSplit : ""}`}
       onPointerDown={() => {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
@@ -5524,7 +5534,7 @@ function ChatThread() {
           plan={activePlan}
           open={activeRightPanel === "plan" && (!bind || bind.focused)}
           pending={planPending}
-          fillPane
+          fillPane={panelFillsChat}
           onClose={() => setPlanPanelOpen(false)}
           onAccept={
             planPending

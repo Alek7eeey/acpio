@@ -257,11 +257,27 @@
   padding-top: 52px;
 }
 
-.pageWithPlan .mainColumn {
+.pageWithPlan,
+.pageWithConsole,
+.pageWithGit {
+  overflow-x: hidden;
+}
+
+.pageWithPlan .mainColumn,
+.pageWithConsole .mainColumn,
+.pageWithGit .mainColumn {
+  overflow: hidden;
+  border-right: none;
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.pagePanelFill.pageWithPlan .mainColumn,
+.pagePanelFill.pageWithConsole .mainColumn,
+.pagePanelFill.pageWithGit .mainColumn {
   display: none;
 }
 
-.pageWithPlan .planPanelDock {
+.pagePanelFill.pageWithPlan .planPanelDock {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
@@ -269,41 +285,50 @@
   width: 100%;
 }
 
-.pageWithConsole .mainColumn {
+.pagePanelFill.pageWithConsole > aside,
+.pagePanelFill.pageWithGit > aside {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
   min-width: 0;
-  border-right: none;
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
 }
 
-.pageWithGit .mainColumn {
-  min-width: 0;
-  border-right: none;
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+.pagePanelFill.pageWithConsole > aside [role="separator"],
+.pagePanelFill.pageWithGit > aside [role="separator"] {
+  display: none;
 }
 
 @media (max-width: 1180px) {
+  .pageWithPlan .mainColumn,
   .pageWithConsole .mainColumn,
   .pageWithGit .mainColumn {
+    display: none;
+  }
+
+  .pageWithPlan .planPanelDock {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    width: 100%;
+  }
+
+  .pageWithConsole > aside,
+  .pageWithGit > aside {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .pageWithConsole > aside [role="separator"],
+  .pageWithGit > aside [role="separator"] {
     display: none;
   }
 
   .splitChrome,
   .splitFab {
     display: none !important;
-  }
-}
-
-@media (min-width: 1200px) {
-  html.sidebar-tree-collapsed .pageWithConsole .mainColumn,
-  html.sidebar-tree-collapsed .pageWithGit .mainColumn {
-    display: none;
-  }
-}
-
-@media (min-width: 1600px) {
-  html.sidebar-tree-open .pageWithConsole .mainColumn,
-  html.sidebar-tree-open .pageWithGit .mainColumn {
-    display: none;
   }
 }
 
@@ -2355,7 +2380,8 @@ button.userSlashCmd:focus-visible {
 
   .composerMetaShellDesktop .composerMetaStart {
     flex-wrap: nowrap;
-    overflow: hidden;
+    overflow: clip;
+    isolation: isolate;
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -2371,10 +2397,14 @@ button.userSlashCmd:focus-visible {
   }
 
   .composerMetaMoreBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
-    min-width: 54px;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 7px 13px;
     min-height: 30px;
-    padding: 0 13px;
     border-radius: 999px;
     border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
     background: color-mix(in srgb, var(--surface) 46%, transparent);
@@ -2459,7 +2489,7 @@ button.userSlashCmd:focus-visible {
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
   transition: border-color var(--motion), box-shadow var(--motion), border-radius var(--motion);
-  overflow: hidden;
+  overflow: visible;
   min-width: 0;
   width: 100%;
   max-width: 100%;
@@ -2997,35 +3027,6 @@ button.userSlashCmd:focus-visible {
 @container chat-composer (max-width: 900px) {
   .pillFooterEnd .composerModel {
     max-width: min(168px, 100%);
-  }
-}
-
-/* Narrow composer column: scroll meta chips instead of clipping them. */
-@container chat-composer (max-width: 760px) {
-  .composerMetaShellDesktop .composerMetaDesktop {
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .composerMetaShellDesktop .composerMetaDesktop::-webkit-scrollbar {
-    display: none;
-    width: 0;
-    height: 0;
-  }
-
-  .composerMetaShellDesktop .composerMetaChipHidden {
-    display: flex;
-  }
-
-  .composerMetaShellDesktop .composerMetaMoreBtn {
-    display: none;
-  }
-
-  .composerMetaShellDesktop .composerMetaStart {
-    flex-wrap: nowrap;
   }
 }
 

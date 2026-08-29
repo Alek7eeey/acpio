@@ -1205,21 +1205,3 @@
     grid-template-columns: 1fr;
   }
 }
-
-@media (min-width: 1200px) {
-  html.sidebar-tree-collapsed .panel,
-  html.sidebar-tree-collapsed .panelMobile {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
-  }
-}
-
-@media (min-width: 1600px) {
-  html.sidebar-tree-open .panel,
-  html.sidebar-tree-open .panelMobile {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
-  }
-}
