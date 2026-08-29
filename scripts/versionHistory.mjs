@@ -2,7 +2,7 @@ export const VERSIONS_HEADER = `# Release history
 
 Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (\`versionEpoch\` in \`package.json\`, default \`2026-08-26\`).
 
-The number is taken from git history, so clones and local builds of the same revision show the same version. Local \`npm run dev\` / \`npm run build\` do not bump it.
+The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. \`npm run dev\` / \`npm run build\` refresh this table.
 
 Release dates use \`DD.MM.YY\` (author date of that day's commits).
 

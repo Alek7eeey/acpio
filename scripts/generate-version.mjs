@@ -1,7 +1,7 @@
 /**
  * App version from git history: +0.0.1 per calendar day that has a commit (since versionEpoch).
- * Same revision ⇒ same version on every machine. Local dev/build does not bump.
- * --record-release rewrites VERSIONS.md from git (for a commit you intend to push).
+ * Same revision ⇒ same version on every machine. Local calendar days without commits do not bump.
+ * Always rewrites VERSIONS.md from git so the table matches the computed version.
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -16,7 +16,6 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VERSIONS_FILE = path.join(repoRoot, "VERSIONS.md");
-const recordRelease = process.argv.includes("--record-release");
 
 function git(cmd) {
   try {
@@ -80,18 +79,16 @@ updateReadmeVersion(
   `**Актуальная версия:** ${version}`,
 );
 
-if (recordRelease) {
-  const entries = releaseEntriesFromCommitDates({
-    baseVersion,
-    commitDates,
-    epochDate: versionEpoch,
-  });
-  const next = renderVersionsMarkdown(entries);
-  const prev = fs.existsSync(VERSIONS_FILE) ? fs.readFileSync(VERSIONS_FILE, "utf8") : "";
-  if (next !== prev) {
-    fs.writeFileSync(VERSIONS_FILE, next);
-    console.log(`Updated VERSIONS.md (${entries[0]?.version ?? version})`);
-  }
+const entries = releaseEntriesFromCommitDates({
+  baseVersion,
+  commitDates,
+  epochDate: versionEpoch,
+});
+const nextVersions = renderVersionsMarkdown(entries);
+const prevVersions = fs.existsSync(VERSIONS_FILE) ? fs.readFileSync(VERSIONS_FILE, "utf8") : "";
+if (nextVersions !== prevVersions) {
+  fs.writeFileSync(VERSIONS_FILE, nextVersions);
+  console.log(`Updated VERSIONS.md (${entries[0]?.version ?? version})`);
 }
 
 console.log(
