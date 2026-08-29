@@ -12,7 +12,12 @@ The main workspace shows a **session tree** on the left and the active chat on t
 - **Tool calls** — each tool invocation appears as a card with arguments and output.
 - **Subagents** — `task` requests show progress, roster, and nested thinking when available.
 - **Permissions & questions** — inline prompts when the agent needs approval or user input.
-- **Composer** — attach files, pick model/mode per chat, stop a running turn with **Stop**.
+- **Composer** — attach files, pick model/mode per chat, stop a running turn with **Stop**. Chips above the input collapse into **More** as soon as a chip would clip.
+- **Plan, git, terminal** — dock beside the chat when there is room. If only a sliver of chat would remain (or the window is already narrow), the tab takes the full chat area until you close it.
+
+Empty chats titled “New chat” / “Новый чат” follow the **Settings → Chat** interface language in the tree and header. Custom titles stay as you typed them.
+
+### Slash commands
 
 ### Slash commands
 

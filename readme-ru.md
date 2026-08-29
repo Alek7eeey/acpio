@@ -72,11 +72,11 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 Подключение агентов, модели, доступ с телефона по VPN/LAN.
 
-| Настройки | Агенты | Телефон и VPN | Мобильный |
+| Настройки чата | Агенты | Телефон и VPN | Мобильный |
 |---|---|---|---|
 | ![Настройки](docs/screens/settings.webp) | ![Агенты](docs/screens/settings-agents.webp) | ![Удалённый доступ](docs/screens/settings-remote.webp) | ![Мобильный чат](docs/screens/mobile-chat.webp) |
 
-Переснять скриншоты после изменений UI: `npm run screens` (нужны `npm run dev` и `npx playwright install chromium`).
+Переснять скриншоты после изменений UI: `npm run screens` (нужны `npm run dev` и `npx playwright install chromium`). Английские кадры — файлы `*-en.webp`, русские — без суффикса. Скрипт выбирает чаты, чей текст совпадает с языком кадра.
 
 ## Прод-сборка
 

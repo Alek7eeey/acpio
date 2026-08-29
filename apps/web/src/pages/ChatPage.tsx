@@ -5666,7 +5666,7 @@ function SplitPaneChrome({
         {running ? <span className={styles.splitChromeLive} aria-hidden /> : null}
         <span className={styles.splitChromeName}>
           {sessionTitle
-            ? sessionTreeDisplayTitle(sessionTitle, sessionProvider)
+            ? sessionTreeDisplayTitle(sessionTitle, sessionProvider, t("common.newChat"))
             : t("chat.splitEmptyTitle")}
         </span>
       </span>

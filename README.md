@@ -72,11 +72,11 @@ Type `/` in the composer to browse agent commands (from ACP `available_commands`
 
 Connect agents, tune models, open from a phone over VPN/LAN.
 
-| Settings | Agents | Phone & VPN | Mobile |
+| Chat settings | Agents | Phone & VPN | Mobile |
 |---|---|---|---|
 | ![Settings](docs/screens/settings-en.webp) | ![Agents](docs/screens/settings-agents-en.webp) | ![Remote access](docs/screens/settings-remote-en.webp) | ![Mobile chat](docs/screens/mobile-chat-en.webp) |
 
-Regenerate screenshots after UI changes: `npm run screens` (requires `npm run dev` and `npx playwright install chromium`).
+Regenerate screenshots after UI changes: `npm run screens` (requires `npm run dev` and `npx playwright install chromium`). English shots (`*-en.webp`) use the English UI; Russian shots omit the `-en` suffix. Capture prefers conversations whose text matches that language.
 
 ## Production build
 

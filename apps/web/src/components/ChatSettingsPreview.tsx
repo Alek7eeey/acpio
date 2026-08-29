@@ -9,7 +9,7 @@ import {
   type ChatTreeElementId,
   type ChatTreeMenuId,
 } from "@acpio/shared";
-import { useT } from "../lib/i18n";
+import { useLocale, useT } from "../lib/i18n";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
@@ -546,6 +546,7 @@ export function ChatSettingsPreview({
   onToggleChatSplit: () => void;
 }) {
   const t = useT();
+  const locale = useLocale();
   const mainBarActions = actions.filter((a) => a !== "edit");
   const userBarActions = actions.filter((a) => a === "copy" || a === "edit");
   // User messages can only carry copy/edit; the bot's bar never shows edit.
@@ -643,7 +644,7 @@ export function ChatSettingsPreview({
           <span className={styles.headerChatCtx} aria-hidden>
             <span className={styles.headerChatFolder}>acprocess</span>
             <span className={styles.headerChatSep}>/</span>
-            <span className={styles.headerChatTitle}>Деплой Acpio на прод</span>
+            <span className={styles.headerChatTitle}>{t("settings.chatPreviewChatTitle")}</span>
           </span>
           <div className={styles.headerActions}>
             <span className={styles.agentChipWrap} aria-hidden>
@@ -660,7 +661,7 @@ export function ChatSettingsPreview({
                 label={t("settings.chatHeaderIconLang")}
               >
                 <span className={styles.toolClusterBtn}>
-                  <span className={styles.toolClusterLang}>ru</span>
+                  <span className={styles.toolClusterLang}>{locale}</span>
                 </span>
               </El>
               <El
@@ -817,8 +818,8 @@ export function ChatSettingsPreview({
             </div>
 
             {[
-              { title: "Деплой Acpio на прод", busy: true },
-              { title: "Рефакторинг поиска сообщений", busy: false },
+              { title: t("settings.chatPreviewChatTitle"), busy: true },
+              { title: t("settings.chatPreviewChatTitle2"), busy: false },
             ].map((row, i) => (
               <div
                 key={row.title}
@@ -964,7 +965,7 @@ export function ChatSettingsPreview({
               <div className={styles.threadInner}>
               <div className={`${styles.msgRow} ${styles.userMsg}`}>
                 <div className={styles.userBubble}>
-                  {t("chatPreviewUser")}
+                  {t("settings.chatPreviewUser")}
                   {showTime ? <span className={styles.time}>{now}</span> : null}
                 </div>
               </div>
@@ -980,7 +981,7 @@ export function ChatSettingsPreview({
               <div className={`${styles.msgRow} ${styles.assistantMsg}`}>
                 <div className={styles.assistantCol}>
                   <div className={styles.assistantText}>
-                    {t("chatPreviewAssistant")}
+                    {t("settings.chatPreviewAssistant")}
                     {showTime ? <span className={styles.time}>{now}</span> : null}
                   </div>
                   <div className={styles.thought} aria-hidden>
@@ -992,7 +993,7 @@ export function ChatSettingsPreview({
                         strokeLinecap="round"
                       />
                     </svg>
-                    <span>{t("chatPreviewThought")}</span>
+                    <span>{t("settings.chatPreviewThought")}</span>
                   </div>
                   <div className={styles.toolRow} aria-hidden>
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
@@ -1010,7 +1011,7 @@ export function ChatSettingsPreview({
                         strokeLinejoin="round"
                       />
                     </svg>
-                    <span>{t("chatPreviewTool")}</span>
+                    <span>{t("settings.chatPreviewTool")}</span>
                     <svg className={styles.toolCheck} width="13" height="13" viewBox="0 0 24 24" fill="none">
                       <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>

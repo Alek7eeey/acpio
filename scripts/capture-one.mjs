@@ -63,12 +63,27 @@ function analyzeSession(detail) {
   if (tool >= 2) bonus += 40;
   if (thought >= 2) bonus += 20;
   if (/test|retest|check|debug/i.test(title)) bonus -= 30;
-  if (/^как дела$/i.test(title) || /^new chat$/i.test(title)) bonus -= 25;
-  if (title.length > 8 && !/^новый чат$/i.test(title)) bonus += 10;
+  if (/^как дела$/i.test(title) || /^new chat$/i.test(title) || /^новый чат$/i.test(title)) bonus -= 25;
+  if (title.length > 8 && !/^новый чат$/i.test(title) && !/^new chat$/i.test(title)) bonus += 10;
 
+  const lang = sessionContentLang(detail);
   const total = thought * 15 + tool * 12 + text / 40 + user * 4 + bonus;
 
-  return { thought, tool, text, user, total, focusMessageId, searchHint: searchHint || "folder" };
+  return { thought, tool, text, user, total, lang, focusMessageId, searchHint: searchHint || "folder" };
+}
+
+function sessionContentLang(detail) {
+  const chunks = [detail.title ?? ""];
+  for (const message of detail.messages ?? []) {
+    for (const part of message.parts ?? []) {
+      if (part.type === "text") chunks.push(String(part.payload?.text ?? ""));
+    }
+  }
+  const blob = chunks.join(" ");
+  const letters = blob.replace(/[^A-Za-zА-Яа-яЁё]/g, "");
+  if (!letters) return "en";
+  const cyr = (blob.match(/[А-Яа-яЁё]/g) ?? []).length;
+  return cyr / letters.length >= 0.28 ? "ru" : "en";
 }
 
 async function scoreSession(summary) {
@@ -83,7 +98,7 @@ async function scoreSession(summary) {
   };
 }
 
-async function pickRichSessions() {
+async function pickRichSessions(locale) {
   const override = process.env.SCREEN_SESSION_ID?.trim();
   if (override) {
     const detail = await api(`/api/sessions/${override}`);
@@ -117,17 +132,24 @@ async function pickRichSessions() {
     }
   }
 
-  scored.sort((a, b) => b.total - a.total);
-  const primary = scored[0];
+  const wantedLang = locale === "ru" ? "ru" : "en";
+  const matching = scored.filter((s) => s.lang === wantedLang);
+  const pool = matching.length ? matching : scored;
+  if (!matching.length && scored.length) {
+    console.warn(`  no ${wantedLang} conversations with enough messages; falling back`);
+  }
+  pool.sort((a, b) => b.total - a.total);
+  const primary = pool[0];
   const secondary =
-    scored.find((s) => s.id !== primary?.id && s.tool >= 2) ??
-    scored.find((s) => s.id !== primary?.id) ??
+    pool.find((s) => s.id !== primary?.id && s.tool >= 2 && s.lang === wantedLang) ??
+    pool.find((s) => s.id !== primary?.id && s.lang === wantedLang) ??
+    pool.find((s) => s.id !== primary?.id) ??
     null;
 
   if (!primary) return { primary: null, secondary: null };
 
   console.log(
-    `  session: ${primary.title} (${primary.tool} tools, ${primary.thought} thoughts)`,
+    `  session: ${primary.title} [${primary.lang}] (${primary.tool} tools, ${primary.thought} thoughts)`,
   );
   if (secondary) {
     console.log(`  split pane: ${secondary.title}`);
@@ -162,13 +184,20 @@ async function main() {
   await mkdir(OUT, { recursive: true });
   await api("/api/settings", {
     method: "PUT",
-    body: JSON.stringify({ locale, theme, showBootSplash: false, chatSplit: action === "split" }),
+    body: JSON.stringify({
+      locale,
+      theme,
+      showBootSplash: false,
+      chatSplit: action === "split",
+      chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
+      chatToolbarStyle: "classic",
+    }),
   });
 
   const mobile = action === "mobile";
   const needsChat =
     action === "chat" || action === "slash" || action === "search" || action === "split" || mobile;
-  const picked = needsChat ? await pickRichSessions() : null;
+  const picked = needsChat ? await pickRichSessions(locale) : null;
   const session = picked?.primary ?? null;
   const splitSecond = action === "split" ? picked?.secondary ?? null : null;
 
@@ -191,6 +220,8 @@ async function main() {
         localStorage.setItem("acpio.locale", locale);
         localStorage.setItem("acpio.theme", theme);
         localStorage.setItem("acpio.bootSplashDismissed", "1");
+        localStorage.removeItem("acpio.gitPanelOpen.v1");
+        localStorage.removeItem("acpio.consoleOpen.v1");
         if (sessionId) localStorage.setItem("acpio.activeSessionId", sessionId);
         if (panePayload) localStorage.setItem("acpio.chatPanes.v1", panePayload);
         sessionStorage.setItem(
@@ -202,11 +233,22 @@ async function main() {
       { locale, theme, sessionId: session?.id ?? null, panePayload },
     );
 
-    const url = action.startsWith("settings") || action === "remote" ? `${BASE}/settings` : `${BASE}/chat`;
+    const url =
+      action === "settings"
+        ? `${BASE}/settings?section=interface&leaf=chat`
+        : action === "settings-agents"
+          ? `${BASE}/settings?section=agent&leaf=connect`
+          : action === "remote"
+            ? `${BASE}/settings?section=agent&leaf=remote`
+            : `${BASE}/chat`;
     await page.goto(url, { waitUntil: "networkidle", timeout: 90_000 });
+    await page.waitForFunction(() => (document.getElementById("root")?.childElementCount ?? 0) > 0, {
+      timeout: 30_000,
+    });
+    await page.waitForFunction((loc) => document.documentElement.lang === loc, locale, { timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(1000);
 
-    const gate = page.getByRole("button", { name: /Continue|Продолжить/i });
+    const gate = page.getByRole("button", { name: locale === "ru" ? /^Продолжить$/ : /^Continue$/i });
     if (await gate.isVisible({ timeout: 2000 }).catch(() => false)) {
       await gate.click({ force: true });
       await page.waitForTimeout(500);
@@ -214,7 +256,7 @@ async function main() {
 
     if (needsChat && session?.id) {
       await page
-        .waitForSelector('[data-testid="chat-composer"], textarea, [contenteditable="true"]', {
+        .waitForSelector('textarea, [contenteditable="true"]', {
           timeout: 20_000,
         })
         .catch(() => {});
@@ -223,30 +265,32 @@ async function main() {
     }
 
     if (action === "slash") {
-      const c = page.getByPlaceholder(/Message|Сообщение|команда/i);
-      await c.click();
+      const c = page.getByPlaceholder(/Message or \/command|Сообщение или/i);
+      await c.click({ timeout: 15_000 });
       await c.fill("/");
       await page.waitForTimeout(500);
     } else if (action === "search") {
-      await page.getByRole("button", { name: /Search messages|Поиск по сообщениям/i }).click();
-      await page.waitForTimeout(300);
-      const q = session?.searchHint?.slice(0, 20) ?? "folder";
-      const input = page.getByPlaceholder(/Search|Поиск/i).first();
-      await input.fill(q);
+      await page
+        .getByRole("button", { name: locale === "ru" ? /^Поиск$/ : /^Search$/ })
+        .first()
+        .click();
+      await page.waitForTimeout(400);
+      const q = session?.searchHint?.slice(0, 20) ?? (locale === "ru" ? "папка" : "folder");
+      await page.getByRole("dialog").locator("input[type='search']").fill(q);
       await page.waitForTimeout(500);
     } else if (action === "split") {
       if (!splitSecond) {
-        await page.getByRole("button", { name: /Split|Разделить|два чата/i }).click();
+        await page.getByRole("button", { name: locale === "ru" ? /Разделить|два чата/i : /Split|two chats/i }).click();
         await page.waitForTimeout(700);
       } else {
         await page.waitForTimeout(700);
       }
       if (session?.focusMessageId) await scrollToMessage(page, session.focusMessageId);
     } else if (action === "remote") {
-      await page.getByRole("button", { name: /Phone|Телефон|VPN/i }).first().click();
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(400);
     } else if (action === "settings-agents") {
-      await page.getByRole("button", { name: /Agents|Агенты/i }).first().click();
+      await page.waitForTimeout(400);
+    } else if (action === "settings") {
       await page.waitForTimeout(500);
     }
 

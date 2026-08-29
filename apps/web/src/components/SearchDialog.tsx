@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acpio/shared";
 import { api, type MessageSearchHit } from "../lib/api";
 import { useLocale, useT } from "../lib/i18n";
+import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import { useAppStore } from "../lib/store";
 import { formatRelativeActivity } from "./ChatSidebar";
 import styles from "./SearchDialog.module.css";
@@ -300,7 +301,10 @@ export function SearchDialog({
                 >
                   <span className={styles.hitTop}>
                     <span className={styles.hitTitle}>
-                      <Highlight text={session.title || t("common.newChat")} needle={chatNeedle} />
+                      <Highlight
+                        text={sessionTreeDisplayTitle(session.title, session.provider, t("common.newChat")) || t("common.newChat")}
+                        needle={chatNeedle}
+                      />
                     </span>
                     <span className={styles.hitMeta}>
                       {formatRelativeActivity(
@@ -335,7 +339,10 @@ export function SearchDialog({
                 onMouseEnter={() => setActiveIndex(index)}
               >
                 <span className={styles.hitTop}>
-                  <span className={styles.hitTitle}>{hit.sessionTitle || t("common.newChat")}</span>
+                  <span className={styles.hitTitle}>
+                    {sessionTreeDisplayTitle(hit.sessionTitle, undefined, t("common.newChat")) ||
+                      t("common.newChat")}
+                  </span>
                   <span className={styles.hitMeta}>
                     {formatRelativeActivity(hit.createdAt, locale, t, nowMs)}
                   </span>

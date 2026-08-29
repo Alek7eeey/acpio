@@ -1,5 +1,4 @@
 import { useLayoutEffect, useEffect, useMemo, useState, type RefObject } from "react";
-import { useAppStore } from "./store";
 
 /** Plan / console / git panels overlay the chat below this viewport width. */
 export const COMPACT_PANEL_LAYOUT_MAX = 1180;
@@ -19,7 +18,7 @@ export function wideOverlayPanelMin(sidebarOpen: boolean) {
   return sidebarOpen ? WIDE_OVERLAY_PANEL_MIN_TREE_OPEN : WIDE_OVERLAY_PANEL_MIN_TREE_COLLAPSED;
 }
 
-export function isOverlayPanelLayout(width = window.innerWidth, _sidebarOpen = useAppStore.getState().sidebarOpen) {
+export function isOverlayPanelLayout(width = typeof window !== "undefined" ? window.innerWidth : 0) {
   return width <= COMPACT_PANEL_LAYOUT_MAX;
 }
 
@@ -107,12 +106,12 @@ export function isSidePanelResizeAllowed(width = window.innerWidth) {
   return width > COMPACT_PANEL_LAYOUT_MAX;
 }
 
-export function isDockedPanelLayout(width = window.innerWidth, sidebarOpen = useAppStore.getState().sidebarOpen) {
+export function isDockedPanelLayout(width = typeof window !== "undefined" ? window.innerWidth : 0) {
   return isSidePanelResizeAllowed(width);
 }
 
-export function isCompactPanelLayout(width = window.innerWidth, sidebarOpen = useAppStore.getState().sidebarOpen) {
-  return isOverlayPanelLayout(width, sidebarOpen);
+export function isCompactPanelLayout(width = typeof window !== "undefined" ? window.innerWidth : 0) {
+  return isOverlayPanelLayout(width);
 }
 
 export function isChatSplitAllowed(width = window.innerWidth) {
@@ -120,7 +119,6 @@ export function isChatSplitAllowed(width = window.innerWidth) {
 }
 
 export function useOverlayPanelLayout() {
-  const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 0));
 
   useEffect(() => {
@@ -130,7 +128,7 @@ export function useOverlayPanelLayout() {
     return () => window.removeEventListener("resize", sync);
   }, []);
 
-  return useMemo(() => isOverlayPanelLayout(width, sidebarOpen), [sidebarOpen, width]);
+  return useMemo(() => isOverlayPanelLayout(width), [width]);
 }
 
 export function useChatSplitAllowed() {

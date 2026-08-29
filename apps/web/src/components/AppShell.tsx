@@ -26,7 +26,7 @@ import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessShortLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
-import { firstUserTitleLine, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
+import { firstUserTitleLine, localizePlaceholderSessionTitle, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
 import { InstallAppButton } from "./InstallAppButton";
@@ -121,8 +121,11 @@ export function AppShell() {
       activeSession?.id === headerSession.id
         ? activeSession
         : sessionDetails[headerSession.id];
-    return headerChatTitle(headerSession, detail?.messages);
-  }, [activeSession, headerSession, sessionDetails]);
+    return localizePlaceholderSessionTitle(
+      headerChatTitle(headerSession, detail?.messages),
+      t("common.newChat"),
+    );
+  }, [activeSession, headerSession, sessionDetails, t]);
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
@@ -1177,7 +1180,7 @@ export function AppShell() {
                       }}
                     >
                       <span className={styles.railMenuItemText}>
-                        {sessionTreeDisplayTitle(s.title, s.provider)}
+                        {sessionTreeDisplayTitle(s.title, s.provider, t("common.newChat"))}
                       </span>
                     </button>
                   ))

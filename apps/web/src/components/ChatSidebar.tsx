@@ -914,9 +914,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               <span className={styles.sessionTitle}>
                 <span
                   className={styles.sessionTitleText}
-                  title={sessionTreeDisplayTitle(s.title, s.provider)}
+                  title={sessionTreeDisplayTitle(s.title, s.provider, t("common.newChat"))}
                 >
-                  {sessionTreeDisplayTitle(s.title, s.provider)}
+                  {sessionTreeDisplayTitle(s.title, s.provider, t("common.newChat"))}
                 </span>
                 {(showRunning || showUnseen) && (
                   showRunning ? (
