@@ -155,6 +155,7 @@ export function GitChangesSidePanel({
   const [commitSummary, setCommitSummary] = useState("");
   const [commitDescription, setCommitDescription] = useState("");
   const [commits, setCommits] = useState<GitCommitDto[]>([]);
+  const [outgoing, setOutgoing] = useState<GitCommitDto[]>([]);
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailDto | null>(null);
   const [loadingCommitDetail, setLoadingCommitDetail] = useState(false);
@@ -177,6 +178,9 @@ export function GitChangesSidePanel({
   const clearLoadedDiff = useCallback(() => {
     loadedDiffKeyRef.current = null;
     inflightDiffKeyRef.current = null;
+    // Drop in-flight gitDiff/gitShow so a late response cannot restore a stale pane.
+    diffRequestRef.current += 1;
+    setLoadingDiff(false);
   }, []);
 
   const invalidateWorkingDiffCache = useCallback(
@@ -193,6 +197,13 @@ export function GitChangesSidePanel({
     },
     [sessionId],
   );
+
+  const resetWorkingDiffView = useCallback(() => {
+    invalidateWorkingDiffCache();
+    clearLoadedDiff();
+    setDiff("");
+    setSelection({ kind: "working", path: null });
+  }, [clearLoadedDiff, invalidateWorkingDiffCache]);
 
   const gitErrorToast = useCallback(
     (e: unknown, fallback: string, context?: "checkout" | "sync") => {
@@ -252,11 +263,13 @@ export function GitChangesSidePanel({
   const refreshCommits = useCallback(async () => {
     setLoadingCommits(true);
     try {
-      const { commits: next } = await api.gitLog(sessionId, 60);
+      const { commits: next, outgoing: nextOutgoing } = await api.gitLog(sessionId, 60);
       setCommits(next);
+      setOutgoing(nextOutgoing ?? []);
       return next;
     } catch {
       setCommits([]);
+      setOutgoing([]);
       return [];
     } finally {
       setLoadingCommits(false);
@@ -306,11 +319,11 @@ export function GitChangesSidePanel({
   );
 
   const selectCommit = useCallback(
-    async (hash: string) => {
+    async (hash: string, opts?: { keepChangesTab?: boolean }) => {
       clearLoadedDiff();
       setSelection({ kind: "commit", hash, filePath: null });
       setDiff("");
-      setTab("history");
+      if (!opts?.keepChangesTab) setTab("history");
       setLoadingCommitDetail(true);
       try {
         const { detail } = await api.gitCommitDetail(sessionId, hash);
@@ -600,27 +613,25 @@ export function GitChangesSidePanel({
   const refreshAfterSync = useCallback(
     async (result: { status: GitStatusDto }) => {
       try {
-        await refreshCommits();
-        invalidateWorkingDiffCache();
         if (selection.kind === "working" && result.status.dirty && selection.path) {
+          invalidateWorkingDiffCache();
           void loadWorkingDiff(selection.path, true);
         } else if (selection.kind === "working") {
-          clearLoadedDiff();
-          setDiff("");
-          setSelection({ kind: "working", path: null });
+          resetWorkingDiffView();
         } else if (selection.kind === "commit") {
           void reloadHistorySelection();
         }
+        await refreshCommits();
       } catch {
         /* sync already succeeded — don't surface secondary refresh errors as a failed push */
       }
     },
     [
-      clearLoadedDiff,
       invalidateWorkingDiffCache,
       loadWorkingDiff,
       refreshCommits,
       reloadHistorySelection,
+      resetWorkingDiffView,
       selection,
     ],
   );
@@ -654,17 +665,15 @@ export function GitChangesSidePanel({
       const result = await api.gitStash(sessionId, action);
       onStatusChange(result.status);
       showToast(action === "push" ? t("git.stashOk") : t("git.popOk"), { tone: "success" });
-      await refreshCommits();
-      invalidateWorkingDiffCache();
       if (selection.kind === "working" && result.status.dirty && selection.path) {
+        invalidateWorkingDiffCache();
         void loadWorkingDiff(selection.path, true);
       } else if (selection.kind === "working") {
-        clearLoadedDiff();
-        setDiff("");
-        setSelection({ kind: "working", path: null });
+        resetWorkingDiffView();
       } else if (selection.kind === "commit") {
         void reloadHistorySelection();
       }
+      await refreshCommits();
     } catch (e) {
       gitErrorToast(e, t("git.syncFailed"));
     } finally {
@@ -751,6 +760,15 @@ export function GitChangesSidePanel({
     }
   };
 
+  const applyCommitSuccess = async (status: GitStatusDto) => {
+    onStatusChange(status);
+    setCommitSummary("");
+    setCommitDescription("");
+    resetWorkingDiffView();
+    if (status.dirty) setTab("changes");
+    await refreshCommits();
+  };
+
   const onCommit = async (e: FormEvent) => {
     e.preventDefault();
     const message = buildCommitMessage();
@@ -758,25 +776,35 @@ export function GitChangesSidePanel({
     setBusy(true);
     try {
       const result = await api.gitCommit(sessionId, message);
-      onStatusChange(result.status);
-      setCommitSummary("");
-      setCommitDescription("");
+      await applyCommitSuccess(result.status);
       showToast(t("git.commitOk"), { tone: "success" });
-      await refreshCommits();
-      if (result.status.dirty) {
-        setTab("changes");
-        invalidateWorkingDiffCache();
-        clearLoadedDiff();
-        setDiff("");
-        setSelection({ kind: "working", path: null });
-      } else {
-        clearLoadedDiff();
-        setDiff("");
-        setSelection({ kind: "working", path: null });
+    } catch (err) {
+      gitErrorToast(err, t("git.commitFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCommitAndPush = async () => {
+    const message = buildCommitMessage();
+    if (!message || syncInFlightRef.current || busy) return;
+    syncInFlightRef.current = true;
+    setBusy(true);
+    try {
+      const result = await api.gitCommit(sessionId, message);
+      await applyCommitSuccess(result.status);
+      try {
+        const syncResult = await api.gitSync(sessionId, "push");
+        onStatusChange(syncResult.status);
+        showToast(gitSyncSuccessMessage("push", syncResult.output, t), { tone: "success" });
+        await refreshAfterSync(syncResult);
+      } catch (err) {
+        gitErrorToast(err, t("git.syncFailed"));
       }
     } catch (err) {
       gitErrorToast(err, t("git.commitFailed"));
     } finally {
+      syncInFlightRef.current = false;
       setBusy(false);
     }
   };
@@ -1058,12 +1086,21 @@ export function GitChangesSidePanel({
     onStagePaths: (paths: string[], staged: boolean) => void setFilesStage(paths, staged),
     onSelectFile: selectWorkingFile,
     onCommit: (e: FormEvent) => void onCommit(e),
+    onCommitAndPush: () => void onCommitAndPush(),
     onStageAndCommit: () => void stageAll(),
     repoRoot: status?.root,
     onDiscardPaths: discardPaths,
     onDeletePaths: deletePaths,
     onBlameFile: loadWorkingBlame,
     layout: "workspace" as const,
+    outgoing,
+    outgoingLoading: loadingCommitDetail,
+    commitHash: commitSelected ? selection.hash : null,
+    commitFilePath: commitSelected ? selection.filePath : null,
+    outgoingFiles:
+      commitSelected && commitDetail?.hash === selection.hash ? commitDetail.files : [],
+    onInspectOutgoing: (hash) => void selectCommit(hash, { keepChangesTab: true }),
+    onSelectOutgoingFile: (hash, path) => void loadCommitFileDiff(hash, path),
   };
 
   const panelInner = (
@@ -1363,7 +1400,9 @@ export function GitChangesSidePanel({
                   ) : diff.trim() ? (
                     <DiffTextView text={diff} contextSource={diffContextSource} />
                   ) : (
-                    <div className={styles.empty}>{t("git.pickFileDiff")}</div>
+                    <div className={styles.empty}>
+                      {commitSelected || status?.dirty ? t("git.pickFileDiff") : t("git.noChanges")}
+                    </div>
                   )}
                 </div>
               </div>

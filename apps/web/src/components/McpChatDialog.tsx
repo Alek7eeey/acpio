@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { isMcpServerAttached, mcpServerEndpoint } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { settingsPath } from "../lib/settingsNav";
+import { mcpTypeMessageKey } from "../lib/mcpUi";
 import { AppDialog } from "./AppDialog";
 import modal from "./Modal.module.css";
 import styles from "./McpChatDialog.module.css";
@@ -30,7 +32,7 @@ export function McpChatDialog({
 
   if (!open || !sessionId) return null;
 
-  const servers = (settings.mcpServers ?? []).filter((s) => s.enabled && s.url?.trim());
+  const servers = (settings.mcpServers ?? []).filter(isMcpServerAttached);
   const disabled = new Set(mcpDisabledIds ?? []);
 
   const toggle = async (id: string) => {
@@ -68,11 +70,11 @@ export function McpChatDialog({
             const isOn = !disabled.has(s.id);
             return (
               <div key={s.id} className={styles.row}>
-                <span className={styles.rowName} title={s.url}>
+                <span className={styles.rowName} title={mcpServerEndpoint(s)}>
                   {s.name}
                 </span>
                 <span className={styles.rowType}>
-                  {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                  {t(mcpTypeMessageKey(s.type))}
                 </span>
                 <button
                   type="button"

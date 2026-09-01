@@ -222,7 +222,7 @@ export const api = {
   },
   gitLog: (id: string, limit?: number) => {
     const q = limit ? `?limit=${limit}` : "";
-    return request<{ commits: GitCommitDto[] }>(`/api/sessions/${id}/git/log${q}`);
+    return request<{ commits: GitCommitDto[]; outgoing?: GitCommitDto[] }>(`/api/sessions/${id}/git/log${q}`);
   },
   gitShow: (id: string, rev: string, filePath?: string) => {
     const params = new URLSearchParams({ rev });

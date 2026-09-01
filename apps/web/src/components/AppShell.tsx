@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   BUILD_INFO,
+  isMcpServerAttached,
+  mcpServerEndpoint,
   modelDisplayName,
   modelForProvider,
   type MessageDto,
@@ -11,6 +13,7 @@ import {
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
+import { mcpTypeMessageKey } from "../lib/mcpUi";
 import { useBrowserLocation } from "../lib/usePathname";
 import {
   getSettingsTree,
@@ -697,9 +700,9 @@ export function AppShell() {
     };
   }, [dragging, sidebarOpen, setSidebarOpen]);
 
-  // MCP servers actually handed to the agent (enabled + has an endpoint URL).
+  // MCP servers actually handed to the agent (enabled + HTTP URL or stdio command).
   const enabledMcpServers = useMemo(
-    () => (settings.mcpServers ?? []).filter((s) => s.enabled && s.url?.trim()),
+    () => (settings.mcpServers ?? []).filter(isMcpServerAttached),
     [settings.mcpServers],
   );
 
@@ -1500,11 +1503,11 @@ export function AppShell() {
                                 title={dotTitle}
                                 aria-hidden
                               />
-                              <span className={styles.agentTipMcpName} title={s.url}>
+                              <span className={styles.agentTipMcpName} title={mcpServerEndpoint(s)}>
                                 {s.name}
                               </span>
                               <span className={styles.agentTipMcpType}>
-                                {s.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                                {t(mcpTypeMessageKey(s.type))}
                               </span>
                             </div>
                           );

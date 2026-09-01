@@ -35,6 +35,7 @@ import {
   type SessionDetailDto,
   type SlashCommandDto,
   isShellSession,
+  isMcpServerAttached,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
@@ -3426,9 +3427,7 @@ function ChatThread() {
 
   // MCP servers this chat's agent session runs with: globally enabled minus
   // the ids this chat disabled in its MCP dialog.
-  const enabledMcp = (settings.mcpServers ?? []).filter(
-    (s) => s.enabled && s.url?.trim(),
-  );
+  const enabledMcp = (settings.mcpServers ?? []).filter(isMcpServerAttached);
   const chatMcp = activeSession
     ? enabledMcp.filter((s) => !(activeSession.mcpDisabledIds ?? []).includes(s.id))
     : [];

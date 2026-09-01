@@ -9,6 +9,7 @@ import {
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
 import { adapters } from "../adapters/registry.js";
+import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
 const SETTINGS_KEY = "app";
@@ -219,16 +220,40 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.mcpServers)) {
     merged.mcpServers = [];
   } else {
-    merged.mcpServers = merged.mcpServers.filter(
-      (s) =>
-        s &&
-        typeof s === "object" &&
-        typeof s.id === "string" &&
-        typeof s.name === "string" &&
-        (s.type === "local" || s.type === "remote"),
-    );
+    merged.mcpServers = merged.mcpServers
+      .filter(
+        (s) =>
+          s &&
+          typeof s === "object" &&
+          typeof s.id === "string" &&
+          typeof s.name === "string" &&
+          (s.type === "local" || s.type === "remote" || s.type === "stdio"),
+      )
+      .map((s) => {
+        // Pre-stdio UI stored local processes as type "local" + command, no URL.
+        if (
+          s.type === "local" &&
+          typeof s.command === "string" &&
+          s.command.trim() &&
+          !(typeof s.url === "string" && s.url.trim())
+        ) {
+          return { ...s, type: "stdio" as const };
+        }
+        return s;
+      });
   }
   return merged;
+}
+
+async function persistSettings(next: AppSettings): Promise<void> {
+  await db
+    .insert(settings)
+    .values({ key: SETTINGS_KEY, value: next, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value: next, updatedAt: new Date() },
+    });
+  syncDeepLoggingFromSettings(next);
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -239,12 +264,21 @@ export async function getSettings(): Promise<AppSettings> {
       cursorApiKey: process.env.CURSOR_API_KEY ?? "",
       anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
       openaiApiKey: process.env.OPENAI_API_KEY ?? "",
+      remoteAccessKey: generateRemoteAccessKey(),
     });
-    await db.insert(settings).values({ key: SETTINGS_KEY, value: seeded });
-    syncDeepLoggingFromSettings(seeded);
+    await persistSettings(seeded);
     return seeded;
   }
-  const merged = mergeSettings(rows[0].value);
+  const raw = rows[0].value;
+  const merged = mergeSettings(raw);
+  const schema = readSettingsSchema(raw);
+  // Schema < 4: empty key was the old default, not an explicit opt-out — fill one.
+  if (!merged.remoteAccessKey.trim() && schema < 4) {
+    merged.remoteAccessKey = generateRemoteAccessKey();
+    merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
+    await persistSettings(merged);
+    return merged;
+  }
   syncDeepLoggingFromSettings(merged);
   return merged;
 }
@@ -252,13 +286,6 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
   const next = mergeSettings({ ...current, ...patch, settingsSchema: SETTINGS_SCHEMA_VERSION });
-  await db
-    .insert(settings)
-    .values({ key: SETTINGS_KEY, value: next, updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: settings.key,
-      set: { value: next, updatedAt: new Date() },
-    });
-  syncDeepLoggingFromSettings(next);
+  await persistSettings(next);
   return next;
 }

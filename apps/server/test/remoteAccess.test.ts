@@ -7,6 +7,9 @@ import {
   isRemoteAccessPublicPath,
   remoteAccessProtected,
   remoteKeysMatch,
+  generateRemoteAccessKey,
+  REMOTE_ACCESS_KEY_ALPHABET,
+  REMOTE_ACCESS_KEY_LENGTH,
 } from "../src/lib/remoteAccess.js";
 
 describe("isLoopbackHost", () => {
@@ -69,6 +72,14 @@ describe("getRequestClientIp", () => {
         headers: { "x-forwarded-for": "192.168.1.50, 127.0.0.1" },
       }),
     ).toBe("192.168.1.50");
+  });
+});
+
+describe("generateRemoteAccessKey", () => {
+  it("returns 8 characters from the unambiguous alphabet", () => {
+    const key = generateRemoteAccessKey();
+    expect(key).toHaveLength(REMOTE_ACCESS_KEY_LENGTH);
+    expect([...key].every((ch) => REMOTE_ACCESS_KEY_ALPHABET.includes(ch))).toBe(true);
   });
 });
 

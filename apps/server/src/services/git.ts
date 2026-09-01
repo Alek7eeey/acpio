@@ -33,6 +33,11 @@ function gitFailureMessage(result: { out: string; err: string }) {
   return (result.err || result.out || "").trim();
 }
 
+function isNoUpstreamError(message: string) {
+  const m = message.toLowerCase();
+  return m.includes("no upstream") || m.includes("has no upstream branch") || m.includes("set the remote as upstream");
+}
+
 function isGitAuthError(message: string) {
   const m = message.toLowerCase();
   return (
@@ -59,6 +64,73 @@ function resolveGitRoot(cwd: string): string | null {
   const root = runGit(cwd, ["rev-parse", "--show-toplevel"]);
   if (!root.ok) return null;
   return root.out.replace(/\\/g, "/");
+}
+
+/** Upstream to compare against: configured @{upstream}, else origin/<branch>. */
+export function resolveGitUpstream(root: string, branch: string): string | null {
+  const configured = runGit(root, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+  if (configured.ok && configured.out.trim()) return configured.out.trim();
+  const name = branch.trim();
+  if (!name) return null;
+  const origin = runGit(root, ["rev-parse", "--verify", `refs/remotes/origin/${name}`]);
+  if (origin.ok) return `origin/${name}`;
+  return null;
+}
+
+/** `git rev-list --left-right --count A...B` → "behind\\tahead". */
+export function parseLeftRightCount(output: string): { behind: number; ahead: number } {
+  const parts = output.trim().split(/\s+/);
+  const behind = Number.parseInt(parts[0] ?? "0", 10);
+  const ahead = Number.parseInt(parts[1] ?? "0", 10);
+  return {
+    behind: Number.isFinite(behind) ? behind : 0,
+    ahead: Number.isFinite(ahead) ? ahead : 0,
+  };
+}
+
+function gitAheadBehind(root: string, branch: string): { ahead: number; behind: number } {
+  const upstream = resolveGitUpstream(root, branch);
+  if (!upstream) return { ahead: 0, behind: 0 };
+  const counts = runGit(root, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`]);
+  if (!counts.ok) return { ahead: 0, behind: 0 };
+  return parseLeftRightCount(counts.out);
+}
+
+function parsePrettyLog(output: string): GitCommitDto[] {
+  const commits: GitCommitDto[] = [];
+  for (const line of output.split("\n")) {
+    if (!line.trim()) continue;
+    const parts = line.split("\t");
+    if (parts.length < 5) continue;
+    const hash = parts[0]!;
+    const parents = parts[1]!.split(" ").filter(Boolean);
+    commits.push({
+      hash,
+      shortHash: hash.slice(0, 7),
+      parents,
+      subject: parts[2] ?? "",
+      author: parts[3] ?? "",
+      date: parts[4] ?? "",
+      depth: 0,
+      merge: parents.length > 1,
+      refs: [],
+    });
+  }
+  return commits;
+}
+
+function getOutgoingCommits(root: string, branch: string, limit = 50): GitCommitDto[] {
+  const upstream = resolveGitUpstream(root, branch);
+  if (!upstream) return [];
+  const raw = runGit(root, [
+    "log",
+    `${upstream}..HEAD`,
+    `--max-count=${Math.min(Math.max(limit, 1), 100)}`,
+    "--date=iso-strict",
+    "--pretty=format:%H%x09%P%x09%s%x09%an%x09%ai",
+  ]);
+  if (!raw.ok || !raw.out) return [];
+  return parsePrettyLog(raw.out);
 }
 
 function validateBranchName(name: string): string | null {
@@ -157,6 +229,7 @@ function buildStatus(root: string): GitStatusDto {
   const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
   const stashList = runGit(root, ["stash", "list"]);
   const stashCount = stashList.ok ? stashList.out.split("\n").filter(Boolean).length : 0;
+  const { ahead, behind } = gitAheadBehind(root, branch.ok ? branch.out : "");
 
   return {
     repo: true,
@@ -173,6 +246,8 @@ function buildStatus(root: string): GitStatusDto {
     additions,
     deletions,
     stashCount,
+    aheadCount: ahead,
+    behindCount: behind,
   };
 }
 
@@ -190,6 +265,8 @@ export function getGitStatus(cwd: string): GitStatusDto {
     additions: 0,
     deletions: 0,
     stashCount: 0,
+    aheadCount: 0,
+    behindCount: 0,
   };
   const root = resolveGitRoot(cwd);
   if (!root) return empty;
@@ -418,6 +495,14 @@ export async function syncGit(
     await sleepMs(2000);
     result = runGit(root, args, { network: true });
   }
+  if (
+    !result.ok &&
+    action === "push" &&
+    isNoUpstreamError(gitFailureMessage(result)) &&
+    runGit(root, ["remote", "get-url", "origin"]).ok
+  ) {
+    result = runGit(root, ["push", "-u", "origin", "HEAD"], { network: true });
+  }
   if (result.ok) {
     return { ok: true, output: result.out || result.err };
   }
@@ -524,12 +609,14 @@ function dedupeCommitRefs(refs: string[]): string[] {
   });
 }
 
-export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[] } {
+export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[]; outgoing: GitCommitDto[] } {
   const root = resolveGitRoot(cwd);
-  if (!root) return { commits: [] };
+  if (!root) return { commits: [], outgoing: [] };
 
   const head = runGit(root, ["rev-parse", "HEAD"]);
-  if (!head.ok) return { commits: [] };
+  if (!head.ok) return { commits: [], outgoing: [] };
+  const branch = runGit(root, ["branch", "--show-current"]);
+  const outgoing = getOutgoingCommits(root, branch.ok ? branch.out : "");
 
   const refsByHash = new Map<string, string[]>();
   const refsRaw = runGit(root, [
@@ -558,7 +645,7 @@ export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[] } 
     "--date=iso-strict",
     "--pretty=format:%H%x09%P%x09%s%x09%an%x09%ai",
   ]);
-  if (!raw.out) return { commits: [] };
+  if (!raw.out) return { commits: [], outgoing };
 
   type Node = {
     hash: string;
@@ -623,7 +710,7 @@ export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[] } 
       };
     });
 
-  return { commits };
+  return { commits, outgoing };
 }
 
 export function getGitShow(cwd: string, rev: string, filePath?: string): string {

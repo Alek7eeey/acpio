@@ -169,6 +169,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.mcpAdd"),
       t("settings.mcpLocal"),
       t("settings.mcpRemote"),
+      t("settings.mcpStdio"),
       t("settings.mcpApplyHint"),
       t("settings.mcpHint"),
     ],

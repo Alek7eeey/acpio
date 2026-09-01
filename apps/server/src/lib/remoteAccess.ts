@@ -1,4 +1,17 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+
+export const REMOTE_ACCESS_KEY_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const REMOTE_ACCESS_KEY_LENGTH = 8;
+
+/** Random LAN/phone access key (no ambiguous 0/O/1/I). */
+export function generateRemoteAccessKey(): string {
+  const bytes = randomBytes(REMOTE_ACCESS_KEY_LENGTH);
+  let out = "";
+  for (let i = 0; i < REMOTE_ACCESS_KEY_LENGTH; i++) {
+    out += REMOTE_ACCESS_KEY_ALPHABET[bytes[i]! % REMOTE_ACCESS_KEY_ALPHABET.length];
+  }
+  return out;
+}
 
 export const REMOTE_ACCESS_COOKIE = "acp_remote";
 

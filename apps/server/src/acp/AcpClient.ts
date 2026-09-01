@@ -22,8 +22,8 @@ import {
   type AppSettings,
   type HarnessAdapter,
   type McpServerConfig,
-  mcpHttpHeaders,
-  mcpRemoteExtras,
+  isMcpServerAttached,
+  toAcpMcpServer,
 } from "@acpio/shared";
 import {
   appendDeepLog,
@@ -628,17 +628,8 @@ export class AcpClient extends EventEmitter {
       }
 
       const mcpServers = (opts?.mcpServers ?? this.settings.mcpServers ?? [])
-        .filter((s) => s.enabled && s.url?.trim())
-        .map((s) => ({
-          name: s.name,
-          type: "http",
-          url: s.url!.trim(),
-          headers: mcpHttpHeaders(s),
-          // Self-signed / internal-CA endpoints: let the harness skip cert
-          // verification for this server only.
-          ...(s.insecureTls ? { insecureTls: true } : {}),
-          ...mcpRemoteExtras(s),
-        }));
+        .filter(isMcpServerAttached)
+        .map(toAcpMcpServer);
 
       const resume = opts?.resume;
       let result: { sessionId?: string; configOptions?: ConfigOption[]; modes?: unknown };

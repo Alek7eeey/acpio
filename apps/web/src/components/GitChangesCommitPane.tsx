@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import type { GitChangedFileDto } from "@acpio/shared";
+import type { GitChangedFileDto, GitCommitDto, GitCommitFileDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { joinRepoPath, normalizeGitPath, sortGitFiles, toRepoAbsolutePath } from "../lib/gitFileTree";
@@ -88,6 +88,7 @@ function ChangesSection({
   onDragLeaveZone,
   onDropZone,
   children,
+  enableDrop = true,
 }: {
   title: string;
   count: number;
@@ -100,6 +101,7 @@ function ChangesSection({
   onDragLeaveZone: (zone: StageZone) => void;
   onDropZone: (zone: StageZone, e: DragEvent) => void;
   children: ReactNode;
+  enableDrop?: boolean;
 }) {
   return (
     <section className={styles.section}>
@@ -123,14 +125,18 @@ function ChangesSection({
       </div>
       {!collapsed ? (
         <div
-          className={`${styles.sectionBody}${dropActive ? ` ${styles.sectionBodyDrop}` : ""}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            onDragOverZone(stageZone);
-          }}
-          onDragLeave={() => onDragLeaveZone(stageZone)}
-          onDrop={(e) => onDropZone(stageZone, e)}
+          className={`${styles.sectionBody}${enableDrop && dropActive ? ` ${styles.sectionBodyDrop}` : ""}`}
+          onDragOver={
+            enableDrop
+              ? (e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  onDragOverZone(stageZone);
+                }
+              : undefined
+          }
+          onDragLeave={enableDrop ? () => onDragLeaveZone(stageZone) : undefined}
+          onDrop={enableDrop ? (e) => onDropZone(stageZone, e) : undefined}
         >
           {children}
         </div>
@@ -355,12 +361,20 @@ export function GitChangesCommitPane({
   onStagePaths,
   onSelectFile,
   onCommit,
+  onCommitAndPush,
   onStageAndCommit,
   repoRoot,
   onDiscardPaths,
   onDeletePaths,
   onBlameFile,
   layout = "stacked",
+  outgoing = [],
+  outgoingLoading = false,
+  commitHash = null,
+  commitFilePath = null,
+  outgoingFiles = [],
+  onInspectOutgoing,
+  onSelectOutgoingFile,
 }: {
   files: GitChangedFileDto[];
   conflictFiles: GitChangedFileDto[];
@@ -379,12 +393,20 @@ export function GitChangesCommitPane({
   onStagePaths: (paths: string[], staged: boolean) => void;
   onSelectFile: (path: string) => void;
   onCommit: (e: FormEvent) => void;
+  onCommitAndPush: () => void;
   onStageAndCommit: () => void;
   repoRoot?: string;
   onDiscardPaths: (paths: string[]) => void | Promise<void>;
   onDeletePaths: (paths: string[]) => void | Promise<void>;
   onBlameFile: (path: string) => void | Promise<void>;
   layout?: PaneLayout;
+  outgoing?: GitCommitDto[];
+  outgoingLoading?: boolean;
+  commitHash?: string | null;
+  commitFilePath?: string | null;
+  outgoingFiles?: GitCommitFileDto[];
+  onInspectOutgoing?: (hash: string) => void;
+  onSelectOutgoingFile?: (hash: string, path: string) => void;
 }) {
   const t = useT();
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -392,6 +414,8 @@ export function GitChangesCommitPane({
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [conflictsOpen, setConflictsOpen] = useState(true);
+  const [outgoingOpen, setOutgoingOpen] = useState(true);
+  const [expandedOutgoing, setExpandedOutgoing] = useState<string | null>(null);
   const [commitHeight, setCommitHeight] = useState(readCommitHeight);
   const [resizing, setResizing] = useState(false);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
@@ -507,6 +531,7 @@ export function GitChangesCommitPane({
   });
 
   const filePathsKey = files.map((f) => f.path).join("\0");
+  const outgoingKey = outgoing.map((c) => c.hash).join("\0");
 
   useEffect(() => {
     setSelectedPaths((prev) => {
@@ -518,6 +543,12 @@ export function GitChangesCommitPane({
       return next.size === prev.size ? prev : next;
     });
   }, [filePathsKey, files]);
+
+  useEffect(() => {
+    if (expandedOutgoing && !outgoing.some((c) => c.hash === expandedOutgoing)) {
+      setExpandedOutgoing(null);
+    }
+  }, [expandedOutgoing, outgoing, outgoingKey]);
 
   useEffect(() => {
     try {
@@ -664,10 +695,101 @@ export function GitChangesCommitPane({
   const primaryLabel =
     stagedCount > 0 ? t("git.commitStaged", { count: stagedCount }) : t("git.stageToCommit");
 
+  const toggleOutgoingCommit = useCallback(
+    (hash: string) => {
+      if (expandedOutgoing === hash) {
+        setExpandedOutgoing(null);
+        return;
+      }
+      setExpandedOutgoing(hash);
+      onInspectOutgoing?.(hash);
+    },
+    [expandedOutgoing, onInspectOutgoing],
+  );
+
+  const outgoingSection =
+    outgoing.length > 0 ? (
+      <ChangesSection
+        title={t("git.outgoingCommits")}
+        count={outgoing.length}
+        collapsed={!outgoingOpen}
+        onToggle={() => setOutgoingOpen((v) => !v)}
+        stageZone="unstaged"
+        dropActive={false}
+        enableDrop={false}
+        onDragOverZone={() => undefined}
+        onDragLeaveZone={() => undefined}
+        onDropZone={() => undefined}
+      >
+        {outgoing.map((commit) => {
+          const open = expandedOutgoing === commit.hash;
+          const filesForCommit = open && commitHash === commit.hash ? outgoingFiles : [];
+          return (
+            <div key={commit.hash} className={styles.outgoingCommit}>
+              <button
+                type="button"
+                className={`${styles.outgoingRow}${commitHash === commit.hash ? ` ${styles.outgoingRowActive}` : ""}`}
+                onClick={() => toggleOutgoingCommit(commit.hash)}
+                title={commit.subject}
+              >
+                <svg
+                  className={`${styles.sectionChevron}${open ? "" : ` ${styles.sectionChevronCollapsed}`}`}
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
+                  <path
+                    d="M8 10l4 4 4-4"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className={styles.outgoingSubject}>{commit.subject || commit.shortHash}</span>
+                <span className={styles.outgoingHash}>{commit.shortHash}</span>
+              </button>
+              {open ? (
+                <div className={styles.outgoingFiles}>
+                  {outgoingLoading && filesForCommit.length === 0 ? (
+                    <p className={styles.sectionEmpty}>{t("common.loading")}</p>
+                  ) : filesForCommit.length === 0 ? (
+                    <p className={styles.sectionEmpty}>{t("git.pickFileForDiff")}</p>
+                  ) : (
+                    filesForCommit.map((file) => (
+                      <button
+                        key={file.path}
+                        type="button"
+                        className={`${styles.outgoingFile}${
+                          commitHash === commit.hash && commitFilePath === file.path
+                            ? ` ${styles.outgoingFileActive}`
+                            : ""
+                        }`}
+                        onClick={() => onSelectOutgoingFile?.(commit.hash, file.path)}
+                        title={file.path}
+                      >
+                        <span className={styles.outgoingFileName}>
+                          {file.path.split("/").pop() || file.path}
+                        </span>
+                        <GitDiffStats additions={file.additions} deletions={file.deletions} />
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </ChangesSection>
+    ) : null;
+
   const treePane = (
     <div className={styles.filesArea}>
+      {outgoingSection}
       {files.length === 0 ? (
-        <div className={styles.empty}>{t("git.noChanges")}</div>
+        outgoing.length === 0 ? <div className={styles.empty}>{t("git.noChanges")}</div> : null
       ) : (
         <>
           {conflictFiles.length > 0 ? (
@@ -848,13 +970,25 @@ export function GitChangesCommitPane({
             disabled={busy}
           />
         </div>
-        <button
-          type="submit"
-          className={styles.primaryBtn}
-          disabled={busy || (stagedCount > 0 && !canCommit)}
-        >
-          {primaryLabel}
-        </button>
+        <div className={styles.commitActions}>
+          <button
+            type="submit"
+            className={styles.primaryBtn}
+            disabled={busy || (stagedCount > 0 && !canCommit)}
+          >
+            {primaryLabel}
+          </button>
+          {stagedCount > 0 ? (
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              disabled={busy || !canCommit}
+              onClick={() => onCommitAndPush()}
+            >
+              {t("git.commitAndPush")}
+            </button>
+          ) : null}
+        </div>
       </form>
     </div>
   );

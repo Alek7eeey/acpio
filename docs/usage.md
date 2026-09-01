@@ -39,9 +39,10 @@ composer and scroll position.
 
 ### Per-chat MCP
 
-MCP servers are configured globally in **Settings → MCP**, but each chat shows which
-servers are active for that session in the header chip. Changing the MCP list restarts
-the live agent process for affected chats (MCP is applied only at `session/new|resume|load`).
+MCP servers are configured globally in **Settings → MCP** (HTTP local/remote or **stdio**
+command + args), but each chat shows which servers are active for that session in the header
+chip. Changing the MCP list restarts the live agent process for affected chats (MCP is applied
+only at `session/new|resume|load`).
 
 ### Resume agent context
 
@@ -120,6 +121,6 @@ The adapter then appears on its own:
 
 - **Phone & VPN** — dev listens on `0.0.0.0`; open `http://<PC_IP>:5173` from a phone on the same LAN/VPN. Production uses port **3001**.
 - **Install (PWA)** — toolbar button adds the app to the home screen.
-- **Remote access key** — optional key in **Settings → Phone & VPN** to protect the instance when exposed beyond localhost.
+- **Remote access key** — generated automatically in **Settings → Phone & VPN**. Required from a phone or another PC; localhost never asks. Delete it only if you want the LAN open.
 
 See also the screenshots gallery in [README.md](../README.md).

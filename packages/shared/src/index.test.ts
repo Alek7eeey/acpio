@@ -17,6 +17,11 @@ import {
   toolDisplayTitle,
   estimateContextUsage,
   extractSubagentLiveContent,
+  isMcpServerAttached,
+  mcpServerEndpoint,
+  mcpServersFingerprint,
+  mcpStdioEnv,
+  toAcpMcpServer,
 } from "@acpio/shared";
 
 describe("parseModelWire", () => {
@@ -532,5 +537,68 @@ describe("extractSubagentLiveContent", () => {
     });
     expect(live.thinking).toEqual(["step 1", "step 2"]);
     expect(live.result).toBe("");
+  });
+});
+
+describe("MCP helpers", () => {
+  const http = {
+    id: "h",
+    name: "http",
+    enabled: true,
+    type: "local" as const,
+    url: "http://127.0.0.1:9",
+  };
+  const stdio = {
+    id: "s",
+    name: "fs",
+    enabled: true,
+    type: "stdio" as const,
+    command: "npx",
+    args: ["-y", "mcp-server"],
+    envConfig: '{"API_KEY":"k"}',
+  };
+
+  it("treats stdio as attached when command is set, HTTP when url is set", () => {
+    expect(isMcpServerAttached(http)).toBe(true);
+    expect(isMcpServerAttached(stdio)).toBe(true);
+    expect(isMcpServerAttached({ ...http, url: "  " })).toBe(false);
+    expect(isMcpServerAttached({ ...stdio, command: "  " })).toBe(false);
+    expect(isMcpServerAttached({ ...stdio, enabled: false })).toBe(false);
+  });
+
+  it("maps stdio to ACP without a type field", () => {
+    expect(toAcpMcpServer(stdio)).toEqual({
+      name: "fs",
+      command: "npx",
+      args: ["-y", "mcp-server"],
+      env: [{ name: "API_KEY", value: "k" }],
+    });
+  });
+
+  it("maps HTTP to ACP type http", () => {
+    expect(toAcpMcpServer(http)).toMatchObject({
+      name: "http",
+      type: "http",
+      url: "http://127.0.0.1:9",
+    });
+  });
+
+  it("parses envConfig object and env array", () => {
+    expect(mcpStdioEnv(stdio)).toEqual([{ name: "API_KEY", value: "k" }]);
+    expect(
+      mcpStdioEnv({
+        ...stdio,
+        env: [{ name: "X", value: "1" }],
+        envConfig: '{"API_KEY":"k"}',
+      }),
+    ).toEqual([{ name: "X", value: "1" }]);
+  });
+
+  it("fingerprints stdio command/args/env separately from HTTP url", () => {
+    expect(mcpServerEndpoint(stdio)).toBe("npx -y mcp-server");
+    const a = mcpServersFingerprint([stdio]);
+    const b = mcpServersFingerprint([{ ...stdio, args: ["-y", "other"] }]);
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(mcpServersFingerprint([http]));
   });
 });

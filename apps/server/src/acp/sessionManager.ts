@@ -34,7 +34,9 @@ import {
   type SlashCommandDto,
   type SubagentCardUpdate,
   titleFromUserText,
-  mcpHttpHeaders,
+  isMcpServerAttached,
+  mcpServerEndpoint,
+  mcpServersFingerprint,
   permissionOptionsLookLikeQuestion,
   questionPayloadFromPermission,
   elicitationResponseFromUiOutcome,
@@ -647,7 +649,7 @@ export function effectiveMcpServers(
 ): McpServerConfig[] {
   const disabled = new Set(disabledIds ?? []);
   return (settings.mcpServers ?? []).filter(
-    (s) => s.enabled && s.url?.trim() && !disabled.has(s.id),
+    (s) => isMcpServerAttached(s) && !disabled.has(s.id),
   );
 }
 
@@ -895,9 +897,11 @@ export async function ensureAcp(
             acpSessionId: client.sessionId,
             mode: opts.mode,
             restoreMode: mode,
-            mcpServers: mcpServers
-              .filter((s) => s.enabled && s.url?.trim())
-              .map((s) => ({ name: s.name, url: s.url!.trim() })),
+            mcpServers: mcpServers.map((s) => ({
+              name: s.name,
+              type: s.type,
+              endpoint: mcpServerEndpoint(s),
+            })),
             model: bootModelOpts.model,
             modelParams: bootModelOpts.modelParams,
           },
@@ -3077,11 +3081,7 @@ export async function restartSessionMcp(sessionId: string): Promise<boolean> {
  */
 export async function restartSessionsForMcpChange(): Promise<void> {
   const settings = await getSettings();
-  const desired = (settings.mcpServers ?? [])
-    .filter((s) => s.enabled && s.url?.trim())
-    .map((s) => `${s.name}|${s.type}|${s.url!.trim()}|${s.token ?? ""}`)
-    .sort()
-    .join("\u0000");
+  const desired = mcpServersFingerprint(settings.mcpServers);
   if (desired === lastMcpSnapshot) return;
   lastMcpSnapshot = desired;
 

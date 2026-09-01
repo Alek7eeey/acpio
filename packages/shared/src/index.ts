@@ -281,15 +281,19 @@ export function isPlaceholderSubagentTitle(title: string): boolean {
   return /^(tool|task|subagent|other|агент|субагент|task\s*:\s*subagent(\s+task)?)$/i.test(value);
 }
 
-/** MCP server connection defined in Settings → Connections. */
+/** MCP server connection defined in Settings → MCP. */
 export type McpServerConfig = {
   /** Stable unique id. */
   id: string;
   name: string;
   enabled: boolean;
-  /** "local" — same-network HTTP endpoint (URL only); "remote" — external endpoint with token. */
-  type: "local" | "remote";
-  /** Endpoint URL (both types). */
+  /**
+   * "local" — same-network HTTP endpoint (URL only);
+   * "remote" — external HTTP endpoint with token/JSON;
+   * "stdio" — agent-spawned process (command + args).
+   */
+  type: "local" | "remote" | "stdio";
+  /** Endpoint URL (HTTP types). */
   url?: string;
   /** Bearer token for remote servers (legacy — prefer remoteConfig JSON). */
   token?: string;
@@ -299,9 +303,14 @@ export type McpServerConfig = {
   headers?: Array<{ name: string; value: string }>;
   /** Remote MCP: free-form JSON (headers, token, transport options). */
   remoteConfig?: string;
-  /** @deprecated Local stdio servers are no longer configured in the UI. */
+  /** Stdio MCP: executable the agent should spawn. */
   command?: string;
+  /** Stdio MCP: argv after the command. */
   args?: string[];
+  /** Stdio MCP: env vars passed through to ACP (`{ name, value }[]`). */
+  env?: Array<{ name: string; value: string }>;
+  /** Stdio MCP: env as a JSON object `{"KEY":"value"}` (UI draft; merged into `env`). */
+  envConfig?: string;
 };
 
 function legacyMcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
@@ -362,6 +371,91 @@ export function mcpRemoteExtras(server: McpServerConfig): Record<string, unknown
   const config = parseMcpRemoteConfig(server);
   const { headers: _headers, ...rest } = config;
   return rest;
+}
+
+/** Env vars for a stdio MCP server (`env` array wins over `envConfig` JSON). */
+export function mcpStdioEnv(server: McpServerConfig): Array<{ name: string; value: string }> {
+  if (server.env?.length) {
+    return server.env
+      .map((row) => ({ name: row.name?.trim() ?? "", value: String(row.value ?? "") }))
+      .filter((row) => row.name);
+  }
+  const raw = server.envConfig?.trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((row) => {
+          if (!row || typeof row !== "object") return null;
+          const name = String((row as { name?: unknown }).name ?? "").trim();
+          if (!name) return null;
+          return { name, value: String((row as { value?: unknown }).value ?? "") };
+        })
+        .filter((row): row is { name: string; value: string } => Boolean(row));
+    }
+    if (parsed && typeof parsed === "object") {
+      return Object.entries(parsed as Record<string, unknown>)
+        .map(([name, value]) => ({ name: name.trim(), value: String(value ?? "") }))
+        .filter((row) => row.name);
+    }
+  } catch {
+    /* invalid JSON — no extra env */
+  }
+  return [];
+}
+
+/** True when the server has the fields its transport needs (ignores `enabled`). */
+export function isMcpServerConfigured(server: McpServerConfig): boolean {
+  if (server.type === "stdio") return Boolean(server.command?.trim());
+  return Boolean(server.url?.trim());
+}
+
+/** Globally enabled MCP server that can be attached to an agent session. */
+export function isMcpServerAttached(server: McpServerConfig): boolean {
+  return Boolean(server.enabled) && isMcpServerConfigured(server);
+}
+
+/** Human-readable endpoint for lists/tooltips: URL or `command args…`. */
+export function mcpServerEndpoint(server: McpServerConfig): string {
+  if (server.type === "stdio") {
+    return [server.command?.trim(), ...(server.args ?? [])].filter(Boolean).join(" ");
+  }
+  return server.url?.trim() ?? "";
+}
+
+/** ACP `session/new|resume|load` mcpServers entry (stdio has no `type` field). */
+export function toAcpMcpServer(server: McpServerConfig): Record<string, unknown> {
+  if (server.type === "stdio") {
+    return {
+      name: server.name,
+      command: server.command!.trim(),
+      args: server.args ?? [],
+      env: mcpStdioEnv(server),
+    };
+  }
+  return {
+    name: server.name,
+    type: "http",
+    url: server.url!.trim(),
+    headers: mcpHttpHeaders(server),
+    ...(server.insecureTls ? { insecureTls: true } : {}),
+    ...mcpRemoteExtras(server),
+  };
+}
+
+/** Stable fingerprint of the attached MCP list (restarts when this changes). */
+export function mcpServersFingerprint(servers: McpServerConfig[] | undefined): string {
+  return (servers ?? [])
+    .filter(isMcpServerAttached)
+    .map((s) => {
+      if (s.type === "stdio") {
+        return `${s.name}|stdio|${s.command!.trim()}|${(s.args ?? []).join("\t")}|${JSON.stringify(mcpStdioEnv(s))}`;
+      }
+      return `${s.name}|${s.type}|${s.url!.trim()}|${s.insecureTls ? "1" : "0"}|${JSON.stringify(parseMcpRemoteConfig(s))}`;
+    })
+    .sort()
+    .join("\u0000");
 }
 
 export type Theme = "light" | "dark";
@@ -527,7 +621,7 @@ export interface AppSettings {
    * Empty = anyone on the VPN/LAN can connect. Localhost never asks.
    */
   remoteAccessKey: string;
-  /** MCP servers attached to the agent (local stdio + remote endpoints). */
+  /** MCP servers attached to the agent (HTTP local/remote + stdio). */
   mcpServers: McpServerConfig[];
 }
 
@@ -989,6 +1083,10 @@ export interface GitStatusDto {
   additions: number;
   deletions: number;
   stashCount: number;
+  /** Commits on HEAD not in the upstream (unpushed). */
+  aheadCount: number;
+  /** Commits on the upstream not in HEAD (unpulled). */
+  behindCount: number;
 }
 
 export interface GitCommitDto {

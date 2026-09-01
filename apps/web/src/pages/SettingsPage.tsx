@@ -14,6 +14,8 @@ import {
   type McpServerConfig,
   type ModelParamDto,
   parseMcpRemoteConfig,
+  isMcpServerConfigured,
+  mcpServerEndpoint,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
@@ -32,12 +34,24 @@ import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import { showToast } from "../lib/toast";
 import { truncateSessionTitle } from "../lib/sessionTitle";
+import { mcpTypeMessageKey } from "../lib/mcpUi";
 import styles from "./SettingsPage.module.css";
 
 function mcpRemoteConfigDraft(server: McpServerConfig): string {
   if (server.remoteConfig?.trim()) return server.remoteConfig;
   const merged = parseMcpRemoteConfig(server);
   return Object.keys(merged).length ? JSON.stringify(merged, null, 2) : "";
+}
+
+function mcpEnvConfigDraft(server: McpServerConfig): string {
+  if (server.envConfig?.trim()) return server.envConfig;
+  if (!server.env?.length) return "";
+  const obj: Record<string, string> = {};
+  for (const row of server.env) {
+    const name = row.name?.trim();
+    if (name) obj[name] = row.value ?? "";
+  }
+  return Object.keys(obj).length ? JSON.stringify(obj, null, 2) : "";
 }
 
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
@@ -744,20 +758,41 @@ export function SettingsPage() {
   const saveMcp = () => {
     if (!mcpDraft) return;
     const name = mcpDraft.name.trim();
-    const url = (mcpDraft.url ?? "").trim();
-    if (!name || !url) return;
     const id = mcpDraft.id || `mcp-${Date.now().toString(36)}`;
-    const next: McpServerConfig = {
-      ...mcpDraft,
-      id,
-      name,
-      url,
-      token: undefined,
-      headers: undefined,
-      remoteConfig: mcpDraft.remoteConfig?.trim() || undefined,
-      command: undefined,
-      args: undefined,
-    };
+    const type = mcpDraft.type === "stdio" ? "stdio" : mcpDraft.type === "remote" ? "remote" : "local";
+    let next: McpServerConfig;
+    if (type === "stdio") {
+      const command = (mcpDraft.command ?? "").trim();
+      if (!name || !command) return;
+      const args = (mcpDraft.args ?? []).map((a) => a.trim()).filter(Boolean);
+      next = {
+        id,
+        name,
+        enabled: mcpDraft.enabled,
+        type: "stdio",
+        command,
+        args,
+        envConfig: mcpDraft.envConfig?.trim() || undefined,
+        env: undefined,
+      };
+    } else {
+      const url = (mcpDraft.url ?? "").trim();
+      if (!name || !url) return;
+      next = {
+        ...mcpDraft,
+        id,
+        name,
+        type,
+        url,
+        token: undefined,
+        headers: undefined,
+        remoteConfig: mcpDraft.remoteConfig?.trim() || undefined,
+        command: undefined,
+        args: undefined,
+        env: undefined,
+        envConfig: undefined,
+      };
+    }
     patch(
       "mcpServers",
       mcpServers.some((s) => s.id === id)
@@ -1911,8 +1946,8 @@ export function SettingsPage() {
                   key={server.id}
                   terms={[
                     server.name,
-                    server.url ?? "",
-                    server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote"),
+                    mcpServerEndpoint(server),
+                    t(mcpTypeMessageKey(server.type)),
                   ]}
                   label={
                     <span className={styles.mcpRowMetaInline}>
@@ -1937,13 +1972,13 @@ export function SettingsPage() {
                       ) : null}
                       <strong>{server.name}</strong>
                       <span className={styles.mcpRowType}>
-                        {server.type === "local" ? t("settings.mcpLocal") : t("settings.mcpRemote")}
+                        {t(mcpTypeMessageKey(server.type))}
                       </span>
                     </span>
                   }
                   hint={
                     <span className={styles.mcpRowDetail}>
-                      {server.url}
+                      {mcpServerEndpoint(server)}
                       {server.type === "remote" && server.token ? (
                         <span className={styles.mcpRowToken}> · {t("settings.mcpTokenSet")}</span>
                       ) : null}
@@ -1959,7 +1994,11 @@ export function SettingsPage() {
                     type="button"
                     className={styles.secondaryBtn}
                     onClick={() =>
-                      setMcpDraft({ ...server, remoteConfig: mcpRemoteConfigDraft(server) })
+                      setMcpDraft({
+                        ...server,
+                        remoteConfig: mcpRemoteConfigDraft(server),
+                        envConfig: mcpEnvConfigDraft(server),
+                      })
                     }
                   >
                     {t("common.edit")}
@@ -2011,42 +2050,78 @@ export function SettingsPage() {
                   onChange={(v) =>
                     setMcpDraft({
                       ...mcpDraft,
-                      type: v === "remote" ? "remote" : "local",
+                      type: v === "stdio" ? "stdio" : v === "remote" ? "remote" : "local",
                     })
                   }
                   options={[
                     { value: "local", label: t("settings.mcpLocal") },
                     { value: "remote", label: t("settings.mcpRemote") },
+                    { value: "stdio", label: t("settings.mcpStdio") },
                   ]}
                 />
-                <input
-                  className={styles.mcpInput}
-                  placeholder={t("settings.mcpUrl")}
-                  value={mcpDraft.url ?? ""}
-                  onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
-                />
-                {mcpDraft.type !== "remote" && (
-                  <label className={styles.mcpTlsRow}>
+                {mcpDraft.type === "stdio" ? (
+                  <>
                     <input
-                      type="checkbox"
-                      checked={mcpDraft.insecureTls === true}
-                      onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
+                      className={styles.mcpInput}
+                      placeholder={t("settings.mcpCommand")}
+                      value={mcpDraft.command ?? ""}
+                      onChange={(e) => setMcpDraft({ ...mcpDraft, command: e.target.value })}
                     />
-                    <span>{t("settings.mcpInsecureTls")}</span>
-                    <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
-                  </label>
+                    <input
+                      className={styles.mcpInput}
+                      placeholder={t("settings.mcpArgs")}
+                      value={(mcpDraft.args ?? []).join(" ")}
+                      onChange={(e) =>
+                        setMcpDraft({
+                          ...mcpDraft,
+                          args: e.target.value.split(/\s+/).filter(Boolean),
+                        })
+                      }
+                    />
+                    <label className={styles.mcpJsonBlock}>
+                      <span className={styles.mcpHeadersLabel}>{t("settings.mcpEnv")}</span>
+                      <textarea
+                        className={styles.mcpJsonInput}
+                        rows={6}
+                        spellCheck={false}
+                        placeholder={'{\n  "API_KEY": ""\n}'}
+                        value={mcpDraft.envConfig ?? ""}
+                        onChange={(e) => setMcpDraft({ ...mcpDraft, envConfig: e.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      className={styles.mcpInput}
+                      placeholder={t("settings.mcpUrl")}
+                      value={mcpDraft.url ?? ""}
+                      onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
+                    />
+                    {mcpDraft.type !== "remote" && (
+                      <label className={styles.mcpTlsRow}>
+                        <input
+                          type="checkbox"
+                          checked={mcpDraft.insecureTls === true}
+                          onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
+                        />
+                        <span>{t("settings.mcpInsecureTls")}</span>
+                        <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
+                      </label>
+                    )}
+                    <label className={styles.mcpJsonBlock}>
+                      <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
+                      <textarea
+                        className={styles.mcpJsonInput}
+                        rows={8}
+                        spellCheck={false}
+                        placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
+                        value={mcpDraft.remoteConfig ?? ""}
+                        onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
+                      />
+                    </label>
+                  </>
                 )}
-                <label className={styles.mcpJsonBlock}>
-                  <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
-                  <textarea
-                    className={styles.mcpJsonInput}
-                    rows={8}
-                    spellCheck={false}
-                    placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
-                    value={mcpDraft.remoteConfig ?? ""}
-                    onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
-                  />
-                </label>
                 <div className={styles.mcpFormActions}>
                   <button
                     type="button"
@@ -2058,7 +2133,7 @@ export function SettingsPage() {
                   <button
                     type="button"
                     className={styles.primaryBtn}
-                    disabled={!mcpDraft.name.trim() || !mcpDraft.url?.trim()}
+                    disabled={!mcpDraft.name.trim() || !isMcpServerConfigured(mcpDraft)}
                     onClick={saveMcp}
                   >
                     {t("common.save")}
@@ -2293,6 +2368,9 @@ export function SettingsPage() {
                       crypto.getRandomValues(bytes);
                       const next = [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
                       patch("remoteAccessKey", next);
+                      void saveSettings({ remoteAccessKey: next }).then(() => {
+                        showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
+                      });
                     }}
                   >
                     {t("settings.remoteKeyGenerate")}
@@ -2301,10 +2379,12 @@ export function SettingsPage() {
                     type="button"
                     className={styles.primaryBtn}
                     disabled={
+                      !(form.remoteAccessKey ?? "").trim() ||
                       (form.remoteAccessKey ?? "") === (settings.remoteAccessKey ?? "")
                     }
                     onClick={() => {
                       const next = (form.remoteAccessKey ?? "").trim();
+                      if (!next) return;
                       patch("remoteAccessKey", next);
                       void saveSettings({ remoteAccessKey: next }).then(() => {
                         showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });

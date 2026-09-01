@@ -6,7 +6,7 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 3;
+export const SETTINGS_SCHEMA_VERSION = 4;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
 const DEFAULT_CHAT_META_CHIPS: ChatMetaChipId[] = [...CHAT_META_CHIP_IDS];

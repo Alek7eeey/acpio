@@ -1,6 +1,7 @@
 import https from "node:https";
+import { spawn } from "node:child_process";
 import type { McpServerConfig } from "@acpio/shared";
-import { mcpHttpHeaders } from "@acpio/shared";
+import { isMcpServerAttached, mcpHttpHeaders, mcpStdioEnv } from "@acpio/shared";
 import { getSettings } from "./settings.js";
 
 const OK_TTL_MS = 30_000;
@@ -14,14 +15,29 @@ const cache = new Map<string, { ok: boolean; at: number }>();
 let inflight: Promise<Map<string, boolean>> | null = null;
 
 function enabledServers(settings: Awaited<ReturnType<typeof getSettings>>) {
-  return (settings.mcpServers ?? []).filter((s) => s.enabled && s.url?.trim());
+  return (settings.mcpServers ?? []).filter(isMcpServerAttached);
 }
+
+function looksLikeInitializeResult(text: string): boolean {
+  return text.includes("jsonrpc") && (text.includes("result") || text.includes("protocolVersion"));
+}
+
+const INIT_BODY = JSON.stringify({
+  jsonrpc: "2.0",
+  id: 1,
+  method: "initialize",
+  params: {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "acpio", version: "0.1.0" },
+  },
+});
 
 /**
  * Probe a single MCP-over-HTTP endpoint with a real JSON-RPC initialize.
  * A 2xx plus a "jsonrpc" payload (JSON or SSE) means the server is alive.
  */
-async function probeOne(s: McpServerConfig): Promise<boolean> {
+async function probeHttp(s: McpServerConfig): Promise<boolean> {
   const url = s.url?.trim();
   if (!url) return false;
   try {
@@ -34,39 +50,81 @@ async function probeOne(s: McpServerConfig): Promise<boolean> {
     for (const row of mcpHttpHeaders(s)) {
       headers[row.name.toLowerCase()] = row.value;
     }
-    const body = JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "acpio", version: "0.1.0" },
-      },
-    });
-    let text: string;
     try {
       if (s.insecureTls && url.startsWith("https://")) {
         // Node's fetch cannot disable cert verification per request; use the
         // https module for self-signed / internal-CA endpoints.
-        text = await probeHttpsInsecure(url, headers, body, controller.signal);
-      } else {
-        const res = await fetch(url, {
-          method: "POST",
-          headers,
-          body,
-          signal: controller.signal,
-        });
-        if (!res.ok) return false;
-        text = await res.text();
+        const text = await probeHttpsInsecure(url, headers, INIT_BODY, controller.signal);
+        return looksLikeInitializeResult(text);
       }
-      return text.includes("jsonrpc") && text.includes("result");
+      const res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: INIT_BODY,
+        signal: controller.signal,
+      });
+      if (!res.ok) return false;
+      const text = await res.text();
+      return looksLikeInitializeResult(text);
     } finally {
       clearTimeout(timer);
     }
   } catch {
     return false;
   }
+}
+
+/** Spawn a stdio MCP and send initialize; success if stdout carries a JSON-RPC result. */
+export function probeStdio(s: McpServerConfig): Promise<boolean> {
+  const command = s.command?.trim();
+  if (!command) return Promise.resolve(false);
+  const args = s.args ?? [];
+  const extraEnv = Object.fromEntries(mcpStdioEnv(s).map((row) => [row.name, row.value]));
+  const winLooseCmd =
+    process.platform === "win32" &&
+    !command.includes("/") &&
+    !command.includes("\\") &&
+    !/\.exe$/i.test(command);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+      resolve(ok);
+    };
+
+    const child = spawn(command, args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...extraEnv },
+      windowsHide: true,
+      shell: winLooseCmd,
+    });
+    const timer = setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
+    let buf = "";
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      buf += String(chunk);
+      if (looksLikeInitializeResult(buf)) finish(true);
+    });
+    child.on("error", () => finish(false));
+    child.on("exit", () => finish(false));
+    try {
+      child.stdin?.write(`${INIT_BODY}\n`);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+async function probeOne(s: McpServerConfig): Promise<boolean> {
+  if (s.type === "stdio") return probeStdio(s);
+  return probeHttp(s);
 }
 
 /** Raw https POST with TLS verification disabled (probe-only). */

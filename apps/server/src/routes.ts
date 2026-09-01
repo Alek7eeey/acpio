@@ -175,9 +175,18 @@ const settingsSchema = z.object({
         id: z.string().min(1).max(64),
         name: z.string().min(1).max(80),
         enabled: z.boolean(),
-        type: z.enum(["local", "remote"]),
+        type: z.enum(["local", "remote", "stdio"]),
         command: z.string().max(300).optional(),
         args: z.array(z.string().max(300)).optional(),
+        env: z
+          .array(
+            z.object({
+              name: z.string().max(80),
+              value: z.string().max(2000),
+            }),
+          )
+          .optional(),
+        envConfig: z.string().max(20_000).optional(),
         url: z.string().max(500).optional(),
         token: z.string().max(500).optional(),
         insecureTls: z.boolean().optional(),

@@ -145,6 +145,73 @@
   outline-offset: -2px;
 }
 
+.outgoingCommit {
+  min-width: 0;
+}
+
+.outgoingRow,
+.outgoingFile {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.outgoingRow {
+  padding: 5px 8px 5px 4px;
+}
+
+.outgoingFile {
+  padding: 4px 10px 4px 26px;
+}
+
+.outgoingRow:hover,
+.outgoingFile:hover {
+  background: var(--bg-tertiary);
+}
+
+.outgoingRowActive,
+.outgoingFileActive {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.outgoingSubject {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.74rem;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outgoingHash {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text-secondary);
+}
+
+.outgoingFileName {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outgoingFiles {
+  min-width: 0;
+}
+
 .fileRow {
   display: flex;
   align-items: stretch;
@@ -455,32 +522,55 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
-.primaryBtn {
+.commitActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin: 8px 10px 0;
+  align-self: stretch;
+}
+
+.primaryBtn,
+.secondaryBtn {
   width: auto;
-  max-width: calc(100% - 20px);
+  max-width: none;
   align-self: flex-start;
-  border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border));
   border-radius: 8px;
   padding: 9px 12px;
   font: inherit;
   font-size: 0.76rem;
   font-weight: 650;
+  cursor: pointer;
+}
+
+.primaryBtn {
+  border: 1px solid color-mix(in srgb, #22c55e 40%, var(--border));
   color: color-mix(in srgb, #22c55e 88%, var(--text));
   background: color-mix(in srgb, #22c55e 10%, var(--surface));
-  cursor: pointer;
 }
 
 .primaryBtn:hover:not(:disabled) {
   background: color-mix(in srgb, #22c55e 16%, var(--surface));
 }
 
-.primaryBtn:disabled {
+.primaryBtn:disabled,
+.secondaryBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+.secondaryBtn {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+
+.secondaryBtn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
 .paneResizing .primaryBtn,
+.paneResizing .secondaryBtn,
 .paneResizing .fileBtn,
 .paneResizing .sectionToggle {
   pointer-events: none;
