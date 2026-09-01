@@ -642,7 +642,7 @@ export function ChatSettingsPreview({
             <span className={styles.brandVersion}>{BUILD_INFO.version}</span>
           </span>
           <span className={styles.headerChatCtx} aria-hidden>
-            <span className={styles.headerChatFolder}>acprocess</span>
+            <span className={styles.headerChatFolder}>acpio</span>
             <span className={styles.headerChatSep}>/</span>
             <span className={styles.headerChatTitle}>{t("settings.chatPreviewChatTitle")}</span>
           </span>
