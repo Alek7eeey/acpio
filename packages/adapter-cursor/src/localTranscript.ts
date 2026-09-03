@@ -261,10 +261,9 @@ function normCwd(cwd: string): string {
 
 function cwdRelated(cwd: string, filter: string): boolean {
   if (!filter) return true;
-  if (!cwd.trim()) return true;
+  if (!cwd.trim()) return false;
   const a = normCwd(cwd).toLowerCase();
-  const b = filter;
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  return a === filter;
 }
 
 function storeBytes(storePath: string): number {
@@ -318,7 +317,7 @@ export function listCursorAcpSessions(opts?: {
       const size = storeBytes(storePath);
       // Probes from this app leave an empty store.db and no title.
       if (!title && size < 4096) continue;
-      if (cwdFilter && cwd && !cwdRelated(cwd, cwdFilter)) continue;
+      if (cwdFilter && !cwdRelated(cwd, cwdFilter)) continue;
       let mtime = 0;
       try {
         mtime = fs.statSync(size ? storePath : dir).mtimeMs;
@@ -376,7 +375,7 @@ export function listCursorAcpSessions(opts?: {
         }
         const size = storeBytes(storePath);
         if (!title && size < 4096) continue;
-        if (cwdFilter && cwd && !cwdRelated(cwd, cwdFilter)) continue;
+        if (cwdFilter && !cwdRelated(cwd, cwdFilter)) continue;
         let mtime = 0;
         try {
           mtime = fs.statSync(size ? storePath : dir).mtimeMs;

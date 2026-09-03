@@ -86,10 +86,8 @@ function isEphemeralOmpDir(name: string): boolean {
 
 function cwdRelated(cwd: string, filter: string): boolean {
   if (!filter) return true;
-  if (!cwd.trim()) return true;
-  const a = normCwd(cwd);
-  const b = filter;
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  if (!cwd.trim()) return false;
+  return normCwd(cwd) === filter;
 }
 
 function collectJsonlFiles(dir: string, out: string[], budget: number): void {

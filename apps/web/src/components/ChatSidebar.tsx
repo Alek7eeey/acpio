@@ -872,21 +872,21 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           menuOpen ? styles.sessionMenuOpen : ""
         } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}`}
         onPointerDown={(e) => {
-          // Open the chat from anywhere on the row — not just the title. The
-          // command buttons (pin/archive/⋯) stop propagation themselves.
+          // Open from anywhere on the row — pin/archive/⋯ stop propagation.
           if (e.button !== 0) return;
           if (e.ctrlKey || e.metaKey) {
             void openSessionInNewPane(s.id);
             return;
           }
-          void selectSession(s.id);
-          if (window.innerWidth < 900) {
-            navigate("/chat");
-            setSidebarOpen(false);
-          }
+          // Touch: wait for click. pointerdown+closeSheet eats the scroll
+          // gesture and treats the first contact as "open this chat".
+          if (e.pointerType !== "mouse") return;
+          openChat(s.id);
         }}
-        onClick={() => {
-          goToChat();
+        onClick={(e) => {
+          if (e.ctrlKey || e.metaKey) return;
+          // Click is suppressed after a scroll; mouse already opened above.
+          if (isTouch || window.innerWidth < 900) openChat(s.id);
         }}
         onDoubleClick={(e) => {
           e.preventDefault();

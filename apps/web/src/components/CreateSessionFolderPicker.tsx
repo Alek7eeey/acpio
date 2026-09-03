@@ -19,7 +19,7 @@ function cwdMatchesFolder(sessionCwd: string, folderCwd: string) {
   const b = normalizeCwd(folderCwd).toLowerCase();
   if (!b) return true;
   if (!a) return false;
-  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+  return a === b;
 }
 
 function parentPath(pathValue: string) {

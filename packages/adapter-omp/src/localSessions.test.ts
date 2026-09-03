@@ -91,4 +91,29 @@ describe("OMP local sessions", () => {
     const rows = listOmpSessions({ root });
     expect(rows.map((r) => r.sessionId)).toEqual([id]);
   });
+
+  it("filters by exact cwd, not parent or nested folders", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-sessions-"));
+    dirs.push(root);
+    const write = (cwd: string, id: string) => {
+      const folder = path.join(root, cwd.replace(/[\\/:]/g, "-"));
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(
+        path.join(folder, `2026-08-10T06-30-55-891Z_${id}.jsonl`),
+        [
+          JSON.stringify({ type: "session", id, cwd, title: cwd }),
+          JSON.stringify({
+            type: "message",
+            message: { role: "user", content: [{ type: "text", text: "hello" }] },
+          }),
+        ].join("\n"),
+        "utf8",
+      );
+    };
+    write("C:/MyFolder/ips", "019fea5d-0001-7000-86cd-c486c1ed8a72");
+    write("C:/MyFolder/ips/ips_10", "019fea5d-0002-7000-86cd-c486c1ed8a72");
+    write("C:/MyFolder/ips/ips_10/consoleServer", "019fea5d-0003-7000-86cd-c486c1ed8a72");
+    const rows = listOmpSessions({ root, cwd: "C:/MyFolder/ips/ips_10" });
+    expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/MyFolder/ips/ips_10"]);
+  });
 });

@@ -1487,7 +1487,8 @@
   position: relative;
   overflow: hidden;
   min-height: 35px;
-  touch-action: manipulation;
+  /* pan-y so a vertical swipe on a row scrolls the list instead of being a tap. */
+  touch-action: pan-y;
   margin: 0;
   padding: 6px 8px 6px 0;
   box-sizing: border-box;
@@ -4441,6 +4442,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    touch-action: pan-y;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     padding-bottom: 8px;
