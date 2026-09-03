@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TerminalShell } from "@acpio/shared";
 import { clampConsoleTerminalSize } from "@acpio/shared";
+import { getConsoleEnv } from "./consoleEnv.js";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
 
@@ -104,7 +105,7 @@ async function spawnPtyBackend(
     const proc = pty.spawn(file, args, {
       name: "xterm-256color",
       cwd,
-      env: process.env as Record<string, string>,
+      env: getConsoleEnv(),
       cols: clampConsoleTerminalSize({ cols: initialSize?.cols ?? 100, rows: 28 }).cols,
       rows: clampConsoleTerminalSize({ cols: 100, rows: initialSize?.rows ?? 28 }).rows,
     });
@@ -130,7 +131,7 @@ function spawnPipeBackend(cwd: string, shell: ConsoleShell): PtyLike {
   const { file, args } = shellCommand(shell);
   const child: ChildProcessWithoutNullStreams = spawn(file, args, {
     cwd,
-    env: process.env,
+    env: getConsoleEnv(),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: false,
   });
