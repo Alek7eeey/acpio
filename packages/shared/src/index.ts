@@ -24,6 +24,7 @@ export type {
 } from "./adapters.js";
 export { SHELL_SESSION_PROVIDER, isShellSession } from "./adapters.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
+export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT } from "./ports.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";

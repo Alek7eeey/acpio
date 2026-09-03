@@ -3,7 +3,7 @@
 Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
-**Актуальная версия:** 0.1.3
+**Актуальная версия:** 0.1.4
 
 > **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -28,14 +28,14 @@ irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | ie
 ```bash
 npm install
 npm run build
-npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
 **Разработка (hot reload):**
 
 ```bash
 npm install
-npm run dev       # UI http://localhost:5173, API http://localhost:3001
+npm run dev       # UI http://localhost:18751, API http://localhost:18741
 ```
 
 > Схема БД создаётся автоматически при старте сервера (идемпотентный
@@ -46,8 +46,8 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 > **После обновления кода** (`git pull`) сделай **hard refresh** в браузере (`Ctrl+Shift+R`).
 > Браузер кеширует старые CSS/JS модули, и без hard refresh новые правки могут не примениться.
 
-- Прод: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
-- Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
+- Прод: [http://localhost:18741](http://localhost:18741) — UI + API + WebSocket
+- Dev: UI [http://localhost:18751](http://localhost:18751), API [http://localhost:18741](http://localhost:18741)
 - Файл БД: `data/acpio.db` (переопределяется через `DATABASE_PATH` в `.env`)
 
 ## Скриншоты
@@ -85,7 +85,7 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 
 ```bash
 npm run build
-npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
 ### Портативный дистрибутив (Windows)
@@ -119,20 +119,20 @@ irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | ie
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acpio-win-x64.zip
 ```
 
-Переменные окружения прода: `PORT` (по умолчанию 3001), `HOST` (по умолчанию
+Переменные окружения прода: `PORT` (по умолчанию 18741), `HOST` (по умолчанию
 `0.0.0.0`), `DATABASE_PATH` (по умолчанию `<каталог приложения>/data/acpio.db`).
 
 ## Телефон и VPN
 
-Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN. Прод-сборка работает так же на порту **3001**.
+Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэтому с телефона можно открыть UI по IP компьютера в той же сети или VPN. Прод-сборка работает так же на порту **18741**.
 
 1. На ПК запустите `npm run dev` (или `npm run start` — прод, один порт).
 2. Подключите телефон к тому же VPN/LAN, что и ПК (WireGuard, Tailscale и т.п.).
-3. Узнайте IP ПК в VPN/LAN (не `0.0.0.0` и не `localhost`) и откройте на телефоне `http://IP_ПК:5173`.
-4. При необходимости разрешите входящий TCP **5173** (и **3001**) в файрволе Windows.
+3. Узнайте IP ПК в VPN/LAN (не `0.0.0.0` и не `localhost`) и откройте на телефоне `http://IP_ПК:18751`.
+4. При необходимости разрешите входящий TCP **18751** (и **18741**) в файрволе Windows.
 5. В UI: **Настройки → Телефон и VPN** — краткая шпаргалка и копирование текущего адреса. Кнопка **Установить** в тулбаре добавляет сайт на домашний экран.
 
-`http://0.0.0.0:5173` в браузере не работает — это только адрес прослушивания сервера.
+`http://0.0.0.0:18751` в браузере не работает — это только адрес прослушивания сервера.
 
 ## Cursor / OMP
 

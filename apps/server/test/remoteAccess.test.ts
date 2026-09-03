@@ -15,13 +15,13 @@ import {
 describe("isLoopbackHost", () => {
   it.each([
     ["localhost", true],
-    ["localhost:5173", true],
+    ["localhost:18751", true],
     ["127.0.0.1", true],
-    ["127.0.0.1:3001", true],
+    ["127.0.0.1:18741", true],
     ["[::1]", true],
-    ["[::1]:5173", true],
-    ["app.localhost:5173", true],
-    ["192.168.1.5:5173", false],
+    ["[::1]:18751", true],
+    ["app.localhost:18751", true],
+    ["192.168.1.5:18751", false],
     ["100.64.1.2", false],
     ["example.com", false],
     ["", false],
@@ -49,7 +49,7 @@ describe("isLoopbackClient", () => {
     expect(
       isLoopbackClient({
         ip: "127.0.0.1",
-        headers: { host: "192.168.1.9:5173", "x-forwarded-for": "192.168.1.50" },
+        headers: { host: "192.168.1.9:18751", "x-forwarded-for": "192.168.1.50" },
       }),
     ).toBe(false);
   });
@@ -58,7 +58,7 @@ describe("isLoopbackClient", () => {
     expect(
       isLoopbackClient({
         ip: "127.0.0.1",
-        headers: { host: "localhost:5173" },
+        headers: { host: "localhost:18751" },
       }),
     ).toBe(true);
   });

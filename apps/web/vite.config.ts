@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
+import { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT } from "../../packages/shared/src/ports.ts";
 
 export default defineConfig({
   plugins: [
@@ -77,7 +78,8 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    port: 5173,
+    port: DEFAULT_DEV_UI_PORT,
+    strictPort: true,
     // Dev module responses carry an etag + "no-cache" (revalidate), and a bad
     // 304 path makes browsers keep STALE module bodies for unchanged URLs —
     // freshly added keys/strings never show up until the cache is cleared.
@@ -89,11 +91,11 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3001",
+        target: `http://127.0.0.1:${DEFAULT_SERVER_PORT}`,
         xfwd: true,
       },
       "/ws": {
-        target: "ws://127.0.0.1:3001",
+        target: `ws://127.0.0.1:${DEFAULT_SERVER_PORT}`,
         ws: true,
         xfwd: true,
       },
@@ -101,6 +103,8 @@ export default defineConfig({
   },
   preview: {
     host: "0.0.0.0",
+    port: DEFAULT_DEV_UI_PORT,
+    strictPort: true,
     allowedHosts: true,
     headers: {
       "Cache-Control": "no-store",

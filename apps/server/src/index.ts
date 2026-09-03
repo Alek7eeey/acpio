@@ -10,12 +10,13 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
+import { DEFAULT_SERVER_PORT } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
 
-const port = Number(process.env.PORT ?? 3001);
+const port = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
 const corsOrigin = process.env.CORS_ORIGIN;
 /** Set CORS_STRICT=1 to pin origins from CORS_ORIGIN again. */
 const corsStrict = process.env.CORS_STRICT === "1";
@@ -51,7 +52,7 @@ async function main() {
   await app.register(websocket);
   await registerRoutes(app);
 
-  // Single-port prod: serve the built web UI (API + WS + static on :3001).
+  // Single-port prod: serve the built web UI (API + WS + static on DEFAULT_SERVER_PORT).
   // Dev layout: apps/web/dist; packaged layout: web/dist.
   const webDist =
     [path.join(rootDir, "apps", "web", "dist"), path.join(rootDir, "web", "dist")].find((p) =>

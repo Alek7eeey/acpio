@@ -119,7 +119,7 @@ The adapter then appears on its own:
 
 ## Mobile and remote access
 
-- **Phone & VPN** — dev listens on `0.0.0.0`; open `http://<PC_IP>:5173` from a phone on the same LAN/VPN. Production uses port **3001**.
+- **Phone & VPN** — dev listens on `0.0.0.0`; open `http://<PC_IP>:18751` from a phone on the same LAN/VPN. Production uses port **18741**.
 - **Install (PWA)** — toolbar button adds the app to the home screen.
 - **Remote access key** — generated automatically in **Settings → Phone & VPN**. Required from a phone or another PC; localhost never asks. Delete it only if you want the LAN open.
 

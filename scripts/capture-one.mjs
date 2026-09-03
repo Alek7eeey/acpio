@@ -15,8 +15,8 @@ if (!name) {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "docs", "screens");
-const BASE = "http://localhost:5173";
-const API = "http://127.0.0.1:3001";
+const BASE = "http://localhost:18751";
+const API = "http://127.0.0.1:18741";
 
 async function api(pathname, init) {
   const res = await fetch(`${API}${pathname}`, {

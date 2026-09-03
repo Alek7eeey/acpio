@@ -152,7 +152,7 @@ describe("health & settings", () => {
 
   it("generates a remote access key by default; LAN needs it until explicitly cleared", async () => {
     const lan = {
-      host: "192.168.1.9:5173",
+      host: "192.168.1.9:18751",
       "x-forwarded-for": "192.168.1.50",
     };
     const seeded = await app.inject({ method: "GET", url: "/api/settings" });

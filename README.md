@@ -3,7 +3,7 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.3
+**Current version:** 0.1.4
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -28,14 +28,14 @@ irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | ie
 ```bash
 npm install
 npm run build
-npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
 **Development (hot reload):**
 
 ```bash
 npm install
-npm run dev       # UI http://localhost:5173, API http://localhost:3001
+npm run dev       # UI http://localhost:18751, API http://localhost:18741
 ```
 
 > The DB schema is created automatically at server boot (idempotent
@@ -46,8 +46,8 @@ npm run dev       # UI http://localhost:5173, API http://localhost:3001
 > (`Ctrl+Shift+R`). Browsers cache old CSS/JS modules, and without a hard refresh
 > new changes may not show up.
 
-- Prod: [http://localhost:3001](http://localhost:3001) — UI + API + WebSocket
-- Dev: UI [http://localhost:5173](http://localhost:5173), API [http://localhost:3001](http://localhost:3001)
+- Prod: [http://localhost:18741](http://localhost:18741) — UI + API + WebSocket
+- Dev: UI [http://localhost:18751](http://localhost:18751), API [http://localhost:18741](http://localhost:18741)
 - DB file: `data/acpio.db` (override with `DATABASE_PATH` in `.env`)
 
 ## Screenshots
@@ -85,7 +85,7 @@ so production is a **single port**:
 
 ```bash
 npm run build
-npm run start     # → http://localhost:3001 (UI + API + WebSocket)
+npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
 ### Portable bundle (Windows)
@@ -119,20 +119,20 @@ to `%LOCALAPPDATA%\acpio` and starts the app (data goes to
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\acpio-win-x64.zip
 ```
 
-Production env vars: `PORT` (default 3001), `HOST` (default `0.0.0.0`),
+Production env vars: `PORT` (default 18741), `HOST` (default `0.0.0.0`),
 `DATABASE_PATH` (default `<app dir>/data/acpio.db`).
 
 ## Phone and VPN
 
-The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI from a phone via the PC's IP on the same network or VPN. The production build works the same way on port **3001**.
+The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI from a phone via the PC's IP on the same network or VPN. The production build works the same way on port **18741**.
 
 1. Start `npm run dev` on the PC (or `npm run start` for the single-port prod build).
 2. Connect the phone to the same VPN/LAN as the PC (WireGuard, Tailscale, etc.).
-3. Find the PC's IP in the VPN/LAN (not `0.0.0.0` and not `localhost`) and open `http://PC_IP:5173` on the phone.
-4. If needed, allow inbound TCP **5173** (and **3001**) in the Windows firewall.
+3. Find the PC's IP in the VPN/LAN (not `0.0.0.0` and not `localhost`) and open `http://PC_IP:18751` on the phone.
+4. If needed, allow inbound TCP **18751** (and **18741**) in the Windows firewall.
 5. In the UI: **Settings → Phone and VPN** — a short cheat sheet and a copy button for the current address. The **Install** button in the toolbar adds the site to the home screen.
 
-`http://0.0.0.0:5173` won't work in a browser — it's only the server's listening address.
+`http://0.0.0.0:18751` won't work in a browser — it's only the server's listening address.
 
 ## Cursor / OMP
 

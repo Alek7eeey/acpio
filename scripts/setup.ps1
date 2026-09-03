@@ -57,7 +57,7 @@ Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
 # --- 4. Launch --------------------------------------------------------------
 $startCmd = Join-Path $InstallDir "start.cmd"
 if (-not $NoLaunch) {
-    Write-Host "Starting Acpio — it opens http://localhost:3001 in your browser."
+    Write-Host "Starting Acpio — it opens http://localhost:18741 in your browser."
     Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$startCmd`"" -WindowStyle Hidden
 }
 Write-Host "Installed. Restart later with: $startCmd"
