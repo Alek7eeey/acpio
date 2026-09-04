@@ -22,6 +22,10 @@ function hasBlockingActiveTools(parts: MessagePartDto[]): boolean {
   });
 }
 
+function partText(part: MessagePartDto): string {
+  return String(part.payload.text ?? "").trim();
+}
+
 export function lastToolOrder(parts: MessagePartDto[]): number {
   let order = -1;
   for (const part of parts) {
@@ -46,23 +50,28 @@ export function turnStillHasLiveTools(parts: MessagePartDto[]): boolean {
   return false;
 }
 
-/** True when the final answer text is already on screen (post-tool only). */
+/**
+ * True when the final answer text is already on screen (post-tool only).
+ * Intermediate narration followed by more thoughts/tools does not count — that
+ * text must stay inside the steps block between reasoning phases.
+ */
 export function turnAnswerVisible(parts: MessagePartDto[]): boolean {
   if (hasBlockingActiveTools(parts)) return false;
   const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const toolOrder = lastToolOrder(sorted);
   if (toolOrder < 0) return false;
-  return sorted.some(
-    (p) =>
-      p.type === "text" &&
-      (p.order ?? 0) > toolOrder &&
-      String(p.payload.text ?? "").trim().length > 0,
-  );
+  const last = sorted.at(-1);
+  if (!last || last.type !== "text") return false;
+  return (last.order ?? 0) > toolOrder && partText(last).length > 0;
 }
 
 /**
  * Final answer text for the turn. When tools ran, only text emitted after the
  * last tool counts — Cursor often sends a short status line before tool calls.
+ *
+ * While streaming, only peel text when it is the trailing part. Otherwise
+ * intermediate agent_message text between thought phases disappears from the
+ * steps block (it gets promoted to the answer slot too early).
  */
 export function finalAnswerPart(
   parts: MessagePartDto[],
@@ -80,7 +89,18 @@ export function finalAnswerPart(
       lastTextAfterTools = part;
     }
   }
-  if (toolOrder >= 0) return lastTextAfterTools;
+  if (toolOrder >= 0) {
+    if (!streaming) return lastTextAfterTools;
+    const last = sorted.at(-1);
+    if (
+      last?.type === "text" &&
+      (last.order ?? 0) > toolOrder &&
+      partText(last).length > 0
+    ) {
+      return last;
+    }
+    return null;
+  }
   // Cursor may emit short status lines as text before any tool — keep them in the
   // timeline while the turn is still streaming.
   if (streaming) return null;
@@ -101,7 +121,7 @@ export function stepsPartsStillLive(parts: MessagePartDto[], streaming: boolean)
   const toolOrder = lastToolOrder(sorted);
 
   const finalText = finalAnswerPart(parts, { streaming });
-  if (finalText && String(finalText.payload.text ?? "").trim().length > 0) {
+  if (finalText && partText(finalText).length > 0) {
     return false;
   }
 
@@ -111,7 +131,7 @@ export function stepsPartsStillLive(parts: MessagePartDto[], streaming: boolean)
       (p) =>
         (p.order ?? 0) > toolOrder &&
         p.type === "thought" &&
-        String(p.payload.text ?? "").trim().length > 0,
+        partText(p).length > 0,
     )
   ) {
     return false;

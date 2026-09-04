@@ -108,6 +108,27 @@ describe("finalAnswerPart", () => {
     expect(finalAnswerPart(parts, { streaming: false })?.payload.text).toBe("checking settings");
     expect(turnAnswerVisible(parts)).toBe(false);
   });
+
+  it("keeps intermediate post-tool text in steps when more thoughts follow", () => {
+    const parts = [
+      part("thought", 0, { text: "plan" }),
+      part("tool_call", 1, { status: "completed", title: "Read" }),
+      part("text", 2, { text: "Сначала сверю локальные настройки." }),
+      part("thought", 3, { text: "next phase" }),
+    ];
+    expect(finalAnswerPart(parts, { streaming: true })).toBeNull();
+    expect(turnAnswerVisible(parts)).toBe(false);
+  });
+
+  it("peels trailing post-tool text while streaming", () => {
+    const parts = [
+      part("thought", 0, { text: "plan" }),
+      part("tool_call", 1, { status: "completed", title: "Read" }),
+      part("text", 2, { text: "Here is the answer." }),
+    ];
+    expect(finalAnswerPart(parts, { streaming: true })?.payload.text).toBe("Here is the answer.");
+    expect(turnAnswerVisible(parts)).toBe(true);
+  });
 });
 
 describe("turnAnswerVisible", () => {
@@ -134,6 +155,15 @@ describe("turnAnswerVisible", () => {
       part("text", 1, {
         text: "Соберу коммиты за 2 и 3 сентября и сверю темы — дам осмысленную сводку, не список хешей.",
       }),
+    ];
+    expect(turnAnswerVisible(parts)).toBe(false);
+  });
+
+  it("is false when narration text is followed by another reasoning phase", () => {
+    const parts = [
+      part("tool_call", 0, { status: "completed", title: "Read" }),
+      part("text", 1, { text: "Промежуточная мысль текстом." }),
+      part("thought", 2, { text: "дальше думаю" }),
     ];
     expect(turnAnswerVisible(parts)).toBe(false);
   });

@@ -404,6 +404,18 @@ export const api = {
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),
+  /** Save a clipboard/device image into the session folder; returns a path attachment. */
+  uploadAttachment: (
+    id: string,
+    file: { name: string; mime?: string; data: string },
+  ) =>
+    request<{ name: string; path: string; size: number }>(
+      `/api/sessions/${id}/attachments/upload`,
+      {
+        method: "POST",
+        body: JSON.stringify(file),
+      },
+    ),
   cancel: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/cancel`, {
       method: "POST",

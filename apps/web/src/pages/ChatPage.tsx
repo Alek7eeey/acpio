@@ -294,6 +294,74 @@ function formatBytes(bytes: number): string {
   return `${v >= 100 ? Math.round(v) : Math.round(v * 10) / 10} ${units[i]}`;
 }
 
+const MAX_ATTACH_COUNT = 8;
+const MAX_ATTACH_SIZE = 15 * 1024 * 1024;
+
+function collectClipboardImages(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const out: File[] = [];
+  const seen = new Set<string>();
+  const push = (file: File | null) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(file);
+  };
+  if (data.files?.length) {
+    for (const file of data.files) push(file);
+  }
+  if (out.length === 0 && data.items) {
+    for (const item of data.items) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        push(item.getAsFile());
+      }
+    }
+  }
+  return out;
+}
+
+function extForImageMime(mime: string): string {
+  switch (mime.toLowerCase()) {
+    case "image/jpeg":
+    case "image/jpg":
+      return ".jpg";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "image/bmp":
+      return ".bmp";
+    case "image/avif":
+      return ".avif";
+    default:
+      return ".png";
+  }
+}
+
+function clipboardImageName(file: File, index: number): string {
+  const ext = extForImageMime(file.type || "image/png");
+  const raw = (file.name || "").trim();
+  if (raw && raw !== "image.png" && raw !== "image.jpg") {
+    return raw.includes(".") ? raw : `${raw}${ext}`;
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return `clipboard-${stamp}${index > 0 ? `-${index + 1}` : ""}${ext}`;
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = String(reader.result ?? "").split(",")[1] ?? "";
+      if (!data) reject(new Error("empty"));
+      else resolve(data);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
 function MessageArticle({
   msg,
   isLiveAssistant,
@@ -1662,37 +1730,53 @@ function StickyStepsToggle({
   liveHeader,
   label,
   onClick,
+  sticky = true,
 }: {
   open: boolean;
   liveHeader: boolean;
   label: string;
   onClick: () => void;
+  /** When false, header stays in normal flow (older timeline phases). */
+  sticky?: boolean;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const [isStuck, setIsStuck] = useState(false);
+  const enableSticky = sticky && open;
 
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
+    if (!el || !enableSticky || typeof IntersectionObserver === "undefined") {
+      setIsStuck(false);
+      return;
+    }
+    const root = el.closest(`.${styles.thread}`) ?? null;
+    const padTop =
+      root instanceof Element
+        ? Number.parseFloat(getComputedStyle(root).paddingTop) || 0
+        : 0;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (!entry) return;
         const rootTop = entry.rootBounds?.top ?? 0;
-        setIsStuck(entry.boundingClientRect.top <= rootTop + 2);
+        setIsStuck(entry.boundingClientRect.top <= rootTop + padTop + 2);
       },
-      { threshold: [1] },
+      {
+        root: root instanceof Element ? root : null,
+        threshold: [1],
+        rootMargin: `-${Math.max(0, padTop)}px 0px 0px 0px`,
+      },
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [enableSticky]);
 
   return (
     <button
       ref={ref}
       type="button"
       tabIndex={-1}
-      className={styles.stepsToggle}
-      data-stuck={isStuck ? "true" : "false"}
+      className={`${styles.stepsToggle}${enableSticky ? ` ${styles.stepsToggleSticky}` : ""}`}
+      data-stuck={enableSticky && isStuck ? "true" : "false"}
       aria-expanded={open}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
@@ -1946,6 +2030,7 @@ function ThoughtPhaseBlock({
   autoExpand,
   phaseKey,
   stepsGlobalTick,
+  sticky = true,
 }: {
   parts: MessagePartDto[];
   tools?: MessagePartDto[];
@@ -1953,6 +2038,7 @@ function ThoughtPhaseBlock({
   autoExpand: boolean;
   phaseKey: string;
   stepsGlobalTick: number;
+  sticky?: boolean;
 }) {
   const t = useT();
   const openKey = `thought-phase:${phaseKey}`;
@@ -2017,6 +2103,7 @@ function ThoughtPhaseBlock({
         open={open}
         liveHeader={streaming}
         label={label}
+        sticky={sticky}
         onClick={() => setOpen((v) => !v)}
       />
       {open && hasBody ? (
@@ -2098,6 +2185,7 @@ function AgentTurnTimeline({
               autoExpand={autoExpand}
               phaseKey={item.key}
               stepsGlobalTick={stepsGlobalTick}
+              sticky={isLast}
             />
           );
         }
@@ -3482,7 +3570,9 @@ function ChatThread() {
   }, [activeSession?.messages]);
   const answerVisible = useMemo(() => turnAnswerVisible(lastAssistantParts), [lastAssistantParts]);
   const stepsStreaming = turnBusy && !answerVisible;
-  const showStop = stepsStreaming;
+  // Keep Stop tied to the live turn (inflight/session), not to "answer started" —
+  // otherwise the button vanishes for seconds while Cursor is still thinking.
+  const showStop = turnBusy;
 
   // MCP servers this chat's agent session runs with: globally enabled minus
   // the ids this chat disabled in its MCP dialog.
@@ -3829,6 +3919,58 @@ function ChatThread() {
       });
     },
     [slashCommands],
+  );
+
+  const attachPastedImages = useCallback(
+    async (files: File[]) => {
+      const sessionId = activeSession?.id;
+      if (!sessionId || files.length === 0) return;
+      if (editingMessageId || composerLocked || turnBusy) return;
+
+      const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
+      if (oversized) {
+        setAttachError(t("chat.fileTooLarge", { name: oversized.name || "image" }));
+      }
+      const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
+      if (ok.length === 0) return;
+
+      let accepted = 0;
+      for (let i = 0; i < ok.length; i++) {
+        const file = ok[i]!;
+        const room = MAX_ATTACH_COUNT - pendingFiles.length - accepted;
+        if (room <= 0) {
+          setAttachError(t("chat.tooManyFiles"));
+          break;
+        }
+        try {
+          const data = await fileToBase64(file);
+          const saved = await api.uploadAttachment(sessionId, {
+            name: clipboardImageName(file, i),
+            mime: file.type || "image/png",
+            data,
+          });
+          setPendingFiles((prev) => {
+            if (prev.length >= MAX_ATTACH_COUNT) {
+              setAttachError(t("chat.tooManyFiles"));
+              return prev;
+            }
+            setAttachError(null);
+            return [...prev, { name: saved.name, path: saved.path }];
+          });
+          accepted += 1;
+        } catch (err) {
+          setAttachError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    },
+    [
+      activeSession?.id,
+      composerLocked,
+      editingMessageId,
+      pendingFiles.length,
+      t,
+      turnBusy,
+    ],
   );
 
   const submitMessage = (raw: string) => {
@@ -5250,6 +5392,13 @@ function ChatThread() {
               onKeyUp={(e) => {
                 setCursorPos(e.currentTarget.selectionStart);
                 syncComposerInputScroll(e.currentTarget);
+              }}
+              onPaste={(e) => {
+                if (composerLocked || editingMessageId || turnBusy) return;
+                const images = collectClipboardImages(e.clipboardData);
+                if (images.length === 0) return;
+                e.preventDefault();
+                void attachPastedImages(images);
               }}
               placeholder={
                 slashInputHint ??

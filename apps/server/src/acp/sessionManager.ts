@@ -2398,6 +2398,8 @@ const STREAM_SETTLE_QUIET_MS = 450;
  * (or nothing arrived at all), the short window applies again.
  */
 const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
+/** After answer text is visible, Cursor may still pause before more thoughts/tools. */
+const STREAM_SETTLE_CURSOR_TEXT_QUIET_MS = 2_000;
 /** Default cap for adapters that stream in one burst (OMP). */
 const STREAM_SETTLE_MAX_MS = 12_000;
 /** Cursor turns can run for many minutes with multi-second gaps between tool rounds. */
@@ -2407,6 +2409,9 @@ const STREAM_SETTLE_TOOL_MAX_MS = 600_000;
 /** After elicitation answer, OMP may pause before /review (or similar) starts streaming. */
 const POST_ELICITATION_SPAWN_WAIT_MS = 8_000;
 const POST_ELICITATION_IDLE_BREAK_MS = 4_000;
+/** Brief wait for elicitation/create that races past session/prompt resolution. */
+const LATE_INTERACTIVE_GRACE_MS = 400;
+const LATE_INTERACTIVE_OMP_GRACE_MS = 1_200;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
 
 function isActiveToolStatus(status: string | undefined): boolean {
@@ -2419,15 +2424,19 @@ function isActiveToolStatus(status: string | undefined): boolean {
 function streamSettleQuietThresholdMs(rt: SessionRuntime): number {
   const waitingForAnswer =
     rt.turnHasThought && !rt.turnHasText && rt.inFlightToolCalls === 0;
+  const waitingForFirstToken =
+    !rt.turnHasThought && !rt.turnHasText && rt.inFlightToolCalls === 0;
   if (rt.adapter?.id === "cursor") {
-    // Answer is on screen and tools are done — settle quickly once updates stop.
-    if (rt.turnHasText && rt.inFlightToolCalls === 0) {
-      return STREAM_SETTLE_QUIET_MS;
-    }
-    if (waitingForAnswer || rt.inFlightToolCalls > 0) {
+    // Cursor often returns session/prompt before the first thought chunk, and
+    // leaves multi-second gaps between narration text and the next reasoning
+    // phase. Never settle on the short window until we have seen real activity
+    // and then only after a Cursor-sized quiet gap.
+    if (waitingForFirstToken || waitingForAnswer || rt.inFlightToolCalls > 0) {
       return STREAM_SETTLE_ANSWER_QUIET_MS;
     }
-    return 1_500;
+    // Final answer text is on screen and tools are done — still allow a brief
+    // Cursor pause before unlocking (450ms was cutting mid-turn narration).
+    return STREAM_SETTLE_CURSOR_TEXT_QUIET_MS;
   }
   if (waitingForAnswer) return STREAM_SETTLE_ANSWER_QUIET_MS;
   return STREAM_SETTLE_QUIET_MS;
@@ -2581,7 +2590,13 @@ async function waitForPendingClientRequests(rt: SessionRuntime) {
 }
 
 /** session/prompt can resolve before elicitation/create is registered on our side. */
-async function waitForLateInteractiveRequests(rt: SessionRuntime, graceMs = 5_000) {
+async function waitForLateInteractiveRequests(rt: SessionRuntime) {
+  // Only poll briefly. The old 5s grace blocked EVERY normal turn end even when
+  // no elicitation was coming — felt like a multi-second freeze after the prompt.
+  const graceMs =
+    rt.adapter?.id === "omp" || rt.elicitationThisTurn
+      ? LATE_INTERACTIVE_OMP_GRACE_MS
+      : LATE_INTERACTIVE_GRACE_MS;
   const deadline = Date.now() + graceMs;
   while (rt.pending.size === 0 && Date.now() < deadline && rt.acceptingStream) {
     await new Promise((r) => setTimeout(r, 50));
@@ -2591,6 +2606,9 @@ async function waitForLateInteractiveRequests(rt: SessionRuntime, graceMs = 5_00
 /** OMP often keeps streaming after an elicitation answer while session/prompt already returned. */
 async function drainPostInteractiveStream(rt: SessionRuntime) {
   if (!rt.acceptingStream) return;
+  // Skip the second settle on ordinary turns — resetting lastStreamAt here used to
+  // force another full quiet wait and freeze the UI for seconds after every prompt.
+  if (!rt.elicitationThisTurn && rt.interactiveAnswerAt == null) return;
   rt.lastStreamAt = Date.now();
   await settlePromptStream(rt);
   await waitForPendingClientRequests(rt);

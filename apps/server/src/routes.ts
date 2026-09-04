@@ -48,6 +48,10 @@ import {
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
+import {
+  MAX_ATTACH_UPLOAD_BYTES,
+  stageSessionUpload,
+} from "./services/attachmentUpload.js";
 import { listFolders, rememberFolders, deleteFolder, reorderFolders } from "./services/folders.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { searchMessages } from "./services/search.js";
@@ -937,6 +941,34 @@ export async function registerRoutes(app: FastifyInstance) {
     const blame = getGitBlame(detail.cwd, q.path);
     if (!blame) return reply.code(404).send({ error: "Blame not available" });
     return { blame };
+  });
+
+  /** Stage a clipboard/device image into the session cwd; returns a path attachment. */
+  app.post("/api/sessions/:id/attachments/upload", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        name: z.string().min(1).max(255),
+        mime: z.string().max(120).optional(),
+        data: z.string().min(1),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const approxBytes = Math.floor((body.data.length * 3) / 4);
+    if (approxBytes > MAX_ATTACH_UPLOAD_BYTES) {
+      return reply.code(413).send({ error: "File too large" });
+    }
+    try {
+      const saved = await stageSessionUpload(id, detail.cwd, body);
+      return { name: saved.name, path: saved.path, size: saved.size };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === "File too large") {
+        return reply.code(413).send({ error: message });
+      }
+      return reply.code(400).send({ error: message || "Upload failed" });
+    }
   });
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {
