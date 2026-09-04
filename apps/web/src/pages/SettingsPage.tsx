@@ -92,6 +92,7 @@ function ChatInteractiveConfigRows({
   persistChatSplit: (value: boolean) => void;
 }) {
   const t = useT();
+  const saveSettings = useAppStore((s) => s.saveSettings);
   return (
     <SettingTable>
       <SettingRow label={t("settings.chatSplit")} hint={t("settings.chatSplitHint")}>

@@ -1099,8 +1099,8 @@ export function GitChangesSidePanel({
     commitFilePath: commitSelected ? selection.filePath : null,
     outgoingFiles:
       commitSelected && commitDetail?.hash === selection.hash ? commitDetail.files : [],
-    onInspectOutgoing: (hash) => void selectCommit(hash, { keepChangesTab: true }),
-    onSelectOutgoingFile: (hash, path) => void loadCommitFileDiff(hash, path),
+    onInspectOutgoing: (hash: string) => void selectCommit(hash, { keepChangesTab: true }),
+    onSelectOutgoingFile: (hash: string, path: string) => void loadCommitFileDiff(hash, path),
   };
 
   const panelInner = (
