@@ -258,19 +258,6 @@
   background: #dc2626;
 }
 
-.conflictBanner {
-  position: relative;
-  z-index: 1;
-  margin: 0 12px 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid color-mix(in srgb, #dc2626 35%, var(--border));
-  background: color-mix(in srgb, #dc2626 12%, var(--surface));
-  color: color-mix(in srgb, #dc2626 82%, var(--text));
-  font-size: 0.72rem;
-  line-height: 1.35;
-}
-
 .headerToolbar {
   position: relative;
   z-index: 1;

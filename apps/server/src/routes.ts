@@ -711,9 +711,10 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions/:id/git/status", async (req, reply) => {
     const { id } = req.params as { id: string };
+    const q = z.object({ summary: z.enum(["0", "1"]).optional() }).parse(req.query ?? {});
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    return getGitStatus(detail.cwd);
+    return getGitStatus(detail.cwd, { summary: q.summary === "1" });
   });
 
   app.get("/api/sessions/:id/git/diff", async (req, reply) => {

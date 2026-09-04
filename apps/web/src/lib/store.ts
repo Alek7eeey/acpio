@@ -23,6 +23,7 @@ import {
   type AdapterMetaDto,
 } from "@acpio/shared";
 import { api } from "./api";
+import { turnStillHasLiveTools } from "./assistantTurnTimeline.js";
 import { groupByFolder } from "./sessionTitle";
 import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
@@ -550,19 +551,57 @@ let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: str
  *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
 const serverConfirmedBusy = new Set<string>();
 const delayedIdleTimers = new Map<string, number>();
-const ACTIVE_TURN_PART = new Set(["pending", "in_progress", "running"]);
 
 function sessionHasActiveTurnParts(messages: MessageDto[]) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
     if (msg?.role !== "assistant") continue;
-    return msg.parts.some(
-      (p) =>
-        (p.type === "tool_call" || p.type === "subagent") &&
-        ACTIVE_TURN_PART.has(String(p.payload.status ?? "").toLowerCase()),
-    );
+    return turnStillHasLiveTools(msg.parts);
   }
   return false;
+}
+
+function turnCancelledForSession(state: AppState, sessionId: string) {
+  const cancelled =
+    state.cancelledPromptEpochBySession?.[sessionId] ??
+    (state.activeSession?.id === sessionId ? state.cancelledPromptEpoch : -2);
+  const epoch =
+    state.promptEpochBySession?.[sessionId] ??
+    (state.activeSession?.id === sessionId ? state.promptEpoch : 0);
+  return cancelled === epoch && epoch !== 0;
+}
+
+/** True only while this tab has an in-flight user prompt for the session. */
+function isClientTurnLive(state: AppState, sessionId: string) {
+  if (turnCancelledForSession(state, sessionId)) return false;
+  if ((state.inflightBySession?.[sessionId] ?? 0) > 0) return true;
+  if (serverConfirmedBusy.has(sessionId)) return true;
+  const pane = liveDetail(state, sessionId);
+  return pane?.status === "running" || pane?.status === "waiting";
+}
+
+function reviveRunningIfTurnActive(
+  sessionId: string,
+  messages: MessageDto[],
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+) {
+  const state = get();
+  if (!isClientTurnLive(state, sessionId)) return;
+  if (!sessionHasActiveTurnParts(messages)) return;
+  const pane = liveDetail(state, sessionId);
+  if (!pane || pane.status === "running" || pane.status === "waiting") return;
+  clearDelayedIdle(sessionId);
+  serverConfirmedBusy.add(sessionId);
+  const nextSessions = state.sessions.map((s) =>
+    s.id === sessionId ? { ...s, status: "running" as const } : s,
+  );
+  set({ sessions: nextSessions });
+  if (state.activeSession?.id === sessionId) {
+    commitDetail(get, set, { ...state.activeSession, status: "running", messages });
+  } else {
+    commitDetail(get, set, { ...pane, status: "running", messages });
+  }
 }
 
 function clearDelayedIdle(sessionId: string) {
@@ -895,6 +934,7 @@ function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppS
     }
     if (!touched) continue;
     commitDetail(get, set, { ...current, messages });
+    reviveRunningIfTurnActive(sessionId, messages, get, set);
   }
 }
 
@@ -2451,6 +2491,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (
         session.status === "idle" &&
         !cancelled &&
+        isClientTurnLive(state, event.sessionId) &&
         sessionHasActiveTurnParts(liveMessages)
       ) {
         session = { ...session, status: "running" as typeof session.status };
@@ -2460,10 +2501,15 @@ export const useAppStore = create<AppState>((set, get) => ({
           window.setTimeout(() => {
             delayedIdleTimers.delete(event.sessionId);
             const latest = get();
+            if (!isClientTurnLive(latest, event.sessionId)) return;
             const pane = liveDetail(latest, event.sessionId);
             if (!pane) return;
             if (sessionHasActiveTurnParts(pane.messages)) {
               reconcileFinishedTurn(event.sessionId, get, set);
+            }
+            if (!isClientTurnLive(get(), event.sessionId)) return;
+            if (sessionHasActiveTurnParts(liveDetail(get(), event.sessionId)?.messages ?? [])) {
+              return;
             }
             const nextSessions = latest.sessions.map((s) =>
               s.id === event.sessionId ? { ...s, status: "idle" as const } : s,
@@ -2472,8 +2518,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             markUnseenFinishedIfAway(event.sessionId, get, set);
             set({
               sessions: nextSessions,
-              inflightBySession,
               inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+              inflightBySession,
             });
             if (latest.activeSession?.id === event.sessionId) {
               commitDetail(get, set, { ...latest.activeSession, status: "idle" });

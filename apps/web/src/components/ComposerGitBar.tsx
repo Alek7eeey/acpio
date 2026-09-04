@@ -7,10 +7,19 @@ import { formatGitErrorToast, shouldAwaitGitRepo } from "../lib/gitUi";import { 
 import { GitDiffStats } from "./GitDiffStats";
 import styles from "./ComposerGitBar.module.css";
 
+const gitStatusByCwd = new Map<string, GitStatusDto>();
+
+function gitCwdKey(cwd: string | undefined): string | null {
+  const trimmed = cwd?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\\/g, "/").toLowerCase();
+}
+
 export function useGitStatus(
   sessionId: string | null,
   onStatusChange?: (status: GitStatusDto | null) => void,
   context?: {
+    cwd?: string;
     hasCwd?: boolean;
     sessionStatus?: SessionStatus;
     streaming?: boolean;
@@ -21,6 +30,8 @@ export function useGitStatus(
   const t = useT();
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
+  const cwdRef = useRef(gitCwdKey(context?.cwd));
+  cwdRef.current = gitCwdKey(context?.cwd);
   const [status, setStatus] = useState<GitStatusDto | null>(null);
   const [resolvedSessionId, setResolvedSessionId] = useState<string | null>(null);
   const [branchBusy, setBranchBusy] = useState(false);
@@ -37,6 +48,8 @@ export function useGitStatus(
         onStatusChange?.(null);
         return;
       }
+      const key = cwdRef.current;
+      if (next?.repo && key) gitStatusByCwd.set(key, next);
       setStatus(next);
       setResolvedSessionId(sid);
       onStatusChange?.(next);
@@ -53,34 +66,55 @@ export function useGitStatus(
     isEmptyChat: context?.isEmptyChat,
   });
 
-  const refresh = useCallback(async () => {
-    const sid = sessionRef.current;
-    if (!sid) {
-      setStatus(null);
-      setResolvedSessionId(null);
-      onStatusChange?.(null);
-      return null;
-    }
-    try {
-      const next = await api.gitStatus(sid);
-      if (sessionRef.current !== sid) return null;
-      applyStatus(next);
-      return next;
-    } catch {
-      if (sessionRef.current !== sid) return null;
-      applyStatus(null);
-      return null;
-    }
-  }, [applyStatus, onStatusChange]);
+  const refresh = useCallback(
+    async (opts?: { full?: boolean }) => {
+      const sid = sessionRef.current;
+      if (!sid) {
+        setStatus(null);
+        setResolvedSessionId(null);
+        onStatusChange?.(null);
+        return null;
+      }
+      const summary = !opts?.full && !context?.gitPanelOpen;
+      try {
+        const next = await api.gitStatus(sid, { summary });
+        if (sessionRef.current !== sid) return null;
+        applyStatus(next);
+        return next;
+      } catch {
+        if (sessionRef.current !== sid) return null;
+        applyStatus(null);
+        return null;
+      }
+    },
+    [applyStatus, context?.gitPanelOpen, onStatusChange],
+  );
 
   useLayoutEffect(() => {
+    const cwdKey = gitCwdKey(context?.cwd);
+    if (!sessionId) {
+      setResolvedSessionId(null);
+      setStatus(null);
+      return;
+    }
+    const cached = cwdKey ? gitStatusByCwd.get(cwdKey) : null;
+    if (cached) {
+      setStatus(cached);
+      setResolvedSessionId(sessionId);
+      return;
+    }
     setResolvedSessionId(null);
     setStatus(null);
-  }, [sessionId]);
+  }, [context?.cwd, sessionId]);
 
   useEffect(() => {
     void refresh();
   }, [refresh, sessionId]);
+
+  useEffect(() => {
+    if (!context?.gitPanelOpen || !sessionId) return;
+    void refresh({ full: true });
+  }, [context?.gitPanelOpen, refresh, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -234,11 +268,13 @@ export function GitBranchSwitcher({
   status,
   branchBusy,
   onCheckout,
+  onRequestFullStatus,
   variant = "default",
 }: {
   status: GitStatusDto;
   branchBusy: boolean;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  onRequestFullStatus?: () => void;
   variant?: "default" | "metaChip" | "panelHeader" | "composerMeta" | "composerSubtle";
 }) {
   const t = useT();
@@ -305,6 +341,11 @@ export function GitBranchSwitcher({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    onRequestFullStatus?.();
+  }, [menuOpen, onRequestFullStatus]);
 
   const branches = status.branches.length ? status.branches : status.branch ? [status.branch] : [];
 

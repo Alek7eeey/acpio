@@ -90,6 +90,48 @@ function activeParamChips(
   return chips;
 }
 
+/** Show effort/context/fast from stored values before per-model options arrive. */
+function fallbackParamChipsFromValues(
+  values: Record<string, string>,
+  effortPrefix: string,
+  contextPrefix: string,
+): ParamChip[] {
+  const chips: ParamChip[] = [];
+  const seen = new Set<string>();
+  for (const [key, raw] of Object.entries(values)) {
+    const value = raw?.trim() ?? "";
+    if (!value) continue;
+    const family = modelParamFamily(key);
+    if (!family) continue;
+    if (seen.has(family)) continue;
+    if (family === "fast") {
+      const on = value === "true" || value === "1" || value.toLowerCase() === "yes";
+      if (!on) continue;
+      seen.add(family);
+      chips.push({ key, label: "Fast", title: "Fast", kind: "fast" });
+      continue;
+    }
+    seen.add(family);
+    if (family === "effort") {
+      const full = value.charAt(0).toUpperCase() + value.slice(1);
+      chips.push({
+        key,
+        label: shortEffortChip(full),
+        title: `${effortPrefix}: ${full}`,
+        kind: "effort",
+      });
+      continue;
+    }
+    chips.push({
+      key,
+      label: value.length > 5 ? value.slice(0, 4).toUpperCase() : value.toUpperCase(),
+      title: `${contextPrefix}: ${value}`,
+      kind: "other",
+    });
+  }
+  return chips;
+}
+
 function activeParamSummary(
   params: ModelParamDto[],
   values: Record<string, string>,
@@ -106,6 +148,9 @@ function resolveParamValues(
   params: ModelParamDto[],
   values: Record<string, string>,
 ): Record<string, string> {
+  if (params.length === 0) {
+    return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ""));
+  }
   const next: Record<string, string> = {};
   for (const param of params) {
     const value =
@@ -177,6 +222,8 @@ type ModelPickerProps = {
   onParamsOpen?: (model: string) => void | Promise<void>;
   /** True while parent is fetching params for the open ⋯ model. */
   paramsLoading?: boolean;
+  /** Model value currently being fetched (composer trigger + row ⋯). */
+  paramsLoadingFor?: string;
   /** Called when the dropdown opens — use to refresh params for the current agent. */
   onOpen?: () => void;
   /**
@@ -200,6 +247,7 @@ export function ModelPicker({
   onParamsChange,
   onParamsOpen,
   paramsLoading = false,
+  paramsLoadingFor,
   onOpen,
   showParamsMenu,
   placement = "up",
@@ -255,11 +303,18 @@ export function ModelPicker({
     );
   }, [options, q]);
   const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
-  const paramChips = useMemo(
-    () => activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix),
-    [visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix],
-  );
-  const triggerChips = paramsBusy ? paramChips.filter((c) => c.kind === "fast") : paramChips;
+  const paramChips = useMemo(() => {
+    const fromSchema = activeParamChips(
+      visibleParams,
+      resolvedParams,
+      paramLabels,
+      effortPrefix,
+      contextPrefix,
+    );
+    if (fromSchema.length > 0) return fromSchema;
+    return fallbackParamChipsFromValues(resolvedParams, effortPrefix, contextPrefix);
+  }, [visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix]);
+  const triggerChips = paramChips;
   const baseLabel = loading
     ? t("common.loading")
     : !model
@@ -634,7 +689,9 @@ export function ModelPicker({
     .map((p) => modelParamSectionName(p.id, p.name))
     .join(", ");
   const showMore = showParamsMenu ?? visibleParams.length > 0;
-  const showTriggerParamLoader = paramsBusy && !loading;
+  const showTriggerParamLoader = paramsBusy;
+  const rowParamsBusy = (modelValue: string) =>
+    paramsBusy && (paramsFor === modelValue || paramsLoadingFor === modelValue);
 
   return (
     <div
@@ -850,7 +907,7 @@ export function ModelPicker({
                           void openParamsFor(m.value, e.currentTarget);
                         }}
                       >
-                        {rowActive && paramsBusy ? (
+                        {rowParamsBusy(m.value) ? (
                           <span className={`${styles.paramsSpinner} ${styles.rowMoreSpinner}`} aria-hidden />
                         ) : (
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

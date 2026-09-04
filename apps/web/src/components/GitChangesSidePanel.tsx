@@ -1245,12 +1245,6 @@ export function GitChangesSidePanel({
           </div>
         ) : null}
 
-        {status?.conflict ? (
-          <div className={styles.conflictBanner} role="status">
-            {t("git.conflictsHint", { count: conflictFiles.length })}
-          </div>
-        ) : null}
-
         {repo && !repoPending ? (
           <div className={styles.viewToggleRow}>
             <div className={styles.viewTabs} role="tablist" aria-label={t("git.title")}>

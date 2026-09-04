@@ -43,6 +43,7 @@ import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
+import { finalAnswerPart, stepsPartsStillLive, turnAnswerVisible } from "../lib/assistantTurnTimeline.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
@@ -296,6 +297,8 @@ function formatBytes(bytes: number): string {
 function MessageArticle({
   msg,
   isLiveAssistant,
+  turnActive,
+  stepsStreaming,
   onEditUser,
   onRegenerate,
   activeSession,
@@ -308,6 +311,8 @@ function MessageArticle({
 }: {
   msg: MessageDto;
   isLiveAssistant: boolean;
+  turnActive: boolean;
+  stepsStreaming: boolean;
   onEditUser: (messageId: string, value: string) => void;
   onRegenerate: () => void;
   activeSession: SessionDetailDto | null;
@@ -345,7 +350,8 @@ function MessageArticle({
           message={msg}
           session={activeSession}
           onRegenerate={onRegenerate}
-          streaming={!!isLiveAssistant}
+          turnActive={turnActive}
+          stepsStreaming={stepsStreaming}
           autoExpandSteps={autoExpandSteps}
           stepsGlobalTick={stepsGlobalTick}
           agentTurnTimeline={agentTurnTimeline}
@@ -1036,7 +1042,7 @@ function SubagentPartView({
     ? (part.payload.tools as Array<{ name?: string; args?: string; status?: string }>)
     : [];
   const status = String(part.payload.status ?? "");
-  const working = status === "running";
+  const working = streaming && status === "running";
   const live = streaming && status !== "completed" && status !== "failed";
   const busy = working || live;
   const failed = status === "failed";
@@ -1100,8 +1106,9 @@ function SubagentPartView({
                 const name = String(tool.name ?? "tool").trim() || "tool";
                 const args = String(tool.args ?? "").trim();
                 const toolBusy =
-                  tool.status === "running" ||
-                  (busy && i === tools.length - 1 && tool.status !== "completed");
+                  Boolean(streaming) &&
+                  (tool.status === "running" ||
+                    (busy && i === tools.length - 1 && tool.status !== "completed"));
                 return (
                   <ToolCallRow
                     key={`${part.id}:nested-tool:${i}:${name}:${args.slice(0, 24)}`}
@@ -1531,8 +1538,9 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       rawInput,
     ) || "Tool";
   const status = String(part.payload.status ?? "").toLowerCase();
-  const busy =
-    streaming || status === "in_progress" || status === "pending" || status === "running";
+  const statusActive =
+    status === "in_progress" || status === "pending" || status === "running";
+  const busy = Boolean(streaming && statusActive);
   const detail = busy ? "" : toolOutputDetail(part);
   const output = busy ? "" : toolOutputText(part);
   const path = busy ? "" : toolPath(part);
@@ -1717,6 +1725,7 @@ function StickyStepsToggle({
 function StepsSpoiler({
   parts,
   streaming,
+  turnActive,
   autoExpand,
   startedAt,
   messageId,
@@ -1725,6 +1734,7 @@ function StepsSpoiler({
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
+  turnActive?: boolean;
   autoExpand: boolean;
   startedAt: string;
   messageId: string;
@@ -1791,7 +1801,7 @@ function StepsSpoiler({
     setOpen(autoExpand);
   }, [stepsGlobalTick, autoExpand, setOpen]);
 
-  const liveHeader = streaming || holdEmptyLive;
+  const liveHeader = streaming || holdEmptyLive || (Boolean(turnActive) && parts.length === 0);
 
   useEffect(() => {
     if (!liveHeader) return;
@@ -1878,49 +1888,67 @@ function StepsSpoiler({
   );
 }
 
+type AgentTimelineItem =
+  | { kind: "phase"; thoughts: MessagePartDto[]; tools: MessagePartDto[]; key: string }
+  | { kind: "text"; part: MessagePartDto; key: string }
+  | { kind: "question"; part: MessagePartDto; key: string };
+
 function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[] {
   const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const items: AgentTimelineItem[] = [];
   let thoughtBuf: MessagePartDto[] = [];
+  let toolBuf: MessagePartDto[] = [];
 
-  const flushThoughts = () => {
-    if (thoughtBuf.length === 0) return;
-    items.push({ kind: "thought", parts: thoughtBuf, key: thoughtBuf[0]!.id });
+  const flushPhase = () => {
+    if (thoughtBuf.length === 0 && toolBuf.length === 0) return;
+    const key = thoughtBuf[0]?.id ?? toolBuf[0]!.id;
+    items.push({ kind: "phase", thoughts: thoughtBuf, tools: toolBuf, key });
     thoughtBuf = [];
+    toolBuf = [];
   };
 
   for (const part of sorted) {
-    if (isThoughtPart(part)) {
+    if (part.type === "thought") {
+      if (toolBuf.length > 0) flushPhase();
       thoughtBuf.push(part);
       continue;
     }
-    flushThoughts();
     if (part.type === "tool_call" || part.type === "subagent") {
-      items.push({ kind: "action", part, key: part.id });
-    } else if (part.type === "text" && String(part.payload.text ?? "").trim()) {
+      toolBuf.push(part);
+      continue;
+    }
+    flushPhase();
+    if (part.type === "text" && String(part.payload.text ?? "").trim()) {
       items.push({ kind: "text", part, key: part.id });
     } else if (part.type === "question") {
       items.push({ kind: "question", part, key: part.id });
     }
   }
-  flushThoughts();
+  flushPhase();
   return items;
 }
 
-type AgentTimelineItem =
-  | { kind: "thought"; parts: MessagePartDto[]; key: string }
-  | { kind: "action"; part: MessagePartDto; key: string }
-  | { kind: "text"; part: MessagePartDto; key: string }
-  | { kind: "question"; part: MessagePartDto; key: string };
+function renderTimelineAction(part: MessagePartDto, streaming: boolean) {
+  const status = String(part.payload.status ?? "").toLowerCase();
+  const toolLive =
+    status === "in_progress" || status === "pending" || status === "running";
+  const live = streaming && toolLive;
+  if (part.type === "subagent") {
+    return <SubagentPartView part={part} streaming={live} />;
+  }
+  return <ToolCallRow part={part} streaming={live} />;
+}
 
 function ThoughtPhaseBlock({
   parts,
+  tools = [],
   streaming,
   autoExpand,
   phaseKey,
   stepsGlobalTick,
 }: {
   parts: MessagePartDto[];
+  tools?: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
   phaseKey: string;
@@ -1981,6 +2009,7 @@ function ThoughtPhaseBlock({
     .map((part) => String(part.payload.text ?? "").trim())
     .filter(Boolean)
     .join("\n\n");
+  const hasBody = Boolean(mergedText) || tools.length > 0;
 
   return (
     <div className={styles.agentPhase}>
@@ -1990,11 +2019,18 @@ function ThoughtPhaseBlock({
         label={label}
         onClick={() => setOpen((v) => !v)}
       />
-      {open && mergedText ? (
+      {open && hasBody ? (
         <div className={styles.stepsBody}>
-          <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
-            <div className={styles.thoughtBody}>{renderThoughtText(mergedText)}</div>
-          </div>
+          {mergedText ? (
+            <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
+              <div className={styles.thoughtBody}>{renderThoughtText(mergedText)}</div>
+            </div>
+          ) : null}
+          {tools.map((part, idx) => (
+            <Fragment key={part.id}>
+              {renderTimelineAction(part, streaming && idx === tools.length - 1)}
+            </Fragment>
+          ))}
         </div>
       ) : null}
     </div>
@@ -2052,11 +2088,12 @@ function AgentTurnTimeline({
     <div className={styles.agentTimeline}>
       {items.map((item, idx) => {
         const isLast = idx === items.length - 1;
-        if (item.kind === "thought") {
+        if (item.kind === "phase") {
           return (
             <ThoughtPhaseBlock
               key={item.key}
-              parts={item.parts}
+              parts={item.thoughts}
+              tools={item.tools}
               streaming={streaming && isLast}
               autoExpand={autoExpand}
               phaseKey={item.key}
@@ -2079,14 +2116,7 @@ function AgentTurnTimeline({
             <QuestionPartView key={item.key} part={item.part} sessionId={sessionId} />
           );
         }
-        const status = String(item.part.payload.status ?? "").toLowerCase();
-        const toolLive =
-          status === "in_progress" || status === "pending" || status === "running";
-        const live = streaming && isLast && toolLive;
-        if (item.part.type === "subagent") {
-          return <SubagentPartView key={item.key} part={item.part} streaming={live} />;
-        }
-        return <ToolCallRow key={item.key} part={item.part} streaming={live} />;
+        return null;
       })}
     </div>
   );
@@ -2976,19 +3006,12 @@ function coalesceAssistantParts(
   return out;
 }
 
-/** Last text part in emission order — the final answer of the turn. */
-function lastTextPart(parts: MessagePartDto[]): MessagePartDto | null {
-  for (let i = parts.length - 1; i >= 0; i -= 1) {
-    if (parts[i]?.type === "text") return parts[i];
-  }
-  return null;
-}
-
 function AssistantParts({
   message,
   session,
   onRegenerate,
-  streaming,
+  turnActive,
+  stepsStreaming,
   autoExpandSteps,
   stepsGlobalTick,
   agentTurnTimeline,
@@ -2996,17 +3019,18 @@ function AssistantParts({
   message: MessageDto;
   session: SessionDetailDto | null;
   onRegenerate: () => void;
-  streaming: boolean;
+  turnActive: boolean;
+  stepsStreaming: boolean;
   autoExpandSteps: boolean;
   stepsGlobalTick: number;
   agentTurnTimeline: boolean;
 }) {
   // Keep typewriter "live" after the turn so late/peeled text still types out
   // instead of dumping in one frame when status flips to idle.
-  const [paintStreaming, setPaintStreaming] = useState(streaming);
-  const wasStreamingRef = useRef(streaming);
+  const [paintStreaming, setPaintStreaming] = useState(stepsStreaming);
+  const wasStreamingRef = useRef(stepsStreaming);
   useEffect(() => {
-    if (streaming) {
+    if (stepsStreaming) {
       wasStreamingRef.current = true;
       setPaintStreaming(true);
       return;
@@ -3021,7 +3045,7 @@ function AssistantParts({
     wasStreamingRef.current = false;
     const id = window.setTimeout(() => setPaintStreaming(false), 3200);
     return () => window.clearTimeout(id);
-  }, [streaming, session?.status]);
+  }, [stepsStreaming, session?.status]);
 
   const parts = useMemo(() => {
     return coalesceAssistantParts(message.parts);
@@ -3031,13 +3055,17 @@ function AssistantParts({
   // steps block; intermediate texts, tools, and subagents interleave inside
   // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
-    const finalText = lastTextPart(parts);
+    const finalText = finalAnswerPart(parts, { streaming: stepsStreaming });
     return parts.filter((p) => p !== finalText && p.type !== "error");
-  }, [parts]);
+  }, [parts, stepsStreaming]);
+  const stepsLive = useMemo(
+    () => stepsPartsStillLive(parts, stepsStreaming),
+    [parts, stepsStreaming],
+  );
   const mainParts = useMemo(() => {
-    const finalText = lastTextPart(parts);
+    const finalText = finalAnswerPart(parts, { streaming: stepsStreaming });
     return parts.filter((p) => p === finalText && p.type !== "error");
-  }, [parts]);
+  }, [parts, stepsStreaming]);
   const plain = useMemo(() => {
     return mainParts
       .filter((p) => p.type === "text")
@@ -3046,6 +3074,7 @@ function AssistantParts({
       .trim();
   }, [mainParts]);
   const actionsCtxRef = useRef<MessageCtxHandle | null>(null);
+  const showAgentTimeline = agentTurnTimeline && stepsLive && !plain;
 
   return (
     <div
@@ -3060,26 +3089,27 @@ function AssistantParts({
         actionsCtxRef.current?.openAt(e.clientX, e.clientY);
       }}
     >
-      {agentTurnTimeline ? (
+      {showAgentTimeline ? (
         <AgentTurnTimeline
           parts={stepsParts}
-          streaming={streaming}
+          streaming={stepsStreaming || turnActive}
           autoExpand={autoExpandSteps}
           messageId={message.id}
           sessionId={message.sessionId}
           stepsGlobalTick={stepsGlobalTick}
         />
-      ) : (
+      ) : stepsParts.length > 0 || turnActive ? (
         <StepsSpoiler
           parts={stepsParts}
-          streaming={streaming}
+          streaming={stepsLive}
+          turnActive={turnActive}
           autoExpand={autoExpandSteps}
           startedAt={message.createdAt}
           messageId={message.id}
           sessionId={message.sessionId}
           stepsGlobalTick={stepsGlobalTick}
         />
-      )}
+      ) : null}
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -3352,6 +3382,7 @@ function ChatThread() {
   }, []);
   const [paramsLoading, setParamsLoading] = useState(false);
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
+  const paramsLoadTokenRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerHighlightInnerRef = useRef<HTMLDivElement>(null);
   /** -1 = composer draft; 0..n-1 = browsing sent user messages (oldest→newest). */
@@ -3440,7 +3471,18 @@ function ChatThread() {
       // ignore
     }
   }, [autoExpandSteps]);
-  const streaming = activeSession?.status === "running" || activeSession?.status === "waiting";
+  const sessionBusy =
+    activeSession?.status === "running" || activeSession?.status === "waiting";
+  const turnBusy = sessionBusy || inflight > 0;
+  const lastAssistantParts = useMemo(() => {
+    const last = [...(activeSession?.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === "assistant");
+    return last ? coalesceAssistantParts(last.parts) : [];
+  }, [activeSession?.messages]);
+  const answerVisible = useMemo(() => turnAnswerVisible(lastAssistantParts), [lastAssistantParts]);
+  const stepsStreaming = turnBusy && !answerVisible;
+  const showStop = stepsStreaming;
 
   // MCP servers this chat's agent session runs with: globally enabled minus
   // the ids this chat disabled in its MCP dialog.
@@ -3452,16 +3494,16 @@ function ChatThread() {
   const cancelledPromptEpoch = useAppStore((s) => s.cancelledPromptEpoch);
 
   // Notify when a turn finishes while the tab is hidden (skips cancelled turns).
-  const prevStreaming = useRef(streaming);
+  const prevStreaming = useRef(turnBusy);
   useEffect(() => {
     const wasStreaming = prevStreaming.current;
-    prevStreaming.current = streaming;
-    if (!wasStreaming || streaming) return;
+    prevStreaming.current = turnBusy;
+    if (!wasStreaming || turnBusy) return;
     if (cancelledPromptEpoch === promptEpoch) return; // user hit Stop
     if (document.hidden) {
       notifyTurnComplete(activeSession?.title);
     }
-  }, [streaming, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
+  }, [turnBusy, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
 
   const planPending = pendingQuestion?.kind === "create_plan";
   const activePlan = useMemo((): PlanPayload | null => {
@@ -3674,9 +3716,10 @@ function ChatThread() {
   // Once the agent is already answering, don't keep the composer stuck on "loading models".
   const isEmptyChat = !(activeSession?.messages.some((m) => m.role === "user"));
   const git = useGitStatus(composerSessionId, undefined, {
+    cwd: activeSession?.cwd,
     hasCwd: Boolean(activeSession?.cwd?.trim()),
     sessionStatus: activeSession?.status,
-    streaming,
+    streaming: turnBusy,
     isEmptyChat,
     gitPanelOpen,
   });
@@ -3703,7 +3746,7 @@ function ChatThread() {
     agentOffline ||
     (!isEmptyChat &&
       !!agentProvider &&
-      !streaming &&
+      !turnBusy &&
       !agentOffline &&
       modelsLoading &&
       models.length === 0);
@@ -3722,7 +3765,7 @@ function ChatThread() {
   const slashLoading = slashListStillLoading(activeSession?.slashCommands);
   const slashMenuOpen =
     !slashMenuDismissed &&
-    !streaming &&
+    !turnBusy &&
     slashCtx != null &&
     (slashLoading || filteredSlashCommands.length > 0);
 
@@ -3897,30 +3940,20 @@ function ChatThread() {
   }, [agentProvider, ensureModels]);
 
   useEffect(() => {
-    if (paramsLoading) return;
+    if (!model) {
+      setStableParams([]);
+      return;
+    }
+    const cached = paramsCacheRef.current.get(model);
+    if (cached?.length) {
+      setStableParams((prev) => (modelParamListsEqual(prev, cached) ? prev : cached));
+      return;
+    }
     setStableParams((prev) => (modelParamListsEqual(prev, modelParams) ? prev : modelParams));
-    if (model && modelParams.length) {
+    if (modelParams.length) {
       paramsCacheRef.current.set(model, modelParams);
     }
-  }, [modelParams, model, paramsLoading]);
-
-  useEffect(() => {
-    if (!agentProvider || !model) return;
-    if (paramsCacheRef.current.get(model)?.length) return;
-    if (modelParams.length) return;
-    let cancelled = false;
-    void api
-      .getModelParams(agentProvider, model, { sessionId: activeSession?.id ?? undefined })
-      .then((res) => {
-        if (cancelled || !res.modelParams?.length) return;
-        paramsCacheRef.current.set(model, res.modelParams);
-        setStableParams((prev) => (prev.length ? prev : res.modelParams));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [agentProvider, model, activeSession?.id, modelParams.length]);
+  }, [modelParams, model]);
 
   useEffect(() => {
     const session = activeSession?.provider === agentProvider ? activeSession : null;
@@ -4096,53 +4129,57 @@ function ChatThread() {
     return modelParams;
   };
 
-  const loadParamsForModel = async (nextModel: string) => {
-    const cached = paramsCacheRef.current.get(nextModel);
-    if (cached?.length) {
-      setStableParams(cached);
-      return;
-    }
-    if (nextModel === model) {
-      if (modelParams.length) {
-        paramsCacheRef.current.set(nextModel, modelParams);
-        setStableParams(modelParams);
+  const loadParamsForModel = useCallback(
+    async (nextModel: string) => {
+      const cached = paramsCacheRef.current.get(nextModel);
+      if (cached?.length) {
+        if (nextModel === model) {
+          setStableParams((prev) => (modelParamListsEqual(prev, cached) ? prev : cached));
+        }
         return;
       }
-      const catParams = catalog?.modelParams ?? EMPTY_MODEL_PARAMS;
-      if (catParams.length) {
-        paramsCacheRef.current.set(nextModel, catParams);
-        setStableParams(catParams);
-        return;
-      }
-    }
-    if (!agentProvider) return;
-    setParamsLoading(true);
-    try {
-      const res = await api.getModelParams(agentProvider, nextModel, {
-        sessionId: activeSession?.id,
-      });
-      const committed = res.modelParams?.length ? res.modelParams : [];
-      paramsCacheRef.current.set(nextModel, committed);
-      setStableParams(committed);
-      if (committed.length && nextModel === model) {
-        rememberModelsCatalog({
-          provider: agentProvider,
-          models,
-          modelParams: committed,
-          modes: catalog?.modes ?? [],
-          currentModel: model,
-          at: Date.now(),
+      if (!agentProvider) return;
+      const token = ++paramsLoadTokenRef.current;
+      setParamsLoading(true);
+      try {
+        const res = await api.getModelParams(agentProvider, nextModel, {
+          sessionId: activeSession?.id,
         });
+        if (token !== paramsLoadTokenRef.current) return;
+        const committed = res.modelParams?.length ? res.modelParams : [];
+        paramsCacheRef.current.set(nextModel, committed);
+        if (nextModel === model) {
+          setStableParams(committed);
+          if (committed.length) {
+            rememberModelsCatalog({
+              provider: agentProvider,
+              models,
+              modelParams: committed,
+              modes: catalog?.modes ?? [],
+              currentModel: model,
+              at: Date.now(),
+            });
+          }
+        }
+      } finally {
+        if (token === paramsLoadTokenRef.current) {
+          setParamsLoading(false);
+        }
       }
-    } finally {
-      setParamsLoading(false);
-    }
-  };
+    },
+    [activeSession?.id, agentProvider, catalog?.modes, model, models],
+  );
+
+  useEffect(() => {
+    if (!agentProvider || !model) return;
+    void loadParamsForModel(model);
+  }, [agentProvider, model, activeSession?.id, loadParamsForModel]);
 
   const onModelChange = async (value: string) => {
     // Don't carry Fast/Effort from the previous model — they often aren't valid
     // for the new one and used to leave the ACP session broken.
     await applyModelSelection(value, {});
+    void loadParamsForModel(value);
   };
 
   const modeLabel = (value: string, fallback?: string) => {
@@ -4241,7 +4278,7 @@ function ChatThread() {
   }, [text]);
 
   useEffect(() => {
-    if (streaming) {
+    if (turnBusy) {
       // Keep focus if the user is typing, but never yank the caret into the
       // input just because a stream started (queued turns chain streams and
       // would otherwise flash a blinking cursor on every new reply).
@@ -4252,7 +4289,7 @@ function ChatThread() {
       keepComposerFocus.current = false;
     }, 300);
     return () => window.clearTimeout(t);
-  }, [streaming]);
+  }, [turnBusy]);
 
   const lastMessageId = activeSession?.messages.at(-1)?.id;
   const messageCount = activeSession?.messages.length ?? 0;
@@ -4398,6 +4435,8 @@ function ChatThread() {
         key={msg.id}
         msg={msg}
         isLiveAssistant={isLiveAssistant}
+        turnActive={isLiveAssistant}
+        stepsStreaming={isLiveAssistant ? stepsStreaming : false}
         onEditUser={(messageId, value) => {
           setEditingMessageId(messageId);
           setText(value);
@@ -4439,7 +4478,10 @@ function ChatThread() {
           </span>
         </div>
       ) : null}
-      {renderArticle(row.msg, streaming && row.msg.role === "assistant" && row.msg.id === lastMessageId)}
+      {renderArticle(
+        row.msg,
+        turnBusy && row.msg.role === "assistant" && row.msg.id === lastMessageId,
+      )}
     </Fragment>
   );
   const activeSessionId = activeSession?.id ?? null;
@@ -4673,7 +4715,7 @@ function ChatThread() {
     }
     // Follow while streaming — but only when the user is already at the
     // bottom; scrolled-away readers keep their place while thoughts grow.
-    if (streaming) {
+    if (turnBusy) {
       if (stickToBottomRef.current) scrollThreadToEnd();
       return;
     }
@@ -4683,7 +4725,7 @@ function ChatThread() {
     lastMessageId,
     messageCount,
     streamDigest,
-    streaming,
+    turnBusy,
     pendingPermission?.requestId,
     pendingQuestion?.kind,
     pendingQuestion?.requestId,
@@ -4900,7 +4942,7 @@ function ChatThread() {
                     const globalIndex =
                       activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
                     const isLiveAssistant =
-                      streaming &&
+                      turnBusy &&
                       msg.role === "assistant" &&
                       globalIndex === (activeSession?.messages.length ?? 0) - 1;
                     return renderArticle(msg, isLiveAssistant);
@@ -5070,7 +5112,7 @@ function ChatThread() {
               !agentMissing &&
               !agentOffline &&
               composerLocked &&
-              !streaming && (
+              !turnBusy && (
                 <div className={styles.typingBar}>
                   <span className={styles.modelsLoaderSpin} aria-hidden />
                   <span>{t("common.loadingModels")}</span>
@@ -5108,6 +5150,7 @@ function ChatThread() {
                     awaiting: git.awaiting,
                     branchBusy: git.branchBusy,
                     onCheckout: git.checkout,
+                    onRequestFullStatus: () => void git.refresh({ full: true }),
                     changesOpen: gitPanelOpen,
                     onOpenChanges: openGitChangesPanel,
                   }
@@ -5148,7 +5191,7 @@ function ChatThread() {
           )}
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
-              streaming ? styles.pillBusy : ""
+              showStop ? styles.pillBusy : ""
             } ${composerLocked ? styles.pillLoading : ""}`}
           >
             <SlashCommandMenu
@@ -5308,7 +5351,7 @@ function ChatThread() {
                 className={styles.attachBtn}
                 aria-label={t("chat.attachFiles")}
                 title={t("chat.attachFiles")}
-                disabled={composerLocked || editingMessageId !== null || streaming}
+                disabled={composerLocked || editingMessageId !== null || turnBusy}
                 onClick={() => setAttachDialogOpen(true)}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -5334,6 +5377,7 @@ function ChatThread() {
                   params={stableParams}
                   paramValues={modelParamValues}
                   paramsLoading={paramsLoading}
+                  paramsLoadingFor={paramsLoading ? model : undefined}
                   loading={composerLocked || modelsLoading}
                   disabled={agentMissing || agentOffline}
                   onOpen={() => {
@@ -5345,23 +5389,16 @@ function ChatThread() {
                       cached.provider !== agentProvider ||
                       (cached.models?.length ?? 0) === 0;
                     void ensureModels(agentProvider, { force: needsCatalog });
-                    if (model) {
-                      void api.getModelParams(agentProvider, model, {
-                        sessionId: activeSession?.id,
-                      }).then((res) => {
-                        if (!res.modelParams?.length) return;
-                        paramsCacheRef.current.set(model, res.modelParams);
-                        setStableParams((prev) => (prev.length ? prev : res.modelParams));
-                      });
-                    }
+                    if (model) void loadParamsForModel(model);
                   }}
                   onChange={(v) => void onModelChange(v)}
                   onParamsOpen={(v) => loadParamsForModel(v)}
                   onParamsChange={(next) => void onParamsChange(next)}
+                  showParamsMenu
                 />
                 )}
 
-                {streaming ? (
+                {showStop ? (
                   <button
                     type="button"
                     className={styles.stopBtn}

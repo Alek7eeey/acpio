@@ -2398,7 +2398,10 @@ const STREAM_SETTLE_QUIET_MS = 450;
  * (or nothing arrived at all), the short window applies again.
  */
 const STREAM_SETTLE_ANSWER_QUIET_MS = 4_000;
+/** Default cap for adapters that stream in one burst (OMP). */
 const STREAM_SETTLE_MAX_MS = 12_000;
+/** Cursor turns can run for many minutes with multi-second gaps between tool rounds. */
+const STREAM_SETTLE_CURSOR_MAX_MS = 1_800_000;
 /** OMP /review can keep tool/subagent traffic going for many minutes. */
 const STREAM_SETTLE_TOOL_MAX_MS = 600_000;
 /** After elicitation answer, OMP may pause before /review (or similar) starts streaming. */
@@ -2410,6 +2413,50 @@ function isActiveToolStatus(status: string | undefined): boolean {
   const s = String(status ?? "pending").toLowerCase();
   if (!s) return true;
   return STUCK_TURN_PART.has(s);
+}
+
+/** How long the stream must be quiet before we treat the turn as finished. */
+function streamSettleQuietThresholdMs(rt: SessionRuntime): number {
+  const waitingForAnswer =
+    rt.turnHasThought && !rt.turnHasText && rt.inFlightToolCalls === 0;
+  if (rt.adapter?.id === "cursor") {
+    // Answer is on screen and tools are done — settle quickly once updates stop.
+    if (rt.turnHasText && rt.inFlightToolCalls === 0) {
+      return STREAM_SETTLE_QUIET_MS;
+    }
+    if (waitingForAnswer || rt.inFlightToolCalls > 0) {
+      return STREAM_SETTLE_ANSWER_QUIET_MS;
+    }
+    return 1_500;
+  }
+  if (waitingForAnswer) return STREAM_SETTLE_ANSWER_QUIET_MS;
+  return STREAM_SETTLE_QUIET_MS;
+}
+
+function streamSettleMaxMs(rt: SessionRuntime): number {
+  return rt.adapter?.id === "cursor" ? STREAM_SETTLE_CURSOR_MAX_MS : STREAM_SETTLE_MAX_MS;
+}
+
+function stopTurnSideEffects(rt: SessionRuntime) {
+  for (const poll of rt.subagentThinkingPoll.values()) {
+    clearInterval(poll.timer);
+  }
+  rt.subagentThinkingPoll.clear();
+  for (const toolCallId of [...rt.cursorStorePoll.keys()]) {
+    clearCursorStorePoll(rt, toolCallId);
+  }
+}
+
+async function finalizeTurn(
+  sessionId: string,
+  rt: SessionRuntime,
+  agentStartedAt: number,
+  status: "idle" | "error" = "idle",
+) {
+  stopTurnSideEffects(rt);
+  await completeDanglingTurnParts(sessionId);
+  await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
+  await finishTurnSessionStatus(sessionId, rt, status);
 }
 
 function trackToolFlight(rt: SessionRuntime, toolCallId: string, status: string | undefined) {
@@ -2482,6 +2529,12 @@ async function settlePromptStream(rt: SessionRuntime) {
       continue;
     }
     if (rt.inFlightToolCalls > 0) {
+      const quietThreshold = streamSettleQuietThresholdMs(rt);
+      const quiet = Date.now() - rt.lastStreamAt;
+      if (quiet >= quietThreshold) {
+        // Cursor sometimes never sends a terminal update for an abandoned tool row.
+        break;
+      }
       const elapsed = Date.now() - started;
       if (elapsed >= STREAM_SETTLE_TOOL_MAX_MS) {
         const stalled = Date.now() - rt.lastStreamAt;
@@ -2490,19 +2543,18 @@ async function settlePromptStream(rt: SessionRuntime) {
       await new Promise((r) => setTimeout(r, 50));
       continue;
     }
-    if (Date.now() - started >= STREAM_SETTLE_MAX_MS && rt.interactiveAnswerAt == null) {
+    const quietThreshold = streamSettleQuietThresholdMs(rt);
+    if (
+      Date.now() - started >= streamSettleMaxMs(rt) &&
+      rt.interactiveAnswerAt == null
+    ) {
       // Absolute cap only when the stream is already quiet — long /review runs
       // can stream for minutes after an elicitation answer.
       const stalled = Date.now() - rt.lastStreamAt;
-      if (stalled >= STREAM_SETTLE_QUIET_MS) break;
+      if (stalled >= quietThreshold) break;
     }
     const quiet = Date.now() - rt.lastStreamAt;
-    const waitingForAnswer =
-      rt.turnHasThought && !rt.turnHasText && rt.inFlightToolCalls === 0;
-    if (
-      quiet >= STREAM_SETTLE_QUIET_MS &&
-      (!waitingForAnswer || quiet >= STREAM_SETTLE_ANSWER_QUIET_MS)
-    ) {
+    if (quiet >= quietThreshold) {
       if (rt.interactiveAnswerAt != null && rt.inFlightToolCalls === 0) {
         const sinceAnswer = Date.now() - rt.interactiveAnswerAt;
         if (sinceAnswer < POST_ELICITATION_SPAWN_WAIT_MS) {
@@ -2554,6 +2606,7 @@ async function resumeStreamAfterInteractiveAnswer(rt: SessionRuntime, sessionId:
   await updateSession(sessionId, { status: "running" });
   try {
     await drainPostInteractiveStream(rt);
+    stopTurnSideEffects(rt);
     await completeDanglingTurnParts(sessionId);
     await finishTurnSessionStatus(sessionId, rt, "idle");
   } finally {
@@ -2706,8 +2759,7 @@ async function runTurn(
     });
     setAgentAvailable(opts.provider, true);
     if (!rt.acceptingStream) {
-      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
-      await finishTurnSessionStatus(sessionId, rt, "idle");
+      await finalizeTurn(sessionId, rt, agentStartedAt);
       return result;
     }
     // Agents often resolve session/prompt before the last tool/text updates
@@ -2717,17 +2769,14 @@ async function runTurn(
     await settlePromptStream(rt);
     await waitForPendingClientRequests(rt);
     if (!rt.acceptingStream) {
-      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
-      await finishTurnSessionStatus(sessionId, rt, "idle");
+      await finalizeTurn(sessionId, rt, agentStartedAt);
       return result;
     }
     await drainPostInteractiveStream(rt);
     if (!rt.acceptingStream) {
-      await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
-      await finishTurnSessionStatus(sessionId, rt, "idle");
+      await finalizeTurn(sessionId, rt, agentStartedAt);
       return result;
     }
-    await completeDanglingTurnParts(sessionId);
 
     const detail = await import("../services/sessions.js").then((m) => m.getSessionDetail(sessionId));
     let lastAssistant = detail?.messages.filter((m) => m.role === "assistant").at(-1);
@@ -2743,8 +2792,6 @@ async function runTurn(
         ["text", "thought", "tool_call", "subagent", "plan"].includes(p.type),
       );
     }
-
-    await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
 
     if (!hasContent && !isAgentSlashPrompt(promptUserText)) {
       const model =
@@ -2779,10 +2826,12 @@ async function runTurn(
       });
     }
 
-    await finishTurnSessionStatus(sessionId, rt, "idle");
+    await finalizeTurn(sessionId, rt, agentStartedAt);
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    stopTurnSideEffects(rt);
+    await completeDanglingTurnParts(sessionId);
     await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
     if (isModelAccessError(message)) {
       const currentModel =
@@ -2803,6 +2852,7 @@ async function runTurn(
     }
     throw err;
   } finally {
+    stopTurnSideEffects(rt);
     rt.running = false;
     rt.acceptingStream = false;
     void dequeueTurn(rt);

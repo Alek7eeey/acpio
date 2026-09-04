@@ -538,7 +538,7 @@
     "chatShowMessageTime": "Message timestamps",
     "chatShowMessageTimeHint": "Show the send time next to each message.",
     "chatAgentTurnTimeline": "Agent turn timeline",
-    "chatAgentTurnTimelineHint": "Show separate thinking phases and actions interleaved instead of one collapsible steps block.",
+    "chatAgentTurnTimelineHint": "While the agent is working, show thinking phases with tool calls nested inside. When the reply is done, collapse into one steps block.",
     "chatSplit": "Two chats side by side",
     "chatSplitHint": "Desktop only. A small floating button at the top left of the chat splits the workspace into two chats. Ctrl+click a chat in the tree to open it in the other pane.",
     "chatToolbarStyle": "New chat & search style",

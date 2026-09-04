@@ -141,6 +141,17 @@ function validateBranchName(name: string): string | null {
   return null;
 }
 
+/** `git diff --shortstat` → line totals (untracked files are not included). */
+export function parseShortstat(output: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  const insMatch = output.match(/(\d+)\s+insertion/);
+  const delMatch = output.match(/(\d+)\s+deletion/);
+  if (insMatch) additions = Number.parseInt(insMatch[1]!, 10) || 0;
+  if (delMatch) deletions = Number.parseInt(delMatch[1]!, 10) || 0;
+  return { additions, deletions };
+}
+
 function parseNumstat(output: string): Map<string, { additions: number; deletions: number }> {
   const map = new Map<string, { additions: number; deletions: number }>();
   for (const line of output.split("\n")) {
@@ -203,6 +214,43 @@ function parsePorcelain(output: string, numstat: Map<string, { additions: number
   return files;
 }
 
+function trackedLineTotals(root: string): { additions: number; deletions: number } {
+  const staged = parseShortstat(runGit(root, ["diff", "--cached", "--shortstat"]).out);
+  const unstaged = parseShortstat(runGit(root, ["diff", "--shortstat"]).out);
+  return {
+    additions: staged.additions + unstaged.additions,
+    deletions: staged.deletions + unstaged.deletions,
+  };
+}
+
+function buildStatusSummary(root: string): GitStatusDto {
+  const branch = runGit(root, ["branch", "--show-current"]);
+  const porcelain = runGit(root, ["status", "--porcelain=v1", "-uall"]);
+  const files = parsePorcelain(porcelain.out, new Map());
+  const conflict = files.some(isConflictFile);
+  const stagedCount = files.filter((f) => f.staged).length;
+  const unstagedCount = files.filter((f) => f.unstaged).length;
+  const { additions, deletions } = trackedLineTotals(root);
+  const { ahead, behind } = gitAheadBehind(root, branch.ok ? branch.out : "");
+
+  return {
+    repo: true,
+    root,
+    branch: branch.ok ? branch.out : "",
+    dirty: files.length > 0,
+    conflict,
+    branches: [],
+    files,
+    stagedCount,
+    unstagedCount,
+    additions,
+    deletions,
+    stashCount: 0,
+    aheadCount: ahead,
+    behindCount: behind,
+  };
+}
+
 function buildStatus(root: string): GitStatusDto {
   const branch = runGit(root, ["branch", "--show-current"]);
   const branches = runGit(root, ["branch", "--format=%(refname:short)"]);
@@ -211,22 +259,12 @@ function buildStatus(root: string): GitStatusDto {
   const numstat = new Map<string, { additions: number; deletions: number }>();
   mergeNumstat(numstat, parseNumstat(runGit(root, ["diff", "--cached", "--numstat"]).out));
   mergeNumstat(numstat, parseNumstat(runGit(root, ["diff", "--numstat"]).out));
-  const untracked = runGit(root, ["ls-files", "--others", "--exclude-standard"]);
-  for (const rel of untracked.out.split("\n").filter(Boolean)) {
-    try {
-      const content = fs.readFileSync(path.join(root, rel), "utf8");
-      numstat.set(rel, { additions: content.split("\n").length, deletions: 0 });
-    } catch {
-      numstat.set(rel, { additions: 0, deletions: 0 });
-    }
-  }
 
   const files = parsePorcelain(porcelain.out, numstat);
   const conflict = files.some(isConflictFile);
   const stagedCount = files.filter((f) => f.staged).length;
   const unstagedCount = files.filter((f) => f.unstaged).length;
-  const additions = files.reduce((sum, f) => sum + f.additions, 0);
-  const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
+  const { additions, deletions } = trackedLineTotals(root);
   const stashList = runGit(root, ["stash", "list"]);
   const stashCount = stashList.ok ? stashList.out.split("\n").filter(Boolean).length : 0;
   const { ahead, behind } = gitAheadBehind(root, branch.ok ? branch.out : "");
@@ -251,7 +289,7 @@ function buildStatus(root: string): GitStatusDto {
   };
 }
 
-export function getGitStatus(cwd: string): GitStatusDto {
+export function getGitStatus(cwd: string, opts?: { summary?: boolean }): GitStatusDto {
   const empty: GitStatusDto = {
     repo: false,
     root: "",
@@ -270,7 +308,7 @@ export function getGitStatus(cwd: string): GitStatusDto {
   };
   const root = resolveGitRoot(cwd);
   if (!root) return empty;
-  return buildStatus(root);
+  return opts?.summary ? buildStatusSummary(root) : buildStatus(root);
 }
 
 function nullDevice() {

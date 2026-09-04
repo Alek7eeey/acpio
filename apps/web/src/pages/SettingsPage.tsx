@@ -1633,6 +1633,7 @@ export function SettingsPage() {
                         params={modelParams}
                         paramValues={paramValues}
                         paramsLoading={loadingParams}
+                        paramsLoadingFor={loadingParams && model ? model : undefined}
                         showParamsMenu={parameterized || modelParams.length > 0}
                         onChange={(value) => {
                           pendingModelPickRef.current[item.id] = value;

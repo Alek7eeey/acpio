@@ -142,6 +142,7 @@ export function ComposerMetaChips({
     awaiting?: boolean;
     branchBusy: boolean;
     onCheckout: (branch: string, create?: boolean) => Promise<void>;
+    onRequestFullStatus?: () => void;
     changesOpen: boolean;
     onOpenChanges: () => void;
   };
@@ -255,6 +256,7 @@ export function ComposerMetaChips({
                 status={gitChip.status}
                 branchBusy={gitChip.branchBusy}
                 onCheckout={gitChip.onCheckout}
+                onRequestFullStatus={gitChip.onRequestFullStatus}
                 variant="composerMeta"
               />
               {gitChip.status.conflict ? (

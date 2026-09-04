@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { parseLeftRightCount } from "./git.js";
+import { parseLeftRightCount, parseShortstat } from "./git.js";
+
+describe("parseShortstat", () => {
+  it.each([
+    ["", { additions: 0, deletions: 0 }],
+    [" 1 file changed, 5 insertions(+)", { additions: 5, deletions: 0 }],
+    [" 2 files changed, 10 insertions(+), 3 deletions(-)", { additions: 10, deletions: 3 }],
+    [" 1 file changed, 1 deletion(-)", { additions: 0, deletions: 1 }],
+  ])("%j → %j", (raw, expected) => {
+    expect(parseShortstat(raw)).toEqual(expected);
+  });
+});
 
 describe("parseLeftRightCount", () => {
   it.each([

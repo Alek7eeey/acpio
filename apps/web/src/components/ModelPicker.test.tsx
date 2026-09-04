@@ -154,6 +154,20 @@ describe("ModelPicker", () => {
     expect(screen.getByLabelText("Загрузка настроек модели…")).toBeTruthy();
   });
 
+  it("shows effort/context chips from stored values before options load", () => {
+    renderPicker({
+      params: [],
+      paramValues: { reasoning_effort: "high", context: "200k" },
+    });
+    expect(screen.getByText("High")).toBeTruthy();
+    expect(screen.getByText("200K")).toBeTruthy();
+  });
+
+  it("keeps the param loader visible while models are still loading", () => {
+    renderPicker({ paramsLoading: true, loading: true, showParamsMenu: true });
+    expect(screen.getByLabelText("Загрузка настроек модели…")).toBeTruthy();
+  });
+
   it("shows a loader in the ⋯ flyout while params are fetched", async () => {
     const user = userEvent.setup();
     let resolveOpen: () => void = () => {};

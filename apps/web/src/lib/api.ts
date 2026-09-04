@@ -220,7 +220,10 @@ export const api = {
     }),
   detachConsole: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/console/detach`, { method: "POST" }),
-  gitStatus: (id: string) => request<GitStatusDto>(`/api/sessions/${id}/git/status`),
+  gitStatus: (id: string, opts?: { summary?: boolean }) => {
+    const q = opts?.summary ? "?summary=1" : "";
+    return request<GitStatusDto>(`/api/sessions/${id}/git/status${q}`);
+  },
   gitDiff: (id: string, filePath?: string) => {
     const q = filePath ? `?path=${encodeURIComponent(filePath)}` : "";
     return request<{ diff: string }>(`/api/sessions/${id}/git/diff${q}`);
