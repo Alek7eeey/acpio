@@ -138,7 +138,7 @@ export function GitComposerLoadingBar({
 }) {
   const t = useT();
   const premium = variant === "composerFooter";
-  const iconOnly = variant === "metaChip" || variant === "composerMeta";
+  const iconOnly = variant === "metaChip";
   return (
     <div
       className={`${styles.bar} ${styles.barLoading}${
@@ -248,7 +248,8 @@ export function GitBranchSwitcher({
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const branchBtnRef = useRef<HTMLButtonElement>(null);
-  const useFixedMenu = variant === "panelHeader";
+  const useFixedMenu =
+    variant === "panelHeader" || variant === "composerMeta" || variant === "metaChip";
 
   useLayoutEffect(() => {
     if (!menuOpen || !branchBtnRef.current) return;
@@ -457,7 +458,7 @@ export function ComposerGitBranchBar({
           status={status}
           changesOpen={changesOpen ?? false}
           onOpenChanges={onOpenChanges}
-          iconOnly={variant === "metaChip" || variant === "composerMeta"}
+          iconOnly={variant === "metaChip"}
           premium={premium}
         />
       ) : null}

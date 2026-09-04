@@ -173,6 +173,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatAgentTurnTimeline !== "boolean") {
     merged.chatAgentTurnTimeline = DEFAULT_SETTINGS.chatAgentTurnTimeline;
   }
+  if (merged.chatGitBranchPosition !== "above") {
+    merged.chatGitBranchPosition = "below";
+  }
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }

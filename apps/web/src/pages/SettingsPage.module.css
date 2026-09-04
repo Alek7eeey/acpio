@@ -22,6 +22,14 @@
   min-width: 0;
 }
 
+.panelChat {
+  max-width: 960px;
+}
+
+.panelChat .actionChips {
+  max-width: 520px;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
@@ -1699,6 +1707,14 @@
   border: none;
   border-radius: 0;
   border-top: 1px solid var(--border);
+}
+
+.chatBehaviorBlock {
+  margin-top: 20px;
+}
+
+.chatBehaviorBlock .sectionHeading {
+  margin-bottom: 10px;
 }
 
 /* Mobile settings use the bottom-sheet tree (header burger), not chip nav. */

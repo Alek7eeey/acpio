@@ -23,6 +23,7 @@ import {
   type AdapterMetaDto,
 } from "@acpio/shared";
 import { api } from "./api";
+import { groupByFolder } from "./sessionTitle";
 import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
 import {
@@ -181,6 +182,7 @@ type AppState = {
   knownFolders: string[];
   refreshFolders: () => Promise<void>;
   deleteFolder: (cwd: string) => Promise<void>;
+  reorderFolders: (items: Array<{ cwd: string; sortOrder: number }>) => Promise<void>;
   /** Live details for open split panes (and the focused chat). */
   sessionDetails: Record<string, SessionDetailDto>;
   setChatPaneCount: (count: number) => void;
@@ -1102,6 +1104,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the folder
     }
   },
+  reorderFolders: async (items) => {
+    try {
+      const folders = await api.reorderFolders(items);
+      set({ knownFolders: folders });
+    } catch {
+      // server offline — keep the current list
+    }
+  },
   focusMessageId: null,
   sessionLoading: false,
   restoringSessionIds: {},
@@ -1825,6 +1835,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!chosen) {
       throw new Error("noAgentsOnline");
     }
+
+    // Save the chosen provider as the last selected provider in localStorage
+    if (typeof localStorage !== "undefined") {
+      try {
+        localStorage.setItem("acpio.lastSelectedProvider.v1", chosen);
+      } catch {
+        // ignore
+      }
+    }
+
     const pinnedModel = model?.trim();
     const session = await api.createSession({
       themeId: null,
@@ -1927,6 +1947,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async setSessionFlags(id, patch) {
+    const isArchivingActive = patch.archived === true && get().activeSessionId === id;
+    let nextSessionId: string | null = null;
+
+    if (isArchivingActive) {
+      const oldFoldersList = groupByFolder(
+        get().sessions.filter((s) => !s.archived),
+        get().knownFolders
+      );
+      const oldVisibleSessions = oldFoldersList.flatMap((f) => f.sessions);
+      const oldIndex = oldVisibleSessions.findIndex((s) => s.id === id);
+
+      const remainingSessions = oldVisibleSessions.filter((s) => s.id !== id);
+      if (remainingSessions.length > 0) {
+        const nextSession =
+          remainingSessions[oldIndex] ??
+          remainingSessions[oldIndex - 1] ??
+          remainingSessions[0];
+        nextSessionId = nextSession.id;
+      }
+    }
+
     // Optimistic flip, then reconcile flags — never activity stamps.
     const apply = (s: SessionDto) => (s.id === id ? { ...s, ...patch } : s);
     set({
@@ -1936,6 +1977,11 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...get().activeSession!, ...patch }
           : get().activeSession,
     });
+
+    if (isArchivingActive) {
+      await get().selectSession(nextSessionId);
+    }
+
     try {
       const updated = await api.updateSession(id, patch);
       if (!updated) return;

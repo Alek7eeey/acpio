@@ -110,7 +110,7 @@ describe("health & settings", () => {
   it("GET /api/health returns ok", async () => {
     const res = await app.inject({ method: "GET", url: "/api/health" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: true });
+    expect(res.json()).toEqual({ ok: true, platform: process.platform });
   });
 
   it("GET /api/export/default-dir returns the exports folder", async () => {
@@ -148,6 +148,20 @@ describe("health & settings", () => {
     expect(get.json().theme).toBe("dark");
     expect(get.json().locale).toBe("en");
     expect(get.json().displayName).toBe("Tester");
+  });
+
+  it("PUT /api/settings persists chatGitBranchPosition", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { chatGitBranchPosition: "above" },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().chatGitBranchPosition).toBe("above");
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().chatGitBranchPosition).toBe("above");
   });
 
   it("generates a remote access key by default; LAN needs it until explicitly cleared", async () => {

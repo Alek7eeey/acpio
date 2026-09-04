@@ -159,6 +159,31 @@
   border-color: var(--border);
 }
 
+.triggerParamsSpinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.paramChipLoading {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.paramChipLoader {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+}
+
 .modelTrigger:hover .modelTriggerName,
 .modelTriggerOpen .modelTriggerName {
   color: var(--text);
@@ -408,6 +433,11 @@
   flex: 0 0 auto;
 }
 
+.rowMoreSpinner {
+  width: 12px;
+  height: 12px;
+}
+
 @keyframes paramsSpin {
   to {
     transform: rotate(360deg);
@@ -645,6 +675,10 @@
 
   .paramChip {
     display: none;
+  }
+
+  .paramChipLoading {
+    display: inline-flex;
   }
 }
 

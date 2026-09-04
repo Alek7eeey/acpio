@@ -10,13 +10,13 @@ import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
-import { DEFAULT_SERVER_PORT } from "@acpio/shared";
+import { resolveServerPort } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
 
-const port = Number(process.env.PORT ?? DEFAULT_SERVER_PORT);
+const port = resolveServerPort();
 const corsOrigin = process.env.CORS_ORIGIN;
 /** Set CORS_STRICT=1 to pin origins from CORS_ORIGIN again. */
 const corsStrict = process.env.CORS_STRICT === "1";
@@ -36,7 +36,11 @@ function applyWebNoCacheHeaders(res: ServerResponse) {
 
 async function main() {
   await ensureSchema();
-  const app = Fastify({ logger: true, trustProxy: true });
+  const app = Fastify({
+    logger: true,
+    trustProxy: true,
+    bodyLimit: 50 * 1024 * 1024, // 50MB limit to allow large diagnostic dumps and attachments
+  });
   await app.register(cors, {
     // TEMPORARY: reflect any browser Origin so LAN / alternate hostnames work.
     origin:

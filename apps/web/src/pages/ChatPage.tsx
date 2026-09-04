@@ -1649,6 +1649,71 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
   );
 }
 
+function StickyStepsToggle({
+  open,
+  liveHeader,
+  label,
+  onClick,
+}: {
+  open: boolean;
+  liveHeader: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [isStuck, setIsStuck] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry) return;
+        const rootTop = entry.rootBounds?.top ?? 0;
+        setIsStuck(entry.boundingClientRect.top <= rootTop + 2);
+      },
+      { threshold: [1] },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      tabIndex={-1}
+      className={styles.stepsToggle}
+      data-stuck={isStuck ? "true" : "false"}
+      aria-expanded={open}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+    >
+      <span className={styles.stepsIcon}>
+        <ThoughtSparkIcon size={16} />
+      </span>
+      <span className={styles.stepsTitle}>
+        {liveHeader ? <span className={styles.pulseDot} /> : null}
+        {label}
+      </span>
+      <span
+        className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
+        aria-hidden
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M9 6l6 6-6 6"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    </button>
+  );
+}
+
 function StepsSpoiler({
   parts,
   streaming,
@@ -1788,36 +1853,12 @@ function StepsSpoiler({
 
   return (
     <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`}>
-      <button
-        type="button"
-        tabIndex={-1}
-        className={styles.stepsToggle}
-        aria-expanded={open}
-        onMouseDown={(e) => e.preventDefault()}
+      <StickyStepsToggle
+        open={open}
+        liveHeader={liveHeader}
+        label={label}
         onClick={() => setOpen((v) => !v)}
-      >
-        <span className={styles.stepsIcon}>
-          <ThoughtSparkIcon size={16} />
-        </span>
-        <span className={styles.stepsTitle}>
-          {liveHeader ? <span className={styles.pulseDot} /> : null}
-          {label}
-        </span>
-        <span
-          className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
-          aria-hidden
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M9 6l6 6-6 6"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
-      </button>
+      />
       {showSubagentsOutside ? (
         <div className={styles.stepsSubagentsPeek}>
           {subagentParts
@@ -1943,36 +1984,12 @@ function ThoughtPhaseBlock({
 
   return (
     <div className={styles.agentPhase}>
-      <button
-        type="button"
-        tabIndex={-1}
-        className={styles.stepsToggle}
-        aria-expanded={open}
-        onMouseDown={(e) => e.preventDefault()}
+      <StickyStepsToggle
+        open={open}
+        liveHeader={streaming}
+        label={label}
         onClick={() => setOpen((v) => !v)}
-      >
-        <span className={styles.stepsIcon}>
-          <ThoughtSparkIcon size={16} />
-        </span>
-        <span className={styles.stepsTitle}>
-          {streaming ? <span className={styles.pulseDot} /> : null}
-          {label}
-        </span>
-        <span
-          className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
-          aria-hidden
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M9 6l6 6-6 6"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </span>
-      </button>
+      />
       {open && mergedText ? (
         <div className={styles.stepsBody}>
           <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
@@ -3663,16 +3680,23 @@ function ChatThread() {
     isEmptyChat,
     gitPanelOpen,
   });
+  const gitChips = settings.chatMetaChips ?? [];
+  const gitBranchChipOn = gitChips.includes("gitBranch");
+  const gitChangesChipOn = gitChips.includes("gitChanges");
+  const gitMetaChipOn = gitBranchChipOn || gitChangesChipOn;
   const showGitComposer = useMemo(
     () =>
+      gitMetaChipOn &&
       shouldShowGitComposerUi({
         loading: git.loading,
         awaiting: git.awaiting,
         status: git.status,
         hasCwd: Boolean(activeSession?.cwd?.trim()),
       }),
-    [activeSession?.cwd, git.awaiting, git.loading, git.status],
+    [activeSession?.cwd, git.awaiting, git.loading, git.status, gitMetaChipOn],
   );
+  const gitBranchBelow =
+    gitBranchChipOn && (settings.chatGitBranchPosition ?? "below") !== "above";
   // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
   const composerLocked =
     agentMissing ||
@@ -5421,7 +5445,7 @@ function ChatThread() {
               </div>
             </div>
           </div>
-          {showGitComposer ? (
+          {showGitComposer && gitBranchBelow ? (
             git.status?.repo ? (
               <div className={styles.gitComposerFooter}>
                 <ComposerGitBranchBar

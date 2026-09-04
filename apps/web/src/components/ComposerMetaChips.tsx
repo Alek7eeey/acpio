@@ -13,7 +13,7 @@ import type { AgentMode, AppSettings, ChatMetaChipId, SessionDetailDto, GitStatu
 import { isShellSession } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { OptionPicker } from "./OptionPicker";
-import { ComposerGitChangesButton, GitChangesChipLoader } from "./ComposerGitBar";
+import { ComposerGitChangesButton, GitChangesChipLoader, GitBranchSwitcher } from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
 import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
@@ -233,20 +233,46 @@ export function ComposerMetaChips({
             <MiddleTruncate text={activeSession.cwd} className={styles.sessionCwdText} />
           </div>
         );
-      } else if (id === "git" && (gitChip?.awaiting || gitChip?.loading)) {
+      } else if (id === "gitBranch" && (gitChip?.awaiting || gitChip?.loading)) {
+        if (settings.chatGitBranchPosition === "above") {
+          node = (
+            <div className={gitBarStyles.barComposerMeta}>
+              <GitChangesChipLoader />
+            </div>
+          );
+        }
+      } else if (id === "gitChanges" && (gitChip?.awaiting || gitChip?.loading)) {
         node = (
           <div className={gitBarStyles.barComposerFooter}>
             <GitChangesChipLoader premium />
           </div>
         );
-      } else if (id === "git" && gitChip?.status?.repo) {
+      } else if (id === "gitBranch" && gitChip?.status?.repo) {
+        if (settings.chatGitBranchPosition === "above") {
+          node = (
+            <div className={`${gitBarStyles.bar} ${gitBarStyles.barComposerMeta}`}>
+              <GitBranchSwitcher
+                status={gitChip.status}
+                branchBusy={gitChip.branchBusy}
+                onCheckout={gitChip.onCheckout}
+                variant="composerMeta"
+              />
+              {gitChip.status.conflict ? (
+                <span className={gitBarStyles.conflictBadge} title={t("common.conflicts")}>
+                  {t("common.conflicts")}
+                </span>
+              ) : null}
+            </div>
+          );
+        }
+      } else if (id === "gitChanges" && gitChip?.status?.repo) {
         node = (
           <div className={gitBarStyles.barComposerFooter}>
             <ComposerGitChangesButton
               status={gitChip.status}
               changesOpen={gitChip.changesOpen}
               onOpenChanges={gitChip.onOpenChanges}
-              premium
+              premium={settings.chatGitBranchPosition !== "above"}
             />
           </div>
         );
@@ -371,12 +397,13 @@ export function ComposerMetaChips({
     settings.chatMetaChips,
     settings.consoleChipStyle,
     settings.thoughtsChipStyle,
+    settings.chatGitBranchPosition,
     t,
   ]);
 
   const chipKey = chipItems.map((item) => item.id).join(",");
   const gitLayoutSig = gitChip
-    ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
+    ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
   const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay.label}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;

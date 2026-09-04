@@ -80,6 +80,7 @@ export const messageParts = sqliteTable("message_parts", {
 /** Folders that have ever held chats — keeps empty folders visible. */
 export const chatFolders = sqliteTable("chat_folders", {
   cwd: text("cwd").primaryKey(),
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: createdAt(),
 });
 

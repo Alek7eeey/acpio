@@ -21,9 +21,23 @@ export function App() {
   const showBootSplash = useAppStore((s) => s.settings.showBootSplash);
   const agentGateDismissed = useAppStore((s) => s.agentGateDismissed);
   const [splashVisible, setSplashVisible] = useState(true);
-  const [remoteLock, setRemoteLock] = useState<"unknown" | "locked" | "open">("unknown");
+
+  const isLocalhost = typeof window !== "undefined" && (
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1" ||
+    window.location.hostname === "[::1]" ||
+    window.location.hostname.endsWith(".localhost")
+  );
+
+  const [remoteLock, setRemoteLock] = useState<"unknown" | "locked" | "open">(
+    isLocalhost ? "open" : "unknown"
+  );
 
   useEffect(() => {
+    if (isLocalhost) {
+      setRemoteLock("open");
+      return;
+    }
     let cancelled = false;
     const unlock = (next: "locked" | "open") => {
       if (cancelled) return;
@@ -42,7 +56,7 @@ export function App() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [isLocalhost]);
 
   useEffect(() => {
     if (remoteLock !== "open") return;

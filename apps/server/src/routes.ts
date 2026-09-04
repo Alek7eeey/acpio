@@ -48,7 +48,7 @@ import {
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
-import { listFolders, rememberFolders, deleteFolder } from "./services/folders.js";
+import { listFolders, rememberFolders, deleteFolder, reorderFolders } from "./services/folders.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
@@ -166,6 +166,7 @@ const settingsSchema = z.object({
   chatEnterToSend: z.boolean().optional(),
   chatShowMessageTime: z.boolean().optional(),
   chatAgentTurnTimeline: z.boolean().optional(),
+  chatGitBranchPosition: z.enum(["below", "above"]).optional(),
   chatSplit: z.boolean().optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
@@ -448,6 +449,21 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z.object({ cwds: z.array(z.string().min(1)).max(200) }).parse(req.body);
     await rememberFolders(body.cwds);
     return { ok: true };
+  });
+
+  app.put("/api/folders/reorder", async (req) => {
+    const body = z
+      .object({
+        items: z.array(
+          z.object({
+            cwd: z.string(),
+            sortOrder: z.number().int(),
+          }),
+        ),
+      })
+      .parse(req.body);
+    const folders = await reorderFolders(body.items);
+    return { ok: true, folders };
   });
 
   app.delete("/api/folders", async (req) => {

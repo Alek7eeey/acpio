@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   BUILD_INFO,
   type ChatActionId,
@@ -13,12 +14,21 @@ import { useLocale, useT } from "../lib/i18n";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
-const CHIP_ORDER: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
+const CHIP_ORDER: ChatMetaChipId[] = [
+  "folder",
+  "gitBranch",
+  "gitChanges",
+  "thoughts",
+  "mcp",
+  "context",
+  "console",
+];
 const ALL_META_CHIPS: ChatMetaChipId[] = [...CHIP_ORDER];
 
 const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
   folder: "settings.chatMetaChipFolder",
-  git: "settings.chatMetaChipGit",
+  gitBranch: "settings.chatMetaChipGitBranch",
+  gitChanges: "settings.chatMetaChipGitChanges",
   thoughts: "settings.chatMetaChipThoughts",
   mcp: "settings.chatMetaChipMcp",
   context: "settings.chatMetaChipContext",
@@ -395,23 +405,89 @@ function PreviewActions({
   );
 }
 
+function PreviewGitBranchOnly({ dragging = false }: { dragging?: boolean }) {
+  return (
+    <span
+      className={`${styles.previewGitBranch}${dragging ? ` ${styles.previewGitBranchDragging}` : ""}`}
+    >
+      <PreviewGitBranchIcon />
+      <span>main</span>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden className={styles.previewGitChevron}>
+        <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+function PreviewGitChangesOnly() {
+  return (
+    <span className={styles.previewGitChangesChip}>
+      <span className={styles.previewGitChangesAdd}>+2</span>
+      <span className={styles.previewGitChangesDel}>-1</span>
+      <span className={styles.previewGitChangesSep}>·</span>
+      <span>3</span>
+    </span>
+  );
+}
+
+function hitGitZone(x: number, y: number): "below" | "above" | null {
+  for (const el of document.querySelectorAll<HTMLElement>("[data-git-zone]")) {
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+      const zone = el.dataset.gitZone;
+      if (zone === "above" || zone === "below") return zone;
+    }
+  }
+  return null;
+}
+
+function PreviewGitDropHint({
+  hintPos,
+  label,
+}: {
+  hintPos: { x: number; y: number } | null;
+  label: string | null;
+}) {
+  if (!hintPos || !label || typeof document === "undefined") return null;
+  return createPortal(
+    <span
+      className={styles.previewGitDropHintFixed}
+      style={{ left: hintPos.x, top: hintPos.y }}
+      aria-hidden
+    >
+      {label}
+    </span>,
+    document.body,
+  );
+}
+
 function PreviewMetaChips({
   chips,
   ordered,
   onToggle,
   onReorder,
+  gitBranchAbove = false,
+  onGitBranchPositionChange,
 }: {
   chips: ChatMetaChipId[];
   ordered: ChatMetaChipId[];
   onToggle: (id: ChatMetaChipId) => void;
   onReorder: (dragged: ChatMetaChipId, target: ChatMetaChipId) => void;
+  gitBranchAbove?: boolean;
+  onGitBranchPositionChange?: (next: "below" | "above") => void;
 }) {
   const t = useT();
   const [overId, setOverId] = useState<ChatMetaChipId | null>(null);
   const [draggingId, setDraggingId] = useState<ChatMetaChipId | null>(null);
+  const [gitHintPos, setGitHintPos] = useState<{ x: number; y: number } | null>(null);
+  const [gitHoverZone, setGitHoverZone] = useState<"below" | "above" | null>(null);
+  const [chipsEdge, setChipsEdge] = useState({ left: false, right: false });
+  const chipsRef = useRef<HTMLDivElement>(null);
   const skipClickRef = useRef(false);
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
+  const onGitPositionRef = useRef(onGitBranchPositionChange);
+  onGitPositionRef.current = onGitBranchPositionChange;
   const isOn = (id: ChatMetaChipId) => chips.includes(id);
 
   const onPointerDown = (id: ChatMetaChipId) => (e: ReactPointerEvent<HTMLSpanElement>) => {
@@ -441,6 +517,17 @@ function PreviewMetaChips({
         skipClickRef.current = true;
         setDraggingId(id);
       }
+      if (id === "gitBranch" && gitBranchAbove) {
+        const zone = hitGitZone(ev.clientX, ev.clientY);
+        if (zone === "below") {
+          setGitHoverZone(zone);
+          setGitHintPos({ x: ev.clientX, y: ev.clientY + 18 });
+          setOverId(null);
+          return;
+        }
+        setGitHoverZone(null);
+        setGitHintPos(null);
+      }
       setOverId(hit(ev.clientX, ev.clientY));
     };
     const onUp = (ev: PointerEvent) => {
@@ -448,10 +535,17 @@ function PreviewMetaChips({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
+      const zone = moved ? hitGitZone(ev.clientX, ev.clientY) : null;
       const target = moved ? hit(ev.clientX, ev.clientY) : null;
       setDraggingId(null);
       setOverId(null);
-      if (moved && target && target !== id) onReorderRef.current(id, target);
+      setGitHoverZone(null);
+      setGitHintPos(null);
+      if (id === "gitBranch" && gitBranchAbove && moved && zone === "below") {
+        onGitPositionRef.current?.("below");
+      } else if (moved && target && target !== id) {
+        onReorderRef.current(id, target);
+      }
       if (moved) {
         window.setTimeout(() => {
           skipClickRef.current = false;
@@ -463,33 +557,226 @@ function PreviewMetaChips({
     window.addEventListener("pointercancel", onUp);
   };
 
+  const gitHintLabel =
+    gitHoverZone === "below"
+      ? t("settings.chatGitBranchDragHint")
+      : gitHoverZone === "above"
+        ? t("settings.chatGitBranchPositionAbove")
+        : null;
+
+  useEffect(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    const sync = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const left = el.scrollLeft > 2;
+      const right = max > 2 && el.scrollLeft < max - 2;
+      setChipsEdge((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+    };
+    sync();
+    el.addEventListener("scroll", sync, { passive: true });
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", sync);
+      ro.disconnect();
+    };
+  }, [ordered, chips, gitBranchAbove]);
+
+  const scrollChipsRight = () => {
+    const el = chipsRef.current;
+    if (!el) return;
+    el.scrollBy({ left: Math.max(96, el.clientWidth * 0.55), behavior: "smooth" });
+  };
+
+  const scrollChipsLeft = () => {
+    const el = chipsRef.current;
+    if (!el) return;
+    el.scrollBy({ left: -Math.max(96, el.clientWidth * 0.55), behavior: "smooth" });
+  };
+
   return (
-    <div className={styles.chips}>
-      {ordered.map((id) => (
-        <span
-          key={id}
-          data-chip-id={id}
-          className={`${styles.dragSlot}${overId === id ? ` ${styles.dragSlotOver}` : ""}${
-            draggingId === id ? ` ${styles.dragSlotDragging}` : ""
-          }`}
-          onPointerDown={onPointerDown(id)}
-        >
-          <El
-            on={isOn(id)}
-            variant="dim"
-            onToggle={() => {
-              if (skipClickRef.current) return;
-              onToggle(id);
-            }}
-            label={t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
+    <>
+      <div
+        className={`${styles.previewChipsShell}${
+          chipsEdge.right ? ` ${styles.previewChipsFadeRight}` : ""
+        }${chipsEdge.left ? ` ${styles.previewChipsFadeLeft}` : ""}`}
+      >
+        <div ref={chipsRef} className={styles.chips} data-git-zone="above">
+        {ordered.map((id) => (
+          <span
+            key={id}
+            data-chip-id={id}
+            className={`${styles.dragSlot}${overId === id ? ` ${styles.dragSlotOver}` : ""}${
+              draggingId === id ? ` ${styles.dragSlotDragging}` : ""
+            }`}
+            onPointerDown={onPointerDown(id)}
           >
-            <span className={styles.chip} aria-hidden>
-              {t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
-            </span>
-          </El>
-        </span>
-      ))}
-    </div>
+            <El
+              on={isOn(id)}
+              variant="dim"
+              onToggle={() => {
+                if (skipClickRef.current) return;
+                onToggle(id);
+              }}
+              label={t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
+            >
+              {id === "gitBranch" && isOn("gitBranch") ? (
+                gitBranchAbove ? (
+                  <PreviewGitBranchOnly dragging={draggingId === "gitBranch"} />
+                ) : (
+                  <span className={styles.chip} aria-hidden>
+                    {t("settings.chatMetaChipGitBranch")}
+                  </span>
+                )
+              ) : id === "gitChanges" && isOn("gitChanges") ? (
+                <PreviewGitChangesOnly />
+              ) : (
+                <span className={styles.chip} aria-hidden>
+                  {t(CHIP_LABEL_KEY[id] as "settings.chatMetaChipFolder")}
+                </span>
+              )}
+            </El>
+          </span>
+        ))}
+        </div>
+        {chipsEdge.left ? (
+          <button
+            type="button"
+            className={`${styles.previewChipsMore} ${styles.previewChipsMoreLeft}`}
+            aria-label={t("settings.chatPreviewScrollChipsLeft")}
+            title={t("settings.chatPreviewScrollChipsLeft")}
+            onClick={scrollChipsLeft}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M15 6l-6 6 6 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+        {chipsEdge.right ? (
+          <button
+            type="button"
+            className={`${styles.previewChipsMore} ${styles.previewChipsMoreRight}`}
+            aria-label={t("settings.chatPreviewScrollChipsRight")}
+            title={t("settings.chatPreviewScrollChipsRight")}
+            onClick={scrollChipsRight}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M9 6l6 6-6 6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+      </div>
+      <PreviewGitDropHint hintPos={gitHintPos} label={gitHintLabel} />
+    </>
+  );
+}
+
+function PreviewGitBranchIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M6 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path d="M6 9v6M18 12c0 3-12 1-12 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PreviewGitBranch({
+  position,
+  onPositionChange,
+}: {
+  position: "below" | "above";
+  onPositionChange: (next: "below" | "above") => void;
+}) {
+  const t = useT();
+  const [dragging, setDragging] = useState(false);
+  const [hoverZone, setHoverZone] = useState<"below" | "above" | null>(null);
+  const [hintPos, setHintPos] = useState<{ x: number; y: number } | null>(null);
+  const skipClickRef = useRef(false);
+
+  const onPointerDown = (e: ReactPointerEvent<HTMLSpanElement>) => {
+    if (e.button !== 0) return;
+    const pointerId = e.pointerId;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+        moved = true;
+        skipClickRef.current = true;
+        setDragging(true);
+      }
+      const zone = hitGitZone(ev.clientX, ev.clientY);
+      setHoverZone(zone);
+      if (zone && zone !== position) {
+        setHintPos({ x: ev.clientX, y: ev.clientY + 18 });
+      } else {
+        setHintPos(null);
+      }
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      const zone = moved ? hitGitZone(ev.clientX, ev.clientY) : null;
+      setDragging(false);
+      setHoverZone(null);
+      setHintPos(null);
+      if (zone && zone !== position) onPositionChange(zone);
+      if (moved) {
+        window.setTimeout(() => {
+          skipClickRef.current = false;
+        }, 0);
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  };
+
+  const hintLabel =
+    hoverZone === "above"
+      ? t("settings.chatGitBranchPositionAbove")
+      : hoverZone === "below"
+        ? t("settings.chatGitBranchDragHint")
+        : null;
+
+  return (
+    <>
+      <span
+        className={styles.previewGitBranchDragWrap}
+        aria-label={t("settings.chatGitBranchDragHint")}
+        onPointerDown={onPointerDown}
+        onClick={(e) => {
+          if (skipClickRef.current) e.preventDefault();
+        }}
+      >
+        <PreviewGitBranchOnly dragging={dragging} />
+      </span>
+      <PreviewGitDropHint hintPos={hintPos} label={hintLabel} />
+    </>
   );
 }
 
@@ -510,6 +797,7 @@ export function ChatSettingsPreview({
   headerIcons,
   chatSplit,
   chatToolbarStyle,
+  chatGitBranchPosition = "below",
   onToggleAction,
   onToggleChip,
   onReorderChip,
@@ -521,6 +809,7 @@ export function ChatSettingsPreview({
   onHeaderHeight,
   onToggleHeaderIcon,
   onToggleChatSplit,
+  onGitBranchPositionChange,
 }: {
   actions: ChatActionId[];
   chips: ChatMetaChipId[];
@@ -533,6 +822,7 @@ export function ChatSettingsPreview({
   headerIcons: ChatHeaderIconId[];
   chatSplit: boolean;
   chatToolbarStyle: ChatToolbarStyle;
+  chatGitBranchPosition?: "below" | "above";
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
   onReorderChip: (nextOrder: ChatMetaChipId[]) => void;
@@ -544,6 +834,7 @@ export function ChatSettingsPreview({
   onHeaderHeight: (next: number) => void;
   onToggleHeaderIcon: (id: ChatHeaderIconId) => void;
   onToggleChatSplit: () => void;
+  onGitBranchPositionChange: (position: "below" | "above") => void;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -582,6 +873,8 @@ export function ChatSettingsPreview({
     applicable
       .filter((id) => displayOrder.includes(id))
       .sort((a, b) => displayOrder.indexOf(a) - displayOrder.indexOf(b));
+  const gitBranchChipOn = chips.includes("gitBranch");
+  const showGitBranchFooter = gitBranchChipOn && chatGitBranchPosition === "below";
   const handleReorder = (dragged: ChatActionId, target: ChatActionId) => {
     const from = displayOrder.indexOf(dragged);
     const to = displayOrder.indexOf(target);
@@ -1039,17 +1332,21 @@ export function ChatSettingsPreview({
                   ordered={chipDisplayOrder}
                   onToggle={onToggleChip}
                   onReorder={handleChipReorder}
+                  gitBranchAbove={gitBranchChipOn && chatGitBranchPosition === "above"}
+                  onGitBranchPositionChange={onGitBranchPositionChange}
                 />
-                <El
-                  on={btnOn("mode")}
-                  variant="dim"
-                  onToggle={() => onToggleComposerButton("mode")}
-                  label={t("settings.chatComposerBtnMode")}
-                >
-                  <span className={styles.composerChip} aria-hidden>
-                    {t("modes.agent")}
-                  </span>
-                </El>
+                <div className={styles.composerModeSlot}>
+                  <El
+                    on={btnOn("mode")}
+                    variant="dim"
+                    onToggle={() => onToggleComposerButton("mode")}
+                    label={t("settings.chatComposerBtnMode")}
+                  >
+                    <span className={styles.composerChip} aria-hidden>
+                      {t("modes.agent")}
+                    </span>
+                  </El>
+                </div>
               </div>
               <div className={styles.pill}>
                 <El
@@ -1103,6 +1400,21 @@ export function ChatSettingsPreview({
                   </svg>
                 </span>
               </div>
+              {gitBranchChipOn ? (
+                <div
+                  className={`${styles.gitDropZoneBelow}${showGitBranchFooter ? ` ${styles.gitDropZoneActive}` : ""}`}
+                  data-git-zone="below"
+                >
+                  {showGitBranchFooter ? (
+                    <PreviewGitBranch
+                      position="below"
+                      onPositionChange={onGitBranchPositionChange}
+                    />
+                  ) : (
+                    <span className={styles.previewGitDropZoneHint}>{t("settings.chatGitBranchDropZone")}</span>
+                  )}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

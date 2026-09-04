@@ -161,6 +161,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ cwds }),
     }),
+  reorderFolders: (items: Array<{ cwd: string; sortOrder: number }>) =>
+    request<{ ok: boolean; folders: string[] }>("/api/folders/reorder", {
+      method: "PUT",
+      body: JSON.stringify({ items }),
+    }).then((r) => r.folders),
   deleteFolder: (cwd: string) =>
     request<{ ok: boolean }>(`/api/folders?cwd=${encodeURIComponent(cwd)}`, {
       method: "DELETE",

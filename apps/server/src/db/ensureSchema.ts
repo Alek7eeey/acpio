@@ -98,9 +98,16 @@ export async function ensureSchema() {
   db.run(sql`
     CREATE TABLE IF NOT EXISTS chat_folders (
       cwd TEXT PRIMARY KEY,
+      sort_order INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
+
+  try {
+    db.run(sql`ALTER TABLE chat_folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
 
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (

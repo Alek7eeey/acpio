@@ -135,6 +135,9 @@ function spawnPipeBackend(cwd: string, shell: ConsoleShell): PtyLike {
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: false,
   });
+  child.on("error", (err) => {
+    console.error("Failed to spawn console shell:", err);
+  });
   return {
     write: (data) => {
       if (child.stdin.writable) child.stdin.write(data);
@@ -163,7 +166,10 @@ async function spawnConsole(
   shell: ConsoleShell,
   initialSize?: { cols?: number; rows?: number },
 ) {
-  const root = path.resolve(cwd || process.cwd());
+  let root = path.resolve(cwd || process.cwd());
+  if (!fs.existsSync(root)) {
+    root = process.cwd();
+  }
   const backend =
     (await spawnPtyBackend(root, shell, initialSize)) ?? spawnPipeBackend(root, shell);
   const entry: ConsoleEntry = { cwd: root, backend, shell };
@@ -180,7 +186,10 @@ export async function attachUserConsole(
   initialSize?: { cols?: number; rows?: number },
 ): Promise<void> {
   const shell = await resolveConsoleShell(preferredShell);
-  const root = path.resolve(cwd || process.cwd());
+  let root = path.resolve(cwd || process.cwd());
+  if (!fs.existsSync(root)) {
+    root = process.cwd();
+  }
   const existing = consoles.get(sessionId);
   if (existing && existing.shell === shell && existing.cwd === root) return;
 
@@ -189,7 +198,10 @@ export async function attachUserConsole(
 
   const task = (async () => {
     const latestShell = await resolveConsoleShell(preferredShell);
-    const latestRoot = path.resolve(cwd || process.cwd());
+    let latestRoot = path.resolve(cwd || process.cwd());
+    if (!fs.existsSync(latestRoot)) {
+      latestRoot = process.cwd();
+    }
     const current = consoles.get(sessionId);
     if (current && current.shell === latestShell && current.cwd === latestRoot) return;
     if (current) releaseUserConsole(sessionId);

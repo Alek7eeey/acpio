@@ -6,10 +6,32 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 4;
+export const SETTINGS_SCHEMA_VERSION = 5;
 
-const CHAT_META_CHIP_IDS: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
+const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
+  "folder",
+  "gitBranch",
+  "gitChanges",
+  "thoughts",
+  "mcp",
+  "context",
+  "console",
+];
 const DEFAULT_CHAT_META_CHIPS: ChatMetaChipId[] = [...CHAT_META_CHIP_IDS];
+
+function expandLegacyGitChip(chips: string[]): ChatMetaChipId[] {
+  const out: ChatMetaChipId[] = [];
+  for (const chip of chips) {
+    if (chip === "git") {
+      out.push("gitBranch", "gitChanges");
+      continue;
+    }
+    if (CHAT_META_CHIP_IDS.includes(chip as ChatMetaChipId)) {
+      out.push(chip as ChatMetaChipId);
+    }
+  }
+  return out;
+}
 
 export function readSettingsSchema(raw: unknown): number {
   if (!raw || typeof raw !== "object") return 1;
@@ -23,29 +45,41 @@ export function normalizeChatMetaChips(
   chips: unknown,
   schemaVersion: number,
 ): ChatMetaChipId[] {
-  const valid = Array.isArray(chips)
-    ? chips.filter(
-        (v): v is ChatMetaChipId =>
-          typeof v === "string" && CHAT_META_CHIP_IDS.includes(v as ChatMetaChipId),
-      )
+  const raw = Array.isArray(chips)
+    ? chips.filter((v): v is string => typeof v === "string")
     : [...DEFAULT_CHAT_META_CHIPS];
 
-  let next = valid;
+  let next = expandLegacyGitChip(raw);
+
   if (schemaVersion < 2 && !next.includes("console")) {
     next = [...next, "console"];
   }
-  if (schemaVersion < 3 && !next.includes("git")) {
+  if (schemaVersion < 3 && !next.includes("gitBranch") && !next.includes("gitChanges")) {
     const folderIdx = next.indexOf("folder");
+    const gitPair: ChatMetaChipId[] = ["gitBranch", "gitChanges"];
     next =
       folderIdx >= 0
-        ? [...next.slice(0, folderIdx + 1), "git", ...next.slice(folderIdx + 1)]
-        : ["git", ...next];
+        ? [...next.slice(0, folderIdx + 1), ...gitPair, ...next.slice(folderIdx + 1)]
+        : [...gitPair, ...next];
   }
-  return next;
+  if (schemaVersion < 5) {
+    next = expandLegacyGitChip(next);
+  }
+
+  const seen = new Set<ChatMetaChipId>();
+  return next.filter((chip) => {
+    if (!CHAT_META_CHIP_IDS.includes(chip) || seen.has(chip)) return false;
+    seen.add(chip);
+    return true;
+  });
 }
 
 export function normalizeChatToolbarStyle(value: unknown): ChatToolbarStyle {
   return value === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
+}
+
+export function normalizeChatGitBranchPosition(value: unknown): "below" | "above" {
+  return value === "above" ? "above" : "below";
 }
 
 /** Client-side merge: defaults + API payload with chip migration. */
@@ -56,6 +90,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...partial };
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
+  merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }

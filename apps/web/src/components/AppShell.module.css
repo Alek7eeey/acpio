@@ -1007,6 +1007,7 @@
 }
 
 .folderHead {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1026,6 +1027,36 @@
 .folderHeadActive {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--text);
+}
+
+.folderHeadDragging {
+  opacity: 0.5;
+  background: var(--bg-hover);
+  cursor: grabbing;
+}
+
+.folderHeadDragOverAbove::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background-color: var(--accent);
+  z-index: 20;
+  pointer-events: none;
+}
+
+.folderHeadDragOverBelow::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background-color: var(--accent);
+  z-index: 20;
+  pointer-events: none;
 }
 
 .folderHeadActive .folderLabel {
@@ -1497,6 +1528,12 @@
 
 .sessionItem.active {
   background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.sessionDragging {
+  opacity: 0.5;
+  background: var(--bg-hover);
+  cursor: grabbing;
 }
 
 .sessionItem.active::before,

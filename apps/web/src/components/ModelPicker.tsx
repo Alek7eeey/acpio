@@ -256,9 +256,10 @@ export function ModelPicker({
   }, [options, q]);
   const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
   const paramChips = useMemo(
-    () => (paramsBusy ? [] : activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix)),
-    [visibleParams, resolvedParams, paramsBusy, paramLabels, effortPrefix, contextPrefix],
+    () => activeParamChips(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix),
+    [visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix],
   );
+  const triggerChips = paramsBusy ? paramChips.filter((c) => c.kind === "fast") : paramChips;
   const baseLabel = loading
     ? t("common.loading")
     : !model
@@ -271,9 +272,11 @@ export function ModelPicker({
   const paramsPopupOpen = paramsFor != null && paramsAnchor != null;
 
   const closeParams = () => {
+    paramsReqRef.current += 1;
     setParamsFor(null);
     setParamsAnchor(null);
     setMenuAnchor(null);
+    setLocalParamsBusy(false);
   };
 
   const syncParamsAnchor = () => {
@@ -288,7 +291,8 @@ export function ModelPicker({
     const clipEl = listRef.current ?? menuRef.current;
     const clip = clipEl?.getBoundingClientRect();
     // Button scrolled out of the visible list — drop the flyout instead of chasing it.
-    if (clip) {
+    // Skip when layout hasn't been measured yet (jsdom / first frame zeros).
+    if (clip && (r.width > 0 || r.height > 0) && (clip.width > 0 || clip.height > 0)) {
       const visible =
         r.bottom > clip.top + 4 &&
         r.top < clip.bottom - 4 &&
@@ -531,15 +535,10 @@ export function ModelPicker({
   };
 
   const renderParamSections = () => {
-    if (paramsBusy) {
-      return (
-        <div className={styles.paramsLoader} aria-busy="true">
-          <span className={styles.paramsSpinner} aria-hidden />
-          <span>{t("common.loading")}</span>
-        </div>
-      );
-    }
-    return visibleParams.map((param) => {
+    const shown = paramsBusy
+      ? visibleParams.filter((p) => modelParamFamily(p.id) === "fast")
+      : visibleParams;
+    const sections = shown.map((param) => {
       const current =
         resolvedParams[param.id] ??
         param.currentValue ??
@@ -618,12 +617,24 @@ export function ModelPicker({
         </div>
       );
     });
+    return (
+      <>
+        {sections}
+        {paramsBusy ? (
+          <div className={styles.paramsLoader} aria-busy="true">
+            <span className={styles.paramsSpinner} aria-hidden />
+            <span>{t("common.loadingParams")}</span>
+          </div>
+        ) : null}
+      </>
+    );
   };
 
   const paramsLabel = visibleParams
     .map((p) => modelParamSectionName(p.id, p.name))
     .join(", ");
   const showMore = showParamsMenu ?? visibleParams.length > 0;
+  const showTriggerParamLoader = paramsBusy && !loading;
 
   return (
     <div
@@ -639,12 +650,14 @@ export function ModelPicker({
         } ${disabled ? styles.modelTriggerDisabled : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-busy={loading || undefined}
+        aria-busy={loading || showTriggerParamLoader || undefined}
         disabled={disabled}
         title={
           loading
             ? t("common.loadingModelsList")
-            : [model || t("common.model"), paramSummary].filter(Boolean).join(" · ")
+            : showTriggerParamLoader
+              ? [model || t("common.model"), t("common.loadingParams")].filter(Boolean).join(" · ")
+              : [model || t("common.model"), paramSummary].filter(Boolean).join(" · ")
         }
         onClick={() => {
           if (disabled) return;
@@ -670,9 +683,13 @@ export function ModelPicker({
         {variant === "compact" ? (
           <>
             <span className={styles.modelTriggerName}>{baseLabel}</span>
-            {paramChips.length > 0 && (
-              <span className={styles.modelTriggerChips} aria-hidden={false}>
-                {paramChips.map((chip) => (
+            {showTriggerParamLoader || triggerChips.length > 0 ? (
+              <span
+                className={styles.modelTriggerChips}
+                aria-busy={showTriggerParamLoader || undefined}
+                aria-label={showTriggerParamLoader ? t("common.loadingParams") : undefined}
+              >
+                {triggerChips.map((chip) => (
                   <span
                     key={chip.key}
                     className={`${styles.paramChip} ${
@@ -687,11 +704,24 @@ export function ModelPicker({
                     {chip.label}
                   </span>
                 ))}
+                {showTriggerParamLoader ? (
+                  <span className={`${styles.paramChip} ${styles.paramChipLoading}`} aria-hidden>
+                    <span className={styles.paramChipLoader} />
+                  </span>
+                ) : null}
               </span>
-            )}
+            ) : null}
           </>
         ) : (
-          <span className={styles.modelTriggerText}>{triggerLabel}</span>
+          <>
+            <span className={styles.modelTriggerText}>{triggerLabel}</span>
+            {showTriggerParamLoader && (
+              <span
+                className={styles.triggerParamsSpinner}
+                aria-label={t("common.loadingParams")}
+              />
+            )}
+          </>
         )}
         <span className={styles.modelChevron} aria-hidden>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
@@ -820,11 +850,15 @@ export function ModelPicker({
                           void openParamsFor(m.value, e.currentTarget);
                         }}
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                          <circle cx="5" cy="12" r="1.7" />
-                          <circle cx="12" cy="12" r="1.7" />
-                          <circle cx="19" cy="12" r="1.7" />
-                        </svg>
+                        {rowActive && paramsBusy ? (
+                          <span className={`${styles.paramsSpinner} ${styles.rowMoreSpinner}`} aria-hidden />
+                        ) : (
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                            <circle cx="5" cy="12" r="1.7" />
+                            <circle cx="12" cy="12" r="1.7" />
+                            <circle cx="19" cy="12" r="1.7" />
+                          </svg>
+                        )}
                       </button>
                     )}
                   </div>

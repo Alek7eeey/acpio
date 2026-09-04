@@ -145,6 +145,18 @@ export function CreateSessionFolderPicker({
   const [error, setError] = useState<string | null>(null);
   const onlineAgents = useMemo(() => agents.filter((a) => a.online), [agents]);
   const [provider, setProvider] = useState<AgentProvider | null>(() => {
+    let lastSelected: AgentProvider | null = null;
+    if (typeof localStorage !== "undefined") {
+      try {
+        const raw = localStorage.getItem("acpio.lastSelectedProvider.v1");
+        if (raw) lastSelected = raw as AgentProvider;
+      } catch {
+        // ignore
+      }
+    }
+    if (lastSelected && onlineAgents.some((a) => a.id === lastSelected)) {
+      return lastSelected;
+    }
     if (preferredProvider && onlineAgents.some((a) => a.id === preferredProvider)) {
       return preferredProvider;
     }

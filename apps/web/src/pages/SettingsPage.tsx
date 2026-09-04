@@ -57,7 +57,15 @@ function mcpEnvConfigDraft(server: McpServerConfig): string {
 const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
 
 /** Canonical display order for composer chips. */
-const CHAT_CHIP_ORDER: ChatMetaChipId[] = ["folder", "git", "thoughts", "mcp", "context", "console"];
+const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
+  "folder",
+  "gitBranch",
+  "gitChanges",
+  "thoughts",
+  "mcp",
+  "context",
+  "console",
+];
 import { isChatSearchEnabled, toggleChatTreeElement } from "../lib/chatTreeSearch";
 const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
@@ -70,11 +78,11 @@ function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
 }
 
 /**
- * The chat settings rows (chips + switches). Shown inside the collapsible
- * "Advanced" block on desktop and as the main list on mobile (where the
- * interactive preview is hidden).
+ * Chat settings that affect the interactive preview (layout, chips, toolbar).
+ * Shown inside the collapsible "Advanced" block on desktop and as the main
+ * list on mobile (where the interactive preview is hidden).
  */
-function ChatConfigRows({
+function ChatInteractiveConfigRows({
   form,
   patch,
   persistChatSplit,
@@ -159,7 +167,8 @@ function ChatConfigRows({
           {(
             [
               ["folder", t("settings.chatMetaChipFolder")],
-              ["git", t("settings.chatMetaChipGit")],
+              ["gitBranch", t("settings.chatMetaChipGitBranch")],
+              ["gitChanges", t("settings.chatMetaChipGitChanges")],
               ["thoughts", t("settings.chatMetaChipThoughts")],
               ["mcp", t("settings.chatMetaChipMcp")],
               ["context", t("settings.chatMetaChipContext")],
@@ -200,6 +209,33 @@ function ChatConfigRows({
                 className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
                 aria-pressed={on}
                 onClick={() => patch("thoughtsChipStyle", id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatGitBranchPosition")} hint={t("settings.chatGitBranchPositionHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["below", t("settings.chatGitBranchPositionBelow")],
+              ["above", t("settings.chatGitBranchPositionAbove")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.chatGitBranchPosition ?? "below") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => {
+                  patch("chatGitBranchPosition", id);
+                  void saveSettings({ chatGitBranchPosition: id });
+                }}
               >
                 {label}
               </button>
@@ -328,19 +364,33 @@ function ChatConfigRows({
         </div>
       </SettingRow>
 
-      <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
-        <Toggle
-          checked={Boolean(form.chatEnterToSend)}
-          onChange={(v) => patch("chatEnterToSend", v)}
-          label={t("settings.chatEnterToSend")}
-        />
-      </SettingRow>
-
       <SettingRow label={t("settings.chatShowMessageTime")} hint={t("settings.chatShowMessageTimeHint")}>
         <Toggle
           checked={Boolean(form.chatShowMessageTime)}
           onChange={(v) => patch("chatShowMessageTime", v)}
           label={t("settings.chatShowMessageTime")}
+        />
+      </SettingRow>
+    </SettingTable>
+  );
+}
+
+/** Chat behavior settings that are not reflected in the interactive preview. */
+function ChatBehaviorConfigRows({
+  form,
+  patch,
+}: {
+  form: AppSettings;
+  patch: (key: string, value: unknown) => void;
+}) {
+  const t = useT();
+  return (
+    <SettingTable>
+      <SettingRow label={t("settings.chatEnterToSend")} hint={t("settings.chatEnterToSendHint")}>
+        <Toggle
+          checked={Boolean(form.chatEnterToSend)}
+          onChange={(v) => patch("chatEnterToSend", v)}
+          label={t("settings.chatEnterToSend")}
         />
       </SettingRow>
 
@@ -632,6 +682,9 @@ export function SettingsPage() {
   // showBootSplash to visually revert. The form is already kept in sync
   // by the explicit setForm calls in patch(), connectAgent(), clearApiKey(),
   // and the model-param handlers.
+  useEffect(() => {
+    setForm(settings);
+  }, [settings]);
 
   useEffect(() => {
     if (leaf !== "diagnostics") return;
@@ -805,9 +858,8 @@ export function SettingsPage() {
   const loadParamsForModel = async (provider: AgentProvider, nextModel: string) => {
     const cacheKey = `${provider}:${nextModel}`;
     const cached = paramsCacheRef.current.get(cacheKey);
-    if (cached?.length) {
+    if (cached) {
       setParamsByProvider((prev) => ({ ...prev, [provider]: cached }));
-      return;
     }
     setParamsLoadingKey(cacheKey);
     try {
@@ -829,6 +881,21 @@ export function SettingsPage() {
     .filter((p) => agentAvailability[p.id] === true)
     .map((p) => p.id)
     .join(",");
+
+  useEffect(() => {
+    if (section !== "agent" || leaf !== "model") return;
+    const online = providers.filter((p) => agentAvailability[p.id] === true);
+    for (const item of online) {
+      const parameterized =
+        adapters.find((a) => a.id === item.id)?.parameterizedModelPicker === true ||
+        item.id === "cursor";
+      if (!parameterized) continue;
+      const pick = form.defaultModelByProvider?.[item.id];
+      if (pick) void loadParamsForModel(item.id, pick);
+    }
+    // Prefetch Fast/Effort/Context so the picker can show a loader on first paint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section, leaf, onlineHarnessKey, form.defaultModelByProvider]);
 
   useEffect(() => {
     if (section !== "agent" || leaf !== "model") return;
@@ -1060,7 +1127,10 @@ export function SettingsPage() {
           </button>
         ) : null}
       </div>
-      <form className={styles.panel} onSubmit={(e) => void onSubmit(e)}>
+      <form
+        className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}`}
+        onSubmit={(e) => void onSubmit(e)}
+      >
         <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
         {settingsQuery.trim() && !viewingResults && (
           <div className={styles.searchBackBar}>
@@ -1450,6 +1520,7 @@ export function SettingsPage() {
               headerIcons={form.chatHeaderIcons ?? []}
               chatSplit={form.chatSplit !== false}
               chatToolbarStyle={form.chatToolbarStyle ?? "classic"}
+              chatGitBranchPosition={form.chatGitBranchPosition ?? "below"}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -1499,23 +1570,33 @@ export function SettingsPage() {
                   nextOrder.filter((id) => enabled.has(id)),
                 );
               }}
+              onGitBranchPositionChange={(pos) => {
+                patch("chatGitBranchPosition", pos);
+                void saveSettings({ chatGitBranchPosition: pos });
+              }}
             />
               </div>
             </SearchGate>
             {settingsQuery.trim() ? (
               <div className={styles.chatSearchRows}>
                 <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatAdvanced"), settingsQuery)}</h2>
-                <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
+                <ChatInteractiveConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
+                <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatBehavior"), settingsQuery)}</h2>
+                <ChatBehaviorConfigRows form={form} patch={patchAny} />
               </div>
             ) : (
               <>
                 <div className={styles.mobileConfig}>
-                  <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
+                  <ChatInteractiveConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
                 </div>
                 <details className={styles.chatAdvancedDetails}>
                   <summary>{t("settings.chatAdvanced")}</summary>
-                  <ChatConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
+                  <ChatInteractiveConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
                 </details>
+                <div className={styles.chatBehaviorBlock}>
+                  <h2 className={styles.sectionHeading}>{t("settings.chatBehavior")}</h2>
+                  <ChatBehaviorConfigRows form={form} patch={patchAny} />
+                </div>
               </>
             )}
           </>
@@ -1536,7 +1617,9 @@ export function SettingsPage() {
                   const parameterized =
                     adapters.find((a) => a.id === item.id)?.parameterizedModelPicker === true ||
                     item.id === "cursor";
-                  const loadingParams = Boolean(paramsLoadingKey?.startsWith(`${item.id}:`));
+                  const loadingParams =
+                    Boolean(paramsLoadingKey?.startsWith(`${item.id}:`)) ||
+                    (parameterized && modelsLoading && modelParams.length === 0);
                   return (
                     <SettingRow
                       key={item.id}

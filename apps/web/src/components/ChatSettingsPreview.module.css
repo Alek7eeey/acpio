@@ -931,6 +931,9 @@
   padding: 8px 16px 14px;
   border-top: none;
   background: transparent;
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 
 .chips {
@@ -1015,6 +1018,143 @@
   border-radius: 14px;
   color: var(--text);
   background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--surface));
+}
+
+.previewGitFooter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.8;
+}
+
+.gitDropZoneBelow {
+  display: flex;
+  align-items: center;
+  min-height: 0;
+  padding: 2px 4px;
+  border-radius: 8px;
+  border: 1px dashed transparent;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    min-height 0.15s ease;
+  margin-top: 2px;
+}
+
+.gitDropZoneBelow:not(.gitDropZoneActive) {
+  min-height: 22px;
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-tertiary) 35%, transparent);
+}
+
+.gitDropZoneBelow.gitDropZoneActive {
+  min-height: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.previewGitDropZoneHint {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: color-mix(in srgb, var(--text-secondary) 72%, transparent);
+  white-space: nowrap;
+  user-select: none;
+  padding: 0 6px;
+}
+
+.previewGitChangesChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.previewGitChangesAdd {
+  color: #3ecf8e;
+}
+
+.previewGitChangesDel {
+  color: #f87171;
+}
+
+.previewGitChangesSep {
+  opacity: 0.55;
+}
+
+.previewGitBranchDragWrap {
+  display: inline-flex;
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragSlot .previewGitBranch {
+  cursor: grab;
+}
+
+.dragSlotDragging .previewGitBranch {
+  cursor: grabbing;
+}
+
+.previewGitBranch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text-secondary);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.previewGitBranchDragging {
+  opacity: 0.92;
+  cursor: grabbing;
+  z-index: 200;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.previewGitChevron {
+  opacity: 0.7;
+}
+
+.previewGitDropHintFixed {
+  position: fixed;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 10000;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 18%, transparent);
 }
 
 /* --- mobile --- */
@@ -1127,13 +1267,119 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: visible;
+  position: relative;
+  z-index: 3;
+  flex-wrap: nowrap;
+}
+
+.composerModeSlot {
+  flex: 0 0 auto;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .composerTopRow .chips {
   flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.composerTopRow .chips::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.previewChipsShell {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.previewChipsFadeRight::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 30px;
+  pointer-events: none;
+  background: linear-gradient(
+    to left,
+    var(--bg) 28%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 62%,
+    transparent
+  );
+  z-index: 1;
+}
+
+.previewChipsFadeLeft::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    var(--bg) 20%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 60%,
+    transparent
+  );
+  z-index: 1;
+}
+
+.previewChipsFadeRight .chips {
+  padding-right: 22px;
+}
+
+.previewChipsFadeLeft .chips {
+  padding-left: 22px;
+}
+
+.previewChipsMore {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg) 88%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent);
+  cursor: pointer;
+}
+
+.previewChipsMoreRight {
+  right: 2px;
+}
+
+.previewChipsMoreLeft {
+  left: 2px;
+}
+
+.previewChipsMore:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, var(--surface));
+}
+
+.previewChipsMore svg {
+  display: block;
 }
 
 .composerTopRow .chip {

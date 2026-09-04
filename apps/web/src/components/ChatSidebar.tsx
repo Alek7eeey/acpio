@@ -6,7 +6,7 @@ import type { AgentProvider, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { harnessShortLabel } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
-import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
+import { sessionTreeDisplayTitle, sessionActivityAt, sortSessions, groupByFolder } from "../lib/sessionTitle";
 import { normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
@@ -61,53 +61,11 @@ function FolderGlyph() {
   );
 }
 
-function sortSessions(list: SessionDto[]) {
-  return [...list].sort(
-    (a, b) =>
-      Number(b.pinned) - Number(a.pinned) ||
-      sessionActivityAt(b).localeCompare(sessionActivityAt(a)) ||
-      b.createdAt.localeCompare(a.createdAt),
-  );
-}
-
-/** Last user message time, or creation time when the chat is still empty. */
-export function sessionActivityAt(session: Pick<SessionDto, "lastMessageAt" | "createdAt">): string {
-  return session.lastMessageAt || session.createdAt;
-}
-
 function folderLabel(cwd: string, noFolderLabel: string) {
   const normalized = normalizeCwd(cwd);
   if (!normalized) return noFolderLabel;
   const parts = normalized.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || normalized;
-}
-
-export function groupByFolder(list: SessionDto[]) {
-  const map = new Map<string, SessionDto[]>();
-  for (const s of list) {
-    const key = normalizeCwd(s.cwd);
-    const bucket = map.get(key);
-    if (bucket) bucket.push(s);
-    else map.set(key, [s]);
-  }
-  const entries = [...map.entries()].map(([cwd, sessions]) => ({
-    cwd,
-    sessions: sortSessions(sessions),
-    latest: sessions.reduce(
-      (max, s) => {
-        const key = sessionActivityAt(s);
-        return key > max ? key : max;
-      },
-      "",
-    ),
-  }));
-  entries.sort((a, b) => {
-    if (a.latest !== b.latest) return b.latest.localeCompare(a.latest);
-    if (!a.cwd && b.cwd) return 1;
-    if (a.cwd && !b.cwd) return -1;
-    return a.cwd.localeCompare(b.cwd, undefined, { sensitivity: "base" });
-  });
-  return entries;
 }
 
 function startOfLocalDay(d: Date) {
@@ -258,6 +216,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const setSessionFlags = useAppStore((s) => s.setSessionFlags);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
+  const reorderFolders = useAppStore((s) => s.reorderFolders);
+  const reorderSessions = useAppStore((s) => s.reorderSessions);
 
   const agentOptions = useMemo(
     () =>
@@ -280,6 +240,10 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [exportDialogId, setExportDialogId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
+  const [draggingFolderCwd, setDraggingFolderCwd] = useState<string | null>(null);
+  const [dragOverFolderCwd, setDragOverFolderCwd] = useState<string | null>(null);
+  const [dragInsertPosition, setDragInsertPosition] = useState<"above" | "below" | null>(null);
+  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Touch devices hide the inline pin/archive actions (no hover to reveal
@@ -451,13 +415,25 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     [visibleSessions, settings.chatTreeShowArchive],
   );
   const folders = useMemo(() => {
-    const grouped = groupByFolder(visibleSessions.filter((s) => !s.archived));
+    const grouped = groupByFolder(visibleSessions.filter((s) => !s.archived), knownFolders);
     const groupedKeys = new Set(grouped.map((f) => f.cwd));
     const empties = knownFolders
       .filter((cwd) => !groupedKeys.has(cwd))
       .map((cwd) => ({ cwd, sessions: [] as SessionDto[], latest: "" }));
-    if (empties.length === 0) return grouped;
-    return [...grouped, ...empties];
+    const all = [...grouped, ...empties];
+    all.sort((a, b) => {
+      if (!a.cwd && b.cwd) return 1;
+      if (a.cwd && !b.cwd) return -1;
+      const indexA = knownFolders.indexOf(a.cwd);
+      const indexB = knownFolders.indexOf(b.cwd);
+      if (indexA !== -1 && indexB !== -1) {
+        return indexA - indexB;
+      }
+      if (indexA !== -1) return -1;
+      if (indexB !== -1) return 1;
+      return a.cwd.localeCompare(b.cwd, undefined, { sensitivity: "base" });
+    });
+    return all;
   }, [visibleSessions, knownFolders]);
 
   // Newly created sections (archive, liked) appear collapsed by default;
@@ -862,16 +838,19 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       );
     }
 
+    const isDragging = draggingSessionId === s.id;
     return (
       <div
         key={s.id}
+        data-session-id={s.id}
+        data-is-toplevel={!s.cwd ? "true" : "false"}
         data-tree-flip={`s:${s.id}`}
         className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
           inPane && !isActive ? styles.sessionInPane : ""
         } ${
           menuOpen ? styles.sessionMenuOpen : ""
-        } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}`}
-        onPointerDown={(e) => {
+        } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}${isDragging ? ` ${styles.sessionDragging}` : ""}`}
+        onPointerDown={!s.cwd ? onSessionPointerDown(s) : (e) => {
           // Open from anywhere on the row — pin/archive/⋯ stop propagation.
           if (e.button !== 0) return;
           if (e.ctrlKey || e.metaKey) {
@@ -1078,6 +1057,162 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     );
   };
 
+  const onFolderPointerDown = (cwd: string) => (e: ReactMouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) => {
+    if (!cwd) return; // Don't drag the top-level "No Folder" container
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button") || target.closest("input")) return;
+
+    const pointerId = (e as React.PointerEvent).pointerId;
+    const startY = e.clientY;
+    const startX = e.clientX;
+    let moved = false;
+    let currentOverCwd: string | null = null;
+    let currentInsertPos: "above" | "below" | null = null;
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+        moved = true;
+        setDraggingFolderCwd(cwd);
+      }
+
+      const elements = document.elementsFromPoint(ev.clientX, ev.clientY);
+      let targetCwd: string | null = null;
+      let targetEl: HTMLElement | null = null;
+      for (const el of elements) {
+        const folderEl = el.closest("[data-folder-cwd]") as HTMLElement;
+        if (folderEl) {
+          targetCwd = folderEl.getAttribute("data-folder-cwd");
+          targetEl = folderEl;
+          break;
+        }
+      }
+
+      const activeDragCwd = cwd || noFolderKey;
+      if (targetCwd && targetEl && targetCwd !== activeDragCwd) {
+        const rect = targetEl.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        const position = ev.clientY < midY ? "above" : "below";
+        currentOverCwd = targetCwd;
+        currentInsertPos = position;
+        setDragOverFolderCwd(targetCwd);
+        setDragInsertPosition(position);
+      } else {
+        currentOverCwd = null;
+        currentInsertPos = null;
+        setDragOverFolderCwd(null);
+        setDragInsertPosition(null);
+      }
+    };
+
+    const onUp = async (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDraggingFolderCwd(null);
+      setDragOverFolderCwd(null);
+      setDragInsertPosition(null);
+
+      if (moved && currentOverCwd && currentInsertPos) {
+        const realTargetCwd = currentOverCwd === noFolderKey ? "" : currentOverCwd;
+        const list = [...useAppStore.getState().knownFolders];
+        const idxA = list.indexOf(cwd);
+
+        if (idxA !== -1) {
+          // Remove cwd from its old position
+          list.splice(idxA, 1);
+
+          if (realTargetCwd === "") {
+            // We are dragging relative to the "No Folder" top-level container
+            list.push(cwd);
+          } else {
+            let idxB = list.indexOf(realTargetCwd);
+            if (idxB !== -1) {
+              if (currentInsertPos === "above") {
+                list.splice(idxB, 0, cwd);
+              } else {
+                list.splice(idxB + 1, 0, cwd);
+              }
+            }
+          }
+
+          useAppStore.setState({ knownFolders: list });
+          const items = list.map((f, i) => ({ cwd: f, sortOrder: i }));
+          await reorderFolders(items);
+        }
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const onSessionPointerDown = (session: SessionDto) => (e: ReactMouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) => {
+    if (session.cwd) return; // Only drag top-level sessions
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest("button") || target.closest("input")) return;
+
+    const pointerId = (e as React.PointerEvent).pointerId;
+    const startY = e.clientY;
+    const startX = e.clientX;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      if (!moved) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+        moved = true;
+        setDraggingSessionId(session.id);
+      }
+
+      const elements = document.elementsFromPoint(ev.clientX, ev.clientY);
+      let targetId: string | null = null;
+      for (const el of elements) {
+        const sessEl = el.closest("[data-session-id][data-is-toplevel='true']");
+        if (sessEl) {
+          targetId = sessEl.getAttribute("data-session-id");
+          break;
+        }
+      }
+
+      if (targetId && targetId !== session.id) {
+        const list = [...useAppStore.getState().sessions];
+        const idxA = list.findIndex((s) => s.id === session.id);
+        const idxB = list.findIndex((s) => s.id === targetId);
+        if (idxA !== -1 && idxB !== -1) {
+          const temp = list[idxA];
+          list[idxA] = list[idxB];
+          list[idxB] = temp;
+          useAppStore.setState({ sessions: list });
+        }
+      }
+    };
+
+    const onUp = async (ev: PointerEvent) => {
+      if (ev.pointerId !== pointerId) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setDraggingSessionId(null);
+
+      if (moved) {
+        const list = useAppStore.getState().sessions;
+        const topLevel = list.filter((s) => !s.cwd);
+        const items = topLevel.map((s, i) => ({
+          id: s.id,
+          themeId: s.themeId,
+          sortOrder: i,
+        }));
+        await reorderSessions(items);
+      }
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
   const noFolderKey = "__no_folder__";
   const activeFolderKey = useMemo(() => {
     const active = sessions.find((s) => s.id === activeSessionId);
@@ -1088,11 +1223,20 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const renderFolderHead = (folder: (typeof folders)[number]) => {
     const fkey = folder.cwd || noFolderKey;
     const isActiveFolder = activeFolderKey === fkey;
+    const isDragging = draggingFolderCwd === folder.cwd;
+    const isDragOver = dragOverFolderCwd === fkey;
+    const dragOverClass = isDragOver
+      ? dragInsertPosition === "above"
+        ? ` ${styles.folderHeadDragOverAbove}`
+        : ` ${styles.folderHeadDragOverBelow}`
+      : "";
     return (
       <div
+        data-folder-cwd={fkey}
+        onPointerDown={onFolderPointerDown(folder.cwd)}
         className={`${styles.folderHead} ${
           collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
-        }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
+        }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}${isDragging ? ` ${styles.folderHeadDragging}` : ""}${dragOverClass}`}
         title={folder.cwd || undefined}
         onClick={() => toggleFolder(fkey)}
         onContextMenu={(e) => openFolderMenu(e, folder.cwd)}
@@ -1401,81 +1545,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 className={styles.folderGroup}
                 data-tree-flip={`fg:${fkey}`}
               >
-                {showFolderHeaders && (
-                  <div
-                    className={`${styles.folderHead} ${
-                      collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
-                    }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}`}
-                    title={folder.cwd || undefined}
-                    onClick={() => toggleFolder(fkey)}
-                    onContextMenu={(e) => openFolderMenu(e, folder.cwd)}
-                  >
-                    <span className={styles.folderLead} aria-hidden>
-                      <span className={styles.folderChevronIcon}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                          <path
-                            d="M6 9l6 6 6-6"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </span>
-                      <span className={styles.folderIcon}>
-                        <FolderGlyph />
-                      </span>
-                    </span>
-                    <span className={styles.folderLabel}>
-                      {folderLabel(folder.cwd, t("common.noFolder"))}
-                    </span>
-                    {folder.cwd ? (
-                      <button
-                        type="button"
-                        className={styles.folderDelete}
-                        title={t("chat.deleteFolder")}
-                        aria-label={t("chat.deleteFolder")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDeleteFolderCwd(folder.cwd);
-                        }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                          <path
-                            d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
-                            stroke="currentColor"
-                            strokeWidth="1.7"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className={styles.folderAdd}
-                      title={t("chat.newInFolder")}
-                      aria-label={t("chat.newInFolder")}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openFolderPicker({
-                          x: e.clientX,
-                          y: e.clientY,
-                          lockedCwd: folder.cwd || "",
-                        });
-                      }}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M12 5v14M5 12h14"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                )}
+                {showFolderHeaders && renderFolderHead(folder)}
                 {!collapsedFolders.has(fkey) && (
                   <div
                     className={`${

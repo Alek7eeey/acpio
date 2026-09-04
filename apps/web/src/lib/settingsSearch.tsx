@@ -235,6 +235,8 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatDesc"),
       t("settings.chatActions"),
       t("settings.chatMetaChips"),
+      t("settings.chatMetaChipGitBranch"),
+      t("settings.chatMetaChipGitChanges"),
       t("settings.chatComposerButtons"),
       t("settings.chatTreeElements"),
       t("settings.chatTreeMenuTitle"),
@@ -244,6 +246,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.chatSplit"),
       t("settings.chatToolbarStyle"),
       t("settings.chatAdvanced"),
+      t("settings.chatBehavior"),
       t("settings.chatIntro"),
     ],
   };

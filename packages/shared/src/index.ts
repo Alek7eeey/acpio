@@ -24,7 +24,7 @@ export type {
 } from "./adapters.js";
 export { SHELL_SESSION_PROVIDER, isShellSession } from "./adapters.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
-export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT } from "./ports.js";
+export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./ports.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
@@ -474,7 +474,14 @@ export type ChatActionId =
   | "readAloud";
 
 /** Chips shown in the composer bar above the input. */
-export type ChatMetaChipId = "folder" | "git" | "thoughts" | "mcp" | "context" | "console";
+export type ChatMetaChipId =
+  | "folder"
+  | "gitBranch"
+  | "gitChanges"
+  | "thoughts"
+  | "mcp"
+  | "context"
+  | "console";
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
@@ -615,6 +622,8 @@ export interface AppSettings {
   chatSplit: boolean;
   /** New chat + search controls in the tree sidebar. */
   chatToolbarStyle: ChatToolbarStyle;
+  /** Position of the Git branch bar: "below" the input or "above" as a chip. */
+  chatGitBranchPosition?: "below" | "above";
   /** Internal persisted settings schema version (not shown in UI). */
   settingsSchema?: number;
   /**
@@ -666,7 +675,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "git", "thoughts", "mcp", "context", "console"],
+  chatMetaChips: ["folder", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"],
   thoughtsChipStyle: "full",
   consoleChipStyle: "full",
   terminalShell: "cmd",
@@ -681,6 +690,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatAgentTurnTimeline: false,
   chatSplit: true,
   chatToolbarStyle: "classic",
+  chatGitBranchPosition: "below",
   remoteAccessKey: "",
   mcpServers: [],
 };

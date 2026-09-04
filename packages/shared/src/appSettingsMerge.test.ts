@@ -9,15 +9,37 @@ import {
 
 describe("normalizeChatMetaChips", () => {
   it("keeps chips when schema is current", () => {
-    const chips = ["folder", "git", "thoughts", "mcp", "context", "console"] as const;
+    const chips = [
+      "folder",
+      "gitBranch",
+      "gitChanges",
+      "thoughts",
+      "mcp",
+      "context",
+      "console",
+    ] as const;
     expect(normalizeChatMetaChips(chips, SETTINGS_SCHEMA_VERSION)).toEqual([...chips]);
   });
 
-  it("adds git after folder for legacy settings without it", () => {
+  it("splits legacy git chip into branch and changes", () => {
+    const chips = ["folder", "git", "thoughts", "mcp", "context", "console"];
+    expect(normalizeChatMetaChips(chips, SETTINGS_SCHEMA_VERSION)).toEqual([
+      "folder",
+      "gitBranch",
+      "gitChanges",
+      "thoughts",
+      "mcp",
+      "context",
+      "console",
+    ]);
+  });
+
+  it("adds git chips after folder for legacy settings without them", () => {
     const chips = ["folder", "thoughts", "mcp", "context", "console"];
     expect(normalizeChatMetaChips(chips, 2)).toEqual([
       "folder",
-      "git",
+      "gitBranch",
+      "gitChanges",
       "thoughts",
       "mcp",
       "context",
@@ -27,12 +49,25 @@ describe("normalizeChatMetaChips", () => {
 
   it("adds console for legacy settings without it", () => {
     const chips = ["folder", "thoughts", "mcp", "context"];
-    expect(normalizeChatMetaChips(chips, 1)).toEqual([...chips, "console"]);
+    expect(normalizeChatMetaChips(chips, 1)).toEqual([
+      "folder",
+      "gitBranch",
+      "gitChanges",
+      "thoughts",
+      "mcp",
+      "context",
+      "console",
+    ]);
   });
 
   it("does not duplicate console", () => {
     const chips = ["folder", "console"];
-    expect(normalizeChatMetaChips(chips, 1)).toEqual(chips);
+    expect(normalizeChatMetaChips(chips, 1)).toEqual([
+      "folder",
+      "gitBranch",
+      "gitChanges",
+      "console",
+    ]);
   });
 });
 
@@ -61,6 +96,12 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({}).chatToolbarStyle).toBe("classic");
     expect(mergeClientAppSettings({ chatToolbarStyle: "minimal" }).chatToolbarStyle).toBe("minimal");
     expect(mergeClientAppSettings({ chatToolbarStyle: "weird" }).chatToolbarStyle).toBe("classic");
+  });
+
+  it("defaults git branch position to below", () => {
+    expect(mergeClientAppSettings({}).chatGitBranchPosition).toBe("below");
+    expect(mergeClientAppSettings({ chatGitBranchPosition: "above" }).chatGitBranchPosition).toBe("above");
+    expect(mergeClientAppSettings({ chatGitBranchPosition: "weird" }).chatGitBranchPosition).toBe("below");
   });
 
   it("defaults deep logging to off", () => {

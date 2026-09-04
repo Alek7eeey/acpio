@@ -222,8 +222,19 @@ function argsFromRaw(raw: Record<string, unknown> | undefined): unknown {
   return raw?.rawInput ?? raw?.input ?? raw?.arguments;
 }
 
-function toModelParams(options: ConfigOption[]): ModelParamDto[] {
-  const params = listModelParamOptions(options).map((o) => ({
+function sortModelParams<T extends { id: string }>(params: T[]): T[] {
+  const rank = (id: string) => {
+    const family = modelParamFamily(id);
+    if (family === "fast") return 0;
+    if (family === "effort") return 1;
+    if (family === "context") return 2;
+    return 50;
+  };
+  return [...params].sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
+}
+
+export function toModelParams(options: ConfigOption[]): ModelParamDto[] {
+  const standalone = listModelParamOptions(options).map((o) => ({
     id: o.id,
     name: modelParamSectionName(o.id, o.name),
     currentValue: o.currentValue,
@@ -240,17 +251,21 @@ function toModelParams(options: ConfigOption[]): ModelParamDto[] {
             ]
           : [],
   }));
+  const fromWire = paramsFromModelWire(options);
+  if (!standalone.length) return fromWire;
+  if (!fromWire.length) return sortModelParams(standalone);
 
-  // Prefer a stable Fast → Effort → Context order in the picker.
-  const rank = (id: string) => {
-    const family = modelParamFamily(id);
-    if (family === "fast") return 0;
-    if (family === "effort") return 1;
-    if (family === "context") return 2;
-    return 50;
-  };
-  params.sort((a, b) => rank(a.id) - rank(b.id) || a.id.localeCompare(b.id));
-  return params.length ? params : paramsFromModelWire(options);
+  const seenIds = new Set(standalone.map((p) => p.id));
+  const seenFamilies = new Set(
+    standalone.map((p) => modelParamFamily(p.id)).filter((f): f is NonNullable<typeof f> => f != null),
+  );
+  const extra = fromWire.filter((p) => {
+    if (seenIds.has(p.id)) return false;
+    const family = modelParamFamily(p.id);
+    if (family && seenFamilies.has(family)) return false;
+    return true;
+  });
+  return sortModelParams([...standalone, ...extra]);
 }
 
 /**
@@ -3350,9 +3365,24 @@ export function warmModelParamsProbe(provider?: AgentProvider) {
   });
 }
 
+function configOptionsMatchModel(options: ConfigOption[], model: string): boolean {
+  const models = toModelList(options);
+  const rawCurrent = findModelConfigOption(options)?.currentValue;
+  const currentModel = pickCurrentModel(models, rawCurrent);
+  const { base } = parseModelWire(model);
+  const currentBase = parseModelWire(String(rawCurrent ?? currentModel ?? "")).base;
+  return (
+    currentModel === model ||
+    currentModel === base ||
+    rawCurrent === model ||
+    rawCurrent === base ||
+    (Boolean(base) && currentBase === base)
+  );
+}
+
 async function probeModelParams(provider: AgentProvider, model: string): Promise<ModelParamDto[]> {
   const live = liveAcpClient(provider);
-  if (live) {
+  if (live && configOptionsMatchModel(live.configOptions, model)) {
     // Never set_config_option on the user's live chat process.
     return toModelParams(live.configOptions);
   }
@@ -3385,16 +3415,7 @@ async function readLiveModelParams(sessionId: string, model: string): Promise<Mo
   }
   if (!client) return null;
 
-  const models = toModelList(client.configOptions);
-  const rawCurrent = findModelConfigOption(client.configOptions)?.currentValue;
-  const currentModel = pickCurrentModel(models, rawCurrent);
-  const { base } = parseModelWire(model);
-  const matches =
-    currentModel === model ||
-    currentModel === base ||
-    rawCurrent === model ||
-    rawCurrent === base;
-  if (!matches) return null;
+  if (!configOptionsMatchModel(client.configOptions, model)) return null;
 
   const params = toModelParams(client.configOptions);
   return params.length ? params : null;

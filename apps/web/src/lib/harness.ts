@@ -53,6 +53,7 @@ export function pickCreateProvider(
 ): AgentProvider | null {
   const online = onlineProviders(availability, ids);
   if (!online.length) return null;
+
   if (preferred && online.includes(preferred)) return preferred;
   return online[0] ?? null;
 }

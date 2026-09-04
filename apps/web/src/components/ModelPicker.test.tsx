@@ -138,4 +138,51 @@ describe("ModelPicker", () => {
     expect(screen.getByText("Список пуст")).toBeTruthy();
     expect(screen.queryByText("Загрузка моделей…")).toBeNull();
   });
+
+  it("shows a single loader chip on the trigger while params load", () => {
+    renderPicker({ paramsLoading: true, showParamsMenu: true });
+    expect(screen.getByLabelText("Загрузка настроек модели…")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /GPT-4o Fast/ }).getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("shows a loader on the settings-style trigger while params load", () => {
+    renderPicker({
+      variant: "block",
+      paramsLoading: true,
+      showParamsMenu: true,
+    });
+    expect(screen.getByLabelText("Загрузка настроек модели…")).toBeTruthy();
+  });
+
+  it("shows a loader in the ⋯ flyout while params are fetched", async () => {
+    const user = userEvent.setup();
+    let resolveOpen: () => void = () => {};
+    const onParamsOpen = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    renderPicker({
+      showParamsMenu: true,
+      onParamsOpen,
+      params: [
+        {
+          id: "fast",
+          name: "Fast",
+          currentValue: "false",
+          options: [
+            { value: "false", name: "Not Fast" },
+            { value: "true", name: "Fast" },
+          ],
+        },
+      ],
+    });
+    await user.click(screen.getByRole("button", { name: "GPT-4o Fast" }));
+    await user.click(screen.getAllByRole("button", { name: "Fast" })[0]);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("auto");
+    expect(dialog.textContent).toContain("Загрузка настроек модели…");
+    resolveOpen();
+  });
 });

@@ -14,6 +14,7 @@ import {
   effectiveMcpServers,
   pickRestoreMode,
   requestIdFor,
+  toModelParams,
 } from "./sessionManager.js";
 import { subagentFieldsFromRaw, textFromUnknown } from "@acpio/shared";
 
@@ -385,6 +386,64 @@ describe("paramsFromModelWire", () => {
       modelOpt("gemini-3.1-pro[]", ["gemini-3.1-pro[]", "glm-5.2[reasoning=high]"]),
     );
     expect(params).toEqual([]);
+  });
+});
+
+describe("toModelParams", () => {
+  const grokWires = [
+    "grok-4.6[effort=high,fast=true]",
+    "grok-4.6[effort=low,fast=false]",
+  ];
+
+  it("falls through to wire params when there are no standalone knobs", () => {
+    const params = toModelParams([
+      {
+        id: "model",
+        category: "model",
+        type: "select",
+        currentValue: grokWires[0],
+        options: grokWires.map((value) => ({ value })),
+      },
+    ]);
+    expect(params.map((p) => p.id)).toEqual(["fast", "effort"]);
+  });
+
+  it("keeps wire effort when standalone only exposes fast", () => {
+    const params = toModelParams([
+      {
+        id: "model",
+        category: "model",
+        type: "select",
+        currentValue: grokWires[0],
+        options: grokWires.map((value) => ({ value })),
+      },
+      { id: "fast", type: "boolean", currentValue: "true" },
+    ]);
+    expect(params.map((p) => p.id)).toEqual(["fast", "effort"]);
+    expect(params.find((p) => p.id === "effort")?.options.map((o) => o.value)).toEqual(["high", "low"]);
+  });
+
+  it("does not duplicate a family already present as a standalone option", () => {
+    const params = toModelParams([
+      {
+        id: "model",
+        category: "model",
+        type: "select",
+        currentValue: "gpt-5.4[context=272k,reasoning=medium,fast=false]",
+        options: [{ value: "gpt-5.4[context=272k,reasoning=medium,fast=false]" }],
+      },
+      {
+        id: "reasoning",
+        type: "select",
+        currentValue: "medium",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "medium", name: "Medium" },
+        ],
+      },
+    ]);
+    expect(params.filter((p) => p.id === "reasoning" || p.id === "effort")).toHaveLength(1);
+    expect(params.find((p) => p.id === "context")?.options.map((o) => o.value)).toEqual(["272k"]);
   });
 });
 

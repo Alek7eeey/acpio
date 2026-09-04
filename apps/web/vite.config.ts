@@ -2,7 +2,12 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 import path from "node:path";
-import { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT } from "../../packages/shared/src/ports.ts";
+import {
+  DEFAULT_DEV_UI_PORT,
+  resolveServerPort,
+} from "../../packages/shared/src/ports.ts";
+
+const apiPort = resolveServerPort();
 
 export default defineConfig({
   plugins: [
@@ -91,11 +96,11 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       "/api": {
-        target: `http://127.0.0.1:${DEFAULT_SERVER_PORT}`,
+        target: `http://127.0.0.1:${apiPort}`,
         xfwd: true,
       },
       "/ws": {
-        target: `ws://127.0.0.1:${DEFAULT_SERVER_PORT}`,
+        target: `ws://127.0.0.1:${apiPort}`,
         ws: true,
         xfwd: true,
       },

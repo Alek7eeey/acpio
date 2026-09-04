@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SessionDto } from "@acpio/shared";
-import { groupByFolder, sessionActivityAt } from "./ChatSidebar";
+import { groupByFolder, sessionActivityAt } from "../lib/sessionTitle";
 
 function session(id: string, cwd: string): SessionDto {
   return {
@@ -37,6 +37,35 @@ describe("groupByFolder", () => {
   it("keeps distinct folders separate", () => {
     const groups = groupByFolder([session("a", "E:/one"), session("b", "E:\\two")]);
     expect(groups.map((g) => g.cwd).sort()).toEqual(["E:/one", "E:/two"]);
+  });
+
+  it("sorts top-level sessions by sortOrder and folder sessions by recency", () => {
+    const s1 = { ...session("s1", ""), sortOrder: 5, lastMessageAt: "2026-08-16T12:00:00.000Z" };
+    const s2 = { ...session("s2", ""), sortOrder: 2, lastMessageAt: "2026-08-16T10:00:00.000Z" };
+    const s3 = { ...session("s3", "E:/folder"), sortOrder: 1, lastMessageAt: "2026-08-16T10:00:00.000Z" };
+    const s4 = { ...session("s4", "E:/folder"), sortOrder: 9, lastMessageAt: "2026-08-16T15:00:00.000Z" };
+
+    const groups = groupByFolder([s1, s2, s3, s4], ["E:/folder"]);
+
+    // Folder group should be first, top-level group (empty cwd) should be last
+    expect(groups).toHaveLength(2);
+    expect(groups[0].cwd).toBe("E:/folder");
+    expect(groups[1].cwd).toBe("");
+
+    // Folder sessions should be sorted by recency (s4 is more recent than s3)
+    expect(groups[0].sessions.map((s) => s.id)).toEqual(["s4", "s3"]);
+
+    // Top-level sessions should be sorted by sortOrder (s2 has sortOrder 2, s1 has sortOrder 5)
+    expect(groups[1].sessions.map((s) => s.id)).toEqual(["s2", "s1"]);
+  });
+
+  it("sorts folders by their order in knownFolders", () => {
+    const s1 = session("s1", "E:/folderA");
+    const s2 = session("s2", "E:/folderB");
+    const s3 = session("s3", "E:/folderC");
+
+    const groups = groupByFolder([s1, s2, s3], ["E:/folderC", "E:/folderA", "E:/folderB"]);
+    expect(groups.map((g) => g.cwd)).toEqual(["E:/folderC", "E:/folderA", "E:/folderB"]);
   });
 });
 

@@ -5,8 +5,69 @@ export {
   truncateSessionTitle,
 } from "@acpio/shared";
 
-import type { MessageDto } from "@acpio/shared";
+import type { MessageDto, SessionDto } from "@acpio/shared";
 import { isShellSession, sanitizeTitleSource, truncateSessionTitle } from "@acpio/shared";
+import { normalizeCwd } from "./pathSegments.js";
+
+export function sortSessions(list: SessionDto[]) {
+  return [...list].sort(
+    (a, b) =>
+      Number(b.pinned) - Number(a.pinned) ||
+      sessionActivityAt(b).localeCompare(sessionActivityAt(a)) ||
+      b.createdAt.localeCompare(a.createdAt),
+  );
+}
+
+export function sortSessionsByOrder(list: SessionDto[]) {
+  return [...list].sort(
+    (a, b) =>
+      Number(b.pinned) - Number(a.pinned) ||
+      a.sortOrder - b.sortOrder ||
+      sessionActivityAt(b).localeCompare(sessionActivityAt(a)),
+  );
+}
+
+/** Last user message time, or creation time when the chat is still empty. */
+export function sessionActivityAt(session: Pick<SessionDto, "lastMessageAt" | "createdAt">): string {
+  return session.lastMessageAt || session.createdAt;
+}
+
+export function groupByFolder(list: SessionDto[], knownFolders: string[] = []) {
+  const map = new Map<string, SessionDto[]>();
+  for (const s of list) {
+    const key = normalizeCwd(s.cwd);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(s);
+    else map.set(key, [s]);
+  }
+  const entries = [...map.entries()].map(([cwd, sessions]) => {
+    const sorted = cwd ? sortSessions(sessions) : sortSessionsByOrder(sessions);
+    return {
+      cwd,
+      sessions: sorted,
+      latest: sessions.reduce(
+        (max, s) => {
+          const key = sessionActivityAt(s);
+          return key > max ? key : max;
+        },
+        "",
+      ),
+    };
+  });
+  entries.sort((a, b) => {
+    if (!a.cwd && b.cwd) return 1;
+    if (a.cwd && !b.cwd) return -1;
+    const indexA = knownFolders.indexOf(a.cwd);
+    const indexB = knownFolders.indexOf(b.cwd);
+    if (indexA !== -1 && indexB !== -1) {
+      return indexA - indexB;
+    }
+    if (indexA !== -1) return -1;
+    if (indexB !== -1) return 1;
+    return a.cwd.localeCompare(b.cwd, undefined, { sensitivity: "base" });
+  });
+  return entries;
+}
 
 const SHELL_TREE_SUFFIX = "-shell";
 const PLACEHOLDER_TITLES = new Set(["новый чат", "new chat"]);
