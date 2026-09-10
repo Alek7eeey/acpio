@@ -1523,13 +1523,18 @@
   flex-wrap: wrap;
 }
 
+.providerRowControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .providerProbeInline {
-  display: block;
-  margin-top: 6px;
   border-radius: 8px;
   padding: 6px 8px;
   font-size: var(--settings-control-size);
   font-weight: var(--settings-control-weight);
+  white-space: nowrap;
 }
 
 .mcpRowMetaInline {

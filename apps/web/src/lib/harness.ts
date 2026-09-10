@@ -1,4 +1,4 @@
-import type { AgentProvider } from "@acpio/shared";
+import type { AdapterMetaDto, AgentProvider } from "@acpio/shared";
 import { isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 
 export type AgentAvailabilityMap = Partial<Record<AgentProvider, boolean | null>>;
@@ -63,4 +63,12 @@ export function harnessShortLabel(provider: AgentProvider | string | null | unde
   if (provider === "cursor") return "Cursor";
   if (provider === "omp") return "OMP";
   return provider ? String(provider) : "";
+}
+
+/**
+ * Names of the switched-on harnesses for copy that lists them ("Works with
+ * …"). Falls back to the caller's generic phrase when every harness is off.
+ */
+export function harnessNamesForCopy(adapters: AdapterMetaDto[], fallback: string): string {
+  return adapters.length ? adapters.map((a) => a.label).join(", ") : fallback;
 }

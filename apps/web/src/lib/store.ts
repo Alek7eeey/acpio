@@ -205,8 +205,12 @@ type AppState = {
   /** True while the TTS engine is generating audio (stop button shows a spinner). */
   ttsLoading: boolean;
   modelsCatalog: ModelsCatalog | null;
-  /** Registered harness adapters (from /api/adapters). */
+  /** Every registered harness, including disabled ones (Settings → Connect). */
+  allAdapters: AdapterMetaDto[];
+  /** Enabled harnesses only (from /api/adapters) — drives pickers and forms. */
   adapters: AdapterMetaDto[];
+  /** True once /api/adapters answered; empty `adapters` then means "all off". */
+  adaptersLoaded: boolean;
   loadAdapters: () => Promise<void>;
   modelsLoading: boolean;
   sidebarOpen: boolean;
@@ -1167,7 +1171,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     typeof window !== "undefined"
       ? !(readStoredModelsCatalog()?.models?.length)
       : true,
+  allAdapters: [],
   adapters: [],
+  adaptersLoaded: false,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
   agentAvailable: false,
@@ -1208,8 +1214,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async loadAdapters() {
     try {
-      const adapters = await api.fetchAdapters();
-      set({ adapters });
+      const all = await api.fetchAdapters();
+      set({
+        allAdapters: all,
+        adapters: all.filter((a) => a.enabled !== false),
+        adaptersLoaded: true,
+      });
     } catch {
       // The static registry is served at boot; a failure leaves the UI with
       // the default (cursor/omp) provider forms.
@@ -1235,14 +1245,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     probeAllAgentsInflight = (async () => {
-    if (!get().adapters.length) {
+    if (!get().adaptersLoaded) {
       await get().loadAdapters();
     }
-    const ids = (
-      get().adapters.length
-        ? get().adapters.map((a) => a.id)
-        : (["cursor", "omp"] as AgentProvider[])
-    ) as AgentProvider[];
+    const ids = get().adapters.map((a) => a.id) as AgentProvider[];
     const quiet = opts?.quiet === true;
     const reportOffline = opts?.reportOffline === true;
     const snapshot: AgentAvailabilityMap = { ...get().agentAvailability };
@@ -1869,11 +1875,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().refreshFolders();
       return session;
     }
-    const ids = (
-      get().adapters.length
-        ? get().adapters.map((a) => a.id)
-        : (["cursor", "omp"] as AgentProvider[])
-    ) as AgentProvider[];
+    const ids = get().adapters.map((a) => a.id) as AgentProvider[];
     const chosen =
       provider ??
       pickCreateProvider(get().agentAvailability, ids, get().settings.defaultProvider);
@@ -2974,6 +2976,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings: nextSettings });
     applyAppearance(nextSettings);
+    if (nextPatch.disabledProviders !== undefined) {
+      // A switched-off harness keeps no probe state and leaves the registry
+      // list, so nothing (pickers, gate, header) can mention it any more.
+      const disabled = new Set(nextPatch.disabledProviders);
+      const agentAvailability = { ...get().agentAvailability };
+      const agentProbing = { ...get().agentProbing };
+      for (const id of disabled) {
+        delete agentAvailability[id];
+        delete agentProbing[id];
+      }
+      writeStoredAgentAvailability(agentAvailability);
+      set({
+        agentAvailability,
+        agentProbing,
+        agentOfflineWarning: get().agentOfflineWarning.filter((id) => !disabled.has(id)),
+      });
+      void get().loadAdapters();
+    }
     if (nextPatch.chatSplit === false || nextSettings.chatSplit === false) {
       get().collapseToSinglePane();
     }

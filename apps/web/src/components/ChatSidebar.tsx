@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { AgentProvider, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { harnessShortLabel } from "../lib/harness";
+import { harnessNamesForCopy, harnessShortLabel } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
 import { sessionTreeDisplayTitle, sessionActivityAt, sortSessions, groupByFolder } from "../lib/sessionTitle";
 import { normalizeCwd } from "../lib/pathSegments";
@@ -210,6 +210,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const createSession = useAppStore((s) => s.createSession);
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
+  const adaptersLoaded = useAppStore((s) => s.adaptersLoaded);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
@@ -221,15 +222,18 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
   const agentOptions = useMemo(
     () =>
-      (adapters.length
-        ? adapters.map((a) => ({ id: a.id, label: a.label }))
-        : [
-            { id: "cursor" as AgentProvider, label: "Cursor" },
-            { id: "omp" as AgentProvider, label: "OMP" },
-          ]
-      ).map((a) => ({ ...a, online: agentAvailability[a.id] === true })),
+      adapters
+        .map((a) => ({ id: a.id, label: a.label }))
+        .map((a) => ({ ...a, online: agentAvailability[a.id] === true })),
     [adapters, agentAvailability],
   );
+
+  /**
+   * Session rows show a harness badge - except for a harness the user turned
+   * off, which must not be named anywhere. Shell sessions always show theirs.
+   */
+  const showProviderBadge = (provider: string): boolean =>
+    isShellSession(provider) || !adaptersLoaded || adapters.some((a) => a.id === provider);
 
   const [liked, setLiked] = useState<LikedMessage[]>(() => listLikedMessages());
   useEffect(() => subscribeLikedMessages(() => setLiked(listLikedMessages())), []);
@@ -918,7 +922,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 )}
               </span>
             </button>
-            {s.provider ? (
+            {s.provider && showProviderBadge(s.provider) ? (
               <span
                 className={`${styles.sessionAgentBadge}${
                   isShellSession(s.provider) ? ` ${styles.sessionAgentBadgeShell}` : ""
@@ -1672,7 +1676,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           )}
           {visibleSessions.length === 0 && (
             <p className={styles.emptyHint}>
-              {t("chat.emptyDescription")}
+              {t("chat.emptyDescription", {
+                agents: harnessNamesForCopy(adapters, t("chat.emptyAgentsAny")),
+              })}
             </p>
           )}
         </div>

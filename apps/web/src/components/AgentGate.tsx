@@ -106,7 +106,11 @@ export function AgentGate() {
   const probing = useAppStore((s) => s.agentProbing);
   const dismissAgentGate = useAppStore((s) => s.dismissAgentGate);
 
-  const ids = adapters.length ? adapters.map((a) => a.id) : (["cursor", "omp"] as const);
+  // Enabled harnesses only, and nothing before /api/adapters answers: guessing
+  // here could name an agent the user switched off.
+  const ids: readonly string[] = adapters.map((a) => a.id);
+  // Every harness switched off — there is nothing to check, so no gate.
+  if (!ids.length) return null;
   const started = Object.keys(probing).length > 0 || Object.keys(availability).length > 0;
   const settled = ids.filter((id) => started && !probing[id] && availability[id] != null).length;
   const checking = !started || ids.some((id) => probing[id] || availability[id] == null);

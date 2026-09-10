@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { TranslateFn } from "@acpio/i18n";
+import type { AdapterMetaDto } from "@acpio/shared";
 import type { SettingsLeaf } from "./settingsNav";
 import searchStyles from "./settingsSearch.module.css";
 
@@ -119,23 +120,26 @@ export function SearchGate({
  * the currently open leaf. Drives the sidebar tree filter (and the "also
  * found in" chips). Rows themselves filter live against their own text.
  */
-export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string[]> {
+export function settingsSearchIndex(
+  t: TranslateFn,
+  adapters: AdapterMetaDto[] = [],
+): Record<SettingsLeaf, string[]> {
+  // Names/commands of the harnesses the user keeps on — a switched-off agent
+  // must not be findable anywhere in the settings tree.
+  const providerTerms = adapters.flatMap((a) => [a.id, a.label, a.defaultCommand]);
   const base: Record<SettingsLeaf, string[]> = {
     connect: [
       t("settings.connection"),
       t("settings.agentConnectTitle"),
       t("settings.agentConnectDesc"),
-      "cursor",
-      "omp",
-      t("settings.cursorDesc"),
-      t("settings.ompDesc"),
       t("settings.defaultAgent"),
       t("settings.defaultAgentHint"),
+      ...providerTerms,
     ],
     model: [
       t("settings.modelSection"),
       t("settings.agentModelTitle"),
-      t("settings.defaultModelFor", { agent: "Cursor" }),
+      ...adapters.map((a) => t("settings.defaultModelFor", { agent: a.label })),
       t("common.noAgentsOnline"),
       t("settings.auto"),
     ],
@@ -160,8 +164,8 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
       t("settings.terminalShell"),
       t("settings.terminalShellCmd"),
       t("settings.terminalShellPowerShell"),
-      "cursor",
-      "omp",
+      // Only the harnesses the user keeps enabled are searchable.
+      ...providerTerms,
     ],
     mcp: [
       t("settings.mcpTitle"),
@@ -264,7 +268,7 @@ export function settingsSearchIndex(t: TranslateFn): Record<SettingsLeaf, string
  */
 function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
   return {
-    connect: [t("settings.cursorDesc"), t("settings.ompDesc")],
+    connect: [],
     model: [],
     advanced: [
       t("settings.exportDirHint", { path: "…" }),

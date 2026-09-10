@@ -123,6 +123,7 @@ const settingsSchema = z.object({
   displayName: z.string().max(80).optional(),
   connectedProvider: z.enum(["cursor", "omp"]).nullable().optional(),
   defaultProvider: z.enum(["cursor", "omp"]).optional(),
+  disabledProviders: z.array(z.enum(["cursor", "omp"])).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
@@ -335,10 +336,15 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // Registered harness adapters — drives the web's provider list and forms.
+  // Disabled harnesses are still listed (Settings → Connect manages them) but
+  // flagged so the web hides them everywhere else.
   app.get("/api/adapters", async () => {
+    const settings = await getSettings();
+    const disabled = new Set(settings.disabledProviders ?? []);
     return adapters.list().map((a) => ({
       id: a.id,
       label: a.label,
+      enabled: !disabled.has(a.id),
       descriptionKey: a.descriptionKey,
       commandField: a.commandField,
       argsField: a.argsField,
@@ -372,12 +378,18 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/agent/status", async () => {
     const settings = await getSettings();
+    const disabled = new Set(settings.disabledProviders);
+    const ids = adapters.ids().filter((id) => !disabled.has(id));
     const availability: Record<string, boolean> = {};
-    for (const id of adapters.ids()) {
+    for (const id of ids) {
       availability[id] = getAgentAvailability(id);
     }
-    const online = adapters.ids().find((id) => availability[id]);
-    const provider = online ?? settings.connectedProvider ?? null;
+    const online = ids.find((id) => availability[id]);
+    const provider =
+      online ??
+      (settings.connectedProvider && ids.includes(settings.connectedProvider)
+        ? settings.connectedProvider
+        : null);
     return {
       provider,
       available: provider ? Boolean(availability[provider]) : false,
@@ -569,7 +581,10 @@ export async function registerRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
     const provider = body.provider ?? settings.connectedProvider ?? settings.defaultProvider;
-    if (!isShellSession(provider) && !getAgentAvailability(provider)) {
+    if (
+      !isShellSession(provider) &&
+      (settings.disabledProviders.includes(provider) || !getAgentAvailability(provider))
+    ) {
       return sendAgentOffline(req, reply);
     }
     const session = await createSession({
@@ -990,11 +1005,16 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
+    const settings = await getSettings();
+    // A harness the user switched off must not be driven through an old chat
+    // either - regardless of what the stale client believes about availability.
+    if (settings.disabledProviders.includes(detail.provider)) {
+      return sendAgentOffline(req, reply);
+    }
     if (!getAgentAvailability(detail.provider)) {
       return sendAgentOffline(req, reply);
     }
 
-    const settings = await getSettings();
     const defaultTitle = defaultSessionTitle(settings.locale);
     void runPrompt(id, body.text, {
       provider: detail.provider,

@@ -3,7 +3,7 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.6
+**Current version:** 0.1.7
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -153,6 +153,9 @@ The dev server listens on all interfaces (`0.0.0.0`), so you can open the UI fro
 3. Click **Test agent connection**.
 4. Permission policy for local: `Always allow`.
 5. Create a chat and send a message.
+
+A harness you do not use can be switched off with the toggle on **Settings → Agents → Connection**:
+it is no longer probed and disappears from agent pickers, model defaults and CLI fields.
 
 If a chat seems stuck — press **Stop** and send again.
 

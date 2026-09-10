@@ -38,6 +38,7 @@ import {
   isMcpServerAttached,
 } from "@acpio/shared";
 import { api } from "../lib/api";
+import { harnessNamesForCopy } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
@@ -3361,6 +3362,7 @@ function ChatThread() {
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const adapters = useAppStore((s) => s.adapters);
+  const adaptersLoaded = useAppStore((s) => s.adaptersLoaded);
   const error = useAppStore((s) => (!bind || bind.focused ? s.error : null));
   const modelsCatalog = useAppStore((s) => s.modelsCatalog);
   const modelsLoading = useAppStore((s) => s.modelsLoading);
@@ -3786,12 +3788,19 @@ function ChatThread() {
   );
   const agentProvider = isShellSessionActive ? null : (activeSession?.provider ?? null);
   const agentOffline = Boolean(agentProvider && agentAvailability[agentProvider] === false);
+  /**
+   * The chat's harness was switched off in Settings → Connection. The session
+   * and its history stay, but nothing may spawn or resume it again, so the
+   * composer locks with an explicit reason instead of failing on send.
+   */
+  const agentDisabled = Boolean(
+    adaptersLoaded && agentProvider && !adapters.some((a) => a.id === agentProvider),
+  );
+  const agentUnavailable = agentOffline || agentDisabled;
   const noOnlineAgents =
     !isShellSessionActive &&
     !agentProvider &&
-    !(adapters.length
-      ? adapters.some((a) => agentAvailability[a.id] === true)
-      : agentAvailability.cursor === true || agentAvailability.omp === true);
+    !adapters.some((a) => agentAvailability[a.id] === true);
   const agentMissing = noOnlineAgents;
   const catalog =
     agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
@@ -3833,11 +3842,11 @@ function ChatThread() {
   // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
   const composerLocked =
     agentMissing ||
-    agentOffline ||
+    agentUnavailable ||
     (!isEmptyChat &&
       !!agentProvider &&
       !turnBusy &&
-      !agentOffline &&
+      !agentUnavailable &&
       modelsLoading &&
       models.length === 0);
 
@@ -4990,7 +4999,11 @@ function ChatThread() {
             <h1>
               <span>ACP</span>rocess
             </h1>
-            <p>{t("chat.emptyDescription")}</p>
+            <p>
+              {t("chat.emptyDescription", {
+                agents: harnessNamesForCopy(adapters, t("chat.emptyAgentsAny")),
+              })}
+            </p>
             {agentMissing ? <p>{t("common.noAgentsOnline")}</p> : null}
             <div className={styles.emptyActions}>
               {!agentMissing ? (
@@ -5244,15 +5257,18 @@ function ChatThread() {
             {!editingMessageId && agentOffline && (
               <div className={styles.typingBar}>{t("common.thisChatAgentOffline")}</div>
             )}
+            {!editingMessageId && agentDisabled && (
+              <div className={styles.typingBar}>{t("common.thisChatAgentDisabled")}</div>
+            )}
             {!editingMessageId && agentMissing && (
               <div className={styles.typingBar}>{t("common.noAgentsOnline")}</div>
             )}
-            {!editingMessageId && !agentMissing && !agentOffline && activeSession?.status === "waiting" && (
+            {!editingMessageId && !agentMissing && !agentUnavailable && activeSession?.status === "waiting" && (
               <div className={styles.typingBar}>{t("common.waitingInput")}</div>
             )}
             {!editingMessageId &&
               !agentMissing &&
-              !agentOffline &&
+              !agentUnavailable &&
               composerLocked &&
               !turnBusy && (
                 <div className={styles.typingBar}>
@@ -5402,7 +5418,7 @@ function ChatThread() {
               }}
               placeholder={
                 slashInputHint ??
-                (composerLocked && !agentMissing && !agentOffline
+                (composerLocked && !agentMissing && !agentUnavailable
                   ? t("common.loadingModels")
                   : t("common.messageOrCommand"))
               }
@@ -5518,7 +5534,7 @@ function ChatThread() {
               {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
 
               <div className={styles.pillFooterEnd}>
-                {(settings.chatComposerButtons ?? []).includes("model") && (
+                {!agentDisabled && (settings.chatComposerButtons ?? []).includes("model") && (
                 <ModelPicker
                   className={styles.composerModel}
                   model={model}
@@ -5607,6 +5623,8 @@ function ChatThread() {
                         title={
                           agentMissing
                             ? t("common.noAgentsOnline")
+                            : agentDisabled
+                              ? t("common.thisChatAgentDisabled")
                             : agentOffline
                               ? t("common.thisChatAgentOffline")
                             : composerLocked
@@ -5657,13 +5675,9 @@ function ChatThread() {
           y={folderPicker.y}
           defaultCwd={settings.defaultCwd ?? ""}
           recentCwds={recentCwds}
-          agents={(adapters.length
-            ? adapters.map((a) => ({ id: a.id, label: a.label }))
-            : [
-                { id: "cursor" as const, label: "Cursor" },
-                { id: "omp" as const, label: "OMP" },
-              ]
-          ).map((a) => ({ ...a, online: agentAvailability[a.id] === true }))}
+          agents={adapters
+            .map((a) => ({ id: a.id, label: a.label }))
+            .map((a) => ({ ...a, online: agentAvailability[a.id] === true }))}
           preferredProvider={settings.defaultProvider}
           onClose={() => setFolderPicker(null)}
           onConfirm={async (cwd, provider) => {

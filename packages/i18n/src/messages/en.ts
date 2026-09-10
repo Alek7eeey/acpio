@@ -87,6 +87,8 @@ export const en = {
     noAgentsOnline: "No agents are available right now",
     thisChatAgentOffline:
       "This chat's agent is not running. History stays available; new messages are paused.",
+    thisChatAgentDisabled:
+      "This chat's agent is switched off in Settings. Enable it under Agents → Connection to continue; history stays available, new messages are paused.",
     agentStoppedTitle: "A harness stopped working",
     agentStoppedLead:
       "These harnesses were available and are no longer running on this PC. Chats that use them can still be read, but new messages are paused until the harness is back.",
@@ -232,7 +234,8 @@ export const en = {
     tooManyFiles: "Up to 8 files can be attached",
     emptyTitle: "Acpio",
     emptyDescription:
-      "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with Cursor and OMP.",
+      "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with {{agents}}.",
+    emptyAgentsAny: "any agent you enable in Settings",
     emptyReady: "Start when you're ready",
     connectAgent: "Connect agent",
     newSession: "New session",
@@ -473,7 +476,7 @@ export const en = {
     allowlistHint: "Tool name patterns (substring match). Matching tools are auto-approved without prompting.",
     agentUnavailable: "Agent unavailable — check CLI install and login",
     multitask: "Multitask (parallel requests)",
-    multitaskHint: "Send the next request as soon as the previous one finishes, without waiting for full completion. Only for agents with multitasking support (Cursor, OMP).",
+    multitaskHint: "Send the next request as soon as the previous one finishes, without waiting for full completion. Only agents that support multitasking can do this.",
     apiKeys: "API keys",
     interface: "Interface",
     appearance: "Appearance",

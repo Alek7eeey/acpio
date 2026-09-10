@@ -3070,6 +3070,20 @@ export async function probeAgent(
 ) {
   const settings = await getSettings();
   const selected = provider ?? settings.defaultProvider;
+  // Disabled harnesses must never spawn a process just to be checked.
+  if (settings.disabledProviders.includes(selected)) {
+    return {
+      ok: false as const,
+      provider: selected,
+      command: adapterCommand(getAdapter(selected), settings),
+      message: `Агент "${getAdapter(selected).label}" отключён в настройках`,
+      details: "",
+      currentModel: undefined,
+      models: [] as ModelOption[],
+      modelParams: [] as ModelParamDto[],
+      modes: [] as ModeOption[],
+    };
+  }
   const existing = probeInflight.get(selected);
   if (existing) return existing;
   const work = probeAgentOnce(selected, opts).finally(() => {
@@ -3426,6 +3440,7 @@ export function warmModelParamsProbe(provider?: AgentProvider) {
   void (async () => {
     const settings = await getSettings();
     const selected = provider ?? settings.connectedProvider ?? settings.defaultProvider;
+    if (settings.disabledProviders.includes(selected)) return;
     const inflight = probeInflight.get(selected);
     if (inflight) await inflight;
     if (liveAcpClient(selected)) return;

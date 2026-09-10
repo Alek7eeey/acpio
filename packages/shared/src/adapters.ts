@@ -202,6 +202,8 @@ export interface AdapterRegistry {
 export interface AdapterMetaDto {
   id: string;
   label: string;
+  /** False when the harness is switched off in Settings → Connect. */
+  enabled: boolean;
   descriptionKey: string;
   commandField: string;
   argsField: string;

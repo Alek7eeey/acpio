@@ -939,3 +939,94 @@ describe("agent status", () => {
     expect(body.availability.omp).toBe(true);
   });
 });
+
+describe("disabled providers", () => {
+  it("flags a switched-off harness in /api/adapters and drops it from agent status", async () => {
+    await connectAgent();
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { disabledProviders: ["omp"] },
+    });
+    expect(put.statusCode).toBe(200);
+    // A switched-off harness is neither the default nor the connected agent.
+    expect(put.json().disabledProviders).toEqual(["omp"]);
+    expect(put.json().defaultProvider).toBe("cursor");
+    expect(put.json().connectedProvider).toBeNull();
+
+    const adapters = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      id: string;
+      enabled: boolean;
+    }>;
+    expect(adapters.map((a) => [a.id, a.enabled])).toEqual([
+      ["cursor", true],
+      ["omp", false],
+    ]);
+
+    const status = (await app.inject({ method: "GET", url: "/api/agent/status" })).json();
+    expect(status).toEqual({ provider: null, available: false, availability: { cursor: false } });
+  });
+
+  it("turning the harness back on restores its registry row", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { disabledProviders: ["cursor", "omp"] },
+    });
+    const off = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      enabled: boolean;
+    }>;
+    expect(off.map((a) => a.enabled)).toEqual([false, false]);
+
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { disabledProviders: [] } });
+    const on = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      enabled: boolean;
+    }>;
+    expect(on.map((a) => a.enabled)).toEqual([true, true]);
+  });
+
+  it("refuses a new session for a switched-off harness", async () => {
+    await connectAgent();
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { disabledProviders: ["omp"] },
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { provider: "omp" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("refuses to drive an existing chat whose harness was switched off", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { disabledProviders: ["omp"] },
+    });
+    // Availability still reports the harness from before the switch, so only
+    // the disabled list can keep the chat from being driven again.
+    setAgentAvailable("omp", true);
+    const prompt = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "must not reach the harness" },
+    });
+    expect(prompt.statusCode).toBe(400);
+    expect(prompt.json().error).toBe("This chat's agent is not running on this PC");
+
+    const detail = (
+      await app.inject({ method: "GET", url: `/api/sessions/${session.id}` })
+    ).json();
+    expect(detail.messages.some((m: { role: string }) => m.role === "user")).toBe(false);
+  });
+});

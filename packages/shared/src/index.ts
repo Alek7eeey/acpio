@@ -526,6 +526,11 @@ export interface AppSettings {
   /** Agent explicitly connected in Settings → Connect. */
   connectedProvider: AgentProvider | null;
   defaultProvider: AgentProvider;
+  /**
+   * Harnesses switched off in Settings → Connect: never probed, never offered
+   * in agent pickers/forms. Sessions that already use them stay readable.
+   */
+  disabledProviders: AgentProvider[];
   defaultMode: AgentMode;
   defaultCwd: string;
   defaultModel: string;
@@ -641,6 +646,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   displayName: "",
   connectedProvider: null,
   defaultProvider: "cursor",
+  disabledProviders: [],
   defaultMode: "agent",
   defaultCwd: "",
   defaultModel: "",

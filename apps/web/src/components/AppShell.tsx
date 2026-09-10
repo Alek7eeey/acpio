@@ -132,7 +132,10 @@ export function AppShell() {
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
-  const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
+  const searchIndex = useMemo(
+    () => settingsSearchIndex(t, adapters),
+    [t, adapters],
+  );
 
   /**
    * Tree view with the active search applied: branches/leaves whose label or
@@ -156,9 +159,7 @@ export function AppShell() {
     return { branches, matches };
   }, [settingsTree, settingsQuery, searchIndex]);
 
-  const harnessIds = adapters.length
-    ? adapters.map((a) => a.id)
-    : (["cursor", "omp"] as const);
+  const harnessIds = adapters.map((a) => a.id);
   const onlineHarnessCount = harnessIds.filter((id) => agentAvailability[id] === true).length;
   const harnessTotal = harnessIds.length;
 

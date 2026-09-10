@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  type AgentProvider,
   type AppSettings,
   type ChatMetaChipId,
   type ChatToolbarStyle,
@@ -96,6 +97,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   }
   merged.terminalShell =
     partial.terminalShell === "powershell" ? "powershell" : DEFAULT_SETTINGS.terminalShell;
+  merged.disabledProviders = Array.isArray(partial.disabledProviders)
+    ? partial.disabledProviders.filter((id): id is AgentProvider => typeof id === "string")
+    : [...DEFAULT_SETTINGS.disabledProviders];
   merged.settingsSchema = SETTINGS_SCHEMA_VERSION;
   return merged;
 }

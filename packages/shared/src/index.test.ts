@@ -408,6 +408,7 @@ describe("DEFAULT_SETTINGS", () => {
     displayName: "",
     connectedProvider: null,
     defaultProvider: "cursor",
+    disabledProviders: [],
     defaultMode: "agent",
     defaultCwd: "",
     defaultModel: "",

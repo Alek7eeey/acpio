@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   migrateModelParamValues,
+  type AdapterMetaDto,
   type AgentProvider,
   type AppSettings,
   type ChatActionId,
@@ -55,7 +56,8 @@ function mcpEnvConfigDraft(server: McpServerConfig): string {
   return Object.keys(obj).length ? JSON.stringify(obj, null, 2) : "";
 }
 
-const PROVIDER_IDS = ["cursor", "omp"] as const satisfies readonly AgentProvider[];
+/** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
+type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
 
 /** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
@@ -444,15 +446,17 @@ function SchemeCard({
 function SearchResults({
   hits,
   query,
+  adapters,
   onNavigate,
 }: {
   hits: { section: string; leaf: string; label: string }[];
   query: string;
+  adapters: AdapterMetaDto[];
   onNavigate: (section: SettingsSection, leaf: SettingsLeaf) => void;
 }) {
   const t = useT();
   const tree = useMemo(() => getSettingsTree(t), [t]);
-  const searchIdx = useMemo(() => settingsSearchIndex(t), [t]);
+  const searchIdx = useMemo(() => settingsSearchIndex(t, adapters), [t, adapters]);
   const hl = (text: string) => highlightText(text, query);
 
   /** Get the first meaningful description term, skipping the leaf's own label. */
@@ -538,44 +542,73 @@ function SearchResults({
 export function SettingsPage() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
-  /** CLI/args form rows: every registered adapter, with built-in fallback. */
-  const cliFormAdapters = useMemo(() => {
-    if (adapters.length) return adapters;
+  const allAdapters = useAppStore((s) => s.allAdapters);
+  /** API-key rows: enabled harnesses' own keys, then the shared LLM keys. */
+  const apiKeyRows = useMemo(() => {
+    const fromProviders = adapters.flatMap((a) => {
+      const key = a.apiKeyField as ApiKeyField | undefined;
+      if (!key) return [];
+      return [
+        {
+          key,
+          label: `${a.label} ${t("settings.apiKeys")}`,
+          env: a.envApiKeyName ?? "",
+          placeholder: "",
+        },
+      ];
+    });
     return [
+      ...fromProviders,
       {
-        id: "cursor",
-        label: "Cursor",
-        commandField: "cursorCommand",
-        argsField: "cursorArgs",
-        apiKeyField: "cursorApiKey",
-        envApiKeyName: "CURSOR_API_KEY",
-        defaultCommand: "agent",
-        defaultArgs: ["acp"],
+        key: "anthropicApiKey" as const,
+        label: `Anthropic ${t("settings.apiKeys")}`,
+        env: "ANTHROPIC_API_KEY",
+        placeholder: "sk-ant-...",
       },
       {
-        id: "omp",
-        label: "OMP",
-        commandField: "ompCommand",
-        argsField: "ompArgs",
-        defaultCommand: "omp",
-        defaultArgs: ["acp"],
+        key: "openaiApiKey" as const,
+        label: `OpenAI ${t("settings.apiKeys")}`,
+        env: "OPENAI_API_KEY",
+        placeholder: "",
       },
     ];
-  }, [adapters]);
-  const providers = useMemo(() => {
-    const registered = adapters.length
-      ? adapters.map((a) => ({
-          id: a.id,
-          title: a.label,
-          description: t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
-        }))
-      : PROVIDER_IDS.map((id) => ({
-          id,
-          title: id === "cursor" ? "Cursor" : "OMP",
-          description: id === "cursor" ? t("settings.cursorDesc") : t("settings.ompDesc"),
-        }));
-    return registered;
   }, [adapters, t]);
+  /**
+   * Session-restore hint. Lists only the enabled harnesses and their real
+   * restore mode, so a switched-off agent is not named here either.
+   */
+  const resumeHint = useMemo(() => {
+    const base = t("settings.resumeAgentContextHint");
+    const details = adapters.flatMap((a) =>
+      a.restoreMode === "resume" || a.restoreMode === "load"
+        ? [t("settings.resumeAgentContextVia", { agent: a.label, mode: `session/${a.restoreMode}` })]
+        : [],
+    );
+    return details.length
+      ? `${base} ${t("settings.resumeAgentContextRestore", { agents: details.join(", ") })}`
+      : base;
+  }, [adapters, t]);
+  /**
+   * Every registered harness with its on/off state — the Connect leaf is the
+   * one place a switched-off agent stays visible (its toggle lives there).
+   * Rows appear once /api/adapters answers; guessing before that could name a
+   * harness the user switched off.
+   */
+  const providerRows = useMemo(
+    () =>
+      allAdapters.map((a) => ({
+        id: a.id as AgentProvider,
+        title: a.label,
+        description: t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
+        enabled: a.enabled !== false,
+      })),
+    [allAdapters, t],
+  );
+  /** Enabled harnesses — model defaults, agent pickers and CLI forms. */
+  const providers = useMemo(
+    () => adapters.map((a) => ({ id: a.id as AgentProvider, title: a.label })),
+    [adapters],
+  );
   const location = useLocation();
   const navigate = useNavigate();
   const { section, leaf } = useMemo(
@@ -611,7 +644,10 @@ export function SettingsPage() {
   const activeSessionId = useAppStore((s) => s.activeSessionId);
   const serverPlatform = useAppStore((s) => s.serverPlatform);
   const showTerminalShell = serverPlatform === "win32";
-  const searchIndex = useMemo(() => settingsSearchIndex(t), [t]);
+  const searchIndex = useMemo(
+    () => settingsSearchIndex(t, adapters),
+    [t, adapters],
+  );
   /** Leaves whose label or index terms match the active search. */
   const searchHits = useMemo(() => {
     const q = settingsQuery.trim();
@@ -768,6 +804,33 @@ export function SettingsPage() {
     patch("chatSplit", value);
     if (!value) useAppStore.getState().collapseToSinglePane();
     void saveSettings({ chatSplit: value });
+  };
+  /**
+   * Switch a harness on/off. The server heals default/connected provider on
+   * read, but the form must move its default off the harness immediately so
+   * the picker never points at a disabled one.
+   */
+  const setProviderEnabled = (id: AgentProvider, enabled: boolean) => {
+    const disabled = form.disabledProviders ?? [];
+    const nextDisabled = enabled
+      ? disabled.filter((v) => v !== id)
+      : [...new Set([...disabled, id])];
+    const nextPatch: Partial<AppSettings> = { disabledProviders: nextDisabled };
+    patch("disabledProviders", nextDisabled);
+    if (!enabled && form.defaultProvider === id) {
+      const fallback = providerRows.find((p) => p.enabled && p.id !== id);
+      if (fallback) {
+        const model = form.defaultModelByProvider?.[fallback.id] ?? "";
+        const params = form.defaultModelParamsByProvider?.[fallback.id] ?? {};
+        nextPatch.defaultProvider = fallback.id;
+        nextPatch.defaultModel = model;
+        nextPatch.defaultModelParams = params;
+        patch("defaultProvider", fallback.id);
+        patch("defaultModel", model);
+        patch("defaultModelParams", params);
+      }
+    }
+    void saveSettings(nextPatch);
   };
 
   const mcpServers = form.mcpServers ?? [];
@@ -1162,24 +1225,43 @@ export function SettingsPage() {
         )}
 
         {settingsQuery.trim() && viewingResults ? (
-          <SearchResults hits={searchHits} query={settingsQuery} onNavigate={(s, l) => { setViewingResults(false); navigate(settingsPath(s as SettingsSection, l as SettingsLeaf)); }} />
+          <SearchResults hits={searchHits} query={settingsQuery} adapters={adapters} onNavigate={(s, l) => { setViewingResults(false); navigate(settingsPath(s as SettingsSection, l as SettingsLeaf)); }} />
         ) : (<div style={{ display: "contents" }}>
         {section === "agent" && leaf === "connect" && (
           <>
+            <p className={styles.hint}>{t("settings.agentEnabledHint")}</p>
             <SettingTable>
-              {providers.map((item) => {
+              {providerRows.map((item) => {
                 const known = agentAvailability[item.id];
-                const checking = known !== true && known !== false;
+                const checking = item.enabled && known !== true && known !== false;
                 const online = known === true;
                 return (
                   <SettingRow
                     key={item.id}
-                    terms={[item.title, item.description]}
+                    terms={[
+                      item.title,
+                      item.description,
+                      t("settings.enabled"),
+                      t("settings.disabled"),
+                    ]}
                     label={item.title}
                     hint={highlightText(item.description, settingsQuery)}
                   >
-                    <span className={styles.providerProbeInline}>
-                      {checking ? t("common.checking") : online ? t("common.online") : t("common.offline")}
+                    <span className={styles.providerRowControl}>
+                      <span className={styles.providerProbeInline}>
+                        {!item.enabled
+                          ? t("settings.disabled")
+                          : checking
+                            ? t("common.checking")
+                            : online
+                              ? t("common.online")
+                              : t("common.offline")}
+                      </span>
+                      <Toggle
+                        checked={item.enabled}
+                        onChange={(next) => setProviderEnabled(item.id, next)}
+                        label={t("settings.enabled")}
+                      />
                     </span>
                   </SettingRow>
                 );
@@ -1813,7 +1895,7 @@ export function SettingsPage() {
                 />
               </SettingRow>
 
-              <SettingRow label={t("settings.resumeAgentContext")} hint={t("settings.resumeAgentContextHint")}>
+              <SettingRow label={t("settings.resumeAgentContext")} hint={resumeHint}>
                 <Toggle
                   checked={Boolean(form.resumeAgentContext)}
                   onChange={(v) => patch("resumeAgentContext", v)}
@@ -1911,31 +1993,10 @@ export function SettingsPage() {
               </SearchGate>
             )}
 
-            <SearchGate terms={[t("settings.apiKeys"), "api", "cursor", "anthropic", "openai"]}>
+            <SearchGate terms={[t("settings.apiKeys"), "api", ...apiKeyRows.flatMap((row) => [row.label, row.env])]}>
               <h2 className={styles.sectionHeading}>{highlightText(t("settings.apiKeys"), settingsQuery)}</h2>
               <SettingTable>
-                {(
-                  [
-                    {
-                      key: "cursorApiKey" as const,
-                      label: `Cursor ${t("settings.apiKeys")}`,
-                      env: "CURSOR_API_KEY",
-                      placeholder: "",
-                    },
-                    {
-                      key: "anthropicApiKey" as const,
-                      label: `Anthropic ${t("settings.apiKeys")}`,
-                      env: "ANTHROPIC_API_KEY",
-                      placeholder: "sk-ant-...",
-                    },
-                    {
-                      key: "openaiApiKey" as const,
-                      label: `OpenAI ${t("settings.apiKeys")}`,
-                      env: "OPENAI_API_KEY",
-                      placeholder: "",
-                    },
-                  ] as const
-                ).map((item) => {
+                {apiKeyRows.map((item) => {
                   const value = form[item.key] ?? "";
                   const hasValue = value.trim().length > 0;
                   return (
@@ -1969,7 +2030,7 @@ export function SettingsPage() {
               terms={[
                 t("settings.cliAndPermissions"),
                 t("settings.agentAdvancedDesc"),
-                ...cliFormAdapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
+                ...adapters.flatMap((a) => [a.label, a.defaultCommand, ...a.defaultArgs]),
               ]}
             >
             <details className={styles.cliDisclosure}>
@@ -1977,7 +2038,7 @@ export function SettingsPage() {
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
                 <SettingTable>
-                  {cliFormAdapters.map((a) => {
+                  {adapters.map((a) => {
                     const command = String(
                       (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
                     );

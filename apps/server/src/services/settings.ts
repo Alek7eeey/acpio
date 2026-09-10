@@ -56,6 +56,17 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.connectedProvider !== null && !isKnownProvider(merged.connectedProvider)) {
     merged.connectedProvider = DEFAULT_SETTINGS.connectedProvider;
   }
+  merged.disabledProviders = Array.isArray(merged.disabledProviders)
+    ? filterValid(merged.disabledProviders, adapters.ids())
+    : [];
+  // A disabled harness can be neither the default nor the connected agent.
+  const enabledIds = adapters.ids().filter((id) => !merged.disabledProviders.includes(id));
+  if (merged.disabledProviders.includes(merged.defaultProvider)) {
+    merged.defaultProvider = enabledIds[0] ?? DEFAULT_SETTINGS.defaultProvider;
+  }
+  if (merged.connectedProvider && merged.disabledProviders.includes(merged.connectedProvider)) {
+    merged.connectedProvider = null;
+  }
   if (typeof merged.diagnosticsDir !== "string") {
     merged.diagnosticsDir = DEFAULT_SETTINGS.diagnosticsDir;
   }
