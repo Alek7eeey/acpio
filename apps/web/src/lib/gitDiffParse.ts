@@ -92,6 +92,43 @@ function normalizeDiffPath(raw: string | undefined): string | null {
   return path;
 }
 
+/** Repo-relative path from a `diff --git a/x b/x` header (git quotes paths with spaces). */
+export function diffHeaderPath(line: string): string | null {
+  if (!line.startsWith("diff --git ")) return null;
+  const rest = line.slice("diff --git ".length);
+  const quoted = /^\s*"(?:[^"\\]|\\.)*"\s+"((?:[^"\\]|\\.)*)"\s*$/.exec(rest);
+  if (quoted) return normalizeDiffPath(quoted[1]!.replace(/\\(.)/g, "$1"));
+  const split = rest.lastIndexOf(" b/");
+  return split >= 0 ? normalizeDiffPath(rest.slice(split + 1)) : null;
+}
+
+/**
+ * Path a diff file is anchored/labelled by: the new path, else the old path,
+ * else the `diff --git` header — binary files get no `---`/`+++` lines.
+ */
+export function resolveDiffFilePath(file: ParsedDiffFile): string | null {
+  const path = file.newPath ?? file.oldPath;
+  if (path) return path;
+  for (const line of file.headerLines) {
+    const fromHeader = diffHeaderPath(line.text);
+    if (fromHeader) return fromHeader;
+  }
+  return null;
+}
+
+/** Added / removed line counts of one parsed file (header lines are not counted). */
+export function diffFileStats(file: ParsedDiffFile): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind === "add") additions += 1;
+      else if (line.kind === "del") deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
 export function parseUnifiedDiff(text: string): ParsedDiffFile[] {
   const trimmed = text.trim();
   if (!trimmed) return [];

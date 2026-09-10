@@ -772,6 +772,12 @@
     "diffViewMode": "Вид diff",
     "diffViewUnified": "Список",
     "diffViewSplit": "Две колонки",
+    "diffFullscreenOpen": "Diff на весь экран",
+    "diffFullscreenExit": "Закрыть полноэкранный diff",
+    "diffFullscreenFiles": "Изменённые файлы",
+    "diffFullscreenPrev": "Предыдущий файл",
+    "diffFullscreenNext": "Следующий файл",
+    "diffFullscreenCounter": "{{index}} / {{total}}",
     "openInModal": "На весь экран",
     "dockToSide": "Боковая панель",
     "commitMenu": "Действия с коммитом",
@@ -810,7 +816,12 @@
     "deleteFileConfirm": "Удалить {{path}}?",
     "deleteFileConfirmMany": "Удалить {{count}} файлов?",
     "deleteOk": "Файл удалён",
-    "fileBlame": "Blame файла"
+    "fileBlame": "Blame файла",
+    "fileViewMode": "Вид списка файлов",
+    "fileViewList": "Плоский список",
+    "fileViewTree": "Дерево папок",
+    "diffFileEmpty": "Нет текстовых изменений",
+    "diffLoadFailed": "Не удалось загрузить diff"
   },
   "planPanel": {
     "title": "План работ"

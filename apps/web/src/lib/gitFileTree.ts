@@ -40,6 +40,72 @@ export function firstChangedFilePath(input: {
   return null;
 }
 
+/** One flattened row of the changed-file tree (dirs first, then files, by name). */
+export type GitFileTreeRow =
+  | { kind: "dir"; key: string; path: string; name: string; depth: number }
+  | { kind: "file"; key: string; index: number; path: string; name: string; depth: number };
+
+type TreeDirNode = {
+  name: string;
+  path: string;
+  dirs: Map<string, TreeDirNode>;
+  files: { name: string; index: number; path: string }[];
+};
+
+function treeNameCompare(a: { name: string }, b: { name: string }) {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
+/**
+ * Flatten changed files into tree rows. `files` keeps the caller's order, which
+ * is the index used for navigation; `collapsed` holds full dir paths that are
+ * folded away.
+ */
+export function buildGitFileTreeRows(
+  files: { path: string }[],
+  collapsed: ReadonlySet<string> = new Set(),
+): GitFileTreeRow[] {
+  const root: TreeDirNode = { name: "", path: "", dirs: new Map(), files: [] };
+
+  files.forEach((file, index) => {
+    const path = normalizeGitPath(file.path);
+    const parts = path.split("/").filter(Boolean);
+    const name = parts.pop() ?? path;
+    let node = root;
+    for (const part of parts) {
+      const dirPath = node.path ? `${node.path}/${part}` : part;
+      let next = node.dirs.get(part);
+      if (!next) {
+        next = { name: part, path: dirPath, dirs: new Map(), files: [] };
+        node.dirs.set(part, next);
+      }
+      node = next;
+    }
+    node.files.push({ name: name || path, index, path });
+  });
+
+  const rows: GitFileTreeRow[] = [];
+  const walk = (node: TreeDirNode, depth: number) => {
+    for (const dir of [...node.dirs.values()].sort(treeNameCompare)) {
+      rows.push({ kind: "dir", key: `d:${dir.path}`, path: dir.path, name: dir.name, depth });
+      if (collapsed.has(dir.path)) continue;
+      walk(dir, depth + 1);
+    }
+    for (const file of [...node.files].sort(treeNameCompare)) {
+      rows.push({
+        kind: "file",
+        key: `f:${file.index}`,
+        index: file.index,
+        path: file.path,
+        name: file.name,
+        depth,
+      });
+    }
+  };
+  walk(root, 0);
+  return rows;
+}
+
 export function firstCommitFilePath(files: { path: string }[]): string | null {
   if (files.length === 0) return null;
   return [...files]

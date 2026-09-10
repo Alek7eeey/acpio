@@ -14,6 +14,7 @@ The main workspace shows a **session tree** on the left and the active chat on t
 - **Permissions & questions** — inline prompts when the agent needs approval or user input.
 - **Composer** — attach files, pick model/mode per chat, stop a running turn with **Stop**. Chips above the input collapse into **More** when they would clip; each chip (folder, branch, changes) can be told to shrink instead, in **Settings → Chat**.
 - **Plan, git, terminal** — dock beside the chat when there is room. If only a sliver of chat would remain (or the window is already narrow), the tab takes the full chat area until you close it.
+- **Full-screen diff** — on a phone or narrow window the changes panel leaves the diff a short strip. The ⤢ button in the diff corner opens it full screen: every changed file stacks top-to-bottom, and the bottom bar opens the file list and scrolls to the one you pick. Each file's diff is fetched as you scroll (the view opens at once instead of after reading every change), and only the blocks near the viewport stay mounted. The file list has a **flat list / folder tree** switch, and **List** / **Two columns** in the header switch the diff layout. While an agent keeps writing files, the view stays on the file you are reading.
 
 Empty chats titled “New chat” / “Новый чат” follow the **Settings → Chat** interface language in the tree and header. Custom titles stay as you typed them.
 

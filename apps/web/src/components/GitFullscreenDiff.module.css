@@ -1,0 +1,489 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 640;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
+  background: var(--surface);
+  color: var(--text);
+  overscroll-behavior: contain;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: max(6px, env(safe-area-inset-top)) 8px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+}
+
+.topTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topCounter {
+  flex-shrink: 0;
+  padding-right: 6px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.iconBtn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.iconBtn:hover {
+  background: var(--bg-tertiary);
+}
+
+.scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  background: var(--surface);
+}
+
+/* Blocks now start at the container top: the mode switch lives in the top bar. */
+.scroll [data-diff-path] {
+  scroll-margin-top: 2px;
+}
+
+.virtualSpacer {
+  position: relative;
+  width: 100%;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.fileBlock {
+  padding: 0 10px 10px;
+}
+
+.fileHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 -10px 4px;
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+  border-bottom: 1px solid var(--border-soft);
+  backdrop-filter: blur(6px);
+}
+
+.fileBadge {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.filePath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.fileStats {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.fileAdd {
+  color: color-mix(in srgb, #22c55e 78%, var(--text));
+}
+
+.fileDel {
+  color: color-mix(in srgb, #ef4444 78%, var(--text));
+}
+
+.fileNote {
+  padding: 12px 2px;
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 2px 14px;
+}
+
+.skeletonBar {
+  height: 11px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border-soft) 70%, transparent);
+  animation: fullscreenDiffPulse 1.1s ease-in-out infinite;
+}
+
+.skeletonBar:nth-child(2) {
+  width: 82%;
+}
+
+.skeletonBar:nth-child(3) {
+  width: 64%;
+}
+
+@keyframes fullscreenDiffPulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.modeToggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--bg-tertiary);
+}
+
+.modeBtn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.modeBtnActive {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 16px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.loaderSpin {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: fullscreenDiffSpin 0.7s linear infinite;
+}
+
+@keyframes fullscreenDiffSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.bottomBar {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+}
+
+.navBtn {
+  display: grid;
+  place-items: center;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.navBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.navBtn:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.pickBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.pickBtn:hover {
+  background: var(--bg-tertiary);
+}
+
+.pickPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-align: left;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.pickCount {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  text-align: center;
+}
+
+.sheetBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 0;
+  border: none;
+  background: rgba(0, 0, 0, 0.38);
+  cursor: pointer;
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  max-height: min(70vh, 560px);
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid var(--border-soft);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.28);
+  animation: fullscreenSheetRise 0.18s ease;
+}
+
+@keyframes fullscreenSheetRise {
+  from {
+    transform: translateY(14%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.sheetHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.sheetTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.sheetCount {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.sheetToggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.sheetToggleBtn {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sheetToggleBtnActive {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.sheetSpacer {
+  position: relative;
+  width: 100%;
+}
+
+.sheetVirtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.sheetDir {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheetDir:hover {
+  background: var(--bg-secondary);
+}
+
+.sheetDirName {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sheetList {
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 4px 0 8px;
+}
+
+.sheetRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheetRow:hover {
+  background: var(--bg-secondary);
+}
+
+.sheetRowActive {
+  background: var(--accent-soft);
+}
+
+.sheetBadge {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.sheetPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.74rem;
+}
+
+.sheetStats {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.68rem;
+}
+

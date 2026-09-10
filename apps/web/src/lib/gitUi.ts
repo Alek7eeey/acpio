@@ -22,6 +22,11 @@ export function isGitConflictFile(file: GitChangedFileDto): boolean {
   );
 }
 
+/** Untracked (new, never added) file — git reports no line counts for it. */
+export function isUntrackedGitFile(file: GitChangedFileDto): boolean {
+  return file.index === "?" || file.worktree === "?";
+}
+
 export function gitConflictFiles(status: GitStatusDto | null | undefined): GitChangedFileDto[] {
   return status?.files.filter(isGitConflictFile) ?? [];
 }

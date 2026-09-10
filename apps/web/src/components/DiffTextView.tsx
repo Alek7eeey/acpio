@@ -8,7 +8,12 @@ import {
   type InlineSegment,
   type SideBySideRow,
 } from "../lib/gitDiffInline";
-import { isUnifiedDiff, parseUnifiedDiff, type ParsedDiffFile, type ParsedDiffLine } from "../lib/gitDiffParse";
+import {
+  isUnifiedDiff,
+  parseUnifiedDiff,
+  resolveDiffFilePath,
+  type ParsedDiffLine,
+} from "../lib/gitDiffParse";
 import styles from "./DiffTextView.module.css";
 
 const EXPAND_CHUNK = 100;
@@ -20,7 +25,7 @@ export type DiffContextSource = {
   commitRev?: string;
 };
 
-type DiffViewMode = "unified" | "split";
+export type DiffViewMode = "unified" | "split";
 
 type HunkExpansion = {
   aboveLines: string[];
@@ -28,7 +33,7 @@ type HunkExpansion = {
   totalLines?: number;
 };
 
-function readDiffViewMode(): DiffViewMode {
+export function readDiffViewMode(): DiffViewMode {
   try {
     const raw = localStorage.getItem(DIFF_VIEW_KEY);
     if (raw === "split" || raw === "unified") return raw;
@@ -36,6 +41,14 @@ function readDiffViewMode(): DiffViewMode {
     /* ignore */
   }
   return "unified";
+}
+
+export function writeDiffViewMode(mode: DiffViewMode): void {
+  try {
+    localStorage.setItem(DIFF_VIEW_KEY, mode);
+  } catch {
+    /* ignore */
+  }
 }
 
 function splitPlain(text: string) {
@@ -229,10 +242,6 @@ function SplitDiffRow({ row }: { row: SideBySideRow }) {
   );
 }
 
-function resolveFilePath(file: ParsedDiffFile) {
-  return file.newPath ?? file.oldPath;
-}
-
 function hunkKey(fileIndex: number, hunkIndex: number) {
   return `${fileIndex}-${hunkIndex}`;
 }
@@ -280,12 +289,21 @@ function renderUnifiedHunkBody(lines: ParsedDiffLine[], keyPrefix: string) {
 export const DiffTextView = memo(function DiffTextView({
   text,
   contextSource,
+  viewMode: viewModeProp,
+  onViewModeChange,
+  toolbar = true,
 }: {
   text: string;
   contextSource?: DiffContextSource;
+  /** Controlled mode; omit to keep the mode in localStorage. */
+  viewMode?: DiffViewMode;
+  onViewModeChange?: (mode: DiffViewMode) => void;
+  /** Hide the built-in mode toolbar (the caller renders its own). */
+  toolbar?: boolean;
 }) {
   const trimmed = text.trim();
-  const [viewMode, setViewMode] = useState<DiffViewMode>(() => readDiffViewMode());
+  const [storedMode, setStoredMode] = useState<DiffViewMode>(() => readDiffViewMode());
+  const viewMode = viewModeProp ?? storedMode;
   const [expansions, setExpansions] = useState<Record<string, HunkExpansion>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
@@ -296,14 +314,14 @@ export const DiffTextView = memo(function DiffTextView({
 
   const parsed = useMemo(() => (trimmed && isUnifiedDiff(trimmed) ? parseUnifiedDiff(trimmed) : null), [trimmed]);
 
-  const setMode = useCallback((mode: DiffViewMode) => {
-    setViewMode(mode);
-    try {
-      localStorage.setItem(DIFF_VIEW_KEY, mode);
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  const setMode = useCallback(
+    (mode: DiffViewMode) => {
+      writeDiffViewMode(mode);
+      setStoredMode(mode);
+      onViewModeChange?.(mode);
+    },
+    [onViewModeChange],
+  );
 
   const fetchLines = useCallback(
     async (filePath: string, start: number, end: number) => {
@@ -393,14 +411,24 @@ export const DiffTextView = memo(function DiffTextView({
 
   return (
     <div className={styles.root}>
-      <DiffViewToolbar mode={viewMode} onChange={setMode} />
+      {toolbar ? <DiffViewToolbar mode={viewMode} onChange={setMode} /> : null}
       <div className={viewMode === "split" ? styles.diffSplit : styles.diff}>
         {parsed.map((file, fileIndex) => {
-          const filePath = resolveFilePath(file);
+          const filePath = resolveDiffFilePath(file);
 
           return (
-            <div key={`file-${fileIndex}`} className={styles.fileBlock}>
-              {file.hunks.map((hunk, hunkIndex) => {
+            <div
+              key={`file-${fileIndex}`}
+              className={styles.fileBlock}
+              data-diff-path={filePath ?? undefined}
+            >
+              {file.hunks.length === 0
+                ? file.headerLines.map((line, lineIndex) => (
+                    <div key={`meta-${fileIndex}-${lineIndex}`} className={styles.line}>
+                      {line.text === "" ? "\u00A0" : line.text}
+                    </div>
+                  ))
+                : file.hunks.map((hunk, hunkIndex) => {
                 const key = hunkKey(fileIndex, hunkIndex);
                 const expansion = expansions[key];
                 const aboveCount = expansion?.aboveLines.length ?? 0;

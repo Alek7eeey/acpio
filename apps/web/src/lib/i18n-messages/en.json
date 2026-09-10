@@ -748,6 +748,12 @@
     "diffViewMode": "Diff view",
     "diffViewUnified": "Unified",
     "diffViewSplit": "Side by side",
+    "diffFullscreenOpen": "Full screen diff",
+    "diffFullscreenExit": "Exit full screen diff",
+    "diffFullscreenFiles": "Changed files",
+    "diffFullscreenPrev": "Previous file",
+    "diffFullscreenNext": "Next file",
+    "diffFullscreenCounter": "{{index}} / {{total}}",
     "openInModal": "Full screen",
     "dockToSide": "Side panel",
     "commitMenu": "Commit actions",
@@ -786,7 +792,12 @@
     "deleteFileConfirm": "Delete {{path}}?",
     "deleteFileConfirmMany": "Delete {{count}} files?",
     "deleteOk": "File deleted",
-    "fileBlame": "File Blame"
+    "fileBlame": "File Blame",
+    "fileViewMode": "File list view",
+    "fileViewList": "Flat list",
+    "fileViewTree": "Folder tree",
+    "diffFileEmpty": "No text changes",
+    "diffLoadFailed": "Could not load the diff"
   },
   "planPanel": {
     "title": "Outline"

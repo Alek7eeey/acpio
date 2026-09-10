@@ -447,6 +447,30 @@
   background: var(--surface);
 }
 
+/* Fullscreen entry — floats over the diff area without scrolling with it. */
+.diffFullscreenBtn {
+  grid-area: diff;
+  justify-self: end;
+  align-self: start;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: 7px 9px 0 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.diffFullscreenBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
 .panelInModal {
   --git-panel-width: 100%;
   flex: 1 1 auto;

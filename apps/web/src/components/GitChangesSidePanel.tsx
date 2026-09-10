@@ -10,8 +10,9 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitStatusDto } from "@acpio/shared";
+import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
 import { DiffTextView, type DiffContextSource } from "./DiffTextView";
+import { GitFullscreenDiff, type FullscreenDiffFile } from "./GitFullscreenDiff";
 import { GitChangesCommitPane } from "./GitChangesCommitPane";
 import { GitCommitHistory } from "./GitCommitHistory";
 import { GitCommitDetail } from "./GitCommitDetail";
@@ -21,8 +22,8 @@ import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
 import { useAppStore } from "../lib/store";
 import { isSidePanelResizeAllowed, useNarrowPanelLayout } from "../lib/panelLayout";
-import { firstChangedFilePath, firstCommitFilePath } from "../lib/gitFileTree";
-import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitSyncSuccessMessage, isGitConflictFile } from "../lib/gitUi";
+import { firstChangedFilePath, firstCommitFilePath, normalizeGitPath } from "../lib/gitFileTree";
+import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitStatusBadge, gitSyncSuccessMessage, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
 import styles from "./GitChangesSidePanel.module.css";
 
 const WIDTH_KEY = "acpio.gitPanelWidth.v1";
@@ -43,6 +44,16 @@ const CHANGES_TREE_WIDTH_MAX = 560;
 const CHANGES_TREE_WIDTH_DEFAULT = 320;
 /** History list stacks above detail below this width (matches @container git-panel). */
 const GIT_HISTORY_STACKED_MAX = 768;
+/** Single-letter badge for a commit file row in the fullscreen file list. */
+const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
+  added: "A",
+  copied: "A",
+  deleted: "D",
+  modified: "M",
+  renamed: "R",
+  typeChanged: "T",
+  other: "M",
+};
 type PanelTab = "changes" | "history";
 type Selection =
   | { kind: "working"; path: string | null }
@@ -148,6 +159,7 @@ export function GitChangesSidePanel({
   const changesTreeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const syncInFlightRef = useRef(false);
   const [tab, setTab] = useState<PanelTab>("changes");
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>({ kind: "working", path: null });
   const [diff, setDiff] = useState("");
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -422,6 +434,7 @@ export function GitChangesSidePanel({
     setCommitDescription("");
     setLoadingCommits(false);
     setLoadingCommitDetail(false);
+    setFullscreenOpen(false);
   }, [clearLoadedDiff, sessionId]);
 
   useEffect(() => {
@@ -433,6 +446,7 @@ export function GitChangesSidePanel({
     setLoadingDiff(false);
     diffDismissedRef.current = false;
     setSelection({ kind: "working", path: null });
+    setFullscreenOpen(false);
     void refreshStatus().then(() => {
       void refreshCommits();
     });
@@ -1068,6 +1082,22 @@ export function GitChangesSidePanel({
     (commitSelected && Boolean(selection.filePath)) ||
     (workingSelected && Boolean(selection.path));
 
+  const fullscreenFiles: FullscreenDiffFile[] = commitSelected
+    ? (commitDetail?.files ?? []).map((file) => ({
+        path: normalizeGitPath(file.path),
+        badge: COMMIT_FILE_BADGE[file.status],
+        additions: file.additions,
+        deletions: file.deletions,
+      }))
+    : files.map((file) => ({
+        path: normalizeGitPath(file.path),
+        badge: gitStatusBadge(file),
+        additions: file.additions,
+        deletions: file.deletions,
+        untracked: isUntrackedGitFile(file),
+      }));
+  const fullscreenAvailable = (narrowPanel || presentation === "modal") && fullscreenFiles.length > 0;
+
   const commitPaneProps = {
     files,
     conflictFiles,
@@ -1399,6 +1429,25 @@ export function GitChangesSidePanel({
                     </div>
                   )}
                 </div>
+                {fullscreenAvailable ? (
+                  <button
+                    type="button"
+                    className={styles.diffFullscreenBtn}
+                    onClick={() => setFullscreenOpen(true)}
+                    title={t("git.diffFullscreenOpen")}
+                    aria-label={t("git.diffFullscreenOpen")}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M9 4H5.8A1.8 1.8 0 0 0 4 5.8V9M15 4h3.2A1.8 1.8 0 0 1 20 5.8V9M9 20H5.8A1.8 1.8 0 0 1 4 18.2V15M15 20h3.2a1.8 1.8 0 0 0 1.8-1.8V15"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                ) : null}
               </div>
             ) : (
               <div
@@ -1503,6 +1552,16 @@ export function GitChangesSidePanel({
           </div>
         </div>
       )}
+
+      {fullscreenOpen && fullscreenAvailable ? (
+        <GitFullscreenDiff
+          sessionId={sessionId}
+          scope={commitSelected ? { mode: "commit", rev: selection.hash } : { mode: "working" }}
+          files={fullscreenFiles}
+          initialPath={commitSelected ? selection.filePath : selection.path}
+          onClose={() => setFullscreenOpen(false)}
+        />
+      ) : null}
     </>
   );
 

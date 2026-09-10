@@ -14,7 +14,7 @@ import type { GitChangedFileDto, GitCommitDto, GitCommitFileDto } from "@acpio/s
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { joinRepoPath, normalizeGitPath, sortGitFiles, toRepoAbsolutePath } from "../lib/gitFileTree";
-import { gitStatusBadge, isGitConflictFile } from "../lib/gitUi";
+import { gitStatusBadge, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
 import styles from "./GitChangesCommitPane.module.css";
@@ -29,16 +29,12 @@ type StageZone = "staged" | "unstaged";
 type PaneLayout = "stacked" | "workspace";
 type FileMenuState = { x: number; y: number; file: GitChangedFileDto; zone: StageZone };
 
-function isUntracked(file: GitChangedFileDto) {
-  return file.index === "?" || file.worktree === "?";
-}
-
 function isDeleted(file: GitChangedFileDto) {
   return file.index === "D" || file.worktree === "D";
 }
 
 function canBlame(file: GitChangedFileDto) {
-  return !isUntracked(file);
+  return !isUntrackedGitFile(file);
 }
 
 function revealPath(root: string, rel: string, deleted: boolean) {
