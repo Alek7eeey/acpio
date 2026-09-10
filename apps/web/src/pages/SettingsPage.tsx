@@ -12,6 +12,7 @@ import {
   type ChatTreeMenuId,
   type DiagnosticsDumpMeta,
   type McpServerConfig,
+  type ModelOption,
   type ModelParamDto,
   parseMcpRemoteConfig,
   isMcpServerConfigured,
@@ -654,7 +655,7 @@ export function SettingsPage() {
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "browser">("idle");
   const [modelsByProvider, setModelsByProvider] = useState<
-    Partial<Record<AgentProvider, Array<{ value: string; name: string }>>>
+    Partial<Record<AgentProvider, ModelOption[]>>
   >({});
   const [paramsByProvider, setParamsByProvider] = useState<
     Partial<Record<AgentProvider, ModelParamDto[]>>
@@ -906,7 +907,7 @@ export function SettingsPage() {
       setModelsError(null);
       return;
     }
-    const seededModels: Partial<Record<AgentProvider, Array<{ value: string; name: string }>>> = {};
+    const seededModels: Partial<Record<AgentProvider, ModelOption[]>> = {};
     const seededParams: Partial<Record<AgentProvider, ModelParamDto[]>> = {};
     for (const item of online) {
       const cached = cachedModelsFor(item.id);
@@ -922,7 +923,7 @@ export function SettingsPage() {
     const ingest = (
       id: AgentProvider,
       catalog: {
-        models?: Array<{ value: string; name: string }>;
+        models?: ModelOption[];
         modelParams?: ModelParamDto[];
         currentModel?: string;
       },

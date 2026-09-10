@@ -9,6 +9,7 @@ import type {
   GitStatusDto,
   GitCommitDto,
   GitCommitDetailDto,
+  ModelOption,
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
@@ -83,7 +84,7 @@ export const api = {
       ok: boolean;
       provider: AgentProvider;
       currentModel?: string;
-      models: Array<{ value: string; name: string }>;
+      models: ModelOption[];
       modelParams?: ModelParamDto[];
       modes?: Array<{ value: string; name: string }>;
       cached?: boolean;
@@ -119,7 +120,7 @@ export const api = {
       model: string;
       appliedLive: boolean;
       currentModel?: string;
-      models?: Array<{ value: string; name: string }>;
+      models?: ModelOption[];
       modelParams?: ModelParamDto[];
       modes?: Array<{ value: string; name: string }>;
     }>(`/api/sessions/${id}/model`, {

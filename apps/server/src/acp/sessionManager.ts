@@ -15,6 +15,7 @@ import {
   modelParamSectionName,
   modelParamsForProvider,
   modelParamsForSession,
+  modelProviderFromValue,
   normalizeToolCallId,
   parseModelWire,
   subagentFieldsFromRaw,
@@ -28,6 +29,7 @@ import {
   type HarnessAdapter,
   type HarnessSessionDto,
   type McpServerConfig,
+  type ModelOption,
   type ModelParamDto,
   type SessionDetailDto,
   type SessionDto,
@@ -330,7 +332,6 @@ export function paramsFromModelWire(options: ConfigOption[]): ModelParamDto[] {
   return out;
 }
 
-type ModelOption = { value: string; name: string };
 type ModeOption = { value: string; name: string };
 
 function toModelList(options: ConfigOption[]): ModelOption[] {
@@ -338,6 +339,7 @@ function toModelList(options: ConfigOption[]): ModelOption[] {
   return (modelOpt?.options ?? []).map((o) => ({
     value: o.value,
     name: modelDisplayName(o.value, o.name),
+    provider: modelProviderFromValue(o.value),
   }));
 }
 
@@ -3315,7 +3317,7 @@ export async function setSessionModel(
 type ModelsCacheEntry = {
   provider: AgentProvider;
   currentModel?: string;
-  models: Array<{ value: string; name: string }>;
+  models: ModelOption[];
   modelParams: ModelParamDto[];
   modes: ModeOption[];
   at: number;

@@ -26,7 +26,11 @@ export interface AgentModeOption {
   name: string;
 }
 
-export type ModelOption = { value: string; name: string };
+/**
+ * One agent model catalog entry. `provider` is the upstream provider key the
+ * harness reports (e.g. `zai` for `zai/glm-5.2`); absent when unknown.
+ */
+export type ModelOption = { value: string; name: string; provider?: string };
 
 /** How an existing agent session is restored at boot. */
 export type AdapterRestoreMode = "resume" | "load" | "new";

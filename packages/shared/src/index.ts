@@ -789,6 +789,17 @@ export function modelDisplayName(value: string, name?: string, defaultLabel = "D
   return prettifyModelWireId(raw || provided, defaultLabel);
 }
 
+/** Provider key embedded in an agent model value: `zai/glm-5.2` -> `zai`. Undefined for bare ids. */
+export function modelProviderFromValue(value: string): string | undefined {
+  const raw = (value || "").trim();
+  const slash = raw.indexOf("/");
+  if (slash <= 0 || slash === raw.length - 1) return undefined;
+  const prefix = raw.slice(0, slash).trim();
+  const rest = raw.slice(slash + 1).trim();
+  if (!prefix || !rest || /\s/.test(prefix)) return undefined;
+  return prefix;
+}
+
 function hasModelParams(label: string): boolean {
   return /\[[^\]]*[=:][^\]]*\]/.test(label);
 }
@@ -1257,7 +1268,7 @@ export interface AgentProbeResult {
   details?: string;
   sessionId?: string;
   currentModel?: string;
-  models?: Array<{ value: string; name: string }>;
+  models?: ModelOption[];
   modelParams?: ModelParamDto[];
   modes?: Array<{ value: string; name: string }>;
 }

@@ -1,5 +1,6 @@
 import {
   modelDisplayName,
+  modelProviderFromValue,
   type AdapterProbeContext,
   type AdapterTranscriptClient,
   type HarnessAdapter,
@@ -150,7 +151,7 @@ async function probeOmpModels(ctx: AdapterProbeContext): Promise<ModelOption[] |
   };
   const rows = parsed.models ?? [];
   return rows
-    .map((row) => {
+    .map((row): ModelOption | null => {
       const value =
         row.selector?.trim() ||
         (row.provider && row.id ? `${row.provider}/${row.id}` : row.id?.trim() || "");
@@ -158,6 +159,7 @@ async function probeOmpModels(ctx: AdapterProbeContext): Promise<ModelOption[] |
       return {
         value,
         name: row.name?.trim() || modelDisplayName(value),
+        provider: row.provider?.trim() || modelProviderFromValue(value),
       };
     })
     .filter((m): m is ModelOption => m != null);

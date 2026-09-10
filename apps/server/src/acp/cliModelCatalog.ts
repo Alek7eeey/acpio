@@ -65,11 +65,15 @@ export function preferAuthoritativeModels(
   cliModels: ModelOption[] | null,
 ): ModelOption[] {
   if (!cliModels?.length) return acpModels;
-  const acpNames = new Map(acpModels.map((m) => [m.value, m.name]));
-  return cliModels.map((m) => ({
-    value: m.value,
-    name: m.name || acpNames.get(m.value) || modelDisplayName(m.value),
-  }));
+  const acpByValue = new Map(acpModels.map((m) => [m.value, m]));
+  return cliModels.map((m) => {
+    const acp = acpByValue.get(m.value);
+    return {
+      value: m.value,
+      name: m.name || acp?.name || modelDisplayName(m.value),
+      provider: m.provider ?? acp?.provider,
+    };
+  });
 }
 
 export async function reconcileModelCatalog(

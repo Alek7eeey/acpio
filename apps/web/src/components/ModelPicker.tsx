@@ -5,6 +5,7 @@ import {
   modelParamFamily,
   modelParamLabel,
   modelParamSectionName,
+  type ModelOption,
   type ModelParamDto,
 } from "@acpio/shared";
 import { useT } from "../lib/i18n";
@@ -210,7 +211,7 @@ function flyoutStyle(
 
 type ModelPickerProps = {
   model: string;
-  models: Array<{ value: string; name: string }>;
+  models: ModelOption[];
   onChange: (value: string) => void;
   params?: ModelParamDto[];
   paramValues?: Record<string, string>;
@@ -874,7 +875,7 @@ export function ModelPicker({
                       type="button"
                       role="option"
                       aria-selected={selected}
-                      title={m.name}
+                      title={[m.name, m.provider].filter(Boolean).join(" · ")}
                       className={styles.modelRowMain}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
@@ -884,6 +885,14 @@ export function ModelPicker({
                       }}
                     >
                       <span className={styles.modelOptionName}>{m.name}</span>
+                      {m.provider ? (
+                        <span
+                          className={styles.modelOptionProvider}
+                          title={`${t("models.provider")}: ${m.provider}`}
+                        >
+                          {m.provider}
+                        </span>
+                      ) : null}
                     </button>
                     {showMore && (
                       <button

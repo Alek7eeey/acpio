@@ -144,8 +144,12 @@ describe("omp adapter", () => {
         }),
     });
     expect(models).toEqual([
-      { value: "grok-4.5", name: "Grok 4.5" },
-      { value: "opencode-go/deepseek-v4-flash", name: "DeepSeek" },
+      { value: "grok-4.5", name: "Grok 4.5", provider: undefined },
+      {
+        value: "opencode-go/deepseek-v4-flash",
+        name: "DeepSeek",
+        provider: "opencode-go",
+      },
     ]);
   });
 });

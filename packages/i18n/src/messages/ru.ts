@@ -675,6 +675,7 @@ export const ru = {
     minimal: "Minimal",
     yes: "Да",
     no: "Нет",
+    provider: "Провайдер",
   },
   errors: {
     usernameRequired: "Укажите имя пользователя",

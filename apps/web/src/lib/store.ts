@@ -6,6 +6,7 @@ import type {
   ChatThemeDto,
   MessageDto,
   MessagePartDto,
+  ModelOption,
   ModelParamDto,
   SessionDetailDto,
   SessionDto,
@@ -18,6 +19,7 @@ import {
   isModelAccessError,
   isShellSession,
   mergeClientAppSettings,
+  modelProviderFromValue,
   SHELL_SESSION_PROVIDER,
   summarizeQuestionAnswer,
   type AdapterMetaDto,
@@ -65,8 +67,8 @@ if (typeof window !== "undefined") {
   }
 }
 
-const MODELS_CACHE_KEY = "acpio.modelsCatalog.v6";
-const MODELS_CACHE_KEY_LEGACY = "acpio.modelsCatalog.v5";
+const MODELS_CACHE_KEY = "acpio.modelsCatalog.v7";
+const MODELS_CACHE_KEY_LEGACY = "acpio.modelsCatalog.v6";
 const MODELS_SESSION_KEY = "acpio.modelsCatalog.session.v1";
 const ACTIVE_SESSION_KEY = "acpio.activeSessionId";
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
@@ -91,7 +93,7 @@ function modelsSoftTtl(provider: AgentProvider): number {
 
 export type ModelsCatalog = {
   provider: AgentProvider;
-  models: Array<{ value: string; name: string }>;
+  models: ModelOption[];
   modelParams: ModelParamDto[];
   /** Session modes (Agent / Plan / Ask) when the agent supports them. */
   modes: Array<{ value: string; name: string }>;
@@ -331,7 +333,10 @@ function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): Mo
   if (!parsed?.provider || !Array.isArray(parsed.models)) return null;
   return {
     provider: parsed.provider,
-    models: parsed.models,
+    models: parsed.models.map((m) => ({
+      ...m,
+      provider: m.provider || modelProviderFromValue(m.value),
+    })),
     modelParams: Array.isArray(parsed.modelParams) ? parsed.modelParams : [],
     modes: sanitizeCatalogModes(parsed.provider, parsed.modes),
     currentModel: parsed.currentModel,

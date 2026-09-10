@@ -822,7 +822,8 @@
     "max": "Max",
     "minimal": "Minimal",
     "yes": "Да",
-    "no": "Нет"
+    "no": "Нет",
+    "provider": "Провайдер"
   },
   "errors": {
     "usernameRequired": "Укажите имя пользователя",

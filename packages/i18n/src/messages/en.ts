@@ -648,6 +648,7 @@ export const en = {
     minimal: "Minimal",
     yes: "Yes",
     no: "No",
+    provider: "Provider",
   },
   errors: {
     usernameRequired: "Enter a username",
