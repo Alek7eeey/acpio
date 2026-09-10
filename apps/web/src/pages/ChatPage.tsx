@@ -3306,6 +3306,10 @@ function ChatThread() {
     const id = bind?.sessionId ?? s.activeSessionId;
     return Boolean(id && s.restoringSessionIds[id]);
   });
+  const initializing = useAppStore((s) => {
+    const id = bind?.sessionId ?? s.activeSessionId;
+    return Boolean(id && s.initializingSessionIds[id]);
+  });
   const selectSession = useAppStore((s) => s.selectSession);
   const focusMessageId = useAppStore((s) => s.focusMessageId);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
@@ -4447,6 +4451,17 @@ function ChatThread() {
 
   const emptyReady = Boolean(activeSession) && isEmptyChat && !restoring && !isShellSessionActive;
   const restoringEmpty = Boolean(activeSession) && !renderSkeleton && isEmptyChat && restoring;
+  // The chat row exists (optimistic) but the agent runtime is still coming up:
+  // keep the empty-chat layout and say so instead of looking like a ready chat.
+  // An offline/disabled harness never warms up, so it keeps its own messaging.
+  const initializingEmpty =
+    Boolean(activeSession) &&
+    !renderSkeleton &&
+    isEmptyChat &&
+    initializing &&
+    !isShellSessionActive &&
+    !agentUnavailable &&
+    !agentMissing;
   // Loading windows (skeleton, session creation, boot) keep the composer out
   // of the layout so an empty chat's input never renders at the bottom and
   // then jumps to center — it appears in its final position once ready. The
@@ -4940,7 +4955,7 @@ function ChatThread() {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
     >
-      <div className={`${styles.mainColumn}${emptyReady || restoringEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}${isShellSessionActive ? ` ${styles.mainColumnShell}` : ""}`}>
+      <div className={`${styles.mainColumn}${emptyReady || restoringEmpty || initializingEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}${isShellSessionActive ? ` ${styles.mainColumnShell}` : ""}`}>
       {isShellSessionActive && activeSession ? (
         <div className={styles.shellConsoleMain}>
           {!showThreadSkeleton ? (
@@ -5199,7 +5214,7 @@ function ChatThread() {
       {!isShellSessionActive ? (
       <form
         className={`${styles.composer}${composerHeld ? ` ${styles.composerSkeleton}` : ""}${
-          emptyReady || restoringEmpty ? ` ${styles.composerEmptyReady}` : ""
+          emptyReady || restoringEmpty || initializingEmpty ? ` ${styles.composerEmptyReady}` : ""
         }`}
         onSubmit={onSubmit}
       >
@@ -5232,6 +5247,11 @@ function ChatThread() {
         <div className={styles.composerInner}>
           {restoringEmpty ? (
             <p className={styles.emptyReadyLead}>{t("chat.sessionRestoring")}</p>
+          ) : initializingEmpty ? (
+            <p className={styles.initializingLead} role="status">
+              <span className={styles.initializingSpin} aria-hidden="true" />
+              {t("chat.initializing")}
+            </p>
           ) : emptyReady ? (
             <p className={styles.emptyReadyLead}>{t("chat.emptyReady")}</p>
           ) : null}

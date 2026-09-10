@@ -570,6 +570,8 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post("/api/sessions", async (req, reply) => {
     const body = z
       .object({
+        /** Optimistic UI creates the row client-side first, then posts it here. */
+        id: z.string().uuid().optional(),
         title: z.string().optional(),
         provider: z.enum(["cursor", "omp", SHELL_SESSION_PROVIDER]).optional(),
         cwd: z.string().optional(),
@@ -588,6 +590,7 @@ export async function registerRoutes(app: FastifyInstance) {
       return sendAgentOffline(req, reply);
     }
     const session = await createSession({
+      id: body.id,
       title: body.title,
       provider,
       cwd,

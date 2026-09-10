@@ -148,6 +148,8 @@ export function normalizeCwd(cwd: string): string {
 }
 
 export async function createSession(input: {
+  /** Client-chosen id so an optimistic UI row keeps the server identity. */
+  id?: string;
   title?: string;
   provider: AgentProvider;
   cwd: string;
@@ -167,6 +169,7 @@ export async function createSession(input: {
   const [row] = await db
     .insert(sessions)
     .values({
+      ...(input.id?.trim() ? { id: input.id.trim() } : {}),
       title: input.title ?? defaultTitle,
       provider: input.provider,
       cwd,

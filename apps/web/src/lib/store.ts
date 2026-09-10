@@ -27,6 +27,8 @@ import {
 import { api } from "./api";
 import { turnStillHasLiveTools } from "./assistantTurnTimeline.js";
 import { groupByFolder } from "./sessionTitle";
+import { createTranslator } from "./translator";
+import { normalizeCwd } from "./pathSegments";
 import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
 import {
@@ -200,6 +202,8 @@ type AppState = {
   sessionLoading: boolean;
   /** Imported harness chat waiting for transcript (ACP replay / disk ingest). */
   restoringSessionIds: Record<string, true>;
+  /** Just-created chats whose agent runtime has not answered yet. */
+  initializingSessionIds: Record<string, true>;
   /** Message currently being read aloud ("" = silent). Drives the stop button. */
   speakingMessageId: string | null;
   /** True while the TTS engine is generating audio (stop button shows a spinner). */
@@ -724,6 +728,88 @@ function markRestoringDone(
   set({ restoringSessionIds: next });
 }
 
+/** In-flight POST /api/sessions per optimistic row, so a prompt sent before the
+ *  server confirms the row waits for it instead of racing a 404. */
+const pendingCreateById = new Map<string, Promise<unknown>>();
+/** Safety net when nothing else reports a freshly created chat as ready. */
+const INITIALIZING_TIMEOUT_MS = 15_000;
+
+/** RFC 4122 v4 id; the server accepts it as the row's primary key. */
+function newSessionId(): string {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  const bytes = c.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** Same string the server stores for a titleless chat (i18n defaultSessionTitle). */
+function sessionPlaceholderTitle(locale: AppLocale | undefined): string {
+  return createTranslator(locale ?? "en")("common.newChat");
+}
+
+function nextSessionSortOrder(sessions: SessionDto[]): number {
+  return sessions.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
+}
+
+function markSessionInitialized(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  sessionId: string,
+) {
+  if (!get().initializingSessionIds[sessionId]) return;
+  const next = { ...get().initializingSessionIds };
+  delete next[sessionId];
+  set({ initializingSessionIds: next });
+}
+
+/** Fresh chat rows stay marked until the agent runtime answers (or the safety
+ *  timeout fires) so the pane can say "Инициализация…" instead of looking idle. */
+function scheduleInitializingTimeout(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  sessionId: string,
+) {
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => markSessionInitialized(get, set, sessionId), INITIALIZING_TIMEOUT_MS);
+}
+
+/** Undo an optimistic create whose POST failed: drop the row and give the
+ *  selection back to whatever chat was open before (if any). */
+function rollbackOptimisticSession(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  id: string,
+  previousActiveId: string | null,
+) {
+  const state = get();
+  const details = { ...(state.sessionDetails ?? {}) };
+  delete details[id];
+  sessionDetailCache.delete(id);
+  slashCommandsCache.delete(id);
+  const wasActive = state.activeSessionId === id;
+  const previousDetail =
+    wasActive && previousActiveId
+      ? (details[previousActiveId] ?? sessionDetailCache.get(previousActiveId) ?? null)
+      : null;
+  set({
+    sessions: state.sessions.filter((s) => s.id !== id),
+    sessionDetails: details,
+    ...(wasActive
+      ? { activeSessionId: previousActiveId, activeSession: previousDetail, sessionLoading: false }
+      : {}),
+  });
+  if (!wasActive) return;
+  if (previousActiveId) {
+    syncPanesOnSelect(get, set, previousActiveId);
+    return;
+  }
+  persistPanes([null], 0);
+  set({ chatPaneIds: [null], focusedPaneIndex: 0 });
+}
+
 async function pollImportedTranscript(
   sessionId: string,
   get: () => AppState,
@@ -790,6 +876,8 @@ function commitDetail(
     ...(state.activeSession?.id === next.id ? { activeSession: next } : {}),
   });
   if (next.messages.length) markRestoringDone(get, set, next.id);
+  // A live detail that already carries agent commands means the runtime is up.
+  if (!slashListStillLoading(next.slashCommands)) markSessionInitialized(get, set, next.id);
 }
 
 function preferSlashCommands(
@@ -806,13 +894,17 @@ function pollSlashCommands(
 ) {
   const seq = (slashPollSeq.get(sessionId) ?? 0) + 1;
   slashPollSeq.set(sessionId, seq);
+  const settled = () => markSessionInitialized(get, set, sessionId);
   void (async () => {
     for (let i = 0; i < 16; i++) {
       await new Promise((r) => setTimeout(r, 400));
       if (slashPollSeq.get(sessionId) !== seq) return;
       const live = liveDetail(get(), sessionId);
       const hydrated = hydrateSessionSlashCommands(live, slashCommandsCache);
-      if (!slashListStillLoading(hydrated?.slashCommands)) return;
+      if (!slashListStillLoading(hydrated?.slashCommands)) {
+        settled();
+        return;
+      }
       try {
         const fetched = preferSlashCommands(
           await api.getSession(sessionId),
@@ -824,11 +916,15 @@ function pollSlashCommands(
         const next = { ...(cur ?? fetched), slashCommands: fetched.slashCommands };
         rememberSessionDetail(next);
         commitDetail(get, set, next);
+        settled();
         return;
       } catch {
+        settled();
         return;
       }
     }
+    // Gave up polling — stop claiming the chat is still starting up.
+    settled();
   })();
 }
 
@@ -1164,6 +1260,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusMessageId: null,
   sessionLoading: false,
   restoringSessionIds: {},
+  initializingSessionIds: {},
   speakingMessageId: null,
   ttsLoading: false,
   modelsCatalog: typeof window !== "undefined" ? readStoredModelsCatalog() : null,
@@ -1847,44 +1944,18 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createSession(cwd, provider, model) {
     const trimmedCwd = cwd?.trim();
-    if (isShellSession(provider)) {
-      const session = await api.createSession({
-        themeId: null,
-        provider: SHELL_SESSION_PROVIDER,
-        ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-      } as Partial<SessionDto>);
-      const detail: SessionDetailDto = {
-        ...session,
-        messages: [],
-        slashCommands: [],
-      };
-      rememberSessionDetail(detail);
-      removeConsoleOpenSession(session.id);
-      set({
-        sessions: [session, ...get().sessions.filter((s) => s.id !== session.id)],
-        activeSessionId: session.id,
-        activeSession: detail,
-        sessionLoading: false,
-        sessionDetails: { ...(get().sessionDetails ?? {}), [session.id]: detail },
-        error: null,
-        consoleOpen: false,
-        gitPanelOpen: false,
-      });
-      syncPanesOnSelect(get, set, session.id);
-      void get().refreshSessions();
-      void get().refreshFolders();
-      return session;
-    }
+    const shell = isShellSession(provider);
     const ids = get().adapters.map((a) => a.id) as AgentProvider[];
-    const chosen =
-      provider ??
-      pickCreateProvider(get().agentAvailability, ids, get().settings.defaultProvider);
+    const chosen = shell
+      ? SHELL_SESSION_PROVIDER
+      : provider ??
+        pickCreateProvider(get().agentAvailability, ids, get().settings.defaultProvider);
     if (!chosen) {
       throw new Error("noAgentsOnline");
     }
 
     // Save the chosen provider as the last selected provider in localStorage
-    if (typeof localStorage !== "undefined") {
+    if (!shell && typeof localStorage !== "undefined") {
       try {
         localStorage.setItem("acpio.lastSelectedProvider.v1", chosen);
       } catch {
@@ -1892,34 +1963,105 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
     }
 
+    // Render the chat NOW and let the POST land in the background: creating the
+    // agent runtime takes seconds on a cold provider, and the user must not
+    // stare at a dead sidebar/tree until then. The row keeps the client id so
+    // the server can adopt it verbatim.
+    const previousActiveId = get().activeSessionId;
+    const id = newSessionId();
+    const now = new Date().toISOString();
+    const cwdValue = normalizeCwd(trimmedCwd ?? get().settings.defaultCwd ?? "");
     const pinnedModel = model?.trim();
-    const session = await api.createSession({
-      themeId: null,
+    const optimistic: SessionDto = {
+      id,
+      title: shell
+        ? cwdValue.split("/").filter(Boolean).pop() || sessionPlaceholderTitle(get().settings.locale)
+        : sessionPlaceholderTitle(get().settings.locale),
       provider: chosen,
-      ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-      ...(pinnedModel ? { model: pinnedModel } : {}),
-    } as Partial<SessionDto>);
-    const detail: SessionDetailDto = {
-      ...session,
-      messages: [],
-      slashCommands: [],
+      cwd: cwdValue,
+      mode: get().settings.defaultMode,
+      status: "idle",
+      acpSessionId: null,
+      themeId: null,
+      sortOrder: nextSessionSortOrder(get().sessions),
+      pinned: false,
+      archived: false,
+      mcpDisabledIds: [],
+      usage: null,
+      model: pinnedModel ?? "",
+      modelParams: {},
+      createdAt: now,
+      updatedAt: now,
+      lastMessageAt: "",
     };
+    const detail: SessionDetailDto = { ...optimistic, messages: [], slashCommands: [] };
     rememberSessionDetail(detail);
+    if (shell) removeConsoleOpenSession(id);
     set({
-      sessions: [session, ...get().sessions.filter((s) => s.id !== session.id)],
-      activeSessionId: session.id,
+      sessions: [optimistic, ...get().sessions.filter((s) => s.id !== id)],
+      activeSessionId: id,
       activeSession: detail,
       sessionLoading: false,
-      sessionDetails: { ...(get().sessionDetails ?? {}), [session.id]: detail },
+      sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
+      initializingSessionIds: { ...get().initializingSessionIds, [id]: true },
       error: null,
+      ...(shell ? { consoleOpen: false, gitPanelOpen: false } : {}),
     });
-    syncPanesOnSelect(get, set, session.id);
-    void get().refreshSessions();
-    void get().refreshFolders();
-    if (slashListStillLoading(detail.slashCommands)) {
-      pollSlashCommands(session.id, get, set);
-    }
-    return session;
+    syncPanesOnSelect(get, set, id);
+    scheduleInitializingTimeout(get, set, id);
+
+    const createPromise = (async (): Promise<SessionDto> => {
+      try {
+        const session = await api.createSession({
+          id,
+          themeId: null,
+          provider: chosen,
+          ...(cwdValue ? { cwd: cwdValue } : {}),
+          ...(pinnedModel ? { model: pinnedModel } : {}),
+        } as Partial<SessionDto>);
+        if (session.id !== id) {
+          // A server that ignores the optimistic id (older build) mints its own;
+          // drop the local placeholder and open the row it actually created.
+          rollbackOptimisticSession(get, set, id, previousActiveId);
+          markSessionInitialized(get, set, id);
+          await get().refreshSessions();
+          await get().selectSession(session.id);
+          return session;
+        }
+        // Server row is canonical (title, sortOrder, timestamps) — keep whatever
+        // the stream already pushed (commands) on top of it.
+        const live = liveDetail(get(), id);
+        const reconciled: SessionDetailDto = {
+          ...session,
+          messages: live?.messages ?? [],
+          slashCommands: live?.slashCommands ?? [],
+        };
+        rememberSessionDetail(reconciled);
+        set({
+          sessions: get().sessions.map((s) => (s.id === id ? session : s)),
+          ...(get().activeSessionId === id ? { activeSession: reconciled } : {}),
+          sessionDetails: { ...(get().sessionDetails ?? {}), [id]: reconciled },
+        });
+        void get().refreshSessions();
+        void get().refreshFolders();
+        if (shell || !slashListStillLoading(reconciled.slashCommands)) {
+          markSessionInitialized(get, set, id);
+        } else {
+          // Readiness signal: the runtime answers with its slash commands.
+          pollSlashCommands(id, get, set);
+        }
+        return session;
+      } catch (err) {
+        rollbackOptimisticSession(get, set, id, previousActiveId);
+        markSessionInitialized(get, set, id);
+        throw err;
+      }
+    })();
+    pendingCreateById.set(id, createPromise);
+    void createPromise
+      .catch(() => undefined)
+      .finally(() => pendingCreateById.delete(id));
+    return createPromise;
   },
 
   async importHarnessSession(input) {
@@ -1965,6 +2107,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     removeConsoleOpenSession(id);
     removeGitPanelOpenSession(id);
     set({ sessionDetails: details, unseenFinishedTurns: unseen });
+    markSessionInitialized(get, set, id);
+    markRestoringDone(get, set, id);
     if (activeSessionId === id) {
       const next =
         panes.find((slot) => slot && slot !== id) ?? get().sessions[0]?.id ?? null;
@@ -2187,6 +2331,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   async runSendPrompt(text, opts, { optimistic = true } = {}) {
     const id = opts?.sessionId ?? get().activeSessionId;
     set({ error: null });
+    // A chat created moments ago may still be in flight to the server; sending
+    // now would 404 on the missing row. Wait for the POST, then proceed.
+    const pendingCreate = id ? pendingCreateById.get(id) : undefined;
+    if (pendingCreate) {
+      try {
+        await pendingCreate;
+      } catch {
+        // The row was rolled back, so nothing is in flight for this chat.
+        if (id) {
+          const inflightBySession = { ...get().inflightBySession, [id]: 0 };
+          set({
+            inflightBySession,
+            inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+          });
+        }
+        return;
+      }
+    }
+    // The user is talking to the chat now — stop claiming it is still starting.
+    if (id) markSessionInitialized(get, set, id);
 
     const buildOptimisticPair = (sessionId: string, baseMessages: MessageDto[]) => {
       const epoch = (get().promptEpochBySession?.[sessionId] ?? get().promptEpoch) + 1;

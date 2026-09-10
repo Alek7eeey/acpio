@@ -2110,6 +2110,27 @@ button.userSlashCmd:focus-visible {
   line-height: 1.3;
   color: var(--text);
 }
+/* Freshly created chat: the row exists, the agent runtime is still starting. */
+.initializingLead {
+  margin: 0 auto 18px;
+  max-width: var(--chat-col);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  color: var(--text-secondary);
+}
+.initializingSpin {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: modelsSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
 
 .composerInner {
   max-width: var(--chat-col);

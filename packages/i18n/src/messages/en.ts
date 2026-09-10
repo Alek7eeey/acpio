@@ -268,6 +268,7 @@ export const en = {
     folderDeleted: "Folder deleted",
     pickExistingSessions: "Choose from existing sessions",
     sessionRestoring: "Restoring session…",
+    initializing: "Initializing…",
     openExistingEmpty: "No other sessions on this agent",
     openExistingLoading: "Looking for sessions…",
     untitledHarnessSession: "Untitled session",

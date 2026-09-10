@@ -292,6 +292,7 @@ export const ru = {
     folderDeleted: "Папка удалена",
     pickExistingSessions: "Выбрать из существующих сессий",
     sessionRestoring: "Сессия восстанавливается…",
+    initializing: "Инициализация…",
     openExistingEmpty: "Других сессий у агента нет",
     openExistingLoading: "Ищем сессии…",
     untitledHarnessSession: "Сессия без названия",
