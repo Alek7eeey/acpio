@@ -3,9 +3,19 @@ import { useLayoutEffect, useRef } from "react";
 /**
  * Single-line text that keeps the head and tail of a long string visible and
  * replaces the middle with "…" when it does not fit its container (paths,
- * long titles). The full text is exposed via `title`/`aria-label`.
+ * long titles). `mode="end"` keeps only the tail (`…/deepest/segment`), which
+ * is the useful half of a path once the chip is squeezed. The full text is
+ * exposed via `title`/`aria-label`.
  */
-export function MiddleTruncate({ text, className }: { text: string; className?: string }) {
+export function MiddleTruncate({
+  text,
+  className,
+  mode = "middle",
+}: {
+  text: string;
+  className?: string;
+  mode?: "middle" | "end";
+}) {
   const ref = useRef<HTMLSpanElement>(null);
 
   useLayoutEffect(() => {
@@ -19,6 +29,23 @@ export function MiddleTruncate({ text, className }: { text: string; className?: 
         el.textContent = candidate;
         return el.scrollWidth;
       };
+      if (mode === "end") {
+        // Largest number of trailing characters that still fits.
+        let lo = 1;
+        let hi = text.length - 1;
+        let best = 1;
+        while (lo <= hi) {
+          const keep = (lo + hi) >> 1;
+          if (measure(`…${text.slice(text.length - keep)}`) <= width) {
+            best = keep;
+            lo = keep + 1;
+          } else {
+            hi = keep - 1;
+          }
+        }
+        el.textContent = `…${text.slice(text.length - best)}`;
+        return;
+      }
       // Largest number of characters (head + tail) that still fits.
       let lo = 1;
       let hi = text.length - 1;
@@ -47,7 +74,7 @@ export function MiddleTruncate({ text, className }: { text: string; className?: 
       return () => ro.disconnect();
     }
     return undefined;
-  }, [text]);
+  }, [mode, text]);
 
   return (
     <span ref={ref} className={className} title={text} aria-label={text}>

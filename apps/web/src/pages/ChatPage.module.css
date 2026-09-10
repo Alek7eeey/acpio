@@ -2303,6 +2303,12 @@ button.userSlashCmd:focus-visible {
   animation: thoughtIconTwinkle 0.55s ease;
 }
 
+.sessionCwd:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+}
+
 .metaChipActive {
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
   color: var(--text);
@@ -2380,31 +2386,20 @@ button.userSlashCmd:focus-visible {
 }
 
 @media (max-width: 700px) {
-  .metaChip:not(.metaChipForceLabel) .metaChipLabel,
-  .metaChipForceLabel .metaChipLabel {
-    display: none;
-  }
-
-  .metaChip:not(.metaChipForceLabel),
-  .metaChipForceLabel {
+  /* Icon-only chips in one horizontal swipe row. The context chip keeps its
+     number — as a bare icon it says nothing. */
+  .metaChip:not(.metaChipForceLabel) {
     padding: 7px 10px;
     gap: 0;
   }
 
-  .sessionCwdText {
+  .metaChip:not(.metaChipForceLabel) .metaChipLabel {
     display: none;
   }
 
   .sessionCwd {
     max-width: none;
     width: auto;
-    padding: 7px 10px;
-  }
-}
-
-@media (max-width: 700px) {
-  /* Icon-only chips in one horizontal swipe row. */
-  .metaChip {
     padding: 7px 10px;
   }
 }
@@ -2439,6 +2434,13 @@ button.userSlashCmd:focus-visible {
 
   .composerMetaChipHidden {
     display: none;
+  }
+
+  /* Compression: the folder and branch chips give up width (their labels
+     ellipsize) so the whole row stays on one line. */
+  .composerMetaChipShrinkable {
+    flex: 0 1 auto;
+    min-width: var(--chip-min-width, 0px);
   }
 
   .composerMetaShellDesktop .composerMode {
@@ -3060,10 +3062,26 @@ button.userSlashCmd:focus-visible {
     overflow: visible;
   }
 
+  /* Attach is an auxiliary action: keep it visibly lighter than send/mic. */
   .attachBtn,
   .pillMultiline .attachBtn {
     order: unset;
     flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    background: transparent;
+    color: var(--text-secondary);
+  }
+
+  .attachBtn svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .attachBtn:hover:not(:disabled),
+  .attachBtn:active:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 9%, transparent);
+    color: var(--text);
   }
 
   .composerModel,
@@ -3109,6 +3127,7 @@ button.userSlashCmd:focus-visible {
   .sessionCwdText {
     white-space: nowrap;
     overflow: hidden;
+    text-overflow: ellipsis;
     word-break: normal;
     line-height: 1.3;
     font-size: 0.72rem;

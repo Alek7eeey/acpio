@@ -9,9 +9,17 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import type { AgentMode, AppSettings, ChatMetaChipId, SessionDetailDto, GitStatusDto } from "@acpio/shared";
+import type {
+  AgentMode,
+  AppSettings,
+  ChatChipOptions,
+  ChatMetaChipId,
+  SessionDetailDto,
+  GitStatusDto,
+} from "@acpio/shared";
 import { isShellSession } from "@acpio/shared";
 import { useT } from "../lib/i18n";
+import { showToast } from "../lib/toast";
 import { OptionPicker } from "./OptionPicker";
 import { ComposerGitChangesButton, GitChangesChipLoader, GitBranchSwitcher } from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
@@ -22,6 +30,35 @@ const DESKTOP_MQ = "(min-width: 701px)";
 const META_CHIP_GAP = 10;
 const MORE_BTN_WIDTH = 96;
 const MENU_VIEWPORT_PAD = 12;
+
+/**
+ * Narrowest each chip may become when the row is overfull: enough for the icon
+ * plus a few characters of its label. A chip whose "compress" switch is off
+ * gets no floor — it never shrinks, so it is the one that moves into the "…"
+ * menu instead.
+ */
+const CHIP_MIN_WIDTH: Partial<Record<MetaChipId, number>> = {
+  folder: 104,
+  gitBranch: 76,
+  gitChanges: 34,
+};
+
+/** Minimum width of a chip that may compress; 0 = never compress it. */
+function chipMinWidth(id: MetaChipId, options: ChatChipOptions): number {
+  const wraps = (() => {
+    switch (id) {
+      case "folder":
+        return options.folder.compress;
+      case "gitBranch":
+        return options.gitBranch.compress;
+      case "gitChanges":
+        return options.gitChanges.compress;
+      default:
+        return false;
+    }
+  })();
+  return wraps ? (CHIP_MIN_WIDTH[id] ?? 0) : 0;
+}
 
 function placeOverflowMenu(menu: HTMLElement, anchor: DOMRect) {
   const pad = MENU_VIEWPORT_PAD;
@@ -86,6 +123,12 @@ function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+/** Last segment of a cwd — the only part that still reads on a phone-width chip. */
+function folderName(cwd: string): string {
+  const parts = cwd.replace(/[\\/]+$/, "").split(/[\\/]/);
+  return parts[parts.length - 1] || cwd;
+}
+
 type MetaChipId = ChatMetaChipId | "plan";
 
 type MetaChipItem = {
@@ -141,8 +184,9 @@ export function ComposerMetaChips({
     loading?: boolean;
     awaiting?: boolean;
     branchBusy: boolean;
+    branchesLoading?: boolean;
     onCheckout: (branch: string, create?: boolean) => Promise<void>;
-    onRequestFullStatus?: () => void;
+    onLoadBranches?: () => void;
     changesOpen: boolean;
     onOpenChanges: () => void;
   };
@@ -163,8 +207,11 @@ export function ComposerMetaChips({
 
   const [composerMetaEdge, setComposerMetaEdge] = useState({ left: false, right: false });
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
+  const [compressing, setCompressing] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowMenuReady, setOverflowMenuReady] = useState(false);
+
+  const chipOptions = settings.chatChipOptions;
 
   const showMode =
     modeSwitcher.length > 0 && (settings.chatComposerButtons ?? []).includes("mode");
@@ -212,8 +259,15 @@ export function ComposerMetaChips({
       let node: ReactNode | null = null;
 
       if (id === "folder" && activeSession?.cwd?.trim()) {
+        const cwd = activeSession.cwd.trim();
         node = (
-          <div className={styles.sessionCwd}>
+          <button
+            type="button"
+            className={styles.sessionCwd}
+            title={cwd}
+            aria-label={`${t("common.folder")}: ${cwd}`}
+            onClick={() => showToast(cwd)}
+          >
             <span className={styles.sessionCwdIcon} aria-hidden>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <path
@@ -231,13 +285,21 @@ export function ComposerMetaChips({
                 />
               </svg>
             </span>
-            <MiddleTruncate text={activeSession.cwd} className={styles.sessionCwdText} />
-          </div>
+            {isDesktop ? (
+              <MiddleTruncate
+                text={cwd}
+                className={styles.sessionCwdText}
+                mode={chipOptions.folder.truncate}
+              />
+            ) : (
+              <span className={styles.sessionCwdText}>{folderName(cwd)}</span>
+            )}
+          </button>
         );
       } else if (id === "gitBranch" && (gitChip?.awaiting || gitChip?.loading)) {
         if (settings.chatGitBranchPosition === "above") {
           node = (
-            <div className={gitBarStyles.barComposerMeta}>
+            <div className={gitBarStyles.barComposerFooter}>
               <GitChangesChipLoader />
             </div>
           );
@@ -251,13 +313,14 @@ export function ComposerMetaChips({
       } else if (id === "gitBranch" && gitChip?.status?.repo) {
         if (settings.chatGitBranchPosition === "above") {
           node = (
-            <div className={`${gitBarStyles.bar} ${gitBarStyles.barComposerMeta}`}>
+            <div className={`${gitBarStyles.bar} ${gitBarStyles.barComposerFooter}`}>
               <GitBranchSwitcher
                 status={gitChip.status}
                 branchBusy={gitChip.branchBusy}
                 onCheckout={gitChip.onCheckout}
-                onRequestFullStatus={gitChip.onRequestFullStatus}
-                variant="composerMeta"
+                onRequestFullStatus={gitChip.onLoadBranches}
+                branchesLoading={gitChip.branchesLoading}
+                fixedMenu
               />
               {gitChip.status.conflict ? (
                 <span className={gitBarStyles.conflictBadge} title={t("common.conflicts")}>
@@ -275,6 +338,8 @@ export function ComposerMetaChips({
               changesOpen={gitChip.changesOpen}
               onOpenChanges={gitChip.onOpenChanges}
               premium={settings.chatGitBranchPosition !== "above"}
+              metrics={chipOptions.gitChanges.metrics}
+              iconOnly={compressing && chipOptions.gitChanges.compress}
             />
           </div>
         );
@@ -331,9 +396,12 @@ export function ComposerMetaChips({
         );
       } else if (id === "context" && activeSession) {
         node = (
-          <span
+          <button
+            type="button"
             className={`${styles.metaChip} ${styles.metaChipForceLabel}`}
             title={contextDisplay.title}
+            aria-label={contextDisplay.title}
+            onClick={() => showToast(contextDisplay.title)}
           >
             <span className={styles.metaChipIcon} aria-hidden>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -347,7 +415,7 @@ export function ComposerMetaChips({
               </svg>
             </span>
             <span className={styles.metaChipLabel}>{contextDisplay.label}</span>
-          </span>
+          </button>
         );
       } else if (id === "console" && activeSession && !isShellSession(activeSession.provider)) {
         node = (
@@ -386,6 +454,10 @@ export function ComposerMetaChips({
     activeSession,
     autoExpandSteps,
     chatMcp,
+    chipOptions.folder.truncate,
+    chipOptions.gitChanges.compress,
+    chipOptions.gitChanges.metrics,
+    compressing,
     consoleOpen,
     contextDisplay.label,
     contextDisplay.title,
@@ -407,33 +479,35 @@ export function ComposerMetaChips({
   const gitLayoutSig = gitChip
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
-  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay.label}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}`;
+  const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
+  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay.label}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;
   const overflowItems =
     isDesktop && visibleCount !== null ? chipItems.slice(visibleCount) : [];
 
-  const computeVisibleCount = useCallback(
+  const computeChipLayout = useCallback(
     (captureWidths: boolean) => {
+      const fitsAll = { visible: chipItems.length, compress: false };
       const start = startRef.current;
       const row = scrollRef.current;
-      if (!start || !row) return chipItems.length;
+      if (!start || !row) return fitsAll;
 
       const gapPx = Number.parseFloat(getComputedStyle(start).columnGap || getComputedStyle(start).gap);
       const gap = Number.isFinite(gapPx) && gapPx > 0 ? gapPx : META_CHIP_GAP;
 
-      if (captureWidths) {
-        for (const item of chipItems) {
-          const el = chipRefs.current.get(item.id);
+      for (const item of chipItems) {
+        const el = chipRefs.current.get(item.id);
+        if (captureWidths) {
           if (el) chipWidthsRef.current.set(item.id, el.offsetWidth);
+          continue;
         }
-      } else {
-        for (const item of chipItems) {
-          const el = chipRefs.current.get(item.id);
-          const w = el?.offsetWidth ?? 0;
-          if (w > 0) chipWidthsRef.current.set(item.id, w);
-        }
+        // A compressible chip is rendered shrunk while the row is overfull, so
+        // its live width is not the natural one the fit is computed from.
+        if (chipMinWidth(item.id, chipOptions) > 0) continue;
+        const w = el?.offsetWidth ?? 0;
+        if (w > 0) chipWidthsRef.current.set(item.id, w);
       }
 
       const rowRect = row.getBoundingClientRect();
@@ -443,34 +517,55 @@ export function ComposerMetaChips({
       const available = visibleRight - rowRect.left - modeW;
 
       const widths = chipItems.map((item) => chipWidthsRef.current.get(item.id) ?? 0);
-      if (available <= 0) return chipItems.length;
-      if (widths.some((w) => w <= 0)) return chipItems.length;
+      if (available <= 0) return fitsAll;
+      if (widths.some((w) => w <= 0)) return fitsAll;
+
+      const sumWidths = (list: number[], upTo = list.length) => {
+        let total = 0;
+        for (let i = 0; i < upTo; i += 1) {
+          total += list[i];
+          if (i > 0) total += gap;
+        }
+        return total;
+      };
+
+      // Compression keeps the row on one line: a chip with its own "compress"
+      // switch on gives up width (down to its floor) instead of being pushed
+      // into the "…" menu. Chips that do not fit even at their floor still go.
+      const overfull = sumWidths(widths) > available;
+      const floors = chipItems.map((item) => chipMinWidth(item.id, chipOptions));
+      const fitWidths =
+        overfull && floors.some((min) => min > 0)
+          ? widths.map((w, i) => (floors[i] > 0 && w > floors[i] ? floors[i] : w))
+          : widths;
+      const result = { visible: 0, compress: overfull && floors.some((min) => min > 0) };
 
       const moreBtnW = moreBtnRef.current?.offsetWidth || MORE_BTN_WIDTH;
 
       for (let visible = chipItems.length; visible >= 0; visible -= 1) {
-        const hidden = chipItems.length - visible;
-        let chipsW = 0;
-        for (let i = 0; i < visible; i += 1) {
-          chipsW += widths[i];
-          if (i > 0) chipsW += gap;
+        const moreW = visible < chipItems.length ? moreBtnW + gap : 0;
+        if (sumWidths(fitWidths, visible) + moreW <= available) {
+          result.visible = visible;
+          return result;
         }
-        const moreW = hidden > 0 ? moreBtnW + gap : 0;
-        if (chipsW + moreW <= available) return visible;
       }
-      return 0;
+      return result;
     },
-    [chipItems, showMode],
+    [chipItems, chipOptions, showMode],
   );
 
   useEffect(() => {
     chipWidthsRef.current.clear();
     setVisibleCount(null);
+    setCompressing(false);
     setOverflowOpen(false);
   }, [chipLayoutKey]);
 
   useEffect(() => {
-    if (!isDesktop) setVisibleCount(null);
+    if (!isDesktop) {
+      setVisibleCount(null);
+      setCompressing(false);
+    }
   }, [isDesktop]);
 
   useLayoutEffect(() => {
@@ -480,17 +575,19 @@ export function ComposerMetaChips({
       setVisibleCount(0);
       return;
     }
-    const next = computeVisibleCount(true);
-    setVisibleCount(next);
-  }, [chipLayoutKey, computeVisibleCount, isDesktop, renderSkeleton, visibleCount]);
+    const next = computeChipLayout(true);
+    setVisibleCount(next.visible);
+    setCompressing(next.compress);
+  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, visibleCount]);
 
   useEffect(() => {
     if (!isDesktop || renderSkeleton || visibleCount === null) return;
     const shell = shellRef.current;
     if (!shell) return;
     const onResize = () => {
-      const next = computeVisibleCount(false);
-      setVisibleCount((prev) => (prev === next ? prev : next));
+      const next = computeChipLayout(false);
+      setVisibleCount((prev) => (prev === next.visible ? prev : next.visible));
+      setCompressing((prev) => (prev === next.compress ? prev : next.compress));
     };
     const ro = new ResizeObserver(onResize);
     ro.observe(shell);
@@ -503,7 +600,7 @@ export function ComposerMetaChips({
       ro.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [chipLayoutKey, computeVisibleCount, isDesktop, renderSkeleton, showMode]);
+  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, showMode]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -642,6 +739,13 @@ export function ComposerMetaChips({
             chipItems.map((item, index) => {
               const hidden =
                 isDesktop && !measuring && visibleCount !== null && index >= visibleCount;
+              const min = chipMinWidth(item.id, chipOptions);
+              const shrinkable =
+                isDesktop &&
+                !measuring &&
+                compressing &&
+                min > 0 &&
+                (chipWidthsRef.current.get(item.id) ?? 0) > min;
               return (
                 <div
                   key={item.id}
@@ -649,7 +753,18 @@ export function ComposerMetaChips({
                     if (el) chipRefs.current.set(item.id, el);
                     else chipRefs.current.delete(item.id);
                   }}
-                  className={hidden ? styles.composerMetaChipHidden : styles.composerMetaChipWrap}
+                  className={
+                    hidden
+                      ? styles.composerMetaChipHidden
+                      : `${styles.composerMetaChipWrap}${
+                          shrinkable ? ` ${styles.composerMetaChipShrinkable}` : ""
+                        }`
+                  }
+                  style={
+                    shrinkable
+                      ? ({ "--chip-min-width": `${min}px` } as CSSProperties)
+                      : undefined
+                  }
                 >
                   {item.node}
                 </div>

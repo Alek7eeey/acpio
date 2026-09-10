@@ -568,6 +568,7 @@ export const en = {
     readOnly: "Read-only",
     allChanges: "All changes",
     switchBranch: "Switch branch",
+    loadingBranches: "Loading branches…",
     openChanges: "Open changes",
     changedFiles: "{{count}} changed",
     checkoutFailed: "Could not switch branch",

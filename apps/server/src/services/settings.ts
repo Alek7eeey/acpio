@@ -3,6 +3,8 @@ import {
   AppSettings,
   DEFAULT_SETTINGS,
   SETTINGS_SCHEMA_VERSION,
+  mergeChatChipOptions,
+  normalizeChatChipOptions,
   normalizeChatMetaChips,
   readSettingsSchema,
 } from "@acpio/shared";
@@ -187,6 +189,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.chatGitBranchPosition !== "above") {
     merged.chatGitBranchPosition = "below";
   }
+  merged.chatChipOptions = normalizeChatChipOptions(merged.chatChipOptions);
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
@@ -299,7 +302,16 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await getSettings();
-  const next = mergeSettings({ ...current, ...patch, settingsSchema: SETTINGS_SCHEMA_VERSION });
+  const next = mergeSettings({
+    ...current,
+    ...patch,
+    // A patch may carry a single chip (the form saves one row at a time) —
+    // deep-merge so the other chips keep their options.
+    chatChipOptions: patch.chatChipOptions
+      ? mergeChatChipOptions(current.chatChipOptions, patch.chatChipOptions)
+      : current.chatChipOptions,
+    settingsSchema: SETTINGS_SCHEMA_VERSION,
+  });
   await persistSettings(next);
   return next;
 }

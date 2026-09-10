@@ -459,6 +459,12 @@ describe("DEFAULT_SETTINGS", () => {
     chatSplit: true,
     chatToolbarStyle: "classic",
     chatGitBranchPosition: "below",
+    chatChipOptions: {
+      folder: { compress: true, truncate: "middle" },
+      gitBranch: { compress: true },
+      gitChanges: { compress: true, metrics: "linesAndFiles" },
+      context: { format: "usage" },
+    },
     remoteAccessKey: "",
     mcpServers: [],
   };

@@ -30,7 +30,9 @@ export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
   SETTINGS_SCHEMA_VERSION,
+  mergeChatChipOptions,
   mergeClientAppSettings,
+  normalizeChatChipOptions,
   normalizeChatMetaChips,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
@@ -487,6 +489,44 @@ export type ChatMetaChipId =
  *  are always visible and cannot be hidden. */
 export type ChatToolbarStyle = "classic" | "minimal";
 
+/** Folder chip: how an over-long path shortens once the chip is compressed. */
+export type ChatCwdTruncate = "middle" | "end";
+
+/** Changes chip: what the chip shows next to its icon. */
+export type ChatChangesMetrics = "none" | "lines" | "files" | "linesAndFiles";
+
+/** Context chip: absolute token usage or the share of the context window. */
+export type ChatContextFormat = "usage" | "percent";
+
+/**
+ * Per-chip options for the composer meta row. Each chip is configured on its
+ * own: whether it may shrink when the row runs out of room, and what it shows.
+ * A chip that cannot shrink (compress off, or already at its smallest) is the
+ * one that moves into the "…" menu.
+ */
+export interface ChatChipOptions {
+  folder: {
+    /** Shrink the path instead of dropping the chip into the "…" menu. */
+    compress: boolean;
+    /** "middle" keeps the head and tail of the path, "end" only the tail. */
+    truncate: ChatCwdTruncate;
+  };
+  gitBranch: { compress: boolean };
+  gitChanges: {
+    compress: boolean;
+    /** "-" … "+" line counts, the changed-file count, both, or nothing. */
+    metrics: ChatChangesMetrics;
+  };
+  context: { format: ChatContextFormat };
+}
+
+export const DEFAULT_CHAT_CHIP_OPTIONS: ChatChipOptions = {
+  folder: { compress: true, truncate: "middle" },
+  gitBranch: { compress: true },
+  gitChanges: { compress: true, metrics: "linesAndFiles" },
+  context: { format: "usage" },
+};
+
 export type ChatTreeElementId = "search" | "searchMsgs" | "pin" | "archive" | "more";
 
 /** Commands shown inside the session "⋯" context menu in the tree.
@@ -629,6 +669,8 @@ export interface AppSettings {
   chatToolbarStyle: ChatToolbarStyle;
   /** Position of the Git branch bar: "below" the input or "above" as a chip. */
   chatGitBranchPosition?: "below" | "above";
+  /** Per-chip composer options: shrink behaviour and what each chip shows. */
+  chatChipOptions: ChatChipOptions;
   /** Internal persisted settings schema version (not shown in UI). */
   settingsSchema?: number;
   /**
@@ -697,6 +739,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatSplit: true,
   chatToolbarStyle: "classic",
   chatGitBranchPosition: "below",
+  chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
   mcpServers: [],
 };

@@ -104,6 +104,38 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatGitBranchPosition: "weird" }).chatGitBranchPosition).toBe("below");
   });
 
+  it("defaults chip options and heals partial objects", () => {
+    const defaults = mergeClientAppSettings({}).chatChipOptions;
+    expect(defaults).toEqual({
+      folder: { compress: true, truncate: "middle" },
+      gitBranch: { compress: true },
+      gitChanges: { compress: true, metrics: "linesAndFiles" },
+      context: { format: "usage" },
+    });
+    // A stored object written by an older/newer client only has to carry the
+    // fields it changed — everything else stays at its default.
+    expect(
+      mergeClientAppSettings({
+        chatChipOptions: { folder: { compress: false, truncate: "end" } },
+      }).chatChipOptions,
+    ).toEqual({
+      folder: { compress: false, truncate: "end" },
+      gitBranch: { compress: true },
+      gitChanges: { compress: true, metrics: "linesAndFiles" },
+      context: { format: "usage" },
+    });
+    expect(
+      mergeClientAppSettings({
+        chatChipOptions: { gitChanges: { metrics: "weird" }, context: { format: "percent" } },
+      }).chatChipOptions,
+    ).toEqual({
+      folder: { compress: true, truncate: "middle" },
+      gitBranch: { compress: true },
+      gitChanges: { compress: true, metrics: "linesAndFiles" },
+      context: { format: "percent" },
+    });
+  });
+
   it("defaults deep logging to off", () => {
     expect(mergeClientAppSettings({}).diagnosticsDeepLogging).toBe(false);
     expect(mergeClientAppSettings({ diagnosticsDeepLogging: true }).diagnosticsDeepLogging).toBe(true);

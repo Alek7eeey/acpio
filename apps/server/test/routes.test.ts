@@ -150,18 +150,40 @@ describe("health & settings", () => {
     expect(get.json().displayName).toBe("Tester");
   });
 
-  it("PUT /api/settings persists chatGitBranchPosition", async () => {
+  it("PUT /api/settings persists composer layout settings", async () => {
     const put = await app.inject({
       method: "PUT",
       url: "/api/settings",
-      payload: { chatGitBranchPosition: "above" },
+      payload: { chatGitBranchPosition: "above", chatChipOptions: { folder: { compress: false } } },
     });
     expect(put.statusCode).toBe(200);
     expect(put.json().chatGitBranchPosition).toBe("above");
+    expect(put.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
 
     const get = await app.inject({ method: "GET", url: "/api/settings" });
     expect(get.statusCode).toBe(200);
     expect(get.json().chatGitBranchPosition).toBe("above");
+    expect(get.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
+  });
+
+  it("PUT /api/settings keeps the other chips when patching one", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { chatChipOptions: { gitChanges: { metrics: "none" } } },
+    });
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { chatChipOptions: { context: { format: "percent" } } },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().chatChipOptions).toEqual({
+      folder: { compress: true, truncate: "middle" },
+      gitBranch: { compress: true },
+      gitChanges: { compress: true, metrics: "none" },
+      context: { format: "percent" },
+    });
   });
 
   it("generates a remote access key by default; LAN needs it until explicitly cleared", async () => {

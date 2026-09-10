@@ -4675,12 +4675,17 @@ function ChatThread() {
     const used = acp?.usedTokens;
     const win = acp?.contextWindow;
     const cost = acp?.cost;
-    const label =
+    const percent = used != null && win ? Math.round((used / win) * 100) : null;
+    const usageLabel =
       used != null
         ? win != null
           ? `${formatCompact(used)} / ${formatCompact(win)}`
           : `${formatCompact(used)} ${t("chat.contextUnit")}`
         : `${formatCompact(contextUsage.tokens)} ${t("chat.contextUnit")}`;
+    const label =
+      settings.chatChipOptions.context.format === "percent" && percent != null
+        ? `${percent}%`
+        : usageLabel;
     const title = acp
       ? t("chat.contextAcpTooltip", {
           used: (used ?? 0).toLocaleString(),
@@ -4692,7 +4697,7 @@ function ChatThread() {
           chars: contextUsage.chars.toLocaleString(),
         });
     return { label, title };
-  }, [activeSession?.usage, contextUsage, t]);
+  }, [activeSession?.usage, contextUsage, settings.chatChipOptions.context.format, t]);
 
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
@@ -5327,8 +5332,9 @@ function ChatThread() {
                     loading: git.loading,
                     awaiting: git.awaiting,
                     branchBusy: git.branchBusy,
+                    branchesLoading: git.branchesLoading,
                     onCheckout: git.checkout,
-                    onRequestFullStatus: () => void git.refresh({ full: true }),
+                    onLoadBranches: () => void git.loadBranches(),
                     changesOpen: gitPanelOpen,
                     onOpenChanges: openGitChangesPanel,
                   }
@@ -5677,6 +5683,9 @@ function ChatThread() {
                   status={git.status}
                   branchBusy={git.branchBusy}
                   onCheckout={git.checkout}
+                  onLoadBranches={() => void git.loadBranches()}
+                  branchesLoading={git.branchesLoading}
+                  changesMetrics={settings.chatChipOptions.gitChanges.metrics}
                 />
               </div>
             ) : git.loading || git.awaiting ? (

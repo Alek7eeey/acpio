@@ -172,6 +172,23 @@ const settingsSchema = z.object({
   chatShowMessageTime: z.boolean().optional(),
   chatAgentTurnTimeline: z.boolean().optional(),
   chatGitBranchPosition: z.enum(["below", "above"]).optional(),
+  chatChipOptions: z
+    .object({
+      folder: z
+        .object({ compress: z.boolean(), truncate: z.enum(["middle", "end"]) })
+        .partial()
+        .optional(),
+      gitBranch: z.object({ compress: z.boolean() }).partial().optional(),
+      gitChanges: z
+        .object({
+          compress: z.boolean(),
+          metrics: z.enum(["none", "lines", "files", "linesAndFiles"]),
+        })
+        .partial()
+        .optional(),
+      context: z.object({ format: z.enum(["usage", "percent"]) }).partial().optional(),
+    })
+    .optional(),
   chatSplit: z.boolean().optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),

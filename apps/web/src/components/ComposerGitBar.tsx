@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
-import type { GitStatusDto, SessionStatus } from "@acpio/shared";
+import type { ChatChangesMetrics, GitStatusDto, SessionStatus } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { formatGitErrorToast, shouldAwaitGitRepo } from "../lib/gitUi";import { showToast } from "../lib/toast";
@@ -8,6 +8,12 @@ import { GitDiffStats } from "./GitDiffStats";
 import styles from "./ComposerGitBar.module.css";
 
 const gitStatusByCwd = new Map<string, GitStatusDto>();
+/**
+ * Branch lists learned from a full status, keyed by cwd. The periodic poll asks
+ * for a summary (which carries no branch list) — without this the list would be
+ * wiped seconds after the user opened the branch menu.
+ */
+const gitBranchesByCwd = new Map<string, string[]>();
 
 function gitCwdKey(cwd: string | undefined): string | null {
   const trimmed = cwd?.trim();
@@ -35,6 +41,7 @@ export function useGitStatus(
   const [status, setStatus] = useState<GitStatusDto | null>(null);
   const [resolvedSessionId, setResolvedSessionId] = useState<string | null>(null);
   const [branchBusy, setBranchBusy] = useState(false);
+  const [branchesLoading, setBranchesLoading] = useState(false);
 
   const boundStatus = resolvedSessionId === sessionId ? status : null;
   const pending = resolvedSessionId !== sessionId;
@@ -49,10 +56,23 @@ export function useGitStatus(
         return;
       }
       const key = cwdRef.current;
-      if (next?.repo && key) gitStatusByCwd.set(key, next);
-      setStatus(next);
+      let resolved = next;
+      if (next?.repo && key) {
+        const cached = gitBranchesByCwd.get(key);
+        if (next.branches.length > 0) {
+          gitBranchesByCwd.set(key, next.branches);
+        } else if (cached?.length) {
+          const branches =
+            next.branch && !cached.includes(next.branch)
+              ? [...cached, next.branch].sort((a, b) => a.localeCompare(b))
+              : cached;
+          resolved = { ...next, branches };
+        }
+        gitStatusByCwd.set(key, resolved ?? next);
+      }
+      setStatus(resolved);
       setResolvedSessionId(sid);
-      onStatusChange?.(next);
+      onStatusChange?.(resolved);
     },
     [onStatusChange],
   );
@@ -89,6 +109,30 @@ export function useGitStatus(
     },
     [applyStatus, context?.gitPanelOpen, onStatusChange],
   );
+
+  /**
+   * Fetch the full status (branch list included) for the open branch menu.
+   * The composer poll only asks for a summary, so the menu would otherwise
+   * offer just the current branch with no sign that more are coming.
+   */
+  const loadBranches = useCallback(async () => {
+    const sid = sessionRef.current;
+    if (!sid) return;
+    setBranchesLoading(true);
+    try {
+      const next = await api.gitStatus(sid, { summary: false });
+      if (sessionRef.current !== sid) return;
+      applyStatus(next);
+    } catch {
+      // Keep the branches we know; the menu just stops loading.
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [applyStatus]);
+
+  useLayoutEffect(() => {
+    setBranchesLoading(false);
+  }, [sessionId]);
 
   useLayoutEffect(() => {
     const cwdKey = gitCwdKey(context?.cwd);
@@ -141,7 +185,17 @@ export function useGitStatus(
     }
   }, [applyStatus, boundStatus?.branch, branchBusy, t]);
 
-  return { status: boundStatus, loading: pending, awaiting, refresh, checkout, branchBusy, applyStatus };
+  return {
+    status: boundStatus,
+    loading: pending,
+    awaiting,
+    refresh,
+    checkout,
+    branchBusy,
+    branchesLoading,
+    loadBranches,
+    applyStatus,
+  };
 }
 
 export function GitChangesChipLoader({
@@ -168,7 +222,7 @@ export function GitChangesChipLoader({
 export function GitComposerLoadingBar({
   variant = "composerSubtle",
 }: {
-  variant?: "default" | "metaChip" | "composerFooter" | "composerMeta" | "composerSubtle";
+  variant?: "default" | "metaChip" | "composerFooter" | "composerSubtle";
 }) {
   const t = useT();
   const premium = variant === "composerFooter";
@@ -177,9 +231,9 @@ export function GitComposerLoadingBar({
     <div
       className={`${styles.bar} ${styles.barLoading}${
         variant === "metaChip" ? ` ${styles.barMetaChip}` : ""
-      }${variant === "composerMeta" ? ` ${styles.barComposerMeta}` : ""}${
-        variant === "composerFooter" ? ` ${styles.barComposerFooter}` : ""
-      }${variant === "composerSubtle" ? ` ${styles.barComposerSubtle}` : ""}`}
+      }${variant === "composerFooter" ? ` ${styles.barComposerFooter}` : ""}${
+        variant === "composerSubtle" ? ` ${styles.barComposerSubtle}` : ""
+      }`}
       aria-busy="true"
       aria-label={t("git.initializing")}
     >
@@ -194,31 +248,38 @@ export function ComposerGitChangesButton({  status,
   onOpenChanges,
   iconOnly = false,
   premium = false,
+  metrics = "linesAndFiles",
 }: {
   status: GitStatusDto;
   changesOpen: boolean;
   onOpenChanges: () => void;
+  /** Collapsed to the icon (row is squeezed, or the user hides the numbers). */
   iconOnly?: boolean;
   premium?: boolean;
+  /** What the chip shows next to its icon. */
+  metrics?: ChatChangesMetrics;
 }) {
   const t = useT();
   const fileCount = status.files.length;
   const detail = status.dirty
     ? `+${status.additions} -${status.deletions} · ${t("git.changedFiles", { count: fileCount })}`
     : t("git.noChanges");
+  const showLines = metrics === "lines" || metrics === "linesAndFiles";
+  const showFiles = metrics === "files" || metrics === "linesAndFiles";
+  const collapsed = iconOnly || metrics === "none";
 
   return (
     <button
       type="button"
       className={`${styles.changesChip}${changesOpen ? ` ${styles.changesChipActive}` : ""}${
         status.dirty ? "" : ` ${styles.changesChipQuiet}`
-      }${iconOnly ? ` ${styles.changesChipIconOnly}` : ""}${premium ? ` ${styles.changesChipPremium}` : ""}`}
+      }${collapsed ? ` ${styles.changesChipIconOnly}` : ""}${premium ? ` ${styles.changesChipPremium}` : ""}`}
       onClick={onOpenChanges}
       title={detail}
       aria-label={`${t("git.openChanges")}: ${detail}`}
       aria-pressed={changesOpen}
     >
-      {iconOnly ? (
+      {collapsed ? (
         <>
           <svg className={styles.changesChipIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
@@ -252,11 +313,15 @@ export function ComposerGitChangesButton({  status,
             </span>
           ) : null}
           <span className={styles.changesChipMetrics}>
-            <GitDiffStats additions={status.additions} deletions={status.deletions} />
-            <span className={styles.changesChipSep} aria-hidden>
-              ·
-            </span>
-            <span className={styles.changesChipCount}>{fileCount}</span>
+            {showLines ? (
+              <GitDiffStats additions={status.additions} deletions={status.deletions} />
+            ) : null}
+            {showLines && showFiles ? (
+              <span className={styles.changesChipSep} aria-hidden>
+                ·
+              </span>
+            ) : null}
+            {showFiles ? <span className={styles.changesChipCount}>{fileCount}</span> : null}
           </span>
         </>
       )}
@@ -269,13 +334,19 @@ export function GitBranchSwitcher({
   branchBusy,
   onCheckout,
   onRequestFullStatus,
+  branchesLoading = false,
   variant = "default",
+  fixedMenu = false,
 }: {
   status: GitStatusDto;
   branchBusy: boolean;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
   onRequestFullStatus?: () => void;
-  variant?: "default" | "metaChip" | "panelHeader" | "composerMeta" | "composerSubtle";
+  /** The branch list has not arrived yet — the menu is showing a partial list. */
+  branchesLoading?: boolean;
+  variant?: "default" | "metaChip" | "panelHeader" | "composerSubtle";
+  /** Portal the branch menu; required when the switcher sits in an overflow-hidden row. */
+  fixedMenu?: boolean;
 }) {
   const t = useT();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -285,7 +356,7 @@ export function GitBranchSwitcher({
   const menuRef = useRef<HTMLDivElement>(null);
   const branchBtnRef = useRef<HTMLButtonElement>(null);
   const useFixedMenu =
-    variant === "panelHeader" || variant === "composerMeta" || variant === "metaChip";
+    fixedMenu || variant === "panelHeader" || variant === "metaChip";
 
   useLayoutEffect(() => {
     if (!menuOpen || !branchBtnRef.current) return;
@@ -338,14 +409,27 @@ export function GitBranchSwitcher({
       if (menuRef.current?.contains(target)) return;
       setMenuOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [menuOpen]);
 
+  const onRequestFullStatusRef = useRef(onRequestFullStatus);
+  onRequestFullStatusRef.current = onRequestFullStatus;
+
   useEffect(() => {
+    // Read the callback through a ref: the parent passes a fresh closure every
+    // render, and depending on it here would refetch the branch list on each
+    // of those renders while the menu stays open.
     if (!menuOpen) return;
-    onRequestFullStatus?.();
-  }, [menuOpen, onRequestFullStatus]);
+    onRequestFullStatusRef.current?.();
+  }, [menuOpen]);
 
   const branches = status.branches.length ? status.branches : status.branch ? [status.branch] : [];
 
@@ -366,11 +450,9 @@ export function GitBranchSwitcher({
   const branchBtnClass =
     variant === "panelHeader"
       ? `${styles.branchBtn} ${styles.branchBtnPanelHeader}`
-      : variant === "composerMeta"
-        ? `${styles.branchBtn} ${styles.branchBtnComposerMeta}`
-        : variant === "composerSubtle"
-          ? `${styles.branchBtn} ${styles.branchBtnComposerSubtle}`
-          : styles.branchBtn;
+      : variant === "composerSubtle"
+        ? `${styles.branchBtn} ${styles.branchBtnComposerSubtle}`
+        : styles.branchBtn;
 
   return (
     <div className={switcherClass} ref={rootRef}>
@@ -407,6 +489,12 @@ export function GitBranchSwitcher({
               role="listbox"
               aria-label={t("git.switchBranch")}
             >
+              {branchesLoading && branches.length <= 1 ? (
+                <span className={styles.menuLoading} aria-live="polite">
+                  <span className={styles.loaderSpin} aria-hidden />
+                  {t("git.loadingBranches")}
+                </span>
+              ) : null}
               {branches.map((branch) => (
                 <button
                   key={branch}
@@ -451,40 +539,47 @@ export function ComposerGitBranchBar({
   status,
   branchBusy,
   onCheckout,
+  onLoadBranches,
+  branchesLoading = false,
   changesOpen,
   onOpenChanges,
+  changesMetrics = "linesAndFiles",
+  changesIconOnly = false,
   variant = "default",
 }: {
   status: GitStatusDto;
   branchBusy: boolean;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  /** Called when the branch menu opens, to fetch the full branch list. */
+  onLoadBranches?: () => void;
+  branchesLoading?: boolean;
   changesOpen?: boolean;
   onOpenChanges?: () => void;
-  variant?: "default" | "metaChip" | "composerFooter" | "composerMeta" | "composerSubtle";
+  changesMetrics?: ChatChangesMetrics;
+  changesIconOnly?: boolean;
+  variant?: "default" | "metaChip" | "composerFooter" | "composerSubtle";
 }) {
   const t = useT();
   const premium = variant === "composerFooter";
   const branchVariant =
     variant === "metaChip"
       ? "metaChip"
-      : variant === "composerMeta"
-        ? "composerMeta"
-        : variant === "composerSubtle"
-          ? "composerSubtle"
-          : "default";
+      : variant === "composerSubtle"
+        ? "composerSubtle"
+        : "default";
 
   return (
     <div
       className={`${styles.bar}${variant === "metaChip" ? ` ${styles.barMetaChip}` : ""}${
-        variant === "composerMeta" ? ` ${styles.barComposerMeta}` : ""
-      }${variant === "composerFooter" ? ` ${styles.barComposerFooter}` : ""}${
-        variant === "composerSubtle" ? ` ${styles.barComposerSubtle}` : ""
-      }`}
+        variant === "composerFooter" ? ` ${styles.barComposerFooter}` : ""
+      }${variant === "composerSubtle" ? ` ${styles.barComposerSubtle}` : ""}`}
     >
       <GitBranchSwitcher
         status={status}
         branchBusy={branchBusy}
         onCheckout={onCheckout}
+        onRequestFullStatus={onLoadBranches}
+        branchesLoading={branchesLoading}
         variant={branchVariant}
       />
 
@@ -499,8 +594,9 @@ export function ComposerGitBranchBar({
           status={status}
           changesOpen={changesOpen ?? false}
           onOpenChanges={onOpenChanges}
-          iconOnly={variant === "metaChip"}
+          iconOnly={variant === "metaChip" || changesIconOnly}
           premium={premium}
+          metrics={changesMetrics}
         />
       ) : null}
     </div>

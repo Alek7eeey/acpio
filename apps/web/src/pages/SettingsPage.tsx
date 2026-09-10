@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  DEFAULT_CHAT_CHIP_OPTIONS,
   migrateModelParamValues,
+  mergeChatChipOptions,
   type AdapterMetaDto,
   type AgentProvider,
   type AppSettings,
@@ -96,6 +98,13 @@ function ChatInteractiveConfigRows({
 }) {
   const t = useT();
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const chipOptions = form.chatChipOptions ?? DEFAULT_CHAT_CHIP_OPTIONS;
+  /** Per-chip rows save one field at a time; the patch is merged, not replaced. */
+  const patchChipOptions = (patchOptions: Parameters<typeof mergeChatChipOptions>[1]) => {
+    const next = mergeChatChipOptions(chipOptions, patchOptions);
+    patch("chatChipOptions", next);
+    void saveSettings({ chatChipOptions: next });
+  };
   return (
     <SettingTable>
       <SettingRow label={t("settings.chatSplit")} hint={t("settings.chatSplitHint")}>
@@ -240,6 +249,110 @@ function ChatInteractiveConfigRows({
                   patch("chatGitBranchPosition", id);
                   void saveSettings({ chatGitBranchPosition: id });
                 }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatChipFolder")} hint={t("settings.chatChipFolderHint")}>
+        <Toggle
+          checked={chipOptions.folder.compress}
+          onChange={(v) => patchChipOptions({ folder: { compress: v } })}
+          label={t("settings.chatChipFolder")}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t("settings.chatChipFolderTruncate")}
+        hint={t("settings.chatChipFolderTruncateHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["middle", t("settings.chatChipFolderTruncateMiddle")],
+              ["end", t("settings.chatChipFolderTruncateEnd")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = chipOptions.folder.truncate === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patchChipOptions({ folder: { truncate: id } })}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatChipBranch")} hint={t("settings.chatChipBranchHint")}>
+        <Toggle
+          checked={chipOptions.gitBranch.compress}
+          onChange={(v) => patchChipOptions({ gitBranch: { compress: v } })}
+          label={t("settings.chatChipBranch")}
+        />
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatChipChanges")} hint={t("settings.chatChipChangesHint")}>
+        <Toggle
+          checked={chipOptions.gitChanges.compress}
+          onChange={(v) => patchChipOptions({ gitChanges: { compress: v } })}
+          label={t("settings.chatChipChanges")}
+        />
+      </SettingRow>
+
+      <SettingRow
+        label={t("settings.chatChipChangesMetrics")}
+        hint={t("settings.chatChipChangesMetricsHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["linesAndFiles", t("settings.chatChipChangesLinesAndFiles")],
+              ["lines", t("settings.chatChipChangesLines")],
+              ["files", t("settings.chatChipChangesFiles")],
+              ["none", t("settings.chatChipChangesNone")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = chipOptions.gitChanges.metrics === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patchChipOptions({ gitChanges: { metrics: id } })}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow label={t("settings.chatChipContext")} hint={t("settings.chatChipContextHint")}>
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["usage", t("settings.chatChipContextUsage")],
+              ["percent", t("settings.chatChipContextPercent")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = chipOptions.context.format === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => patchChipOptions({ context: { format: id } })}
               >
                 {label}
               </button>

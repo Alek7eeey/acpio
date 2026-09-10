@@ -1,7 +1,10 @@
 import {
+  DEFAULT_CHAT_CHIP_OPTIONS,
   DEFAULT_SETTINGS,
   type AgentProvider,
   type AppSettings,
+  type ChatChangesMetrics,
+  type ChatChipOptions,
   type ChatMetaChipId,
   type ChatToolbarStyle,
 } from "./index.js";
@@ -83,6 +86,50 @@ export function normalizeChatGitBranchPosition(value: unknown): "below" | "above
   return value === "above" ? "above" : "below";
 }
 
+const CHAT_CHANGES_METRICS: ChatChangesMetrics[] = [
+  "none",
+  "lines",
+  "files",
+  "linesAndFiles",
+];
+
+/**
+ * Deep-merge a partial per-chip patch onto an existing options object. Used by
+ * both the settings form (one chip saved at a time) and load-time healing, so
+ * a partial object never resets the chips it does not mention.
+ */
+export function mergeChatChipOptions(base: ChatChipOptions, patch: unknown): ChatChipOptions {
+  const raw = (patch && typeof patch === "object" ? patch : {}) as Partial<
+    Record<keyof ChatChipOptions, unknown>
+  >;
+  const folder = (raw.folder ?? {}) as { compress?: unknown; truncate?: unknown };
+  const gitBranch = (raw.gitBranch ?? {}) as { compress?: unknown };
+  const gitChanges = (raw.gitChanges ?? {}) as { compress?: unknown; metrics?: unknown };
+  const context = (raw.context ?? {}) as { format?: unknown };
+  const bool = (v: unknown, fallback: boolean) => (typeof v === "boolean" ? v : fallback);
+  const pick = <T extends string>(v: unknown, allowed: readonly T[], fallback: T): T =>
+    typeof v === "string" && (allowed as readonly string[]).includes(v) ? (v as T) : fallback;
+  return {
+    folder: {
+      compress: bool(folder.compress, base.folder.compress),
+      truncate: pick(folder.truncate, ["middle", "end"] as const, base.folder.truncate),
+    },
+    gitBranch: { compress: bool(gitBranch.compress, base.gitBranch.compress) },
+    gitChanges: {
+      compress: bool(gitChanges.compress, base.gitChanges.compress),
+      metrics: pick(gitChanges.metrics, CHAT_CHANGES_METRICS, base.gitChanges.metrics),
+    },
+    context: {
+      format: pick(context.format, ["usage", "percent"] as const, base.context.format),
+    },
+  };
+}
+
+/** Heal a stored per-chip options object against the defaults. */
+export function normalizeChatChipOptions(value: unknown): ChatChipOptions {
+  return mergeChatChipOptions(DEFAULT_CHAT_CHIP_OPTIONS, value);
+}
+
 /** Client-side merge: defaults + API payload with chip migration. */
 export function mergeClientAppSettings(raw: unknown): AppSettings {
   const partial =
@@ -92,6 +139,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
+  merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }

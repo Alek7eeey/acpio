@@ -592,6 +592,7 @@ export const ru = {
     readOnly: "Только чтение",
     allChanges: "Все изменения",
     switchBranch: "Переключить ветку",
+    loadingBranches: "Загрузка веток…",
     openChanges: "Открыть изменения",
     changedFiles: "{{count}} изменено",
     checkoutFailed: "Не удалось переключить ветку",

@@ -205,63 +205,6 @@
   font-size: 0.62rem;
 }
 
-.barComposerMeta {
-  gap: 4px;
-  min-height: 0;
-}
-
-.barComposerMeta .branchBtnComposerMeta {
-  gap: 5px;
-  padding: 2px 4px 2px 2px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: color-mix(in srgb, var(--text) 72%, var(--text-secondary));
-}
-
-.barComposerMeta .branchBtnComposerMeta:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  color: var(--text);
-}
-
-.barComposerMeta .branchIcon {
-  width: 13px;
-  height: 13px;
-  opacity: 0.72;
-}
-
-.barComposerMeta .branchName {
-  font-size: 0.8rem;
-  font-weight: 500;
-  font-family: inherit;
-  letter-spacing: -0.01em;
-  color: inherit;
-}
-
-.barComposerMeta .chevron {
-  width: 10px;
-  height: 10px;
-  opacity: 0.55;
-}
-
-.barComposerMeta .changesChip {
-  padding: 2px 4px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-}
-
-.barComposerMeta .changesChip:hover,
-.barComposerMeta .changesChipActive {
-  border: none;
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-
-.barComposerMeta .changesChipBadge {
-  top: -2px;
-  right: -4px;
-}
-
 .barComposerSubtle {
   gap: 6px;
   min-height: 0;
@@ -506,6 +449,16 @@
   font-size: 0.78rem;
 }
 
+/* Fetching the full branch list for a menu that only knew the current branch. */
+.menuLoading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+}
+
 .menuItem:hover:not(:disabled) {
   background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
 }
@@ -561,9 +514,14 @@
     gap: 6px;
   }
 
-  .branchBtn:not(.branchBtnComposerSubtle) .branchName,
+  /* A bare branch icon says nothing: keep a readable slice of the name. */
   .branchBtn:not(.branchBtnComposerSubtle) .chevron {
     display: none;
+  }
+
+  /* The composer chip shares its row with the other chips. */
+  .barComposerFooter .branchBtn .branchName {
+    max-width: 9ch;
   }
 
   .branchBtn:not(.branchBtnComposerSubtle) {
