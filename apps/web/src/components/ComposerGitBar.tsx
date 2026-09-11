@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import type { ChatChangesMetrics, GitStatusDto, SessionStatus } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
-import { formatGitErrorToast, shouldAwaitGitRepo } from "../lib/gitUi";import { showToast } from "../lib/toast";
+import { formatGitErrorToast, shouldAwaitGitRepo } from "../lib/gitUi";
+import { showToast } from "../lib/toast";
 import { GitDiffStats } from "./GitDiffStats";
 import styles from "./ComposerGitBar.module.css";
 
@@ -266,7 +267,11 @@ export function ComposerGitChangesButton({  status,
     : t("git.noChanges");
   const showLines = metrics === "lines" || metrics === "linesAndFiles";
   const showFiles = metrics === "files" || metrics === "linesAndFiles";
-  const collapsed = iconOnly || metrics === "none";
+  // Git reports no line counts for untracked-only trees; "lines" then has
+  // nothing to print, so the chip falls back to its icon + file badge rather
+  // than rendering an empty pill.
+  const linesAvailable = status.additions > 0 || status.deletions > 0;
+  const collapsed = iconOnly || metrics === "none" || (metrics === "lines" && !linesAvailable);
 
   return (
     <button
@@ -543,8 +548,6 @@ export function ComposerGitBranchBar({
   branchesLoading = false,
   changesOpen,
   onOpenChanges,
-  changesMetrics = "linesAndFiles",
-  changesIconOnly = false,
   variant = "default",
 }: {
   status: GitStatusDto;
@@ -555,8 +558,6 @@ export function ComposerGitBranchBar({
   branchesLoading?: boolean;
   changesOpen?: boolean;
   onOpenChanges?: () => void;
-  changesMetrics?: ChatChangesMetrics;
-  changesIconOnly?: boolean;
   variant?: "default" | "metaChip" | "composerFooter" | "composerSubtle";
 }) {
   const t = useT();
@@ -594,9 +595,8 @@ export function ComposerGitBranchBar({
           status={status}
           changesOpen={changesOpen ?? false}
           onOpenChanges={onOpenChanges}
-          iconOnly={variant === "metaChip" || changesIconOnly}
+          iconOnly={variant === "metaChip"}
           premium={premium}
-          metrics={changesMetrics}
         />
       ) : null}
     </div>

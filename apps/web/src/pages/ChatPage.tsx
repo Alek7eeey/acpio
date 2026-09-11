@@ -5685,7 +5685,6 @@ function ChatThread() {
                   onCheckout={git.checkout}
                   onLoadBranches={() => void git.loadBranches()}
                   branchesLoading={git.branchesLoading}
-                  changesMetrics={settings.chatChipOptions.gitChanges.metrics}
                 />
               </div>
             ) : git.loading || git.awaiting ? (
