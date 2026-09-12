@@ -2585,7 +2585,6 @@ button.userSlashCmd:focus-visible {
   align-self: stretch;
 }
 
-.pillInputHighlight,
 .pillInput {
   grid-area: 1 / 1;
   min-width: 0;
@@ -2595,40 +2594,6 @@ button.userSlashCmd:focus-visible {
   line-height: 1.45;
   font-size: 0.95rem;
   box-sizing: border-box;
-}
-
-.pillInputHighlight {
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-  color: var(--text);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.pillInputHighlightInner {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.pill:not(.pillMultiline) .pillInputHighlight,
-.pill:not(.pillMultiline) .pillInputHighlightInner {
-  white-space: nowrap;
-  overflow-wrap: normal;
-  word-break: normal;
-}
-
-.pill:not(.pillMultiline) .pillInputHighlightInner {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-}
-
-.pillInput {
-  position: relative;
-  z-index: 1;
   resize: none;
   border: none;
   background: transparent;
@@ -2646,18 +2611,6 @@ button.userSlashCmd:focus-visible {
 
 .pill:not(.pillMultiline) .pillInput::-webkit-scrollbar {
   display: none;
-}
-
-.pillInputGhost {
-  color: transparent;
-  caret-color: var(--text);
-  -webkit-text-fill-color: transparent;
-}
-
-.pillInputGhost::selection {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  background: color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
 .pillInput:focus {
@@ -2981,8 +2934,7 @@ button.userSlashCmd:focus-visible {
   flex: 1 1 auto;
 }
 
-.pillMultiline .pillInput,
-.pillMultiline .pillInputHighlight {
+.pillMultiline .pillInput {
   min-height: 48px;
 }
 
@@ -3263,9 +3215,7 @@ button.userSlashCmd:focus-visible {
   }
 
   .pillInput,
-  .pillInputHighlight,
-  .pillMultiline .pillInput,
-  .pillMultiline .pillInputHighlight {
+  .pillMultiline .pillInput {
     min-height: 44px;
   }
 
@@ -3406,14 +3356,12 @@ button.userSlashCmd:focus-visible {
 }
 
 /* Composer size variants (settings → Chat → Composer height). */
-.pillCompact textarea,
-.pillCompact .pillInputHighlight {
+.pillCompact textarea {
   min-height: 24px;
   font-size: 0.85rem;
 }
 
-.pillRoomy textarea,
-.pillRoomy .pillInputHighlight {
+.pillRoomy textarea {
   min-height: 60px;
   font-size: 0.95rem;
 }

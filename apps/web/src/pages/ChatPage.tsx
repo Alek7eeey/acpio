@@ -3473,7 +3473,6 @@ function ChatThread() {
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const paramsLoadTokenRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const composerHighlightInnerRef = useRef<HTMLDivElement>(null);
   /** -1 = composer draft; 0..n-1 = browsing sent user messages (oldest→newest). */
   const composerHistoryIndexRef = useRef(-1);
   const composerHistoryDraftRef = useRef("");
@@ -3646,19 +3645,6 @@ function ChatThread() {
     el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 160)}px`;
   };
 
-  const syncComposerInputScroll = (el: HTMLTextAreaElement) => {
-    const inner = composerHighlightInnerRef.current;
-    if (el.value.includes("\n")) {
-      if (inner) inner.style.transform = `translateY(-${el.scrollTop}px)`;
-      return;
-    }
-    if (inner) inner.style.transform = el.scrollLeft > 0 ? `translateX(-${el.scrollLeft}px)` : "";
-    if (el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
-      el.scrollLeft = el.scrollWidth;
-      if (inner) inner.style.transform = el.scrollLeft > 0 ? `translateX(-${el.scrollLeft}px)` : "";
-    }
-  };
-
   const resetComposerHistory = () => {
     composerHistoryIndexRef.current = -1;
     composerHistoryDraftRef.current = "";
@@ -3676,7 +3662,6 @@ function ChatThread() {
         el.focus({ preventScroll: true });
         el.setSelectionRange(value.length, value.length);
         syncComposerSize(el);
-        syncComposerInputScroll(el);
       }
       composerHistoryApplyingRef.current = false;
     });
@@ -3727,7 +3712,6 @@ function ChatThread() {
           el.style.overflowY = "hidden";
           el.scrollTop = 0;
           setComposerMultilineIfNeeded(false);
-          syncComposerInputScroll(el);
         }
         return;
       }
@@ -3743,7 +3727,6 @@ function ChatThread() {
       el.style.overflowY = "hidden";
       el.scrollTop = 0;
       setComposerMultilineIfNeeded(false);
-      syncComposerInputScroll(el);
       return;
     }
 
@@ -3923,7 +3906,6 @@ function ChatThread() {
         el.focus({ preventScroll: true });
         el.setSelectionRange(next.length, next.length);
         syncComposerSize(el);
-        syncComposerInputScroll(el);
       });
     },
     [slashCommands],
@@ -5403,20 +5385,9 @@ function ChatThread() {
               }}
             />
             <div className={styles.pillInputWrap}>
-              {text ? (
-                <div className={styles.pillInputHighlight} aria-hidden>
-                  <div ref={composerHighlightInnerRef} className={styles.pillInputHighlightInner}>
-                    {highlightUserText(
-                      text,
-                      slashCommands.map((c) => c.name),
-                    )}
-                    {"\u200b"}
-                  </div>
-                </div>
-              ) : null}
               <textarea
               ref={textareaRef}
-              className={`${styles.pillInput}${text ? ` ${styles.pillInputGhost}` : ""}`}
+              className={styles.pillInput}
               value={text}
               onChange={(e) => {
                 if (composerLocked) return;
@@ -5426,10 +5397,6 @@ function ChatThread() {
                 setText(e.target.value);
                 setCursorPos(e.target.selectionStart);
                 syncComposerSize(e.currentTarget);
-                syncComposerInputScroll(e.currentTarget);
-              }}
-              onScroll={(e) => {
-                syncComposerInputScroll(e.currentTarget);
               }}
               onBlur={(e) => {
                 const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
@@ -5438,11 +5405,9 @@ function ChatThread() {
               }}
               onClick={(e) => {
                 setCursorPos(e.currentTarget.selectionStart);
-                syncComposerInputScroll(e.currentTarget);
               }}
               onKeyUp={(e) => {
                 setCursorPos(e.currentTarget.selectionStart);
-                syncComposerInputScroll(e.currentTarget);
               }}
               onPaste={(e) => {
                 if (composerLocked || editingMessageId || turnBusy) return;
