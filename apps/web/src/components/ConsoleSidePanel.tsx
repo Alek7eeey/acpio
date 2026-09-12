@@ -26,6 +26,8 @@ import { useT } from "../lib/i18n";
 
 import { isSidePanelResizeAllowed } from "../lib/panelLayout";
 
+import { useFixedMenuPlacement } from "../lib/menuPosition";
+
 import { api } from "../lib/api";
 
 import {
@@ -188,6 +190,8 @@ export function ConsoleSidePanel({
   const containerRef = useRef<HTMLDivElement>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const contextMenuStyle = useFixedMenuPlacement(contextMenu, menuRef);
 
   const termRef = useRef<import("@xterm/xterm").Terminal | null>(null);
 
@@ -1120,7 +1124,7 @@ export function ConsoleSidePanel({
 
               className={styles.contextMenu}
 
-              style={{ left: contextMenu.x, top: contextMenu.y }}
+              style={contextMenuStyle ?? undefined}
 
               role="menu"
 

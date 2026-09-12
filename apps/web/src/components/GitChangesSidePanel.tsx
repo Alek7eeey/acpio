@@ -9,7 +9,6 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { createPortal } from "react-dom";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
 import { DiffTextView, type DiffContextSource } from "./DiffTextView";
 import { GitFullscreenDiff, type FullscreenDiffFile } from "./GitFullscreenDiff";
@@ -20,7 +19,6 @@ import { GitBranchSwitcher } from "./ComposerGitBar";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
-import { useAppStore } from "../lib/store";
 import { isSidePanelResizeAllowed, useNarrowPanelLayout } from "../lib/panelLayout";
 import { firstChangedFilePath, firstCommitFilePath, normalizeGitPath } from "../lib/gitFileTree";
 import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitStatusBadge, gitSyncSuccessMessage, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
@@ -144,8 +142,6 @@ export function GitChangesSidePanel({
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
 }) {
   const t = useT();
-  const presentation = useAppStore((s) => s.gitPanelPresentation);
-  const togglePresentation = useAppStore((s) => s.toggleGitPanelPresentation);
   const narrowPanel = useNarrowPanelLayout();
   const [width, setWidth] = useState(readStoredWidth);
   const [dragging, setDragging] = useState(false);
@@ -254,13 +250,12 @@ export function GitChangesSidePanel({
   }, [changesTreeWidth]);
 
   useEffect(() => {
-    if (presentation !== "side") return;
     try {
       localStorage.setItem(WIDTH_KEY, String(width));
     } catch {
       /* ignore */
     }
-  }, [presentation, width]);
+  }, [width]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -570,6 +565,25 @@ export function GitChangesSidePanel({
     [refreshAfterFileMutation, sessionId, t],
   );
 
+  const ignorePaths = useCallback(
+    async (paths: string[]) => {
+      if (paths.length === 0) return;
+      setBusy(true);
+      try {
+        const result = await api.gitIgnore(sessionId, paths);
+        await refreshAfterFileMutation(result.status, paths);
+        showToast(result.added.length > 0 ? t("git.gitIgnoreOk") : t("git.gitIgnoreNone"), {
+          tone: result.added.length > 0 ? "success" : "info",
+        });
+      } catch (e) {
+        gitErrorToast(e, t("git.gitIgnoreFailed"));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refreshAfterFileMutation, sessionId, t],
+  );
+
   const loadWorkingBlame = useCallback(
     async (path: string) => {
       const key = buildBlameKey(path);
@@ -825,19 +839,19 @@ export function GitChangesSidePanel({
 
   const onSplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (presentation !== "side" || !isSidePanelResizeAllowed()) return;
+      if (!isSidePanelResizeAllowed()) return;
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
       dragRef.current = { startX: e.clientX, startWidth: width };
       setDragging(true);
     },
-    [presentation, width],
+    [width],
   );
 
   const onSplitterDoubleClick = useCallback(() => {
-    if (presentation !== "side" || !isSidePanelResizeAllowed()) return;
+    if (!isSidePanelResizeAllowed()) return;
     setWidth(WIDTH_DEFAULT);
-  }, [presentation]);
+  }, []);
 
   const onHistorySplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1096,7 +1110,7 @@ export function GitChangesSidePanel({
         deletions: file.deletions,
         untracked: isUntrackedGitFile(file),
       }));
-  const fullscreenAvailable = (narrowPanel || presentation === "modal") && fullscreenFiles.length > 0;
+  const fullscreenAvailable = fullscreenFiles.length > 0;
 
   const commitPaneProps = {
     files,
@@ -1121,6 +1135,7 @@ export function GitChangesSidePanel({
     repoRoot: status?.root,
     onDiscardPaths: discardPaths,
     onDeletePaths: deletePaths,
+    onIgnorePaths: ignorePaths,
     onBlameFile: loadWorkingBlame,
     layout: "workspace" as const,
     outgoing,
@@ -1204,44 +1219,6 @@ export function GitChangesSidePanel({
             </button>
           </div>
         </div>
-
-        {!narrowPanel ? (
-          <div className={styles.headerPresentationRow}>
-            <button
-              type="button"
-              className={`${styles.presentationBtn}${
-                presentation === "modal" ? ` ${styles.presentationBtnActive}` : ""
-              }`}
-              onClick={() => togglePresentation()}
-              title={presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}
-              aria-pressed={presentation === "modal"}
-            >
-              {presentation === "modal" ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <rect x="4" y="5" width="10" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
-                  <path
-                    d="M16 8h4v11a2 2 0 0 1-2 2h-2"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.7" />
-                  <path d="M8 3h8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  <path
-                    d="M9 9h6M9 12h6M9 15h4"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              )}
-              <span>{presentation === "modal" ? t("git.dockToSide") : t("git.openInModal")}</span>
-            </button>
-          </div>
-        ) : null}
 
         {status && !repoPending ? (
           <div className={styles.headerMetaRow}>
@@ -1564,28 +1541,6 @@ export function GitChangesSidePanel({
       ) : null}
     </>
   );
-
-  if (presentation === "modal") {
-    return createPortal(
-      <div
-        className={styles.modalOverlay}
-        role="presentation"
-        onMouseDown={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
-      >
-        <div
-          className={styles.modalShell}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("git.title")}
-        >
-          <aside className={`${styles.panel} ${styles.panelInModal}`}>{panelInner}</aside>
-        </div>
-      </div>,
-      document.body,
-    );
-  }
 
   return (
     <aside

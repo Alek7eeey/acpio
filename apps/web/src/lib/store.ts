@@ -55,15 +55,14 @@ import {
   readGitPanelOpenSessions,
   removeGitPanelOpenSession,
   persistGitPanelOpen,
-  readGitPanelPresentation,
-  persistGitPanelPresentation,
-  type GitPanelPresentation,
 } from "./sessionGitPanel";
 
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
   try {
     localStorage.removeItem("acpio.consoleLog.v1");
+    // The git panel is docked only now; drop the removed side/full-screen choice.
+    localStorage.removeItem("acpio.gitPanelPresentation.v1");
   } catch {
     /* ignore */
   }
@@ -332,9 +331,6 @@ type AppState = {
   gitPanelOpen: boolean;
   setGitPanelOpen: (open: boolean) => void;
   toggleGitPanelOpen: () => void;
-  gitPanelPresentation: GitPanelPresentation;
-  setGitPanelPresentation: (presentation: GitPanelPresentation) => void;
-  toggleGitPanelPresentation: () => void;
 };
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
@@ -1204,7 +1200,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   sessionDetails: {},
   consoleOpen: initialSidePanels.consoleOpen,
   gitPanelOpen: initialSidePanels.gitPanelOpen,
-  gitPanelPresentation: readGitPanelPresentation(),
   knownFolders: [],
   refreshFolders: async () => {
     try {
@@ -1675,17 +1670,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   toggleGitPanelOpen() {
     const open = !get().gitPanelOpen;
     get().setGitPanelOpen(open);
-  },
-
-  setGitPanelPresentation(presentation) {
-    persistGitPanelPresentation(presentation);
-    set({ gitPanelPresentation: presentation });
-  },
-
-  toggleGitPanelPresentation() {
-    const next = get().gitPanelPresentation === "modal" ? "side" : "modal";
-    persistGitPanelPresentation(next);
-    set({ gitPanelPresentation: next });
   },
 
   async selectSession(id) {

@@ -1,27 +1,4 @@
 const GIT_OPEN_KEY = "acpio.gitPanelOpen.v1";
-const GIT_PRESENTATION_KEY = "acpio.gitPanelPresentation.v1";
-
-export type GitPanelPresentation = "side" | "modal";
-
-export function readGitPanelPresentation(): GitPanelPresentation {
-  if (typeof window === "undefined") return "modal";
-  try {
-    const raw = localStorage.getItem(GIT_PRESENTATION_KEY);
-    if (raw === "side") return "side";
-    return "modal";
-  } catch {
-    return "modal";
-  }
-}
-
-export function persistGitPanelPresentation(presentation: GitPanelPresentation) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(GIT_PRESENTATION_KEY, presentation);
-  } catch {
-    /* quota or private mode */
-  }
-}
 
 /** Which sessions had the git changes panel open. */
 export function readGitPanelOpenSessions(): Set<string> {

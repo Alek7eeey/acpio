@@ -15,3 +15,5 @@ dev-dist/
 _temp/
 data/
 dist-app/
+/.playwright-mcp/
+/.tmp-perf/

@@ -217,7 +217,47 @@
   align-items: stretch;
   gap: 0;
   min-height: 30px;
-  padding-left: 2px;
+  padding-left: calc(var(--tree-depth, 0) * 12px + 2px);
+}
+
+.filesToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 8px 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.viewToggle {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.viewToggleBtn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.viewToggleBtn:hover {
+  color: var(--text);
+}
+
+.viewToggleBtnActive {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .fileRowDraggable {
@@ -577,6 +617,8 @@
 }
 
 .contextMenu {
+  /* The menu scrolls itself when the viewport cannot fit every item. */
+  overscroll-behavior: contain;
   position: fixed;
   z-index: 520;
   min-width: 220px;

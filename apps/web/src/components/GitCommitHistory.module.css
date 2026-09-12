@@ -230,6 +230,8 @@
 }
 
 .contextMenu {
+  /* The menu scrolls itself when the viewport cannot fit every item. */
+  overscroll-behavior: contain;
   position: fixed;
   z-index: 520;
   min-width: 220px;

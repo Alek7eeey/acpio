@@ -121,7 +121,7 @@ function FileSkeleton({ height }: { height: number }) {
 }
 
 /**
- * Phone-sized continuous diff: changed files stack top-to-bottom in one scroll.
+ * Full-window continuous diff: changed files stack top-to-bottom in one scroll.
  * Each file's diff is fetched on demand as it scrolls into view, and only the
  * blocks near the viewport are rendered, so huge changesets open instantly.
  */
@@ -522,7 +522,10 @@ export function GitFullscreenDiff({
                 data-index={item.index}
                 data-file-index={item.index}
                 className={styles.virtualRow}
-                style={{ transform: `translateY(${item.start}px)` }}
+                // `top`, not `transform`: a transformed row is a containing block
+                // that breaks the sticky file header (it never pins to the
+                // scrollport top), which is exactly what the header is for.
+                style={{ top: item.start }}
               >
                 {renderBlock(item.index)}
               </div>

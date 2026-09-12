@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type FormEvent,
   type MouseEvent,
@@ -13,8 +14,15 @@ import {
 import type { GitChangedFileDto, GitCommitDto, GitCommitFileDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
-import { joinRepoPath, normalizeGitPath, sortGitFiles, toRepoAbsolutePath } from "../lib/gitFileTree";
+import {
+  buildGitFileTreeRows,
+  joinRepoPath,
+  normalizeGitPath,
+  sortGitFiles,
+  toRepoAbsolutePath,
+} from "../lib/gitFileTree";
 import { gitStatusBadge, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
+import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
 import styles from "./GitChangesCommitPane.module.css";
@@ -23,11 +31,24 @@ const COMMIT_HEIGHT_KEY = "acpio.gitCommitSectionHeight.v1";
 const COMMIT_HEIGHT_DEFAULT = 168;
 const COMMIT_HEIGHT_MIN = 120;
 const COMMIT_HEIGHT_MAX = 360;
+const CHANGES_VIEW_KEY = "acpio.gitChangesView.v1";
 const DND_MIME = "application/x-acpio-git-paths";
 
 type StageZone = "staged" | "unstaged";
 type PaneLayout = "stacked" | "workspace";
-type FileMenuState = { x: number; y: number; file: GitChangedFileDto; zone: StageZone };
+/** Changed files as one row per file (…/a/b.ts) or one per folder level (b → b/b.ts). */
+type ChangesView = "list" | "tree";
+type FileMenuState =
+  | { kind: "file"; x: number; y: number; file: GitChangedFileDto }
+  | { kind: "dir"; x: number; y: number; path: string };
+
+function readChangesView(): ChangesView {
+  try {
+    return localStorage.getItem(CHANGES_VIEW_KEY) === "tree" ? "tree" : "list";
+  } catch {
+    return "list";
+  }
+}
 
 function isDeleted(file: GitChangedFileDto) {
   return file.index === "D" || file.worktree === "D";
@@ -191,6 +212,7 @@ function FileIcon({ file }: { file: GitChangedFileDto }) {
 function FileRow({
   file,
   zone,
+  depth = 0,
   active,
   selected,
   dragging,
@@ -204,6 +226,7 @@ function FileRow({
 }: {
   file: GitChangedFileDto;
   zone: StageZone;
+  depth?: number;
   active: boolean;
   selected: boolean;
   dragging: boolean;
@@ -233,6 +256,7 @@ function FileRow({
       }${isGitConflictFile(file) ? ` ${styles.fileRowConflict}` : ""}${
         dragging ? ` ${styles.fileRowDragging}` : ""
       }${busy ? "" : ` ${styles.fileRowDraggable}`}`}
+      style={depth > 0 ? { ["--tree-depth" as string]: String(depth) } as CSSProperties : undefined}
       draggable={!busy}
       onDragStart={handleRowDragStart}
       onDragEnd={onDragEnd}
@@ -287,56 +311,156 @@ function FileRow({
   );
 }
 
+/** A folder level of the changed-file tree; clicking folds the subtree. */
+function DirRow({
+  path: dirPath,
+  name,
+  count,
+  depth,
+  collapsed,
+  onToggle,
+  onContextMenu,
+}: {
+  path: string;
+  name: string;
+  count: number;
+  depth: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  onContextMenu: (e: MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={styles.folderRow}
+      style={{ ["--tree-depth" as string]: String(depth) } as CSSProperties}
+      aria-expanded={!collapsed}
+      title={dirPath}
+      onClick={onToggle}
+      onContextMenu={onContextMenu}
+    >
+      <svg
+        className={`${styles.folderChevron}${collapsed ? ` ${styles.folderChevronCollapsed}` : ""}`}
+        width="12"
+        height="12"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden
+      >
+        <path d="M8 10l4 4 4-4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      <svg className={styles.folderIcon} width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M3.5 7.5a2 2 0 0 1 2-2h3.1l1.7 2h8.2a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9Z"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className={styles.folderName}>{name}</span>
+      <span className={styles.folderCount}>{count}</span>
+    </button>
+  );
+}
+
 function FileList({
   files,
   zone,
+  view,
+  collapsedDirs,
   workingSelected,
   selectionPath,
   selectedPaths,
   dragPaths,
   busy,
   stageLabel,
+  onToggleDir,
   onFileSelect,
   onToggleStage,
   onDragStart,
   onDragEnd,
   onContextMenu,
+  onDirContextMenu,
 }: {
   files: GitChangedFileDto[];
   zone: StageZone;
+  view: ChangesView;
+  collapsedDirs: ReadonlySet<string>;
   workingSelected: boolean;
   selectionPath: string | null;
   selectedPaths: Set<string>;
   dragPaths: string[] | null;
   busy: boolean;
   stageLabel: string;
+  onToggleDir: (path: string) => void;
   onFileSelect: (file: GitChangedFileDto, e: MouseEvent) => void;
   onToggleStage: (file: GitChangedFileDto) => void;
   onDragStart: (file: GitChangedFileDto, e: DragEvent) => void;
   onDragEnd: () => void;
-  onContextMenu: (file: GitChangedFileDto, zone: StageZone, e: MouseEvent) => void;
+  onContextMenu: (file: GitChangedFileDto, e: MouseEvent) => void;
+  onDirContextMenu: (path: string, e: MouseEvent) => void;
 }) {
-  return (
-    <>
-      {files.map((file) => (
-        <FileRow
-          key={`${zone}-${file.path}`}
-          file={file}
-          zone={zone}
-          active={workingSelected && selectionPath === file.path}
-          selected={selectedPaths.has(file.path)}
-          dragging={Boolean(dragPaths?.includes(file.path))}
-          busy={busy}
-          stageLabel={stageLabel}
-          onSelect={(e) => onFileSelect(file, e)}
-          onToggleStage={() => onToggleStage(file)}
-          onDragStart={(e) => onDragStart(file, e)}
-          onDragEnd={onDragEnd}
-          onContextMenu={(e) => onContextMenu(file, zone, e)}
-        />
-      ))}
-    </>
+  /** Files under each folder of this section, for the folder badge. */
+  const dirCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const file of files) {
+      const parts = normalizeGitPath(file.path).split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const dir = parts.slice(0, i).join("/");
+        counts.set(dir, (counts.get(dir) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [files]);
+
+  const rows = useMemo(
+    () => (view === "tree" ? buildGitFileTreeRows(files, collapsedDirs) : []),
+    [collapsedDirs, files, view],
   );
+
+  const renderFile = (file: GitChangedFileDto, depth = 0) => (
+    <FileRow
+      key={`${zone}-${file.path}`}
+      file={file}
+      zone={zone}
+      depth={depth}
+      active={workingSelected && selectionPath === file.path}
+      selected={selectedPaths.has(file.path)}
+      dragging={Boolean(dragPaths?.includes(file.path))}
+      busy={busy}
+      stageLabel={stageLabel}
+      onSelect={(e) => onFileSelect(file, e)}
+      onToggleStage={() => onToggleStage(file)}
+      onDragStart={(e) => onDragStart(file, e)}
+      onDragEnd={onDragEnd}
+      onContextMenu={(e) => onContextMenu(file, e)}
+    />
+  );
+
+  if (view === "tree") {
+    return (
+      <>
+        {rows.map((row) =>
+          row.kind === "dir" ? (
+            <DirRow
+              key={row.key}
+              path={row.path}
+              name={row.name}
+              count={dirCounts.get(row.path) ?? 0}
+              depth={row.depth}
+              collapsed={collapsedDirs.has(row.path)}
+              onToggle={() => onToggleDir(row.path)}
+              onContextMenu={(e) => onDirContextMenu(row.path, e)}
+            />
+          ) : (
+            renderFile(files[row.index]!, row.depth)
+          ),
+        )}
+      </>
+    );
+  }
+
+  return <>{files.map((file) => renderFile(file))}</>;
 }
 
 export function GitChangesCommitPane({
@@ -371,6 +495,7 @@ export function GitChangesCommitPane({
   outgoingFiles = [],
   onInspectOutgoing,
   onSelectOutgoingFile,
+  onIgnorePaths,
 }: {
   files: GitChangedFileDto[];
   conflictFiles: GitChangedFileDto[];
@@ -403,10 +528,15 @@ export function GitChangesCommitPane({
   outgoingFiles?: GitCommitFileDto[];
   onInspectOutgoing?: (hash: string) => void;
   onSelectOutgoingFile?: (hash: string, path: string) => void;
+  /** Append the given repo-relative files or folders to the root .gitignore. */
+  onIgnorePaths: (paths: string[]) => void | Promise<void>;
 }) {
   const t = useT();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const fileMenuStyle = useFixedMenuPlacement(fileMenu, menuRef);
+  const [view, setView] = useState<ChangesView>(readChangesView);
+  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [stagedOpen, setStagedOpen] = useState(true);
   const [conflictsOpen, setConflictsOpen] = useState(true);
@@ -427,14 +557,34 @@ export function GitChangesCommitPane({
 
   const closeFileMenu = useCallback(() => setFileMenu(null), []);
 
-  const openFileMenu = useCallback(
-    (file: GitChangedFileDto, zone: StageZone, e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setFileMenu({ x: e.clientX, y: e.clientY, file, zone });
-    },
-    [],
-  );
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHANGES_VIEW_KEY, view);
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
+
+  const toggleDir = useCallback((dirPath: string) => {
+    setCollapsedDirs((prev) => {
+      const next = new Set(prev);
+      if (next.has(dirPath)) next.delete(dirPath);
+      else next.add(dirPath);
+      return next;
+    });
+  }, []);
+
+  const openFileMenu = useCallback((file: GitChangedFileDto, e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFileMenu({ kind: "file", x: e.clientX, y: e.clientY, file });
+  }, []);
+
+  const openDirMenu = useCallback((dirPath: string, e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFileMenu({ kind: "dir", x: e.clientX, y: e.clientY, path: dirPath });
+  }, []);
 
   useEffect(() => {
     if (!fileMenu) return;
@@ -463,68 +613,110 @@ export function GitChangesCommitPane({
     [closeFileMenu],
   );
 
-  const handleCopyRelativePath = useCallback(async () => {
-    if (!fileMenu) return;
-    const paths = resolveMenuPaths(fileMenu.file, selectedPaths);
-    const text = paths.map((rel) => normalizeGitPath(rel)).join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(t("common.copied"));
-    } catch (e) {
-      showToast(String(e instanceof Error ? e.message : e));
-    }
-  }, [fileMenu, selectedPaths, t]);
+  /** File behind the open context menu; null when it targets a folder. */
+  const menuFile = fileMenu?.kind === "file" ? fileMenu.file : null;
 
-  const handleCopyPath = useCallback(async () => {
-    if (!fileMenu) return;
-    const paths = resolveMenuPaths(fileMenu.file, selectedPaths);
-    const text = paths
-      .map((rel) => (repoRoot ? toRepoAbsolutePath(repoRoot, rel) : normalizeGitPath(rel)))
-      .join("\n");
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast(t("common.copied"));
-    } catch (e) {
-      showToast(String(e instanceof Error ? e.message : e));
-    }
-  }, [fileMenu, repoRoot, selectedPaths, t]);
+  const copyMenuPaths = useCallback(
+    async (paths: string[], absolute: boolean) => {
+      const text = paths
+        .map((rel) => (absolute && repoRoot ? toRepoAbsolutePath(repoRoot, rel) : normalizeGitPath(rel)))
+        .join("\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(t("common.copied"));
+      } catch (e) {
+        showToast(String(e instanceof Error ? e.message : e));
+      }
+    },
+    [repoRoot, t],
+  );
+
+  const handleCopyRelativePath = useCallback(() => {
+    if (!menuFile) return;
+    return copyMenuPaths(resolveMenuPaths(menuFile, selectedPaths), false);
+  }, [copyMenuPaths, menuFile, selectedPaths]);
+
+  const handleCopyPath = useCallback(() => {
+    if (!menuFile) return;
+    return copyMenuPaths(resolveMenuPaths(menuFile, selectedPaths), true);
+  }, [copyMenuPaths, menuFile, selectedPaths]);
+
+  const handleCopyDirPath = useCallback(
+    (dirPath: string, absolute: boolean) => copyMenuPaths([dirPath], absolute),
+    [copyMenuPaths],
+  );
 
   const handleOpenFile = useCallback(async () => {
-    if (!fileMenu || !repoRoot || isDeleted(fileMenu.file)) return;
-    const target = toRepoAbsolutePath(repoRoot, fileMenu.file.path);
+    if (!menuFile || !repoRoot || isDeleted(menuFile)) return;
+    const target = toRepoAbsolutePath(repoRoot, menuFile.path);
     try {
       const result = await api.openPath(target);
       if (!result.ok) showToast(t("git.openFileFailed"));
     } catch (e) {
       showToast(String(e instanceof Error ? e.message : e));
     }
-  }, [fileMenu, repoRoot, t]);
+  }, [menuFile, repoRoot, t]);
 
   const handleShowInFolder = useCallback(async () => {
-    if (!fileMenu || !repoRoot) return;
-    const target = revealPath(repoRoot, fileMenu.file.path, isDeleted(fileMenu.file));
+    if (!menuFile || !repoRoot) return;
+    const target = revealPath(repoRoot, menuFile.path, isDeleted(menuFile));
     try {
       const result = await api.openPath(target);
       if (!result.ok) showToast(t("git.showInFolderFailed"));
     } catch (e) {
       showToast(String(e instanceof Error ? e.message : e));
     }
-  }, [fileMenu, repoRoot, t]);
+  }, [menuFile, repoRoot, t]);
 
-  const menuPaths = fileMenu ? resolveMenuPaths(fileMenu.file, selectedPaths) : [];
+  const menuPaths = menuFile ? resolveMenuPaths(menuFile, selectedPaths) : [];
   const menuStagePaths = menuPaths.filter((path) => fileByPath.get(path)?.unstaged);
   const menuUnstagePaths = menuPaths.filter((path) => fileByPath.get(path)?.staged);
   const menuCanDiscard = menuPaths.some((path) => {
     const file = fileByPath.get(path);
     return file && (file.staged || file.unstaged);
   });
-  const menuCanBlame = fileMenu ? canBlame(fileMenu.file) : false;
+  const menuCanBlame = menuFile ? canBlame(menuFile) : false;
   const menuCanReveal = Boolean(repoRoot);
-  const menuCanOpenFile = Boolean(repoRoot && fileMenu && !isDeleted(fileMenu.file));
+  const menuCanOpenFile = Boolean(repoRoot && menuFile && !isDeleted(menuFile));
   const menuConflictPaths = menuPaths.filter((path) => {
     const file = fileByPath.get(path);
     return file && isGitConflictFile(file);
   });
+  const menuIgnorePaths = fileMenu?.kind === "file" ? resolveMenuPaths(fileMenu.file, selectedPaths) : [];
+
+  const handleDelete = useCallback(async () => {
+    const label =
+      menuPaths.length > 1
+        ? t("git.deleteFileConfirmMany", { count: menuPaths.length })
+        : t("git.deleteFileConfirm", { path: normalizeGitPath(menuFile?.path ?? "") });
+    if (!window.confirm(label)) return;
+    await onDeletePaths(menuPaths);
+  }, [menuFile, menuPaths, onDeletePaths, t]);
+
+  const handleDiscard = useCallback(async () => {
+    const label =
+      menuPaths.length > 1
+        ? t("git.discardChangesConfirmMany", { count: menuPaths.length })
+        : t("git.discardChangesConfirm", { path: normalizeGitPath(menuFile?.path ?? "") });
+    if (!window.confirm(label)) return;
+    await onDiscardPaths(menuPaths);
+  }, [menuFile, menuPaths, onDiscardPaths, t]);
+
+  const handleDiscardDir = useCallback(
+    async (dirPath: string) => {
+      if (!window.confirm(t("git.discardFolderConfirm", { path: normalizeGitPath(dirPath) }))) return;
+      await onDiscardPaths([dirPath]);
+    },
+    [onDiscardPaths, t],
+  );
+
+  const handleDeleteDir = useCallback(
+    async (dirPath: string) => {
+      if (!window.confirm(t("git.deleteFolderConfirm", { path: normalizeGitPath(dirPath) }))) return;
+      await onDeletePaths([dirPath]);
+    },
+    [onDeletePaths, t],
+  );
 
   const filePathsKey = files.map((f) => f.path).join("\0");
   const outgoingKey = outgoing.map((c) => c.hash).join("\0");
@@ -781,8 +973,58 @@ export function GitChangesCommitPane({
       </ChangesSection>
     ) : null;
 
+  /** Row rendering shared by the conflict/unstaged/staged sections. */
+  const fileListProps = {
+    view,
+    collapsedDirs,
+    workingSelected,
+    selectionPath,
+    selectedPaths,
+    dragPaths,
+    busy,
+    onToggleDir: toggleDir,
+    onDragEnd: handleDragEnd,
+    onContextMenu: openFileMenu,
+    onDirContextMenu: openDirMenu,
+  };
+
   const treePane = (
     <div className={styles.filesArea}>
+      {files.length > 0 ? (
+        <div className={styles.filesToolbar}>
+          <div className={styles.viewToggle} role="toolbar" aria-label={t("git.fileViewMode")}>
+            <button
+              type="button"
+              className={`${styles.viewToggleBtn}${view === "list" ? ` ${styles.viewToggleBtnActive}` : ""}`}
+              aria-pressed={view === "list"}
+              aria-label={t("git.fileViewList")}
+              title={t("git.fileViewList")}
+              onClick={() => setView("list")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`${styles.viewToggleBtn}${view === "tree" ? ` ${styles.viewToggleBtnActive}` : ""}`}
+              aria-pressed={view === "tree"}
+              aria-label={t("git.fileViewTree")}
+              title={t("git.fileViewTree")}
+              onClick={() => setView("tree")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      ) : null}
       {outgoingSection}
       {files.length === 0 ? (
         outgoing.length === 0 ? <div className={styles.empty}>{t("git.noChanges")}</div> : null
@@ -801,19 +1043,13 @@ export function GitChangesCommitPane({
               onDropZone={() => undefined}
             >
               <FileList
+                {...fileListProps}
                 files={sortedConflicts}
                 zone="unstaged"
-                workingSelected={workingSelected}
-                selectionPath={selectionPath}
-                selectedPaths={selectedPaths}
-                dragPaths={dragPaths}
-                busy={busy}
                 stageLabel={t("git.stageFile")}
                 onFileSelect={(file, e) => handleFileSelect(file, "unstaged", sortedConflicts, e)}
                 onToggleStage={(file) => toggleStageForFile(file, "unstaged")}
                 onDragStart={(file, e) => handleDragStart(file, "unstaged", e)}
-                onDragEnd={handleDragEnd}
-                onContextMenu={openFileMenu}
               />
             </ChangesSection>
           ) : null}
@@ -851,19 +1087,13 @@ export function GitChangesCommitPane({
               <p className={styles.sectionEmpty}>{t("git.noUnstaged")}</p>
             ) : (
               <FileList
+                {...fileListProps}
                 files={sortedUnstaged}
                 zone="unstaged"
-                workingSelected={workingSelected}
-                selectionPath={selectionPath}
-                selectedPaths={selectedPaths}
-                dragPaths={dragPaths}
-                busy={busy}
                 stageLabel={t("git.stageFile")}
                 onFileSelect={(file, e) => handleFileSelect(file, "unstaged", sortedUnstaged, e)}
                 onToggleStage={(file) => toggleStageForFile(file, "unstaged")}
                 onDragStart={(file, e) => handleDragStart(file, "unstaged", e)}
-                onDragEnd={handleDragEnd}
-                onContextMenu={openFileMenu}
               />
             )}
           </ChangesSection>
@@ -901,19 +1131,13 @@ export function GitChangesCommitPane({
               <p className={styles.sectionEmpty}>{t("git.noStaged")}</p>
             ) : (
               <FileList
+                {...fileListProps}
                 files={sortedStaged}
                 zone="staged"
-                workingSelected={workingSelected}
-                selectionPath={selectionPath}
-                selectedPaths={selectedPaths}
-                dragPaths={dragPaths}
-                busy={busy}
                 stageLabel={t("git.unstageFile")}
                 onFileSelect={(file, e) => handleFileSelect(file, "staged", sortedStaged, e)}
                 onToggleStage={(file) => toggleStageForFile(file, "staged")}
                 onDragStart={(file, e) => handleDragStart(file, "staged", e)}
-                onDragEnd={handleDragEnd}
-                onContextMenu={openFileMenu}
               />
             )}
           </ChangesSection>
@@ -1001,145 +1225,177 @@ export function GitChangesCommitPane({
         <div
           ref={menuRef}
           className={styles.contextMenu}
-          style={{ left: fileMenu.x, top: fileMenu.y }}
+          style={fileMenuStyle ?? undefined}
           role="menu"
           aria-label={t("git.fileMenu")}
         >
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            onClick={() => runMenuAction(() => onSelectFile(fileMenu.file.path))}
-          >
-            {t("git.viewDiff")}
-          </button>
-          {menuConflictPaths.length > 0 ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => runMenuAction(() => onStagePaths(menuConflictPaths, true))}
-            >
-              {menuConflictPaths.length > 1
-                ? t("git.markConflictsResolvedMany", { count: menuConflictPaths.length })
-                : t("git.markConflictResolved")}
-            </button>
-          ) : null}
-          {menuStagePaths.length > 0 ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => runMenuAction(() => onStagePaths(menuStagePaths, true))}
-            >
-              {menuStagePaths.length > 1 ? t("git.stageSelected", { count: menuStagePaths.length }) : t("git.stage")}
-            </button>
-          ) : null}
-          {menuUnstagePaths.length > 0 ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => runMenuAction(() => onStagePaths(menuUnstagePaths, false))}
-            >
-              {menuUnstagePaths.length > 1
-                ? t("git.unstageSelected", { count: menuUnstagePaths.length })
-                : t("git.unstage")}
-            </button>
-          ) : null}
-          {menuCanDiscard ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() =>
-                runMenuAction(async () => {
-                  const label =
-                    menuPaths.length > 1
-                      ? t("git.discardChangesConfirmMany", { count: menuPaths.length })
-                      : t("git.discardChangesConfirm", { path: normalizeGitPath(fileMenu.file.path) });
-                  if (!window.confirm(label)) return;
-                  await onDiscardPaths(menuPaths);
-                })
-              }
-            >
-              {t("git.discardChanges")}
-            </button>
-          ) : null}
-          {(menuConflictPaths.length > 0 || menuStagePaths.length > 0 || menuUnstagePaths.length > 0 || menuCanDiscard) ? (
-            <div className={styles.contextMenuDivider} aria-hidden />
-          ) : null}
-          <button type="button" role="menuitem" onClick={() => runMenuAction(handleCopyRelativePath)}>
-            {t("git.copyRelativePath")}
-          </button>
-          <button type="button" role="menuitem" onClick={() => runMenuAction(handleCopyPath)}>
-            {t("git.copyFilePath")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!menuCanOpenFile}
-            onClick={() => runMenuAction(handleOpenFile)}
-          >
-            {t("git.openFile")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={!menuCanReveal}
-            onClick={() => runMenuAction(handleShowInFolder)}
-          >
-            {t("git.showInFolder")}
-          </button>
-          {menuCanBlame ? (
-            <button
-              type="button"
-              role="menuitem"
-              disabled={busy}
-              onClick={() => runMenuAction(() => onBlameFile(fileMenu.file.path))}
-            >
-              {t("git.fileBlame")}
-            </button>
-          ) : null}
-          <div className={styles.contextMenuDivider} aria-hidden />
-          <button
-            type="button"
-            role="menuitem"
-            className={styles.contextMenuDanger}
-            disabled={busy}
-            onClick={() =>
-              runMenuAction(async () => {
-                const label =
-                  menuPaths.length > 1
-                    ? t("git.deleteFileConfirmMany", { count: menuPaths.length })
-                    : t("git.deleteFileConfirm", { path: normalizeGitPath(fileMenu.file.path) });
-                if (!window.confirm(label)) return;
-                await onDeletePaths(menuPaths);
-              })
-            }
-          >
-            {t("git.deleteFile")}
-          </button>
-          {menuCanDiscard ? (
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.contextMenuDanger}
-              disabled={busy}
-              onClick={() =>
-                runMenuAction(async () => {
-                  const label =
-                    menuPaths.length > 1
-                      ? t("git.discardChangesConfirmMany", { count: menuPaths.length })
-                      : t("git.discardChangesConfirm", { path: normalizeGitPath(fileMenu.file.path) });
-                  if (!window.confirm(label)) return;
-                  await onDiscardPaths(menuPaths);
-                })
-              }
-            >
-              {t("git.discardChanges")}
-            </button>
-          ) : null}
+          {fileMenu.kind === "file" ? (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => runMenuAction(() => onSelectFile(fileMenu.file.path))}
+              >
+                {t("git.viewDiff")}
+              </button>
+              {menuConflictPaths.length > 0 ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={busy}
+                  onClick={() => runMenuAction(() => onStagePaths(menuConflictPaths, true))}
+                >
+                  {menuConflictPaths.length > 1
+                    ? t("git.markConflictsResolvedMany", { count: menuConflictPaths.length })
+                    : t("git.markConflictResolved")}
+                </button>
+              ) : null}
+              {menuStagePaths.length > 0 ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={busy}
+                  onClick={() => runMenuAction(() => onStagePaths(menuStagePaths, true))}
+                >
+                  {menuStagePaths.length > 1
+                    ? t("git.stageSelected", { count: menuStagePaths.length })
+                    : t("git.stage")}
+                </button>
+              ) : null}
+              {menuUnstagePaths.length > 0 ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={busy}
+                  onClick={() => runMenuAction(() => onStagePaths(menuUnstagePaths, false))}
+                >
+                  {menuUnstagePaths.length > 1
+                    ? t("git.unstageSelected", { count: menuUnstagePaths.length })
+                    : t("git.unstage")}
+                </button>
+              ) : null}
+              {menuCanDiscard ? (
+                <button type="button" role="menuitem" disabled={busy} onClick={() => runMenuAction(handleDiscard)}>
+                  {t("git.discardChanges")}
+                </button>
+              ) : null}
+              {menuConflictPaths.length > 0 ||
+              menuStagePaths.length > 0 ||
+              menuUnstagePaths.length > 0 ||
+              menuCanDiscard ? (
+                <div className={styles.contextMenuDivider} aria-hidden />
+              ) : null}
+              <button type="button" role="menuitem" onClick={() => runMenuAction(handleCopyRelativePath)}>
+                {t("git.copyRelativePath")}
+              </button>
+              <button type="button" role="menuitem" onClick={() => runMenuAction(handleCopyPath)}>
+                {t("git.copyFilePath")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!menuCanOpenFile}
+                onClick={() => runMenuAction(handleOpenFile)}
+              >
+                {t("git.openFile")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!menuCanReveal}
+                onClick={() => runMenuAction(handleShowInFolder)}
+              >
+                {t("git.showInFolder")}
+              </button>
+              {menuCanBlame ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={busy}
+                  onClick={() => runMenuAction(() => onBlameFile(fileMenu.file.path))}
+                >
+                  {t("git.fileBlame")}
+                </button>
+              ) : null}
+              <div className={styles.contextMenuDivider} aria-hidden />
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => runMenuAction(() => onIgnorePaths(menuIgnorePaths))}
+              >
+                {t("git.addToGitIgnore")}
+              </button>
+              <div className={styles.contextMenuDivider} aria-hidden />
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.contextMenuDanger}
+                disabled={busy}
+                onClick={() => runMenuAction(handleDelete)}
+              >
+                {t("git.deleteFile")}
+              </button>
+              {menuCanDiscard ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={styles.contextMenuDanger}
+                  disabled={busy}
+                  onClick={() => runMenuAction(handleDiscard)}
+                >
+                  {t("git.discardChanges")}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => runMenuAction(() => onIgnorePaths([fileMenu.path]))}
+              >
+                {t("git.addToGitIgnore")}
+              </button>
+              <div className={styles.contextMenuDivider} aria-hidden />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => runMenuAction(() => handleCopyDirPath(fileMenu.path, false))}
+              >
+                {t("git.copyRelativePath")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!repoRoot}
+                onClick={() => runMenuAction(() => handleCopyDirPath(fileMenu.path, true))}
+              >
+                {t("git.copyFilePath")}
+              </button>
+              <div className={styles.contextMenuDivider} aria-hidden />
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.contextMenuDanger}
+                disabled={busy}
+                onClick={() => runMenuAction(() => handleDiscardDir(fileMenu.path))}
+              >
+                {t("git.discardFolder")}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.contextMenuDanger}
+                disabled={busy}
+                onClick={() => runMenuAction(() => handleDeleteDir(fileMenu.path))}
+              >
+                {t("git.deleteFolder")}
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </div>

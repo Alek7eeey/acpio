@@ -10,6 +10,7 @@ import type { GitCommitDto, GitStatusDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { showToast } from "../lib/toast";
 import { dedupeCommitRefs, gitLaneColor } from "../lib/gitCommitGraph";
+import { useFixedMenuPlacement } from "../lib/menuPosition";
 import styles from "./GitCommitHistory.module.css";
 
 type CommitMenuState = { x: number; y: number; commit: GitCommitDto };
@@ -127,6 +128,7 @@ export function GitCommitHistory({
   const t = useT();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menu, setMenu] = useState<CommitMenuState | null>(null);
+  const menuStyle = useFixedMenuPlacement(menu, menuRef);
 
   const openCommitMenu = useCallback(
     (e: ReactMouseEvent, commit: GitCommitDto) => {
@@ -272,7 +274,7 @@ export function GitCommitHistory({
         <div
           ref={menuRef}
           className={styles.contextMenu}
-          style={{ left: menu.x, top: menu.y }}
+          style={menuStyle ?? undefined}
           role="menu"
           aria-label={t("git.commitMenu")}
         >

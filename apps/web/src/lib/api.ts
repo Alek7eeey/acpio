@@ -321,6 +321,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ paths }),
     }),
+  gitIgnore: (id: string, paths: string[]) =>
+    request<{ ok: boolean; added: string[]; status: GitStatusDto }>(`/api/sessions/${id}/git/ignore`, {
+      method: "POST",
+      body: JSON.stringify({ paths }),
+    }),
   gitBlame: (id: string, filePath: string) =>
     request<{ blame: string }>(`/api/sessions/${id}/git/blame?path=${encodeURIComponent(filePath)}`),
   deleteSession: (id: string) =>

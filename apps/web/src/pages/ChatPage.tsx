@@ -82,7 +82,7 @@ import {
 import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
-import { useCompactPanelLayout, useFillPanelWhenChatTight } from "../lib/panelLayout";
+import { useFillPanelWhenChatTight } from "../lib/panelLayout";
 import { isImageFile } from "../lib/pathSegments";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
@@ -3343,11 +3343,6 @@ function ChatThread() {
   const consoleOpen = useAppStore((s) => s.consoleOpen);
   const setConsoleOpen = useAppStore((s) => s.setConsoleOpen);
   const gitPanelOpen = useAppStore((s) => s.gitPanelOpen);
-  const gitPanelPresentation = useAppStore((s) => s.gitPanelPresentation);
-  const compactPanelLayout = useCompactPanelLayout();
-  const sidePanelResizeAllowed = useChatSplitAllowed();
-  const gitPanelDockedLayout =
-    gitPanelPresentation === "side" && (compactPanelLayout || sidePanelResizeAllowed);
   const pageRef = useRef<HTMLDivElement>(null);
   const setGitPanelOpen = useAppStore((s) => s.setGitPanelOpen);
   const saveSettings = useAppStore((s) => s.saveSettings);
@@ -3787,7 +3782,7 @@ function ChatThread() {
     Boolean(
       (planPanelOpen && activePlan) ||
         (consoleOpen && !isShellSessionActive) ||
-        (gitPanelOpen && gitPanelDockedLayout),
+        gitPanelOpen,
     ),
   );
   const agentProvider = isShellSessionActive ? null : (activeSession?.provider ?? null);
@@ -4675,27 +4670,41 @@ function ChatThread() {
     const used = acp?.usedTokens;
     const win = acp?.contextWindow;
     const cost = acp?.cost;
-    const percent = used != null && win ? Math.round((used / win) * 100) : null;
+    // Harnesses may report a real `used` with window 0 — that is "unknown", not a
+    // 0-token window, so the window clause is dropped instead of printing a zero.
+    const windowKnown = win != null && win > 0;
+    const percent = used != null && windowKnown ? Math.round((used / win) * 100) : null;
     const usageLabel =
       used != null
-        ? win != null
+        ? windowKnown
           ? `${formatCompact(used)} / ${formatCompact(win)}`
-          : `${formatCompact(used)} ${t("chat.contextUnit")}`
-        : `${formatCompact(contextUsage.tokens)} ${t("chat.contextUnit")}`;
+          : formatCompact(used)
+        : formatCompact(contextUsage.tokens);
     const label =
       settings.chatChipOptions.context.format === "percent" && percent != null
         ? `${percent}%`
         : usageLabel;
-    const title = acp
-      ? t("chat.contextAcpTooltip", {
-          used: (used ?? 0).toLocaleString(),
-          window: (win ?? 0).toLocaleString(),
-          cost: cost != null ? cost.toLocaleString(undefined, { maximumFractionDigits: 4 }) : "—",
-        })
-      : t("chat.contextTooltip", {
-          tokens: contextUsage.tokens.toLocaleString(),
-          chars: contextUsage.chars.toLocaleString(),
-        });
+    const title =
+      used != null
+        ? [
+            windowKnown
+              ? t("chat.contextAcpTooltip", {
+                  used: used.toLocaleString(),
+                  window: win.toLocaleString(),
+                })
+              : t("chat.contextAcpTooltipNoWindow", { used: used.toLocaleString() }),
+            cost != null
+              ? t("chat.contextAcpCost", {
+                  cost: cost.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+                })
+              : null,
+          ]
+            .filter((part): part is string => part != null)
+            .join(" · ")
+        : t("chat.contextTooltip", {
+            tokens: contextUsage.tokens.toLocaleString(),
+            chars: contextUsage.chars.toLocaleString(),
+          });
     return { label, title };
   }, [activeSession?.usage, contextUsage, settings.chatChipOptions.context.format, t]);
 
@@ -4944,7 +4953,7 @@ function ChatThread() {
       ? "plan"
       : consoleOpen && !isShellSessionActive
         ? "console"
-        : gitPanelOpen && gitPanelDockedLayout
+        : gitPanelOpen
           ? "git"
           : null;
 

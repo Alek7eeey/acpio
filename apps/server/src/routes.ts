@@ -73,6 +73,8 @@ import {
   writeUserConsole,
 } from "./services/userConsole.js";
 import {
+  MAX_GIT_PATHS,
+  addGitIgnoreEntries,
   applyGitCommitAction,
   checkoutGitBranch,
   checkoutGitRevision,
@@ -817,7 +819,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const body = z
       .object({
-        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
         staged: z.boolean(),
       })
       .parse(req.body);
@@ -917,7 +919,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const body = z
       .object({
-        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
       })
       .parse(req.body);
     const detail = await getSessionDetail(id);
@@ -931,7 +933,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const body = z
       .object({
-        paths: z.array(z.string().min(1).max(4096)).min(1).max(64),
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
       })
       .parse(req.body);
     const detail = await getSessionDetail(id);
@@ -939,6 +941,20 @@ export async function registerRoutes(app: FastifyInstance) {
     const result = deleteGitFiles(detail.cwd, body.paths);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Delete failed" });
     return { ok: true, status: getGitStatus(detail.cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/ignore", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const result = addGitIgnoreEntries(detail.cwd, body.paths);
+    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Add to .gitignore failed" });
+    return { ok: true, added: result.added, status: getGitStatus(detail.cwd) };
   });
 
   app.get("/api/sessions/:id/git/lines", async (req, reply) => {

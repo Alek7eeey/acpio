@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as R
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitFileDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { joinRepoPath, normalizeGitPath, toRepoAbsolutePath } from "../lib/gitFileTree";
+import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { api } from "../lib/api";
 import { GitDiffStats } from "./GitDiffStats";
 import { showToast } from "../lib/toast";
@@ -166,6 +167,7 @@ export function GitCommitDetail({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [sortDesc, setSortDesc] = useState(false);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const fileMenuStyle = useFixedMenuPlacement(fileMenu, menuRef);
   const [descriptionHeight, setDescriptionHeight] = useState(readDescriptionHeight);
   const [resizing, setResizing] = useState(false);
   const resizeDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
@@ -488,7 +490,7 @@ export function GitCommitDetail({
         <div
           ref={menuRef}
           className={styles.contextMenu}
-          style={{ left: fileMenu.x, top: fileMenu.y }}
+          style={fileMenuStyle ?? undefined}
           role="menu"
           aria-label={t("git.fileMenu")}
         >

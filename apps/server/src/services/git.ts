@@ -3,6 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
 
+/**
+ * Cap for path arrays on the git mutation routes. Untracked trees are reported
+ * one row per file, so a folder like `piper/` alone exceeds a small cap.
+ */
+export const MAX_GIT_PATHS = 2000;
+
 function runGit(
   cwd: string,
   args: string[],
@@ -152,6 +158,65 @@ export function parseShortstat(output: string): { additions: number; deletions: 
   return { additions, deletions };
 }
 
+const GIT_QUOTE_ESCAPES: Record<string, string> = {
+  "\\": "\\",
+  '"': '"',
+  n: "\n",
+  t: "\t",
+  r: "\r",
+  a: "\x07",
+  b: "\b",
+  f: "\f",
+  v: "\v",
+};
+
+/** Decode a git C-quoted path (`"a b"`, `\320\277`) back into the real file name. */
+export function unquoteGitPath(raw: string): string {
+  const value = raw.trim();
+  if (value.length < 2 || !value.startsWith('"') || !value.endsWith('"')) return value;
+  const body = value.slice(1, -1);
+  const chunks: Buffer[] = [];
+  let text = "";
+  const flush = () => {
+    if (text) chunks.push(Buffer.from(text, "utf8"));
+    text = "";
+  };
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (ch !== "\\") {
+      text += ch;
+      continue;
+    }
+    const next = body[++i];
+    if (next === undefined) {
+      text += "\\";
+      break;
+    }
+    const simple = GIT_QUOTE_ESCAPES[next];
+    if (simple !== undefined) {
+      text += simple;
+      continue;
+    }
+    // Octal escapes are raw UTF-8 bytes, so they cannot be appended per byte.
+    const octal = /^[0-7]{1,3}/.exec(body.slice(i, i + 3))?.[0];
+    if (octal) {
+      flush();
+      chunks.push(Buffer.from([Number.parseInt(octal, 8)]));
+      i += octal.length - 1;
+      continue;
+    }
+    text += next;
+  }
+  flush();
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/** `git diff --numstat` path column; renames keep only the new name. */
+function parseNumstatPath(raw: string) {
+  const renamed = raw.includes(" => ") ? raw.split(" => ").pop()! : raw;
+  return unquoteGitPath(renamed);
+}
+
 function parseNumstat(output: string): Map<string, { additions: number; deletions: number }> {
   const map = new Map<string, { additions: number; deletions: number }>();
   for (const line of output.split("\n")) {
@@ -160,7 +225,7 @@ function parseNumstat(output: string): Map<string, { additions: number; deletion
     if (parts.length < 3) continue;
     const additions = parts[0] === "-" ? 0 : parseInt(parts[0]!, 10) || 0;
     const deletions = parts[1] === "-" ? 0 : parseInt(parts[1]!, 10) || 0;
-    map.set(parts.slice(2).join("\t"), { additions, deletions });
+    map.set(parseNumstatPath(parts.slice(2).join("\t")), { additions, deletions });
   }
   return map;
 }
@@ -195,8 +260,9 @@ function parsePorcelain(output: string, numstat: Map<string, { additions: number
     if (!match) continue;
     const index = match[1] ?? " ";
     const worktree = match[2] ?? " ";
-    let filePath = match[3]!.trim();
-    if (filePath.includes(" -> ")) filePath = filePath.split(" -> ").pop()!.trim();
+    const rawPath = match[3]!.trim();
+    // Renames arrive as `old -> new`; git quotes each side separately.
+    const filePath = unquoteGitPath((rawPath.includes(" -> ") ? rawPath.split(" -> ").pop()! : rawPath).trim());
     const stats = numstat.get(filePath) ?? { additions: 0, deletions: 0 };
     const untracked = index === "?" && worktree === "?";
     const staged = !untracked && index !== " ";
@@ -369,6 +435,39 @@ function validateGitPaths(paths: string[]): string | null {
   return null;
 }
 
+/** Repo-relative paths: normalized (forward slashes, no trailing slash), deduped. */
+function normalizeGitPaths(paths: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const p of paths) {
+    const rel = p
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/+$/, "");
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    result.push(rel);
+  }
+  return result;
+}
+
+/**
+ * Split requested paths by what git can act on. A folder matches itself and
+ * everything below it, so folder-level actions hand git the folder path instead
+ * of enumerating files — the panel lists a large untracked tree one row per file.
+ */
+function classifyGitPaths(root: string, requested: string[]) {
+  const entries = parsePorcelain(runGit(root, ["status", "--porcelain=v1", "-uall"]).out, new Map()).map(
+    (file) => ({ path: file.path, untracked: file.index === "?" && file.worktree === "?" }),
+  );
+  const covers = (rel: string, entry: { path: string }) => entry.path === rel || entry.path.startsWith(`${rel}/`);
+  return {
+    changed: requested.filter((rel) => entries.some((entry) => !entry.untracked && covers(rel, entry))),
+    untracked: requested.filter((rel) => entries.some((entry) => entry.untracked && covers(rel, entry))),
+  };
+}
+
 export function setGitStage(cwd: string, paths: string[], staged: boolean): { ok: boolean; error?: string } {
   const root = resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
@@ -385,23 +484,16 @@ export function discardGitChanges(cwd: string, paths: string[]): { ok: boolean; 
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid };
 
-  const status = buildStatus(root);
-  const byPath = new Map(status.files.map((f) => [f.path, f]));
-  const tracked: string[] = [];
-  const untracked: string[] = [];
+  const requested = normalizeGitPaths(paths);
+  const { changed, untracked } = classifyGitPaths(root, requested);
 
-  for (const rel of paths) {
-    const file = byPath.get(rel);
-    if (!file || file.index === "?" || file.worktree === "?") untracked.push(rel);
-    else tracked.push(rel);
-  }
-
-  if (tracked.length > 0) {
-    const result = runGit(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...tracked]);
+  if (changed.length > 0) {
+    const result = runGit(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...changed]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Discard failed" };
   }
   if (untracked.length > 0) {
-    const result = runGit(root, ["clean", "-f", "--", ...untracked]);
+    // `-d` lets clean take a folder (and prune the directories it empties).
+    const result = runGit(root, ["clean", "-f", "-d", "--", ...untracked]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Discard failed" };
   }
   return { ok: true };
@@ -413,28 +505,90 @@ export function deleteGitFiles(cwd: string, paths: string[]): { ok: boolean; err
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid };
 
-  const tracked: string[] = [];
-  const untracked: string[] = [];
-  for (const rel of paths) {
-    const match = runGit(root, ["ls-files", "--error-unmatch", "--", rel]);
-    if (match.ok) tracked.push(rel);
-    else untracked.push(rel);
-  }
-
+  const requested = normalizeGitPaths(paths);
+  // `git rm -r` drops every tracked file under the path; untracked leftovers and
+  // the directories it emptied go through clean.
+  const tracked = requested.filter((rel) => runGit(root, ["ls-files", "--error-unmatch", "--", rel]).ok);
   if (tracked.length > 0) {
-    const result = runGit(root, ["rm", "-f", "--", ...tracked]);
+    const result = runGit(root, ["rm", "-f", "-r", "--", ...tracked]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Delete failed" };
   }
+  const cleanResult = runGit(root, ["clean", "-f", "-d", "--", ...requested]);
+  if (!cleanResult.ok) return { ok: false, error: cleanResult.err || cleanResult.out || "Delete failed" };
+  return { ok: true };
+}
 
-  for (const rel of untracked) {
-    try {
-      fs.unlinkSync(path.join(root, rel));
-    } catch {
-      return { ok: false, error: `Could not delete ${rel}` };
+/** `.gitignore` line for a repo-relative path; the leading `/` anchors it to the repo root. */
+export function toGitIgnorePattern(relPath: string, isDir: boolean): string {
+  const rel = relPath
+    .replace(/\\/g, "/")
+    .replace(/^\.\//, "")
+    .replace(/^\/+|\/+$/g, "");
+  if (!rel) return "";
+  const pattern = `/${rel}${isDir ? "/" : ""}`;
+  // Git drops trailing spaces unless they are escaped.
+  return pattern.replace(/ +$/, (spaces) => "\\ ".repeat(spaces.length));
+}
+
+/** Append patterns to `.gitignore` text, keeping its line endings and skipping duplicates. */
+export function appendGitIgnoreEntries(
+  existing: string,
+  patterns: string[],
+): { content: string; added: string[] } {
+  const eol = existing.includes("\r\n") ? "\r\n" : "\n";
+  const known = new Set(
+    existing
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+  const added: string[] = [];
+  for (const pattern of patterns) {
+    if (!pattern || known.has(pattern)) continue;
+    known.add(pattern);
+    added.push(pattern);
+  }
+  if (added.length === 0) return { content: existing, added };
+  const base = existing === "" || existing.endsWith("\n") ? existing : `${existing}${eol}`;
+  return { content: `${base}${added.join(eol)}${eol}`, added };
+}
+
+/** Add repo-relative paths (files or directories) to the repository's root `.gitignore`. */
+export function addGitIgnoreEntries(
+  cwd: string,
+  paths: string[],
+): { ok: boolean; error?: string; added: string[] } {
+  const root = resolveGitRoot(cwd);
+  if (!root) return { ok: false, error: "Not a git repository", added: [] };
+  const invalid = validateGitPaths(paths);
+  if (invalid) return { ok: false, error: invalid, added: [] };
+
+  const rootAbs = path.resolve(root);
+  const patterns: string[] = [];
+  for (const p of paths) {
+    const abs = path.resolve(rootAbs, p);
+    if (abs !== rootAbs && !abs.startsWith(rootAbs + path.sep)) {
+      return { ok: false, error: "Invalid path", added: [] };
     }
+    const isDir = fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory() ?? false;
+    patterns.push(toGitIgnorePattern(p, isDir));
   }
 
-  return { ok: true };
+  const file = path.join(rootAbs, ".gitignore");
+  let existing = "";
+  try {
+    existing = fs.readFileSync(file, "utf8");
+  } catch {
+    /* no .gitignore yet — it will be created */
+  }
+  const { content, added } = appendGitIgnoreEntries(existing, patterns);
+  if (added.length === 0) return { ok: true, added };
+  try {
+    fs.writeFileSync(file, content, "utf8");
+  } catch {
+    return { ok: false, error: "Could not update .gitignore", added: [] };
+  }
+  return { ok: true, added };
 }
 
 export function getGitBlame(cwd: string, filePath: string): string {

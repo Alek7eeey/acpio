@@ -332,6 +332,14 @@
   animation: fullscreenSheetRise 0.18s ease;
 }
 
+/* A sheet stretched across a wide window reads as a stray bar; keep it drawer-sized. */
+@media (min-width: 721px) {
+  .sheet {
+    max-width: 560px;
+    margin: 0 auto;
+  }
+}
+
 @keyframes fullscreenSheetRise {
   from {
     transform: translateY(14%);
