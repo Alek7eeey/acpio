@@ -1,4 +1,11 @@
 .wrap {
+  /* History caps this pane at 38–42% of its host once a file diff is open, so the
+     commit header cannot keep its full stored height — these floors give it the
+     rest and leave the file list a readable window instead of its own padding. */
+  --commit-splitter-height: 5px;
+  --commit-header-min-height: 40px;
+  /* Stats toolbar plus five file rows — the list is this pane's working surface. */
+  --commit-file-list-space: 185px;
   min-width: 0;
   min-height: 0;
   flex: 1;
@@ -24,13 +31,18 @@
 .descriptionPane {
   flex: 0 0 auto;
   min-height: 0;
+  /* The stored height is a preference, not a guarantee: give way before the list. */
+  max-height: max(
+    var(--commit-header-min-height),
+    calc(100% - var(--commit-splitter-height) - var(--commit-file-list-space))
+  );
   overflow: auto;
   border-bottom: none;
 }
 
 .detailSplitter {
   flex: 0 0 auto;
-  height: 5px;
+  height: var(--commit-splitter-height);
   cursor: row-resize;
   touch-action: none;
   background: color-mix(in srgb, var(--border) 75%, transparent);
