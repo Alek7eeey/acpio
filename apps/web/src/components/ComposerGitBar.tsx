@@ -179,7 +179,7 @@ export function useGitStatus(
       applyStatus(result.status);
       showToast(t("git.checkoutOk"), { tone: "success" });
     } catch (e) {
-      const raw = e instanceof Error ? e.message : t("git.checkoutFailed");
+      const raw = e instanceof Error ? e.message : "";
       showToast(formatGitErrorToast(raw, t, { context: "checkout" }), { tone: "danger" });
     } finally {
       setBranchBusy(false);

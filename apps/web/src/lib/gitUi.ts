@@ -189,6 +189,9 @@ export function gitSyncSuccessMessage(
 
 const GIT_PATH_PATTERN = /[\w.-]+(?:\/[\w.-]+)+/g;
 
+/** Cap for the git explanation appended to a toast; stderr can be a wall of hints. */
+const GIT_ERROR_DETAIL_MAX = 480;
+
 type GitErrorToastKey = "git.checkoutBlocked" | "git.checkoutBlockedHint" | "git.checkoutFailed" | "git.syncFailed";
 
 function normalizeGitCliError(raw: string) {
@@ -213,11 +216,22 @@ function isCheckoutBlockedError(message: string) {
   return false;
 }
 
+/** Git's own words, trimmed of trailing noise and capped so a toast stays a toast. */
+function gitErrorDetail(raw: string) {
+  const detail = raw
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return detail.length > GIT_ERROR_DETAIL_MAX ? `${detail.slice(0, GIT_ERROR_DETAIL_MAX - 1)}…` : detail;
+}
+
 export function formatGitErrorToast(
   raw: string,
   t: (key: GitErrorToastKey, vars?: Record<string, string>) => string,
-  options?: { context?: "checkout" | "sync" },
+  options?: { context?: "checkout" | "sync"; fallback?: string },
 ) {
+  const fallback =
+    options?.fallback ?? (options?.context === "checkout" ? t("git.checkoutFailed") : t("git.syncFailed"));
   const message = normalizeGitCliError(raw);
   if (isCheckoutBlockedError(message) || isCheckoutBlockedError(raw)) {
     const files = extractGitRepoPaths(raw);
@@ -229,6 +243,7 @@ export function formatGitErrorToast(
     return `${t("git.checkoutBlocked")}\n\n${t("git.checkoutBlockedHint")}`;
   }
 
-  if (options?.context === "checkout") return t("git.checkoutFailed");
-  return t("git.syncFailed");
+  // Git's explanation is the only place the cause lives — never swallow it.
+  const detail = gitErrorDetail(message);
+  return detail && detail !== fallback ? `${fallback}\n${detail}` : fallback;
 }

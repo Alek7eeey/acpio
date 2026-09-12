@@ -149,10 +149,36 @@ describe("formatGitErrorToast", () => {
     );
   });
 
-  it("falls back to localized checkout message instead of raw git output", () => {
+  it("keeps the git reason visible under the localized summary", () => {
     expect(formatGitErrorToast("error: some unknown git failure", t, { context: "checkout" })).toBe(
-      "git.checkoutFailed",
+      "git.checkoutFailed\nsome unknown git failure",
     );
+    expect(
+      formatGitErrorToast("fatal: Authentication failed for 'https://github.com/a/b.git'", t, {
+        fallback: "git.commitFailed",
+      }),
+    ).toBe("git.commitFailed\nAuthentication failed for 'https://github.com/a/b.git'");
+  });
+
+  it("keeps a rejected push, whose reason is not the first line", () => {
+    const output =
+      "To github.com:a/b.git\n ! [rejected]        dev -> dev (fetch first)\nerror: failed to push some refs to 'github.com:a/b.git'";
+    expect(formatGitErrorToast(output, t, { fallback: "git.syncFailed" })).toBe(
+      `git.syncFailed\n${output}`,
+    );
+  });
+
+  it("shows only the summary when git gave no output", () => {
+    expect(formatGitErrorToast("", t, { context: "checkout" })).toBe("git.checkoutFailed");
+    expect(formatGitErrorToast("", t, { fallback: "git.syncFailed" })).toBe("git.syncFailed");
+  });
+
+  it("caps a wall of git hints", () => {
+    const toast = formatGitErrorToast(`fatal: nope\n${"hint: x\n".repeat(200)}`, t, {
+      fallback: "git.syncFailed",
+    });
+    expect(toast.startsWith("git.syncFailed\nnope\n")).toBe(true);
+    expect(toast.length).toBeLessThanOrEqual("git.syncFailed\n".length + 480);
   });
 });
 

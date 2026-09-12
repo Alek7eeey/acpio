@@ -836,7 +836,10 @@ export async function registerRoutes(app: FastifyInstance) {
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
     const result = commitGit(detail.cwd, body.message);
-    if (!result.ok) return reply.code(400).send({ error: result.error ?? "Commit failed" });
+    if (!result.ok) {
+      req.log.warn({ sessionId: id, cwd: detail.cwd, error: result.error }, "git commit failed");
+      return reply.code(400).send({ error: result.error ?? "Commit failed" });
+    }
     return { ok: true, status: getGitStatus(detail.cwd) };
   });
 
@@ -846,7 +849,13 @@ export async function registerRoutes(app: FastifyInstance) {
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
     const result = await syncGit(detail.cwd, body.action);
-    if (!result.ok && !result.conflict) return reply.code(400).send({ error: result.error ?? "Sync failed" });
+    if (!result.ok && !result.conflict) {
+      req.log.warn(
+        { sessionId: id, cwd: detail.cwd, action: body.action, error: result.error },
+        "git sync failed",
+      );
+      return reply.code(400).send({ error: result.error ?? "Sync failed" });
+    }
     return {
       ok: result.ok,
       conflict: result.conflict ?? false,

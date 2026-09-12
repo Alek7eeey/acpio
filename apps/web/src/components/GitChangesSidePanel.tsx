@@ -215,8 +215,8 @@ export function GitChangesSidePanel({
 
   const gitErrorToast = useCallback(
     (e: unknown, fallback: string, context?: "checkout" | "sync") => {
-      const raw = e instanceof Error ? e.message : fallback;
-      showToast(formatGitErrorToast(raw, t, { context }), { tone: "danger" });
+      const raw = e instanceof Error ? e.message : "";
+      showToast(formatGitErrorToast(raw, t, { context, fallback }), { tone: "danger" });
     },
     [t],
   );
