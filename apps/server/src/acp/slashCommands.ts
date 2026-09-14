@@ -109,10 +109,13 @@ export function parseAvailableCommands(raw: Record<string, unknown>): SlashComma
 }
 
 function parseCommandFields(cmd: Record<string, unknown>): SlashCommandDto | null {
-  const name = String(cmd.name ?? cmd.command ?? cmd.id ?? cmd.slug ?? "")
+  const rawName = String(cmd.name ?? cmd.command ?? cmd.id ?? cmd.slug ?? "")
     .trim()
-    .replace(/^\//, "")
     .replace(/\s+/g, "-");
+  // Zed-style bridges (zcode-acp-server) prefix skills with `$` for editor
+  // grouping; the composer always emits `/name`, so store the bare name.
+  const isSkillPrefix = rawName.startsWith("$");
+  const name = rawName.replace(/^[$/]/, "");
   if (!name || !SLASH_COMMAND_NAME_RE.test(name)) return null;
   const description = String(cmd.description ?? cmd.title ?? cmd.summary ?? "").trim();
   const input = cmd.input;
@@ -134,7 +137,7 @@ function parseCommandFields(cmd: Record<string, unknown>): SlashCommandDto | nul
   const desc = description || name;
   if (
     !kind &&
-    (/^skill:/i.test(name) || /\((?:user |project |builtin )?skill\)\s*$/i.test(desc))
+    (/^skill:/i.test(name) || isSkillPrefix || /\((?:user |project |builtin )?skill\)\s*$/i.test(desc))
   ) {
     kind = "skill";
   }

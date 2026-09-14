@@ -46,6 +46,26 @@ describe("parseAvailableCommands", () => {
       }).map((c) => c.name),
     ).toEqual(["create-pr", "review"]);
   });
+
+  it("strips the `$` skill prefix and tags the entry as a skill", () => {
+    expect(
+      parseAvailableCommands({
+        availableCommands: [
+          { name: "$commit", description: "Выполнить git-коммит" },
+          { name: "$i-have-adhd", description: "Shape output", input: { hint: "[notes]" } },
+        ],
+      }),
+    ).toEqual([
+      { name: "commit", description: "Выполнить git-коммит", kind: "skill" },
+      {
+        name: "i-have-adhd",
+        description: "Shape output",
+        requiresInput: true,
+        inputHint: "[notes]",
+        kind: "skill",
+      },
+    ]);
+  });
 });
 
 describe("mergeSlashCommandLists", () => {

@@ -295,6 +295,22 @@ describe("mergeSlashCommands", () => {
     });
   });
 
+  it("strips the `$` skill prefix and tags the command as a skill", () => {
+    expect(
+      mergeSlashCommands([{ name: "$commit", description: "Выполнить git-коммит" }], t)[0],
+    ).toEqual({
+      name: "commit",
+      description: "Выполнить git-коммит",
+      kind: "skill",
+    });
+  });
+
+  it("keeps an explicit kind when stripping the `$` prefix", () => {
+    expect(
+      mergeSlashCommands([{ name: "$tdd", description: "TDD", kind: "skill" }], t)[0],
+    ).toEqual({ name: "tdd", description: "TDD", kind: "skill" });
+  });
+
   it("keeps namespace-style command names", () => {
     expect(mergeSlashCommands([{ name: "skill:foo", description: "d" }], t)[0]).toEqual({
       name: "skill:foo",

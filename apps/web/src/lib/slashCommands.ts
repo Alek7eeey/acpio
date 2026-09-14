@@ -2,7 +2,7 @@ import type { SlashCommandDto } from "@acpio/shared";
 import type { TranslateFn } from "@acpio/i18n";
 
 export function slashCommandBareName(name: string) {
-  return name.trim().replace(/^\//, "").replace(/^skill:/i, "").toLowerCase();
+  return name.trim().replace(/^[$/]/, "").replace(/^skill:/i, "").toLowerCase();
 }
 
 function preferSlashCommand(prev: SlashCommandDto, next: SlashCommandDto): SlashCommandDto {
@@ -73,13 +73,16 @@ export function slashCommandRequiresInput(cmd: SlashCommandDto) {
 }
 
 export function sanitizeSlashCommand(cmd: SlashCommandDto): SlashCommandDto | null {
-  const name = cmd.name.trim().replace(/^\//, "");
+  // Zed-style bridges prefix skills with `$` (editor grouping); the composer
+  // always emits `/name`, so store the bare name and keep the skill kind.
+  const isSkillPrefix = cmd.name.trim().startsWith("$");
+  const name = cmd.name.trim().replace(/^[$/]/, "");
   if (!isValidSlashCommandName(name)) return null;
 
   const description = cmd.description.trim();
+  const kind = (cmd.kind?.trim() || (isSkillPrefix ? "skill" : "")).trim() || undefined;
 
   const inputHint = cmd.inputHint?.trim();
-  const kind = cmd.kind?.trim();
   return {
     name,
     description: description || name,
