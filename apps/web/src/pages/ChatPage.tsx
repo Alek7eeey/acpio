@@ -43,7 +43,7 @@ import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
 import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
-import { useChatSplitAllowed } from "../lib/panelLayout";
+import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
@@ -3851,11 +3851,19 @@ function ChatThread() {
   }, [activePlan, pendingQuestion?.requestId]);
 
   useEffect(() => {
-    if (planPending || planSignature) {
-      setConsoleOpen(false);
-      setGitPanelOpen(false);
-      setPlanPanelOpen(true);
-    }
+    if (!planPending && !planSignature) return;
+    setConsoleOpen(false);
+    setGitPanelOpen(false);
+    // Read the layout here rather than subscribing to it: a resize must not
+    // close the console or the git panel behind the user's back.
+    //
+    // A takeover panel is not worth a plan update: below 1180px the plan covers
+    // the whole chat (see the compact block in ChatPage.module.css), and omp
+    // sends one update per todo change, so auto-opening it there hid the
+    // conversation mid-turn — and re-opened it right after the user closed it.
+    // The composer's plan chip and the approval card in the thread open it on
+    // demand instead.
+    if (!isCompactPanelLayout()) setPlanPanelOpen(true);
   }, [planPending, pendingQuestion?.requestId, planSignature, setConsoleOpen, setGitPanelOpen]);
 
   useEffect(() => {
