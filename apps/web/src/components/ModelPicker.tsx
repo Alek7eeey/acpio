@@ -553,7 +553,7 @@ export function ModelPicker({
     const row = rowRefs.current.get(model);
     if (!row) return;
     row.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [open, model, visibleOptions.length]);
+  }, [open, model, visibleOptions.length, favoriteOptions]);
 
   useLayoutEffect(() => {
     if (!paramsFor) return;
@@ -778,8 +778,17 @@ export function ModelPicker({
       <div
         key={key ?? m.value}
         ref={(el) => {
-          if (el) rowRefs.current.set(m.value, el);
-          else rowRefs.current.delete(m.value);
+          // A favorited model renders twice (favorites section + main list). React
+          // remounts the favorites row on every open, and its unmount fires *after*
+          // the new one mounts — so `set` must not overwrite an existing entry and
+          // `delete` must only drop it when it is still the registered node.
+          // Otherwise the map ends up pointing at the stale detached node and
+          // scrollIntoView centers the general-list copy instead of the favorite.
+          if (el) {
+            if (!rowRefs.current.has(m.value)) rowRefs.current.set(m.value, el);
+          } else if (rowRefs.current.get(m.value) === el) {
+            rowRefs.current.delete(m.value);
+          }
         }}
         className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
           rowActive ? styles.modelRowExpanded : ""

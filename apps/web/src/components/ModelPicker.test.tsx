@@ -377,4 +377,27 @@ describe("ModelPicker", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Убрать из избранного" }));
     expect(onToggleFavorite).toHaveBeenCalledWith("claude");
   });
+
+  it("centers the favorites-section row when the selected model is favorited", async () => {
+    const user = userEvent.setup();
+    // Track which DOM node gets scrolled. The favorited model renders twice
+    // (Избранное + general list); the target must be the favorites copy, which
+    // comes first in DOM order and carries the section star marker.
+    const scrolled: HTMLElement[] = [];
+    HTMLElement.prototype.scrollIntoView = function scroll(this: HTMLElement) {
+      scrolled.push(this);
+    };
+    renderPicker({ model: "claude", favoriteModels: ["claude"] });
+    await user.click(screen.getByRole("button", { name: /Claude Sonnet/ }));
+    await screen.findByText("Избранное");
+    const rows = screen
+      .getAllByRole("option")
+      .filter((el) => el.textContent?.includes("Claude Sonnet"));
+    expect(rows).toHaveLength(2);
+    expect(scrolled.length).toBeGreaterThan(0);
+    const last = scrolled[scrolled.length - 1];
+    const favRow = rows[0];
+    // The ref lives on the wrapper div; accept either the row or its wrapper.
+    expect(last === favRow || last?.contains(favRow)).toBe(true);
+  });
 });
