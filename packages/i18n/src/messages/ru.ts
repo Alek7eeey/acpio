@@ -484,6 +484,7 @@ export const ru = {
     mcpCommand: "Команда",
     mcpArgs: "Аргументы (необязательно)",
     mcpEnv: "JSON окружения (необязательно)",
+    mcpCommandHint: "Агент запускает этот файл напрямую, без оболочки, поэтому голое имя вроде «npx» ищется в его PATH. Надёжнее указать полный путь (например C:/Program Files/nodejs/npx.cmd или /usr/local/bin/mcp-server).",
     mcpRemoteConfig: "JSON подключения",
     mcpInsecureTls: "Не проверять TLS-сертификат",
     mcpInsecureTlsHint: "для самоподписанных и внутренних сертификатов",

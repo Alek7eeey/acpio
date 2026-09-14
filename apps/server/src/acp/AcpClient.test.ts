@@ -13,6 +13,7 @@ import {
   listModelParamOptions,
   mergeConfigOptions,
   resolveCommand,
+  resolveMcpStdioCommands,
   buildAgentEnv,
   type ConfigOption,
   type AgentModeOption,
@@ -579,6 +580,43 @@ describe("resolveCommand", () => {
     { name: "cmd inside forward-slash path", command: "C:/Tools/agent.cmd", expected: { cmd: "C:/Tools/agent.cmd", shell: true } },
   ])("$name", async ({ command, expected }) => {
     expect(await resolveCommand(command)).toEqual(expected);
+  });
+});
+
+describe("resolveMcpStdioCommands", () => {
+  const stdio = (name: string, command: string) => ({
+    id: name,
+    name,
+    enabled: true,
+    type: "stdio" as const,
+    command,
+  });
+
+  // Deterministic cases only: no bare names, so nothing hits where.exe/which.
+  it("leaves already-absolute and slash paths untouched", async () => {
+    const servers = [
+      stdio("exe", "C:\\Tools\\mcp.exe"),
+      stdio("shim", "C:/Users/me/AppData/Roaming/npm/mcp-gitea.cmd"),
+      stdio("unix", "/usr/local/bin/mcp-fs"),
+    ];
+    expect(await resolveMcpStdioCommands(servers, process.env)).toEqual(servers);
+  });
+
+  it("keeps HTTP servers and their order intact", async () => {
+    const http = { id: "h", name: "h", enabled: true, type: "local" as const, url: "http://x/mcp" };
+    const out = await resolveMcpStdioCommands([http, stdio("exe", "C:/a/mcp.exe")], process.env);
+    expect(out).toEqual([http, stdio("exe", "C:/a/mcp.exe")]);
+  });
+
+  it("returns the same array when nothing needs resolving", async () => {
+    const servers = [stdio("exe", "C:/a/mcp.exe")];
+    expect(await resolveMcpStdioCommands(servers, process.env)).toBe(servers);
+  });
+
+  it("resolves a bare command to an absolute path", async () => {
+    const out = await resolveMcpStdioCommands([stdio("node", "node")], process.env);
+    expect(out[0]!.command).toMatch(/[\\/]/);
+    expect(out[0]!.name).toBe("node");
   });
 });
 

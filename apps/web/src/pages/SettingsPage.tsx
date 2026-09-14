@@ -27,6 +27,7 @@ import {
   type ModelParamDto,
   parseMcpRemoteConfig,
   isMcpServerConfigured,
+  mcpCommandNeedsAbsolute,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -2716,6 +2717,9 @@ export function SettingsPage() {
                       value={mcpDraft.command ?? ""}
                       onChange={(e) => setMcpDraft({ ...mcpDraft, command: e.target.value })}
                     />
+                    {mcpCommandNeedsAbsolute(mcpDraft) ? (
+                      <span className={styles.mcpFieldHint}>{t("settings.mcpCommandHint")}</span>
+                    ) : null}
                     <input
                       className={styles.mcpInput}
                       placeholder={t("settings.mcpArgs")}

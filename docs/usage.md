@@ -49,7 +49,10 @@ composer and scroll position.
 MCP servers are configured globally in **Settings → MCP** (HTTP local/remote or **stdio**
 command + args), but each chat shows which servers are active for that session in the header
 chip. Changing the MCP list restarts the live agent process for affected chats (MCP is applied
-only at `session/new|resume|load`).
+only at `session/new|resume|load`). ACP requires an **absolute** stdio `command`, so a bare
+name (`npx`, `mcp-gitea`) is resolved to its full path before the session starts; the server
+console logs `stdio "<name>": <command> -> <path>`. If it cannot be resolved, put the binary's
+full path in Settings → MCP.
 
 ### Resume agent context
 

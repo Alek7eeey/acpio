@@ -23,6 +23,7 @@ import {
   type HarnessAdapter,
   type McpServerConfig,
   isMcpServerAttached,
+  mcpCommandNeedsAbsolute,
   toAcpMcpServer,
 } from "@acpio/shared";
 import {
@@ -306,6 +307,34 @@ export async function resolveCommand(
   } catch {
     return { cmd: command, shell: false };
   }
+}
+
+/**
+ * Rewrite a bare stdio MCP command to the absolute path of its shim. The ACP
+ * spec requires `command` to be absolute, and OMP spawns client servers with
+ * `Bun.spawn` (no shell): a bare `npx` / `mcp-gitea` never launches, so the
+ * whole `session/new` fails and the chat loses every MCP tool. `where.exe`
+ * answers `.exe` first; npm ships bare names as `.cmd` shims, which spawn
+ * cannot execute — prefer the shim and let the agent's own resolver follow it.
+ */
+export async function resolveMcpStdioCommands(
+  servers: McpServerConfig[],
+  env: NodeJS.ProcessEnv,
+): Promise<McpServerConfig[]> {
+  if (!servers.some(mcpCommandNeedsAbsolute)) return servers;
+  const out: McpServerConfig[] = [];
+  for (const server of servers) {
+    if (!mcpCommandNeedsAbsolute(server)) {
+      out.push(server);
+      continue;
+    }
+    const resolved = await resolveCommand(server.command!.trim());
+    if (resolved.cmd !== server.command!.trim()) {
+      console.log(`[mcp] stdio "${server.name}": ${server.command!.trim()} -> ${resolved.cmd}`);
+    }
+    out.push({ ...server, command: resolved.cmd });
+  }
+  return out;
 }
 
 function decodeProcessText(buf: Buffer): string {
@@ -648,10 +677,10 @@ export class AcpClient extends EventEmitter {
           this.emit("log", `authenticate skipped/failed: ${String(err)}`);
         }
       }
-
-      const mcpServers = (opts?.mcpServers ?? this.settings.mcpServers ?? [])
-        .filter(isMcpServerAttached)
-        .map(toAcpMcpServer);
+      const mcpServers = (await resolveMcpStdioCommands(
+        (opts?.mcpServers ?? this.settings.mcpServers ?? []).filter(isMcpServerAttached),
+        env,
+      )).map(toAcpMcpServer);
 
       const resume = opts?.resume;
       let result: { sessionId?: string; configOptions?: ConfigOption[]; modes?: unknown };

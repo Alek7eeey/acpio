@@ -413,6 +413,7 @@
     "mcpCommand": "Command",
     "mcpArgs": "Arguments (optional)",
     "mcpEnv": "Environment JSON (optional)",
+    "mcpCommandHint": "The agent spawns this binary directly — no shell, so a bare name like \"npx\" is resolved against its PATH. Prefer the full path (e.g. C:/Program Files/nodejs/npx.cmd or /usr/local/bin/mcp-server).",
     "mcpToken": "Token (optional)",
     "mcpTokenSet": "token set",
     "mcpHeaders": "HTTP headers",

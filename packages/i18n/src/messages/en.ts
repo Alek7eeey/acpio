@@ -464,6 +464,7 @@ export const en = {
     mcpCommand: "Command",
     mcpArgs: "Arguments (optional)",
     mcpEnv: "Environment JSON (optional)",
+    mcpCommandHint: 'The agent spawns this binary directly — no shell, so a bare name like "npx" is resolved against its PATH. Prefer the full path (e.g. C:/Program Files/nodejs/npx.cmd or /usr/local/bin/mcp-server).',
     mcpRemoteConfig: "Connection JSON",
     mcpInsecureTls: "Skip TLS certificate verification",
     mcpInsecureTlsHint: "for self-signed and internal certificates",

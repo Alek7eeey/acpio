@@ -1054,6 +1054,15 @@
   font-size: var(--settings-hint-size);
 }
 
+/* Inline note under the stdio command field: bare names need the agent's PATH. */
+.mcpFieldHint {
+  margin: -4px 0 0;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
+  color: var(--text-secondary);
+}
+
 .mcpFormActions {
   display: flex;
   gap: 8px;

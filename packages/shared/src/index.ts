@@ -420,6 +420,19 @@ export function mcpStdioEnv(server: McpServerConfig): Array<{ name: string; valu
   return [];
 }
 
+/**
+ * True when a stdio MCP command cannot be resolved by the agent's own PATH
+ * lookup. The ACP spec requires an absolute path, and OMP in particular spawns
+ * client-supplied servers with `Bun.spawn` (no shell), so a bare `npx` /
+ * `mcp-gitea` never launches. Slash/backslash paths are already resolvable.
+ */
+export function mcpCommandNeedsAbsolute(server: McpServerConfig): boolean {
+  if (server.type !== "stdio") return false;
+  const command = server.command?.trim() ?? "";
+  if (!command) return false;
+  return !/[\\/]/.test(command);
+}
+
 /** True when the server has the fields its transport needs (ignores `enabled`). */
 export function isMcpServerConfigured(server: McpServerConfig): boolean {
   if (server.type === "stdio") return Boolean(server.command?.trim());

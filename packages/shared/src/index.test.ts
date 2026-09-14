@@ -20,6 +20,7 @@ import {
   isMcpServerAttached,
   mcpServerEndpoint,
   mcpServersFingerprint,
+  mcpCommandNeedsAbsolute,
   mcpStdioEnv,
   toAcpMcpServer,
 } from "@acpio/shared";
@@ -628,5 +629,14 @@ describe("MCP helpers", () => {
     const b = mcpServersFingerprint([{ ...stdio, args: ["-y", "other"] }]);
     expect(a).not.toBe(b);
     expect(a).not.toBe(mcpServersFingerprint([http]));
+  });
+
+  it("flags bare stdio commands that agents cannot resolve via PATH", () => {
+    expect(mcpCommandNeedsAbsolute(stdio)).toBe(true);
+    expect(mcpCommandNeedsAbsolute({ ...stdio, command: " C:/Tools/mcp.exe " })).toBe(false);
+    expect(mcpCommandNeedsAbsolute({ ...stdio, command: "./bin/mcp" })).toBe(false);
+    expect(mcpCommandNeedsAbsolute({ ...stdio, command: "\\\\server\\share\\mcp.exe" })).toBe(false);
+    expect(mcpCommandNeedsAbsolute({ ...stdio, command: "" })).toBe(false);
+    expect(mcpCommandNeedsAbsolute(http)).toBe(false);
   });
 });
