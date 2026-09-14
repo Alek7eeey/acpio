@@ -110,6 +110,7 @@ export function AppShell() {
   const sessionDetails = useAppStore((s) => s.sessionDetails);
   const chatPaneIds = useAppStore((s) => s.chatPaneIds);
   const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
+  const connection = useAppStore((s) => s.connection);
   const headerSession = useMemo(() => {
     const focusedId =
       (chatPaneIds?.length ?? 0) > 1
@@ -1407,6 +1408,20 @@ export function AppShell() {
           ) : (
             <div className={styles.headerSpacer} />
           )}
+          {connection === "reconnecting" || connection === "offline" ? (
+            <div
+              className={`${styles.connBadge} ${connection === "offline" ? styles.connBadgeOffline : ""}`}
+              role="status"
+              aria-live="polite"
+            >
+              <span className={styles.connBadgeDot} aria-hidden />
+              <span className={styles.connBadgeLabel}>
+                {connection === "offline"
+                  ? t("common.connOffline")
+                  : t("common.connReconnecting")}
+              </span>
+            </div>
+          ) : null}
           <div className={styles.headerActions}>
             <div ref={agentChipRef} className={styles.agentChipWrap}>
               <button

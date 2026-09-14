@@ -133,6 +133,9 @@ type PendingPermission = {
   payload: Record<string, unknown>;
 };
 
+/** Live socket status — drives the header chip. */
+export type ConnectionState = "connecting" | "open" | "reconnecting" | "offline";
+
 type PendingQuestion = {
   sessionId: string;
   requestId: string;
@@ -218,6 +221,8 @@ type AppState = {
   modelsLoading: boolean;
   sidebarOpen: boolean;
   connected: boolean;
+  /** Fine-grained socket state for the toolbar chip; `connected` mirrors it. */
+  connection: ConnectionState;
   /** True when the focused chat's harness (or any harness) last probed OK. */
   agentAvailable: boolean;
   /** Per-harness: true / false / null while probing. */
@@ -305,7 +310,9 @@ type AppState = {
   setMultitask: (value: boolean) => Promise<void>;
   cancelPrompt: (sessionId?: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
-  setConnected: (connected: boolean) => void;
+  setConnection: (connection: ConnectionState) => void;
+  /** Re-read server-owned state after the socket returns (missed events are never replayed). */
+  resyncAfterReconnect: () => Promise<void>;
   setAgentAvailable: (provider: AgentProvider, available: boolean) => void;
   handleWsEvent: (event: WsServerEvent) => void;
   answerPermission: (optionId: string) => Promise<void>;
@@ -1268,6 +1275,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   adaptersLoaded: false,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
   connected: false,
+  connection: "connecting",
   agentAvailable: false,
   agentAvailability: typeof window !== "undefined" ? readStoredAgentAvailability() : {},
   agentProbing: {},
@@ -2530,8 +2538,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ sidebarOpen: open });
   },
 
-  setConnected(connected) {
-    set({ connected });
+  setConnection(connection) {
+    set({ connection, connected: connection === "open" });
+  },
+
+  async resyncAfterReconnect() {
+    // The socket only carries live traffic: whatever was broadcast while it was
+    // down is lost. Re-read what the server owns — the list plus the open chat
+    // (selectSession's warm path refreshes quietly, no skeleton, no remount).
+    void get().refreshSessions().catch(() => {});
+    const id = get().activeSessionId;
+    if (!id) return;
+    await get().selectSession(id);
+    const detail = get().activeSession;
+    if (detail?.id !== id) return;
+    const question = pendingQuestionFromDetail(detail);
+    if (question) set({ pendingQuestion: question });
   },
 
   setAgentAvailable(provider, available) {

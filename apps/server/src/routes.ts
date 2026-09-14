@@ -46,6 +46,7 @@ import {
   restartSessionsForMcpChange,
   restartSessionMcp,
   resetAllAgentSessions,
+  replayPendingInteractive,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -1285,6 +1286,9 @@ export async function registerRoutes(app: FastifyInstance) {
         }
         if (msg.type === "subscribe" && msg.sessionId) {
           subscribeClient(client, msg.sessionId);
+          // The subscriber may have missed live prompts while its socket was
+          // down — re-emit whatever is still waiting on the user.
+          replayPendingInteractive(msg.sessionId);
           return;
         }
         if (msg.type === "unsubscribe" && msg.sessionId) {

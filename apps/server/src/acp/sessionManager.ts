@@ -3796,6 +3796,75 @@ function hasPendingQuestion(detail: SessionDetailDto | null): boolean {
   return false;
 }
 
+/** Payload of the still-unanswered permission part `requestId` belongs to,
+ *  reshaped back into the `permission.request` broadcast payload. */
+function findPendingPermissionPayload(
+  detail: SessionDetailDto,
+  requestId: string,
+): Record<string, unknown> | null {
+  for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
+    const msg = detail.messages[mi];
+    if (!msg) continue;
+    for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
+      const part = msg.parts[pi];
+      if (part?.type !== "permission") continue;
+      if (String(part.payload.requestId ?? "") !== requestId) continue;
+      const { requestId: _rid, options, ...params } = part.payload as Record<string, unknown>;
+      return { ...params, ...(options !== undefined ? { options } : {}) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Re-broadcast interactive requests that are still waiting on the user. The
+ * originals went out live over WS; a client whose socket died and came back
+ * (phone slept, network hopped) missed them and would show a stalled turn
+ * with no prompt to answer. Client-side handlers dedupe by requestId, so a
+ * replay to a client that never lost them is harmless.
+ */
+export function replayPendingInteractive(sessionId: string) {
+  const rt = runtimes.get(sessionId);
+  if (!rt || rt.pending.size === 0) return;
+  void (async () => {
+    const detail = await getSessionDetail(sessionId).catch(() => null);
+    if (!detail || rt.pending.size === 0) return;
+    for (const [reqKey, p] of [...rt.pending]) {
+      if (p.kind === "permission") {
+        const payload = findPendingPermissionPayload(detail, reqKey);
+        if (!payload) continue;
+        broadcastToSession(sessionId, {
+          type: "permission.request",
+          sessionId,
+          requestId: reqKey,
+          payload,
+        });
+        continue;
+      }
+      if (p.kind === "switch_mode") {
+        if (p.mode == null) continue;
+        broadcastToSession(sessionId, {
+          type: "question.request",
+          sessionId,
+          requestId: reqKey,
+          kind: "switch_mode",
+          payload: { mode: p.mode, previousMode: p.previousMode },
+        });
+        continue;
+      }
+      const payload = findPendingQuestionPayload(detail, reqKey);
+      if (!payload) continue;
+      broadcastToSession(sessionId, {
+        type: "question.request",
+        sessionId,
+        requestId: reqKey,
+        kind: p.kind === "create_plan" ? "create_plan" : "ask_question",
+        payload,
+      });
+    }
+  })();
+}
+
 /**
  * Answer to a question whose ACP request is gone — the server was restarted (or
  * the harness process died) while the agent was parked on the user. The pending

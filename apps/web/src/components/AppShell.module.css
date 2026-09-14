@@ -3632,6 +3632,53 @@
   background: color-mix(in srgb, var(--danger) 42%, var(--text-secondary));
 }
 
+/* Socket state chip — only rendered while the connection is not open. */
+.connBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: calc(var(--header-tool-size) + 4px);
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface));
+  backdrop-filter: blur(16px) saturate(1.08);
+  color: color-mix(in srgb, var(--warning) 78%, var(--text));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.connBadgeOffline {
+  border-color: color-mix(in srgb, var(--danger) 38%, var(--border));
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+.connBadgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: connBadgePulse 1.2s ease-in-out infinite;
+}
+
+.connBadgeLabel {
+  letter-spacing: 0.01em;
+}
+
+@keyframes connBadgePulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
 .agentTip {
   position: absolute;
   top: calc(100% + 8px);
