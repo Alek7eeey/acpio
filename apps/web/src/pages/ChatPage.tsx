@@ -43,6 +43,13 @@ import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
 import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
+import {
+  discardComposerPaneWork,
+  newComposerPaneKey,
+  readComposerDraft,
+  setComposerAttachments,
+  setComposerDraft,
+} from "../lib/composerDrafts";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
@@ -3489,19 +3496,6 @@ type ChatPaneBind = {
 
 const ChatPaneContext = createContext<ChatPaneBind | null>(null);
 
-/** Per-session composer drafts — survive chat switches until reload. */
-const composerDrafts = new Map<string, string>();
-
-function rememberComposerDraft(sessionId: string | null | undefined, value: string) {
-  if (!sessionId) return;
-  if (value) composerDrafts.set(sessionId, value);
-  else composerDrafts.delete(sessionId);
-}
-
-function forgetComposerDraft(sessionId: string | null | undefined) {
-  if (sessionId) composerDrafts.delete(sessionId);
-}
-
 function useDesktopSplit() {
   const desktop = useChatSplitAllowed();
   const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
@@ -3616,6 +3610,10 @@ function ChatThread() {
   textRef.current = text;
   const composerSessionId = bind?.sessionId ?? activeSession?.id ?? null;
   const composerSessionRef = useRef<string | null>(null);
+  /** A pane whose chat does not exist yet has no id to key its draft on. */
+  const composerPaneKeyRef = useRef("");
+  if (!composerPaneKeyRef.current) composerPaneKeyRef.current = newComposerPaneKey();
+  const composerKey = composerSessionId ?? composerPaneKeyRef.current;
   const hasText = text.trim().length > 0;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [composerMultiline, setComposerMultiline] = useState(false);
@@ -3981,16 +3979,16 @@ function ChatThread() {
   };
 
   useEffect(() => {
-    return () => {
-      rememberComposerDraft(composerSessionRef.current, textRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
     if (composerSessionRef.current === composerSessionId) return;
-    rememberComposerDraft(composerSessionRef.current, textRef.current);
+    // The outgoing chat's draft is already in the registry (live sync below). A
+    // pane that just got its chat moves from the pane token to the new id: carry
+    // the text over, then drop the token — a stale one would pin the reload
+    // guard on forever.
+    const carried = readComposerDraft(composerPaneKeyRef.current);
+    if (composerSessionId && carried) setComposerDraft(composerSessionId, carried);
+    discardComposerPaneWork(composerPaneKeyRef.current);
     composerSessionRef.current = composerSessionId;
-    const next = composerSessionId ? (composerDrafts.get(composerSessionId) ?? "") : "";
+    const next = composerSessionId ? readComposerDraft(composerSessionId) : "";
     resetComposerHistory();
     setText(next);
     setCursorPos(next.length);
@@ -4003,6 +4001,18 @@ function ChatThread() {
       syncComposerSize(el);
     });
   }, [composerSessionId]);
+
+  // Live, not on switch: the reload guard reads the registry at unload time, so
+  // it has to see the text as it is typed — and the chips of attachments the
+  // server has already stored but no message references yet.
+  useEffect(() => {
+    setComposerDraft(composerKey, text);
+  }, [composerKey, text]);
+
+  useEffect(() => {
+    setComposerAttachments(composerKey, pendingFiles.length);
+    return () => setComposerAttachments(composerKey, 0);
+  }, [composerKey, pendingFiles.length]);
 
   const isShellSessionActive = isShellSession(activeSession?.provider);
   const panelFillsChat = useFillPanelWhenChatTight(
@@ -4258,7 +4268,6 @@ function ChatThread() {
     const attach = editId ? undefined : readyAttachments(pendingFiles);
     for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
     previewUrlsRef.current.clear();
-    forgetComposerDraft(composerSessionRef.current);
     resetComposerHistory();
     setText("");
     setEditingMessageId(null);
@@ -4301,7 +4310,6 @@ function ChatThread() {
       // Same housekeeping as submitMessage: clear the composer, resend as an
       // edit (the server truncates the old reply and regenerates it).
       userJustSentRef.current = true;
-      forgetComposerDraft(composerSessionRef.current);
       setText("");
       setEditingMessageId(null);
       setCursorPos(0);
@@ -5584,7 +5592,6 @@ function ChatThread() {
                   onClick={() => {
                     setEditingMessageId(null);
                     resetComposerHistory();
-                    forgetComposerDraft(composerSessionRef.current);
                     setText("");
                     setComposerMultilineIfNeeded(false);
                   }}
