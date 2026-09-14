@@ -32,6 +32,25 @@ export function sessionActivityAt(session: Pick<SessionDto, "lastMessageAt" | "c
   return session.lastMessageAt || session.createdAt;
 }
 
+/**
+ * Status mark a chat row shows in the tree.
+ *
+ * `waiting` is the server's parked state (an open question or permission
+ * prompt) — the agent is idle until the user acts, so it must not share the
+ * "Working…" mark with a chat that is actually running. The chat open in the
+ * active pane shows no mark: its state is on screen already.
+ */
+export function sessionRowMark(
+  status: SessionDto["status"],
+  away: boolean,
+  hasUnseenResponse: boolean,
+): "running" | "waiting" | "unseen" | null {
+  if (!away) return null;
+  if (status === "running") return "running";
+  if (status === "waiting") return "waiting";
+  return hasUnseenResponse ? "unseen" : null;
+}
+
 export function groupByFolder(list: SessionDto[], knownFolders: string[] = []) {
   const map = new Map<string, SessionDto[]>();
   for (const s of list) {

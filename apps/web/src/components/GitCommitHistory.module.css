@@ -8,18 +8,6 @@
   background: var(--bg-secondary);
 }
 
-.head {
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--bg-secondary);
-  flex-shrink: 0;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-}
-
 .scroll {
   overflow-x: hidden;
   overflow-y: auto;

@@ -344,6 +344,26 @@
   min-width: 0;
 }
 
+/* Compact numeric field used by single-count settings (chats per folder). */
+.numberInput {
+  width: 88px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font: inherit;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
+  box-sizing: border-box;
+}
+
+.numberInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--settings-focus-ring);
+}
+
 .fieldHint {
   margin: 0;
   font-size: var(--settings-hint-size);
@@ -969,6 +989,17 @@
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+}
+
+.customAgentTestResult {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.customAgentTestResultError {
+  color: var(--danger);
 }
 
 .mcpForm {

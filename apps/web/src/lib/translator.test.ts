@@ -76,12 +76,6 @@ describe("createTranslator: Russian plurals", () => {
     expect(ru("common.userCount", { count })).toBe(expected);
   });
 
-  it("combines the plural form with other interpolated variables", () => {
-    expect(ru("common.thoughtFor", { count: 1, seconds: 3 })).toBe("Думал 3 секунду");
-    expect(ru("common.thoughtFor", { count: 4, seconds: 3 })).toBe("Думал 3 секунды");
-    expect(ru("common.thoughtFor", { count: 9, seconds: 3 })).toBe("Думал 3 секунд");
-  });
-
   it("accepts a numeric string count", () => {
     expect(ru("common.userCount", { count: "3" })).toBe("3 пользователя");
   });

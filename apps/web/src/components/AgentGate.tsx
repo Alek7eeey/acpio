@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useT } from "../lib/i18n";
-import { harnessShortLabel } from "../lib/harness";
+import { harnessLabel } from "../lib/harness";
 import { useAppStore } from "../lib/store";
 import styles from "./AgentGate.module.css";
 
@@ -130,7 +130,7 @@ export function AgentGate() {
         return (
           <AgentRow
             key={id}
-            label={adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id)}
+            label={harnessLabel(id, adapters)}
             loading={loading}
             online={availability[id] === true}
             checkingLabel={t("common.agentChecking")}
@@ -161,7 +161,7 @@ export function AgentOfflineWarning() {
       {ids.map((id) => (
         <AgentRow
           key={id}
-          label={adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id)}
+          label={harnessLabel(id, adapters)}
           loading={false}
           online={false}
           checkingLabel={t("common.agentChecking")}

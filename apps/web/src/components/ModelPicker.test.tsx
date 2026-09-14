@@ -199,4 +199,126 @@ describe("ModelPicker", () => {
     expect(dialog.textContent).toContain("Загрузка настроек модели…");
     resolveOpen();
   });
+
+  it("the ⋯ flyout renders the target model's params, not the current model's", async () => {
+    const user = userEvent.setup();
+    const current = {
+      id: "effort",
+      name: "Effort",
+      currentValue: "high",
+      options: [
+        { value: "low", name: "Low" },
+        { value: "high", name: "High" },
+      ],
+    };
+    const target = {
+      id: "effort",
+      name: "Effort",
+      currentValue: "max",
+      options: [
+        { value: "max", name: "Max" },
+        { value: "ultra", name: "Ultra" },
+      ],
+    };
+    renderPicker({
+      showParamsMenu: true,
+      params: [current],
+      paramsByModel: { claude: [target] },
+      onParamsOpen: () => {},
+    });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    // Row order follows `models`: [0]=gpt-4o, [1]=claude, [2]=deepseek.
+    await user.click(screen.getAllByRole("button", { name: "Effort" })[1]);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("Ultra");
+    expect(dialog.textContent).not.toContain("Low");
+    // The target's own currentValue marks the checked row, not the session's.
+    const checked = dialog.querySelectorAll('[aria-checked="true"]');
+    expect(checked).toHaveLength(1);
+    expect(checked[0].textContent).toContain("Max");
+  });
+
+  it("picking an option in another model's flyout fires onParamsChange with that model", async () => {
+    const user = userEvent.setup();
+    const onParamsChange = vi.fn();
+    renderPicker({
+      showParamsMenu: true,
+      params: [
+        {
+          id: "effort",
+          name: "Effort",
+          currentValue: "high",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+      paramsByModel: {
+        claude: [
+          {
+            id: "effort",
+            name: "Effort",
+            currentValue: "max",
+            options: [
+              { value: "max", name: "Max" },
+              { value: "ultra", name: "Ultra" },
+            ],
+          },
+        ],
+      },
+      onParamsOpen: () => {},
+      onParamsChange,
+    });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    await user.click(screen.getAllByRole("button", { name: "Effort" })[1]);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Ultra" }));
+    expect(onParamsChange).toHaveBeenCalledWith("claude", { effort: "ultra" });
+  });
+
+  it("the flyout keeps the loader until the target model's params arrive", async () => {
+    const user = userEvent.setup();
+    let resolveOpen: () => void = () => {};
+    const onParamsOpen = () =>
+      new Promise<void>((resolve) => {
+        resolveOpen = resolve;
+      });
+    renderPicker({
+      showParamsMenu: true,
+      params: [
+        {
+          id: "effort",
+          name: "Effort",
+          currentValue: "high",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+      paramsByModel: {
+        claude: [
+          {
+            id: "effort",
+            name: "Effort",
+            currentValue: "max",
+            options: [
+              { value: "max", name: "Max" },
+              { value: "ultra", name: "Ultra" },
+            ],
+          },
+        ],
+      },
+      onParamsOpen,
+    });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    await user.click(screen.getAllByRole("button", { name: "Effort" })[1]);
+    const dialog = await screen.findByRole("dialog");
+    // Busy: only the loader row — no stale options from either model.
+    expect(dialog.textContent).toContain("Загрузка настроек модели…");
+    expect(dialog.textContent).not.toContain("Ultra");
+    resolveOpen();
+    expect(await screen.findByText("Ultra")).toBeTruthy();
+    expect(dialog.textContent).not.toContain("Загрузка настроек модели…");
+  });
 });

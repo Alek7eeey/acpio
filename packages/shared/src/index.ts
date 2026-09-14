@@ -2,6 +2,7 @@ import type {
   AgentMode,
   AgentModeOption,
   AgentProvider,
+  CustomAgentSpec,
   ModelOption,
 } from "./adapters.js";
 
@@ -15,6 +16,7 @@ export type {
   AgentModeOption,
   AgentProvider,
   AgentMode,
+  CustomAgentSpec,
   HarnessAdapter,
   ModelOption,
   SubagentCardUpdate,
@@ -22,18 +24,28 @@ export type {
   SubagentToolEvent,
   SubagentTranscriptPage,
 } from "./adapters.js";
-export { SHELL_SESSION_PROVIDER, isShellSession } from "./adapters.js";
+export {
+  CUSTOM_AGENT_ID_RE,
+  CUSTOM_AGENT_MAX,
+  customAgentAdapter,
+  isShellSession,
+  normalizeCustomAgentId,
+  normalizeCustomAgents,
+  SHELL_SESSION_PROVIDER,
+} from "./adapters.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
 export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./ports.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
+  CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
   mergeClientAppSettings,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
+  normalizeChatTreeRecentLimit,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
 export {
@@ -580,6 +592,8 @@ export interface AppSettings {
   defaultModelByProvider: Partial<Record<AgentProvider, string>>;
   /** Parameter picker values per harness. */
   defaultModelParamsByProvider: Partial<Record<AgentProvider, Record<string, string>>>;
+  /** User-defined ACP agents (Settings → Connect) — registered at runtime. */
+  customAgents: CustomAgentSpec[];
   cursorCommand: string;
   cursorArgs: string[];
   ompCommand: string;
@@ -653,6 +667,11 @@ export interface AppSettings {
   chatTreeMenu: ChatTreeMenuId[];
   /** Show the "Archive" section in the chat tree. */
   chatTreeShowArchive: boolean;
+  /**
+   * How many of the newest chats stay visible per folder in the chat tree.
+   * The rest hide behind a "Show more" button; 0 shows every chat.
+   */
+  chatTreeRecentLimit: number;
   /** App header height in px (drag the header in the preview). */
   chatHeaderHeight: number;
   /** Icons shown in the app header bar. */
@@ -695,6 +714,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultModelParams: {},
   defaultModelByProvider: {},
   defaultModelParamsByProvider: {},
+  customAgents: [],
   cursorCommand: "agent",
   cursorArgs: ["acp"],
   ompCommand: "omp",
@@ -731,6 +751,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
   chatTreeShowArchive: true,
+  chatTreeRecentLimit: 0,
   chatHeaderHeight: 52,
   chatHeaderIcons: ["lang", "install", "theme"],
   chatEnterToSend: true,
@@ -829,6 +850,19 @@ export function modelDisplayName(value: string, name?: string, defaultLabel = "D
   }
 
   const provided = (name || "").trim();
+  // An opaque id carries no display information: ZCode spells its model as the
+  // JSON tuple `["builtin:zai-coding-plan","GLM-5.3-Flash",null]`, which
+  // humanizes into noise. There the agent's own title is authoritative.
+  if (raw && !/^[\w./@-]+(?:\[[^\]]*\])?$/.test(raw)) {
+    if (provided) {
+      return isRawWireSlug(provided) ? prettifyModelWireId(provided, defaultLabel) : provided;
+    }
+    // A JSON tuple id (ZCode: `["builtin:zai-coding-plan","GLM-5.3-Flash",null]`)
+    // still names its model: take the part that is not a provider marker.
+    const parts = [...raw.matchAll(/"([^"]*)"/g)].map((m) => m[1] ?? "");
+    const model = parts.find((p) => p !== "" && !p.includes(":"));
+    return model ? prettifyModelWireId(model, defaultLabel) : raw;
+  }
   // Prefer a clean agent-provided title (e.g. "Cursor Grok 4.5 Fast").
   if (provided && !hasModelParams(provided) && !isRawWireSlug(provided)) {
     if (/^default(\[.*\])?$/i.test(provided) || /^auto$/i.test(provided)) return defaultLabel;

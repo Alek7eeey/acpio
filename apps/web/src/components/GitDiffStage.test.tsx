@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
-import { GitFullscreenDiff } from "./GitFullscreenDiff";
+import { setDiffLayout } from "../lib/diffLayout";
+import { GitDiffStage } from "./GitDiffStage";
 
 const apiMock = vi.hoisted(() => ({ gitDiff: vi.fn(), gitShow: vi.fn() }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -24,11 +25,11 @@ function fileBlock(path: string) {
   return document.querySelector<HTMLElement>(`[data-diff-path="${path}"]`);
 }
 
-function renderViewer(paths: string[] = SMALL, props: Partial<Parameters<typeof GitFullscreenDiff>[0]> = {}) {
+function renderViewer(paths: string[] = SMALL, props: Partial<Parameters<typeof GitDiffStage>[0]> = {}) {
   const onClose = vi.fn();
   const view = render(
     <I18nProvider>
-      <GitFullscreenDiff
+      <GitDiffStage
         sessionId="s1"
         scope={{ mode: "working" }}
         files={paths.map((path) => ({ path, badge: "M" }))}
@@ -43,6 +44,7 @@ function renderViewer(paths: string[] = SMALL, props: Partial<Parameters<typeof 
 
 beforeEach(() => {
   useAppStore.setState((s) => ({ settings: { ...s.settings, locale: "ru" } }));
+  act(() => setDiffLayout("stacked"));
   apiMock.gitDiff.mockImplementation((_id: string, path: string) => Promise.resolve(fileDiff(path, `new-${path}`)));
   apiMock.gitShow.mockImplementation((_id: string, _rev: string, path: string) =>
     Promise.resolve(fileDiff(path, `new-${path}`)),
@@ -56,7 +58,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("GitFullscreenDiff", () => {
+describe("GitDiffStage", () => {
   it("requests each file's diff separately and shows only that file", async () => {
     renderViewer();
 
@@ -139,9 +141,93 @@ describe("GitFullscreenDiff", () => {
     await waitFor(() => expect(screen.getByText("3 / 3")).toBeTruthy());
   });
 
+  it("re-centres whenever the host picks a file, even the one already open", async () => {
+    const viewerProps: Partial<Parameters<typeof GitDiffStage>[0]> = {
+      sessionId: "s1",
+      scope: { mode: "working" },
+      initialPath: "src/a.ts",
+      jumpToken: 0,
+      onClose: () => {},
+    };
+    const files = SMALL.map((path) => ({ path, badge: "M" }));
+    const { rerender } = render(
+      <I18nProvider>
+        <GitDiffStage {...viewerProps} files={files} />
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeTruthy());
+
+    rerender(
+      <I18nProvider>
+        <GitDiffStage {...viewerProps} files={files} initialPath="assets/logo.png" jumpToken={1} />
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeTruthy());
+
+    // Same file again: the pick is a request to go back to its top, not a no-op.
+    rerender(
+      <I18nProvider>
+        <GitDiffStage {...viewerProps} files={files} initialPath="assets/logo.png" jumpToken={2} />
+      </I18nProvider>,
+    );
+    await waitFor(() =>
+      expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalledWith({
+        block: "start",
+        behavior: "auto",
+      }),
+    );
+    expect(screen.getByText("3 / 3")).toBeTruthy();
+  });
+
+  it("hands the file sheet to its host when the host is narrow", async () => {
+    renderViewer(SMALL, { compact: true });
+
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeTruthy());
+    // The host's navigator is the picker there, so the stage keeps only the diff.
+    expect(screen.queryByRole("button", { name: "Изменённые файлы" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Следующий файл" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Назад" })).toBeTruthy();
+    // ...and the reading controls, which are the stage's own, stay in reach.
+    expect(screen.getByRole("button", { name: "Список" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Перенос длинных строк" })).toBeTruthy();
+  });
+
+  it("offers the full view and reports its state back", async () => {
+    const user = userEvent.setup();
+    const onToggleExpand = vi.fn();
+    const view = renderViewer(SMALL, { onToggleExpand });
+
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeTruthy());
+    const open = screen.getByRole("button", { name: "Diff на весь экран" });
+    expect(open.getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(open);
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+
+    // The host flips the flag: the same control is now the way out, and the
+    // host — not the stage — owns dismissal there.
+    view.rerender(
+      <I18nProvider>
+        <GitDiffStage
+          sessionId="s1"
+          scope={{ mode: "working" }}
+          files={SMALL.map((path) => ({ path, badge: "M" }))}
+          initialPath={null}
+          expanded
+          onToggleExpand={onToggleExpand}
+        />
+      </I18nProvider>,
+    );
+
+    const exit = screen.getByRole("button", { name: "Закрыть полноэкранный diff" });
+    expect(exit.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByRole("button", { name: "Diff на весь экран" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Назад" })).toBeNull();
+  });
+
   it("keeps the reader's file when the file list is refreshed", async () => {
     const user = userEvent.setup();
-    const viewerProps: Partial<Parameters<typeof GitFullscreenDiff>[0]> = {
+    const viewerProps: Partial<Parameters<typeof GitDiffStage>[0]> = {
       sessionId: "s1",
       scope: { mode: "working" },
       initialPath: "src/a.ts",
@@ -149,7 +235,7 @@ describe("GitFullscreenDiff", () => {
     };
     const { rerender } = render(
       <I18nProvider>
-        <GitFullscreenDiff {...viewerProps} files={SMALL.map((path) => ({ path, badge: "M" }))} />
+        <GitDiffStage {...viewerProps} files={SMALL.map((path) => ({ path, badge: "M" }))} />
       </I18nProvider>,
     );
 
@@ -162,7 +248,7 @@ describe("GitFullscreenDiff", () => {
     // reopen on the file being read, not on the panel's selection.
     rerender(
       <I18nProvider>
-        <GitFullscreenDiff
+        <GitDiffStage
           {...viewerProps}
           files={[...SMALL, "src/c.ts"].map((path) => ({ path, badge: "M" }))}
         />
@@ -172,7 +258,32 @@ describe("GitFullscreenDiff", () => {
     await waitFor(() => expect(screen.getByText("3 / 4")).toBeTruthy());
   });
 
-  it("switches the diff between unified and split from the top bar", async () => {
+  it("keeps the file header to identity and the reading controls in the bottom bar", async () => {
+    renderViewer(SMALL, { onToggleExpand: vi.fn() });
+
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeTruthy());
+    const topBar = screen.getByRole("button", { name: "Назад" }).closest("header");
+    const bottomBar = screen.getByRole("button", { name: "Следующий файл" }).closest("nav");
+    // The header names the file being read; everything the reader touches sits
+    // in the bar under it, next to the file stepper.
+    expect(topBar?.textContent).toContain("Изменения");
+    expect(topBar?.textContent).toContain("1 / 3");
+    expect(bottomBar).toBeTruthy();
+    for (const name of [
+      "Список",
+      "Две колонки",
+      "Все файлы",
+      "Один файл",
+      "Перенос длинных строк",
+      "Diff на весь экран",
+    ]) {
+      const control = screen.getByRole("button", { name });
+      expect(bottomBar?.contains(control)).toBe(true);
+      expect(topBar?.contains(control)).toBe(false);
+    }
+  });
+
+  it("switches the diff between unified and split", async () => {
     const user = userEvent.setup();
     renderViewer();
 
@@ -199,7 +310,30 @@ describe("GitFullscreenDiff", () => {
     const user = userEvent.setup();
     const { onClose } = renderViewer();
 
-    await user.click(screen.getByRole("button", { name: "Закрыть полноэкранный diff" }));
+    await user.click(screen.getByRole("button", { name: "Назад" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows one file per screen and pages through the diff in the single-file layout", async () => {
+    const user = userEvent.setup();
+    renderViewer();
+
+    await waitFor(() => expect(fileBlock("src/a.ts")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Один файл" }));
+
+    // Only the file on screen is mounted; the rest of the changeset is gone.
+    await waitFor(() => expect(fileBlock("src/b.ts")).toBeNull());
+    expect(fileBlock("src/a.ts")?.textContent).toContain("new-src/a.ts");
+
+    await user.click(screen.getByRole("button", { name: "Следующий файл" }));
+    await waitFor(() => expect(fileBlock("src/b.ts")).toBeTruthy());
+    expect(fileBlock("src/a.ts")).toBeNull();
+    expect(screen.getByText("2 / 3")).toBeTruthy();
+    expect(localStorage.getItem("acpio.gitDiffLayout.v1")).toBe("single");
+
+    // Back to the stacked list: every file is mounted again.
+    await user.click(screen.getByRole("button", { name: "Все файлы" }));
+    await waitFor(() => expect(fileBlock("src/a.ts")).toBeTruthy());
+    expect(fileBlock("assets/logo.png")).toBeTruthy();
   });
 });

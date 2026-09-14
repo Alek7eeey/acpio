@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
+import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
 import c from "highlight.js/lib/languages/c";
@@ -201,8 +202,63 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function WrapButton() {
+  const t = useT();
+  const wrap = useWrapLines();
+  const label = t("common.wrapLines");
+  return (
+    <button
+      type="button"
+      className={`${styles.copyBtn}${wrap ? "" : ` ${styles.copyBtnOff}`}`}
+      aria-pressed={wrap}
+      title={label}
+      aria-label={label}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleWrapLines();
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M4 6h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        {wrap ? (
+          <>
+            <path
+              d="M4 12h11a3 3 0 0 1 0 6H8"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M11 15l-3 3 3 3"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        ) : (
+          <>
+            <path d="M4 12h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            <path
+              d="M17 9l3 3-3 3"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path d="M4 18h16" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          </>
+        )}
+      </svg>
+    </button>
+  );
+}
+
 function CodeBlock({ language, code }: { language?: string; code: string }) {
   const t = useT();
+  const wrap = useWrapLines();
   const label = languageLabel(language) ?? t("common.code");
   const highlighted = useMemo(() => highlightCode(code, language), [code, language]);
 
@@ -210,9 +266,12 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
     <div className={styles.codeBlock}>
       <div className={styles.codeToolbar}>
         <span className={styles.codeLang}>{label}</span>
-        <CopyButton text={code} />
+        <div className={styles.codeActions}>
+          <WrapButton />
+          <CopyButton text={code} />
+        </div>
       </div>
-      <pre className={styles.codePre}>
+      <pre className={`${styles.codePre}${wrap ? "" : ` ${styles.codePreNoWrap}`}`}>
         {highlighted ? (
           <code
             className={`hljs${language ? ` language-${normalizeLang(language)}` : ""}`}

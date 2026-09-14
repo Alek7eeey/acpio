@@ -139,6 +139,16 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
 }
 
 /**
+ * Working directory of a session. Routes that only need the folder (every git
+ * call does) must not go through `getSessionDetail`: that reads every message
+ * and message part, which costs ~100 ms on a long chat.
+ */
+export async function getSessionCwd(id: string): Promise<string | null> {
+  const rows = await db.select({ cwd: sessions.cwd }).from(sessions).where(eq(sessions.id, id)).limit(1);
+  return rows[0]?.cwd ?? null;
+}
+
+/**
  * Canonical working-directory form: forward slashes, no trailing separator.
  * `E:\proj` and `E:/proj/` are the same folder — the chat tree must not
  * split them into two groups, so every write stores one canonical form.
@@ -527,7 +537,25 @@ export async function reconcileStaleSessions(): Promise<{
   let fixedSessions = 0;
   let fixedParts = 0;
 
+  // A session parked on an unanswered question is NOT stale: the agent asked
+  // and is waiting for the human, and the question part is the durable,
+  // answerable state (answering it after this restart re-drives the turn).
+  // Only a turn that would spin forever without its runtime is reset.
+  const parkedOnQuestion = new Set<string>();
+  if (stale.length) {
+    const questionParts = await db
+      .select({ sessionId: messages.sessionId, payload: messageParts.payload })
+      .from(messageParts)
+      .innerJoin(messages, eq(messageParts.messageId, messages.id))
+      .where(eq(messageParts.type, "question"));
+    for (const row of questionParts) {
+      const payload = row.payload as { pending?: unknown } | null;
+      if (payload?.pending === true) parkedOnQuestion.add(row.sessionId);
+    }
+  }
+
   for (const row of stale) {
+    if (parkedOnQuestion.has(row.id)) continue;
     await updateSession(row.id, { status: "idle" });
     fixedSessions++;
   }

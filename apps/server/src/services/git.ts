@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
@@ -9,11 +9,19 @@ import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFile
  */
 export const MAX_GIT_PATHS = 2000;
 
-function runGit(
+/**
+ * One `git` invocation. Asynchronous on purpose: the server used to run these
+ * with `spawnSync`, so a panel loading one diff per file froze every other
+ * request (and each other) until the last child process exited.
+ *
+ * A non-zero exit is a normal answer here — `git diff --no-index` reports
+ * "files differ" that way — so it is folded into the result instead of thrown.
+ */
+async function runGit(
   cwd: string,
   args: string[],
   opts?: { network?: boolean },
-): { ok: boolean; out: string; err: string } {
+): Promise<{ ok: boolean; out: string; err: string }> {
   const env = opts?.network
     ? {
         ...process.env,
@@ -21,17 +29,24 @@ function runGit(
         GIT_TERMINAL_PROMPT: "1",
       }
     : process.env;
-  const result = spawnSync("git", args, {
-    cwd: path.resolve(cwd),
-    encoding: "utf8",
-    env,
-    windowsHide: opts?.network ? process.platform !== "win32" : true,
-    maxBuffer: 16 * 1024 * 1024,
+  const result = await new Promise<{ ok: boolean; stdout: string; stderr: string }>((resolve) => {
+    execFile(
+      "git",
+      args,
+      {
+        cwd: path.resolve(cwd),
+        encoding: "utf8",
+        env,
+        windowsHide: opts?.network ? process.platform !== "win32" : true,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => resolve({ ok: !error, stdout, stderr }),
+    );
   });
   return {
-    ok: result.status === 0,
-    out: (result.stdout ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd(),
-    err: (result.stderr ?? "").trim(),
+    ok: result.ok,
+    out: result.stdout.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd(),
+    err: result.stderr.trim(),
   };
 }
 
@@ -64,21 +79,55 @@ function sleepMs(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-function resolveGitRoot(cwd: string): string | null {
-  const inside = runGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
-  if (!inside.ok || inside.out !== "true") return null;
-  const root = runGit(cwd, ["rev-parse", "--show-toplevel"]);
-  if (!root.ok) return null;
-  return root.out.replace(/\\/g, "/");
+/**
+ * Repo root per working directory. Every git call here starts by resolving it,
+ * which costs two `git` processes (~60 ms on Windows) — so the answer is
+ * memoized, in-flight resolution included: parallel requests for one folder
+ * share a single pair of processes.
+ *
+ * A root never moves, but "not a repository" is only remembered briefly:
+ * `git init` can run inside a session while the panel is open.
+ */
+const NOT_A_REPO_TTL_MS = 10_000;
+
+interface GitRootEntry {
+  root: Promise<string | null>;
+  at: number;
+  /** Set once the promise settles with `null`, i.e. the folder is not a repo. */
+  missing: boolean;
+}
+
+const gitRoots = new Map<string, GitRootEntry>();
+
+function resolveGitRoot(cwd: string): Promise<string | null> {
+  const key = path.resolve(cwd);
+  const cached = gitRoots.get(key);
+  if (cached && (!cached.missing || Date.now() - cached.at < NOT_A_REPO_TTL_MS)) return cached.root;
+  const entry: GitRootEntry = {
+    at: Date.now(),
+    missing: false,
+    root: (async () => {
+      const inside = await runGit(key, ["rev-parse", "--is-inside-work-tree"]);
+      if (!inside.ok || inside.out !== "true") return null;
+      const toplevel = await runGit(key, ["rev-parse", "--show-toplevel"]);
+      return toplevel.ok ? toplevel.out.replace(/\\/g, "/") : null;
+    })(),
+  };
+  gitRoots.set(key, entry);
+  // Only tags the entry; a rejection stays the caller's to handle.
+  void entry.root.then((root) => {
+    entry.missing = root === null;
+  }, () => {});
+  return entry.root;
 }
 
 /** Upstream to compare against: configured @{upstream}, else origin/<branch>. */
-export function resolveGitUpstream(root: string, branch: string): string | null {
-  const configured = runGit(root, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+export async function resolveGitUpstream(root: string, branch: string): Promise<string | null> {
+  const configured = await runGit(root, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
   if (configured.ok && configured.out.trim()) return configured.out.trim();
   const name = branch.trim();
   if (!name) return null;
-  const origin = runGit(root, ["rev-parse", "--verify", `refs/remotes/origin/${name}`]);
+  const origin = await runGit(root, ["rev-parse", "--verify", `refs/remotes/origin/${name}`]);
   if (origin.ok) return `origin/${name}`;
   return null;
 }
@@ -94,10 +143,10 @@ export function parseLeftRightCount(output: string): { behind: number; ahead: nu
   };
 }
 
-function gitAheadBehind(root: string, branch: string): { ahead: number; behind: number } {
-  const upstream = resolveGitUpstream(root, branch);
+async function gitAheadBehind(root: string, branch: string): Promise<{ ahead: number; behind: number }> {
+  const upstream = await resolveGitUpstream(root, branch);
   if (!upstream) return { ahead: 0, behind: 0 };
-  const counts = runGit(root, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`]);
+  const counts = await runGit(root, ["rev-list", "--left-right", "--count", `${upstream}...HEAD`]);
   if (!counts.ok) return { ahead: 0, behind: 0 };
   return parseLeftRightCount(counts.out);
 }
@@ -125,10 +174,10 @@ function parsePrettyLog(output: string): GitCommitDto[] {
   return commits;
 }
 
-function getOutgoingCommits(root: string, branch: string, limit = 50): GitCommitDto[] {
-  const upstream = resolveGitUpstream(root, branch);
+async function getOutgoingCommits(root: string, branch: string, limit = 50): Promise<GitCommitDto[]> {
+  const upstream = await resolveGitUpstream(root, branch);
   if (!upstream) return [];
-  const raw = runGit(root, [
+  const raw = await runGit(root, [
     "log",
     `${upstream}..HEAD`,
     `--max-count=${Math.min(Math.max(limit, 1), 100)}`,
@@ -280,24 +329,37 @@ function parsePorcelain(output: string, numstat: Map<string, { additions: number
   return files;
 }
 
-function trackedLineTotals(root: string): { additions: number; deletions: number } {
-  const staged = parseShortstat(runGit(root, ["diff", "--cached", "--shortstat"]).out);
-  const unstaged = parseShortstat(runGit(root, ["diff", "--shortstat"]).out);
+/**
+ * Line totals for tracked changes. `diff HEAD` covers staged and unstaged in a
+ * single process; a fresh `git init` has no HEAD to diff against, so that case
+ * falls back to the two separate diffs.
+ */
+async function trackedLineTotals(root: string): Promise<{ additions: number; deletions: number }> {
+  const vsHead = await runGit(root, ["diff", "--shortstat", "HEAD"]);
+  if (vsHead.ok) return parseShortstat(vsHead.out);
+  const staged = parseShortstat((await runGit(root, ["diff", "--cached", "--shortstat"])).out);
+  const unstaged = parseShortstat((await runGit(root, ["diff", "--shortstat"])).out);
   return {
     additions: staged.additions + unstaged.additions,
     deletions: staged.deletions + unstaged.deletions,
   };
 }
 
-function buildStatusSummary(root: string): GitStatusDto {
-  const branch = runGit(root, ["branch", "--show-current"]);
-  const porcelain = runGit(root, ["status", "--porcelain=v1", "-uall"]);
+async function buildStatusSummary(root: string): Promise<GitStatusDto> {
+  // Four independent reads: run them together, then the slowest one decides.
+  const branchCall = runGit(root, ["branch", "--show-current"]);
+  const [branch, porcelain, totals, aheadBehind] = await Promise.all([
+    branchCall,
+    runGit(root, ["status", "--porcelain=v1", "-uall"]),
+    trackedLineTotals(root),
+    branchCall.then((result) => gitAheadBehind(root, result.ok ? result.out : "")),
+  ]);
   const files = parsePorcelain(porcelain.out, new Map());
   const conflict = files.some(isConflictFile);
   const stagedCount = files.filter((f) => f.staged).length;
   const unstagedCount = files.filter((f) => f.unstaged).length;
-  const { additions, deletions } = trackedLineTotals(root);
-  const { ahead, behind } = gitAheadBehind(root, branch.ok ? branch.out : "");
+  const { additions, deletions } = totals;
+  const { ahead, behind } = aheadBehind;
 
   return {
     repo: true,
@@ -317,23 +379,36 @@ function buildStatusSummary(root: string): GitStatusDto {
   };
 }
 
-function buildStatus(root: string): GitStatusDto {
-  const branch = runGit(root, ["branch", "--show-current"]);
-  const branches = runGit(root, ["branch", "--format=%(refname:short)"]);
-  const porcelain = runGit(root, ["status", "--porcelain=v1", "-uall"]);
+async function buildStatus(root: string): Promise<GitStatusDto> {
+  // Independent reads, one wave: the branch list, the staged and worktree
+  // numstats, the stash, the ahead/behind probe and the HEAD totals.
+  const branchCall = runGit(root, ["branch", "--show-current"]);
+  const [branch, branches, porcelain, cachedNumstat, worktreeNumstat, stashList, aheadBehind, totals] =
+    await Promise.all([
+      branchCall,
+      runGit(root, ["branch", "--format=%(refname:short)"]),
+      runGit(root, ["status", "--porcelain=v1", "-uall"]),
+      runGit(root, ["diff", "--cached", "--numstat"]),
+      runGit(root, ["diff", "--numstat"]),
+      runGit(root, ["stash", "list"]),
+      branchCall.then((result) => gitAheadBehind(root, result.ok ? result.out : "")),
+      trackedLineTotals(root),
+    ]);
 
   const numstat = new Map<string, { additions: number; deletions: number }>();
-  mergeNumstat(numstat, parseNumstat(runGit(root, ["diff", "--cached", "--numstat"]).out));
-  mergeNumstat(numstat, parseNumstat(runGit(root, ["diff", "--numstat"]).out));
+  mergeNumstat(numstat, parseNumstat(cachedNumstat.out));
+  mergeNumstat(numstat, parseNumstat(worktreeNumstat.out));
 
   const files = parsePorcelain(porcelain.out, numstat);
   const conflict = files.some(isConflictFile);
   const stagedCount = files.filter((f) => f.staged).length;
   const unstagedCount = files.filter((f) => f.unstaged).length;
-  const { additions, deletions } = trackedLineTotals(root);
-  const stashList = runGit(root, ["stash", "list"]);
+  // Totals come from `diff HEAD`, not from the per-file numstats: a line that is
+  // staged and then edited again counts once there and twice in the two maps,
+  // and the composer chip reads the same total off the summary shape.
+  const { additions, deletions } = totals;
   const stashCount = stashList.ok ? stashList.out.split("\n").filter(Boolean).length : 0;
-  const { ahead, behind } = gitAheadBehind(root, branch.ok ? branch.out : "");
+  const { ahead, behind } = aheadBehind;
 
   return {
     repo: true,
@@ -355,7 +430,7 @@ function buildStatus(root: string): GitStatusDto {
   };
 }
 
-export function getGitStatus(cwd: string, opts?: { summary?: boolean }): GitStatusDto {
+export async function getGitStatus(cwd: string, opts?: { summary?: boolean }): Promise<GitStatusDto> {
   const empty: GitStatusDto = {
     repo: false,
     root: "",
@@ -372,7 +447,7 @@ export function getGitStatus(cwd: string, opts?: { summary?: boolean }): GitStat
     aheadCount: 0,
     behindCount: 0,
   };
-  const root = resolveGitRoot(cwd);
+  const root = await resolveGitRoot(cwd);
   if (!root) return empty;
   return opts?.summary ? buildStatusSummary(root) : buildStatus(root);
 }
@@ -381,49 +456,52 @@ function nullDevice() {
   return process.platform === "win32" ? "NUL" : "/dev/null";
 }
 
-export function getGitDiff(cwd: string, filePath?: string): string {
-  const root = resolveGitRoot(cwd);
+export async function getGitDiff(cwd: string, filePath?: string): Promise<string> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return "";
 
   if (filePath?.trim()) {
     const rel = filePath.trim();
-    const tracked = runGit(root, ["ls-files", "--error-unmatch", "--", rel]);
-    if (tracked.ok) {
-      return runGit(root, ["diff", "--no-color", "HEAD", "--", rel]).out;
-    }
-    return runGit(root, ["diff", "--no-color", "--no-index", nullDevice(), rel]).out;
+    // One process for the files the panel lists: a changed file is tracked and
+    // its worktree-vs-HEAD diff is non-empty. An empty diff means the file is
+    // clean (nothing to show) or untracked (diff against the null device).
+    const changed = await runGit(root, ["diff", "--no-color", "HEAD", "--", rel]);
+    if (changed.out) return changed.out;
+    if ((await runGit(root, ["ls-files", "--error-unmatch", "--", rel])).ok) return "";
+    return (await runGit(root, ["diff", "--no-color", "--no-index", nullDevice(), rel])).out;
   }
 
   const chunks: string[] = [];
-  const head = runGit(root, ["diff", "--no-color", "HEAD"]);
+  const head = await runGit(root, ["diff", "--no-color", "HEAD"]);
   if (head.out) chunks.push(head.out);
-  for (const rel of runGit(root, ["ls-files", "--others", "--exclude-standard"]).out.split("\n").filter(Boolean)) {
-    const diff = runGit(root, ["diff", "--no-color", "--no-index", nullDevice(), rel]);
+  const others = await runGit(root, ["ls-files", "--others", "--exclude-standard"]);
+  for (const rel of others.out.split("\n").filter(Boolean)) {
+    const diff = await runGit(root, ["diff", "--no-color", "--no-index", nullDevice(), rel]);
     if (diff.out) chunks.push(diff.out);
   }
   return chunks.join("\n\n");
 }
 
-export function checkoutGitBranch(
+export async function checkoutGitBranch(
   cwd: string,
   branch: string,
   opts?: { create?: boolean },
-): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateBranchName(branch);
   if (invalid) return { ok: false, error: invalid };
   const args = opts?.create ? ["checkout", "-b", branch.trim()] : ["checkout", branch.trim()];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Checkout failed" };
 }
 
-export function checkoutGitRevision(cwd: string, rev: string): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+export async function checkoutGitRevision(cwd: string, rev: string): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const name = validateRevision(rev);
   if (!name) return { ok: false, error: "Invalid revision" };
-  const result = runGit(root, ["checkout", "--detach", name]);
+  const result = await runGit(root, ["checkout", "--detach", name]);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Checkout failed" };
 }
 
@@ -457,10 +535,12 @@ function normalizeGitPaths(paths: string[]) {
  * everything below it, so folder-level actions hand git the folder path instead
  * of enumerating files — the panel lists a large untracked tree one row per file.
  */
-function classifyGitPaths(root: string, requested: string[]) {
-  const entries = parsePorcelain(runGit(root, ["status", "--porcelain=v1", "-uall"]).out, new Map()).map(
-    (file) => ({ path: file.path, untracked: file.index === "?" && file.worktree === "?" }),
-  );
+async function classifyGitPaths(root: string, requested: string[]) {
+  const porcelain = await runGit(root, ["status", "--porcelain=v1", "-uall"]);
+  const entries = parsePorcelain(porcelain.out, new Map()).map((file) => ({
+    path: file.path,
+    untracked: file.index === "?" && file.worktree === "?",
+  }));
   const covers = (rel: string, entry: { path: string }) => entry.path === rel || entry.path.startsWith(`${rel}/`);
   return {
     changed: requested.filter((rel) => entries.some((entry) => !entry.untracked && covers(rel, entry))),
@@ -468,39 +548,49 @@ function classifyGitPaths(root: string, requested: string[]) {
   };
 }
 
-export function setGitStage(cwd: string, paths: string[], staged: boolean): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+export async function setGitStage(
+  cwd: string,
+  paths: string[],
+  staged: boolean,
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid };
   const args = staged ? ["add", "--", ...paths] : ["reset", "HEAD", "--", ...paths];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Stage failed" };
 }
 
-export function discardGitChanges(cwd: string, paths: string[]): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+export async function discardGitChanges(
+  cwd: string,
+  paths: string[],
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid };
 
   const requested = normalizeGitPaths(paths);
-  const { changed, untracked } = classifyGitPaths(root, requested);
+  const { changed, untracked } = await classifyGitPaths(root, requested);
 
   if (changed.length > 0) {
-    const result = runGit(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...changed]);
+    const result = await runGit(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", ...changed]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Discard failed" };
   }
   if (untracked.length > 0) {
     // `-d` lets clean take a folder (and prune the directories it empties).
-    const result = runGit(root, ["clean", "-f", "-d", "--", ...untracked]);
+    const result = await runGit(root, ["clean", "-f", "-d", "--", ...untracked]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Discard failed" };
   }
   return { ok: true };
 }
 
-export function deleteGitFiles(cwd: string, paths: string[]): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+export async function deleteGitFiles(
+  cwd: string,
+  paths: string[],
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid };
@@ -508,12 +598,15 @@ export function deleteGitFiles(cwd: string, paths: string[]): { ok: boolean; err
   const requested = normalizeGitPaths(paths);
   // `git rm -r` drops every tracked file under the path; untracked leftovers and
   // the directories it emptied go through clean.
-  const tracked = requested.filter((rel) => runGit(root, ["ls-files", "--error-unmatch", "--", rel]).ok);
+  const tracked: string[] = [];
+  for (const rel of requested) {
+    if ((await runGit(root, ["ls-files", "--error-unmatch", "--", rel])).ok) tracked.push(rel);
+  }
   if (tracked.length > 0) {
-    const result = runGit(root, ["rm", "-f", "-r", "--", ...tracked]);
+    const result = await runGit(root, ["rm", "-f", "-r", "--", ...tracked]);
     if (!result.ok) return { ok: false, error: result.err || result.out || "Delete failed" };
   }
-  const cleanResult = runGit(root, ["clean", "-f", "-d", "--", ...requested]);
+  const cleanResult = await runGit(root, ["clean", "-f", "-d", "--", ...requested]);
   if (!cleanResult.ok) return { ok: false, error: cleanResult.err || cleanResult.out || "Delete failed" };
   return { ok: true };
 }
@@ -554,11 +647,11 @@ export function appendGitIgnoreEntries(
 }
 
 /** Add repo-relative paths (files or directories) to the repository's root `.gitignore`. */
-export function addGitIgnoreEntries(
+export async function addGitIgnoreEntries(
   cwd: string,
   paths: string[],
-): { ok: boolean; error?: string; added: string[] } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; error?: string; added: string[] }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository", added: [] };
   const invalid = validateGitPaths(paths);
   if (invalid) return { ok: false, error: invalid, added: [] };
@@ -591,20 +684,20 @@ export function addGitIgnoreEntries(
   return { ok: true, added };
 }
 
-export function getGitBlame(cwd: string, filePath: string): string {
-  const root = resolveGitRoot(cwd);
+export async function getGitBlame(cwd: string, filePath: string): Promise<string> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return "";
   const rel = filePath.trim().replace(/\\/g, "/");
   if (!rel || rel.includes("..") || /[\0\r\n]/.test(rel)) return "";
 
-  const tracked = runGit(root, ["ls-files", "--error-unmatch", "--", rel]);
+  const tracked = await runGit(root, ["ls-files", "--error-unmatch", "--", rel]);
   if (!tracked.ok) return "";
 
   const exists = fs.existsSync(path.join(root, rel));
   const args = exists
     ? ["blame", "--date=short", "--", rel]
     : ["blame", "--date=short", "HEAD", "--", rel];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.ok ? result.out : result.err || "";
 }
 
@@ -619,22 +712,22 @@ function readWorktreeLines(root: string, rel: string): string[] | null {
   }
 }
 
-function readRefLines(root: string, rel: string, ref: string): string[] | null {
-  const result = runGit(root, ["show", `${ref}:${rel}`]);
+async function readRefLines(root: string, rel: string, ref: string): Promise<string[] | null> {
+  const result = await runGit(root, ["show", `${ref}:${rel}`]);
   if (!result.ok) return null;
   if (!result.out) return [];
   return result.out.split("\n");
 }
 
-export function getGitFileLines(
+export async function getGitFileLines(
   cwd: string,
   filePath: string,
   startLine: number,
   endLine: number,
   side: "old" | "new",
   source: { mode: "working" } | { mode: "commit"; rev: string },
-): { lines: string[]; startLine: number; endLine: number; totalLines: number } | null {
-  const root = resolveGitRoot(cwd);
+): Promise<{ lines: string[]; startLine: number; endLine: number; totalLines: number } | null> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return null;
   const rel = filePath.trim().replace(/\\/g, "/");
   if (!rel || rel.includes("..") || /[\0\r\n]/.test(rel)) return null;
@@ -644,15 +737,15 @@ export function getGitFileLines(
 
   let allLines: string[] | null = null;
   if (source.mode === "working") {
-    allLines = side === "new" ? readWorktreeLines(root, rel) : readRefLines(root, rel, "HEAD");
+    allLines = side === "new" ? readWorktreeLines(root, rel) : await readRefLines(root, rel, "HEAD");
   } else {
     const rev = source.rev.trim();
     if (!rev || rev.includes("..") || /[\0\r\n]/.test(rev)) return null;
-    if (side === "new") allLines = readRefLines(root, rel, rev);
+    if (side === "new") allLines = await readRefLines(root, rel, rev);
     else {
-      const parent = runGit(root, ["rev-parse", `${rev}^`]);
+      const parent = await runGit(root, ["rev-parse", `${rev}^`]);
       if (!parent.ok || !parent.out) return { lines: [], startLine: start, endLine: start - 1, totalLines: 0 };
-      allLines = readRefLines(root, rel, parent.out);
+      allLines = await readRefLines(root, rel, parent.out);
     }
   }
 
@@ -666,12 +759,12 @@ export function getGitFileLines(
   };
 }
 
-export function commitGit(cwd: string, message: string): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+export async function commitGit(cwd: string, message: string): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const trimmed = message.trim();
   if (!trimmed) return { ok: false, error: "Commit message required" };
-  const result = runGit(root, ["commit", "-m", trimmed]);
+  const result = await runGit(root, ["commit", "-m", trimmed]);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Commit failed" };
 }
 
@@ -679,48 +772,48 @@ export async function syncGit(
   cwd: string,
   action: "fetch" | "pull" | "push",
 ): Promise<{ ok: boolean; conflict?: boolean; output?: string; error?: string }> {
-  const root = resolveGitRoot(cwd);
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const args = action === "fetch" ? ["fetch"] : action === "pull" ? ["pull", "--no-rebase"] : ["push"];
-  let result = runGit(root, args, { network: true });
+  let result = await runGit(root, args, { network: true });
   if (!result.ok && isGitAuthError(gitFailureMessage(result))) {
     await sleepMs(2000);
-    result = runGit(root, args, { network: true });
+    result = await runGit(root, args, { network: true });
   }
   if (
     !result.ok &&
     action === "push" &&
     isNoUpstreamError(gitFailureMessage(result)) &&
-    runGit(root, ["remote", "get-url", "origin"]).ok
+    (await runGit(root, ["remote", "get-url", "origin"])).ok
   ) {
-    result = runGit(root, ["push", "-u", "origin", "HEAD"], { network: true });
+    result = await runGit(root, ["push", "-u", "origin", "HEAD"], { network: true });
   }
   if (result.ok) {
     return { ok: true, output: result.out || result.err };
   }
   const message = gitFailureMessage(result) || `${action} failed`;
-  if (action === "pull" && buildStatus(root).conflict) {
+  if (action === "pull" && (await buildStatus(root)).conflict) {
     return { ok: false, conflict: true, output: message, error: message };
   }
   return { ok: false, error: message };
 }
 
-export function stashGit(
+export async function stashGit(
   cwd: string,
   action: "push" | "pop",
   message?: string,
-): { ok: boolean; output?: string; error?: string } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   if (action === "pop") {
-    const result = runGit(root, ["stash", "pop"]);
+    const result = await runGit(root, ["stash", "pop"]);
     return result.ok
       ? { ok: true, output: result.out || result.err }
       : { ok: false, error: result.err || result.out || "Stash pop failed" };
   }
   const trimmed = message?.trim();
   const args = trimmed ? ["stash", "push", "-m", trimmed] : ["stash", "push", "-m", "WIP"];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.ok
     ? { ok: true, output: result.out || result.err }
     : { ok: false, error: result.err || result.out || "Stash failed" };
@@ -732,17 +825,17 @@ function validateRevision(rev: string): string | null {
   return name;
 }
 
-export function applyGitCommitAction(
+export async function applyGitCommitAction(
   cwd: string,
   action: "revert" | "cherry-pick",
   rev: string,
-): { ok: boolean; output?: string; error?: string } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; output?: string; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const name = validateRevision(rev);
   if (!name) return { ok: false, error: "Invalid revision" };
   const args = action === "revert" ? ["revert", "--no-edit", name] : ["cherry-pick", name];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.ok
     ? { ok: true, output: result.out || result.err }
     : { ok: false, error: result.err || result.out || `${action} failed` };
@@ -757,33 +850,33 @@ function validateTagName(name: string): string | null {
   return null;
 }
 
-export function createGitBranchAt(
+export async function createGitBranchAt(
   cwd: string,
   branch: string,
   rev: string,
-): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateBranchName(branch);
   if (invalid) return { ok: false, error: invalid };
   const name = validateRevision(rev);
   if (!name) return { ok: false, error: "Invalid revision" };
-  const result = runGit(root, ["branch", branch.trim(), name]);
+  const result = await runGit(root, ["branch", branch.trim(), name]);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Create branch failed" };
 }
 
-export function createGitTagAt(
+export async function createGitTagAt(
   cwd: string,
   tag: string,
   rev: string,
-): { ok: boolean; error?: string } {
-  const root = resolveGitRoot(cwd);
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateTagName(tag);
   if (invalid) return { ok: false, error: invalid };
   const name = validateRevision(rev);
   if (!name) return { ok: false, error: "Invalid revision" };
-  const result = runGit(root, ["tag", tag.trim(), name]);
+  const result = await runGit(root, ["tag", tag.trim(), name]);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Create tag failed" };
 }
 
@@ -801,22 +894,34 @@ function dedupeCommitRefs(refs: string[]): string[] {
   });
 }
 
-export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[]; outgoing: GitCommitDto[] } {
-  const root = resolveGitRoot(cwd);
+export async function getGitLog(
+  cwd: string,
+  limit = 60,
+): Promise<{ commits: GitCommitDto[]; outgoing: GitCommitDto[] }> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return { commits: [], outgoing: [] };
 
-  const head = runGit(root, ["rev-parse", "HEAD"]);
+  const head = await runGit(root, ["rev-parse", "HEAD"]);
   if (!head.ok) return { commits: [], outgoing: [] };
-  const branch = runGit(root, ["branch", "--show-current"]);
-  const outgoing = getOutgoingCommits(root, branch.ok ? branch.out : "");
+  // Three independent reads; the outgoing probe only needs the branch name.
+  const branchCall = runGit(root, ["branch", "--show-current"]);
+  const [refsRaw, raw, outgoing] = await Promise.all([
+    runGit(root, [
+      "for-each-ref",
+      "--format=%(objectname)\t%(refname:short)",
+      "refs/heads",
+      "refs/remotes",
+    ]),
+    runGit(root, [
+      "log",
+      `--max-count=${Math.min(Math.max(limit, 1), 200)}`,
+      "--date=iso-strict",
+      "--pretty=format:%H%x09%P%x09%s%x09%an%x09%ai",
+    ]),
+    branchCall.then((result) => getOutgoingCommits(root, result.ok ? result.out : "")),
+  ]);
 
   const refsByHash = new Map<string, string[]>();
-  const refsRaw = runGit(root, [
-    "for-each-ref",
-    "--format=%(objectname)\t%(refname:short)",
-    "refs/heads",
-    "refs/remotes",
-  ]);
   if (refsRaw.out) {
     for (const line of refsRaw.out.split("\n")) {
       if (!line.trim()) continue;
@@ -831,12 +936,6 @@ export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[]; o
     }
   }
 
-  const raw = runGit(root, [
-    "log",
-    `--max-count=${Math.min(Math.max(limit, 1), 200)}`,
-    "--date=iso-strict",
-    "--pretty=format:%H%x09%P%x09%s%x09%an%x09%ai",
-  ]);
   if (!raw.out) return { commits: [], outgoing };
 
   type Node = {
@@ -905,8 +1004,8 @@ export function getGitLog(cwd: string, limit = 60): { commits: GitCommitDto[]; o
   return { commits, outgoing };
 }
 
-export function getGitShow(cwd: string, rev: string, filePath?: string): string {
-  const root = resolveGitRoot(cwd);
+export async function getGitShow(cwd: string, rev: string, filePath?: string): Promise<string> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return "";
   const name = rev.trim();
   if (!name || name.includes("..") || /[\0\r\n]/.test(name)) return "";
@@ -915,7 +1014,7 @@ export function getGitShow(cwd: string, rev: string, filePath?: string): string 
   const args = path
     ? ["show", "--no-color", name, "--", path]
     : ["show", "--no-color", "--format=fuller", name];
-  const result = runGit(root, args);
+  const result = await runGit(root, args);
   return result.out || result.err;
 }
 
@@ -938,17 +1037,18 @@ function mapCommitFileStatus(code: string): GitCommitFileDto["status"] {
   }
 }
 
-export function getGitCommitDetail(cwd: string, rev: string): GitCommitDetailDto | null {
-  const root = resolveGitRoot(cwd);
+export async function getGitCommitDetail(cwd: string, rev: string): Promise<GitCommitDetailDto | null> {
+  const root = await resolveGitRoot(cwd);
   if (!root) return null;
   const name = rev.trim();
   if (!name || name.includes("..") || /[\0\r\n]/.test(name)) return null;
 
-  const header = runGit(root, [
-    "show",
-    "-s",
-    "--format=%H%x09%P%x09%s%x09%an%x09%ae%x09%ai",
-    name,
+  // Four independent reads of one commit, one wave.
+  const [header, bodyOut, numstatRaw, statusRaw] = await Promise.all([
+    runGit(root, ["show", "-s", "--format=%H%x09%P%x09%s%x09%an%x09%ae%x09%ai", name]),
+    runGit(root, ["show", "-s", "--format=%b", name]),
+    runGit(root, ["show", "--numstat", "--format=", name]),
+    runGit(root, ["show", "--name-status", "--format=", "-M", name]),
   ]);
   if (!header.ok || !header.out) return null;
   const parts = header.out.split("\t");
@@ -960,11 +1060,9 @@ export function getGitCommitDetail(cwd: string, rev: string): GitCommitDetailDto
   const author = parts[3] ?? "";
   const authorEmail = parts[4] ?? "";
   const date = parts[5] ?? "";
-  const bodyOut = runGit(root, ["show", "-s", "--format=%b", name]);
   const body = bodyOut.out ?? "";
 
-  const numstatMap = parseNumstat(runGit(root, ["show", "--numstat", "--format=", name]).out);
-  const statusRaw = runGit(root, ["show", "--name-status", "--format=", "-M", name]);
+  const numstatMap = parseNumstat(numstatRaw.out);
 
   const files: GitCommitFileDto[] = [];
   let additions = 0;

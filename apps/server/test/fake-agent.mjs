@@ -6,6 +6,10 @@
 //   prompt containing "SLOW-SILENT" → stays quiet then finishes (tests hard timeout)
 //   prompt starting with "PERMISSION:" → issues session/request_permission
 //                                  and waits for the client's decision
+//   prompt starting with "ELICIT:" → issues elicitation/create (form mode),
+//                                  waits, then echoes the answer back
+//   prompt starting with "ELICIT-DIE:" → issues elicitation/create, ends the
+//                                  turn, then exits(1) before any answer
 import readline from "node:readline";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -129,6 +133,62 @@ async function handle(method, params, id) {
       }
       if (text.includes("SLOW-SILENT")) {
         await sleep(250);
+        return { stopReason: "end_turn" };
+      }
+      if (text.startsWith("ELICIT-DIE:")) {
+        // Ask, complete the turn, then die before any answer arrives: the host
+        // must keep the question answerable across the agent's death.
+        const requestId = `elicit-die-${nextSession++}-${Date.now()}`;
+        write({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "elicitation/create",
+          params: {
+            sessionId: params.sessionId,
+            mode: "form",
+            message: text.slice("ELICIT-DIE:".length).trim(),
+            requestedSchema: {
+              type: "object",
+              properties: { answer: { type: "string", title: "Pick one", enum: ["red", "green"] } },
+              required: ["answer"],
+            },
+          },
+        });
+        setTimeout(() => process.exit(1), 150);
+        return { stopReason: "end_turn" };
+      }
+      if (text.startsWith("ELICIT:")) {
+        const requestId = `elicit-${nextSession++}-${Date.now()}`;
+        write({
+          jsonrpc: "2.0",
+          id: requestId,
+          method: "elicitation/create",
+          params: {
+            sessionId: params.sessionId,
+            mode: "form",
+            message: text.slice("ELICIT:".length).trim(),
+            requestedSchema: {
+              type: "object",
+              properties: {
+                answer: {
+                  type: "string",
+                  title: "Pick one",
+                  enum: ["red", "green"],
+                },
+              },
+              required: ["answer"],
+            },
+          },
+        });
+        const reply = await waitForResponse(requestId);
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "elicit-final",
+            content: { type: "text", text: `elicitation reply: ${JSON.stringify(reply)}` },
+          },
+        });
         return { stopReason: "end_turn" };
       }
       if (text.startsWith("PERMISSION:")) {

@@ -3,6 +3,14 @@ import { useLayoutEffect, useEffect, useMemo, useState, type RefObject } from "r
 /** Plan / console / git panels overlay the chat below this viewport width. */
 export const COMPACT_PANEL_LAYOUT_MAX = 1180;
 
+/**
+ * Phone layout: below this width the shell becomes the one-hand bottom sheet
+ * (AppShell's `max-width: 899px` block) — a header on top, a chat dock under it.
+ * Right-hand panels take the whole viewport there instead of docking into the
+ * slice the shell leaves them.
+ */
+export const PHONE_PANEL_LAYOUT_MAX = 899;
+
 /** Full-width panels on wide viewports when the session tree is collapsed. */
 export const WIDE_OVERLAY_PANEL_MIN_TREE_COLLAPSED = 1200;
 
@@ -118,7 +126,8 @@ export function isChatSplitAllowed(width = window.innerWidth) {
   return isSidePanelResizeAllowed(width);
 }
 
-export function useOverlayPanelLayout() {
+/** Current viewport width, re-read on every resize. */
+function useViewportWidth() {
   const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 0));
 
   useEffect(() => {
@@ -128,19 +137,16 @@ export function useOverlayPanelLayout() {
     return () => window.removeEventListener("resize", sync);
   }, []);
 
+  return width;
+}
+
+export function useOverlayPanelLayout() {
+  const width = useViewportWidth();
   return useMemo(() => isOverlayPanelLayout(width), [width]);
 }
 
 export function useChatSplitAllowed() {
-  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 0));
-
-  useEffect(() => {
-    const sync = () => setWidth(window.innerWidth);
-    sync();
-    window.addEventListener("resize", sync);
-    return () => window.removeEventListener("resize", sync);
-  }, []);
-
+  const width = useViewportWidth();
   return useMemo(() => isChatSplitAllowed(width), [width]);
 }
 
@@ -150,16 +156,18 @@ export function isNarrowPanelLayout(width = window.innerWidth) {
 }
 
 export function useNarrowPanelLayout() {
-  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 0));
-
-  useEffect(() => {
-    const sync = () => setWidth(window.innerWidth);
-    sync();
-    window.addEventListener("resize", sync);
-    return () => window.removeEventListener("resize", sync);
-  }, []);
-
+  const width = useViewportWidth();
   return useMemo(() => isNarrowPanelLayout(width), [width]);
+}
+
+/** True for the one-hand phone layout (see the media query in AppShell). */
+export function isPhonePanelLayout(width = window.innerWidth) {
+  return width <= PHONE_PANEL_LAYOUT_MAX;
+}
+
+export function usePhonePanelLayout() {
+  const width = useViewportWidth();
+  return useMemo(() => isPhonePanelLayout(width), [width]);
 }
 
 /** Alias for overlay layout (compact + wide fullscreen). */

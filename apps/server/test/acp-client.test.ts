@@ -247,6 +247,50 @@ describe("AcpClient against the fake agent", () => {
     }
   });
 
+  it("never times out a prompt while the agent waits for a user answer", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    AcpClient.requestTimeoutMs = 80;
+    try {
+      await withClient(async (client) => {
+        const requestPromise = once(client, "request") as Promise<[AcpRequest]>;
+        const promptPromise = client.prompt("ELICIT: pick a colour");
+        const [request] = await requestPromise;
+        expect(request.kind).toBe("elicitation");
+        // Quieten far past the idle ceiling. The agent is parked on the USER,
+        // not hung — the prompt must stay alive however long the answer takes.
+        await new Promise((r) => setTimeout(r, 250));
+        const raced = await Promise.race([
+          promptPromise.then(() => "settled"),
+          new Promise((r) => setTimeout(() => r("still pending"), 20)),
+        ]);
+        expect(raced).toBe("still pending");
+        client.respond(request.id, { action: "accept", content: { answer: "green" } });
+        const result = await promptPromise;
+        expect(result.stopReason).toBe("end_turn");
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
+  it("times out again after an answered request releases the exemption", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    AcpClient.requestTimeoutMs = 80;
+    try {
+      await withClient(async (client) => {
+        const requestPromise = once(client, "request") as Promise<[AcpRequest]>;
+        const first = client.prompt("ELICIT: pick a colour");
+        const [request] = await requestPromise;
+        client.respond(request.id, { action: "accept", content: { answer: "green" } });
+        await first;
+        // Stale exemption would silently disable the hang detector for good.
+        await expect(client.prompt("SLOW-SILENT please")).rejects.toThrow(/Таймаут ответа ACP/);
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
   it("cancel() mid-prompt resolves the prompt with stopReason 'cancelled'", async () => {
     await withClient(async (client) => {
       const promptPromise = client.prompt("hello");

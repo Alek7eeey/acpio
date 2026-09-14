@@ -1,15 +1,19 @@
+/**
+ * The git review surface is [stage | navigator]: the stage reads the diff, the
+ * navigator stages files and writes the commit. The panel owns the split and the
+ * sheet the navigator turns into when there is no room for two columns.
+ */
 .panel {
-  --git-panel-width: 460px;
-  container-type: inline-size;
-  container-name: git-panel;
+  --git-panel-width: 900px;
+  --git-navigator-width: 380px;
   position: relative;
   flex: 0 0 var(--git-panel-width);
   width: var(--git-panel-width);
-  max-width: min(72vw, 100%);
+  max-width: 100%;
   min-width: 0;
   min-height: 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   z-index: 4;
   overflow: hidden;
   background: var(--surface);
@@ -22,24 +26,71 @@
   box-shadow: -8px 0 20px rgba(15, 23, 42, 0.04);
 }
 
-.resizing {
-  transition: none;
-  user-select: none;
+/* Compact viewport: the panel covers the page instead of docking beside it. */
+.panelOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  flex: 1 1 auto;
+  flex-basis: auto;
+  width: auto;
+  max-width: none;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
 }
 
-.resizingBody,
-.resizingBody * {
-  cursor: col-resize !important;
-  user-select: none !important;
+/**
+ * Phone: the whole viewport, not the slice the shell leaves between its header
+ * and its chat dock. Portalled to the body (see the component), so it also sits
+ * above the shell chrome — the header costs no height here and the chats sheet
+ * stays out of reach until the review is closed.
+ */
+.panelTakeover {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  flex: 0 0 auto;
+  flex-basis: auto;
+  width: auto;
+  max-width: none;
+  height: auto;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
 }
 
+/* No room for two columns: the navigator is a sheet, so the panel is one column. */
+.panelSheetNav {
+  flex-direction: column;
+}
+
+/**
+ * Full view: the whole screen, not a wider dock. Portalled to the body (see the
+ * component), fixed to the viewport and above the shell chrome — under dialogs
+ * (500) and toasts (400), which must still be able to appear over it.
+ */
+.panelFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 380;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  height: auto;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Grab strip for the dock edge. The shell hides every separator once the panel
+   fills the page, so it is never offered where dragging would mean nothing. */
 .splitter {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: 12px;
-  margin-left: -6px;
+  width: 10px;
   z-index: 6;
   cursor: col-resize;
   touch-action: none;
@@ -54,133 +105,201 @@
   left: 50%;
   width: 3px;
   transform: translateX(-50%);
-  background: color-mix(in srgb, var(--text-secondary) 30%, var(--border));
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+  transition:
+    background 0.15s ease,
+    width 0.15s ease;
+}
+
+/* Grip at the reading height: the edge is the only thing that says "drag me". */
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 44px;
+  margin-top: -22px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
 }
 
 .splitter:hover::before,
-.resizing .splitter::before {
+.splitter:hover::after,
+.resizing .splitter::before,
+.resizing .splitter::after {
   width: 4px;
-  background: color-mix(in srgb, var(--text-secondary) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
 }
 
-.header {
-  position: relative;
-  border-bottom: 1px solid var(--border-soft);
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.resizingBody,
+.resizingBody * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.stageHost {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--surface);
-  flex-shrink: 0;
-  overflow: hidden;
-  max-width: 100%;
-  isolation: isolate;
+  /* The board measures itself: the stage's bar tightens on a narrow dock. */
+  container-type: inline-size;
+  container-name: git-stage;
 }
 
-.headerTop {
-  position: relative;
-  z-index: 1;
+.navigator {
+  flex: 0 0 var(--git-navigator-width);
+  width: var(--git-navigator-width);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-soft);
+}
+
+.panelSheetNav .navigator {
+  flex: 1 1 auto;
+  width: 100%;
+  border-left: none;
+}
+
+/* --- navigator: repo, branch, sync ------------------------------------- */
+
+.navHead {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.navHeadTop {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 10px 12px 6px;
+  gap: 8px;
   min-width: 0;
 }
 
-.headerLead {
-  min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-.headerBranchIcon {
-  flex: 0 0 auto;
+.navRepoIcon {
   display: grid;
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-}
-
-.headerKicker {
-  display: block;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  color: var(--text-secondary);
-  line-height: 1.1;
-}
-
-.headerTitle {
-  margin: 2px 0 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.88rem;
-  font-weight: 750;
-  letter-spacing: -0.03em;
-  line-height: 1.15;
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-}
-
-.headerIconRow {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
   flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
 }
 
-.headerMetaRow {
-  position: relative;
-  z-index: 1;
+.navLead {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px 6px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
+  flex: 1 1 auto;
 }
 
-.headerStatsGroup {
+.navTitle {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.navStats {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.72rem;
-  font-weight: 650;
-  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 .statAdd {
-  color: #22c55e;
+  color: #16a34a;
 }
 
 .statDel {
-  color: #ef4444;
+  color: #dc2626;
 }
 
-.headerClean {
-  font-size: 0.68rem;
-  font-weight: 600;
+.navClean {
   color: var(--text-secondary);
+  font-weight: 500;
 }
 
-.countPills {
+.navIcons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.actionDivider {
+  width: 1px;
+  height: 18px;
+  margin: 0 1px;
+  background: var(--border-soft);
+}
+
+/* --- navigator: the two segment switches -------------------------------- */
+
+.segSwitch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.segBtn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.segBtn:hover {
+  color: var(--text);
+}
+
+.segBtnActive,
+.segBtnActive:hover {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.segBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.navPills {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 6px;
-  min-width: 0;
-  flex: 1 1 100px;
-  max-width: 100%;
 }
 
 .countPill {
@@ -215,110 +334,11 @@
   background: #dc2626;
 }
 
-.headerToolbar {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  justify-content: flex-start;
-  padding: 2px 10px 10px;
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-  overflow-x: auto;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.actionBar {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 2px;
-  padding: 2px 4px;
-  border-radius: 10px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-soft);
-  box-shadow: var(--shadow-soft);
-}
-
-.actionBtn {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-width: 54px;
-  padding: 7px 10px 6px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  transition:
-    background 0.12s ease,
-    opacity 0.12s ease;
-}
-
-.actionBtn:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-}
-
-.actionBtn:active:not(:disabled) {
-  background: var(--surface-2);
-}
-
-.actionBtn:disabled {
-  opacity: 0.38;
-  cursor: not-allowed;
-}
-
-.actionLabel {
-  font-size: 0.62rem;
-  font-weight: 650;
-  letter-spacing: 0.03em;
-  line-height: 1;
-  color: color-mix(in srgb, var(--warning) 82%, #9a3412);
-  white-space: nowrap;
-}
-
-.actionIcon {
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  color: var(--text);
-}
-
-.actionDivider {
-  align-self: stretch;
-  width: 1px;
-  margin: 6px 4px;
-  background: var(--border-soft);
-}
-
-:global([data-theme="dark"]) .actionBar {
-  background: var(--bg-secondary);
-  border-color: var(--border-soft);
-  box-shadow: none;
-}
-
-:global([data-theme="dark"]) .actionLabel {
-  color: #d4a574;
-}
-
-:global([data-theme="dark"]) .actionIcon {
-  color: color-mix(in srgb, var(--text) 96%, #fff);
-}
-
-:global([data-theme="dark"]) .actionDivider {
-  background: var(--border-soft);
-}
-
-.closeBtn,
 .iconBtn {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border-soft);
   border-radius: 9px;
   background: var(--surface-2);
@@ -327,600 +347,247 @@
   transition:
     color 0.15s ease,
     border-color 0.15s ease,
-    background 0.15s ease,
-    box-shadow 0.15s ease;
+    background 0.15s ease;
 }
 
-.closeBtn:hover,
 .iconBtn:hover:not(:disabled) {
   background: var(--bg-tertiary);
   color: var(--text);
 }
 
-.panelBody {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* --- navigator: action bar --------------------------------------------- */
+
+/**
+ * The navigator's controls live at its bottom, not over the list: on the phone
+ * the navigator is a bottom sheet, so this row is the closest thing to the
+ * thumb — the same row for both surfaces, one code path. The changes/history
+ * switch, the list/tree switch and the sync buttons share one weight, so nothing
+ * claims a row of its own; wrapping is the coarse-pointer escape hatch.
+ */
+.navFoot {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface);
-}
-
-.body {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(160px, 38%) minmax(0, 1fr);
-}
-
-.bodyHistory {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.bodyChanges {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.changesLayout {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(200px, var(--changes-tree-width, 320px)) 4px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "tree splitter diff"
-    "commit commit commit";
-}
-
-.changesSplitter {
-  grid-area: splitter;
-  position: relative;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.changesSplitter::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--border) 82%, transparent);
-}
-
-.changesResizing {
-  user-select: none;
-}
-
-.changesLayout .diffPane {
-  grid-area: diff;
-  min-height: 0;
-  border-left: 1px solid var(--border-soft);
-  background: var(--surface);
-}
-
-/* Fullscreen entry — floats over the diff area without scrolling with it. */
-.diffFullscreenBtn {
-  grid-area: diff;
-  justify-self: end;
-  align-self: start;
-  z-index: 3;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  margin: 7px 9px 0 0;
-  padding: 0;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 86%, transparent);
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.diffFullscreenBtn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text);
-}
-
-.historyLayout {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(140px, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
-  overflow: hidden;
-}
-
-.historyListPane {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  row-gap: 6px;
+  /* The row is the panel's bottom edge, and a takeover reaches the home indicator. */
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
   background: var(--bg-secondary);
-}
-
-.historySplitter {
-  position: relative;
-  cursor: col-resize;
-  touch-action: none;
-}
-
-.historySplitter::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--border) 82%, transparent);
-}
-
-.historyRightPane {
-  min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
-  border-left: 1px solid var(--border-soft);
-  background: var(--surface);
-}
-
-.historyLayoutWithDiff .historyRightPane {
-  grid-template-rows: minmax(120px, min(var(--history-detail-height, 240px), 42%)) 4px minmax(120px, 1fr);
-}
-
-.historyDetailPane {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
-  background: var(--surface);
-}
-
-.historyDiffSplitter {
-  position: relative;
-  cursor: row-resize;
-  touch-action: none;
-  background: color-mix(in srgb, var(--border) 82%, transparent);
-}
-
-.historyDiffSplitter::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -3px;
-  bottom: -3px;
-}
-
-.historyResizing {
-  user-select: none;
-}
-
-.historyLayoutStacked {
-  grid-template-columns: 1fr;
-  grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
-}
-
-.historyLayoutStacked .historySplitter {
-  cursor: row-resize;
-}
-
-.historyLayoutStacked .historySplitter::after {
-  left: 0;
-  right: 0;
-  top: -3px;
-  bottom: -3px;
-}
-
-.historyLayoutStacked .historyRightPane {
-  border-left: none;
   border-top: 1px solid var(--border-soft);
 }
 
-.historyLayoutStacked.historyLayoutWithDiff .historyRightPane {
-  grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
+.navFoot .iconBtn {
+  width: 26px;
+  height: 28px;
 }
 
-.historyPane {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  overflow: hidden;
-  border-right: 1px solid var(--border-soft);
-}
-
-.sidebar {
-  min-width: 0;
-  min-height: 0;
+/* The ops the row cannot hold: one button, a menu above the bar. */
+.footMenu {
+  position: fixed;
+  z-index: 520;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border-soft);
-}
-
-.viewToggleRow {
-  position: relative;
-  z-index: 1;
-  padding: 2px 12px 8px;
-  min-width: 0;
-  box-sizing: border-box;
-  background: var(--surface);
-}
-
-.viewTabs {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 11px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-soft);
-}
-
-.viewTab {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  line-height: 1.1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    box-shadow 160ms ease;
-}
-
-.viewTab svg {
-  flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
-  opacity: 0.85;
-}
-
-.viewTab:hover {
-  color: var(--text);
-}
-
-.viewTab:hover svg {
-  opacity: 1;
-}
-
-.viewTabActive {
-  color: var(--text);
-  background: var(--surface);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 50%, transparent) inset,
-    0 4px 14px color-mix(in srgb, #000 8%, transparent);
-}
-
-:global([data-theme="dark"]) .viewTabActive {
-  box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset,
-    0 6px 18px color-mix(in srgb, #000 32%, transparent);
-}
-
-.viewTabActive svg {
-  opacity: 1;
-  color: color-mix(in srgb, var(--accent) 72%, var(--text));
-}
-
-.viewTab:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  outline-offset: 1px;
-}
-
-.sidebarScroll {
-  overflow: auto;
-  padding: 8px;
-  min-height: 0;
-  flex: 1;
-}
-
-.emptyInline {
-  padding: 16px 10px;
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-  text-align: center;
-}
-
-.commitTree {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-left: 2px;
-}
-
-.commitRow {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  min-height: 58px;
-  padding-left: calc(var(--commit-depth, 0) * 12px);
-}
-
-.commitRowActive {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  border-radius: 10px;
-}
-
-.commitGutter {
-  position: relative;
-  width: 18px;
-  flex: 0 0 18px;
-}
-
-.commitLine {
-  position: absolute;
-  left: 8px;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-
-.commitLineFirst {
-  top: 16px;
-}
-
-.commitLineLast {
-  bottom: auto;
-  height: 16px;
-}
-
-.commitDot {
-  position: absolute;
-  left: 4px;
-  top: 12px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 2px solid color-mix(in srgb, var(--accent) 70%, var(--border));
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.commitDotMerge {
-  border-radius: 3px;
-  transform: rotate(45deg);
-  width: 9px;
-  height: 9px;
-  left: 4.5px;
-  top: 12.5px;
-}
-
-.commitBranchLine {
-  position: absolute;
-  left: 8px;
-  top: 12px;
-  width: calc(var(--commit-depth, 0) * 12px + 8px);
-  max-width: 28px;
-  height: 2px;
-  transform: translateX(-100%);
-  background: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-
-.commitBtn {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
   gap: 2px;
-  border: none;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  padding: 8px 8px 8px 4px;
-  cursor: pointer;
-  font: inherit;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, 0.18));
+  animation: footMenuIn 0.14s ease both;
 }
 
-.commitTop {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+.footMenu button {
   width: 100%;
-}
-
-.commitHash {
-  font-size: 0.68rem;
-  color: color-mix(in srgb, var(--accent) 75%, var(--text));
-}
-
-.commitMerge {
-  font-size: 0.58rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-secondary) 75%, var(--surface));
-}
-
-.commitDate {
-  margin-left: auto;
-  font-size: 0.62rem;
-  color: var(--text-secondary);
-}
-
-.commitSubject {
-  font-size: 0.74rem;
-  line-height: 1.35;
-  font-weight: 600;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.commitAuthor {
-  font-size: 0.64rem;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
-}
-
-.fileList {
-  overflow: auto;
-  border-right: 1px solid var(--border-soft);
-  padding: 8px;
-  background: var(--bg-secondary);
-}
-
-.allBtn {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
   padding: 8px 10px;
-  cursor: pointer;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
   font: inherit;
-  font-size: 0.76rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.footMenu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.footMenu button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+@keyframes footMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- navigator: body --------------------------------------------------- */
+
+.navBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Commit list over the commit's own detail: the detail is the taller half. */
+.historyList {
+  flex: 1 1 40%;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.historyDetail {
+  flex: 1 1 60%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* --- phone: navigator as a bottom sheet -------------------------------- */
+
+.puller {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "bar bar bar"
+    "title meta chevron";
+  align-items: center;
+  gap: 3px 8px;
+  min-height: 52px;
+  padding: 6px 12px max(10px, env(safe-area-inset-bottom));
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.puller:active {
+  background: var(--bg-tertiary);
+}
+
+.pullerBar {
+  grid-area: bar;
+  width: 38px;
+  height: 4px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: var(--border-soft);
+}
+
+.pullerTitle {
+  grid-area: title;
+  font-size: 0.8rem;
   font-weight: 650;
-  margin-bottom: 6px;
 }
 
-.allBtn:hover {
-  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
-}
-
-.allBtnActive {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-}
-
-.allStats {
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.68rem;
-  color: color-mix(in srgb, var(--accent) 70%, var(--text));
-}
-
-.sectionLabel {
-  padding: 8px 8px 4px;
-  font-size: 0.64rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.pullerMeta {
+  grid-area: meta;
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
   color: var(--text-secondary);
 }
 
-.fileRow {
+.pullerChevron {
+  grid-area: chevron;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.pullerChevronUp {
+  transform: rotate(180deg);
+}
+
+.sheetBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.34);
+  animation: sheetBackdropIn 0.18s ease both;
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  height: min(78%, 640px);
+  max-height: calc(100% - 56px);
   display: flex;
-  align-items: stretch;
-  gap: 4px;
-  border-radius: 10px;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.22);
+  animation: sheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.fileRowActive {
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-}
-
-.stageCheck {
+.sheetGrabber {
+  flex: 0 0 auto;
   display: grid;
   place-items: center;
-  padding: 0 2px 0 6px;
-  cursor: pointer;
-}
-
-.stageCheck input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent);
-}
-
-.fileBtn {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: start;
+  height: 24px;
   border: none;
   background: transparent;
-  color: var(--text);
-  text-align: left;
-  padding: 7px 8px 7px 0;
   cursor: pointer;
-  font: inherit;
+  touch-action: manipulation;
 }
 
-.fileStatus {
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.68rem;
-  font-weight: 700;
-  color: var(--accent);
+.sheetGrabber span {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-soft);
 }
 
-.filePath {
-  min-width: 0;
-  font-size: 0.72rem;
-  line-height: 1.35;
-  word-break: break-word;
-}
-
-.fileStats {
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.64rem;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-
-.diffPane {
-  overflow: auto;
-  padding: 0;
-  min-width: 0;
-  min-height: 0;
-  background: var(--surface);
-}
-
-.diffPane > .empty {
-  padding: 24px 16px;
-}
+/* --- states ------------------------------------------------------------ */
 
 .empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 24px 16px;
   color: var(--text-secondary);
   font-size: 0.82rem;
   text-align: center;
 }
 
-.emptyLoading,
-.headerLoading {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+.emptyLoading {
   gap: 8px;
-}
-
-.headerLoading {
-  min-height: 1.4rem;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--text-secondary);
 }
 
 .loaderSpin {
@@ -939,47 +606,6 @@
   }
 }
 
-.footer {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: end;
-  padding: 12px 14px 14px;
-  border-top: 1px solid var(--border-soft);
-  background: var(--surface);
-  flex-shrink: 0;
-}
-
-.footer textarea {
-  width: 100%;
-  min-height: 52px;
-  resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font: inherit;
-  font-size: 0.82rem;
-  background: var(--surface);
-  color: var(--text);
-}
-
-.commitBtn {
-  border: none;
-  border-radius: 999px;
-  padding: 11px 16px;
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 700;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-}
-
-.commitBtn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 @keyframes slideIn {
   from {
     opacity: 0;
@@ -991,151 +617,48 @@
   }
 }
 
-/* Stack two-column git layouts when the panel itself is narrow (docked beside chat). */
-@container git-panel (max-width: 768px) {
-  .body,
-  .bodyHistory {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
+@keyframes sheetUp {
+  from {
+    transform: translateY(24px);
+    opacity: 0.6;
   }
-
-  .historyLayout {
-    grid-template-columns: 1fr;
-    grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
-  }
-
-  .historyLayout .historySplitter {
-    cursor: row-resize;
-  }
-
-  .historyLayout .historySplitter::after {
-    left: 0;
-    right: 0;
-    top: -3px;
-    bottom: -3px;
-  }
-
-  .historyLayout .historyRightPane {
-    border-left: none;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .historyLayout.historyLayoutWithDiff .historyRightPane {
-    grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
-  }
-
-  .changesLayout {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(180px, 42%) minmax(0, 1fr) auto;
-    grid-template-areas:
-      "tree"
-      "diff"
-      "commit";
-  }
-
-  .changesSplitter {
-    display: none;
-  }
-
-  .changesLayout .diffPane {
-    border-left: none;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .paneWorkspace .filesArea {
-    border-right: none;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .fileList {
-    border-right: none;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .footer {
-    grid-template-columns: 1fr;
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 
-@media (max-width: 1180px) {
+@keyframes sheetBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .navFoot .iconBtn,
+  .navIcons .iconBtn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .segBtn {
+    width: 40px;
+    height: 34px;
+  }
+
+  .puller {
+    min-height: 58px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
   .panel,
-  .panelMobile {
-    position: absolute;
-    inset: 0;
-    z-index: 28;
-    width: 100%;
-    flex: 1 1 auto;
-    flex-basis: auto;
-    max-width: none;
-    border-left: none;
-    box-shadow: none;
+  .sheet,
+  .sheetBackdrop,
+  .footMenu {
     animation: none;
-  }
-
-  .splitter {
-    display: none;
-  }
-
-  .body,
-  .bodyHistory {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 38%) minmax(0, 1fr);
-  }
-
-  .historyLayout {
-    grid-template-columns: 1fr;
-    grid-template-rows: var(--history-list-height, var(--history-list-width, 220px)) 4px minmax(0, 1fr);
-  }
-
-  .historyLayout .historySplitter {
-    cursor: row-resize;
-  }
-
-  .historyLayout .historySplitter::after {
-    left: 0;
-    right: 0;
-    top: -3px;
-    bottom: -3px;
-  }
-
-  .historyLayout .historyRightPane {
-    border-left: none;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .historyLayout.historyLayoutWithDiff .historyRightPane {
-    grid-template-rows: minmax(100px, min(var(--history-detail-height, 200px), 38%)) 4px minmax(140px, 1fr);
-  }
-
-  .changesLayout {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(180px, 42%) minmax(0, 1fr) auto;
-    grid-template-areas:
-      "tree"
-      "diff"
-      "commit";
-  }
-
-  .changesSplitter {
-    display: none;
-  }
-
-  .changesLayout .diffPane {
-    border-left: none;
-    border-top: 1px solid var(--border-soft);
-  }
-
-  .paneWorkspace .filesArea {
-    border-right: none;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .fileList {
-    border-right: none;
-    border-bottom: 1px solid var(--border-soft);
-  }
-
-  .footer {
-    grid-template-columns: 1fr;
   }
 }

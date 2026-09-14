@@ -1,43 +1,11 @@
 .pane {
   min-width: 0;
   min-height: 0;
+  /* Fills the navigator column it is mounted in; the stage sits beside it. */
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border-soft);
-}
-
-.paneWorkspace {
-  display: contents;
-}
-
-.paneWorkspace .filesArea {
-  grid-area: tree;
-  min-width: 0;
-  min-height: 0;
-  background: var(--bg-secondary);
-}
-
-.paneWorkspace .commitResize {
-  grid-area: unset;
-}
-
-.paneWorkspace .commitSection {
-  grid-area: unset;
-  border-left: none;
-  border-top: 1px solid var(--border-soft);
-}
-
-.commitStack {
-  display: contents;
-}
-
-.commitDock {
-  grid-area: commit;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
   background: var(--bg-secondary);
 }
 
@@ -218,46 +186,6 @@
   gap: 0;
   min-height: 30px;
   padding-left: calc(var(--tree-depth, 0) * 12px + 2px);
-}
-
-.filesToolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 6px 8px 4px;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.viewToggle {
-  display: flex;
-  flex-shrink: 0;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 8px;
-  background: var(--bg-tertiary);
-}
-
-.viewToggleBtn {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-
-.viewToggleBtn:hover {
-  color: var(--text);
-}
-
-.viewToggleBtnActive {
-  background: var(--surface);
-  color: var(--text);
 }
 
 .fileRowDraggable {

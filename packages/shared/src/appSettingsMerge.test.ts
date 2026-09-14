@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS } from "./index.js";
 import {
+  CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeClientAppSettings,
   normalizeChatMetaChips,
@@ -139,6 +140,18 @@ describe("mergeClientAppSettings", () => {
   it("defaults deep logging to off", () => {
     expect(mergeClientAppSettings({}).diagnosticsDeepLogging).toBe(false);
     expect(mergeClientAppSettings({ diagnosticsDeepLogging: true }).diagnosticsDeepLogging).toBe(true);
+  });
+
+  it("heals the chat-tree recent-chat limit", () => {
+    expect(mergeClientAppSettings({}).chatTreeRecentLimit).toBe(0);
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: 7 }).chatTreeRecentLimit).toBe(7);
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: -3 }).chatTreeRecentLimit).toBe(0);
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: 12.6 }).chatTreeRecentLimit).toBe(13);
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: 9999 }).chatTreeRecentLimit).toBe(
+      CHAT_TREE_RECENT_LIMIT_MAX,
+    );
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: "many" }).chatTreeRecentLimit).toBe(0);
+    expect(mergeClientAppSettings({ chatTreeRecentLimit: Number.NaN }).chatTreeRecentLimit).toBe(0);
   });
 });
 

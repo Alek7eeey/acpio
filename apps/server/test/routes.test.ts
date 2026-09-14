@@ -5,6 +5,7 @@
 // between tests; every app instance is closed in afterEach.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import fsp from "node:fs/promises";
@@ -19,7 +20,13 @@ import {
   messageParts as messagePartsTable,
 } from "../src/db/schema.js";
 import { disposeRuntime, setAgentAvailable } from "../src/acp/sessionManager.js";
-import { appendPart, appendTextChunk, createMessage } from "../src/services/sessions.js";
+import {
+  appendPart,
+  appendTextChunk,
+  createMessage,
+  reconcileStaleSessions,
+} from "../src/services/sessions.js";
+import type { GitCommitDetailDto, GitCommitDto, GitStatusDto, MessagePartDto, SessionDetailDto } from "@acpio/shared";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
  *  connects to it instead of a real harness. */
@@ -47,13 +54,13 @@ function connectAgent() {
 }
 
 /** Insert a session row directly (no agent involved). */
-async function seedSession(opts: { title?: string; createdAt?: Date } = {}) {
+async function seedSession(opts: { title?: string; createdAt?: Date; cwd?: string } = {}) {
   const [row] = await db
     .insert(sessionsTable)
     .values({
       title: opts.title ?? "Seeded session",
       provider: "omp",
-      cwd: "",
+      cwd: opts.cwd ?? "",
       mode: "agent",
       ...(opts.createdAt
         ? { createdAt: opts.createdAt, updatedAt: opts.createdAt }
@@ -840,6 +847,75 @@ describe("export", () => {
   });
 });
 
+describe("attachment upload", () => {
+  const ONE_PIXEL_PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  /** Session whose cwd is a fresh temp dir (uploads land under it). */
+  async function seedUploadSession() {
+    const cwd = await newTempDir("acp-upload-");
+    const row = await seedSession();
+    await db.update(sessionsTable).set({ cwd }).where(eq(sessionsTable.id, row.id));
+    return { id: row.id, cwd };
+  }
+
+  function postUpload(sessionId: string, body: Buffer, name: string, mime = "image/png") {
+    return app.inject({
+      method: "POST",
+      url: `/api/sessions/${sessionId}/attachments/upload`,
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-file-name": encodeURIComponent(name),
+        "x-file-mime": mime,
+      },
+      payload: body,
+    });
+  }
+
+  it("stages an octet-stream body under the session attachments folder", async () => {
+    const session = await seedUploadSession();
+    const res = await postUpload(session.id, ONE_PIXEL_PNG, "Снимок экрана.png");
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { name: string; path: string; size: number };
+    expect(body.name).toBe("Снимок экрана.png");
+    expect(body.size).toBe(ONE_PIXEL_PNG.length);
+    expect(body.path).toBe(
+      path.join(session.cwd, ".acpio-attachments", session.id, "Снимок экрана.png"),
+    );
+    expect(await fsp.readFile(body.path)).toEqual(ONE_PIXEL_PNG);
+  });
+
+  it("accepts a payload far above the instance-wide default body limit", async () => {
+    // The parser raises the limit to MAX_ATTACH_UPLOAD_BYTES for this content
+    // type; a multi-MB screenshot must not hit Fastify's 1 MB default.
+    const session = await seedUploadSession();
+    const big = Buffer.alloc(3 * 1024 * 1024, 7);
+    const res = await postUpload(session.id, big, "shot.png");
+    expect(res.statusCode).toBe(200);
+    expect(res.json().size).toBe(big.length);
+  });
+
+  it("rejects a payload above 15 MB with 413", async () => {
+    const session = await seedUploadSession();
+    const huge = Buffer.alloc(15 * 1024 * 1024 + 1, 7);
+    const res = await postUpload(session.id, huge, "huge.png");
+    expect(res.statusCode).toBe(413);
+  });
+
+  it("rejects a body without a file name with 400", async () => {
+    const session = await seedUploadSession();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/attachments/upload`,
+      headers: { "content-type": "application/octet-stream" },
+      payload: ONE_PIXEL_PNG,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("diagnostics", () => {
   async function setupDiagDir(): Promise<string> {
     const dir = await newTempDir("acp-diag-");
@@ -962,6 +1038,250 @@ describe("agent status", () => {
   });
 });
 
+describe("durable questions", () => {
+  /** Poll GET /api/sessions/:id until `check` passes. The warm-up/agent side is
+   *  a real child process, so fake timers cannot advance it. */
+  async function waitForDetail(
+    sessionId: string,
+    check: (detail: SessionDetailDto) => boolean,
+    timeoutMs = 8000,
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    let lastSeen = "no detail fetched";
+    while (Date.now() < deadline) {
+      const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
+      if (res.statusCode === 200) {
+        const detail = res.json() as SessionDetailDto;
+        if (check(detail)) return detail;
+        lastSeen = `status=${detail.status} parts=${detail.messages
+          .flatMap((m) => m.parts)
+          .map(
+            (p) =>
+              `${p.type}:${p.payload.pending ? "pending" : "settled"}${
+                typeof p.payload.text === "string" ? `(${p.payload.text.slice(0, 120)})` : ""
+              }`,
+          )
+          .join(",")}`;
+      }
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, 50);
+      await promise;
+    }
+    throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
+  }
+
+  /** Inline-question UI answer shape (elicitation accept with one option). */
+  const PICK_GREEN = {
+    outcome: {
+      outcome: "accepted",
+      answers: [{ questionId: "answer", selectedOptionIds: ["green"] }],
+    },
+  };
+
+  function questionPart(detail: SessionDetailDto): MessagePartDto | undefined {
+    for (const message of detail.messages) {
+      const part = message.parts.find((p) => p.type === "question");
+      if (part) return part;
+    }
+    return undefined;
+  }
+
+  function textParts(detail: SessionDetailDto): string[] {
+    return detail.messages
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "text")
+      .map((p) => String(p.payload.text ?? ""));
+  }
+
+  it("answers a live elicitation and feeds it back to the agent", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "ELICIT: pick a colour" },
+    });
+    const parked = await waitForDetail(
+      session.id,
+      (d) => d.status === "waiting" && Boolean(questionPart(d)?.payload.pending),
+    );
+    const question = questionPart(parked)!;
+    const requestId = String(question.payload.requestId ?? "");
+    expect(requestId).toBeTruthy();
+    expect(question.payload.questions).toHaveLength(1);
+
+    const answer = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/answers/${encodeURIComponent(requestId)}`,
+      payload: { result: PICK_GREEN },
+    });
+    expect(answer.statusCode).toBe(200);
+
+    // The fake agent echoes what the client replied → proof the answer reached it.
+    // (Only the echo is awaited: after a live elicitation answer the host holds a
+    // deliberate multi-second grace for post-answer agent work before settling.)
+    const done = await waitForDetail(
+      session.id,
+      (d) => textParts(d).some((t) => t.includes('"answer":"green"')),
+    );
+    expect(questionPart(done)?.payload.pending).toBe(false);
+    expect(questionPart(done)?.payload.answerSummary).toBe("green");
+    setAgentAvailable("omp", false);
+  });
+
+  it("keeps a question answerable after a restart and resumes the turn when answered", async () => {
+    await connectAgent();
+    const session = await seedSession({ title: "Parked on a question" });
+    runtimeSessionIds.push(session.id);
+    const assistant = await createMessage(session.id, "assistant");
+    const requestId = `${session.id}:q-restart`;
+    await appendPart(session.id, assistant.id, "question", {
+      requestId,
+      pending: true,
+      title: "Pick a colour",
+      questions: [
+        { id: "answer", prompt: "Pick one", options: [{ id: "green", label: "green" }] },
+      ],
+    });
+    await db
+      .update(sessionsTable)
+      .set({ status: "waiting" })
+      .where(eq(sessionsTable.id, session.id));
+
+    // Boot sweep after a restart: no runtime survives, but a session parked on a
+    // question is not a stale turn — the question is the answerable state.
+    const recovered = await reconcileStaleSessions();
+    expect(recovered.sessions).toBe(0);
+
+    // Opening the chat in the UI warms a fresh ACP process (GET /api/sessions/:id
+    // fires warmAcp). That warm-up must not report the chat as idle while the
+    // question is unanswered — otherwise the composer unlocks and the question
+    // stops being the pending one.
+    const parked = await waitForDetail(
+      session.id,
+      (d) => d.acpSessionId?.startsWith("fake-sess-") && questionPart(d)?.payload.pending === true,
+    );
+    expect(parked.status).toBe("waiting");
+
+    // Answering later (days, several restarts) resumes the turn on a fresh agent.
+    const answer = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/answers/${encodeURIComponent(requestId)}`,
+      payload: { result: PICK_GREEN },
+    });
+    expect(answer.statusCode).toBe(200);
+
+    const done = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("green")),
+    );
+    expect(questionPart(done)?.payload.pending).toBe(false);
+    expect(questionPart(done)?.payload.answerSummary).toBe("green");
+    // The resumed turn carries the question and the answer back to the agent.
+    const resumedText = textParts(done).join("\n");
+    expect(resumedText).toContain("Pick a colour");
+    expect(resumedText).toContain("green");
+    setAgentAvailable("omp", false);
+  });
+
+  it("keeps a question answerable after the harness dies while parked on it", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "ELICIT-DIE: pick a colour" },
+    });
+    const parked = await waitForDetail(
+      session.id,
+      (d) => d.status === "waiting" && Boolean(questionPart(d)?.payload.pending),
+    );
+    const requestId = String(questionPart(parked)?.payload.requestId ?? "");
+    // The fake agent exits 150ms after asking and nothing in the public API
+    // exposes that child's death — wait past the window before answering.
+    await new Promise((r) => setTimeout(r, 500));
+
+    const afterDeath = (
+      await app.inject({ method: "GET", url: `/api/sessions/${session.id}` })
+    ).json() as SessionDetailDto;
+    expect(afterDeath.status).toBe("waiting");
+    expect(questionPart(afterDeath)?.payload.pending).toBe(true);
+
+    const answer = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/answers/${encodeURIComponent(requestId)}`,
+      payload: { result: PICK_GREEN },
+    });
+    expect(answer.statusCode).toBe(200);
+
+    const done = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("green")),
+    );
+    expect(questionPart(done)?.payload.pending).toBe(false);
+    expect(questionPart(done)?.payload.answerSummary).toBe("green");
+    setAgentAvailable("omp", false);
+  });
+
+  it("Stop settles the parked question instead of leaving it answerable", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "ELICIT: pick a colour" },
+    });
+    await waitForDetail(
+      session.id,
+      (d) => d.status === "waiting" && Boolean(questionPart(d)?.payload.pending),
+    );
+
+    await app.inject({ method: "POST", url: `/api/sessions/${session.id}/cancel` });
+
+    const stopped = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && questionPart(d)?.payload.pending === false,
+    );
+    expect(questionPart(stopped)?.payload.answerSummary).toBe("—");
+    // A cancelled question must not park the chat across a restart either.
+    const recovered = await reconcileStaleSessions();
+    expect(recovered.sessions).toBe(0);
+    setAgentAvailable("omp", false);
+  });
+
+  it("rejects an answer to a question that was already answered", async () => {
+    const session = await seedSession({ title: "Answered" });
+    const assistant = await createMessage(session.id, "assistant");
+    await appendPart(session.id, assistant.id, "question", {
+      requestId: `${session.id}:q-old`,
+      pending: false,
+      title: "Pick a colour",
+      answerSummary: "green",
+      questions: [{ id: "answer", prompt: "Pick one", options: [] }],
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/answers/${encodeURIComponent(`${session.id}:q-old`)}`,
+      payload: { result: PICK_GREEN },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("Question request not found");
+  });
+});
+
 describe("disabled providers", () => {
   it("flags a switched-off harness in /api/adapters and drops it from agent status", async () => {
     await connectAgent();
@@ -1050,5 +1370,193 @@ describe("disabled providers", () => {
       await app.inject({ method: "GET", url: `/api/sessions/${session.id}` })
     ).json();
     expect(detail.messages.some((m: { role: string }) => m.role === "user")).toBe(false);
+  });
+});
+
+describe("user-defined agents", () => {
+  /** Point a custom agent at the fake ACP agent so it can really connect. */
+  const fakeSpec = {
+    id: "fake-acp",
+    label: "Fake ACP",
+    command: process.execPath,
+    args: [FAKE_AGENT],
+  };
+
+  it("registers a custom agent from settings and heals reserved ids", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        customAgents: [fakeSpec, { id: "omp", label: "Shadow", command: "shadow.exe" }],
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    // The reserved id is dropped, the agent is normalized (defaults filled in).
+    expect(put.json().customAgents).toEqual([
+      {
+        ...fakeSpec,
+        restoreMode: "resume",
+        suppressReplayOnLoad: false,
+        parameterizedModelPicker: true,
+        subagentStreaming: false,
+        cloudCatalog: false,
+      },
+    ]);
+
+    const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      id: string;
+      label: string;
+      custom?: boolean;
+      commandField: string;
+      defaultCommand: string;
+    }>;
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "fake-acp"]);
+    expect(meta[2]).toMatchObject({
+      custom: true,
+      label: "Fake ACP",
+      commandField: "",
+      defaultCommand: process.execPath,
+    });
+  });
+
+  it("runs a custom agent end to end (spawn + initialize + session/new)", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { customAgents: [fakeSpec] },
+    });
+    setAgentAvailable("fake-acp", true);
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { provider: "fake-acp" },
+    });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    expect(session.provider).toBe("fake-acp");
+    const detail = await waitForAcpSessionId(session.id);
+    expect(detail.acpSessionId).toBeTruthy();
+
+    // A provider that is not in the registry is refused explicitly.
+    const bogus = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { provider: "not-registered" },
+    });
+    expect(bogus.statusCode).toBe(400);
+    expect(bogus.json().error).toBe("unknownAgent");
+  });
+
+  it("drops the agent from the registry when it is removed from settings", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { customAgents: [fakeSpec] },
+    });
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { customAgents: [] } });
+    const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      id: string;
+    }>;
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp"]);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { provider: "fake-acp" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("unknownAgent");
+  });
+});
+
+describe("git routes", () => {
+  function git(cwd: string, args: string[]) {
+    const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+    if (result.status !== 0) throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+    return result.stdout;
+  }
+
+  /** Temp repo with one commit and the identity git needs in order to commit. */
+  async function gitRepo() {
+    const dir = await newTempDir("acpio-gitroutes-");
+    git(dir, ["init"]);
+    git(dir, ["config", "user.email", "t@t"]);
+    git(dir, ["config", "user.name", "t"]);
+    git(dir, ["config", "core.autocrlf", "false"]);
+    await fsp.writeFile(path.join(dir, "tracked.txt"), "base\n");
+    git(dir, ["add", "tracked.txt"]);
+    git(dir, ["commit", "-m", "init"]);
+    return dir;
+  }
+
+  it("serves status, diff, log, show, commit detail and blame for a worktree", async () => {
+    const dir = await gitRepo();
+    await fsp.writeFile(path.join(dir, "tracked.txt"), "base\nchanged\n");
+    const session = await seedSession({ cwd: dir });
+    const url = (suffix: string) => `/api/sessions/${session.id}${suffix}`;
+
+    const status = await app.inject({ method: "GET", url: url("/git/status") });
+    expect(status.statusCode).toBe(200);
+    const statusBody = status.json() as GitStatusDto;
+    expect(statusBody.repo).toBe(true);
+    expect(statusBody.files.map((file) => file.path)).toEqual(["tracked.txt"]);
+    expect(statusBody.additions).toBe(1);
+
+    const diff = await app.inject({ method: "GET", url: url("/git/diff?path=tracked.txt") });
+    expect((diff.json() as { diff: string }).diff).toContain("+changed");
+
+    const log = await app.inject({ method: "GET", url: url("/git/log") });
+    expect((log.json() as { commits: GitCommitDto[] }).commits.map((commit) => commit.subject)).toEqual([
+      "init",
+    ]);
+
+    const show = await app.inject({ method: "GET", url: url("/git/show?rev=HEAD&path=tracked.txt") });
+    expect((show.json() as { diff: string }).diff).toContain("+base");
+
+    const detail = await app.inject({ method: "GET", url: url("/git/commit?rev=HEAD") });
+    const detailBody = detail.json() as { detail: GitCommitDetailDto };
+    expect(detailBody.detail.subject).toBe("init");
+    expect(detailBody.detail.files.map((file) => file.path)).toEqual(["tracked.txt"]);
+
+    const blame = await app.inject({ method: "GET", url: url("/git/blame?path=tracked.txt") });
+    expect((blame.json() as { blame: string }).blame).toContain("base");
+  });
+
+  it("returns the refreshed status from a mutation", async () => {
+    const dir = await gitRepo();
+    await fsp.writeFile(path.join(dir, "new.txt"), "hello\n");
+    const session = await seedSession({ cwd: dir });
+    const url = (suffix: string) => `/api/sessions/${session.id}${suffix}`;
+
+    const staged = await app.inject({
+      method: "POST",
+      url: url("/git/stage"),
+      payload: { paths: ["new.txt"], staged: true },
+    });
+    expect(staged.statusCode).toBe(200);
+    const stagedBody = staged.json() as { ok: boolean; status: GitStatusDto };
+    expect(stagedBody.status.files.map((file) => [file.path, file.index, file.worktree])).toEqual([
+      ["new.txt", "A", " "],
+    ]);
+
+    const committed = await app.inject({
+      method: "POST",
+      url: url("/git/commit"),
+      payload: { message: "add new" },
+    });
+    expect(committed.statusCode).toBe(200);
+    const committedBody = committed.json() as { ok: boolean; status: GitStatusDto };
+    expect(committedBody.status).toMatchObject({ repo: true, files: [] });
+    expect(git(dir, ["log", "-1", "--pretty=%s"]).trim()).toBe("add new");
+  });
+
+  it("reports an empty status outside a repository", async () => {
+    const dir = await newTempDir("acpio-gitroutes-plain-");
+    const session = await seedSession({ cwd: dir });
+
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${session.id}/git/status` });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ repo: false, root: "", files: [] });
   });
 });

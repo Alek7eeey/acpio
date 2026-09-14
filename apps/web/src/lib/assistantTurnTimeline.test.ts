@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePartDto } from "@acpio/shared";
-import { finalAnswerPart, lastTextPart, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools } from "./assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, lastTextPart, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools, unansweredQuestionParts } from "./assistantTurnTimeline.js";
 
 function part(
   type: MessagePartDto["type"],
@@ -67,6 +67,29 @@ describe("stepsPartsStillLive", () => {
     const parts = [part("thought", 0, { text: "still reasoning" })];
     expect(stepsPartsStillLive(parts, true)).toBe(true);
     expect(stepsPartsStillLive(parts, false)).toBe(false);
+  });
+
+  // A parked question used to be counted as "tools finished, answer pending",
+  // so the spoiler header kept pulsing "Working…" while the agent waited.
+  it("goes quiet on a pending question even after finished tools", () => {
+    const parts = [
+      part("thought", 0, { text: "checking the config" }),
+      part("tool_call", 1, { status: "completed", title: "Read" }),
+      part("question", 2, { requestId: "q1", pending: true }),
+    ];
+    expect(stepsPartsStillLive(parts, true)).toBe(false);
+  });
+
+  it("counts only unanswered questions as parked", () => {
+    const answered = [
+      part("tool_call", 0, { status: "completed", title: "Read" }),
+      part("question", 1, { requestId: "q1", pending: false }),
+    ];
+    expect(unansweredQuestionParts(answered)).toEqual([]);
+    expect(stepsPartsStillLive(answered, true)).toBe(true);
+
+    const pending = part("question", 1, { requestId: "q2", pending: true });
+    expect(unansweredQuestionParts([pending, ...answered])).toEqual([pending]);
   });
 });
 
@@ -191,5 +214,69 @@ describe("turnStillHasLiveTools", () => {
       part("tool_call", 1, { status: "in_progress", title: "Shell" }),
     ];
     expect(turnStillHasLiveTools(parts)).toBe(true);
+  });
+});
+
+describe("buildAgentTimeline", () => {
+  const shape = (parts: MessagePartDto[]) =>
+    buildAgentTimeline(parts).map((item) => (item.kind === "run" ? `run(${item.parts.length})` : item.kind));
+
+  // A real omp turn streams `tool_call → thought → tool_call → thought`: the
+  // thought lands after the previous tool already completed and must stay in
+  // the same run. Splitting on it turned one continuous stretch of work into
+  // three phases, the first of them with no thoughts at all.
+  it("keeps thoughts and tool calls in one run whatever their emission order", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("thought", 1, { text: "Need the bodies." }),
+      part("tool_call", 2, { title: "Read a.ts:1-200", status: "completed" }),
+      part("thought", 3, { text: "Now I can answer." }),
+    ];
+    expect(shape(parts)).toEqual(["run(4)"]);
+  });
+
+  it("closes a run on visible text and opens the next one after it", () => {
+    const parts = [
+      part("text", 0, { text: "I'll read both files." }),
+      part("tool_call", 1, { title: "Read a.ts", status: "completed" }),
+      part("tool_call", 2, { title: "Read b.ts", status: "completed" }),
+      part("thought", 3, { text: "Both are utilities." }),
+      part("tool_call", 4, { title: "Read a.ts:raw", status: "completed" }),
+      part("thought", 5, { text: "Writing the summary." }),
+      part("text", 6, { text: "Step 1 — …" }),
+    ];
+    expect(shape(parts)).toEqual(["text", "run(5)", "text"]);
+  });
+
+  it("drops empty thoughts instead of opening a run for them", () => {
+    const parts = [
+      part("thought", 0, { text: "   " }),
+      part("tool_call", 1, { title: "Read a.ts", status: "completed" }),
+    ];
+    expect(shape(parts)).toEqual(["run(1)"]);
+  });
+
+  // omp sends a `plan` update on every todo change, and the body renders plan
+  // parts as nothing — closing a run on them left two "Работал" headers with
+  // an empty gap between them (turn a788b7a9: tools → plan → tools).
+  it("keeps one run across parts that render nothing", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("plan", 1, { entries: [{ content: "step", status: "completed" }] }),
+      part("thought", 2, { text: "" }),
+      part("permission", 3, { requestId: "p1", pending: true }),
+      part("status", 4, { kind: "image" }),
+      part("tool_call", 5, { title: "Read b.ts", status: "completed" }),
+    ];
+    expect(shape(parts)).toEqual(["run(2)"]);
+  });
+
+  it("keeps questions out of runs so an interactive prompt is never buried", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("question", 1, { requestId: "q1", pending: true }),
+      part("tool_call", 2, { title: "Read a.ts:raw", status: "completed" }),
+    ];
+    expect(shape(parts)).toEqual(["run(1)", "question", "run(1)"]);
   });
 });

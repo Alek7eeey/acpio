@@ -20,11 +20,11 @@ import {
 
 } from "react";
 import {
+  isGenericToolTitle,
   isPlaceholderSubagentTitle,
   isSubagentToolCall,
   migrateModelParamValues,
   toolDisplayTitle,
-  estimateContextUsage,
   modelForProvider,
   modelForSession,
   modelParamsForSession,
@@ -39,12 +39,14 @@ import {
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
-import { useT } from "../lib/i18n";
+import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
+import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
-import { finalAnswerPart, stepsPartsStillLive, turnAnswerVisible } from "../lib/assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
+import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
@@ -298,6 +300,36 @@ function formatBytes(bytes: number): string {
 const MAX_ATTACH_COUNT = 8;
 const MAX_ATTACH_SIZE = 15 * 1024 * 1024;
 
+/**
+ * Attachment sitting in the composer. A pasted image gets its chip (and a
+ * local preview) on the paste event itself — the chip is created in
+ * "uploading" state and the server path is filled in when the upload lands,
+ * so the UI never waits for the network.
+ */
+type ComposerAttachment = {
+  id: string;
+  name: string;
+  /** Staged path on the server; null while (or if) the upload has not landed. */
+  path: string | null;
+  size: number;
+  status: "uploading" | "ready" | "error";
+  error?: string;
+  /** Object URL of the local file — instant preview, no server round-trip. */
+  previewUrl?: string;
+};
+
+let composerAttachmentSeq = 0;
+
+function nextComposerAttachmentId(): string {
+  composerAttachmentSeq += 1;
+  return `attach-${composerAttachmentSeq}`;
+}
+
+/** Composer attachments that are staged and therefore sendable. */
+function readyAttachments(files: ComposerAttachment[]): PendingAttachment[] {
+  return files.flatMap((f) => (f.status === "ready" && f.path ? [{ name: f.name, path: f.path }] : []));
+}
+
 function collectClipboardImages(data: DataTransfer | null): File[] {
   if (!data) return [];
   const out: File[] = [];
@@ -348,19 +380,6 @@ function clipboardImageName(file: File, index: number): string {
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `clipboard-${stamp}${index > 0 ? `-${index + 1}` : ""}${ext}`;
-}
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const data = String(reader.result ?? "").split(",")[1] ?? "";
-      if (!data) reject(new Error("empty"));
-      else resolve(data);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
-    reader.readAsDataURL(file);
-  });
 }
 
 function MessageArticle({
@@ -1248,14 +1267,10 @@ function PartView({
     }
     // Standalone thoughts are folded into the thinking spoiler; keep a minimal fallback.
     return (
-      <div
-        className={`${styles.thought} ${open ? styles.thoughtOpen : ""} ${
-          streaming ? styles.thoughtLive : ""
-        }`}
-      >
+      <div className={`${styles.thought} ${streaming ? styles.thoughtLive : ""}`}>
         <button {...toggleProps} onClick={() => setOpen(!open)} aria-expanded={open}>
           <span className={styles.thoughtLabel}>
-            {streaming && <span className={styles.pulseDot} />}
+            {streaming ? <span className={styles.pulseDot} /> : null}
             {t("common.reasoning")}
           </span>
           <span className={styles.thoughtChevron} aria-hidden>
@@ -1334,10 +1349,6 @@ function formatCompact(n: number): string {
   return `${v.toFixed(1).replace(/\.0$/, "")}M`;
 }
 
-function isThoughtPart(part: MessagePartDto) {
-  return part.type === "thought" && Boolean(String(part.payload.text ?? "").trim());
-}
-
 /** Full text output of a tool call (string or array of content blocks). */
 function toolOutputText(part: MessagePartDto): string {
   const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
@@ -1360,6 +1371,18 @@ function toolOutputText(part: MessagePartDto): string {
     text = content;
   }
   return text.trim();
+}
+
+/** Failure a tool reported instead of output. Harnesses that put nothing in
+ *  `content` still record why they failed here (`error`, or raw `stderr`), and
+ *  without this the row collapsed to its title with the reason invisible. */
+function toolErrorText(part: MessagePartDto): string {
+  const raw = (part.payload.raw ?? {}) as Record<string, unknown>;
+  const rawOutput = (raw.rawOutput ?? {}) as Record<string, unknown>;
+  for (const value of [rawOutput.error, raw.error, rawOutput.stderr, raw.stderr]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 /** Short human-readable outcome of a tool: written/read path or output first line. */
@@ -1569,8 +1592,7 @@ const TOOL_OUTPUT_CAP = 20000;
 // Expand/collapse state survives virtualization remounts: message rows unmount
 // when scrolled out of the virtual window, so local useState would lose which
 // tool outputs / thought spoilers / steps blocks the user opened.
-const expandedPartIds = new Map<string, boolean>();
-import { expandedStepsByMessage, clearExpandedStepsOverrides } from "../lib/expandedSteps";
+import { expandedPartIds, expandedStepsByMessage, clearExpandedStepsOverrides } from "../lib/expandedSteps";
 
 /** Initial height guess for a virtualized message row; refined by measurement. */
 function estimateMessageRowHeight(msg: MessageDto | undefined): number {
@@ -1585,8 +1607,9 @@ function estimateMessageRowHeight(msg: MessageDto | undefined): number {
   return Math.min(720, Math.max(56, 56 + parts * 22 + chars * 0.35));
 }
 
-function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: boolean }) {
+function ToolCallRow({ part, streaming, durationMs }: { part: MessagePartDto; streaming?: boolean; durationMs?: number }) {
   const t = useT();
+  const locale = useLocale();
   const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
     setOpenState((prev) => {
@@ -1606,12 +1629,17 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
       typeof raw.toolName === "string" ? raw.toolName : undefined,
       rawInput,
     ) || "Tool";
+  // The header is a one-line row, so it shows the call's first line. OMP sends
+  // the whole command/code as the title — the rest stays readable in the body.
+  const titleLine = title.split("\n")[0].trim() || title;
   const status = String(part.payload.status ?? "").toLowerCase();
   const statusActive =
     status === "in_progress" || status === "pending" || status === "running";
   const busy = Boolean(streaming && statusActive);
+  const shownDuration = formatDuration(durationMs ?? 0, locale, t);
   const detail = busy ? "" : toolOutputDetail(part);
   const output = busy ? "" : toolOutputText(part);
+  const errorText = busy ? "" : toolErrorText(part);
   const path = busy ? "" : toolPath(part);
   const metaExtra = busy ? "" : toolMetaExtra(part);
 
@@ -1637,6 +1665,15 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
     !!pathNorm &&
     (pathNorm === hintNorm || pathNorm.startsWith(hintNorm) || hintNorm.startsWith(pathNorm));
 
+  // Many tools report no text at all: a search that matched nothing, an OMP
+  // `execute` with silent stdout, a Cursor edit that only carries its path.
+  // Those rows used to be inert — the call itself was all that was left to
+  // show, and the header ellipsized it away. Fall back to the failure, then to
+  // the call's own full text, so the spoiler always has the whole story.
+  if (!shown.trim()) {
+    shown = errorText.trim() ? errorText : isGenericToolTitle(title) ? "" : title;
+  }
+
   const expandable = !busy && shown.trim().length > 0;
   const truncated = shown.length > TOOL_OUTPUT_CAP;
   const displayed = truncated ? shown.slice(0, TOOL_OUTPUT_CAP) : shown;
@@ -1644,14 +1681,12 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
     if (expandable) setOpen((v) => !v);
   };
   return (
-    <div
-      className={`${styles.toolRow} ${busy ? styles.toolRowBusy : ""} ${
-        expandable ? styles.toolRowClickable : ""
-      }`}
-    >
+    <div className={styles.thought}>
       <button
         type="button"
-        className={styles.toolRowMain}
+        tabIndex={expandable ? undefined : -1}
+        className={styles.partToggle}
+        onMouseDown={(e) => e.preventDefault()}
         onClick={toggle}
         disabled={!expandable}
         aria-expanded={expandable ? open : undefined}
@@ -1662,32 +1697,23 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
           expandable ? (open ? t("common.toolCollapse") : t("common.toolExpand")) : undefined
         }
       >
-        {busy ? (
-          <span className={styles.toolLoader} aria-hidden />
-        ) : (
-          <span className={styles.toolCheck} aria-hidden>
-            ✓
+        <span className={styles.thoughtLabel}>
+          {busy ? (
+            <span className={styles.toolLoader} aria-hidden />
+          ) : (
+            <span className={styles.toolCheck} aria-hidden>
+              ✓
+            </span>
+          )}
+          <span className={`${styles.toolName}${busy ? ` ${styles.toolNameBusy}` : ""}`}>
+            {titleLine}
           </span>
-        )}
-        <span className={styles.toolName}>{title}</span>
-        {busy ? <span className={styles.toolStatus}>{t("common.toolWorking")}</span> : null}
+        </span>
+        {shownDuration ? <span className={styles.thoughtTime}>{shownDuration}</span> : null}
         {expandable ? (
-          <svg
-            className={`${styles.toolChevron} ${open ? styles.toolChevronOpen : ""}`}
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden
-          >
-            <path
-              d="M9 6l6 6-6 6"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <span className={styles.thoughtChevron} aria-hidden>
+            {open ? "\u25be" : "\u25b8"}
+          </span>
         ) : null}
       </button>
       {open ? (
@@ -1713,16 +1739,123 @@ function ToolCallRow({ part, streaming }: { part: MessagePartDto; streaming?: bo
           />
         </div>
       ) : null}
-      {!open && detail ? (
-        path ? (
-          <PathLink path={path} className={styles.toolDetail}>
-            {detail}
-          </PathLink>
-        ) : (
-          <span className={styles.toolDetail}>{detail}</span>
-        )
-      ) : null}
     </div>
+  );
+}
+
+/** First content the reader sees after `node` inside `limit`, walking up out of
+ *  the block's own wrapper (a timeline phase sits inside `.agentTimeline`). */
+function nextContentAfter(node: HTMLElement, limit: HTMLElement): HTMLElement | null {
+  let cur: HTMLElement | null = node;
+  while (cur && cur !== limit) {
+    const next = cur.nextElementSibling;
+    if (next instanceof HTMLElement) return next;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+type PendingReasoningCollapse =
+  | { kind: "hold"; anchor: HTMLElement; offset: number }
+  | { kind: "align" };
+
+/**
+ * Collapse a reasoning block without losing the reader's place.
+ *
+ * The body is up to tens of thousands of pixels tall, so closing it moves
+ * everything after it at once; the browser clamps `scrollTop` and the reader
+ * lands somewhere unrelated. The scroll fix-up runs after the collapse has been
+ * rendered — `planReasoningCollapseScroll` picks between holding the reply in
+ * place and bringing the collapsed block to the top of the scrollport.
+ */
+function useReasoningCollapseScroll(
+  blockRef: RefObject<HTMLDivElement | null>,
+  open: boolean,
+  setOpen: (next: boolean) => void,
+) {
+  const pendingRef = useRef<PendingReasoningCollapse | null>(null);
+
+  const threadOf = (block: HTMLElement | null) =>
+    block?.closest<HTMLElement>(`.${styles.thread}`) ?? null;
+
+  const collapse = () => {
+    const block = blockRef.current;
+    const thread = threadOf(block);
+    const next = block && thread ? nextContentAfter(block, thread) : null;
+    if (block && thread) {
+      const view = thread.getBoundingClientRect();
+      const plan = planReasoningCollapseScroll({
+        viewportTop: view.top,
+        viewportBottom: view.bottom,
+        blockTop: block.getBoundingClientRect().top,
+        nextTop: next ? next.getBoundingClientRect().top : null,
+      });
+      pendingRef.current =
+        plan.kind === "hold"
+          ? { kind: "hold", anchor: plan.anchor === "next" && next ? next : block, offset: plan.offset }
+          : { kind: "align" };
+    } else {
+      pendingRef.current = null;
+    }
+    setOpen(false);
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingRef.current;
+    pendingRef.current = null;
+    const block = blockRef.current;
+    const thread = threadOf(block);
+    if (!pending || !block || !thread) return;
+    const place = () => {
+      const view = thread.getBoundingClientRect();
+      if (pending.kind === "hold" && pending.anchor.isConnected) {
+        // Content that shrank away above moved up on screen by the removed
+        // height; scrolling back by the same amount restores the offset.
+        thread.scrollTop += pending.anchor.getBoundingClientRect().top - view.top - pending.offset;
+        return;
+      }
+      thread.scrollTop += block.getBoundingClientRect().top - view.top;
+    };
+    place();
+    // Virtualized rows re-measure after this commit — settle on real heights.
+    const raf = window.requestAnimationFrame(place);
+    return () => window.cancelAnimationFrame(raf);
+  }, [open, blockRef]);
+
+  return collapse;
+}
+
+/** Icon-only collapse control that floats inside an expanded reasoning body.
+ *  It sticks to the bottom of the thread scrollport, so a long transcript can
+ *  be closed from where it is being read — the header toggle is pinned to the
+ *  top of the screen, which on phones means reaching all the way back up.
+ *  Only the live (last) phase pins: two sticky buttons would overlap. */
+function StepsCollapseButton({
+  onClick,
+  sticky = true,
+}: {
+  onClick: () => void;
+  sticky?: boolean;
+}) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className={`${styles.stepsCollapse}${sticky ? ` ${styles.stepsCollapseSticky}` : ""}`}
+      onClick={onClick}
+      title={t("common.collapseThinking")}
+      aria-label={t("common.collapseThinking")}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M6 15l6-6 6 6"
+          stroke="currentColor"
+          strokeWidth="1.9"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </button>
   );
 }
 
@@ -1730,12 +1863,15 @@ function StickyStepsToggle({
   open,
   liveHeader,
   label,
+  time = "",
   onClick,
   sticky = true,
 }: {
   open: boolean;
   liveHeader: boolean;
   label: string;
+  /** Measured span shown next to the label, e.g. "12 с" / "1 мин 5 с". */
+  time?: string;
   onClick: () => void;
   /** When false, header stays in normal flow (older timeline phases). */
   sticky?: boolean;
@@ -1789,6 +1925,7 @@ function StickyStepsToggle({
         {liveHeader ? <span className={styles.pulseDot} /> : null}
         {label}
       </span>
+      {time ? <span className={styles.stepsTime}>{time}</span> : null}
       <span
         className={`${styles.stepsChevron} ${open ? styles.stepsChevronOpen : ""}`}
         aria-hidden
@@ -1812,21 +1949,32 @@ function StepsSpoiler({
   streaming,
   turnActive,
   autoExpand,
-  startedAt,
   messageId,
   sessionId,
   stepsGlobalTick,
+  durations,
+  timeMs,
+  body,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
   turnActive?: boolean;
   autoExpand: boolean;
-  startedAt: string;
   messageId: string;
   sessionId: string;
   stepsGlobalTick: number;
+  /** Measured span per part, for the rows inside the body. */
+  durations?: Map<string, number>;
+  /** Measured span of this spoiler's own contents. Overrides the turn-wide
+   *  stamp the harness reports on thoughts, which covers the answer too. */
+  timeMs?: number;
+  /** Pre-rendered open body. The agent-turn timeline passes its phased items
+   *  here so the finished turn keeps the same structure it streamed with;
+   *  without it the spoiler renders `parts` flat. */
+  body?: ReactNode;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [open, setOpenState] = useState(
     () => expandedStepsByMessage.get(messageId) ?? autoExpand,
   );
@@ -1837,6 +1985,8 @@ function StepsSpoiler({
       return value;
     });
   };
+  const blockRef = useRef<HTMLDivElement>(null);
+  const collapseBlock = useReasoningCollapseScroll(blockRef, open, setOpen);
   const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
   useEffect(() => {
     if (streaming) {
@@ -1850,26 +2000,6 @@ function StepsSpoiler({
     const id = window.setTimeout(() => setHoldEmptyLive(false), 160);
     return () => window.clearTimeout(id);
   }, [streaming, parts.length]);
-  const thoughts = parts.filter(isThoughtPart);
-  const hasPendingQuestion = parts.some(
-    (p) => p.type === "question" && Boolean(p.payload.pending),
-  );
-  useEffect(() => {
-    if (hasPendingQuestion) setOpen(true);
-  }, [hasPendingQuestion, setOpen]);
-  const agentDurationSec = thoughts.reduce((max, part) => {
-    const ms = Number(part.payload.durationMs);
-    return Number.isFinite(ms) && ms > 0 ? Math.max(max, Math.max(1, Math.round(ms / 1000))) : max;
-  }, 0);
-  const messageStartedAt = Date.parse(startedAt);
-  const startedAtRef = useRef<number | null>(
-    Number.isFinite(messageStartedAt) ? messageStartedAt : null,
-  );
-  const [elapsedSec, setElapsedSec] = useState(() => {
-    if (streaming || holdEmptyLive) return 0;
-    const value = Date.parse(startedAt);
-    return Number.isFinite(value) ? Math.max(1, Math.round((Date.now() - value) / 1000)) : 0;
-  });
 
   const prevAutoExpandRef = useRef(autoExpand);
   useEffect(() => {
@@ -1888,46 +2018,19 @@ function StepsSpoiler({
 
   const liveHeader = streaming || holdEmptyLive || (Boolean(turnActive) && parts.length === 0);
 
-  useEffect(() => {
-    if (!liveHeader) return;
-    if (startedAtRef.current == null) startedAtRef.current = Date.now();
-    const tick = () => {
-      const start = startedAtRef.current ?? Date.now();
-      setElapsedSec(Math.max(1, Math.round((Date.now() - start) / 1000)));
-    };
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, [liveHeader]);
-
-  useEffect(() => {
-    if (liveHeader) return;
-    if (startedAtRef.current == null) {
-      const value = Date.parse(startedAt);
-      if (Number.isFinite(value)) startedAtRef.current = value;
-    }
-    if (startedAtRef.current == null) return;
-    setElapsedSec(Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000)));
-  }, [startedAt, liveHeader]);
-
   if (parts.length === 0 && !liveHeader) return null;
 
   const stepsLength = parts.length;
   const subagentParts = parts.filter((p) => p.type === "subagent");
   const showSubagentsOutside = !open && subagentParts.length > 0;
 
-  const fallbackRecent =
-    Date.now() - (Number.isFinite(Date.parse(startedAt)) ? Date.parse(startedAt) : Date.now()) <
-    10 * 60_000;
-  const shownSeconds = agentDurationSec || (fallbackRecent ? elapsedSec : 0);
-  const label = liveHeader
-    ? t("common.steps")
-    : shownSeconds > 0
-      ? t("common.thoughtFor", {
-          seconds: shownSeconds,
-          count: shownSeconds,
-        })
-      : t("common.steps");
+  // Span of this spoiler's own contents, measured from the part timeline.
+  // `timeMs` lets the phased caller pass the sum it already computed; otherwise
+  // it is summed here, so both modes state the same number for the same block.
+  // The harness-reported `durationMs` on thoughts is the whole ACP request
+  // (answer included) and is deliberately not used.
+  const spanMs = timeMs ?? (durations ? sumDurations(parts, durations) : 0);
+  const label = liveHeader ? t("common.working") : t("common.worked");
 
   const renderPart = (part: MessagePartDto, idx: number, listLength: number) => {
     if (part.type === "question") {
@@ -1940,19 +2043,25 @@ function StepsSpoiler({
     const live =
       part.type === "tool_call" || part.type === "subagent" ? streaming && toolLive : isLast;
     return part.type === "tool_call" ? (
-      <ToolCallRow key={part.id} part={part} streaming={live} />
+      <ToolCallRow
+        key={part.id}
+        part={part}
+        streaming={live}
+        durationMs={durations?.get(part.id)}
+      />
     ) : (
       <PartView key={part.id} part={part} embedded streaming={live} />
     );
   };
 
   return (
-    <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`}>
+    <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`} ref={blockRef}>
       <StickyStepsToggle
         open={open}
         liveHeader={liveHeader}
         label={label}
-        onClick={() => setOpen((v) => !v)}
+        time={formatDuration(spanMs, locale, t)}
+        onClick={() => (open ? collapseBlock() : setOpen(true))}
       />
       {showSubagentsOutside ? (
         <div className={styles.stepsSubagentsPeek}>
@@ -1964,56 +2073,22 @@ function StepsSpoiler({
       ) : null}
       {open && parts.length > 0 && (
         <div className={styles.stepsBody}>
-          {[...parts]
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((part, idx) => renderPart(part, idx, stepsLength))}
+          {body ??
+            [...parts]
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+              .map((part, idx) => renderPart(part, idx, stepsLength))}
+          <StepsCollapseButton onClick={collapseBlock} />
         </div>
       )}
     </div>
   );
 }
 
-type AgentTimelineItem =
-  | { kind: "phase"; thoughts: MessagePartDto[]; tools: MessagePartDto[]; key: string }
-  | { kind: "text"; part: MessagePartDto; key: string }
-  | { kind: "question"; part: MessagePartDto; key: string };
-
-function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[] {
-  const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const items: AgentTimelineItem[] = [];
-  let thoughtBuf: MessagePartDto[] = [];
-  let toolBuf: MessagePartDto[] = [];
-
-  const flushPhase = () => {
-    if (thoughtBuf.length === 0 && toolBuf.length === 0) return;
-    const key = thoughtBuf[0]?.id ?? toolBuf[0]!.id;
-    items.push({ kind: "phase", thoughts: thoughtBuf, tools: toolBuf, key });
-    thoughtBuf = [];
-    toolBuf = [];
-  };
-
-  for (const part of sorted) {
-    if (part.type === "thought") {
-      if (toolBuf.length > 0) flushPhase();
-      thoughtBuf.push(part);
-      continue;
-    }
-    if (part.type === "tool_call" || part.type === "subagent") {
-      toolBuf.push(part);
-      continue;
-    }
-    flushPhase();
-    if (part.type === "text" && String(part.payload.text ?? "").trim()) {
-      items.push({ kind: "text", part, key: part.id });
-    } else if (part.type === "question") {
-      items.push({ kind: "question", part, key: part.id });
-    }
-  }
-  flushPhase();
-  return items;
-}
-
-function renderTimelineAction(part: MessagePartDto, streaming: boolean) {
+function renderTimelineAction(
+  part: MessagePartDto,
+  streaming: boolean,
+  durationMs?: number,
+) {
   const status = String(part.payload.status ?? "").toLowerCase();
   const toolLive =
     status === "in_progress" || status === "pending" || status === "running";
@@ -2021,28 +2096,96 @@ function renderTimelineAction(part: MessagePartDto, streaming: boolean) {
   if (part.type === "subagent") {
     return <SubagentPartView part={part} streaming={live} />;
   }
-  return <ToolCallRow part={part} streaming={live} />;
+  return <ToolCallRow part={part} streaming={live} durationMs={durationMs} />;
 }
 
-function ThoughtPhaseBlock({
+/** A single thought block: its own spoiler, because a reasoning block is often
+ *  thousands of characters and would flatten the run it sits in. */
+function ThoughtBlock({
+  part,
+  autoExpand,
+  streaming,
+  durationMs,
+}: {
+  part: MessagePartDto;
+  autoExpand: boolean;
+  streaming: boolean;
+  durationMs?: number;
+}) {
+  const t = useT();
+  const locale = useLocale();
+  const openKey = `thought:${part.id}`;
+  const [open, setOpenState] = useState(() => expandedPartIds.get(openKey) ?? autoExpand);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    expandedPartIds.set(openKey, next);
+  };
+  const blockRef = useRef<HTMLDivElement>(null);
+  const collapseBlock = useReasoningCollapseScroll(blockRef, open, () => setOpen(false));
+
+  const prevAutoExpandRef = useRef(autoExpand);
+  useEffect(() => {
+    if (prevAutoExpandRef.current === autoExpand) return;
+    prevAutoExpandRef.current = autoExpand;
+    setOpen(autoExpand);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoExpand]);
+
+  const text = String(part.payload.text ?? "").trim();
+  if (!text) return null;
+
+  return (
+    <div className={styles.thought} ref={blockRef}>
+      <button
+        type="button"
+        tabIndex={-1}
+        className={styles.partToggle}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => (open ? collapseBlock() : setOpen(true))}
+        aria-expanded={open}
+      >
+        <span className={styles.thoughtLabel}>
+          {streaming ? <span className={styles.pulseDot} /> : null}
+          {t("common.reasoning")}
+        </span>
+        <span className={styles.thoughtTime}>{formatDuration(durationMs ?? 0, locale, t)}</span>
+        <span className={styles.thoughtChevron} aria-hidden>
+          {open ? "\u25be" : "\u25b8"}
+        </span>
+      </button>
+      {open ? <div className={styles.thoughtBody}>{renderThoughtText(text)}</div> : null}
+    </div>
+  );
+}
+
+/** One contiguous stretch of agent activity — thoughts and tool calls in
+ *  emission order. While the turn runs this is what streams on screen; after it
+ *  stops the same block is what sits inside the single collapsed spoiler.
+ *
+ *  Its header time is the measured span of its own parts (`durationMs`, ticking
+ *  while the run is live), never the turn-wide stamp the harness reports. */
+function ActivityRunBlock({
   parts,
-  tools = [],
   streaming,
   autoExpand,
-  phaseKey,
+  runKey,
+  durationMs,
+  durations,
   stepsGlobalTick,
   sticky = true,
 }: {
   parts: MessagePartDto[];
-  tools?: MessagePartDto[];
   streaming: boolean;
   autoExpand: boolean;
-  phaseKey: string;
+  runKey: string;
+  durationMs: number;
+  durations: Map<string, number>;
   stepsGlobalTick: number;
   sticky?: boolean;
 }) {
   const t = useT();
-  const openKey = `thought-phase:${phaseKey}`;
+  const locale = useLocale();
+  const openKey = `steps-run:${runKey}`;
   const [open, setOpenState] = useState(() => expandedPartIds.get(openKey) ?? autoExpand);
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
     setOpenState((prev) => {
@@ -2051,9 +2194,8 @@ function ThoughtPhaseBlock({
       return value;
     });
   };
-  const phaseStartedRef = useRef(Date.now());
-  const [liveSec, setLiveSec] = useState(1);
-  const [frozenSec, setFrozenSec] = useState<number | null>(null);
+  const blockRef = useRef<HTMLDivElement>(null);
+  const collapseBlock = useReasoningCollapseScroll(blockRef, open, setOpen);
 
   const prevAutoExpandRef = useRef(autoExpand);
   useEffect(() => {
@@ -2070,60 +2212,109 @@ function ThoughtPhaseBlock({
     setOpen(autoExpand);
   }, [stepsGlobalTick, autoExpand, setOpen]);
 
-  useEffect(() => {
-    if (streaming) {
-      const tick = () => {
-        setLiveSec(Math.max(1, Math.round((Date.now() - phaseStartedRef.current) / 1000)));
-      };
-      tick();
-      const id = window.setInterval(tick, 1000);
-      return () => window.clearInterval(id);
-    }
-    setFrozenSec(Math.max(1, Math.round((Date.now() - phaseStartedRef.current) / 1000)));
-  }, [streaming]);
-
-  const payloadDurationSec = parts.reduce((max, part) => {
-    const ms = Number(part.payload.durationMs);
-    return Number.isFinite(ms) && ms > 0 ? Math.max(max, Math.max(1, Math.round(ms / 1000))) : max;
-  }, 0);
-  const shownSeconds = streaming ? liveSec : frozenSec ?? payloadDurationSec;
-  const label = streaming
-    ? t("common.steps")
-    : shownSeconds > 0
-      ? t("common.thoughtFor", { seconds: shownSeconds, count: shownSeconds })
-      : t("common.steps");
-  const mergedText = parts
-    .map((part) => String(part.payload.text ?? "").trim())
-    .filter(Boolean)
-    .join("\n\n");
-  const hasBody = Boolean(mergedText) || tools.length > 0;
+  const label = streaming ? t("common.working") : t("common.worked");
 
   return (
-    <div className={styles.agentPhase}>
+    <div className={styles.agentPhase} ref={blockRef}>
       <StickyStepsToggle
         open={open}
         liveHeader={streaming}
         label={label}
+        time={formatDuration(durationMs, locale, t)}
         sticky={sticky}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? collapseBlock() : setOpen(true))}
       />
-      {open && hasBody ? (
+      {open && parts.length > 0 ? (
         <div className={styles.stepsBody}>
-          {mergedText ? (
-            <div className={`${styles.thoughtEmbedded} ${streaming ? styles.thoughtLive : ""}`}>
-              <div className={styles.thoughtBody}>{renderThoughtText(mergedText)}</div>
-            </div>
-          ) : null}
-          {tools.map((part, idx) => (
-            <Fragment key={part.id}>
-              {renderTimelineAction(part, streaming && idx === tools.length - 1)}
-            </Fragment>
-          ))}
+          {parts.map((part, idx) => {
+            const isLast = idx === parts.length - 1;
+            return (
+              <Fragment key={part.id}>
+                {part.type === "thought" ? (
+                  <ThoughtBlock
+                    part={part}
+                    autoExpand={autoExpand}
+                    streaming={streaming && isLast}
+                    durationMs={durations.get(part.id)}
+                  />
+                ) : (
+                  renderTimelineAction(part, streaming && isLast, durations.get(part.id))
+                )}
+              </Fragment>
+            );
+          })}
+          <StepsCollapseButton sticky={sticky} onClick={collapseBlock} />
         </div>
       ) : null}
     </div>
   );
 }
+
+/** The turn's items in emission order — used inline while the agent generates
+ *  and, unchanged, as the body of the finished spoiler. */
+function AgentTimelineItems({
+  items,
+  streaming,
+  autoExpand,
+  messageId,
+  sessionId,
+  durations,
+  stepsGlobalTick,
+  stickyRuns = true,
+}: {
+  items: AgentTimelineItem[];
+  streaming: boolean;
+  autoExpand: boolean;
+  messageId: string;
+  sessionId: string;
+  durations: Map<string, number>;
+  stepsGlobalTick: number;
+  /** Pinned phase headers belong to the block the reader is inside. As the body
+   *  of an open spoiler that block is the spoiler itself — a run header pinned
+   *  at the same offset would sit exactly on top of it and take the tap. */
+  stickyRuns?: boolean;
+}) {
+  return (
+    <>
+      {items.map((item, idx) => {
+        const isLast = idx === items.length - 1;
+        if (item.kind === "run") {
+          // Keyed by position, not by the run's first part: the empty live block
+          // that waits for the first token has no part to name it after, so a
+          // part-id key made it swap identity the moment reasoning arrived —
+          // the block remounted and dropped to collapsed under the reader.
+          const runKey = `${messageId}:${idx}`;
+          return (
+            <ActivityRunBlock
+              key={runKey}
+              parts={item.parts}
+              streaming={streaming && isLast}
+              autoExpand={autoExpand}
+              runKey={runKey}
+              durationMs={sumDurations(item.parts, durations)}
+              durations={durations}
+              stepsGlobalTick={stepsGlobalTick}
+              sticky={stickyRuns && isLast}
+            />
+          );
+        }
+        if (item.kind === "text") {
+          return (
+            <PartView key={item.key} part={item.part} embedded streaming={streaming && isLast} />
+          );
+        }
+
+        if (item.kind === "question") {
+          return <QuestionPartView key={item.key} part={item.part} sessionId={sessionId} />;
+        }
+        return null;
+      })}
+    </>
+  );
+}
+
+/** The live turn's block before its first part arrives. */
+const EMPTY_LIVE_RUN: AgentTimelineItem = { kind: "run", parts: [] };
 
 function AgentTurnTimeline({
   parts,
@@ -2131,6 +2322,7 @@ function AgentTurnTimeline({
   autoExpand,
   messageId,
   sessionId,
+  durations,
   stepsGlobalTick,
 }: {
   parts: MessagePartDto[];
@@ -2138,6 +2330,7 @@ function AgentTurnTimeline({
   autoExpand: boolean;
   messageId: string;
   sessionId: string;
+  durations: Map<string, number>;
   stepsGlobalTick: number;
 }) {
   const items = useMemo(() => buildAgentTimeline(parts), [parts]);
@@ -2157,56 +2350,23 @@ function AgentTurnTimeline({
 
   const liveHeader = streaming || holdEmptyLive;
   if (items.length === 0 && !liveHeader) return null;
-
-  if (items.length === 0 && liveHeader) {
-    return (
-      <div className={styles.agentTimeline}>
-        <ThoughtPhaseBlock
-          parts={[]}
-          streaming
-          autoExpand={autoExpand}
-          phaseKey={`${messageId}:live`}
-          stepsGlobalTick={stepsGlobalTick}
-        />
-      </div>
-    );
-  }
+  // A live turn opens before its first part exists. That empty block goes
+  // through the same list as the real runs so it keeps its identity when the
+  // first thought lands - a separate branch made React tear the block down and
+  // build it again under the reader.
+  const shown = items.length === 0 ? [EMPTY_LIVE_RUN] : items;
 
   return (
     <div className={styles.agentTimeline}>
-      {items.map((item, idx) => {
-        const isLast = idx === items.length - 1;
-        if (item.kind === "phase") {
-          return (
-            <ThoughtPhaseBlock
-              key={item.key}
-              parts={item.thoughts}
-              tools={item.tools}
-              streaming={streaming && isLast}
-              autoExpand={autoExpand}
-              phaseKey={item.key}
-              stepsGlobalTick={stepsGlobalTick}
-              sticky={isLast}
-            />
-          );
-        }
-        if (item.kind === "text") {
-          return (
-            <PartView
-              key={item.key}
-              part={item.part}
-              embedded
-              streaming={streaming && isLast}
-            />
-          );
-        }
-        if (item.kind === "question") {
-          return (
-            <QuestionPartView key={item.key} part={item.part} sessionId={sessionId} />
-          );
-        }
-        return null;
-      })}
+      <AgentTimelineItems
+        items={shown}
+        streaming={streaming || items.length === 0}
+        autoExpand={autoExpand}
+        messageId={messageId}
+        sessionId={sessionId}
+        durations={durations}
+        stepsGlobalTick={stepsGlobalTick}
+      />
     </div>
   );
 }
@@ -3140,13 +3300,19 @@ function AssistantParts({
     return coalesceAssistantParts(message.parts);
   }, [message.parts]);
 
+  // A parked question renders outside the spoiler (see below), so the "Working…"
+  // header never covers an agent that is really waiting for the user.
+  const parkedQuestions = useMemo(() => unansweredQuestionParts(parts), [parts]);
+  const parked = parkedQuestions.length > 0;
   // The final answer (last text part in emission order) stays outside the
   // steps block; intermediate texts, tools, and subagents interleave inside
   // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
     const finalText = finalAnswerPart(parts, { streaming: stepsStreaming });
-    return parts.filter((p) => p !== finalText && p.type !== "error");
-  }, [parts, stepsStreaming]);
+    return parts.filter(
+      (p) => p !== finalText && p.type !== "error" && !parkedQuestions.includes(p),
+    );
+  }, [parts, stepsStreaming, parkedQuestions]);
   const stepsLive = useMemo(
     () => stepsPartsStillLive(parts, stepsStreaming),
     [parts, stepsStreaming],
@@ -3163,7 +3329,32 @@ function AssistantParts({
       .trim();
   }, [mainParts]);
   const actionsCtxRef = useRef<MessageCtxHandle | null>(null);
-  const showAgentTimeline = agentTurnTimeline && stepsLive && !plain;
+  // Spans for every spoiler (thoughts, tools, aggregate blocks) come from the
+  // part timeline of the whole message — including the answer, which is what
+  // gives the trailing steps part its end. While generation is running the
+  // open-ended trailing part is bounded by `now` and grows once a second — but
+  // not while the turn is parked on a question: nobody is working then, so the
+  // ticker (and the interval behind it) must stop with the agent.
+  const live = !parked && (stepsStreaming || turnActive);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    setNow(Date.now());
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [live]);
+  const durations = useMemo(
+    () => partDurations(parts, { now: live ? now : undefined }),
+    [parts, now, live],
+  );
+  // Agent-turn timeline. While the agent is still generating (state 1) the turn
+  // reads as spoiler → text → spoiler → text …, and it stays that way until the
+  // last token. Once generation stops (state 2) everything but the final text
+  // folds into one spoiler whose body is that same transcript.
+  const timelineItems = useMemo(
+    () => (agentTurnTimeline ? buildAgentTimeline(stepsParts) : []),
+    [agentTurnTimeline, stepsParts],
+  );
 
   return (
     <div
@@ -3178,27 +3369,55 @@ function AssistantParts({
         actionsCtxRef.current?.openAt(e.clientX, e.clientY);
       }}
     >
-      {showAgentTimeline ? (
+      {agentTurnTimeline && turnActive ? (
         <AgentTurnTimeline
           parts={stepsParts}
-          streaming={stepsStreaming || turnActive}
+          streaming={!parked && (stepsStreaming || turnActive)}
           autoExpand={autoExpandSteps}
           messageId={message.id}
           sessionId={message.sessionId}
+          durations={durations}
           stepsGlobalTick={stepsGlobalTick}
         />
-      ) : stepsParts.length > 0 || turnActive ? (
+      ) : agentTurnTimeline && timelineItems.length > 0 ? (
+        <StepsSpoiler
+          parts={stepsParts}
+          streaming={false}
+          turnActive={false}
+          autoExpand={autoExpandSteps}
+          messageId={message.id}
+          sessionId={message.sessionId}
+          durations={durations}
+          timeMs={sumDurations(stepsParts, durations)}
+          stepsGlobalTick={stepsGlobalTick}
+          body={
+            <AgentTimelineItems
+              items={timelineItems}
+              streaming={false}
+              autoExpand={autoExpandSteps}
+              messageId={message.id}
+              sessionId={message.sessionId}
+              durations={durations}
+              stepsGlobalTick={stepsGlobalTick}
+              stickyRuns={false}
+            />
+          }
+        />
+      ) : stepsParts.length > 0 || (turnActive && !parked) ? (
         <StepsSpoiler
           parts={stepsParts}
           streaming={stepsLive}
           turnActive={turnActive}
           autoExpand={autoExpandSteps}
-          startedAt={message.createdAt}
           messageId={message.id}
           sessionId={message.sessionId}
+          durations={durations}
           stepsGlobalTick={stepsGlobalTick}
         />
       ) : null}
+      {parkedQuestions.map((part) => (
+        <QuestionPartView key={part.id} part={part} sessionId={message.sessionId} />
+      ))}
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
         return (
@@ -3406,6 +3625,8 @@ function ChatThread() {
   const [slashKeyboardNav, setSlashKeyboardNav] = useState(false);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [planPanelOpen, setPlanPanelOpen] = useState(false);
+  /** The git diff in the full view: portalled to the body, pinned to the viewport. */
+  const [gitFullscreen, setGitFullscreen] = useState(false);
   const prevPaneCountRef = useRef(bind?.paneCount ?? 1);
 
   const openPlanPanel = useCallback(() => {
@@ -3443,6 +3664,12 @@ function ChatThread() {
     }
     prevPaneCountRef.current = n;
   }, [bind?.paneCount, setConsoleOpen, setGitPanelOpen]);
+
+  useEffect(() => {
+    // The panel keeps its own state across sessions; the page-wide takeover does
+    // not outlive the panel or the session it was asked for.
+    setGitFullscreen(false);
+  }, [gitPanelOpen, activeSession?.id]);
   const [modelParamValues, setModelParamValues] = useState<Record<string, string>>(
     () => modelParamsForSession(settings, null),
   );
@@ -3450,12 +3677,14 @@ function ChatThread() {
   const [folderPicker, setFolderPicker] = useState<{ x: number; y: number } | null>(null);
   const [autoExpandSteps, setAutoExpandSteps] = useState(() => {
     try {
-      // v2: thinking/steps open by default (legacy key defaulted to off).
-      const raw = localStorage.getItem("acpio.autoExpandSteps.v2");
-      if (raw === null) return true;
+      // v3: blocks start collapsed. v2 opened thinking/steps by default, which
+      // buried the answer under the whole transcript; the "Размышления" chip
+      // above the composer still expands everything on demand.
+      const raw = localStorage.getItem("acpio.autoExpandSteps.v3");
+      if (raw === null) return false;
       return raw === "1";
     } catch {
-      return true;
+      return false;
     }
   });
   const [stepsGlobalTick, setStepsGlobalTick] = useState(0);
@@ -3464,14 +3693,16 @@ function ChatThread() {
     setAutoExpandSteps(open);
     setStepsGlobalTick((tick) => tick + 1);
     try {
-      localStorage.setItem("acpio.autoExpandSteps.v2", open ? "1" : "0");
+      localStorage.setItem("acpio.autoExpandSteps.v3", open ? "1" : "0");
     } catch {
       /* ignore */
     }
   }, []);
-  const [paramsLoading, setParamsLoading] = useState(false);
+  /** Model value whose params are currently being fetched (⋯ flyout / prefetch). */
+  const [paramsLoadingFor, setParamsLoadingFor] = useState<string | null>(null);
+  /** Per-model config-option schemas, keyed by model value. */
+  const [paramsByModel, setParamsByModel] = useState<Record<string, ModelParamDto[]>>({});
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
-  const paramsLoadTokenRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** -1 = composer draft; 0..n-1 = browsing sent user messages (oldest→newest). */
   const composerHistoryIndexRef = useRef(-1);
@@ -3484,7 +3715,13 @@ function ChatThread() {
   /** After selecting/creating a chat, focus the composer once it is empty+ready. */
   const pendingEmptyChatFocusRef = useRef(false);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
-  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
+  const paramsInflightRef = useRef(new Map<string, Promise<ModelParamDto[]>>());
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  const [pendingFiles, setPendingFiles] = useState<ComposerAttachment[]>([]);
+  /** Object URLs behind the composer previews, keyed by attachment id: revoked
+      the moment a chip leaves the composer so the blobs are not pinned. */
+  const previewUrlsRef = useRef(new Map<string, string>());
   const [attachError, setAttachError] = useState<string | null>(null);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
@@ -3554,7 +3791,7 @@ function ChatThread() {
 
   useEffect(() => {
     try {
-      localStorage.setItem("acpio.autoExpandSteps.v2", autoExpandSteps ? "1" : "0");
+      localStorage.setItem("acpio.autoExpandSteps.v3", autoExpandSteps ? "1" : "0");
     } catch {
       // ignore
     }
@@ -3912,7 +4149,7 @@ function ChatThread() {
   );
 
   const attachPastedImages = useCallback(
-    async (files: File[]) => {
+    (files: File[]) => {
       const sessionId = activeSession?.id;
       if (!sessionId || files.length === 0) return;
       if (editingMessageId || composerLocked || turnBusy) return;
@@ -3924,34 +4161,56 @@ function ChatThread() {
       const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
       if (ok.length === 0) return;
 
-      let accepted = 0;
-      for (let i = 0; i < ok.length; i++) {
-        const file = ok[i]!;
-        const room = MAX_ATTACH_COUNT - pendingFiles.length - accepted;
-        if (room <= 0) {
-          setAttachError(t("chat.tooManyFiles"));
-          break;
-        }
-        try {
-          const data = await fileToBase64(file);
-          const saved = await api.uploadAttachment(sessionId, {
-            name: clipboardImageName(file, i),
-            mime: file.type || "image/png",
-            data,
+      const room = Math.max(0, MAX_ATTACH_COUNT - pendingFiles.length);
+      if (ok.length > room) setAttachError(t("chat.tooManyFiles"));
+      const accepted = ok.slice(0, room);
+      if (accepted.length === 0) return;
+
+      // Chips (with a local preview) land synchronously, before any await —
+      // the upload fills in the staged path in the background.
+      const entries: ComposerAttachment[] = accepted.map((file, i) => {
+        const id = nextComposerAttachmentId();
+        const previewUrl = URL.createObjectURL(file);
+        previewUrlsRef.current.set(id, previewUrl);
+        return {
+          id,
+          name: clipboardImageName(file, i),
+          path: null,
+          size: file.size,
+          status: "uploading",
+          previewUrl,
+        };
+      });
+      setAttachError(null);
+      setPendingFiles((prev) => [...prev, ...entries].slice(0, MAX_ATTACH_COUNT));
+
+      const patch = (id: string, next: Partial<ComposerAttachment>) => {
+        setPendingFiles((prev) =>
+          prev.map((f) => (f.id === id ? { ...f, ...next } : f)),
+        );
+      };
+      // Uploads run in parallel: each pasted image gets its own request, so a
+      // slow one never holds up the others.
+      accepted.forEach((file, i) => {
+        const entry = entries[i]!;
+        void api
+          .uploadAttachment(sessionId, file, entry.name)
+          .then((saved) => {
+            patch(entry.id, {
+              name: saved.name,
+              path: saved.path,
+              size: saved.size,
+              status: "ready",
+              error: undefined,
+            });
+          })
+          .catch((err: unknown) => {
+            patch(entry.id, {
+              status: "error",
+              error: err instanceof Error ? err.message : String(err),
+            });
           });
-          setPendingFiles((prev) => {
-            if (prev.length >= MAX_ATTACH_COUNT) {
-              setAttachError(t("chat.tooManyFiles"));
-              return prev;
-            }
-            setAttachError(null);
-            return [...prev, { name: saved.name, path: saved.path }];
-          });
-          accepted += 1;
-        } catch (err) {
-          setAttachError(err instanceof Error ? err.message : String(err));
-        }
-      }
+      });
     },
     [
       activeSession?.id,
@@ -3963,9 +4222,20 @@ function ChatThread() {
     ],
   );
 
+  const removePendingFile = useCallback((id: string) => {
+    const url = previewUrlsRef.current.get(id);
+    if (url) {
+      previewUrlsRef.current.delete(id);
+      URL.revokeObjectURL(url);
+    }
+    setPendingFiles((prev) => prev.filter((f) => f.id !== id));
+  }, []);
+
+  const attachmentsUploading = pendingFiles.some((f) => f.status === "uploading");
+
   const submitMessage = (raw: string) => {
     const value = raw.trim();
-    if (!value || composerLocked) return;
+    if (!value || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
@@ -3977,7 +4247,9 @@ function ChatThread() {
     }
     userJustSentRef.current = true;
     const editId = editingMessageId;
-    const attach = editId ? undefined : pendingFiles;
+    const attach = editId ? undefined : readyAttachments(pendingFiles);
+    for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
+    previewUrlsRef.current.clear();
     forgetComposerDraft(composerSessionRef.current);
     resetComposerHistory();
     setText("");
@@ -4138,12 +4410,14 @@ function ChatThread() {
   const applyModelSelection = async (
     nextModel: string,
     nextParams: Record<string, string>,
+    /** Schema to migrate `nextParams` against — the target model's own params
+     *  when a flyout on another row picked values, else the current model's. */
+    schema?: ModelParamDto[],
   ) => {
+    const targetParams = schema ?? modelParams;
     // Alias-aware prune (effort ↔ reasoning). Don't wipe before options load.
     const supported =
-      modelParams.length === 0
-        ? nextParams
-        : migrateModelParamValues(nextParams, modelParams);
+      targetParams.length === 0 ? nextParams : migrateModelParamValues(nextParams, targetParams);
     const sessionId = activeSession?.id ?? null;
     const prevModel = model;
     const prevParams = modelParamValues;
@@ -4187,7 +4461,7 @@ function ChatThread() {
       };
     });
 
-    if (!agentProvider) return modelParams;
+    if (!agentProvider) return targetParams;
 
     const rollbackModelSelection = () => {
       setModel(prevModel);
@@ -4213,7 +4487,7 @@ function ChatThread() {
         const res = await api.setSessionModel(sessionId, nextModel, supported);
         // Prefer agent-refreshed params, but keep prior Effort if the payload is empty.
         const nextModelParams =
-          res.modelParams && res.modelParams.length > 0 ? res.modelParams : modelParams;
+          res.modelParams && res.modelParams.length > 0 ? res.modelParams : targetParams;
         if (res.models?.length || (res.modelParams && res.modelParams.length > 0)) {
           rememberModelsCatalog({
             provider: agentProvider,
@@ -4253,53 +4527,67 @@ function ChatThread() {
         useAppStore.setState({
           error: err instanceof Error ? err.message : String(err),
         });
-        return modelParams;
+        return targetParams;
       }
       const cat = await ensureModels(agentProvider, { force: true });
-      return cat?.modelParams ?? modelParams;
+      return cat?.modelParams ?? targetParams;
     }
-    return modelParams;
+    return targetParams;
   };
+
+  const commitParams = useCallback((m: string, list: ModelParamDto[]) => {
+    paramsCacheRef.current.set(m, list);
+    setParamsByModel((prev) => (prev[m] === list ? prev : { ...prev, [m]: list }));
+  }, []);
 
   const loadParamsForModel = useCallback(
     async (nextModel: string) => {
       const cached = paramsCacheRef.current.get(nextModel);
       if (cached?.length) {
-        if (nextModel === model) {
+        commitParams(nextModel, cached);
+        if (nextModel === modelRef.current) {
           setStableParams((prev) => (modelParamListsEqual(prev, cached) ? prev : cached));
         }
         return;
       }
       if (!agentProvider) return;
-      const token = ++paramsLoadTokenRef.current;
-      setParamsLoading(true);
-      try {
-        const res = await api.getModelParams(agentProvider, nextModel, {
-          sessionId: activeSession?.id,
-        });
-        if (token !== paramsLoadTokenRef.current) return;
-        const committed = res.modelParams?.length ? res.modelParams : [];
-        paramsCacheRef.current.set(nextModel, committed);
-        if (nextModel === model) {
-          setStableParams(committed);
-          if (committed.length) {
+      const pending = paramsInflightRef.current.get(nextModel);
+      if (pending) {
+        await pending;
+        return;
+      }
+      const run = (async () => {
+        setParamsLoadingFor((cur) => (cur === nextModel ? cur : nextModel));
+        try {
+          const res = await api.getModelParams(agentProvider, nextModel, {
+            sessionId: activeSession?.id,
+          });
+          const committed = res.modelParams?.length ? res.modelParams : [];
+          commitParams(nextModel, committed);
+          if (committed.length && nextModel === modelRef.current) {
+            setStableParams(committed);
             rememberModelsCatalog({
               provider: agentProvider,
               models,
               modelParams: committed,
               modes: catalog?.modes ?? [],
-              currentModel: model,
+              currentModel: nextModel,
               at: Date.now(),
             });
           }
+          return committed;
+        } finally {
+          setParamsLoadingFor((cur) => (cur === nextModel ? null : cur));
         }
+      })();
+      paramsInflightRef.current.set(nextModel, run);
+      try {
+        return await run;
       } finally {
-        if (token === paramsLoadTokenRef.current) {
-          setParamsLoading(false);
-        }
+        paramsInflightRef.current.delete(nextModel);
       }
     },
-    [activeSession?.id, agentProvider, catalog?.modes, model, models],
+    [activeSession?.id, agentProvider, catalog?.modes, commitParams, models],
   );
 
   useEffect(() => {
@@ -4373,11 +4661,16 @@ function ChatThread() {
     }
   };
 
-  const onParamsChange = async (next: Record<string, string>) => {
-    const fresh = await applyModelSelection(model, next);
+  const onParamsChange = async (target: string, next: Record<string, string>) => {
+    // The ⋯ flyout belongs to `target`'s row: apply against target's own schema
+    // and switch the session to it, so the pick actually reaches the agent.
+    const schema = target === model ? modelParams : (paramsByModel[target] ?? modelParams);
+    const fresh = await applyModelSelection(target, next, schema);
     if (fresh?.length) {
-      paramsCacheRef.current.set(model, fresh);
-      setStableParams(fresh);
+      commitParams(target, fresh);
+      if (target === modelRef.current) {
+        setStableParams(fresh);
+      }
     }
   };
 
@@ -4643,56 +4936,48 @@ function ChatThread() {
     }
     return `${parts}:${chars}:${activeSession.status}`;
   }, [activeSession?.messages, activeSession?.status]);
-  const contextUsage = useMemo(
-    () => estimateContextUsage(activeSession?.messages ?? []),
-    [activeSession?.messages],
-  );
+  // Context chip renders ACP-reported usage only: no estimate fallback, and no
+  // chip at all until the harness has reported `usedTokens` for this session.
   const contextDisplay = useMemo(() => {
     const acp = activeSession?.usage ?? null;
     const used = acp?.usedTokens;
+    if (used == null) return null;
     const win = acp?.contextWindow;
     const cost = acp?.cost;
     // Harnesses may report a real `used` with window 0 — that is "unknown", not a
     // 0-token window, so the window clause is dropped instead of printing a zero.
     const windowKnown = win != null && win > 0;
-    const percent = used != null && windowKnown ? Math.round((used / win) * 100) : null;
-    const usageLabel =
-      used != null
-        ? windowKnown
-          ? `${formatCompact(used)} / ${formatCompact(win)}`
-          : formatCompact(used)
-        : formatCompact(contextUsage.tokens);
+    const percent = windowKnown ? Math.round((used / win) * 100) : null;
+    const usageLabel = windowKnown
+      ? `${formatCompact(used)} / ${formatCompact(win)}`
+      : formatCompact(used);
     const label =
       settings.chatChipOptions.context.format === "percent" && percent != null
         ? `${percent}%`
         : usageLabel;
-    const title =
-      used != null
-        ? [
-            windowKnown
-              ? t("chat.contextAcpTooltip", {
-                  used: used.toLocaleString(),
-                  window: win.toLocaleString(),
-                })
-              : t("chat.contextAcpTooltipNoWindow", { used: used.toLocaleString() }),
-            cost != null
-              ? t("chat.contextAcpCost", {
-                  cost: cost.toLocaleString(undefined, { maximumFractionDigits: 4 }),
-                })
-              : null,
-          ]
-            .filter((part): part is string => part != null)
-            .join(" · ")
-        : t("chat.contextTooltip", {
-            tokens: contextUsage.tokens.toLocaleString(),
-            chars: contextUsage.chars.toLocaleString(),
-          });
+    const title = [
+      windowKnown
+        ? t("chat.contextAcpTooltip", {
+            used: used.toLocaleString(),
+            window: win.toLocaleString(),
+          })
+        : t("chat.contextAcpTooltipNoWindow", { used: used.toLocaleString() }),
+      cost != null
+        ? t("chat.contextAcpCost", {
+            cost: cost.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+          })
+        : null,
+    ]
+      .filter((part): part is string => part != null)
+      .join(" · ");
     return { label, title };
-  }, [activeSession?.usage, contextUsage, settings.chatChipOptions.context.format, t]);
+  }, [activeSession?.usage, settings.chatChipOptions.context.format, t]);
 
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
   const suppressScrollWatchRef = useRef(false);
+  /** Last observed scrollTop, for telling a reader's upward drag from growth. */
+  const lastScrollTopRef = useRef(0);
   /** Pin to bottom across skeleton → first paint of an unloaded chat. */
   const pendingBottomPinRef = useRef(false);
   const [scrolledAway, setScrolledAway] = useState(false);
@@ -4741,6 +5026,9 @@ function ChatThread() {
     const thread = threadRef.current;
     if (!thread) return;
     const onScroll = () => {
+      const top = thread.scrollTop;
+      const prevTop = lastScrollTopRef.current;
+      lastScrollTopRef.current = top;
       if (suppressScrollWatchRef.current) return;
       // While pinning a freshly opened chat, ignore intermediate layouts that
       // look like "scrolled away" (skeleton → content height jumps).
@@ -4749,14 +5037,35 @@ function ChatThread() {
         setScrolledAway(false);
         return;
       }
+      // Any upward scroll is the reader taking over. The old rule released the
+      // pin only once the gap passed 140px, which a slow phone drag never
+      // covered — the next token grew the thread and the pin pulled the reader
+      // back down, so only a hard fling escaped.
+      const scrolledUp = top < prevTop - 2;
       // Growth during stream can temporarily look like "scrolled away" before we catch up.
-      const gap = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
-      const stuck = gap < 140;
+      const gap = thread.scrollHeight - top - thread.clientHeight;
+      const stuck = !scrolledUp && gap < 140;
       stickToBottomRef.current = stuck;
       setScrolledAway(!stuck);
     };
+    // Opening a block is the reader choosing what to read: stop following the
+    // stream, or the growth re-pins to the bottom and the block's first line
+    // scrolls out of view the moment it is expanded.
+    const onPointerDown = (e: Event) => {
+      const target = e.target as HTMLElement | null;
+      const onBlockHeader = target?.closest(
+        `.${styles.stepsToggle}, .${styles.partToggle}, .${styles.subagentToggle}`,
+      );
+      if (!onBlockHeader) return;
+      stickToBottomRef.current = false;
+      setScrolledAway(true);
+    };
     thread.addEventListener("scroll", onScroll, { passive: true });
-    return () => thread.removeEventListener("scroll", onScroll);
+    thread.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      thread.removeEventListener("scroll", onScroll);
+      thread.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [storeActiveSessionId]);
 
   useEffect(() => {
@@ -4920,6 +5229,8 @@ function ChatThread() {
     return () => {
       keepComposerFocus.current = false;
       textareaRef.current?.blur();
+      for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
+      previewUrlsRef.current.clear();
     };
   }, []);
 
@@ -5068,10 +5379,14 @@ function ChatThread() {
                   ref={chatVirtualizer.measureElement}
                   style={{
                     position: "absolute",
-                    top: 0,
+                    // Offset with `top`, never `transform: translateY()`: a
+                    // transform here makes the browser resolve the sticky
+                    // spoiler headers inside the row against the transformed
+                    // box, which parks an opened header at the *bottom* of its
+                    // own block — below the body it heads.
+                    top: vi.start,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${vi.start}px)`,
                     paddingBottom: 12,
                   }}
                 >
@@ -5335,33 +5650,52 @@ function ChatThread() {
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
-              {pendingFiles.map((f, i) => (
-                <span key={`${f.name}-${i}`} className={styles.pendingFileChip}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <span className={styles.pendingFileMeta}>
-                    <span className={styles.pendingFileName}>{f.name}</span>
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.pendingFileRemove}
-                    aria-label={t("chat.removeFile")}
-                    title={t("chat.removeFile")}
-                    onClick={() =>
-                      setPendingFiles((prev) => prev.filter((_, j) => j !== i))
-                    }
+              {pendingFiles.map((f) => {
+                const status =
+                  f.status === "uploading"
+                    ? t("chat.attachmentUploading")
+                    : f.status === "error"
+                      ? f.error ?? t("chat.attachmentUploadFailed")
+                      : f.size > 0
+                        ? formatBytes(f.size)
+                        : "";
+                return (
+                  <span
+                    key={f.id}
+                    className={styles.pendingFileChip}
+                    data-status={f.status}
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
+                    {f.previewUrl ? (
+                      <img className={styles.pendingFileThumb} src={f.previewUrl} alt="" />
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    )}
+                    <span className={styles.pendingFileMeta}>
+                      <span className={styles.pendingFileName}>{f.name}</span>
+                      {status ? (
+                        <span className={styles.pendingFileSize}>{status}</span>
+                      ) : null}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.pendingFileRemove}
+                      aria-label={t("chat.removeFile")}
+                      title={t("chat.removeFile")}
+                      onClick={() => removePendingFile(f.id)}
+                    >
+                      ×
+                    </button>
+                  </span>
+                );
+              })}
             </div>
           )}
           <div
@@ -5414,7 +5748,7 @@ function ChatThread() {
                 const images = collectClipboardImages(e.clipboardData);
                 if (images.length === 0) return;
                 e.preventDefault();
-                void attachPastedImages(images);
+                attachPastedImages(images);
               }}
               placeholder={
                 slashInputHint ??
@@ -5541,8 +5875,9 @@ function ChatThread() {
                   models={models}
                   params={stableParams}
                   paramValues={modelParamValues}
-                  paramsLoading={paramsLoading}
-                  paramsLoadingFor={paramsLoading ? model : undefined}
+                  paramsByModel={paramsByModel}
+                  paramsLoading={paramsLoadingFor != null}
+                  paramsLoadingFor={paramsLoadingFor ?? undefined}
                   loading={composerLocked || modelsLoading}
                   disabled={agentMissing || agentOffline}
                   onOpen={() => {
@@ -5558,7 +5893,7 @@ function ChatThread() {
                   }}
                   onChange={(v) => void onModelChange(v)}
                   onParamsOpen={(v) => loadParamsForModel(v)}
-                  onParamsChange={(next) => void onParamsChange(next)}
+                  onParamsChange={(target, next) => void onParamsChange(target, next)}
                   showParamsMenu
                 />
                 )}
@@ -5619,7 +5954,7 @@ function ChatThread() {
                       <button
                         type="submit"
                         className={styles.sendBtn}
-                        disabled={composerLocked || !text.trim()}
+                        disabled={composerLocked || attachmentsUploading || !text.trim()}
                         title={
                           agentMissing
                             ? t("common.noAgentsOnline")
@@ -5629,7 +5964,9 @@ function ChatThread() {
                               ? t("common.thisChatAgentOffline")
                             : composerLocked
                               ? t("common.loadingModels")
-                              : t("common.send")
+                              : attachmentsUploading
+                                ? t("chat.attachmentUploading")
+                                : t("common.send")
                         }
                         aria-label={t("common.send")}
                       >
@@ -5727,12 +6064,22 @@ function ChatThread() {
         onClose={() => setAttachDialogOpen(false)}
         onAttach={(files) => {
           setPendingFiles((prev) => {
-            if (prev.length + files.length > 8) {
+            if (prev.length + files.length > MAX_ATTACH_COUNT) {
               setAttachError(t("chat.tooManyFiles"));
               return prev;
             }
             setAttachError(null);
-            return [...prev, ...files];
+            // Files picked from the server are already staged — nothing to upload.
+            return [
+              ...prev,
+              ...files.map((f) => ({
+                id: nextComposerAttachmentId(),
+                name: f.name,
+                path: f.path,
+                size: 0,
+                status: "ready" as const,
+              })),
+            ];
           });
         }}
       />
@@ -5816,9 +6163,11 @@ function ChatThread() {
           statusLoading={git.loading}
           awaitingGit={git.awaiting}
           branchBusy={git.branchBusy}
+          fullscreen={gitFullscreen}
           onClose={() => setGitPanelOpen(false)}
           onStatusChange={git.applyStatus}
           onCheckout={git.checkout}
+          onFullscreenChange={setGitFullscreen}
         />
       ) : null}
     </div>

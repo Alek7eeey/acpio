@@ -338,12 +338,12 @@
   color: var(--text);
 }
 
+/* --bg-secondary equals --surface in the dark theme (the menu backdrop), so a
+   bg-secondary tint painted nothing over it. A text-alpha overlay reads in
+   both themes and, unlike an opaque fill, keeps the selected row's
+   accent-soft tint visible underneath. */
 .modelRowMain:hover {
-  background: color-mix(in srgb, var(--bg-secondary) 80%, transparent);
-}
-
-.modelRowActive .modelRowMain:hover {
-  background: transparent;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .modelRowMain .modelOptionName {
@@ -628,8 +628,20 @@
   color: var(--text);
 }
 
-.modelOption:hover {
-  background: var(--bg-secondary);
+/* Hover feedback only for real pointers: on touch :hover sticks after a tap and
+   used to wipe the selected item's accent, making it look unselected.
+   Same trap as .modelRowMain: --bg-secondary equals --surface (the flyout
+   backdrop) in the dark theme, so a bg-secondary fill painted nothing. */
+@media (hover: hover) and (pointer: fine) {
+  .modelOption:hover {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+  }
+
+  /* The selected row must keep its accent while hovered — losing it on hover
+     made the current effort look like nothing was picked. */
+  .modelOption.modelOptionActive:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--accent-soft));
+  }
 }
 
 .modelOptionActive {

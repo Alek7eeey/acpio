@@ -86,6 +86,20 @@ export function normalizeChatGitBranchPosition(value: unknown): "below" | "above
   return value === "above" ? "above" : "below";
 }
 
+/** Upper bound for the chat-tree "newest chats per folder" cap. */
+export const CHAT_TREE_RECENT_LIMIT_MAX = 200;
+
+/**
+ * Heal the chat-tree "newest chats per folder" cap. Anything not a finite
+ * number falls back to the default; negatives clamp to 0 (= show all).
+ */
+export function normalizeChatTreeRecentLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.chatTreeRecentLimit;
+  }
+  return Math.min(CHAT_TREE_RECENT_LIMIT_MAX, Math.max(0, Math.round(value)));
+}
+
 const CHAT_CHANGES_METRICS: ChatChangesMetrics[] = [
   "none",
   "lines",
@@ -139,6 +153,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
+  merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;

@@ -1019,6 +1019,8 @@
   border-radius: 6px;
   color: var(--text);
   cursor: pointer;
+  /* A vertical swipe on the head scrolls the tree; only the grip drags. */
+  touch-action: pan-y;
   transition:
     color 0.18s ease,
     background 0.18s ease;
@@ -1160,6 +1162,85 @@
   }
 }
 
+/* Drag handle: the only place a touch drag may start, so the head itself
+   keeps panning the list. `touch-action: none` hands the gesture to us. */
+.folderGrip {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--text) 45%, var(--text-secondary));
+  cursor: grab;
+  touch-action: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.folderGrip svg {
+  display: block;
+}
+
+.folderGrip:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+
+/* Mouse users grab the head anywhere; the handle is only a touch affordance. */
+@media (hover: hover) and (pointer: fine) {
+  .folderGrip {
+    display: none;
+  }
+}
+
+/* Touch-only "⋯" opening the folder menu (move up/down, delete). */
+.folderMenuBtn {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 55%, var(--text-secondary));
+  cursor: pointer;
+}
+
+.folderMenuBtn svg {
+  display: block;
+}
+
+.folderMenuBtn:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+
+/* "Show more" row under a folder whose chats were capped by the limit. */
+.folderMore {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 4px 8px 4px 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 550;
+  text-align: left;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.folderMore:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text);
+}
+
 /* Delete button for empty folders — sits next to the plus, red on hover. */
 .folderDelete {
   flex: 0 0 auto;
@@ -1180,6 +1261,14 @@
 .folderDelete svg {
   display: block;
   stroke-width: 1.7;
+}
+
+/* Touch: the grip already pushes the right-side actions over, so the delete
+   button must not claim the free space a second time. */
+@media (hover: none), (pointer: coarse) {
+  .folderDelete {
+    margin-left: 2px;
+  }
 }
 
 .folderDelete:hover {
@@ -1570,20 +1659,6 @@
 .sessionItem.active:hover {
   background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
-.sessionItem.entering {
-  animation: sessionItemIn 0.24s ease both;
-}
-
-@keyframes sessionItemIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 
 .sessionBtn {
   text-align: left;
@@ -1742,6 +1817,18 @@
   opacity: 0.88;
 }
 
+/* "Waiting for you" indicator: a static warning ring. No animation on purpose —
+   the agent is parked on the user, and anything that moves reads as work. */
+.sessionWaiting {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--warning, #b45309);
+  background: transparent;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
 .sessionActivity {
   flex: 0 0 auto;
   display: inline-flex;
@@ -1866,6 +1953,15 @@
 
 .contextMenu button:hover {
   background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.contextMenu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.contextMenu button:disabled:hover {
+  background: transparent;
 }
 
 .contextMenuIcon {

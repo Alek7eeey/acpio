@@ -21,7 +21,7 @@ describe("stageSessionUpload", () => {
     const saved = await stageSessionUpload("sess-1", cwd, {
       name: "clipboard.png",
       mime: "image/png",
-      data: png.toString("base64"),
+      bytes: png,
     });
     expect(saved.name).toBe("clipboard.png");
     expect(saved.path).toBe(path.join(cwd, ATTACH_DIR, "sess-1", "clipboard.png"));
@@ -31,16 +31,16 @@ describe("stageSessionUpload", () => {
   it("avoids clobbering an existing file name", async () => {
     const cwd = await mkdtemp(path.join(os.tmpdir(), "acpio-attach-"));
     dirs.push(cwd);
-    const data = Buffer.from("hello").toString("base64");
+    const bytes = Buffer.from("hello");
     const first = await stageSessionUpload("sess-1", cwd, {
       name: "shot.png",
       mime: "image/png",
-      data,
+      bytes,
     });
     const second = await stageSessionUpload("sess-1", cwd, {
       name: "shot.png",
       mime: "image/png",
-      data,
+      bytes,
     });
     expect(first.name).toBe("shot.png");
     expect(second.name).toBe("shot-2.png");

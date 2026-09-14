@@ -164,7 +164,8 @@ export function ComposerMetaChips({
   onToggleAutoExpandSteps: () => void;
   chatMcp: Array<{ id: string; name: string }>;
   enabledMcpCount: number;
-  contextDisplay: { label: string; title: string };
+  /** ACP-reported context usage; null hides the chip (no estimate fallback). */
+  contextDisplay: { label: string; title: string } | null;
   consoleOpen: boolean;
   onToggleConsole: () => void;
   modeSwitcher: Array<{ value: string; name?: string }>;
@@ -394,7 +395,7 @@ export function ComposerMetaChips({
             </span>
           </button>
         );
-      } else if (id === "context" && activeSession) {
+      } else if (id === "context" && activeSession && contextDisplay) {
         node = (
           <button
             type="button"
@@ -459,8 +460,8 @@ export function ComposerMetaChips({
     chipOptions.gitChanges.metrics,
     compressing,
     consoleOpen,
-    contextDisplay.label,
-    contextDisplay.title,
+    contextDisplay?.label,
+    contextDisplay?.title,
     enabledMcpCount,
     gitChip,
     isDesktop,
@@ -480,7 +481,7 @@ export function ComposerMetaChips({
     ? `${gitChip.awaiting ? "a" : ""}${gitChip.loading ? "l" : ""}:${gitChip.status?.branch ?? ""}:${gitChip.status?.files.length ?? 0}:${gitChip.status?.additions ?? 0}:${gitChip.status?.deletions ?? 0}:${gitChip.status?.dirty ? 1 : 0}`
     : "";
   const chipOptionsSig = `${chipOptions.folder.compress ? 1 : 0}${chipOptions.folder.truncate === "end" ? "e" : "m"}|${chipOptions.gitBranch.compress ? 1 : 0}|${chipOptions.gitChanges.compress ? 1 : 0}:${chipOptions.gitChanges.metrics}`;
-  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay.label}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}|${chipOptionsSig}`;
+  const chipLayoutKey = `${chipKey}|${gitLayoutSig}|${contextDisplay?.label ?? ""}|${settings.thoughtsChipStyle}|${settings.consoleChipStyle}|${chipOptionsSig}`;
   const measuring = isDesktop && visibleCount === null && !renderSkeleton;
   const overflowCount =
     isDesktop && visibleCount !== null ? Math.max(0, chipItems.length - visibleCount) : 0;

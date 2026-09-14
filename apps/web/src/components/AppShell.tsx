@@ -10,7 +10,7 @@ import {
   type MessageDto,
   type SessionDto,
 } from "@acpio/shared";
-import { useAppStore } from "../lib/store";
+import { cachedModelsFor, useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { mcpTypeMessageKey } from "../lib/mcpUi";
@@ -27,7 +27,7 @@ import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSea
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
-import { harnessShortLabel } from "../lib/harness";
+import { harnessLabel } from "../lib/harness";
 import { normalizeCwd } from "../lib/pathSegments";
 import { firstUserTitleLine, localizePlaceholderSessionTitle, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
@@ -98,6 +98,7 @@ export function AppShell() {
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
+  const modelsCatalog = useAppStore((s) => s.modelsCatalog);
   const theme = useAppStore((s) => s.settings.theme);
   const setTheme = useAppStore((s) => s.setTheme);
   const settings = useAppStore((s) => s.settings);
@@ -1261,7 +1262,7 @@ export function AppShell() {
           recentCwds={recentCwds}
           agents={harnessIds.map((id) => ({
             id,
-            label: adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id),
+            label: harnessLabel(id, adapters),
             online: agentAvailability[id] === true,
           }))}
           preferredProvider={settings.defaultProvider}
@@ -1443,10 +1444,17 @@ export function AppShell() {
                   {harnessIds.map((id) => {
                     const online = agentAvailability[id] === true;
                     const label =
-                      adapters.find((a) => a.id === id)?.label ?? harnessShortLabel(id);
+                      harnessLabel(id, adapters);
                     const modelId = modelForProvider(settings, id);
+                    // An agent id can be opaque (ZCode's JSON tuple), so only the
+                    // catalog knows the readable title for it.
+                    const catalog =
+                      modelsCatalog?.provider === id ? modelsCatalog : cachedModelsFor(id);
+                    const modelName = modelId
+                      ? catalog?.models.find((m) => m.value === modelId)?.name
+                      : undefined;
                     const model = modelId
-                      ? modelDisplayName(modelId, undefined, t("models.default"))
+                      ? modelDisplayName(modelId, modelName, t("models.default"))
                       : t("models.auto");
                     return (
                       <div key={id} className={styles.agentTipHarness}>

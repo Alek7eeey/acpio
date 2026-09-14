@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  CHAT_TREE_RECENT_LIMIT_MAX,
+  CUSTOM_AGENT_ID_RE,
   DEFAULT_CHAT_CHIP_OPTIONS,
   migrateModelParamValues,
   mergeChatChipOptions,
+  normalizeChatTreeRecentLimit,
+  normalizeCustomAgentId,
+  normalizeCustomAgents,
+  SHELL_SESSION_PROVIDER,
   type AdapterMetaDto,
+  type AdapterRestoreMode,
   type AgentProvider,
   type AppSettings,
   type ChatActionId,
@@ -13,6 +20,7 @@ import {
   type ChatMetaChipId,
   type ChatTreeElementId,
   type ChatTreeMenuId,
+  type CustomAgentSpec,
   type DiagnosticsDumpMeta,
   type McpServerConfig,
   type ModelOption,
@@ -21,6 +29,7 @@ import {
   isMcpServerConfigured,
   mcpServerEndpoint,
 } from "@acpio/shared";
+import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
 import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
@@ -61,6 +70,31 @@ function mcpEnvConfigDraft(server: McpServerConfig): string {
 /** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
 type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
 
+/** Editable form state for one user-defined ACP agent (args/env as text). */
+type CustomAgentDraft = {
+  id: string;
+  label: string;
+  command: string;
+  argsText: string;
+  envText: string;
+  binaryDirsText: string;
+  restoreMode: AdapterRestoreMode;
+  parameterizedModelPicker: boolean;
+  subagentStreaming: boolean;
+  cloudCatalog: boolean;
+  /** True once the id was edited by hand — stop deriving it from the label. */
+  idTouched: boolean;
+};
+
+/** Last Test result for a custom agent (spawn + initialize + session/new). */
+type CustomAgentTest = {
+  id: string;
+  ok: boolean;
+  message: string;
+  models: number;
+  modes: number;
+};
+
 /** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "folder",
@@ -99,6 +133,16 @@ function ChatInteractiveConfigRows({
   const t = useT();
   const saveSettings = useAppStore((s) => s.saveSettings);
   const chipOptions = form.chatChipOptions ?? DEFAULT_CHAT_CHIP_OPTIONS;
+  /**
+   * The limit field is a free-text number input: keep the raw string while the
+   * user types so a half-erased value ("1" of "12") is not force-corrected.
+   */
+  const [recentLimitDraft, setRecentLimitDraft] = useState(
+    String(form.chatTreeRecentLimit ?? 0),
+  );
+  useEffect(() => {
+    setRecentLimitDraft(String(form.chatTreeRecentLimit ?? 0));
+  }, [form.chatTreeRecentLimit]);
   /** Per-chip rows save one field at a time; the patch is merged, not replaced. */
   const patchChipOptions = (patchOptions: Parameters<typeof mergeChatChipOptions>[1]) => {
     const next = mergeChatChipOptions(chipOptions, patchOptions);
@@ -450,6 +494,33 @@ function ChatInteractiveConfigRows({
         </div>
       </SettingRow>
 
+      <SettingRow
+        label={t("settings.chatTreeRecentLimit")}
+        hint={t("settings.chatTreeRecentLimitHint")}
+      >
+        <input
+          type="number"
+          className={styles.numberInput}
+          min={0}
+          max={CHAT_TREE_RECENT_LIMIT_MAX}
+          step={1}
+          inputMode="numeric"
+          value={recentLimitDraft}
+          aria-label={t("settings.chatTreeRecentLimit")}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setRecentLimitDraft(raw);
+            if (raw.trim() === "") return;
+            const parsed = Number(raw);
+            if (!Number.isFinite(parsed)) return;
+            const next = normalizeChatTreeRecentLimit(parsed);
+            patch("chatTreeRecentLimit", next);
+            void saveSettings({ chatTreeRecentLimit: next });
+          }}
+          onBlur={() => setRecentLimitDraft(String(form.chatTreeRecentLimit ?? 0))}
+        />
+      </SettingRow>
+
       <SettingRow label={t("settings.chatTreeMenuTitle")} hint={t("settings.chatTreeMenuHint")}>
         <div className={styles.actionChips}>
           {(
@@ -492,7 +563,9 @@ function ChatInteractiveConfigRows({
   );
 }
 
-/** Chat behavior settings that are not reflected in the interactive preview. */
+/** Chat behavior settings. Only the agent turn timeline changes the preview's
+ *  mock (it decides which of the two readings is drawn); the rest are switches
+ *  with nothing to show there. */
 function ChatBehaviorConfigRows({
   form,
   patch,
@@ -712,7 +785,11 @@ export function SettingsPage() {
       allAdapters.map((a) => ({
         id: a.id as AgentProvider,
         title: a.label,
-        description: t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
+        // A user-defined agent has no i18n key — show what it will launch.
+        description:
+          a.custom === true
+            ? [a.defaultCommand, ...a.defaultArgs].join(" ")
+            : t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
         enabled: a.enabled !== false,
       })),
     [allAdapters, t],
@@ -806,9 +883,8 @@ export function SettingsPage() {
   const [modelsByProvider, setModelsByProvider] = useState<
     Partial<Record<AgentProvider, ModelOption[]>>
   >({});
-  const [paramsByProvider, setParamsByProvider] = useState<
-    Partial<Record<AgentProvider, ModelParamDto[]>>
-  >({});
+  /** Per-model config-option schemas, keyed by `${provider}:${model}`. */
+  const [paramsByModelKey, setParamsByModelKey] = useState<Record<string, ModelParamDto[]>>({});
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [paramsLoadingKey, setParamsLoadingKey] = useState<string | null>(null);
@@ -827,13 +903,16 @@ export function SettingsPage() {
   /** Blocks catalog ingest from clobbering an in-flight default-model save. */
   const pendingModelPickRef = useRef<Partial<Record<AgentProvider, string>>>({});
 
-  // NOTE: removed the `useEffect(() => setForm(settings), [settings])` that
-  // was here — it overwrites the local form state every time the store's
-  // settings change (e.g. after saveSettings), which causes toggles like
-  // showBootSplash to visually revert. The form is already kept in sync
-  // by the explicit setForm calls in patch(), connectAgent(), clearApiKey(),
-  // and the model-param handlers.
+  // The form picks the store payload up exactly once: the store holds
+  // DEFAULT_SETTINGS until bootstrap resolves, while a deep link paints this
+  // page immediately. Never re-sync afterwards — echoing later snapshots
+  // reverts in-progress edits after saveSettings (the bug 2fb5d4c fixed), and
+  // against a server that predates a field it erased each keystroke of it.
+  const bootSettings = useRef(settings);
+  const formHydrated = useRef(false);
   useEffect(() => {
+    if (formHydrated.current || settings === bootSettings.current) return;
+    formHydrated.current = true;
     setForm(settings);
   }, [settings]);
 
@@ -1033,20 +1112,152 @@ export function SettingsPage() {
     setMcpDraft(null);
   };
 
+  // ── Custom ACP agents (Settings → Connect) ────────────────────────────────
+  const customAgents = form.customAgents ?? [];
+  const [agentDraft, setAgentDraft] = useState<CustomAgentDraft | null>(null);
+  const [agentError, setAgentError] = useState("");
+  const [agentTest, setAgentTest] = useState<CustomAgentTest | null>(null);
+
+  /** Ids a new agent must not take (its own id is excluded while editing). */
+  const reservedAgentIds = useMemo(
+    () => [...allAdapters.map((a) => a.id), SHELL_SESSION_PROVIDER],
+    [allAdapters],
+  );
+
+  const draftFromSpec = (spec?: CustomAgentSpec): CustomAgentDraft => ({
+    id: spec?.id ?? "",
+    label: spec?.label ?? "",
+    command: spec?.command ?? "",
+    argsText: formatArgs(spec?.args ?? []),
+    envText: formatEnvLines(spec?.env),
+    binaryDirsText: (spec?.binaryDirs ?? []).join(" "),
+    restoreMode: spec?.restoreMode ?? "resume",
+    parameterizedModelPicker: spec?.parameterizedModelPicker ?? true,
+    subagentStreaming: spec?.subagentStreaming ?? false,
+    cloudCatalog: spec?.cloudCatalog ?? false,
+    idTouched: Boolean(spec),
+  });
+
+  /** Spawn the agent once and report what it answered (models/modes/error). */
+  const runAgentProbe = async (id: string) => {
+    try {
+      const res = await api.probeAgent(id);
+      useAppStore.getState().setAgentAvailable(id, res.ok);
+      setAgentTest({
+        id,
+        ok: res.ok,
+        message: res.message,
+        models: res.models?.length ?? 0,
+        modes: res.modes?.length ?? 0,
+      });
+    } catch (err) {
+      setAgentTest({
+        id,
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+        models: 0,
+        modes: 0,
+      });
+    }
+  };
+
+  const saveAgent = () => {
+    if (!agentDraft) return;
+    const spec: CustomAgentSpec = {
+      id: agentDraft.id.trim() || normalizeCustomAgentId(agentDraft.label),
+      label: agentDraft.label.trim(),
+      command: agentDraft.command.trim(),
+      args: splitArgs(agentDraft.argsText),
+      env: parseEnvLines(agentDraft.envText),
+      binaryDirs: splitArgs(agentDraft.binaryDirsText),
+      restoreMode: agentDraft.restoreMode,
+      // session/load replays history the core already stores.
+      suppressReplayOnLoad: agentDraft.restoreMode === "load",
+      parameterizedModelPicker: agentDraft.parameterizedModelPicker,
+      subagentStreaming: agentDraft.subagentStreaming,
+      cloudCatalog: agentDraft.cloudCatalog,
+    };
+    const [clean] = normalizeCustomAgents(
+      [spec],
+      reservedAgentIds.filter((id) => id !== spec.id),
+    );
+    if (!clean) {
+      setAgentError(t("settings.customAgentInvalid"));
+      return;
+    }
+    const next = customAgents.some((a) => a.id === clean.id)
+      ? customAgents.map((a) => (a.id === clean.id ? clean : a))
+      : [...customAgents, clean];
+    patch("customAgents", next);
+    setAgentDraft(null);
+    setAgentError("");
+    setAgentTest(null);
+    void saveSettings({ customAgents: next }).then(() => runAgentProbe(clean.id));
+  };
+
+  const removeAgent = (id: string) => {
+    const next = customAgents.filter((a) => a.id !== id);
+    patch("customAgents", next);
+    setAgentDraft((draft) => (draft && draft.id === id ? null : draft));
+    setAgentTest((prev) => (prev && prev.id === id ? null : prev));
+    void saveSettings({ customAgents: next });
+  };
+
   const loadParamsForModel = async (provider: AgentProvider, nextModel: string) => {
     const cacheKey = `${provider}:${nextModel}`;
+    const commit = (list: ModelParamDto[]) =>
+      setParamsByModelKey((prev) => (prev[cacheKey] === list ? prev : { ...prev, [cacheKey]: list }));
     const cached = paramsCacheRef.current.get(cacheKey);
     if (cached) {
-      setParamsByProvider((prev) => ({ ...prev, [provider]: cached }));
+      commit(cached);
+      return;
     }
     setParamsLoadingKey(cacheKey);
     try {
       const res = await api.getModelParams(provider, nextModel);
       const fresh = res.modelParams ?? [];
       paramsCacheRef.current.set(cacheKey, fresh);
-      setParamsByProvider((prev) => ({ ...prev, [provider]: fresh }));
+      commit(fresh);
     } finally {
       setParamsLoadingKey((key) => (key === cacheKey ? null : key));
+    }
+  };
+
+  /** Persist a provider's default model + params (mirrors the chat composer's
+   *  switch-and-apply semantics). */
+  const saveDefaultModel = (
+    provider: AgentProvider,
+    value: string,
+    params: Record<string, string>,
+  ) => {
+    pendingModelPickRef.current[provider] = value;
+    let savePatch: Partial<AppSettings> | null = null;
+    setForm((prev) => {
+      const defaultModelByProvider = { ...prev.defaultModelByProvider, [provider]: value };
+      const defaultModelParamsByProvider = {
+        ...prev.defaultModelParamsByProvider,
+        [provider]: params,
+      };
+      savePatch = {
+        defaultModelByProvider,
+        defaultModelParamsByProvider,
+        ...(prev.defaultProvider === provider
+          ? { defaultModel: value, defaultModelParams: params }
+          : {}),
+      };
+      return {
+        ...prev,
+        defaultModelByProvider,
+        defaultModelParamsByProvider,
+        ...(prev.defaultProvider === provider
+          ? { defaultModel: value, defaultModelParams: params }
+          : {}),
+      };
+    });
+    if (savePatch) {
+      void saveSettings(savePatch).finally(() => {
+        delete pendingModelPickRef.current[provider];
+      });
     }
   };
 
@@ -1084,17 +1295,14 @@ export function SettingsPage() {
       return;
     }
     const seededModels: Partial<Record<AgentProvider, ModelOption[]>> = {};
-    const seededParams: Partial<Record<AgentProvider, ModelParamDto[]>> = {};
     for (const item of online) {
       const cached = cachedModelsFor(item.id);
       if (cached?.models.length) {
         seededModels[item.id] = cached.models;
-        seededParams[item.id] = cached.modelParams ?? [];
       }
     }
     if (Object.keys(seededModels).length) {
       setModelsByProvider((prev) => ({ ...seededModels, ...prev }));
-      setParamsByProvider((prev) => ({ ...seededParams, ...prev }));
     }
     const ingest = (
       id: AgentProvider,
@@ -1105,15 +1313,17 @@ export function SettingsPage() {
       },
     ) => {
       setModelsByProvider((prev) => ({ ...prev, [id]: catalog.models ?? [] }));
-      setParamsByProvider((prev) => ({ ...prev, [id]: catalog.modelParams ?? [] }));
       const currentPick =
         (catalog.currentModel &&
         (catalog.models ?? []).some((m) => m.value === catalog.currentModel)
           ? catalog.currentModel
           : "") ||
         "";
-      if (catalog.modelParams?.length && currentPick) {
-        paramsCacheRef.current.set(`${id}:${currentPick}`, catalog.modelParams);
+      const list = catalog.modelParams;
+      if (list?.length && currentPick) {
+        const key = `${id}:${currentPick}`;
+        paramsCacheRef.current.set(key, list);
+        setParamsByModelKey((prev) => (prev[key] === list ? prev : { ...prev, [key]: list }));
       }
       setForm((prev) => {
         if (pendingModelPickRef.current[id]) return prev;
@@ -1407,6 +1617,215 @@ export function SettingsPage() {
                 />
               </SettingRow>
             </SettingTable>
+
+            <p className={styles.hint}>{t("settings.customAgentsHint")}</p>
+            <SettingTable>
+              {customAgents.map((agent) => (
+                <SettingRow
+                  key={agent.id}
+                  terms={[
+                    t("settings.customAgents"),
+                    agent.label,
+                    agent.id,
+                    agent.command,
+                    ...agent.args,
+                  ]}
+                  label={agent.label}
+                  hint={[agent.command, ...agent.args].join(" ")}
+                >
+                  <span className={styles.providerRowControl}>
+                    <span className={styles.providerProbeInline}>
+                      {agentTest && agentTest.id === agent.id
+                        ? agentTest.ok
+                          ? t("common.online")
+                          : t("common.offline")
+                        : t("settings.customAgentUntested")}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => void runAgentProbe(agent.id)}
+                    >
+                      {t("settings.customAgentTest")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => {
+                        setAgentError("");
+                        setAgentTest(null);
+                        setAgentDraft(draftFromSpec(agent));
+                      }}
+                    >
+                      {t("common.edit")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.secondaryBtn}
+                      onClick={() => removeAgent(agent.id)}
+                    >
+                      {t("common.delete")}
+                    </button>
+                  </span>
+                </SettingRow>
+              ))}
+              {customAgents.length === 0 ? (
+                <SettingRow
+                  label={t("settings.customAgentsEmpty")}
+                  hint={t("settings.customAgentsEmptyHint")}
+                />
+              ) : null}
+            </SettingTable>
+
+            {agentTest ? (
+              <p
+                role="status"
+                className={`${styles.customAgentTestResult}${
+                  agentTest.ok ? "" : ` ${styles.customAgentTestResultError}`
+                }`}
+              >
+                {agentTest.ok
+                  ? t("settings.customAgentTestOk", {
+                      models: String(agentTest.models),
+                      modes: String(agentTest.modes),
+                      message: agentTest.message,
+                    })
+                  : t("settings.customAgentTestFail", { error: agentTest.message })}
+              </p>
+            ) : null}
+
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={() => {
+                setAgentError("");
+                setAgentTest(null);
+                setAgentDraft(draftFromSpec());
+              }}
+            >
+              + {t("settings.customAgentAdd")}
+            </button>
+
+            {agentDraft && (
+              <div className={styles.mcpForm}>
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.customAgentLabel")}
+                  value={agentDraft.label}
+                  onChange={(e) => {
+                    const label = e.target.value;
+                    setAgentDraft((draft) =>
+                      draft
+                        ? {
+                            ...draft,
+                            label,
+                            id: draft.idTouched ? draft.id : normalizeCustomAgentId(label),
+                          }
+                        : draft,
+                    );
+                  }}
+                />
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.customAgentId")}
+                  value={agentDraft.id}
+                  onChange={(e) =>
+                    setAgentDraft((draft) =>
+                      draft ? { ...draft, id: e.target.value, idTouched: true } : draft,
+                    )
+                  }
+                />
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.customAgentCommand")}
+                  value={agentDraft.command}
+                  onChange={(e) =>
+                    setAgentDraft((draft) => (draft ? { ...draft, command: e.target.value } : draft))
+                  }
+                />
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.customAgentArgs")}
+                  value={agentDraft.argsText}
+                  onChange={(e) =>
+                    setAgentDraft((draft) => (draft ? { ...draft, argsText: e.target.value } : draft))
+                  }
+                />
+                <input
+                  className={styles.mcpInput}
+                  placeholder={t("settings.customAgentBinaryDirs")}
+                  value={agentDraft.binaryDirsText}
+                  onChange={(e) =>
+                    setAgentDraft((draft) =>
+                      draft ? { ...draft, binaryDirsText: e.target.value } : draft,
+                    )
+                  }
+                />
+                <label className={styles.mcpJsonBlock}>
+                  <span className={styles.mcpHeadersLabel}>{t("settings.customAgentEnv")}</span>
+                  <textarea
+                    className={styles.mcpJsonInput}
+                    rows={4}
+                    spellCheck={false}
+                    placeholder={"KEY=VALUE"}
+                    value={agentDraft.envText}
+                    onChange={(e) =>
+                      setAgentDraft((draft) => (draft ? { ...draft, envText: e.target.value } : draft))
+                    }
+                  />
+                </label>
+                <OptionPicker
+                  variant="block"
+                  placement="down"
+                  menuTitle={t("settings.customAgentRestoreMode")}
+                  value={agentDraft.restoreMode}
+                  onChange={(v) =>
+                    setAgentDraft((draft) =>
+                      draft ? { ...draft, restoreMode: v as AdapterRestoreMode } : draft,
+                    )
+                  }
+                  options={[
+                    { value: "resume", label: "session/resume" },
+                    { value: "load", label: "session/load" },
+                    { value: "new", label: t("settings.customAgentRestoreNew") },
+                  ]}
+                />
+                <label className={styles.mcpTlsRow}>
+                  <input
+                    type="checkbox"
+                    checked={agentDraft.parameterizedModelPicker}
+                    onChange={(e) =>
+                      setAgentDraft((draft) =>
+                        draft ? { ...draft, parameterizedModelPicker: e.target.checked } : draft,
+                      )
+                    }
+                  />
+                  <span>{t("settings.customAgentParams")}</span>
+                  <span className={styles.mcpTlsHint}>{t("settings.customAgentParamsHint")}</span>
+                </label>
+                {agentError ? <p className={styles.fieldHint}>{agentError}</p> : null}
+                <div className={styles.mcpFormActions}>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() => {
+                      setAgentDraft(null);
+                      setAgentError("");
+                    }}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryBtn}
+                    disabled={!agentDraft.command.trim()}
+                    onClick={saveAgent}
+                  >
+                    {t("common.save")}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -1718,6 +2137,7 @@ export function SettingsPage() {
               chatSplit={form.chatSplit !== false}
               chatToolbarStyle={form.chatToolbarStyle ?? "classic"}
               chatGitBranchPosition={form.chatGitBranchPosition ?? "below"}
+              agentTurnTimeline={Boolean(form.chatAgentTurnTimeline)}
               onToggleAction={(id) => {
                 const cur = form.chatActions ?? [];
                 patch(
@@ -1808,15 +2228,24 @@ export function SettingsPage() {
                 .filter((p) => agentAvailability[p.id] === true)
                 .map((item) => {
                   const models = modelsByProvider[item.id] ?? [];
-                  const modelParams = paramsByProvider[item.id] ?? [];
                   const model = form.defaultModelByProvider?.[item.id] ?? "";
+                  const modelParams = paramsByModelKey[`${item.id}:${model}`] ?? [];
                   const paramValues = form.defaultModelParamsByProvider?.[item.id] ?? {};
                   const parameterized =
                     adapters.find((a) => a.id === item.id)?.parameterizedModelPicker === true ||
                     item.id === "cursor";
+                  const loadingFor = paramsLoadingKey?.startsWith(`${item.id}:`)
+                    ? paramsLoadingKey.slice(item.id.length + 1)
+                    : undefined;
                   const loadingParams =
-                    Boolean(paramsLoadingKey?.startsWith(`${item.id}:`)) ||
+                    Boolean(loadingFor) ||
                     (parameterized && modelsLoading && modelParams.length === 0);
+                  const scopedParams: Record<string, ModelParamDto[]> = {};
+                  for (const [key, list] of Object.entries(paramsByModelKey)) {
+                    if (key.startsWith(`${item.id}:`)) {
+                      scopedParams[key.slice(item.id.length + 1)] = list;
+                    }
+                  }
                   return (
                     <SettingRow
                       key={item.id}
@@ -1829,77 +2258,25 @@ export function SettingsPage() {
                         models={models}
                         params={modelParams}
                         paramValues={paramValues}
+                        paramsByModel={scopedParams}
                         paramsLoading={loadingParams}
-                        paramsLoadingFor={loadingParams && model ? model : undefined}
+                        paramsLoadingFor={loadingFor}
                         showParamsMenu={parameterized || modelParams.length > 0}
                         onChange={(value) => {
-                          pendingModelPickRef.current[item.id] = value;
-                          let savePatch: Partial<AppSettings> | null = null;
-                          setForm((prev) => {
-                            const defaultModelByProvider = {
-                              ...prev.defaultModelByProvider,
-                              [item.id]: value,
-                            };
-                            const defaultModelParamsByProvider = {
-                              ...prev.defaultModelParamsByProvider,
-                              [item.id]: {},
-                            };
-                            savePatch = {
-                              defaultModelByProvider,
-                              defaultModelParamsByProvider,
-                              ...(prev.defaultProvider === item.id
-                                ? { defaultModel: value, defaultModelParams: {} }
-                                : {}),
-                            };
-                            return {
-                              ...prev,
-                              defaultModelByProvider,
-                              defaultModelParamsByProvider,
-                              ...(prev.defaultProvider === item.id
-                                ? { defaultModel: value, defaultModelParams: {} }
-                                : {}),
-                            };
-                          });
-                          if (savePatch) {
-                            void saveSettings(savePatch).finally(() => {
-                              delete pendingModelPickRef.current[item.id];
-                            });
-                          }
+                          saveDefaultModel(item.id, value, {});
                           void loadParamsForModel(item.id, value);
                         }}
-                        onParamsChange={(next) => {
+                        onParamsChange={(target, next) => {
+                          // The ⋯ flyout belongs to `target`: migrate against the
+                          // target's own schema and make it the provider default.
+                          const schema =
+                            target === model ? modelParams : (scopedParams[target] ?? []);
                           const migrated =
-                            modelParams.length === 0
-                              ? next
-                              : migrateModelParamValues(next, modelParams);
-                          pendingModelPickRef.current[item.id] = model;
-                          let savePatch: Partial<AppSettings> | null = null;
-                          setForm((prev) => {
-                            const defaultModelParamsByProvider = {
-                              ...prev.defaultModelParamsByProvider,
-                              [item.id]: migrated,
-                            };
-                            savePatch = {
-                              defaultModelParamsByProvider,
-                              ...(prev.defaultProvider === item.id
-                                ? { defaultModelParams: migrated }
-                                : {}),
-                            };
-                            return {
-                              ...prev,
-                              defaultModelParamsByProvider,
-                              ...(prev.defaultProvider === item.id
-                                ? { defaultModelParams: migrated }
-                                : {}),
-                            };
-                          });
-                          if (savePatch) {
-                            void saveSettings(savePatch).finally(() => {
-                              delete pendingModelPickRef.current[item.id];
-                            });
-                          }
+                            schema.length === 0 ? next : migrateModelParamValues(next, schema);
+                          saveDefaultModel(item.id, target, migrated);
+                          if (target !== model) void loadParamsForModel(item.id, target);
                         }}
-                        onParamsOpen={(value) => void loadParamsForModel(item.id, value)}
+                        onParamsOpen={(value) => loadParamsForModel(item.id, value)}
                         onOpen={() => {
                           void api.warmModelParams(item.id);
                           if (model) void loadParamsForModel(item.id, model);
@@ -1909,10 +2286,6 @@ export function SettingsPage() {
                             setModelsByProvider((prev) => ({
                               ...prev,
                               [item.id]: catalog.models ?? [],
-                            }));
-                            setParamsByProvider((prev) => ({
-                              ...prev,
-                              [item.id]: catalog.modelParams ?? [],
                             }));
                           });
                         }}
@@ -2151,7 +2524,7 @@ export function SettingsPage() {
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
                 <SettingTable>
-                  {adapters.map((a) => {
+                  {adapters.filter((a) => a.custom !== true).map((a) => {
                     const command = String(
                       (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
                     );

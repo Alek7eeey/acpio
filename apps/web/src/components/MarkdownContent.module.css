@@ -218,6 +218,12 @@
   white-space: nowrap;
 }
 
+.codeActions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .copyBtn {
   flex: 0 0 auto;
   width: 28px;
@@ -235,6 +241,11 @@
 .copyBtn:hover {
   background: var(--bg-tertiary);
   color: var(--text);
+}
+
+/* Wrap off: the button stays visible but reads as inactive next to Copy. */
+.copyBtnOff {
+  color: color-mix(in srgb, var(--text-secondary) 62%, transparent);
 }
 
 .copyBtn svg {
@@ -271,6 +282,21 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-all;
+}
+
+/* No-wrap mode: long lines scroll inside the block instead of folding. */
+.codePreNoWrap {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  overflow-x: auto;
+}
+
+.codePreNoWrap code,
+.codePreNoWrap :global(.hljs) {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 /* Syntax highlighting — soft tokens for light/dark */

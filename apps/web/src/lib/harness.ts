@@ -66,6 +66,19 @@ export function harnessShortLabel(provider: AgentProvider | string | null | unde
 }
 
 /**
+ * Display label for a provider: the adapter's own label when the registry
+ * knows it (user-defined agents included), the built-in short name otherwise
+ * (a session can outlive the agent that created it).
+ */
+export function harnessLabel(
+  provider: AgentProvider | string | null | undefined,
+  adapters: AdapterMetaDto[],
+): string {
+  if (!provider) return "";
+  return adapters.find((a) => a.id === provider)?.label ?? harnessShortLabel(provider);
+}
+
+/**
  * Names of the switched-on harnesses for copy that lists them ("Works with
  * …"). Falls back to the caller's generic phrase when every harness is off.
  */

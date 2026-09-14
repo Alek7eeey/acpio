@@ -6,11 +6,12 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
   deleteSession,
+  getSessionCwd,
   getSessionDetail,
   listSessions,
   reorderSessions,
@@ -123,9 +124,12 @@ const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
   locale: z.enum(["ru", "en"]).optional(),
   displayName: z.string().max(80).optional(),
-  connectedProvider: z.enum(["cursor", "omp"]).nullable().optional(),
-  defaultProvider: z.enum(["cursor", "omp"]).optional(),
-  disabledProviders: z.array(z.enum(["cursor", "omp"])).optional(),
+  // Provider ids are validated by the registry merge (unknown → healed), so a
+  // patch may add an agent and point at it in the same request.
+  connectedProvider: z.string().max(64).nullable().optional(),
+  defaultProvider: z.string().max(64).optional(),
+  disabledProviders: z.array(z.string().max(64)).optional(),
+  customAgents: z.array(z.unknown()).max(CUSTOM_AGENT_MAX * 2).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
@@ -168,6 +172,7 @@ const settingsSchema = z.object({
   chatTreeElements: z.array(z.string()).optional(),
   chatTreeMenu: z.array(z.string()).optional(),
   chatTreeShowArchive: z.boolean().optional(),
+  chatTreeRecentLimit: z.number().int().min(0).max(200).optional(),
   chatHeaderHeight: z.number().min(40).max(72).optional(),
   chatHeaderIcons: z.array(z.string()).optional(),
   chatEnterToSend: z.boolean().optional(),
@@ -229,13 +234,44 @@ const settingsSchema = z.object({
     .optional(),
 });
 
+/** Registered provider id (built-ins + custom agents). Sessions may only
+ *  reference an agent that exists in the registry right now. */
+const registeredProviderSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine((id) => adapters.ids().includes(id), { message: "unknownAgent" });
+
 async function sendAgentOffline(req: FastifyRequest, reply: FastifyReply) {
   return reply
     .code(400)
     .send({ error: errorMessage(await resolveLocale(req), "agentOffline") });
 }
 
+/** A repeated header arrives as an array — take the first value. */
+function headerValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+/** File names ride percent-encoded (they may be Cyrillic: «Снимок экрана.png»). */
+function decodeHeaderFileName(value: string | string[] | undefined): string {
+  const raw = headerValue(value);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export async function registerRoutes(app: FastifyInstance) {
+  // Attachment uploads post raw bytes (see /attachments/upload), so the body
+  // arrives as a Buffer rather than JSON; the limit matches the service's cap.
+  app.addContentTypeParser(
+    "application/octet-stream",
+    { parseAs: "buffer", bodyLimit: MAX_ATTACH_UPLOAD_BYTES },
+    (_req, body, done) => done(null, body),
+  );
+
   // Validation failures are client errors, not server faults: turn zod
   // .parse() throws into a 400 with the first issue(s) instead of a 500.
   app.setErrorHandler((err, req, reply) => {
@@ -365,6 +401,8 @@ export async function registerRoutes(app: FastifyInstance) {
       label: a.label,
       enabled: !disabled.has(a.id),
       descriptionKey: a.descriptionKey,
+      description: a.description,
+      custom: a.custom === true,
       commandField: a.commandField,
       argsField: a.argsField,
       apiKeyField: a.apiKeyField,
@@ -518,7 +556,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/sessions/harness", async (req, reply) => {
     const query = z
       .object({
-        provider: z.enum(["cursor", "omp"]),
+        provider: registeredProviderSchema,
         cwd: z.string().max(4096).optional(),
       })
       .parse(req.query ?? {});
@@ -528,7 +566,7 @@ export async function registerRoutes(app: FastifyInstance) {
   app.post("/api/sessions/import", async (req, reply) => {
     const body = z
       .object({
-        provider: z.enum(["cursor", "omp"]),
+        provider: registeredProviderSchema,
         acpSessionId: z.string().min(1).max(200),
         cwd: z.string().max(4096).optional(),
         title: z.string().max(500).optional(),
@@ -592,7 +630,7 @@ export async function registerRoutes(app: FastifyInstance) {
         /** Optimistic UI creates the row client-side first, then posts it here. */
         id: z.string().uuid().optional(),
         title: z.string().optional(),
-        provider: z.enum(["cursor", "omp", SHELL_SESSION_PROVIDER]).optional(),
+        provider: z.string().min(1).max(64).optional(),
         cwd: z.string().optional(),
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
@@ -602,6 +640,9 @@ export async function registerRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
     const provider = body.provider ?? settings.connectedProvider ?? settings.defaultProvider;
+    if (!isShellSession(provider) && !adapters.get(provider)) {
+      return reply.code(400).send({ error: "unknownAgent" });
+    }
     if (
       !isShellSession(provider) &&
       (settings.disabledProviders.includes(provider) || !getAgentAvailability(provider))
@@ -753,25 +794,25 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/sessions/:id/git/status", async (req, reply) => {
     const { id } = req.params as { id: string };
     const q = z.object({ summary: z.enum(["0", "1"]).optional() }).parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    return getGitStatus(detail.cwd, { summary: q.summary === "1" });
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    return getGitStatus(cwd, { summary: q.summary === "1" });
   });
 
   app.get("/api/sessions/:id/git/diff", async (req, reply) => {
     const { id } = req.params as { id: string };
     const q = z.object({ path: z.string().max(4096).optional() }).parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    return { diff: getGitDiff(detail.cwd, q.path) };
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    return { diff: await getGitDiff(cwd, q.path) };
   });
 
   app.get("/api/sessions/:id/git/log", async (req, reply) => {
     const { id } = req.params as { id: string };
     const q = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    return getGitLog(detail.cwd, q.limit ?? 60);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    return getGitLog(cwd, q.limit ?? 60);
   });
 
   app.get("/api/sessions/:id/git/show", async (req, reply) => {
@@ -782,17 +823,17 @@ export async function registerRoutes(app: FastifyInstance) {
         path: z.string().min(1).max(4096).optional(),
       })
       .parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    return { diff: getGitShow(detail.cwd, q.rev, q.path) };
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    return { diff: await getGitShow(cwd, q.rev, q.path) };
   });
 
   app.get("/api/sessions/:id/git/commit", async (req, reply) => {
     const { id } = req.params as { id: string };
     const q = z.object({ rev: z.string().min(4).max(64) }).parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const commit = getGitCommitDetail(detail.cwd, q.rev);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const commit = await getGitCommitDetail(cwd, q.rev);
     if (!commit) return reply.code(404).send({ error: "Commit not found" });
     return { detail: commit };
   });
@@ -805,14 +846,14 @@ export async function registerRoutes(app: FastifyInstance) {
         z.object({ rev: z.string().min(7).max(64) }),
       ])
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
     const result =
       "rev" in body
-        ? checkoutGitRevision(detail.cwd, body.rev)
-        : checkoutGitBranch(detail.cwd, body.branch, { create: body.create });
+        ? await checkoutGitRevision(cwd, body.rev)
+        : await checkoutGitBranch(cwd, body.branch, { create: body.create });
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Checkout failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/stage", async (req, reply) => {
@@ -823,35 +864,35 @@ export async function registerRoutes(app: FastifyInstance) {
         staged: z.boolean(),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = setGitStage(detail.cwd, body.paths, body.staged);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await setGitStage(cwd, body.paths, body.staged);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Stage failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/commit", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = z.object({ message: z.string().min(1).max(5000) }).parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = commitGit(detail.cwd, body.message);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await commitGit(cwd, body.message);
     if (!result.ok) {
-      req.log.warn({ sessionId: id, cwd: detail.cwd, error: result.error }, "git commit failed");
+      req.log.warn({ sessionId: id, cwd: cwd, error: result.error }, "git commit failed");
       return reply.code(400).send({ error: result.error ?? "Commit failed" });
     }
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/sync", async (req, reply) => {
     const { id } = req.params as { id: string };
     const body = z.object({ action: z.enum(["fetch", "pull", "push"]) }).parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = await syncGit(detail.cwd, body.action);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await syncGit(cwd, body.action);
     if (!result.ok && !result.conflict) {
       req.log.warn(
-        { sessionId: id, cwd: detail.cwd, action: body.action, error: result.error },
+        { sessionId: id, cwd: cwd, action: body.action, error: result.error },
         "git sync failed",
       );
       return reply.code(400).send({ error: result.error ?? "Sync failed" });
@@ -860,7 +901,7 @@ export async function registerRoutes(app: FastifyInstance) {
       ok: result.ok,
       conflict: result.conflict ?? false,
       output: result.output ?? "",
-      status: getGitStatus(detail.cwd),
+      status: await getGitStatus(cwd),
     };
   });
 
@@ -872,11 +913,11 @@ export async function registerRoutes(app: FastifyInstance) {
         message: z.string().max(500).optional(),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = stashGit(detail.cwd, body.action, body.message);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await stashGit(cwd, body.action, body.message);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Stash failed" });
-    return { ok: true, output: result.output ?? "", status: getGitStatus(detail.cwd) };
+    return { ok: true, output: result.output ?? "", status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/commit-action", async (req, reply) => {
@@ -887,11 +928,11 @@ export async function registerRoutes(app: FastifyInstance) {
         rev: z.string().min(7).max(64),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = applyGitCommitAction(detail.cwd, body.action, body.rev);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await applyGitCommitAction(cwd, body.action, body.rev);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Git action failed" });
-    return { ok: true, output: result.output ?? "", status: getGitStatus(detail.cwd) };
+    return { ok: true, output: result.output ?? "", status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/create-branch", async (req, reply) => {
@@ -902,11 +943,11 @@ export async function registerRoutes(app: FastifyInstance) {
         branch: z.string().min(1).max(255),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = createGitBranchAt(detail.cwd, body.branch, body.rev);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await createGitBranchAt(cwd, body.branch, body.rev);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Create branch failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/create-tag", async (req, reply) => {
@@ -917,11 +958,11 @@ export async function registerRoutes(app: FastifyInstance) {
         tag: z.string().min(1).max(255),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = createGitTagAt(detail.cwd, body.tag, body.rev);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await createGitTagAt(cwd, body.tag, body.rev);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Create tag failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/discard", async (req, reply) => {
@@ -931,11 +972,11 @@ export async function registerRoutes(app: FastifyInstance) {
         paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = discardGitChanges(detail.cwd, body.paths);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await discardGitChanges(cwd, body.paths);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Discard failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/delete", async (req, reply) => {
@@ -945,11 +986,11 @@ export async function registerRoutes(app: FastifyInstance) {
         paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = deleteGitFiles(detail.cwd, body.paths);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await deleteGitFiles(cwd, body.paths);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Delete failed" });
-    return { ok: true, status: getGitStatus(detail.cwd) };
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/ignore", async (req, reply) => {
@@ -959,11 +1000,11 @@ export async function registerRoutes(app: FastifyInstance) {
         paths: z.array(z.string().min(1).max(4096)).min(1).max(MAX_GIT_PATHS),
       })
       .parse(req.body);
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const result = addGitIgnoreEntries(detail.cwd, body.paths);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await addGitIgnoreEntries(cwd, body.paths);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Add to .gitignore failed" });
-    return { ok: true, added: result.added, status: getGitStatus(detail.cwd) };
+    return { ok: true, added: result.added, status: await getGitStatus(cwd) };
   });
 
   app.get("/api/sessions/:id/git/lines", async (req, reply) => {
@@ -978,11 +1019,11 @@ export async function registerRoutes(app: FastifyInstance) {
         rev: z.string().min(4).max(64).optional(),
       })
       .parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
     if (q.mode === "commit" && !q.rev) return reply.code(400).send({ error: "rev required" });
-    const result = getGitFileLines(
-      detail.cwd,
+    const result = await getGitFileLines(
+      cwd,
       q.path,
       q.start,
       q.end,
@@ -996,31 +1037,32 @@ export async function registerRoutes(app: FastifyInstance) {
   app.get("/api/sessions/:id/git/blame", async (req, reply) => {
     const { id } = req.params as { id: string };
     const q = z.object({ path: z.string().min(1).max(4096) }).parse(req.query ?? {});
-    const detail = await getSessionDetail(id);
-    if (!detail) return reply.code(404).send({ error: "Not found" });
-    const blame = getGitBlame(detail.cwd, q.path);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const blame = await getGitBlame(cwd, q.path);
     if (!blame) return reply.code(404).send({ error: "Blame not available" });
     return { blame };
   });
 
-  /** Stage a clipboard/device image into the session cwd; returns a path attachment. */
+  /** Stage a pasted/uploaded image into the session cwd; returns a path attachment. */
   app.post("/api/sessions/:id/attachments/upload", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = z
-      .object({
-        name: z.string().min(1).max(255),
-        mime: z.string().max(120).optional(),
-        data: z.string().min(1),
-      })
-      .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    const approxBytes = Math.floor((body.data.length * 3) / 4);
-    if (approxBytes > MAX_ATTACH_UPLOAD_BYTES) {
+    // The client posts the clipboard blob itself; name/mime ride in headers so
+    // no base64 (and no giant JSON body) is involved.
+    const bytes = req.body;
+    if (!Buffer.isBuffer(bytes) || bytes.length === 0) {
+      return reply.code(400).send({ error: "Empty upload" });
+    }
+    if (bytes.length > MAX_ATTACH_UPLOAD_BYTES) {
       return reply.code(413).send({ error: "File too large" });
     }
+    const name = decodeHeaderFileName(req.headers["x-file-name"]).trim();
+    if (!name) return reply.code(400).send({ error: "Missing file name" });
+    const mime = headerValue(req.headers["x-file-mime"]).trim();
     try {
-      const saved = await stageSessionUpload(id, detail.cwd, body);
+      const saved = await stageSessionUpload(id, detail.cwd, { name, mime, bytes });
       return { name: saved.name, path: saved.path, size: saved.size };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1188,7 +1230,7 @@ export async function registerRoutes(app: FastifyInstance) {
       })
       .parse(req.body);
     const requestId = body.requestId ?? decodeURIComponent(rawRequestId);
-    answerQuestion(id, requestId, body.result);
+    await answerQuestion(id, requestId, body.result);
     return { ok: true };
   });
 

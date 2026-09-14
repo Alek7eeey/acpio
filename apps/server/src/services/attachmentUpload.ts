@@ -29,15 +29,18 @@ function extForMime(mime: string, fallbackName: string): string {
 }
 
 /**
- * Write a clipboard/device image into the session cwd and return a path-based
+ * Write a pasted/uploaded image into the session cwd and return a path-based
  * attachment the existing prompt flow can consume.
+ *
+ * Takes the raw bytes: the client posts the clipboard blob as-is, so neither
+ * side pays the base64 round-trip (a 15 MB screenshot becomes ~20 MB of JSON).
  */
 export async function stageSessionUpload(
   sessionId: string,
   cwd: string,
-  input: { name: string; mime?: string; data: string },
+  input: { name: string; mime?: string; bytes: Buffer },
 ): Promise<{ name: string; path: string; size: number }> {
-  const buf = Buffer.from(input.data, "base64");
+  const buf = input.bytes;
   if (!buf.length) throw new Error("Empty upload");
   if (buf.length > MAX_ATTACH_UPLOAD_BYTES) throw new Error("File too large");
 

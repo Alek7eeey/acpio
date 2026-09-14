@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { SessionDto } from "@acpio/shared";
-import { groupByFolder, sessionActivityAt } from "../lib/sessionTitle";
+import { groupByFolder, sessionActivityAt, sessionRowMark } from "../lib/sessionTitle";
 
 function session(id: string, cwd: string): SessionDto {
   return {
@@ -77,5 +77,27 @@ describe("sessionActivityAt", () => {
   it("falls back to createdAt for empty chats", () => {
     const empty = { ...session("a", "E:/x"), lastMessageAt: "" };
     expect(sessionActivityAt(empty)).toBe("2026-08-16T10:00:00.000Z");
+  });
+});
+
+describe("sessionRowMark", () => {
+  // The chat the reader is looking at states its own condition on screen.
+  it("marks nothing in the active pane", () => {
+    expect(sessionRowMark("running", false, false)).toBeNull();
+    expect(sessionRowMark("waiting", false, false)).toBeNull();
+    expect(sessionRowMark("idle", false, true)).toBeNull();
+  });
+
+  // A parked chat used to get the animated "Working…" mark, which claimed the
+  // agent was burning time while it actually waited for an answer.
+  it("never marks a parked chat as running", () => {
+    expect(sessionRowMark("waiting", true, false)).toBe("waiting");
+    expect(sessionRowMark("waiting", true, true)).toBe("waiting");
+  });
+
+  it("keeps running and unseen distinct", () => {
+    expect(sessionRowMark("running", true, false)).toBe("running");
+    expect(sessionRowMark("idle", true, true)).toBe("unseen");
+    expect(sessionRowMark("idle", true, false)).toBeNull();
   });
 });

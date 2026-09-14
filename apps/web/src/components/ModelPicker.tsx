@@ -11,10 +11,9 @@ import {
 import { useT } from "../lib/i18n";
 import styles from "./ModelPicker.module.css";
 
-function shortModelName(value: string, name: string | undefined, defaultLabel: string) {
-  const raw = modelDisplayName(value, name, defaultLabel);
-  const tail = raw.includes("/") ? raw.split("/").pop()! : raw;
-  return tail.length > 22 ? `${tail.slice(0, 20)}…` : tail;
+/** Chip text: the resolved label capped to the trigger width; the tooltip keeps it whole. */
+function shortLabel(label: string) {
+  return label.length > 22 ? `${label.slice(0, 20)}…` : label;
 }
 
 function optionLabel(
@@ -215,12 +214,16 @@ type ModelPickerProps = {
   onChange: (value: string) => void;
   params?: ModelParamDto[];
   paramValues?: Record<string, string>;
-  onParamsChange?: (params: Record<string, string>) => void;
+  /** Per-model params for the ⋯ flyout, keyed by model value. The current model
+   *  falls back to `params`; an uncached model shows the loader until filled. */
+  paramsByModel?: Record<string, ModelParamDto[]>;
+  /** Params picked in a flyout, tagged with the model the flyout was opened for. */
+  onParamsChange?: (targetModel: string, params: Record<string, string>) => void;
   /**
    * Load Fast/Effort for a model before showing them.
    * While this promise runs, the popup shows a loader (no stale flicker).
    */
-  onParamsOpen?: (model: string) => void | Promise<void>;
+  onParamsOpen?: (model: string) => void | Promise<unknown>;
   /** True while parent is fetching params for the open ⋯ model. */
   paramsLoading?: boolean;
   /** Model value currently being fetched (composer trigger + row ⋯). */
@@ -245,6 +248,7 @@ export function ModelPicker({
   onChange,
   params = [],
   paramValues = {},
+  paramsByModel,
   onParamsChange,
   onParamsOpen,
   paramsLoading = false,
@@ -279,7 +283,6 @@ export function ModelPicker({
   const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const paramsReqRef = useRef(0);
-  const paramsBusy = paramsLoading || localParamsBusy;
   const resolvedParams = useMemo(
     () => resolveParamValues(params, paramValues),
     [params, paramValues],
@@ -288,6 +291,27 @@ export function ModelPicker({
     () => params.filter((p) => p.options.length > 0),
     [params],
   );
+  /** The flyout belongs to `paramsFor`, not to the session's model: render that
+   *  model's schema so the options match what the row's ⋯ promises to configure. */
+  const flyoutParams = useMemo(() => {
+    if (!paramsFor || paramsFor === model) return visibleParams;
+    const list = paramsByModel?.[paramsFor];
+    return list ? list.filter((p) => p.options.length > 0) : [];
+  }, [paramsFor, model, paramsByModel, visibleParams]);
+  /** Saved values exist only for the session model; other models report their
+   *  current pick through `param.currentValue` from the agent probe. */
+  const flyoutValues = useMemo(
+    () => (paramsFor && paramsFor !== model ? {} : resolvedParams),
+    [paramsFor, model, resolvedParams],
+  );
+  const flyoutBusy =
+    localParamsBusy ||
+    (paramsLoading && paramsLoadingFor != null && paramsLoadingFor === paramsFor);
+  /** The trigger chip reflects the session model only — a background fetch for
+   *  another model must not spin it. */
+  const showTriggerParamLoader =
+    (paramsLoading && (paramsLoadingFor == null || paramsLoadingFor === model)) ||
+    (localParamsBusy && (paramsFor == null || paramsFor === model));
   const options = useMemo(
     () =>
       models.map((m) => ({
@@ -316,13 +340,17 @@ export function ModelPicker({
     return fallbackParamChipsFromValues(resolvedParams, effortPrefix, contextPrefix);
   }, [visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix]);
   const triggerChips = paramChips;
+  const selectedModelName = models.find((m) => m.value === model)?.name;
+  // Agent ids can be opaque (ZCode's JSON tuple), so the label comes from the
+  // agent's own title — the wire id itself is never shown to the user.
+  const fullLabel = model ? modelDisplayName(model, selectedModelName, defaultModelLabel) : "";
   const baseLabel = loading
     ? t("common.loading")
     : !model
       ? t("common.selectModel")
-      : shortModelName(model, models.find((m) => m.value === model)?.name, defaultModelLabel);
+      : shortLabel(fullLabel);
   const triggerLabel =
-    variant === "block" && paramSummary && !loading && !paramsBusy
+    variant === "block" && paramSummary && !loading && !showTriggerParamLoader
       ? `${baseLabel} · ${paramSummary}`
       : baseLabel;
   const paramsPopupOpen = paramsFor != null && paramsAnchor != null;
@@ -500,23 +528,22 @@ export function ModelPicker({
     syncParamsAnchor();
     const list = listRef.current;
     const onResize = () => syncParamsAnchor();
-    const onListScroll = () => closeParams();
-    const onWinScroll = (e: Event) => {
+    // Scrolling re-anchors the flyout; syncParamsAnchor drops it once the ⋯
+    // button leaves the visible list. Closing on ANY scroll killed the flyout
+    // on the programmatic scrollIntoView that centers the selected row — and
+    // on the momentum scroll a tap leaves behind on touch ("click does nothing").
+    const onScroll = (e: Event) => {
       const t = e.target;
       if (t instanceof Node && paramsPopupRef.current?.contains(t)) return;
-      if (t === list || (t instanceof Node && list?.contains(t))) {
-        closeParams();
-        return;
-      }
       syncParamsAnchor();
     };
     window.addEventListener("resize", onResize);
-    list?.addEventListener("scroll", onListScroll, { passive: true });
-    window.addEventListener("scroll", onWinScroll, true);
+    list?.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       window.removeEventListener("resize", onResize);
-      list?.removeEventListener("scroll", onListScroll);
-      window.removeEventListener("scroll", onWinScroll, true);
+      list?.removeEventListener("scroll", onScroll);
+      window.removeEventListener("scroll", onScroll, true);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paramsFor, open, options.length]);
@@ -542,7 +569,7 @@ export function ModelPicker({
       window.visualViewport?.removeEventListener("resize", onResize);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramsPopupOpen, paramsAnchor, menuAnchor, paramsBusy, visibleParams.length, resolvedParams]);
+  }, [paramsPopupOpen, paramsAnchor, menuAnchor, flyoutBusy, flyoutParams.length, flyoutValues]);
 
   useEffect(() => {
     if (!open) return;
@@ -567,11 +594,11 @@ export function ModelPicker({
     };
   }, [open, paramsFor]);
 
-  // After load: if this model has nothing to configure — close flyout.
+  // After load: if the flyout's model has nothing to configure — close it.
   useEffect(() => {
-    if (paramsBusy || !paramsFor) return;
-    if (visibleParams.length === 0) closeParams();
-  }, [paramsBusy, paramsFor, visibleParams.length]);
+    if (flyoutBusy || !paramsFor) return;
+    if (flyoutParams.length === 0) closeParams();
+  }, [flyoutBusy, paramsFor, flyoutParams.length]);
 
   const openParamsFor = async (modelValue: string, btn: HTMLButtonElement) => {
     const req = ++paramsReqRef.current;
@@ -591,12 +618,13 @@ export function ModelPicker({
   };
 
   const renderParamSections = () => {
-    const shown = paramsBusy
-      ? visibleParams.filter((p) => modelParamFamily(p.id) === "fast")
-      : visibleParams;
+    const shown = flyoutBusy
+      ? flyoutParams.filter((p) => modelParamFamily(p.id) === "fast")
+      : flyoutParams;
+    const target = paramsFor ?? model;
     const sections = shown.map((param) => {
       const current =
-        resolvedParams[param.id] ??
+        flyoutValues[param.id] ??
         param.currentValue ??
         param.options[0]?.value ??
         "";
@@ -633,8 +661,8 @@ export function ModelPicker({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (!onParamsChange) return;
-                  onParamsChange({
-                    ...resolvedParams,
+                  onParamsChange(target, {
+                    ...flyoutValues,
                     [param.id]: isOn ? offValue : onValue,
                   });
                 }}
@@ -661,7 +689,7 @@ export function ModelPicker({
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   if (!onParamsChange) return;
-                  onParamsChange({ ...resolvedParams, [param.id]: opt.value });
+                  onParamsChange(target, { ...flyoutValues, [param.id]: opt.value });
                 }}
               >
                 <span className={styles.modelOptionName}>
@@ -676,7 +704,7 @@ export function ModelPicker({
     return (
       <>
         {sections}
-        {paramsBusy ? (
+        {flyoutBusy ? (
           <div className={styles.paramsLoader} aria-busy="true">
             <span className={styles.paramsSpinner} aria-hidden />
             <span>{t("common.loadingParams")}</span>
@@ -686,13 +714,13 @@ export function ModelPicker({
     );
   };
 
-  const paramsLabel = visibleParams
+  const paramsLabel = (paramsFor ? flyoutParams : visibleParams)
     .map((p) => modelParamSectionName(p.id, p.name))
     .join(", ");
   const showMore = showParamsMenu ?? visibleParams.length > 0;
-  const showTriggerParamLoader = paramsBusy;
   const rowParamsBusy = (modelValue: string) =>
-    paramsBusy && (paramsFor === modelValue || paramsLoadingFor === modelValue);
+    (paramsLoading && paramsLoadingFor === modelValue) ||
+    (localParamsBusy && paramsFor === modelValue);
 
   return (
     <div
@@ -714,8 +742,10 @@ export function ModelPicker({
           loading
             ? t("common.loadingModelsList")
             : showTriggerParamLoader
-              ? [model || t("common.model"), t("common.loadingParams")].filter(Boolean).join(" · ")
-              : [model || t("common.model"), paramSummary].filter(Boolean).join(" · ")
+              ? [fullLabel || t("common.model"), t("common.loadingParams")]
+                  .filter(Boolean)
+                  .join(" · ")
+              : [fullLabel || t("common.model"), paramSummary].filter(Boolean).join(" · ")
         }
         onClick={() => {
           if (disabled) return;

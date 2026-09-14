@@ -1,48 +1,54 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
-  type ReactNode,
 } from "react";
-import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
-import { DiffTextView, type DiffContextSource } from "./DiffTextView";
-import { GitFullscreenDiff, type FullscreenDiffFile } from "./GitFullscreenDiff";
-import { GitChangesCommitPane } from "./GitChangesCommitPane";
+import { createPortal } from "react-dom";
+import type { GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
+import {
+  GitBlameView,
+  GitDiffStage,
+  GitStageHeader,
+  type GitDiffFile,
+  type GitDiffScope,
+} from "./GitDiffStage";
+import {
+  CHANGES_VIEW_KEY,
+  GitChangesCommitPane,
+  readChangesView,
+  type ChangesView,
+} from "./GitChangesCommitPane";
 import { GitCommitHistory } from "./GitCommitHistory";
 import { GitCommitDetail } from "./GitCommitDetail";
 import { GitBranchSwitcher } from "./ComposerGitBar";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
-import { isSidePanelResizeAllowed, useNarrowPanelLayout } from "../lib/panelLayout";
-import { firstChangedFilePath, firstCommitFilePath, normalizeGitPath } from "../lib/gitFileTree";
+import {
+  isSidePanelResizeAllowed,
+  useNarrowPanelLayout,
+  usePhonePanelLayout,
+} from "../lib/panelLayout";
+import {
+  GIT_PANEL_WIDTH_MAX,
+  GIT_PANEL_WIDTH_MIN,
+  GIT_SPLIT_MIN_WIDTH,
+  clampGitPanelWidth,
+  gitDefaultPanelWidth,
+  gitNavigatorWidthFor,
+} from "../lib/gitLayout";
+import { normalizeGitPath } from "../lib/gitFileTree";
 import { formatGitErrorToast, gitConflictFiles, gitPullConflictMessage, gitStatusBadge, gitSyncSuccessMessage, isGitConflictFile, isUntrackedGitFile } from "../lib/gitUi";
 import styles from "./GitChangesSidePanel.module.css";
 
-const WIDTH_KEY = "acpio.gitPanelWidth.v1";
-const WIDTH_MIN = 320;
-const WIDTH_MAX = 920;
-const WIDTH_DEFAULT = 520;
-const HISTORY_LIST_WIDTH_KEY = "acpio.gitHistoryListWidth.v1";
-const HISTORY_LIST_WIDTH_MIN = 140;
-const HISTORY_LIST_WIDTH_MAX = 520;
-const HISTORY_LIST_WIDTH_DEFAULT = 220;
-const HISTORY_DETAIL_HEIGHT_KEY = "acpio.gitHistoryDetailHeight.v1";
-const HISTORY_DETAIL_HEIGHT_MIN = 120;
-const HISTORY_DETAIL_HEIGHT_MAX = 560;
-const HISTORY_DETAIL_HEIGHT_DEFAULT = 240;
-const CHANGES_TREE_WIDTH_KEY = "acpio.gitChangesTreeWidth.v1";
-const CHANGES_TREE_WIDTH_MIN = 200;
-const CHANGES_TREE_WIDTH_MAX = 560;
-const CHANGES_TREE_WIDTH_DEFAULT = 320;
-/** History list stacks above detail below this width (matches @container git-panel). */
-const GIT_HISTORY_STACKED_MAX = 768;
-/** Single-letter badge for a commit file row in the fullscreen file list. */
+/** Assumed width of the ops menu, used to keep it inside the viewport. */
+const OPS_MENU_WIDTH = 200;
+
+/** Single-letter badge for a commit file row in the stage's file list. */
 const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
   added: "A",
   copied: "A",
@@ -52,72 +58,22 @@ const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
   typeChanged: "T",
   other: "M",
 };
+/** Which list the navigator column is showing. */
 type PanelTab = "changes" | "history";
 type Selection =
   | { kind: "working"; path: string | null }
   | { kind: "commit"; hash: string; filePath: string | null };
 
-function readStoredWidth() {
-  try {
-    const raw = localStorage.getItem(WIDTH_KEY);
-    const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) return Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, n));
-  } catch {
-    /* ignore */
-  }
-  return WIDTH_DEFAULT;
-}
+/** Reader-dragged dock width, remembered per browser. */
+const PANEL_WIDTH_KEY = "acpio.gitPanelWidth.v1";
 
-function readHistoryListWidth() {
+function readStoredPanelWidth(): number | null {
   try {
-    const raw = localStorage.getItem(HISTORY_LIST_WIDTH_KEY);
-    const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) return Math.min(HISTORY_LIST_WIDTH_MAX, Math.max(HISTORY_LIST_WIDTH_MIN, n));
+    const n = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
   } catch {
-    /* ignore */
+    return null;
   }
-  return HISTORY_LIST_WIDTH_DEFAULT;
-}
-
-function readHistoryDetailHeight() {
-  try {
-    const raw = localStorage.getItem(HISTORY_DETAIL_HEIGHT_KEY);
-    const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) return Math.min(HISTORY_DETAIL_HEIGHT_MAX, Math.max(HISTORY_DETAIL_HEIGHT_MIN, n));
-  } catch {
-    /* ignore */
-  }
-  return HISTORY_DETAIL_HEIGHT_DEFAULT;
-}
-
-function readChangesTreeWidth() {
-  try {
-    const raw = localStorage.getItem(CHANGES_TREE_WIDTH_KEY);
-    const n = raw ? Number(raw) : NaN;
-    if (Number.isFinite(n)) return Math.min(CHANGES_TREE_WIDTH_MAX, Math.max(CHANGES_TREE_WIDTH_MIN, n));
-  } catch {
-    /* ignore */
-  }
-  return CHANGES_TREE_WIDTH_DEFAULT;
-}
-
-function GitActionButton({
-  label,
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button type="button" className={styles.actionBtn} disabled={disabled} onClick={onClick} title={label}>
-      <span className={styles.actionLabel}>{label}</span>
-      <span className={styles.actionIcon}>{children}</span>
-    </button>
-  );
 }
 
 export function GitChangesSidePanel({
@@ -127,9 +83,11 @@ export function GitChangesSidePanel({
   statusLoading = false,
   awaitingGit = false,
   branchBusy,
+  fullscreen,
   onClose,
   onStatusChange,
   onCheckout,
+  onFullscreenChange,
 }: {
   sessionId: string;
   open: boolean;
@@ -137,28 +95,29 @@ export function GitChangesSidePanel({
   statusLoading?: boolean;
   awaitingGit?: boolean;
   branchBusy: boolean;
+  /** Reader asked for the diff alone: the chat steps aside and the page is the review. */
+  fullscreen: boolean;
   onClose: () => void;
   onStatusChange: (status: GitStatusDto) => void;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  onFullscreenChange: (fullscreen: boolean) => void;
 }) {
   const t = useT();
   const narrowPanel = useNarrowPanelLayout();
-  const [width, setWidth] = useState(readStoredWidth);
-  const [dragging, setDragging] = useState(false);
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const historyListDragRef = useRef<
-    | { axis: "x"; startX: number; startWidth: number }
-    | { axis: "y"; startY: number; startHeight: number }
-    | null
-  >(null);
-  const historyDetailDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const changesTreeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const phonePanel = usePhonePanelLayout();
   const syncInFlightRef = useRef(false);
   const [tab, setTab] = useState<PanelTab>("changes");
-  const [fullscreenOpen, setFullscreenOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>({ kind: "working", path: null });
-  const [diff, setDiff] = useState("");
-  const [loadingDiff, setLoadingDiff] = useState(false);
+  /** Bumped on every file pick so the stage re-centres even on the same path. */
+  const [jumpToken, setJumpToken] = useState(0);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  /** Fetch and the stash pair are rare next to pull/push: they live behind one button. */
+  const [opsAnchor, setOpsAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  const opsRef = useRef<HTMLButtonElement | null>(null);
+  const opsMenuRef = useRef<HTMLDivElement | null>(null);
+  /** List or tree: the commit pane's file rows, switched from the navigator header. */
+  const [view, setView] = useState<ChangesView>(readChangesView);
+  const [blame, setBlame] = useState<{ path: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [commitSummary, setCommitSummary] = useState("");
   const [commitDescription, setCommitDescription] = useState("");
@@ -167,51 +126,117 @@ export function GitChangesSidePanel({
   const [loadingCommits, setLoadingCommits] = useState(false);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailDto | null>(null);
   const [loadingCommitDetail, setLoadingCommitDetail] = useState(false);
-  const [historyListWidth, setHistoryListWidth] = useState(readHistoryListWidth);
-  const [historyListDragging, setHistoryListDragging] = useState(false);
-  const [historyDetailHeight, setHistoryDetailHeight] = useState(readHistoryDetailHeight);
-  const [historyDetailDragging, setHistoryDetailDragging] = useState(false);
-  const [changesTreeWidth, setChangesTreeWidth] = useState(readChangesTreeWidth);
-  const [changesTreeDragging, setChangesTreeDragging] = useState(false);
-  const panelBodyRef = useRef<HTMLDivElement>(null);
-  const historyLayoutRef = useRef<HTMLDivElement>(null);
-  const [historyStacked, setHistoryStacked] = useState(false);
-  const loadedDiffKeyRef = useRef<string | null>(null);
-  const inflightDiffKeyRef = useRef<string | null>(null);
-  const diffCacheRef = useRef(new Map<string, string>());
-  const diffRequestRef = useRef(0);
-  const diffDismissedRef = useRef(false);
-  const diffAutoSelectScopeRef = useRef("");
+  /** Width of the page this panel is docked into — the panel's own width follows from it. */
+  const [pageWidth, setPageWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
+  const panelRef = useRef<HTMLElement | null>(null);
+  /** Null until dragged: whoever has not touched the splitter follows the default. */
+  const [draggedWidth, setDraggedWidth] = useState<number | null>(readStoredPanelWidth);
+  const [resizing, setResizing] = useState(false);
+  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  const clearLoadedDiff = useCallback(() => {
-    loadedDiffKeyRef.current = null;
-    inflightDiffKeyRef.current = null;
-    // Drop in-flight gitDiff/gitShow so a late response cannot restore a stale pane.
-    diffRequestRef.current += 1;
-    setLoadingDiff(false);
-  }, []);
+  useEffect(() => {
+    if (draggedWidth === null) return;
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(draggedWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [draggedWidth]);
 
-  const invalidateWorkingDiffCache = useCallback(
-    (paths?: string[]) => {
-      if (!paths?.length) {
-        for (const key of diffCacheRef.current.keys()) {
-          if (key.startsWith(`${sessionId}:working:`)) diffCacheRef.current.delete(key);
-        }
-        return;
-      }
-      for (const path of paths) {
-        diffCacheRef.current.delete(`${sessionId}:working:${path}`);
-      }
+  /**
+   * The dock takes a slice of the page and the navigator takes a slice of the
+   * dock, so the diff keeps the rest. The slice is what the reader dragged, fitted
+   * to the page; before the first drag it is the default. Below
+   * `GIT_SPLIT_MIN_WIDTH` there is no rest to keep, and the navigator becomes a
+   * sheet over the stage instead of a column beside it.
+   */
+  const overlay = narrowPanel;
+  /**
+   * Phone: the panel is the whole viewport. The shell parks a chat dock under the
+   * page and a header above it, and both would box the review in — leaving the
+   * diff a slice short of the screen and the chats sheet callable from it.
+   */
+  const takeover = overlay && phonePanel;
+  const panelWidth = overlay
+    ? pageWidth
+    : clampGitPanelWidth(draggedWidth ?? gitDefaultPanelWidth(pageWidth), pageWidth);
+  const navigatorWidth = gitNavigatorWidthFor(panelWidth);
+  const sheetNavigator = panelWidth < GIT_SPLIT_MIN_WIDTH;
+
+  const onSplitterDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isSidePanelResizeAllowed()) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      resizeDragRef.current = { startX: e.clientX, startWidth: panelWidth };
+      setResizing(true);
     },
-    [sessionId],
+    [panelWidth],
   );
 
-  const resetWorkingDiffView = useCallback(() => {
-    invalidateWorkingDiffCache();
-    clearLoadedDiff();
-    setDiff("");
-    setSelection({ kind: "working", path: null });
-  }, [clearLoadedDiff, invalidateWorkingDiffCache]);
+  useEffect(() => {
+    if (!resizing) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = resizeDragRef.current;
+      if (!drag) return;
+      // Dragging left grows the dock, which sits on the right edge of the page.
+      setDraggedWidth(clampGitPanelWidth(drag.startWidth - (e.clientX - drag.startX), pageWidth));
+    };
+    const onUp = () => {
+      resizeDragRef.current = null;
+      setResizing(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [pageWidth, resizing]);
+
+  useEffect(() => {
+    if (!resizing) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "col-resize";
+    document.body.classList.add(styles.resizingBody);
+    return () => {
+      document.body.style.cursor = prev;
+      document.body.classList.remove(styles.resizingBody);
+    };
+  }, [resizing]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHANGES_VIEW_KEY, view);
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
+
+  useEffect(() => {
+    const page = panelRef.current?.parentElement;
+    if (!page || !open) return;
+    const sync = () => setPageWidth(page.clientWidth);
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(page);
+    return () => observer.disconnect();
+  }, [open]);
+
+  /**
+   * Dropping the stored width drops the memory of it too: the next session opens
+   * at the default instead of at the width the reader was last unhappy with.
+   */
+  const resetPanelWidth = useCallback(() => {
+    setDraggedWidth(null);
+    try {
+      localStorage.removeItem(PANEL_WIDTH_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const gitErrorToast = useCallback(
     (e: unknown, fallback: string, context?: "checkout" | "sync") => {
@@ -220,42 +245,6 @@ export function GitChangesSidePanel({
     },
     [t],
   );
-
-  const buildWorkingDiffKey = (path: string | null) => `working:${path ?? ""}`;
-  const buildCommitDiffKey = (hash: string, filePath: string) => `commit:${hash}:${filePath}`;
-  const buildBlameKey = (path: string) => `blame:${path}`;
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_LIST_WIDTH_KEY, String(historyListWidth));
-    } catch {
-      /* ignore */
-    }
-  }, [historyListWidth]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(HISTORY_DETAIL_HEIGHT_KEY, String(historyDetailHeight));
-    } catch {
-      /* ignore */
-    }
-  }, [historyDetailHeight]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CHANGES_TREE_WIDTH_KEY, String(changesTreeWidth));
-    } catch {
-      /* ignore */
-    }
-  }, [changesTreeWidth]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(WIDTH_KEY, String(width));
-    } catch {
-      /* ignore */
-    }
-  }, [width]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -283,53 +272,9 @@ export function GitChangesSidePanel({
     }
   }, [sessionId]);
 
-  const loadWorkingDiff = useCallback(
-    async (path: string | null, force = false) => {
-      const key = buildWorkingDiffKey(path);
-      const cacheKey = `${sessionId}:${key}`;
-
-      if (!force) {
-        const cached = diffCacheRef.current.get(cacheKey);
-        if (cached !== undefined) {
-          loadedDiffKeyRef.current = key;
-          setSelection({ kind: "working", path });
-          setDiff(cached);
-          setLoadingDiff(false);
-          return;
-        }
-        if (loadedDiffKeyRef.current === key || inflightDiffKeyRef.current === key) return;
-      }
-
-      const requestId = ++diffRequestRef.current;
-      inflightDiffKeyRef.current = key;
-      setSelection({ kind: "working", path });
-      if (loadedDiffKeyRef.current !== key) setDiff("");
-      setLoadingDiff(true);
-      try {
-        const { diff: text } = await api.gitDiff(sessionId, path ?? undefined);
-        if (requestId !== diffRequestRef.current) return;
-        diffCacheRef.current.set(cacheKey, text);
-        loadedDiffKeyRef.current = key;
-        setDiff(text);
-      } catch (e) {
-        if (requestId !== diffRequestRef.current) return;
-        if (loadedDiffKeyRef.current === key) loadedDiffKeyRef.current = null;
-        setDiff("");
-        showToast(String(e instanceof Error ? e.message : e));
-      } finally {
-        if (requestId !== diffRequestRef.current) return;
-        if (inflightDiffKeyRef.current === key) inflightDiffKeyRef.current = null;
-        setLoadingDiff(false);
-      }
-    },
-    [sessionId],
-  );
-
   const selectCommit = useCallback(
     async (hash: string, opts?: { keepChangesTab?: boolean }) => {
-      clearLoadedDiff();
       setSelection({ kind: "commit", hash, filePath: null });
-      setDiff("");
       if (!opts?.keepChangesTab) setTab("history");
       setLoadingCommitDetail(true);
       try {
@@ -340,48 +285,6 @@ export function GitChangesSidePanel({
         showToast(String(e instanceof Error ? e.message : e));
       } finally {
         setLoadingCommitDetail(false);
-      }
-    },
-    [clearLoadedDiff, sessionId],
-  );
-
-  const loadCommitFileDiff = useCallback(
-    async (hash: string, filePath: string, force = false) => {
-      const key = buildCommitDiffKey(hash, filePath);
-      const cacheKey = `${sessionId}:${key}`;
-
-      if (!force) {
-        const cached = diffCacheRef.current.get(cacheKey);
-        if (cached !== undefined) {
-          loadedDiffKeyRef.current = key;
-          setSelection({ kind: "commit", hash, filePath });
-          setDiff(cached);
-          setLoadingDiff(false);
-          return;
-        }
-        if (loadedDiffKeyRef.current === key || inflightDiffKeyRef.current === key) return;
-      }
-
-      const requestId = ++diffRequestRef.current;
-      inflightDiffKeyRef.current = key;
-      setSelection({ kind: "commit", hash, filePath });
-      if (loadedDiffKeyRef.current !== key) setDiff("");
-      setLoadingDiff(true);
-      try {
-        const { diff: text } = await api.gitShow(sessionId, hash, filePath);
-        if (requestId !== diffRequestRef.current) return;
-        diffCacheRef.current.set(cacheKey, text);
-        loadedDiffKeyRef.current = key;
-        setDiff(text);
-      } catch (e) {
-        if (requestId !== diffRequestRef.current) return;
-        if (loadedDiffKeyRef.current === key) loadedDiffKeyRef.current = null;
-        setDiff("");
-        showToast(String(e instanceof Error ? e.message : e));
-      } finally {
-        if (requestId !== diffRequestRef.current) return;
-        if (inflightDiffKeyRef.current === key) inflightDiffKeyRef.current = null;
-        setLoadingDiff(false);
       }
     },
     [sessionId],
@@ -398,98 +301,132 @@ export function GitChangesSidePanel({
     } finally {
       setLoadingCommitDetail(false);
     }
-    if (selection.filePath) {
-      await loadCommitFileDiff(selection.hash, selection.filePath, true);
-    }
-  }, [loadCommitFileDiff, selection, sessionId]);
+  }, [selection, sessionId]);
 
   const handleCheckout = useCallback(
     async (branch: string, create?: boolean) => {
       await onCheckout(branch, create);
-      clearLoadedDiff();
       setSelection({ kind: "working", path: null });
-      setDiff("");
+      setBlame(null);
       setCommitDetail(null);
       await refreshCommits();
     },
-    [clearLoadedDiff, onCheckout, refreshCommits],
+    [onCheckout, refreshCommits],
   );
 
   useEffect(() => {
-    clearLoadedDiff();
-    diffCacheRef.current.clear();
-    diffRequestRef.current += 1;
-    setDiff("");
-    setLoadingDiff(false);
     setCommits([]);
     setCommitDetail(null);
     setSelection({ kind: "working", path: null });
+    setBlame(null);
     setTab("changes");
     setCommitSummary("");
     setCommitDescription("");
     setLoadingCommits(false);
     setLoadingCommitDetail(false);
-    setFullscreenOpen(false);
-  }, [clearLoadedDiff, sessionId]);
+    setNavigatorOpen(false);
+    setOpsAnchor(null);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!open) return;
-    clearLoadedDiff();
-    diffCacheRef.current.clear();
-    diffRequestRef.current += 1;
-    setDiff("");
-    setLoadingDiff(false);
-    diffDismissedRef.current = false;
     setSelection({ kind: "working", path: null });
-    setFullscreenOpen(false);
+    setBlame(null);
+    // The panel is hidden, not unmounted: close/reopen starts on the board, not
+    // on the sheet or the full view the reader left behind.
+    setNavigatorOpen(false);
     void refreshStatus().then(() => {
       void refreshCommits();
     });
-  }, [clearLoadedDiff, open, sessionId, refreshStatus, refreshCommits]);
+  }, [open, refreshStatus, refreshCommits]);
 
-  const clearWorkingFileSelection = useCallback(() => {
-    diffDismissedRef.current = true;
-    diffRequestRef.current += 1;
-    clearLoadedDiff();
-    setDiff("");
-    setLoadingDiff(false);
-    setSelection({ kind: "working", path: null });
-  }, [clearLoadedDiff]);
+  useEffect(() => {
+    if (!opsAnchor) return;
+    const close = () => setOpsAnchor(null);
+    const onPointerDown = (e: Event) => {
+      if (opsMenuRef.current?.contains(e.target as Node)) return;
+      if (opsRef.current?.contains(e.target as Node)) return;
+      close();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close();
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [opsAnchor]);
 
-  const clearCommitFileSelection = useCallback(
-    (hash: string) => {
-      diffDismissedRef.current = true;
-      diffRequestRef.current += 1;
-      clearLoadedDiff();
-      setDiff("");
-      setLoadingDiff(false);
-      setSelection({ kind: "commit", hash, filePath: null });
+  useEffect(() => {
+    if (!navigatorOpen) return;
+    // Capture, so the stage's own Escape handling does not close the whole
+    // panel from under the sheet the reader is looking at.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setNavigatorOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [navigatorOpen]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    // Same rule as the sheet: Escape unwinds the innermost layer, so the full
+    // view goes back to the board instead of taking the whole panel with it.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onFullscreenChange(false);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [fullscreen, onFullscreenChange]);
+
+  /**
+   * Selecting a file is what feeds the stage; selecting it again empties it.
+   * On a phone the sheet gets out of the way: the diff is what was asked for.
+   */
+  const showFile = useCallback(
+    (next: Selection) => {
+      setBlame(null);
+      setSelection(next);
+      setJumpToken((token) => token + 1);
+      if (sheetNavigator && (next.kind === "working" ? next.path : next.filePath)) {
+        setNavigatorOpen(false);
+      }
     },
-    [clearLoadedDiff],
+    [sheetNavigator],
   );
 
   const toggleWorkingFile = useCallback(
     (path: string) => {
-      if (selection.kind === "working" && selection.path === path) {
-        clearWorkingFileSelection();
-        return;
-      }
-      diffDismissedRef.current = false;
-      void loadWorkingDiff(path);
+      showFile(
+        selection.kind === "working" && selection.path === path
+          ? { kind: "working", path: null }
+          : { kind: "working", path },
+      );
     },
-    [clearWorkingFileSelection, loadWorkingDiff, selection],
+    [selection, showFile],
   );
 
   const toggleCommitFile = useCallback(
     (hash: string, filePath: string) => {
-      if (selection.kind === "commit" && selection.hash === hash && selection.filePath === filePath) {
-        clearCommitFileSelection(hash);
-        return;
-      }
-      diffDismissedRef.current = false;
-      void loadCommitFileDiff(hash, filePath);
+      showFile(
+        selection.kind === "commit" && selection.hash === hash && selection.filePath === filePath
+          ? { kind: "commit", hash, filePath: null }
+          : { kind: "commit", hash, filePath },
+      );
     },
-    [clearCommitFileSelection, loadCommitFileDiff, selection],
+    [selection, showFile],
   );
 
   const setFilesStage = useCallback(
@@ -499,36 +436,26 @@ export function GitChangesSidePanel({
       try {
         const result = await api.gitStage(sessionId, paths, staged);
         onStatusChange(result.status);
-        invalidateWorkingDiffCache(paths);
-        if (selection.kind === "working") void loadWorkingDiff(selection.path, true);
       } catch (e) {
         showToast(String(e instanceof Error ? e.message : e));
       } finally {
         setBusy(false);
       }
     },
-    [invalidateWorkingDiffCache, loadWorkingDiff, onStatusChange, selection, sessionId],
+    [onStatusChange, sessionId],
   );
 
+  /** After a file is discarded or deleted, the stage must stop showing it. */
   const refreshAfterFileMutation = useCallback(
-    async (nextStatus: GitStatusDto, affectedPaths: string[]) => {
+    async (nextStatus: GitStatusDto) => {
       onStatusChange(nextStatus);
-      invalidateWorkingDiffCache(affectedPaths);
-      if (selection.kind !== "working") return;
-      const stillExists = affectedPaths.some((path) => nextStatus.files.some((f) => f.path === path));
-      if (stillExists && selection.path && nextStatus.files.some((f) => f.path === selection.path)) {
-        void loadWorkingDiff(selection.path, true);
-      } else if (nextStatus.dirty) {
-        clearLoadedDiff();
-        setDiff("");
-        setSelection({ kind: "working", path: null });
-      } else {
-        clearLoadedDiff();
-        setDiff("");
-        setSelection({ kind: "working", path: null });
-      }
+      setSelection((prev) =>
+        prev.kind === "working" && prev.path && !nextStatus.files.some((f) => f.path === prev.path)
+          ? { kind: "working", path: null }
+          : prev,
+      );
     },
-    [clearLoadedDiff, invalidateWorkingDiffCache, loadWorkingDiff, onStatusChange, selection],
+    [onStatusChange],
   );
 
   const discardPaths = useCallback(
@@ -537,7 +464,7 @@ export function GitChangesSidePanel({
       setBusy(true);
       try {
         const result = await api.gitDiscard(sessionId, paths);
-        await refreshAfterFileMutation(result.status, paths);
+        await refreshAfterFileMutation(result.status);
         showToast(t("git.discardOk"), { tone: "success" });
       } catch (e) {
         gitErrorToast(e, t("git.syncFailed"));
@@ -554,7 +481,7 @@ export function GitChangesSidePanel({
       setBusy(true);
       try {
         const result = await api.gitDelete(sessionId, paths);
-        await refreshAfterFileMutation(result.status, paths);
+        await refreshAfterFileMutation(result.status);
         showToast(t("git.deleteOk"), { tone: "success" });
       } catch (e) {
         gitErrorToast(e, t("git.syncFailed"));
@@ -571,7 +498,7 @@ export function GitChangesSidePanel({
       setBusy(true);
       try {
         const result = await api.gitIgnore(sessionId, paths);
-        await refreshAfterFileMutation(result.status, paths);
+        await refreshAfterFileMutation(result.status);
         showToast(result.added.length > 0 ? t("git.gitIgnoreOk") : t("git.gitIgnoreNone"), {
           tone: result.added.length > 0 ? "success" : "info",
         });
@@ -586,24 +513,12 @@ export function GitChangesSidePanel({
 
   const loadWorkingBlame = useCallback(
     async (path: string) => {
-      const key = buildBlameKey(path);
-      if (loadedDiffKeyRef.current === key || inflightDiffKeyRef.current === key) return;
-
-      inflightDiffKeyRef.current = key;
-      const showLoading = loadedDiffKeyRef.current !== key;
-      if (showLoading) setLoadingDiff(true);
       try {
-        const { blame } = await api.gitBlame(sessionId, path);
-        loadedDiffKeyRef.current = key;
-        setDiff(blame);
+        const result = await api.gitBlame(sessionId, path);
+        setBlame({ path, text: result.blame });
         setSelection({ kind: "working", path });
       } catch (e) {
-        if (loadedDiffKeyRef.current === key) loadedDiffKeyRef.current = null;
-        setDiff("");
         showToast(String(e instanceof Error ? e.message : e));
-      } finally {
-        if (inflightDiffKeyRef.current === key) inflightDiffKeyRef.current = null;
-        setLoadingDiff(false);
       }
     },
     [sessionId],
@@ -626,43 +541,22 @@ export function GitChangesSidePanel({
     return description ? `${summary}\n\n${description}` : summary;
   };
 
-  const focusConflictFiles = useCallback(
-    (nextStatus: GitStatusDto) => {
-      const conflicts = gitConflictFiles(nextStatus);
-      if (conflicts.length === 0) return;
-      setTab("changes");
-      const first = conflicts[0]!.path;
-      setSelection({ kind: "working", path: first });
-      void loadWorkingDiff(first, true);
-    },
-    [loadWorkingDiff],
-  );
+  const focusConflictFiles = useCallback((nextStatus: GitStatusDto) => {
+    const conflicts = gitConflictFiles(nextStatus);
+    if (conflicts.length === 0) return;
+    setTab("changes");
+    setSelection({ kind: "working", path: conflicts[0]!.path });
+  }, []);
 
-  const refreshAfterSync = useCallback(
-    async (result: { status: GitStatusDto }) => {
-      try {
-        if (selection.kind === "working" && result.status.dirty && selection.path) {
-          invalidateWorkingDiffCache();
-          void loadWorkingDiff(selection.path, true);
-        } else if (selection.kind === "working") {
-          resetWorkingDiffView();
-        } else if (selection.kind === "commit") {
-          void reloadHistorySelection();
-        }
-        await refreshCommits();
-      } catch {
-        /* sync already succeeded — don't surface secondary refresh errors as a failed push */
-      }
-    },
-    [
-      invalidateWorkingDiffCache,
-      loadWorkingDiff,
-      refreshCommits,
-      reloadHistorySelection,
-      resetWorkingDiffView,
-      selection,
-    ],
-  );
+  /** Sync moves HEAD: refresh the commit list and whatever commit sits on the stage. */
+  const refreshAfterSync = useCallback(async () => {
+    try {
+      if (selection.kind === "commit") await reloadHistorySelection();
+      await refreshCommits();
+    } catch {
+      /* sync already succeeded — don't surface secondary refresh errors as a failed push */
+    }
+  }, [refreshCommits, reloadHistorySelection, selection]);
 
   const runSync = async (action: "fetch" | "pull" | "push") => {
     if (syncInFlightRef.current || busy) return;
@@ -677,7 +571,7 @@ export function GitChangesSidePanel({
         focusConflictFiles(result.status);
       } else {
         showToast(gitSyncSuccessMessage(action, result.output, t), { tone: "success" });
-        await refreshAfterSync(result);
+        await refreshAfterSync();
       }
     } catch (e) {
       gitErrorToast(e, t("git.syncFailed"));
@@ -693,14 +587,7 @@ export function GitChangesSidePanel({
       const result = await api.gitStash(sessionId, action);
       onStatusChange(result.status);
       showToast(action === "push" ? t("git.stashOk") : t("git.popOk"), { tone: "success" });
-      if (selection.kind === "working" && result.status.dirty && selection.path) {
-        invalidateWorkingDiffCache();
-        void loadWorkingDiff(selection.path, true);
-      } else if (selection.kind === "working") {
-        resetWorkingDiffView();
-      } else if (selection.kind === "commit") {
-        void reloadHistorySelection();
-      }
+      if (selection.kind === "commit") await reloadHistorySelection();
       await refreshCommits();
     } catch (e) {
       gitErrorToast(e, t("git.syncFailed"));
@@ -722,8 +609,6 @@ export function GitChangesSidePanel({
       if (nextCommits[0]) void selectCommit(nextCommits[0].hash);
       else if (result.status.dirty) {
         setTab("changes");
-        clearLoadedDiff();
-        setDiff("");
         setSelection({ kind: "working", path: null });
       }
     } catch (e) {
@@ -772,11 +657,9 @@ export function GitChangesSidePanel({
       const result = await api.gitCheckoutRev(sessionId, hash);
       onStatusChange(result.status);
       showToast(t("git.checkoutOk"), { tone: "success" });
-      clearLoadedDiff();
       setTab("history");
       setSelection({ kind: "commit", hash, filePath: null });
       setCommitDetail(null);
-      setDiff("");
       const nextCommits = await refreshCommits();
       if (nextCommits.some((c) => c.hash === hash)) {
         await selectCommit(hash);
@@ -792,7 +675,8 @@ export function GitChangesSidePanel({
     onStatusChange(status);
     setCommitSummary("");
     setCommitDescription("");
-    resetWorkingDiffView();
+    setSelection({ kind: "working", path: null });
+    setBlame(null);
     if (status.dirty) setTab("changes");
     await refreshCommits();
   };
@@ -825,7 +709,7 @@ export function GitChangesSidePanel({
         const syncResult = await api.gitSync(sessionId, "push");
         onStatusChange(syncResult.status);
         showToast(gitSyncSuccessMessage("push", syncResult.output, t), { tone: "success" });
-        await refreshAfterSync(syncResult);
+        await refreshAfterSync();
       } catch (err) {
         gitErrorToast(err, t("git.syncFailed"));
       }
@@ -837,251 +721,6 @@ export function GitChangesSidePanel({
     }
   };
 
-  const onSplitterDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (!isSidePanelResizeAllowed()) return;
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      dragRef.current = { startX: e.clientX, startWidth: width };
-      setDragging(true);
-    },
-    [width],
-  );
-
-  const onSplitterDoubleClick = useCallback(() => {
-    if (!isSidePanelResizeAllowed()) return;
-    setWidth(WIDTH_DEFAULT);
-  }, []);
-
-  const onHistorySplitterDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      if (historyStacked) {
-        historyListDragRef.current = { axis: "y", startY: e.clientY, startHeight: historyListWidth };
-      } else {
-        historyListDragRef.current = { axis: "x", startX: e.clientX, startWidth: historyListWidth };
-      }
-      setHistoryListDragging(true);
-    },
-    [historyListWidth, historyStacked],
-  );
-
-  const onHistorySplitterDoubleClick = useCallback(() => {
-    setHistoryListWidth(HISTORY_LIST_WIDTH_DEFAULT);
-  }, []);
-
-  const onHistoryDiffSplitterDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      historyDetailDragRef.current = { startY: e.clientY, startHeight: historyDetailHeight };
-      setHistoryDetailDragging(true);
-    },
-    [historyDetailHeight],
-  );
-
-  const onHistoryDiffSplitterDoubleClick = useCallback(() => {
-    setHistoryDetailHeight(HISTORY_DETAIL_HEIGHT_DEFAULT);
-  }, []);
-
-  const onChangesSplitterDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      if (window.innerWidth <= 700) return;
-      e.preventDefault();
-      e.currentTarget.setPointerCapture(e.pointerId);
-      changesTreeDragRef.current = { startX: e.clientX, startWidth: changesTreeWidth };
-      setChangesTreeDragging(true);
-    },
-    [changesTreeWidth],
-  );
-
-  const onChangesSplitterDoubleClick = useCallback(() => {
-    setChangesTreeWidth(CHANGES_TREE_WIDTH_DEFAULT);
-  }, []);
-
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e: PointerEvent) => {
-      const drag = dragRef.current;
-      if (!drag) return;
-      const max = Math.min(WIDTH_MAX, Math.floor(window.innerWidth * 0.62));
-      const next = drag.startWidth - (e.clientX - drag.startX);
-      setWidth(Math.min(max, Math.max(WIDTH_MIN, next)));
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      setDragging(false);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [dragging]);
-
-  useEffect(() => {
-    if (!historyListDragging) return;
-    const onMove = (e: PointerEvent) => {
-      const drag = historyListDragRef.current;
-      if (!drag) return;
-      const next =
-        drag.axis === "y"
-          ? drag.startHeight + (e.clientY - drag.startY)
-          : drag.startWidth + (e.clientX - drag.startX);
-      setHistoryListWidth(Math.min(HISTORY_LIST_WIDTH_MAX, Math.max(HISTORY_LIST_WIDTH_MIN, next)));
-    };
-    const onUp = () => {
-      historyListDragRef.current = null;
-      setHistoryListDragging(false);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [historyListDragging]);
-
-  useEffect(() => {
-    if (!historyDetailDragging) return;
-    const onMove = (e: PointerEvent) => {
-      const drag = historyDetailDragRef.current;
-      if (!drag) return;
-      const next = drag.startHeight + (e.clientY - drag.startY);
-      setHistoryDetailHeight(Math.min(HISTORY_DETAIL_HEIGHT_MAX, Math.max(HISTORY_DETAIL_HEIGHT_MIN, next)));
-    };
-    const onUp = () => {
-      historyDetailDragRef.current = null;
-      setHistoryDetailDragging(false);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [historyDetailDragging]);
-
-  useEffect(() => {
-    if (!changesTreeDragging) return;
-    const onMove = (e: PointerEvent) => {
-      const drag = changesTreeDragRef.current;
-      if (!drag) return;
-      const next = drag.startWidth + (e.clientX - drag.startX);
-      setChangesTreeWidth(Math.min(CHANGES_TREE_WIDTH_MAX, Math.max(CHANGES_TREE_WIDTH_MIN, next)));
-    };
-    const onUp = () => {
-      changesTreeDragRef.current = null;
-      setChangesTreeDragging(false);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [changesTreeDragging]);
-
-  useEffect(() => {
-    if (!dragging && !historyListDragging && !historyDetailDragging && !changesTreeDragging) return;
-    const prev = document.body.style.cursor;
-    if (dragging || changesTreeDragging) document.body.style.cursor = "col-resize";
-    else if (historyListDragging) document.body.style.cursor = historyStacked ? "row-resize" : "col-resize";
-    else if (historyDetailDragging) document.body.style.cursor = "row-resize";
-    document.body.classList.add(styles.resizingBody);
-    return () => {
-      document.body.style.cursor = prev;
-      document.body.classList.remove(styles.resizingBody);
-    };
-  }, [dragging, historyListDragging, historyDetailDragging, changesTreeDragging, historyStacked]);
-
-  useEffect(() => {
-    if (!open) {
-      setHistoryStacked(false);
-      return;
-    }
-    const measureEl =
-      tab === "history" ? historyLayoutRef.current ?? panelBodyRef.current : panelBodyRef.current;
-    if (!measureEl) return;
-
-    const sync = () => {
-      const el =
-        tab === "history" ? historyLayoutRef.current ?? panelBodyRef.current : panelBodyRef.current;
-      if (!el) return;
-      setHistoryStacked(narrowPanel || el.clientWidth <= GIT_HISTORY_STACKED_MAX);
-    };
-
-    sync();
-    const ro = new ResizeObserver(sync);
-    ro.observe(measureEl);
-    if (panelBodyRef.current && panelBodyRef.current !== measureEl) {
-      ro.observe(panelBodyRef.current);
-    }
-    return () => ro.disconnect();
-  }, [narrowPanel, open, tab]);
-
-  const diffAutoSelectScope =
-    selection.kind === "commit" ? `commit:${selection.hash}` : "working";
-
-  useEffect(() => {
-    if (diffAutoSelectScopeRef.current !== diffAutoSelectScope) {
-      diffAutoSelectScopeRef.current = diffAutoSelectScope;
-      diffDismissedRef.current = false;
-    }
-  }, [diffAutoSelectScope]);
-
-  useEffect(() => {
-    diffDismissedRef.current = false;
-    diffAutoSelectScopeRef.current = "";
-  }, [sessionId]);
-
-  useEffect(() => {
-    if (!open || !status?.dirty || selection.kind !== "working") return;
-    if (diffDismissedRef.current && !selection.path) return;
-    const filePaths = status.files.map((f) => f.path);
-    if (selection.path && filePaths.includes(selection.path)) return;
-    const first = firstChangedFilePath({
-      conflictFiles: status.files.filter(isGitConflictFile),
-      unstagedFiles: status.files.filter((f) => f.unstaged && !isGitConflictFile(f)),
-      stagedFiles: status.files.filter((f) => f.staged && !isGitConflictFile(f)),
-      files: status.files,
-    });
-    if (first) void loadWorkingDiff(first);
-  }, [loadWorkingDiff, open, selection, status]);
-
-  useEffect(() => {
-    if (!open || selection.kind !== "commit" || !commitDetail?.files.length) return;
-    if (diffDismissedRef.current && !selection.filePath) return;
-    if (selection.filePath && commitDetail.files.some((f) => f.path === selection.filePath)) return;
-    const first = firstCommitFilePath(commitDetail.files);
-    if (first) void loadCommitFileDiff(selection.hash, first);
-  }, [commitDetail, loadCommitFileDiff, open, selection]);
-
-  const selectWorkingFile = useCallback(
-    (path: string) => {
-      toggleWorkingFile(path);
-    },
-    [toggleWorkingFile],
-  );
-
-  const diffContextSource = useMemo((): DiffContextSource | undefined => {
-    if (!status?.repo) return undefined;
-    if (selection.kind === "commit") {
-      return { sessionId, mode: "commit", commitRev: selection.hash };
-    }
-    return { sessionId, mode: "working" };
-  }, [selection, sessionId, status?.repo]);
-
   if (!open) return null;
 
   const repoPending = statusLoading || (awaitingGit && !status);
@@ -1092,11 +731,8 @@ export function GitChangesSidePanel({
   const unstagedFiles = files.filter((f) => f.unstaged && !isGitConflictFile(f));
   const workingSelected = selection.kind === "working";
   const commitSelected = selection.kind === "commit";
-  const historyFileSelected =
-    (commitSelected && Boolean(selection.filePath)) ||
-    (workingSelected && Boolean(selection.path));
 
-  const fullscreenFiles: FullscreenDiffFile[] = commitSelected
+  const stageFiles: GitDiffFile[] = commitSelected
     ? (commitDetail?.files ?? []).map((file) => ({
         path: normalizeGitPath(file.path),
         badge: COMMIT_FILE_BADGE[file.status],
@@ -1110,13 +746,19 @@ export function GitChangesSidePanel({
         deletions: file.deletions,
         untracked: isUntrackedGitFile(file),
       }));
-  const fullscreenAvailable = fullscreenFiles.length > 0;
+  /** The stage shows one file at a time; nothing selected means it starts at the top. */
+  const stagePath = commitSelected ? selection.filePath : selection.path;
+  const stageScope: GitDiffScope =
+    commitSelected && selection.hash
+      ? { mode: "commit", rev: selection.hash }
+      : { mode: "working" };
 
   const commitPaneProps = {
     files,
     conflictFiles,
     stagedFiles,
     unstagedFiles,
+    view,
     stagedCount: status?.stagedCount ?? 0,
     busy,
     workingSelected,
@@ -1128,7 +770,7 @@ export function GitChangesSidePanel({
     onStageAll: () => void stageAll(),
     onUnstageAll: () => void unstageAll(),
     onStagePaths: (paths: string[], staged: boolean) => void setFilesStage(paths, staged),
-    onSelectFile: selectWorkingFile,
+    onSelectFile: toggleWorkingFile,
     onCommit: (e: FormEvent) => void onCommit(e),
     onCommitAndPush: () => void onCommitAndPush(),
     onStageAndCommit: () => void stageAll(),
@@ -1137,7 +779,6 @@ export function GitChangesSidePanel({
     onDeletePaths: deletePaths,
     onIgnorePaths: ignorePaths,
     onBlameFile: loadWorkingBlame,
-    layout: "workspace" as const,
     outgoing,
     outgoingLoading: loadingCommitDetail,
     commitHash: commitSelected ? selection.hash : null,
@@ -1145,14 +786,19 @@ export function GitChangesSidePanel({
     outgoingFiles:
       commitSelected && commitDetail?.hash === selection.hash ? commitDetail.files : [],
     onInspectOutgoing: (hash: string) => void selectCommit(hash, { keepChangesTab: true }),
-    onSelectOutgoingFile: (hash: string, path: string) => void loadCommitFileDiff(hash, path),
+    onSelectOutgoingFile: (hash: string, path: string) => toggleCommitFile(hash, path),
   };
 
-  const panelInner = (
-    <>
-      <div className={styles.header}>
-        <div className={styles.headerTop}>
-          <span className={styles.headerBranchIcon} aria-hidden>
+  /**
+   * One tree of markup for both places the navigator lives: a column beside the
+   * stage on a wide panel, the content of a bottom sheet on a phone. Only one of
+   * the two is mounted at a time, so the tab and the lists need no syncing.
+   */
+  const navigatorInner = (
+    <div className={styles.navigator}>
+      <header className={styles.navHead}>
+        <div className={styles.navHeadTop}>
+          <span className={styles.navRepoIcon} aria-hidden>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <circle cx="6.5" cy="6.5" r="2.2" stroke="currentColor" strokeWidth="1.6" />
               <circle cx="17.5" cy="17.5" r="2.2" stroke="currentColor" strokeWidth="1.6" />
@@ -1164,14 +810,8 @@ export function GitChangesSidePanel({
               />
             </svg>
           </span>
-          <div className={styles.headerLead}>
-            <span className={styles.headerKicker}>{t("git.title")}</span>
-            {repoPending ? (
-              <span className={styles.headerLoading}>
-                <span className={styles.loaderSpin} aria-hidden />
-                {t("git.initializing")}
-              </span>
-            ) : status?.repo ? (
+          <div className={styles.navLead}>
+            {status?.repo ? (
               <GitBranchSwitcher
                 status={status}
                 branchBusy={branchBusy}
@@ -1179,390 +819,456 @@ export function GitChangesSidePanel({
                 variant="panelHeader"
               />
             ) : (
-              <h2 className={styles.headerTitle}>{t("git.title")}</h2>
+              <span className={styles.navTitle}>{t("git.title")}</span>
             )}
-          </div>
-          <div className={styles.headerIconRow}>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              disabled={busy}
-              onClick={() => {
-                void refreshStatus();
-                void refreshCommits().then(() => {
-                  if (selection.kind === "working" && status?.dirty) void loadWorkingDiff(selection.path, true);
-                  else if (selection.kind === "commit") void reloadHistorySelection();
-                });
-              }}
-              title={t("common.refresh")}
-              aria-label={t("common.refresh")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <button type="button" className={styles.closeBtn} onClick={onClose} aria-label={t("common.cancel")}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M6 6l12 12M18 6L6 18"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {status && !repoPending ? (
-          <div className={styles.headerMetaRow}>
-            <div className={styles.headerStatsGroup}>
-              {status.dirty ? (
+            <span className={styles.navStats}>
+              {status?.dirty ? (
                 <>
                   <span className={styles.statAdd}>+{status.additions}</span>
                   <span className={styles.statDel}>-{status.deletions}</span>
                 </>
               ) : (
-                <span className={styles.headerClean}>{t("git.noChanges")}</span>
+                <span className={styles.navClean}>{t("git.noChanges")}</span>
               )}
-            </div>
-            <div className={styles.countPills}>
-              {status.conflict ? (
-                <span className={`${styles.countPill} ${styles.countPillConflict}`}>
-                  {t("git.conflictCount", { count: conflictFiles.length })}
-                </span>
-              ) : null}
-              <span
-                className={`${styles.countPill}${status.stagedCount > 0 ? ` ${styles.countPillStaged}` : ""}`}
-              >
-                {t("git.stagedCount", { count: status.stagedCount })}
-              </span>
-              <span
-                className={`${styles.countPill}${status.unstagedCount > 0 ? ` ${styles.countPillUnstaged}` : ""}`}
-              >
-                {t("git.unstagedCount", { count: status.unstagedCount })}
-              </span>
-            </div>
+            </span>
           </div>
-        ) : null}
-
-        {repo && !repoPending ? (
-          <div className={styles.viewToggleRow}>
-            <div className={styles.viewTabs} role="tablist" aria-label={t("git.title")}>
+          <div className={styles.navIcons}>
+            {sheetNavigator ? null : (
               <button
                 type="button"
-                role="tab"
-                aria-selected={tab === "changes"}
-                className={`${styles.viewTab}${tab === "changes" ? ` ${styles.viewTabActive}` : ""}`}
-                onClick={() => setTab("changes")}
+                className={styles.iconBtn}
+                onClick={onClose}
+                title={t("git.closeChanges")}
+                aria-label={t("git.closeChanges")}
               >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {status && (status.conflict || status.stagedCount > 0 || status.unstagedCount > 0) ? (
+          <div className={styles.navPills}>
+            {status.conflict ? (
+              <span className={`${styles.countPill} ${styles.countPillConflict}`}>
+                {t("git.conflictCount", { count: conflictFiles.length })}
+              </span>
+            ) : null}
+            {status.stagedCount > 0 ? (
+              <span className={`${styles.countPill} ${styles.countPillStaged}`}>
+                {t("git.stagedCount", { count: status.stagedCount })}
+              </span>
+            ) : null}
+            {status.unstagedCount > 0 ? (
+              <span className={`${styles.countPill} ${styles.countPillUnstaged}`}>
+                {t("git.unstagedCount", { count: status.unstagedCount })}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </header>
+
+      <div className={styles.navBody}>
+        {tab === "changes" ? (
+          <GitChangesCommitPane {...commitPaneProps} />
+        ) : (
+          <>
+            <div className={styles.historyList}>
+              <GitCommitHistory
+                commits={commits}
+                status={status}
+                loading={loadingCommits}
+                busy={busy}
+                selectedHash={commitSelected ? selection.hash : null}
+                wipSelected={workingSelected && Boolean(status?.dirty)}
+                onSelectCommit={(hash) => void selectCommit(hash)}
+                onSelectWip={() => {
+                  setTab("history");
+                  setSelection({ kind: "working", path: null });
+                  setBlame(null);
+                  setCommitDetail(null);
+                }}
+                onRevertCommit={(hash) => void runCommitAction("revert", hash)}
+                onCherryPickCommit={(hash) => void runCommitAction("cherry-pick", hash)}
+                onCreateBranchAt={(hash, branch) => void createBranchAt(hash, branch)}
+                onCreateTagAt={(hash, tag) => void createTagAt(hash, tag)}
+                onCheckoutCommit={(hash) => void checkoutCommit(hash)}
+              />
+            </div>
+            <div className={styles.historyDetail}>
+              <GitCommitDetail
+                loading={loadingCommitDetail}
+                detail={commitSelected ? commitDetail : null}
+                repoRoot={status?.root}
+                wipFiles={workingSelected && status?.dirty ? files : undefined}
+                selectedFilePath={commitSelected ? selection.filePath : selection.path}
+                onSelectFile={(path) => {
+                  if (commitSelected) toggleCommitFile(selection.hash, path);
+                  else toggleWorkingFile(path);
+                }}
+                onSelectParent={(hash) => void selectCommit(hash)}
+                onBlameFile={loadWorkingBlame}
+                wipMode={workingSelected && Boolean(status?.dirty)}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className={styles.navFoot} role="toolbar" aria-label={t("git.title")}>
+        <div className={styles.segSwitch} role="tablist" aria-label={t("git.title")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "changes"}
+            className={`${styles.segBtn}${tab === "changes" ? ` ${styles.segBtnActive}` : ""}`}
+            title={t("git.tabChanges")}
+            aria-label={t("git.tabChanges")}
+            onClick={() => setTab("changes")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "history"}
+            className={`${styles.segBtn}${tab === "history" ? ` ${styles.segBtnActive}` : ""}`}
+            title={t("git.tabHistory")}
+            aria-label={t("git.tabHistory")}
+            onClick={() => setTab("history")}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
+        {tab === "changes" ? (
+          <div className={styles.segSwitch} role="toolbar" aria-label={t("git.fileViewMode")}>
+            <button
+              type="button"
+              className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
+              aria-pressed={view === "list"}
+              aria-label={t("git.fileViewList")}
+              title={t("git.fileViewList")}
+              onClick={() => setView("list")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
+              aria-pressed={view === "tree"}
+              aria-label={t("git.fileViewTree")}
+              title={t("git.fileViewTree")}
+              onClick={() => setView("tree")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          </div>
+        ) : null}
+        <span className={styles.actionDivider} aria-hidden />
+        <button
+          type="button"
+          className={styles.iconBtn}
+          disabled={busy}
+          onClick={() => {
+            void refreshStatus();
+            void refreshCommits().then(() => {
+              if (selection.kind === "commit") void reloadHistorySelection();
+            });
+          }}
+          title={t("common.refresh")}
+          aria-label={t("common.refresh")}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          disabled={busy}
+          onClick={() => void runSync("pull")}
+          title={t("git.pull")}
+          aria-label={t("git.pull")}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M12 5v10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <path
+              d="M8 11l4 4 4-4M6 19h12"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={styles.iconBtn}
+          disabled={busy}
+          onClick={() => void runSync("push")}
+          title={t("git.push")}
+          aria-label={t("git.push")}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M12 19V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <path
+              d="M8 13l4-4 4 4M6 5h12"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          ref={opsRef}
+          className={styles.iconBtn}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(opsAnchor)}
+          aria-label={t("common.more")}
+          title={t("common.more")}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setOpsAnchor(
+              opsAnchor
+                ? null
+                : {
+                    left: Math.max(8, Math.min(rect.left, window.innerWidth - OPS_MENU_WIDTH - 8)),
+                    bottom: Math.max(8, window.innerHeight - rect.top + 6),
+                  },
+            );
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <circle cx="5" cy="12" r="1.7" fill="currentColor" />
+            <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+            <circle cx="19" cy="12" r="1.7" fill="currentColor" />
+          </svg>
+        </button>
+      </div>
+
+      {opsAnchor ? (
+        <div
+          ref={opsMenuRef}
+          className={styles.footMenu}
+          style={{ left: opsAnchor.left, bottom: opsAnchor.bottom }}
+          role="menu"
+          aria-label={t("common.actions")}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => {
+              setOpsAnchor(null);
+              void runSync("fetch");
+            }}
+          >
+            {t("git.fetch")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy || !status?.dirty}
+            onClick={() => {
+              setOpsAnchor(null);
+              void runStash("push");
+            }}
+          >
+            {t("git.stash")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy || !(status?.stashCount ?? 0)}
+            onClick={() => {
+              setOpsAnchor(null);
+              void runStash("pop");
+            }}
+          >
+            {t("git.pop")}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const stageSlot = blame ? (
+    <GitBlameView path={blame.path} text={blame.text} onClose={() => setBlame(null)} />
+  ) : (
+    <GitDiffStage
+      sessionId={sessionId}
+      scope={stageScope}
+      files={stageFiles}
+      initialPath={stagePath}
+      jumpToken={jumpToken}
+      compact={sheetNavigator && !fullscreen}
+      expanded={fullscreen}
+      flushTop={fullscreen || takeover}
+      onToggleExpand={() => onFullscreenChange(!fullscreen)}
+      onClose={sheetNavigator && !fullscreen ? onClose : undefined}
+    />
+  );
+
+  const panelClasses = [
+    styles.panel,
+    overlay && styles.panelOverlay,
+    takeover && styles.panelTakeover,
+    sheetNavigator && styles.panelSheetNav,
+    fullscreen && styles.panelFullscreen,
+    resizing && styles.resizing,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const panel = (
+    <aside
+      ref={panelRef}
+      className={panelClasses}
+      role={fullscreen ? "dialog" : undefined}
+      aria-modal={fullscreen ? true : undefined}
+      aria-label={fullscreen ? t("git.diffFullscreenOpen") : t("git.title")}
+      style={
+        {
+          ["--git-panel-width" as string]: `${panelWidth}px`,
+          ["--git-navigator-width" as string]: `${navigatorWidth}px`,
+        } as CSSProperties
+      }
+    >
+      {!overlay && !fullscreen ? (
+        <div
+          className={styles.splitter}
+          onPointerDown={onSplitterDown}
+          onDoubleClick={resetPanelWidth}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("common.resizeChanges")}
+          aria-valuenow={panelWidth}
+          aria-valuemin={GIT_PANEL_WIDTH_MIN}
+          aria-valuemax={GIT_PANEL_WIDTH_MAX}
+          title={t("common.resizeChangesHint")}
+        />
+      ) : null}
+      {repoPending ? (
+        <>
+          {/* A takeover covers the shell header: its own bar carries the way back. */}
+          {takeover ? (
+            <GitStageHeader title={t("git.title")} flushTop onBack={onClose} />
+          ) : null}
+          <div className={`${styles.empty} ${styles.emptyLoading}`}>
+            <span className={styles.loaderSpin} aria-hidden />
+            {t("git.initializing")}
+          </div>
+        </>
+      ) : !status?.repo ? (
+        <>
+          {takeover ? (
+            <GitStageHeader title={t("git.title")} flushTop onBack={onClose} />
+          ) : null}
+          <div className={styles.empty}>{t("git.noRepo")}</div>
+        </>
+      ) : (
+        <>
+          <div className={styles.stageHost}>{stageSlot}</div>
+          {fullscreen ? null : sheetNavigator ? (
+            <>
+              <button
+                type="button"
+                className={styles.puller}
+                onClick={() => setNavigatorOpen(true)}
+                aria-expanded={navigatorOpen}
+                aria-label={t("git.openChanges")}
+              >
+                <span className={styles.pullerBar} aria-hidden />
+                <span className={styles.pullerTitle}>
+                  {tab === "changes" ? t("git.tabChanges") : t("git.tabHistory")}
+                </span>
+                <span className={styles.pullerMeta}>
+                  {status.dirty ? (
+                    <>
+                      <span>{t("git.changedFiles", { count: files.length })}</span>
+                      <span className={styles.statAdd}>+{status.additions}</span>
+                      <span className={styles.statDel}>-{status.deletions}</span>
+                    </>
+                  ) : (
+                    <span>{t("git.noChanges")}</span>
+                  )}
+                </span>
+                <svg
+                  className={`${styles.pullerChevron}${navigatorOpen ? ` ${styles.pullerChevronUp}` : ""}`}
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
                   <path
-                    d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                    d="M6 15l6-6 6 6"
                     stroke="currentColor"
-                    strokeWidth="1.7"
+                    strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
                 </svg>
-                {t("git.tabChanges")}
               </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "history"}
-                className={`${styles.viewTab}${tab === "history" ? ` ${styles.viewTabActive}` : ""}`}
-                onClick={() => setTab("history")}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
-                  <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                </svg>
-                {t("git.tabHistory")}
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-        <div className={styles.headerToolbar}>
-          <div className={styles.actionBar} role="toolbar" aria-label={t("git.title")}>
-            <GitActionButton label={t("git.fetch")} disabled={busy} onClick={() => void runSync("fetch")}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M20 7v4h-4M4 17v-4h4M20 7a8 8 0 0 0-13.5-3M4 17a8 8 0 0 0 13.5 3"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </GitActionButton>
-            <GitActionButton label={t("git.pull")} disabled={busy} onClick={() => void runSync("pull")}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 5v10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path
-                  d="M8 11l4 4 4-4M6 19h12"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </GitActionButton>
-            <GitActionButton label={t("git.push")} disabled={busy} onClick={() => void runSync("push")}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 19V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path
-                  d="M8 13l4-4 4 4M6 5h12"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </GitActionButton>
-            <span className={styles.actionDivider} aria-hidden />
-            <GitActionButton
-              label={t("git.stash")}
-              disabled={busy || !status?.dirty}
-              onClick={() => void runStash("push")}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M7 16h10v4H7v-4Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                <path d="M6 20h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path d="M12 4v9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path
-                  d="M9 10l3 3 3-3"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </GitActionButton>
-            <GitActionButton
-              label={t("git.pop")}
-              disabled={busy || !(status?.stashCount ?? 0)}
-              onClick={() => void runStash("pop")}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M7 16h10v4H7v-4Z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-                <path d="M6 20h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path d="M12 20V11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                <path
-                  d="M9 14l3-3 3 3"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </GitActionButton>
-          </div>
-        </div>
-      </div>
-
-      {repoPending ? (
-        <div className={`${styles.empty} ${styles.emptyLoading}`}>
-          <span className={styles.loaderSpin} aria-hidden />
-          {t("git.initializing")}
-        </div>
-      ) : !repo ? (
-        <div className={styles.empty}>{t("git.noRepo")}</div>
-      ) : (
-        <div className={styles.panelBody} ref={panelBodyRef}>
-          <div className={`${styles.body}${tab === "history" ? ` ${styles.bodyHistory}` : ` ${styles.bodyChanges}`}`}>
-            {tab === "changes" ? (
-              <div
-                className={`${styles.changesLayout}${
-                  changesTreeDragging ? ` ${styles.changesResizing}` : ""
-                }`}
-                style={{ ["--changes-tree-width" as string]: `${changesTreeWidth}px` } as CSSProperties}
-              >
-                <GitChangesCommitPane {...commitPaneProps} />
-                <div
-                  className={styles.changesSplitter}
-                  onPointerDown={onChangesSplitterDown}
-                  onDoubleClick={onChangesSplitterDoubleClick}
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={t("common.resizePlan")}
-                  title={t("common.resizePlanHint")}
-                />
-                <div className={styles.diffPane}>
-                  {loadingDiff ? (
-                    <div className={styles.empty}>{t("common.loading")}</div>
-                  ) : diff.trim() ? (
-                    <DiffTextView text={diff} contextSource={diffContextSource} />
-                  ) : (
-                    <div className={styles.empty}>
-                      {commitSelected || status?.dirty ? t("git.pickFileDiff") : t("git.noChanges")}
-                    </div>
-                  )}
-                </div>
-                {fullscreenAvailable ? (
-                  <button
-                    type="button"
-                    className={styles.diffFullscreenBtn}
-                    onClick={() => setFullscreenOpen(true)}
-                    title={t("git.diffFullscreenOpen")}
-                    aria-label={t("git.diffFullscreenOpen")}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path
-                        d="M9 4H5.8A1.8 1.8 0 0 0 4 5.8V9M15 4h3.2A1.8 1.8 0 0 1 20 5.8V9M9 20H5.8A1.8 1.8 0 0 1 4 18.2V15M15 20h3.2a1.8 1.8 0 0 0 1.8-1.8V15"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <div
-                ref={historyLayoutRef}
-                className={`${styles.historyLayout}${
-                  historyStacked ? ` ${styles.historyLayoutStacked}` : ""
-                }${
-                  historyListDragging || historyDetailDragging ? ` ${styles.historyResizing}` : ""
-                }${historyFileSelected ? ` ${styles.historyLayoutWithDiff}` : ""}`}
-                style={
-                  {
-                    ["--history-list-width" as string]: `${historyListWidth}px`,
-                    ["--history-list-height" as string]: `${historyListWidth}px`,
-                  } as CSSProperties
-                }
-              >
-                <div className={styles.historyListPane}>
-                  <GitCommitHistory
-                    commits={commits}
-                    status={status}
-                    loading={loadingCommits}
-                    busy={busy}
-                    selectedHash={commitSelected ? selection.hash : null}
-                    wipSelected={workingSelected && Boolean(status?.dirty)}
-                    onSelectCommit={(hash) => void selectCommit(hash)}
-                    onSelectWip={() => {
-                      clearLoadedDiff();
-                      diffDismissedRef.current = false;
-                      setTab("history");
-                      setSelection({ kind: "working", path: null });
-                      setCommitDetail(null);
-                      setDiff("");
-                    }}
-                    onRevertCommit={(hash) => void runCommitAction("revert", hash)}
-                    onCherryPickCommit={(hash) => void runCommitAction("cherry-pick", hash)}
-                    onCreateBranchAt={(hash, branch) => void createBranchAt(hash, branch)}
-                    onCreateTagAt={(hash, tag) => void createTagAt(hash, tag)}
-                    onCheckoutCommit={(hash) => void checkoutCommit(hash)}
-                  />
-                </div>
-                <div
-                  className={styles.historySplitter}
-                  onPointerDown={onHistorySplitterDown}
-                  onDoubleClick={onHistorySplitterDoubleClick}
-                  role="separator"
-                  aria-orientation={historyStacked ? "horizontal" : "vertical"}
-                  aria-label={t("common.resizePlan")}
-                  title={t("common.resizePlanHint")}
-                />
-                <div
-                  className={styles.historyRightPane}
-                  style={
-                    historyFileSelected
-                      ? ({ ["--history-detail-height" as string]: `${historyDetailHeight}px` } as CSSProperties)
-                      : undefined
-                  }
-                >
-                  <div className={styles.historyDetailPane}>
-                    <GitCommitDetail
-                      loading={loadingCommitDetail}
-                      detail={commitSelected ? commitDetail : null}
-                      repoRoot={status?.root}
-                      wipFiles={workingSelected && status?.dirty ? status.files : undefined}
-                      selectedFilePath={
-                        commitSelected ? selection.filePath : workingSelected ? selection.path : null
-                      }
-                      onSelectFile={(path) => {
-                        if (commitSelected) toggleCommitFile(selection.hash, path);
-                        else toggleWorkingFile(path);
-                      }}
-                      onSelectParent={(hash) => void selectCommit(hash)}
-                      onBlameFile={loadWorkingBlame}
-                      wipMode={workingSelected && Boolean(status?.dirty)}
-                    />
+              {navigatorOpen ? (
+                <>
+                  <div className={styles.sheetBackdrop} onClick={() => setNavigatorOpen(false)} aria-hidden />
+                  <div className={styles.sheet} role="dialog" aria-label={t("git.openChanges")}>
+                    <button
+                      type="button"
+                      className={styles.sheetGrabber}
+                      onClick={() => setNavigatorOpen(false)}
+                      aria-label={t("git.closeChanges")}
+                    >
+                      <span aria-hidden />
+                    </button>
+                    {navigatorInner}
                   </div>
-                  {historyFileSelected ? (
-                    <>
-                      <div
-                        className={styles.historyDiffSplitter}
-                        onPointerDown={onHistoryDiffSplitterDown}
-                        onDoubleClick={onHistoryDiffSplitterDoubleClick}
-                        role="separator"
-                        aria-orientation="horizontal"
-                        aria-label={t("git.resizeHistoryDetail")}
-                        title={t("git.resizeHistoryDetail")}
-                      />
-                      <div className={styles.diffPane}>
-                        {loadingDiff ? (
-                          <div className={styles.empty}>{t("common.loading")}</div>
-                        ) : diff.trim() ? (
-                          <DiffTextView text={diff} contextSource={diffContextSource} />
-                        ) : (
-                          <div className={styles.empty}>{t("git.pickFileDiff")}</div>
-                        )}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
+                </>
+              ) : null}
+            </>
+          ) : (
+            navigatorInner
+          )}
+        </>
       )}
-
-      {fullscreenOpen && fullscreenAvailable ? (
-        <GitFullscreenDiff
-          sessionId={sessionId}
-          scope={commitSelected ? { mode: "commit", rev: selection.hash } : { mode: "working" }}
-          files={fullscreenFiles}
-          initialPath={commitSelected ? selection.filePath : selection.path}
-          onClose={() => setFullscreenOpen(false)}
-        />
-      ) : null}
-    </>
-  );
-
-  return (
-    <aside
-      className={`${styles.panel} ${dragging ? styles.resizing : ""}${
-        narrowPanel ? ` ${styles.panelMobile}` : ""
-      }`}
-      aria-label={t("git.title")}
-      style={{ ["--git-panel-width"]: `${width}px` } as CSSProperties}
-    >
-      <div
-        className={styles.splitter}
-        onPointerDown={onSplitterDown}
-        onDoubleClick={onSplitterDoubleClick}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("common.resizePlan")}
-        aria-valuenow={width}
-        aria-valuemin={WIDTH_MIN}
-        aria-valuemax={WIDTH_MAX}
-        title={t("common.resizePlanHint")}
-      />
-      {panelInner}
     </aside>
   );
+
+  /**
+   * The full view and the phone takeover are the whole screen, not a wider dock —
+   * portalled to the body so no page container (or its `container-type`) can clip
+   * them, and no ancestor stacking context can hold them under the shell header.
+   */
+  return fullscreen || takeover ? createPortal(panel, document.body) : panel;
 }

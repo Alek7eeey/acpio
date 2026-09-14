@@ -1,11 +1,11 @@
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 640;
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  max-height: 100dvh;
+  overflow: hidden;
   background: var(--surface);
   color: var(--text);
   overscroll-behavior: contain;
@@ -17,9 +17,18 @@
   gap: 8px;
   flex-shrink: 0;
   min-height: 44px;
-  padding: max(6px, env(safe-area-inset-top)) 8px 6px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--bg-secondary);
+}
+
+/*
+ * The notch inset belongs to whatever sits flush with the top of the viewport.
+ * A stage docked under the shell header is not that — the header already holds
+ * that space, and reserving it again leaves a band of nothing above the title.
+ */
+.topBarFlush {
+  padding-top: max(6px, env(safe-area-inset-top));
 }
 
 .topTitle {
@@ -61,7 +70,10 @@
 .scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  /* Vertical only: horizontal travel belongs to each file's own body, or one
+     wide file would drag the whole list (sticky headers included) sideways. */
+  overflow-y: auto;
+  overflow-x: hidden;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   background: var(--surface);
@@ -86,6 +98,48 @@
 
 .fileBlock {
   padding: 0 10px 10px;
+}
+
+/* Each file scrolls its own long lines; the header above stays put. */
+.fileBody {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+/*
+ * One file per screen: the header is pinned above the body and the body owns
+ * both scroll axes, so a wide line pans without dragging a sticky header with
+ * it. The inner frame must not claim horizontal travel of its own.
+ */
+.singleWrap {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.singleHead {
+  display: flex;
+  flex-shrink: 0;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+}
+
+.singleScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.singleScroll .fileBody {
+  overflow: visible;
 }
 
 .fileHead {
@@ -207,6 +261,36 @@
   color: var(--text);
 }
 
+.wrapBtn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.wrapBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+/* Pressed = long lines fold inside the viewport; unpressed = they scroll sideways. */
+.wrapBtnActive {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.wrapBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .state {
   display: flex;
   align-items: center;
@@ -232,31 +316,53 @@
   }
 }
 
+/**
+ * One bar for navigation and reading controls, at the bottom of the board: the
+ * buttons are the ones a reader touches, so they sit in the thumb zone instead
+ * of over the first lines of the diff. Compact hosts drop the file stepper (the
+ * host lists the files) and keep the controls, right-aligned.
+ */
 .bottomBar {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
   padding: 6px 8px max(6px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--border-soft);
   background: var(--bg-secondary);
 }
 
+.bottomControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/*
+ * `--surface` equals `--bg-secondary` in the dark theme, so an outlined button
+ * on this bar painted nothing but a hairline. Fill them with the same tint the
+ * mode tracks use, or the stepper reads as an empty placeholder next to them.
+ * Sized like the mode segments beside it (28px), not like the icon buttons —
+ * the stepper is the only filled control on the left, so a taller box reads
+ * larger than its neighbours even when the boxes match. Touch grows it below.
+ */
 .navBtn {
   display: grid;
+  flex: 0 0 28px;
   place-items: center;
-  height: 44px;
+  height: 28px;
   padding: 0;
-  border: 1px solid var(--border-soft);
+  border: none;
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--bg-tertiary);
   color: var(--text);
   cursor: pointer;
 }
 
 .navBtn:hover:not(:disabled) {
-  background: var(--bg-tertiary);
+  background: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-secondary));
 }
 
 .navBtn:disabled {
@@ -266,21 +372,23 @@
 
 .pickBtn {
   display: flex;
+  /* Shrinks to nothing before the row wraps: the paths are one tap away. */
+  flex: 1 1 110px;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  height: 44px;
-  padding: 0 12px;
-  border: 1px solid var(--border-soft);
+  height: 28px;
+  padding: 0 10px;
+  border: none;
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--bg-tertiary);
   color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
 .pickBtn:hover {
-  background: var(--bg-tertiary);
+  background: color-mix(in srgb, var(--bg-tertiary) 88%, var(--text-secondary));
 }
 
 .pickPath {
@@ -298,7 +406,8 @@
   min-width: 22px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: var(--bg-tertiary);
+  /* Recessed seat on the tinted button, like the pressed segment in the mode track. */
+  background: var(--surface);
   color: var(--text-secondary);
   font-size: 0.66rem;
   text-align: center;
@@ -495,3 +604,81 @@
   font-size: 0.68rem;
 }
 
+/* Touch: the bar is the only chrome the diff has on a phone, so its controls
+   grow to finger size and the row grows with them. */
+@media (pointer: coarse) {
+  .topBar {
+    gap: 10px;
+    min-height: 52px;
+  }
+
+  .iconBtn,
+  .wrapBtn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .modeBtn {
+    width: 40px;
+    height: 38px;
+  }
+
+  .sheetToggleBtn {
+    width: 38px;
+    height: 34px;
+  }
+
+  .sheetDir,
+  .sheetRow {
+    min-height: 44px;
+  }
+
+  /* Touch keeps the full-size target the stepper had on phones: 44 wide, 48 tall. */
+  .navBtn {
+    flex: 0 0 44px;
+    height: 48px;
+  }
+
+  .pickBtn {
+    height: 48px;
+  }
+}
+
+
+/**
+ * A docked board can be as narrow as 350px (the navigator keeps its column, the
+ * diff keeps its minimum). The stepper stays useful there, but the file path in
+ * it is what the navigator beside the board already shows — so it goes first,
+ * and the buttons tighten, rather than letting the bar grow a second row.
+ */
+@media (pointer: fine) {
+  @container git-stage (max-width: 480px) {
+    .pickPath,
+    .pickCount {
+      display: none;
+    }
+
+    /* Icon-only here, so the pick chip keeps its 15px glyph and tight padding. */
+    .pickBtn {
+      flex: 0 0 auto;
+      padding: 0 8px;
+    }
+
+    .modeBtn {
+      width: 26px;
+    }
+
+    .wrapBtn,
+    .bottomControls .iconBtn {
+      width: 30px;
+    }
+
+    .bottomBar {
+      padding-inline: 6px;
+    }
+
+    .bottomControls {
+      gap: 3px;
+    }
+  }
+}

@@ -207,7 +207,6 @@ export function GitCommitHistory({
 
   return (
     <div className={styles.wrap}>
-      <div className={styles.head}>{t("git.tabHistory")}</div>
       <div className={styles.scroll}>
         {status?.dirty ? (
           <button

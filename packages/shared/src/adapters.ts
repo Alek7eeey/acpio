@@ -36,6 +36,152 @@ export type ModelOption = { value: string; name: string; provider?: string };
 export type AdapterRestoreMode = "resume" | "load" | "new";
 
 /**
+ * A user-defined ACP agent (Settings → Connect → Custom agents). The core turns
+ * each spec into a {@link HarnessAdapter} at runtime, so no code knows the
+ * vendor: the user supplies the executable and its args.
+ */
+export interface CustomAgentSpec {
+  /** Slug used as the provider id in sessions/settings. */
+  id: string;
+  /** Display label shown in pickers and settings. */
+  label: string;
+  /** Executable path or bare command name. */
+  command: string;
+  args: string[];
+  /** Extra environment variables for the spawned process. */
+  env?: Record<string, string>;
+  /** Windows-only: extra dirs under %LOCALAPPDATA% searched for `command`. */
+  binaryDirs?: string[];
+  restoreMode?: AdapterRestoreMode;
+  suppressReplayOnLoad?: boolean;
+  parameterizedModelPicker?: boolean;
+  subagentStreaming?: boolean;
+  cloudCatalog?: boolean;
+}
+
+/** Upper bound on user-defined agents — keeps the registry and UI sane. */
+export const CUSTOM_AGENT_MAX = 20;
+
+/** Legal provider id for a custom agent: lowercase slug, 1–32 chars. */
+export const CUSTOM_AGENT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/** Generic install hint: the core cannot know where a user's binary lives. */
+const CUSTOM_AGENT_INSTALL_HINT =
+  'Команда "{command}" не найдена. Укажите полный путь к исполняемому файлу ACP-агента.';
+
+/** Fold free text from the id field into a legal slug. */
+export function normalizeCustomAgentId(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+}
+
+function normalizeEnvRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (Object.keys(out).length >= 32) break;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    if (typeof raw !== "string") continue;
+    out[key] = raw.slice(0, 2048);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * Drop everything malformed and return concrete specs: unknown/duplicate ids
+ * and missing commands are skipped, optionals get their defaults. Called by the
+ * server before the registry is rebuilt, so a hand-edited settings row can
+ * never register a broken agent.
+ */
+export function normalizeCustomAgents(
+  raw: unknown,
+  reserved: readonly string[] = [],
+): CustomAgentSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const taken = new Set(reserved);
+  const out: CustomAgentSpec[] = [];
+  for (const entry of raw) {
+    if (out.length >= CUSTOM_AGENT_MAX) break;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const spec = entry as Record<string, unknown>;
+    const id = normalizeCustomAgentId(spec.id);
+    if (!CUSTOM_AGENT_ID_RE.test(id) || taken.has(id)) continue;
+    const command = typeof spec.command === "string" ? spec.command.trim().slice(0, 512) : "";
+    if (!command) continue;
+    const label =
+      (typeof spec.label === "string" ? spec.label.trim() : "").slice(0, 80) || id;
+    const args = Array.isArray(spec.args)
+      ? spec.args
+          .filter((a): a is string => typeof a === "string" && a.trim() !== "")
+          .map((a) => a.slice(0, 512))
+          .slice(0, 64)
+      : [];
+    const binaryDirs = Array.isArray(spec.binaryDirs)
+      ? spec.binaryDirs
+          .filter((d): d is string => typeof d === "string" && d.trim() !== "")
+          .map((d) => d.trim().replace(/[\\/]+/g, "").slice(0, 64))
+          .slice(0, 8)
+      : [];
+    const env = normalizeEnvRecord(spec.env);
+    const restoreMode: AdapterRestoreMode =
+      spec.restoreMode === "load" || spec.restoreMode === "new" ? spec.restoreMode : "resume";
+    taken.add(id);
+    out.push({
+      id,
+      label,
+      command,
+      args,
+      ...(env ? { env } : {}),
+      ...(binaryDirs.length ? { binaryDirs } : {}),
+      restoreMode,
+      suppressReplayOnLoad: spec.suppressReplayOnLoad === true,
+      parameterizedModelPicker: spec.parameterizedModelPicker !== false,
+      subagentStreaming: spec.subagentStreaming === true,
+      cloudCatalog: spec.cloudCatalog === true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Build the runtime adapter for a normalized custom spec. Command/args live in
+ * the spec (empty settings fields), so `adapterCommand`/`adapterArgs` fall back
+ * to `defaultCommand`/`defaultArgs`.
+ */
+export function customAgentAdapter(spec: CustomAgentSpec): HarnessAdapter {
+  return {
+    id: spec.id,
+    label: spec.label,
+    custom: true,
+    commandField: "",
+    argsField: "",
+    defaultCommand: spec.command,
+    defaultArgs: [...spec.args],
+    binaryNames: [],
+    binaryDirs: [...(spec.binaryDirs ?? [])],
+    ...(spec.env ? { env: { ...spec.env } } : {}),
+    installHint: CUSTOM_AGENT_INSTALL_HINT,
+    restoreMode: spec.restoreMode ?? "resume",
+    suppressReplayOnLoad: spec.suppressReplayOnLoad ?? false,
+    parameterizedModelPicker: spec.parameterizedModelPicker ?? true,
+    subagentStreaming: spec.subagentStreaming ?? false,
+    cloudCatalog: spec.cloudCatalog ?? false,
+    defaultModes: [],
+    subagentToolKinds: [],
+    requestKinds: {
+      "session/request_permission": "permission",
+      "session/ask_question": "ask_question",
+    },
+    extensionKinds: {},
+  };
+}
+
+/**
  * Normalized core event kinds produced from harness-specific extension
  * methods. The core switches on the kind, never on raw method names.
  */
@@ -106,14 +252,20 @@ export interface HarnessAdapter {
   id: AgentProvider;
   /** Display label ("Cursor", "OMP"). */
   label: string;
-  /** i18n key for the settings description. */
-  descriptionKey: string;
+  /** i18n key for the settings description (built-in harnesses only). */
+  descriptionKey?: string;
+  /** Literal settings description (user-defined agents, no i18n key). */
+  description?: string;
+  /** True for user-defined agents from Settings → Connect. */
+  custom?: boolean;
 
   // ── CLI & config ─────────────────────────────────────────────────────────
-  /** Settings field holding the executable command. */
+  /** Settings field holding the executable command ("" for custom agents). */
   commandField: string;
-  /** Settings field holding the CLI args array. */
+  /** Settings field holding the CLI args array ("" for custom agents). */
   argsField: string;
+  /** Extra environment variables for the spawned process. */
+  env?: Record<string, string>;
   /** Optional settings field holding an API key. */
   apiKeyField?: string;
   /** Env var the API key is exported as (e.g. CURSOR_API_KEY). */
@@ -204,7 +356,12 @@ export interface AdapterMetaDto {
   label: string;
   /** False when the harness is switched off in Settings → Connect. */
   enabled: boolean;
-  descriptionKey: string;
+  /** i18n key for the description (built-in harnesses only). */
+  descriptionKey?: string;
+  /** Literal description (user-defined agents). */
+  description?: string;
+  /** True for user-defined agents — their fields live in `customAgents`. */
+  custom?: boolean;
   commandField: string;
   argsField: string;
   apiKeyField?: string;

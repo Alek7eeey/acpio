@@ -1,29 +1,54 @@
 /**
- * Static harness adapter registry — the only place the core knows concrete
- * harnesses. Adding a third-party harness = implement {@link HarnessAdapter}
- * (in a package depending on `@acpio/shared`) and register it here.
+ * Harness registry — built-in adapters plus user-defined ACP agents. Custom
+ * agents are data (Settings → Connect → Custom agents): the core only ever sees
+ * a {@link HarnessAdapter}, never a vendor.
  */
 import { cursorAdapter } from "@acpio/adapter-cursor";
 import { ompAdapter } from "@acpio/adapter-omp";
-import type { AdapterRegistry, AppSettings, HarnessAdapter } from "@acpio/shared";
+import { customAgentAdapter, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import type {
+  AdapterRegistry,
+  AppSettings,
+  CustomAgentSpec,
+  HarnessAdapter,
+} from "@acpio/shared";
 
-const ALL: HarnessAdapter[] = [cursorAdapter, ompAdapter];
-const BY_ID = new Map<string, HarnessAdapter>(ALL.map((a) => [a.id, a]));
+const BUILT_IN: HarnessAdapter[] = [cursorAdapter, ompAdapter];
+
+/** Ids a user-defined agent may not take: built-ins and the shell session. */
+export const RESERVED_AGENT_IDS: readonly string[] = [
+  ...BUILT_IN.map((a) => a.id),
+  SHELL_SESSION_PROVIDER,
+];
+
+let all: HarnessAdapter[] = [...BUILT_IN];
+let byId = new Map<string, HarnessAdapter>(all.map((a) => [a.id, a]));
+
+/**
+ * Replace the user-defined half of the registry. Called with the merged
+ * settings (and again on every read), so a settings edit cannot leave a stale
+ * agent spawnable.
+ */
+export function setCustomAdapters(specs: readonly CustomAgentSpec[]): void {
+  const custom = specs.map(customAgentAdapter);
+  all = [...BUILT_IN, ...custom];
+  byId = new Map(all.map((a) => [a.id, a]));
+}
 
 export const adapters: AdapterRegistry = {
   get(id: string): HarnessAdapter | undefined {
-    return BY_ID.get(id);
+    return byId.get(id);
   },
   list(): HarnessAdapter[] {
-    return [...ALL];
+    return [...all];
   },
   ids(): string[] {
-    return ALL.map((a) => a.id);
+    return all.map((a) => a.id);
   },
 };
 
 export function getAdapter(provider: string): HarnessAdapter {
-  const adapter = BY_ID.get(provider);
+  const adapter = byId.get(provider);
   if (!adapter) {
     throw new Error(`Неизвестный агент "${provider}" — не зарегистрирован адаптер`);
   }

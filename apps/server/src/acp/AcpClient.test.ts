@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import path from "node:path";
-import { DEFAULT_SETTINGS, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acpio/shared";
+import { DEFAULT_SETTINGS, customAgentAdapter, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acpio/shared";
 import { getAdapter } from "../adapters/registry.js";
 import {
   AcpClient,
@@ -547,6 +547,20 @@ describe("buildAgentEnv", () => {
     expect(env.NO_COLOR).toBe("1");
     expect(env.PATH).toBe(process.env.PATH);
   });
+
+  it("exports a user-defined agent's own env without touching other harnesses", () => {
+    const custom = customAgentAdapter({
+      id: "my-agent",
+      label: "My Agent",
+      command: "agent.exe",
+      args: [],
+      env: { AGENT_LOG: "info" },
+    });
+    const env = buildAgentEnv(custom, settingsWith({ openaiApiKey: "oa" }));
+    expect(env.AGENT_LOG).toBe("info");
+    expect(env.OPENAI_API_KEY).toBe("oa");
+    expect(buildAgentEnv(getAdapter("omp"), settingsWith({})).AGENT_LOG).toBeUndefined();
+  });
 });
 
 describe("resolveCommand", () => {
@@ -619,5 +633,43 @@ describe("ACP usage_update normalization", () => {
     expect(ev.kind).toBe("usage");
     expect(ev.usage?.usedTokens).toBe(1);
     expect(ev.usage?.contextWindow).toBe(2);
+  });
+});
+
+describe("applyModelSelection against an enumerated model list", () => {
+  /** Opaque value a user-defined agent reports (JSON tuple, no params syntax). */
+  const WIRE = '["builtin:zai-coding-plan","GLM-5.3-Flash",null]';
+
+  type TestableModelAcp = AcpClient & {
+    configOptions: ConfigOption[];
+    setConfigOption: (id: string, value: string) => Promise<void>;
+  };
+
+  function makeClient(calls: Array<[string, string]>) {
+    const acp = new AcpClient(
+      customAgentAdapter({ id: "my-agent", label: "My Agent", command: "agent.exe", args: [] }),
+      DEFAULT_SETTINGS,
+      "/tmp",
+      "agent" as AgentMode,
+    ) as unknown as TestableModelAcp;
+    acp.configOptions = [
+      { id: "my-agent.model", category: "model", options: [{ value: WIRE, name: "Flash" }] },
+    ];
+    acp.setConfigOption = async (id, value) => {
+      calls.push([id, value]);
+    };
+    return acp;
+  }
+
+  it("sends the exact value the agent listed", async () => {
+    const calls: Array<[string, string]> = [];
+    await makeClient(calls).applyModelSelection(WIRE);
+    expect(calls).toEqual([["my-agent.model", WIRE]]);
+  });
+
+  it("skips a model this agent does not know instead of sending it", async () => {
+    const calls: Array<[string, string]> = [];
+    await makeClient(calls).applyModelSelection("builtin:bigmodel/GLM-5.3");
+    expect(calls).toEqual([]);
   });
 });

@@ -90,6 +90,21 @@ describe("modelDisplayName", () => {
     ["", "default", undefined, "Default"],
     ["", "auto", undefined, "Default"],
     ["", "default[]", undefined, "Default"],
+    // an opaque agent id (ZCode's `[provider, model, variant]` tuple) is never
+    // humanized wholesale: the agent's own title wins, and without one the tuple
+    // still names its model part
+    [
+      '["builtin:zai-coding-plan","GLM-5.3-Flash",null]',
+      "GLM-5.3-Flash",
+      undefined,
+      "GLM 5.3 Flash",
+    ],
+    [
+      '["builtin:zai-coding-plan","GLM-5.3-Flash",null]',
+      undefined,
+      undefined,
+      "GLM 5.3 Flash",
+    ],
   ])("modelDisplayName(%j, %j, %j)", (value, name, defaultLabel, expected) => {
     expect(modelDisplayName(value, name, defaultLabel)).toBe(expected);
   });
@@ -417,6 +432,7 @@ describe("DEFAULT_SETTINGS", () => {
     defaultModelParamsByProvider: {},
     cursorCommand: "agent",
     cursorArgs: ["acp"],
+    customAgents: [],
     ompCommand: "omp",
     ompArgs: ["acp"],
     cursorApiKey: "",
@@ -451,6 +467,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
     chatTreeMenu: ["rename", "move", "export", "delete"],
     chatTreeShowArchive: true,
+    chatTreeRecentLimit: 0,
     chatHeaderHeight: 52,
     chatHeaderIcons: ["lang", "install", "theme"],
     chatEnterToSend: true,

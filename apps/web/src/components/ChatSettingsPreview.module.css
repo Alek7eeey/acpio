@@ -751,33 +751,103 @@
   text-align: left;
 }
 
-.thought {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 4px 10px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--text) 14%, transparent);
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-  color: var(--text-secondary);
-  font-size: 0.74rem;
+/* --- agent turn mock: the reading the timeline setting selects --- */
+
+.pvWork {
+  display: grid;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
 }
 
-.toolRow {
-  display: inline-flex;
+.pvWorkHead {
+  display: flex;
   align-items: center;
-  gap: 7px;
-  width: fit-content;
-  max-width: 100%;
-  padding: 4px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--border-soft, var(--border));
-  border-left: 3px solid var(--warning, #d4a017);
-  background: transparent;
+  gap: 6px;
   color: var(--text-secondary);
   font-size: 0.74rem;
+  font-weight: 550;
+}
+
+.pvWorkLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pvWorkBody {
+  display: grid;
+  gap: 6px;
+  margin: 5px 0 0 6px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.pvChevron {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+/* Measured spans: tabular figures so 1,1 с and 4,3 с line up. */
+.pvTime {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.pvReasoning {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.pvReasoningHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.pvReasoningBody {
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pvTool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.pvToolName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Intermediate agent text stays outside the spoiler it follows. */
+.pvText {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolCheck {

@@ -846,7 +846,9 @@
   margin: 0 -16px;
   padding: 6px 16px;
   border: none;
-  background: var(--bg);
+  /* Transparent: a nested header spans over its parent timeline rail, and an
+     opaque background here punched gaps into that line at every header row. */
+  background: transparent;
   color: color-mix(in srgb, var(--text) 72%, transparent);
   font: inherit;
   font-size: 0.9rem;
@@ -872,9 +874,13 @@
   z-index: 10;
 }
 
+/* A stuck header gains an opaque surface (transcript scrolls underneath) plus a
+   hairline instead of extra padding: the old padding bump changed its height as
+   it crossed the threshold, which read as a jump while the thread was streaming
+   and scrolling. */
 .stepsToggle[data-stuck="true"] {
-  padding-top: 8px;
-  padding-bottom: 8px;
+  background: var(--bg);
+  border-bottom-color: var(--border-soft);
 }
 
 .stepsToggle:hover {
@@ -904,6 +910,20 @@
   gap: 8px;
 }
 
+/* Measured span for a spoiler header / thought block. Tabular figures keep the
+   number from jittering while it ticks up once a second. */
+.stepsTime,
+.thoughtTime {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  white-space: nowrap;
+}
+
+.stepsTime {
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
 .stepsChevron {
   flex: 0 0 auto;
   display: grid;
@@ -919,6 +939,11 @@
 
 .stepsBody {
   display: grid;
+  /* Single track pinned to the container: an auto track is sized by max-content,
+     so one nowrap tool row used to widen the body past the thread — the rows'
+     own `text-overflow: ellipsis` never engaged and the collapse control below
+     landed off-screen. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   margin-top: 8px;
   margin-left: 7px;
@@ -927,6 +952,51 @@
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
+}
+
+/* Icon-only collapse control floating inside an expanded reasoning body. It
+   sticks to the bottom of the thread scrollport, so a long transcript stays
+   closable from where it is being read — the header toggle sits at the top of
+   the screen instead. Same surface pill language as .jumpLatest. */
+.stepsCollapse {
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+  cursor: pointer;
+  touch-action: manipulation;
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 12%),
+    0 4px 14px rgb(15 23 42 / 10%);
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.stepsCollapseSticky {
+  position: sticky;
+  bottom: 8px;
+  /* Below the sticky phase header (z-index 10), above the transcript. */
+  z-index: 9;
+}
+
+.stepsCollapse:hover,
+.stepsCollapse:focus-visible {
+  background: color-mix(in srgb, var(--text) 7%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+}
+
+.stepsCollapse svg {
+  display: block;
+  pointer-events: none;
 }
 
 .thoughtEmbedded {
@@ -956,65 +1026,12 @@
   display: none;
 }
 
-.toolRow {
+/* Tool rows are the same card as a thought block — one transcript should not
+   need two header shapes — so only the body differs. */
+.toolBody {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-  max-width: 100%;
-  min-width: 0;
-  justify-self: start;
-  padding: 1px 0;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: var(--text);
-}
-
-.toolRowMain {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.toolRowMain:disabled {
-  cursor: default;
-}
-
-.toolRowClickable .toolName:hover {
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--text) 45%, transparent);
-  text-underline-offset: 2px;
-}
-
-.toolRowBusy .toolName {
-  color: var(--accent);
-}
-
-.toolCheck {
-  color: var(--success);
-  font-size: 0.66rem;
-  line-height: 1;
-  opacity: 0.85;
-}
-
-.toolChevron {
-  color: var(--text-secondary);
-  transition: transform 140ms ease;
-}
-
-.toolChevronOpen {
-  transform: rotate(90deg);
-}
-
-.toolBody {
   min-width: 0;
   margin-top: 2px;
 }
@@ -1076,10 +1093,16 @@
 }
 
 .toolName {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   align-self: center;
+}
+
+/* A running tool takes the accent, like the live "Работаю…" header. */
+.toolNameBusy {
+  color: var(--accent);
 }
 
 .toolCheck {
@@ -1089,21 +1112,9 @@
   align-self: center;
 }
 
-.toolStatus {
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  line-height: 1;
-  align-self: center;
-  /* Glyph ink of the Cyrillic text sits ~0.7px above the line-box center in
-     Segoe UI (asymmetric baseline); nudge it down so the label reads level
-     with the spinner on the left. */
-  position: relative;
-  top: 0.7px;
-  white-space: nowrap;
-}
-
 /* Intermediate agent text inside the steps block — match the thinking style. */
-.stepsBody .textEmbedded {
+.stepsBody .textEmbedded,
+.agentTimeline .textEmbedded {
   font-size: 0.86rem;
   color: color-mix(in srgb, var(--text) 68%, transparent);
 }
@@ -1124,6 +1135,16 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  /* The header is a space-between row: letting the label take the slack keeps
+     the time and the chevron together on the right. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.thoughtTime {
+  flex: 0 0 auto;
+  font-size: 0.76rem;
+  font-weight: 500;
 }
 
 .thoughtChevron {
@@ -1401,30 +1422,16 @@ button.userSlashCmd:focus-visible {
   }
 }
 
-.thought,
-.tool,
-.metaBlock {
-  background: transparent;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
-  padding: 2px 10px;
-  max-width: 100%;
-  box-sizing: border-box;
-  width: fit-content;
-}
-
+/* Tool calls and reasoning blocks are plain rows inside their run's rail — the
+   rounded card they used to wear only wrapped one line of transcript in chrome. */
 .thought {
-  border-color: color-mix(in srgb, var(--text) 14%, transparent);
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-}
-
-.thoughtOpen {
+  background: transparent;
+  border: none;
+  padding: 2px 0;
   width: 100%;
-  background: color-mix(in srgb, var(--text) 5%, transparent);
-}
-
-.tool {
-  border-left: 3px solid var(--warning);
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* Subagent — fork glyph + soft strip, distinct from tool rows (no checkmarks). */
@@ -1901,6 +1908,12 @@ button.userSlashCmd:focus-visible {
   font-weight: 650;
   font-size: 0.84rem;
   padding: 4px 0;
+}
+
+/* A tool row with no output yet has nothing to open — keep it a plain line
+   instead of a dead control. */
+.partToggle:disabled {
+  cursor: default;
 }
 
 .preview {
@@ -2762,6 +2775,28 @@ button.userSlashCmd:focus-visible {
   min-width: 0;
 }
 
+.pendingFileThumb {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  object-fit: cover;
+}
+
+.pendingFileChip[data-status="uploading"] {
+  border-style: dashed;
+}
+
+.pendingFileChip[data-status="error"] {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.pendingFileChip[data-status="error"] .pendingFileSize {
+  color: var(--danger);
+}
+
 .pendingFileName,
 .userFileName {
   overflow: hidden;
@@ -3273,6 +3308,12 @@ button.userSlashCmd:focus-visible {
     gap: 6px;
   }
 
+  /* Comfortable tap target for the floating collapse control. */
+  .stepsCollapse {
+    width: 34px;
+    height: 34px;
+  }
+
   .stepsIcon svg {
     width: 13px;
     height: 13px;
@@ -3282,10 +3323,6 @@ button.userSlashCmd:focus-visible {
   .stepsBody .textEmbedded {
     font-size: 0.82rem;
     line-height: 1.5;
-  }
-
-  .toolRow {
-    font-size: 0.72rem;
   }
 
   .toolDetail,
@@ -3324,7 +3361,7 @@ button.userSlashCmd:focus-visible {
     margin-left: 20px;
   }
 
-  .subagentTools .toolRow {
+  .subagentTools .partToggle {
     font-size: 0.7rem;
   }
 }

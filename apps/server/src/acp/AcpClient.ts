@@ -339,6 +339,12 @@ function looksLikeCommandNotFound(text: string): boolean {
 
 export function buildAgentEnv(adapter: HarnessAdapter, settings: AppSettings): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+  // User-defined agents carry their own env (Settings → Connect).
+  if (adapter.env) {
+    for (const [key, value] of Object.entries(adapter.env)) {
+      if (key) env[key] = value;
+    }
+  }
   const apiKey = adapter.apiKeyField ? adapterSetting(settings, adapter.apiKeyField) : undefined;
   if (adapter.envApiKeyName && typeof apiKey === "string" && apiKey) {
     env[adapter.envApiKeyName] = apiKey;
@@ -435,6 +441,13 @@ export class AcpClient extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
   private pending = new Map<JsonRpcId, Pending>();
+  /**
+   * Agent requests (elicitation, permission, ask_question) the host has not
+   * answered yet. The agent is blocked on the user, not on the network — the
+   * idle ceiling must not fire while one of these is open, or a question the
+   * user reads for five minutes gets killed mid-thought.
+   */
+  private awaitingReply = new Set<JsonRpcId>();
   private promptRequestId: JsonRpcId | null = null;
   private closed = false;
   private stderrBuf = "";
@@ -517,6 +530,14 @@ export class AcpClient extends EventEmitter {
         p.reject(wrapped);
       }
       this.pending.clear();
+      this.awaitingReply.clear();
+    });
+
+    // A harness that dies mid-turn leaves writes racing its exit. Without a
+    // listener the resulting EPIPE is an uncaught exception that takes the whole
+    // server down; a dead agent is a per-session problem, not a host one.
+    child.stdin.on("error", (err: NodeJS.ErrnoException) => {
+      this.emit("log", `stdin write failed: ${err.code ?? err.message}`);
     });
 
     child.stderr.on("data", (buf: Buffer) => {
@@ -538,6 +559,7 @@ export class AcpClient extends EventEmitter {
         p.reject(err);
       }
       this.pending.clear();
+      this.awaitingReply.clear();
       this.killAllTerminals();
       this.emit("exit", { code, signal });
     });
@@ -837,7 +859,9 @@ export class AcpClient extends EventEmitter {
           .join(",")}]`;
         target = allowedModels.includes(rebuilt) ? rebuilt : sameBase;
       } else {
-        target = base;
+        // The agent enumerated its models and knows nothing about this one —
+        // sending it anyway only earns a -32602. Keep the agent's own default.
+        target = null;
       }
     }
     if (!target) {
@@ -896,6 +920,9 @@ export class AcpClient extends EventEmitter {
   async cancel(): Promise<void> {
     if (!this.sessionId || !this.isConnected()) return;
     this.notify("session/cancel", { sessionId: this.sessionId });
+    // Stop ends the turn: any request the agent was still waiting on is moot,
+    // and a stale entry would exempt the NEXT prompt from its idle ceiling.
+    this.awaitingReply.clear();
     // Child tools must stop too: host-side terminals spawned for this session
     // would otherwise keep running even after the agent's prompt is cancelled.
     this.killAllTerminals();
@@ -916,6 +943,7 @@ export class AcpClient extends EventEmitter {
   }
 
   respond(id: JsonRpcId, result: unknown) {
+    this.awaitingReply.delete(id);
     this.emit("log", `respond id=${String(id)}`);
     this.write({ jsonrpc: "2.0", id, result });
   }
@@ -926,11 +954,13 @@ export class AcpClient extends EventEmitter {
   }
 
   respondError(id: JsonRpcId, message: string, code = -32000) {
+    this.awaitingReply.delete(id);
     this.write({ jsonrpc: "2.0", id, error: { code, message } });
   }
 
   dispose() {
     this.closed = true;
+    this.awaitingReply.clear();
     this.killAllTerminals();
     try {
       this.proc?.stdin.end();
@@ -1195,10 +1225,20 @@ export class AcpClient extends EventEmitter {
           if (!this.pending.has(id)) return;
           // Agent still streaming / answering → do not kill an active turn.
           const idleMs = Date.now() - this.lastActivityAt;
-          if (!this.closed && this.isConnected() && idleMs < AcpClient.requestTimeoutMs) {
+          // An open elicitation/permission request park the agent on the user.
+          // Waiting for a human is not a hang: keep the prompt alive so the
+          // question stays answerable however long the user takes.
+          const awaitingUser = this.awaitingReply.size > 0;
+          if (
+            !this.closed &&
+            this.isConnected() &&
+            (awaitingUser || idleMs < AcpClient.requestTimeoutMs)
+          ) {
             this.emit(
               "log",
-              `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,
+              awaitingUser
+                ? `ACP "${method}" awaiting user input — not timing out`
+                : `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,
             );
             armTimeout();
             return;
@@ -1312,6 +1352,7 @@ export class AcpClient extends EventEmitter {
 
     const requestKind = this.adapter.requestKinds[method];
     if (requestKind && msg.id !== undefined) {
+      this.awaitingReply.add(msg.id as JsonRpcId);
       this.emit("request", {
         kind: requestKind,
         id: msg.id as JsonRpcId,
@@ -1321,6 +1362,7 @@ export class AcpClient extends EventEmitter {
     }
 
     if (method === "elicitation/create" && msg.id !== undefined) {
+      this.awaitingReply.add(msg.id as JsonRpcId);
       this.emit("request", {
         kind: "elicitation",
         id: msg.id as JsonRpcId,

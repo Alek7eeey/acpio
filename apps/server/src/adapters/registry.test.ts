@@ -1,6 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
-import { adapterArgs, adapterCommand, adapters, getAdapter } from "./registry.js";
+import {
+  adapterArgs,
+  adapterCommand,
+  adapters,
+  getAdapter,
+  setCustomAdapters,
+} from "./registry.js";
 import { cursorAdapter } from "@acpio/adapter-cursor";
 import { ompAdapter } from "@acpio/adapter-omp";
 
@@ -27,6 +33,34 @@ describe("adapter registry", () => {
     expect(adapterCommand(cursorAdapter, DEFAULT_SETTINGS)).toBe("agent");
     expect(adapterArgs(cursorAdapter, DEFAULT_SETTINGS)).toEqual(["acp"]);
     expect(adapterCommand(ompAdapter, DEFAULT_SETTINGS)).toBe("omp");
+  });
+});
+
+describe("user-defined agents", () => {
+  afterEach(() => setCustomAdapters([]));
+
+  const spec = {
+    id: "my-agent",
+    label: "My Agent",
+    command: "C:\\tools\\agent.exe",
+    args: ["--stdio"],
+  };
+
+  it("builds a resolvable adapter whose command lives in the spec", () => {
+    setCustomAdapters([spec]);
+    expect(adapters.ids()).toEqual(["cursor", "omp", "my-agent"]);
+    expect(adapters.get("my-agent")?.custom).toBe(true);
+    // Empty settings fields fall through to the spec's command/args.
+    expect(adapterCommand(getAdapter("my-agent"), DEFAULT_SETTINGS)).toBe("C:\\tools\\agent.exe");
+    expect(adapterArgs(getAdapter("my-agent"), DEFAULT_SETTINGS)).toEqual(["--stdio"]);
+  });
+
+  it("forgets a removed agent", () => {
+    setCustomAdapters([spec]);
+    setCustomAdapters([]);
+    expect(adapters.ids()).toEqual(["cursor", "omp"]);
+    expect(adapters.get("my-agent")).toBeUndefined();
+    expect(() => getAdapter("my-agent")).toThrow(/Неизвестный агент/);
   });
 });
 

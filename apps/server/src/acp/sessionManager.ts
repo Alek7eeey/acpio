@@ -65,7 +65,7 @@ import {
   saveSessionUsage,
 } from "../services/sessions.js";
 import { broadcastToSession } from "../services/wsHub.js";
-import { adapterCommand, getAdapter } from "../adapters/registry.js";
+import { adapterCommand, adapters, getAdapter } from "../adapters/registry.js";
 import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
@@ -156,6 +156,7 @@ async function applyAgentReportedMode(
     rt.pending.set(reqKey, {
       kind: "switch_mode",
       rpcId: reqKey,
+      client: rt.client ?? null,
       mode,
       previousMode,
       resolve: (v) => resolve(v as { outcome?: string } | undefined),
@@ -381,8 +382,9 @@ function denyModel(provider: AgentProvider, model: string) {
 }
 
 function modelsCacheTtlMs(provider: AgentProvider): number {
-  const adapter = getAdapter(provider);
-  return adapter.cloudCatalog ? 2 * 60_000 : 24 * 60_000;
+  // A session may outlive its custom agent; fall back to the quiet TTL.
+  const adapter = adapters.get(provider);
+  return adapter?.cloudCatalog ? 2 * 60_000 : 24 * 60_000;
 }
 
 async function finalizeModelList(
@@ -407,6 +409,12 @@ type PendingRequest = {
   kind: AcpRequest["kind"] | "switch_mode";
   /** Original JSON-RPC id from the agent (number | string) — do not re-parse from the URL key. */
   rpcId: string | number;
+  /**
+   * ACP client the request belongs to. A different (or missing) live client
+   * means the original RPC is gone — a restarted server or respawned harness —
+   * so the reply cannot be delivered and the turn must be re-driven instead.
+   */
+  client?: AcpClient | null;
   /** Question UI shown, but the ACP reply must use permission outcome shape. */
   respondAsPermission?: boolean;
   /** Form elicitation/create mapped to the inline question UI. */
@@ -793,9 +801,21 @@ export async function ensureAcp(
       rt.provider = null;
       rt.running = false;
       rt.toolsHintSent = false;
+      // Deliberate restart (MCP/model/provider change): drop the dead prompts so
+      // a deferred restart and the turn queue aren't wedged. The question parts
+      // stay in the DB and remain answerable — answering one re-drives the turn.
+      if (intentional) {
+        for (const [reqKey, p] of rt.pending) {
+          if (p.client && p.client !== client) continue;
+          p.resolve(undefined);
+          rt.pending.delete(reqKey);
+        }
+      }
       // One chat's process dying is not "the harness is gone" — a parallel
       // probe or a Cursor singleton restart used to flip the header LED.
-      if (!intentional) {
+      // A crash with an open question is a different thing: the session stays
+      // "waiting" so the question can still be answered (see runTurn's catch).
+      if (!intentional && rt.pending.size === 0) {
         await updateSession(sessionId, { status: "closed" });
       }
     });
@@ -927,8 +947,10 @@ export async function ensureAcp(
         if (paramsProbe?.provider === opts.provider) disposeParamsProbe();
         await updateSession(sessionId, {
           acpSessionId: client.sessionId,
-          // Don't clobber an in-flight prompt if warm-up finishes during runPrompt.
-          ...(rt.running ? {} : { status: "idle" as const }),
+          // Don't clobber an in-flight prompt if warm-up finishes during runPrompt,
+          // and don't unlock a chat that is parked on an unanswered question —
+          // merely opening it must not pretend the agent is done asking.
+          ...(rt.running || hasPendingQuestion(detail) ? {} : { status: "idle" as const }),
         });
         return client;
       } catch (err) {
@@ -2647,6 +2669,7 @@ function registerInteractivePending(
   });
   rt.pending.set(reqKey, {
     ...entry,
+    client: entry.client ?? rt.client ?? null,
     resolve: () => release(),
   });
   return done;
@@ -2862,7 +2885,12 @@ async function runTurn(
     const userMessage = isTokenizerEncodingError(message)
       ? `${message}\n\n${tokenizerEncodingErrorHint(settings.locale === "ru" ? "ru" : "en")}`
       : message;
-    await updateSession(sessionId, { status: "error" });
+    // A turn that died while an agent question was open must not be buried in
+    // "error": the question part is the durable, answerable state, and the user
+    // may come back days later. Answering it re-drives the turn.
+    await updateSession(sessionId, {
+      status: rt.pending.size > 0 ? "waiting" : "error",
+    });
     broadcastToSession(sessionId, { type: "error", sessionId, message: userMessage });
     // Broken ACP process → recreate next time
     if (/exited|spawn|ENOENT|таймаут|timeout/i.test(message)) {
@@ -2957,6 +2985,14 @@ export async function cancelPrompt(sessionId: string) {
         // ignore respond failures
       }
       p.resolve(undefined);
+      // Stop ends the question too: leaving the part "pending" would keep it
+      // answerable (and the session parked across restarts) after the user
+      // explicitly halted the turn.
+      if (p.kind === "elicitation" || p.kind === "ask_question") {
+        void markQuestionPartAnswered(sessionId, reqKey, {
+          outcome: { outcome: "cancelled" },
+        });
+      }
     }
     rt.pending.clear();
     try {
@@ -3000,12 +3036,17 @@ async function probeResultFromClient(
     .map((p) => `${p.name}: ${modelParamLabel(p.id, p.currentValue ?? "", undefined)}`)
     .filter((s) => !s.endsWith(": "))
     .join(", ");
+  // Report the same label the model picker shows — a raw agent id may be opaque
+  // (ZCode's JSON tuple), so re-deriving it from the value alone reads as noise.
+  const currentModelLabel = currentModel
+    ? models.find((m) => m.value === currentModel)?.name ?? modelDisplayName(currentModel)
+    : undefined;
   return {
     ok: true as const,
     provider: selected,
     command: adapterCommand(getAdapter(selected), settings),
-    message: currentModel
-      ? `ACP OK${live ? " (live)" : ""}. Model: ${modelDisplayName(currentModel)}${paramSummary ? ` · ${paramSummary}` : ""}`
+    message: currentModelLabel
+      ? `ACP OK${live ? " (live)" : ""}. Model: ${currentModelLabel}${paramSummary ? ` · ${paramSummary}` : ""}`
       : `ACP OK${live ? " (live)" : ""} — session ${sessionId}`,
     details: details.slice(-1500),
     sessionId,
@@ -3683,9 +3724,10 @@ export async function setSessionMode(sessionId: string, mode: AgentMode) {
 
 export function answerPermission(sessionId: string, requestId: string, optionId: string) {
   const rt = runtimes.get(sessionId);
-  if (!rt) throw new Error("Runtime not found");
-  const pending = rt.pending.get(requestId);
-  if (!pending) throw new Error("Permission request not found");
+  const pending = rt?.pending.get(requestId);
+  // No live request to answer (server restarted, harness respawned) — the
+  // permission card is only meaningful while its ACP prompt exists.
+  if (!rt || !pending) throw new Error("Permission request not found");
 
   const id = pending.rpcId ?? parseRpcId(requestId, sessionId);
   console.log(
@@ -3724,15 +3766,100 @@ async function markQuestionPartAnswered(
   }
 }
 
-export function answerQuestion(
+/** Payload of the still-unanswered question part `requestId` belongs to. */
+function findPendingQuestionPayload(
+  detail: SessionDetailDto,
+  requestId: string,
+): Record<string, unknown> | null {
+  for (let mi = detail.messages.length - 1; mi >= 0; mi -= 1) {
+    const msg = detail.messages[mi];
+    if (!msg) continue;
+    for (let pi = msg.parts.length - 1; pi >= 0; pi -= 1) {
+      const part = msg.parts[pi];
+      if (part?.type !== "question") continue;
+      if (!part.payload.pending) continue;
+      if (String(part.payload.requestId ?? "") !== requestId) continue;
+      return part.payload as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+/** True when the chat holds an unanswered question (its durable parked state). */
+function hasPendingQuestion(detail: SessionDetailDto | null): boolean {
+  if (!detail) return false;
+  for (const message of detail.messages) {
+    for (const part of message.parts) {
+      if (part.type === "question" && part.payload.pending) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Answer to a question whose ACP request is gone — the server was restarted (or
+ * the harness process died) while the agent was parked on the user. The pending
+ * request is unrecoverable, so persist the answer on the question part and
+ * re-drive the turn with the answer as text: on resume the agent gets the
+ * answer instead of the chat staying parked on a question forever.
+ *
+ * Returns false when no unanswered question with that requestId exists.
+ */
+async function redriveAnsweredQuestion(
+  sessionId: string,
+  requestId: string,
+  result: Record<string, unknown>,
+): Promise<boolean> {
+  const detail = await getSessionDetail(sessionId);
+  if (!detail) return false;
+  const payload = findPendingQuestionPayload(detail, requestId);
+  if (!payload) return false;
+
+  await markQuestionPartAnswered(sessionId, requestId, result);
+  const settings = await getSettings();
+  const locale = settings.locale ?? "en";
+  const question = String(payload.title ?? "").trim();
+  const answer = summarizeQuestionAnswer({ ...payload, result }).trim();
+  const text = t(locale, "agent.answerToQuestion", { question, answer: answer || "—" });
+  appendDeepLog({
+    kind: "question-redrive",
+    sessionId,
+    provider: detail.provider,
+    cwd: detail.cwd,
+    data: { requestId, question, answer, text },
+  });
+  // A turn runs for minutes — answer the click now and let the reply stream in,
+  // exactly like POST /prompt. Errors surface through the session banner.
+  void runPrompt(sessionId, text, {
+    provider: detail.provider,
+    cwd: detail.cwd,
+    mode: detail.mode,
+  }).catch((err) => {
+    broadcastToSession(sessionId, {
+      type: "error",
+      sessionId,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  });
+  return true;
+}
+
+export async function answerQuestion(
   sessionId: string,
   requestId: string,
   result: Record<string, unknown>,
 ) {
   const rt = runtimes.get(sessionId);
-  if (!rt) throw new Error("Runtime not found");
-  const pending = rt.pending.get(requestId);
-  if (!pending) throw new Error("Question request not found");
+  const pending = rt?.pending.get(requestId);
+  // No live ACP request behind this answer: the server was restarted (or the
+  // harness respawned) while the agent waited on the user. The question part is
+  // still the fixed, answerable state — persist the answer and resume the turn
+  // instead of failing the click.
+  if (!rt || !pending) {
+    const redriven = await redriveAnsweredQuestion(sessionId, requestId, result);
+    if (!redriven) throw new Error("Question request not found");
+    return;
+  }
 
   // switch_mode is a synthetic consent (the agent already switched on its
   // side), so there is no ACP request to answer — just resolve the waiter.
@@ -3741,6 +3868,16 @@ export function answerQuestion(
     rt.pending.delete(requestId);
     void updateSession(sessionId, { status: "running" });
     void markQuestionPartAnswered(sessionId, requestId, result);
+    return;
+  }
+
+  // The client that received the request is gone (respawned harness, provider
+  // switch): the RPC id is meaningless on the live process. Resume the turn.
+  if (pending.client && pending.client !== rt.client) {
+    pending.resolve(result);
+    rt.pending.delete(requestId);
+    const redriven = await redriveAnsweredQuestion(sessionId, requestId, result);
+    if (!redriven) throw new Error("Question request not found");
     return;
   }
 

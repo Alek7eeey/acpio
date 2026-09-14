@@ -17,3 +17,5 @@ data/
 dist-app/
 /.playwright-mcp/
 /.tmp-perf/
+/.acpio-attachments/
+/.tmp-check/

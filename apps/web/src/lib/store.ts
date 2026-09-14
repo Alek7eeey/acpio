@@ -3124,10 +3124,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings: nextSettings });
     applyAppearance(nextSettings);
-    if (nextPatch.disabledProviders !== undefined) {
+    if (nextPatch.disabledProviders !== undefined || nextPatch.customAgents !== undefined) {
       // A switched-off harness keeps no probe state and leaves the registry
       // list, so nothing (pickers, gate, header) can mention it any more.
-      const disabled = new Set(nextPatch.disabledProviders);
+      // Custom agents enter/leave the same registry list.
+      const disabled = new Set(nextPatch.disabledProviders ?? current.disabledProviders);
       const agentAvailability = { ...get().agentAvailability };
       const agentProbing = { ...get().agentProbing };
       for (const id of disabled) {

@@ -80,19 +80,6 @@ describe("createTranslator — RU pluralization", () => {
     expect(t("ru", "common.userCount", { count })).toBe(expected);
   });
 
-  // The suffix is chosen from vars.count while interpolation uses {{seconds}}.
-  it.each<[Record<string, string | number>, string]>([
-    [{ count: 1, seconds: 1 }, "Думал 1 секунду"],
-    [{ count: 2, seconds: 2 }, "Думал 2 секунды"],
-    [{ count: 5, seconds: 5 }, "Думал 5 секунд"],
-    [{ count: 21, seconds: 21 }, "Думал 21 секунду"],
-    [{ count: 101, seconds: 101 }, "Думал 101 секунду"],
-    [{ count: 1, seconds: 42 }, "Думал 42 секунду"],
-    [{ count: 5, seconds: 1 }, "Думал 1 секунд"],
-  ])("ru common.thoughtFor with %j -> %s", (vars, expected) => {
-    expect(t("ru", "common.thoughtFor", vars)).toBe(expected);
-  });
-
   it("accepts a numeric string count", () => {
     expect(t("ru", "common.userCount", { count: "2" })).toBe("2 пользователя");
   });

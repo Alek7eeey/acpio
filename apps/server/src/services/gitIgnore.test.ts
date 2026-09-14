@@ -23,34 +23,34 @@ describe("toGitIgnorePattern", () => {
     expect(toGitIgnorePattern(relPath, isDir)).toBe(expected);
   });
 
-  it("escapes a trailing space so git keeps it in the name", () => {
+  it("escapes a trailing space so git keeps it in the name", async () => {
     expect(toGitIgnorePattern("my file ", false)).toBe("/my file\\ ");
   });
 });
 
 describe("appendGitIgnoreEntries", () => {
-  it("appends new patterns on their own lines", () => {
+  it("appends new patterns on their own lines", async () => {
     expect(appendGitIgnoreEntries("node_modules\n", ["/build/", "/notes.txt"])).toEqual({
       content: "node_modules\n/build/\n/notes.txt\n",
       added: ["/build/", "/notes.txt"],
     });
   });
 
-  it("keeps existing CRLF line endings", () => {
+  it("keeps existing CRLF line endings", async () => {
     const result = appendGitIgnoreEntries("node_modules\r\n", ["/build/"]);
     expect(result.content).toBe("node_modules\r\n/build/\r\n");
   });
 
-  it("terminates a file that has no trailing newline", () => {
+  it("terminates a file that has no trailing newline", async () => {
     expect(appendGitIgnoreEntries("node_modules", ["/build/"]).content).toBe("node_modules\n/build/\n");
   });
 
-  it("skips patterns already present, including duplicates in the same call", () => {
+  it("skips patterns already present, including duplicates in the same call", async () => {
     const result = appendGitIgnoreEntries("# comment\n/build/\n", ["/build/", "/x y", "/x y"]);
     expect(result).toEqual({ content: "# comment\n/build/\n/x y\n", added: ["/x y"] });
   });
 
-  it("leaves the file untouched when every pattern is already ignored", () => {
+  it("leaves the file untouched when every pattern is already ignored", async () => {
     expect(appendGitIgnoreEntries("/build/\n", ["/build/"])).toEqual({
       content: "/build/\n",
       added: [],
@@ -72,14 +72,14 @@ describe("addGitIgnoreEntries", () => {
     return repo;
   }
 
-  it("adds a file and a directory to the root .gitignore", () => {
+  it("adds a file and a directory to the root .gitignore", async () => {
     const repo = tempRepo();
     fs.mkdirSync(path.join(repo, "dev-dist"));
     fs.writeFileSync(path.join(repo, "dev-dist", "sw.js"), "");
     fs.writeFileSync(path.join(repo, "notes.txt"), "");
     fs.writeFileSync(path.join(repo, ".gitignore"), "node_modules\n");
 
-    const result = addGitIgnoreEntries(repo, ["notes.txt", "dev-dist"]);
+    const result = await addGitIgnoreEntries(repo, ["notes.txt", "dev-dist"]);
 
     expect(result).toEqual({ ok: true, added: ["/notes.txt", "/dev-dist/"] });
     expect(fs.readFileSync(path.join(repo, ".gitignore"), "utf8")).toBe(
@@ -92,31 +92,31 @@ describe("addGitIgnoreEntries", () => {
     expect(status).toContain(".gitignore");
   });
 
-  it("creates .gitignore when the repository has none", () => {
+  it("creates .gitignore when the repository has none", async () => {
     const repo = tempRepo();
     fs.writeFileSync(path.join(repo, "notes.txt"), "");
 
-    expect(addGitIgnoreEntries(repo, ["notes.txt"])).toEqual({ ok: true, added: ["/notes.txt"] });
+    expect(await addGitIgnoreEntries(repo, ["notes.txt"])).toEqual({ ok: true, added: ["/notes.txt"] });
     expect(fs.readFileSync(path.join(repo, ".gitignore"), "utf8")).toBe("/notes.txt\n");
   });
 
-  it("reports nothing added when the path is already ignored", () => {
+  it("reports nothing added when the path is already ignored", async () => {
     const repo = tempRepo();
     fs.writeFileSync(path.join(repo, ".gitignore"), "/notes.txt\n");
-    expect(addGitIgnoreEntries(repo, ["notes.txt"])).toEqual({ ok: true, added: [] });
+    expect(await addGitIgnoreEntries(repo, ["notes.txt"])).toEqual({ ok: true, added: [] });
   });
 
-  it("rejects a path that escapes the repository", () => {
+  it("rejects a path that escapes the repository", async () => {
     const repo = tempRepo();
-    const result = addGitIgnoreEntries(repo, ["../outside.txt"]);
+    const result = await addGitIgnoreEntries(repo, ["../outside.txt"]);
     expect(result.ok).toBe(false);
     expect(fs.existsSync(path.join(repo, ".gitignore"))).toBe(false);
   });
 
-  it("fails outside a repository", () => {
+  it("fails outside a repository", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acpio-ignore-plain-"));
     dirs.push(dir);
-    const result = addGitIgnoreEntries(dir, ["notes.txt"]);
+    const result = await addGitIgnoreEntries(dir, ["notes.txt"]);
     expect(result).toMatchObject({ ok: false });
   });
 });

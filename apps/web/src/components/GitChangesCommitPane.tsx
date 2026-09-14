@@ -31,18 +31,18 @@ const COMMIT_HEIGHT_KEY = "acpio.gitCommitSectionHeight.v1";
 const COMMIT_HEIGHT_DEFAULT = 168;
 const COMMIT_HEIGHT_MIN = 120;
 const COMMIT_HEIGHT_MAX = 360;
-const CHANGES_VIEW_KEY = "acpio.gitChangesView.v1";
+export const CHANGES_VIEW_KEY = "acpio.gitChangesView.v1";
 const DND_MIME = "application/x-acpio-git-paths";
 
 type StageZone = "staged" | "unstaged";
-type PaneLayout = "stacked" | "workspace";
 /** Changed files as one row per file (…/a/b.ts) or one per folder level (b → b/b.ts). */
-type ChangesView = "list" | "tree";
+export type ChangesView = "list" | "tree";
 type FileMenuState =
   | { kind: "file"; x: number; y: number; file: GitChangedFileDto }
   | { kind: "dir"; x: number; y: number; path: string };
 
-function readChangesView(): ChangesView {
+/** The navigator header owns the switch; the rows here only read the answer. */
+export function readChangesView(): ChangesView {
   try {
     return localStorage.getItem(CHANGES_VIEW_KEY) === "tree" ? "tree" : "list";
   } catch {
@@ -468,6 +468,7 @@ export function GitChangesCommitPane({
   conflictFiles,
   stagedFiles,
   unstagedFiles,
+  view,
   stagedCount,
   busy,
   workingSelected,
@@ -487,7 +488,6 @@ export function GitChangesCommitPane({
   onDiscardPaths,
   onDeletePaths,
   onBlameFile,
-  layout = "stacked",
   outgoing = [],
   outgoingLoading = false,
   commitHash = null,
@@ -501,6 +501,8 @@ export function GitChangesCommitPane({
   conflictFiles: GitChangedFileDto[];
   stagedFiles: GitChangedFileDto[];
   unstagedFiles: GitChangedFileDto[];
+  /** Row layout, switched from the navigator header. */
+  view: ChangesView;
   stagedCount: number;
   busy: boolean;
   workingSelected: boolean;
@@ -520,7 +522,6 @@ export function GitChangesCommitPane({
   onDiscardPaths: (paths: string[]) => void | Promise<void>;
   onDeletePaths: (paths: string[]) => void | Promise<void>;
   onBlameFile: (path: string) => void | Promise<void>;
-  layout?: PaneLayout;
   outgoing?: GitCommitDto[];
   outgoingLoading?: boolean;
   commitHash?: string | null;
@@ -535,7 +536,6 @@ export function GitChangesCommitPane({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
   const fileMenuStyle = useFixedMenuPlacement(fileMenu, menuRef);
-  const [view, setView] = useState<ChangesView>(readChangesView);
   const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
   const [unstagedOpen, setUnstagedOpen] = useState(true);
   const [stagedOpen, setStagedOpen] = useState(true);
@@ -556,14 +556,6 @@ export function GitChangesCommitPane({
   const fileByPath = useMemo(() => new Map(files.map((f) => [f.path, f])), [files]);
 
   const closeFileMenu = useCallback(() => setFileMenu(null), []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(CHANGES_VIEW_KEY, view);
-    } catch {
-      /* ignore */
-    }
-  }, [view]);
 
   const toggleDir = useCallback((dirPath: string) => {
     setCollapsedDirs((prev) => {
@@ -990,41 +982,6 @@ export function GitChangesCommitPane({
 
   const treePane = (
     <div className={styles.filesArea}>
-      {files.length > 0 ? (
-        <div className={styles.filesToolbar}>
-          <div className={styles.viewToggle} role="toolbar" aria-label={t("git.fileViewMode")}>
-            <button
-              type="button"
-              className={`${styles.viewToggleBtn}${view === "list" ? ` ${styles.viewToggleBtnActive}` : ""}`}
-              aria-pressed={view === "list"}
-              aria-label={t("git.fileViewList")}
-              title={t("git.fileViewList")}
-              onClick={() => setView("list")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`${styles.viewToggleBtn}${view === "tree" ? ` ${styles.viewToggleBtnActive}` : ""}`}
-              aria-pressed={view === "tree"}
-              aria-label={t("git.fileViewTree")}
-              title={t("git.fileViewTree")}
-              onClick={() => setView("tree")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-      ) : null}
       {outgoingSection}
       {files.length === 0 ? (
         outgoing.length === 0 ? <div className={styles.empty}>{t("git.noChanges")}</div> : null
@@ -1146,8 +1103,12 @@ export function GitChangesCommitPane({
     </div>
   );
 
+  /**
+   * The commit box is a fixed-height dock under the file list; the drag handle
+   * above it is the only thing that decides how much of the list is left.
+   */
   const commitPane = (
-    <div className={layout === "workspace" ? styles.commitDock : styles.commitStack}>
+    <>
       <div
         className={styles.commitResize}
         onPointerDown={onResizeDown}
@@ -1210,15 +1171,11 @@ export function GitChangesCommitPane({
           ) : null}
         </div>
       </form>
-    </div>
+    </>
   );
 
   return (
-    <div
-      className={`${styles.pane}${resizing ? ` ${styles.paneResizing}` : ""}${
-        layout === "workspace" ? ` ${styles.paneWorkspace}` : ""
-      }`}
-    >
+    <div className={`${styles.pane}${resizing ? ` ${styles.paneResizing}` : ""}`}>
       {treePane}
       {commitPane}
       {fileMenu ? (

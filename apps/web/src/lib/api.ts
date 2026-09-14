@@ -410,16 +410,20 @@ export const api = {
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),
-  /** Save a clipboard/device image into the session folder; returns a path attachment. */
-  uploadAttachment: (
-    id: string,
-    file: { name: string; mime?: string; data: string },
-  ) =>
+  /** Save a pasted/device image into the session folder; returns a path attachment. */
+  uploadAttachment: (id: string, file: File, name: string) =>
     request<{ name: string; path: string; size: number }>(
       `/api/sessions/${id}/attachments/upload`,
       {
         method: "POST",
-        body: JSON.stringify(file),
+        // Raw blob instead of base64-in-JSON: a screenshot uploads as itself,
+        // with no 33% size penalty and no giant string on the main thread.
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-File-Name": encodeURIComponent(name),
+          "X-File-Mime": file.type || "application/octet-stream",
+        },
+        body: file,
       },
     ),
   cancel: (id: string) =>

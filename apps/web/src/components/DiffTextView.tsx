@@ -1,5 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useT } from "../lib/i18n";
+import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
+import { setDiffViewMode, useDiffViewMode, type DiffViewMode } from "../lib/diffViewMode";
 import { api } from "../lib/api";
 import {
   buildSideBySideRows,
@@ -17,7 +19,6 @@ import {
 import styles from "./DiffTextView.module.css";
 
 const EXPAND_CHUNK = 100;
-const DIFF_VIEW_KEY = "acpio.gitDiffView.v1";
 
 export type DiffContextSource = {
   sessionId: string;
@@ -25,31 +26,11 @@ export type DiffContextSource = {
   commitRev?: string;
 };
 
-export type DiffViewMode = "unified" | "split";
-
 type HunkExpansion = {
   aboveLines: string[];
   belowLines: string[];
   totalLines?: number;
 };
-
-export function readDiffViewMode(): DiffViewMode {
-  try {
-    const raw = localStorage.getItem(DIFF_VIEW_KEY);
-    if (raw === "split" || raw === "unified") return raw;
-  } catch {
-    /* ignore */
-  }
-  return "unified";
-}
-
-export function writeDiffViewMode(mode: DiffViewMode): void {
-  try {
-    localStorage.setItem(DIFF_VIEW_KEY, mode);
-  } catch {
-    /* ignore */
-  }
-}
 
 function splitPlain(text: string) {
   return text.split("\n").map((line, idx) => (
@@ -188,9 +169,11 @@ function ExpandDownRow({ busy, onClick }: { busy: boolean; onClick: () => void }
 function DiffViewToolbar({
   mode,
   onChange,
+  wrap,
 }: {
   mode: DiffViewMode;
   onChange: (mode: DiffViewMode) => void;
+  wrap: boolean;
 }) {
   const t = useT();
   return (
@@ -210,6 +193,16 @@ function DiffViewToolbar({
         onClick={() => onChange("split")}
       >
         {t("git.diffViewSplit")}
+      </button>
+      <button
+        type="button"
+        className={`${styles.viewBtn}${wrap && mode !== "split" ? ` ${styles.viewBtnActive}` : ""}`}
+        aria-pressed={wrap && mode !== "split"}
+        disabled={mode === "split"}
+        title={mode === "split" ? t("git.diffWrapSplitHint") : t("common.wrapLines")}
+        onClick={toggleWrapLines}
+      >
+        {t("git.diffWrapLines")}
       </button>
     </div>
   );
@@ -289,21 +282,16 @@ function renderUnifiedHunkBody(lines: ParsedDiffLine[], keyPrefix: string) {
 export const DiffTextView = memo(function DiffTextView({
   text,
   contextSource,
-  viewMode: viewModeProp,
-  onViewModeChange,
   toolbar = true,
 }: {
   text: string;
   contextSource?: DiffContextSource;
-  /** Controlled mode; omit to keep the mode in localStorage. */
-  viewMode?: DiffViewMode;
-  onViewModeChange?: (mode: DiffViewMode) => void;
   /** Hide the built-in mode toolbar (the caller renders its own). */
   toolbar?: boolean;
 }) {
   const trimmed = text.trim();
-  const [storedMode, setStoredMode] = useState<DiffViewMode>(() => readDiffViewMode());
-  const viewMode = viewModeProp ?? storedMode;
+  const wrap = useWrapLines();
+  const viewMode = useDiffViewMode();
   const [expansions, setExpansions] = useState<Record<string, HunkExpansion>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
 
@@ -313,15 +301,6 @@ export const DiffTextView = memo(function DiffTextView({
   }, [trimmed, contextSource?.sessionId, contextSource?.mode, contextSource?.commitRev]);
 
   const parsed = useMemo(() => (trimmed && isUnifiedDiff(trimmed) ? parseUnifiedDiff(trimmed) : null), [trimmed]);
-
-  const setMode = useCallback(
-    (mode: DiffViewMode) => {
-      writeDiffViewMode(mode);
-      setStoredMode(mode);
-      onViewModeChange?.(mode);
-    },
-    [onViewModeChange],
-  );
 
   const fetchLines = useCallback(
     async (filePath: string, start: number, end: number) => {
@@ -404,15 +383,19 @@ export const DiffTextView = memo(function DiffTextView({
   if (!trimmed) return null;
 
   if (!parsed) {
-    return <div className={styles.plain}>{splitPlain(trimmed)}</div>;
+    return <div className={`${styles.plain}${wrap ? "" : ` ${styles.noWrap}`}`}>{splitPlain(trimmed)}</div>;
   }
 
   const canExpand = Boolean(contextSource);
 
   return (
     <div className={styles.root}>
-      {toolbar ? <DiffViewToolbar mode={viewMode} onChange={setMode} /> : null}
-      <div className={viewMode === "split" ? styles.diffSplit : styles.diff}>
+      {toolbar ? <DiffViewToolbar mode={viewMode} onChange={setDiffViewMode} wrap={wrap} /> : null}
+      <div
+        className={
+          viewMode === "split" ? styles.diffSplit : `${styles.diff}${wrap ? "" : ` ${styles.noWrap}`}`
+        }
+      >
         {parsed.map((file, fileIndex) => {
           const filePath = resolveDiffFilePath(file);
 

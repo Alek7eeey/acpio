@@ -6,11 +6,13 @@ import {
   mergeChatChipOptions,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
+  normalizeChatTreeRecentLimit,
+  normalizeCustomAgents,
   readSettingsSchema,
 } from "@acpio/shared";
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
-import { adapters } from "../adapters/registry.js";
+import { adapters, RESERVED_AGENT_IDS, setCustomAdapters } from "../adapters/registry.js";
 import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
@@ -41,6 +43,10 @@ function mergeSettings(raw: unknown): AppSettings {
   ] as const) {
     delete (merged as Record<string, unknown>)[stale];
   }
+  // User-defined agents must be in the registry before the provider fields
+  // below are validated — otherwise a freshly added agent is healed away.
+  merged.customAgents = normalizeCustomAgents(merged.customAgents, RESERVED_AGENT_IDS);
+  setCustomAdapters(merged.customAgents);
   // Backward-compatible defaults for newly added fields
   if (!merged.ompCommand) merged.ompCommand = DEFAULT_SETTINGS.ompCommand;
   if (!Array.isArray(merged.ompArgs)) {
@@ -164,6 +170,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatTreeShowArchive !== "boolean") {
     merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;
   }
+  merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(merged.chatTreeRecentLimit);
   if (
     typeof merged.chatHeaderHeight !== "number" ||
     !Number.isFinite(merged.chatHeaderHeight)

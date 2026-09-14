@@ -11,6 +11,7 @@ import {
   type ChatTreeMenuId,
 } from "@acpio/shared";
 import { useLocale, useT } from "../lib/i18n";
+import { formatDuration } from "../lib/partTiming";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import styles from "./ChatSettingsPreview.module.css";
 
@@ -785,6 +786,103 @@ function PreviewGitBranch({
  * Every configurable element is always visible — active elements get the
  * theme accent, inactive ones stay semi-transparent. Click toggles.
  */
+/** Decorative parts of the chat preview. The mock mirrors how a real turn
+ *  reads, so it has to track the timeline rules: spoiler → text → spoiler while
+ *  the agent works, with the "Работал" header and the measured span next to it
+ *  once it stops. */
+
+const PREVIEW_SPARK = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
+const PREVIEW_FOLDER = (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const PREVIEW_CHECK = (
+  <svg className={styles.toolCheck} width="13" height="13" viewBox="0 0 24 24" fill="none">
+    <path
+      d="M5 13l4 4L19 7"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+/** One activity spoiler: header with its measured span, indented body. */
+function PreviewWork({
+  label,
+  time,
+  children,
+}: {
+  label: string;
+  time: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={styles.pvWork} aria-hidden>
+      <div className={styles.pvWorkHead}>
+        <span className={styles.pvChevron}>▾</span>
+        <span className={styles.pvWorkLabel}>{label}</span>
+        {time ? <span className={styles.pvTime}>{time}</span> : null}
+      </div>
+      <div className={styles.pvWorkBody}>{children}</div>
+    </div>
+  );
+}
+
+/** A reasoning block nested in a spoiler — its own header, its own span. */
+function PreviewReasoning({ time, open }: { time: string; open: boolean }) {
+  const t = useT();
+  return (
+    <div className={styles.pvReasoning} aria-hidden>
+      <div className={styles.pvReasoningHead}>
+        <span className={styles.pvChevron}>{open ? "▾" : "▸"}</span>
+        {PREVIEW_SPARK}
+        <span>{t("common.reasoning")}</span>
+        {time ? <span className={styles.pvTime}>{time}</span> : null}
+      </div>
+      {open ? (
+        <div className={styles.pvReasoningBody}>{t("settings.chatPreviewThought")}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function PreviewToolRow({ time }: { time: string }) {
+  const t = useT();
+  return (
+    <div className={styles.pvTool} aria-hidden>
+      {PREVIEW_CHECK}
+      <span className={styles.pvToolName}>{t("settings.chatPreviewTool")}</span>
+      {time ? <span className={styles.pvTime}>{time}</span> : null}
+    </div>
+  );
+}
+
 export function ChatSettingsPreview({
   actions,
   chips,
@@ -798,6 +896,7 @@ export function ChatSettingsPreview({
   chatSplit,
   chatToolbarStyle,
   chatGitBranchPosition = "below",
+  agentTurnTimeline = false,
   onToggleAction,
   onToggleChip,
   onReorderChip,
@@ -823,6 +922,8 @@ export function ChatSettingsPreview({
   chatSplit: boolean;
   chatToolbarStyle: ChatToolbarStyle;
   chatGitBranchPosition?: "below" | "above";
+  /** Mirrors the agent-turn-timeline setting: the mock shows the reading it selects. */
+  agentTurnTimeline?: boolean;
   onToggleAction: (id: ChatActionId) => void;
   onToggleChip: (id: ChatMetaChipId) => void;
   onReorderChip: (nextOrder: ChatMetaChipId[]) => void;
@@ -1273,41 +1374,35 @@ export function ChatSettingsPreview({
 
               <div className={`${styles.msgRow} ${styles.assistantMsg}`}>
                 <div className={styles.assistantCol}>
+                  {agentTurnTimeline ? (
+                    <>
+                      <PreviewWork
+                        label={t("common.working")}
+                        time={formatDuration(4300, locale, t)}
+                      >
+                        <PreviewToolRow time={formatDuration(1100, locale, t)} />
+                        <PreviewReasoning time={formatDuration(2200, locale, t)} open />
+                      </PreviewWork>
+                      <div className={styles.pvText}>{t("settings.chatPreviewNote")}</div>
+                      <PreviewWork
+                        label={t("common.working")}
+                        time={formatDuration(600, locale, t)}
+                      >
+                        <PreviewToolRow time="" />
+                      </PreviewWork>
+                    </>
+                  ) : (
+                    <PreviewWork
+                      label={t("common.worked")}
+                      time={formatDuration(6000, locale, t)}
+                    >
+                      <PreviewToolRow time={formatDuration(1100, locale, t)} />
+                      <PreviewReasoning time={formatDuration(2200, locale, t)} open />
+                    </PreviewWork>
+                  )}
                   <div className={styles.assistantText}>
                     {t("settings.chatPreviewAssistant")}
                     {showTime ? <span className={styles.time}>{now}</span> : null}
-                  </div>
-                  <div className={styles.thought} aria-hidden>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <span>{t("settings.chatPreviewThought")}</span>
-                  </div>
-                  <div className={styles.toolRow} aria-hidden>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
-                      <path
-                        d="M3.5 8.5V7a2 2 0 0 1 2-2h4.2l1.6 1.7H18.5a2 2 0 0 1 2 2v1"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                      <path
-                        d="M3.5 10.2h17v6.3a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-6.3Z"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <span>{t("settings.chatPreviewTool")}</span>
-                    <svg className={styles.toolCheck} width="13" height="13" viewBox="0 0 24 24" fill="none">
-                      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
                   </div>
                   <div className={styles.typing} aria-hidden>
                     <span />

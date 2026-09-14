@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { deleteGitFiles, discardGitChanges, getGitStatus, unquoteGitPath } from "./git.js";
+import { deleteGitFiles, discardGitChanges, getGitDiff, getGitStatus, unquoteGitPath } from "./git.js";
 
 function git(cwd: string, args: string[]) {
   const result = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -30,6 +30,19 @@ function write(repo: string, rel: string, content: string) {
   fs.writeFileSync(abs, content);
 }
 
+/** Temp repos opened by a test, deleted when that test ends. */
+const repos: string[] = [];
+
+afterEach(() => {
+  for (const repo of repos.splice(0)) fs.rmSync(repo, { recursive: true, force: true });
+});
+
+function repo() {
+  const dir = tempRepo();
+  repos.push(dir);
+  return dir;
+}
+
 describe("unquoteGitPath", () => {
   it.each([
     ["plain/path.ts", "plain/path.ts"],
@@ -46,45 +59,31 @@ describe("unquoteGitPath", () => {
 });
 
 describe("folder-level git file operations", () => {
-  const repos: string[] = [];
+  const changedPaths = async (dir: string) =>
+    (await getGitStatus(dir)).files.map((file) => file.path).sort();
 
-  afterEach(() => {
-    for (const repo of repos.splice(0)) fs.rmSync(repo, { recursive: true, force: true });
-  });
-
-  function repo() {
-    const dir = tempRepo();
-    repos.push(dir);
-    return dir;
-  }
-
-  const changedPaths = (dir: string) =>
-    getGitStatus(dir)
-      .files.map((file) => file.path)
-      .sort();
-
-  it("deletes an untracked folder with all of its files", () => {
+  it("deletes an untracked folder with all of its files", async () => {
     const dir = repo();
     write(dir, "piper/en_US-ryan.onnx", "a\n");
     write(dir, "piper/espeak-ng-data/en_dict", "b\n");
     write(dir, "piper/espeak-ng-data/ru_dict", "c\n");
 
-    expect(deleteGitFiles(dir, ["piper/"])).toEqual({ ok: true });
+    expect(await deleteGitFiles(dir, ["piper/"])).toEqual({ ok: true });
     expect(fs.existsSync(path.join(dir, "piper"))).toBe(false);
-    expect(changedPaths(dir)).toEqual([]);
+    expect(await changedPaths(dir)).toEqual([]);
   });
 
-  it("discards an untracked folder with all of its files", () => {
+  it("discards an untracked folder with all of its files", async () => {
     const dir = repo();
     write(dir, "piper/en_US-ryan.onnx", "a\n");
     write(dir, "piper/espeak-ng-data/en_dict", "b\n");
 
-    expect(discardGitChanges(dir, ["piper"])).toEqual({ ok: true });
+    expect(await discardGitChanges(dir, ["piper"])).toEqual({ ok: true });
     expect(fs.existsSync(path.join(dir, "piper"))).toBe(false);
-    expect(changedPaths(dir)).toEqual([]);
+    expect(await changedPaths(dir)).toEqual([]);
   });
 
-  it("restores tracked files and drops untracked ones in one folder", () => {
+  it("restores tracked files and drops untracked ones in one folder", async () => {
     const dir = repo();
     write(dir, "mod/tracked.txt", "base\n");
     git(dir, ["add", "mod/tracked.txt"]);
@@ -92,45 +91,112 @@ describe("folder-level git file operations", () => {
     write(dir, "mod/tracked.txt", "changed\n");
     write(dir, "mod/nested/new.txt", "new\n");
 
-    expect(discardGitChanges(dir, ["mod"])).toEqual({ ok: true });
+    expect(await discardGitChanges(dir, ["mod"])).toEqual({ ok: true });
     expect(fs.readFileSync(path.join(dir, "mod/tracked.txt"), "utf8")).toBe("base\n");
     expect(fs.existsSync(path.join(dir, "mod/nested"))).toBe(false);
-    expect(changedPaths(dir)).toEqual([]);
+    expect(await changedPaths(dir)).toEqual([]);
   });
 
-  it("discards a staged new file inside a folder", () => {
+  it("discards a staged new file inside a folder", async () => {
     const dir = repo();
     write(dir, "d/a.txt", "a\n");
     write(dir, "d/b.txt", "b\n");
     git(dir, ["add", "d/a.txt"]);
 
-    expect(discardGitChanges(dir, ["d"])).toEqual({ ok: true });
+    expect(await discardGitChanges(dir, ["d"])).toEqual({ ok: true });
     expect(fs.existsSync(path.join(dir, "d"))).toBe(false);
-    expect(changedPaths(dir)).toEqual([]);
+    expect(await changedPaths(dir)).toEqual([]);
   });
 
-  it("deletes a folder holding tracked and untracked files", () => {
+  it("deletes a folder holding tracked and untracked files", async () => {
     const dir = repo();
     write(dir, "mixed/tracked.txt", "base\n");
     git(dir, ["add", "mixed/tracked.txt"]);
     git(dir, ["commit", "-m", "add"]);
     write(dir, "mixed/untracked.txt", "new\n");
 
-    expect(deleteGitFiles(dir, ["mixed"])).toEqual({ ok: true });
+    expect(await deleteGitFiles(dir, ["mixed"])).toEqual({ ok: true });
     expect(fs.existsSync(path.join(dir, "mixed"))).toBe(false);
     // The tracked deletion stays staged for commit; the untracked file is gone.
-    expect(getGitStatus(dir).files.map((file) => [file.path, file.index, file.worktree])).toEqual([
+    expect((await getGitStatus(dir)).files.map((file) => [file.path, file.index, file.worktree])).toEqual([
       ["mixed/tracked.txt", "D", " "],
     ]);
   });
 
-  it("handles paths git reports quoted", () => {
+  it("handles paths git reports quoted", async () => {
     const dir = repo();
     write(dir, "ru/мой файл.txt", "base\n");
-    expect(changedPaths(dir)).toEqual(["ru/мой файл.txt"]);
+    expect(await changedPaths(dir)).toEqual(["ru/мой файл.txt"]);
 
-    expect(deleteGitFiles(dir, ["ru/мой файл.txt"])).toEqual({ ok: true });
+    expect(await deleteGitFiles(dir, ["ru/мой файл.txt"])).toEqual({ ok: true });
     expect(fs.existsSync(path.join(dir, "ru/мой файл.txt"))).toBe(false);
-    expect(changedPaths(dir)).toEqual([]);
+    expect(await changedPaths(dir)).toEqual([]);
+  });
+});
+
+describe("per-file diffs", () => {
+  it("diffs a tracked file against HEAD", async () => {
+    const dir = repo();
+    write(dir, "tracked.txt", "base\nchanged\n");
+    expect(await getGitDiff(dir, "tracked.txt")).toContain("+changed");
+  });
+
+  it("shows nothing for a tracked file without changes", async () => {
+    expect(await getGitDiff(repo(), "tracked.txt")).toBe("");
+  });
+
+  it("shows an untracked file's content as additions", async () => {
+    const dir = repo();
+    write(dir, "new.txt", "hello\n");
+    expect(await getGitDiff(dir, "new.txt")).toContain("+hello");
+  });
+
+  it("shows nothing for a path that is not in the worktree", async () => {
+    expect(await getGitDiff(repo(), "missing.txt")).toBe("");
+  });
+});
+
+describe("changed-line totals", () => {
+  it("counts staged and unstaged changes together", async () => {
+    const dir = repo();
+    write(dir, "staged.txt", "one\ntwo\n");
+    git(dir, ["add", "staged.txt"]);
+    write(dir, "tracked.txt", "base\nplus\n");
+
+    // Both shapes feed the same header: the panel takes the full one, the
+    // composer bar the summary.
+    const full = await getGitStatus(dir);
+    const summary = await getGitStatus(dir, { summary: true });
+    expect(full.additions).toBe(3);
+    expect(summary.additions).toBe(3);
+    expect(full.deletions).toBe(0);
+    expect(summary.deletions).toBe(0);
+  });
+
+  it("counts a line staged and then edited again once", async () => {
+    const dir = repo();
+    write(dir, "tracked.txt", "base\nstaged\n");
+    git(dir, ["add", "tracked.txt"]);
+    write(dir, "tracked.txt", "base\nedited\n");
+
+    // Worktree vs HEAD adds one line and deletes none; summing the index and
+    // worktree numstats instead would report 2 additions and 1 deletion.
+    const full = await getGitStatus(dir);
+    const summary = await getGitStatus(dir, { summary: true });
+    expect([full.additions, full.deletions]).toEqual([1, 0]);
+    // The composer chip reads the summary shape; a total counted twice here
+    // would disagree with the panel header for the same worktree.
+    expect([summary.additions, summary.deletions]).toEqual([1, 0]);
+  });
+
+  it("counts a repository that has no commits yet", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acpio-gitpaths-fresh-"));
+    repos.push(dir);
+    git(dir, ["init"]);
+    write(dir, "first.txt", "a\nb\n");
+    git(dir, ["add", "first.txt"]);
+
+    expect((await getGitStatus(dir, { summary: true })).additions).toBe(2);
+    expect((await getGitStatus(dir)).additions).toBe(2);
   });
 });

@@ -4,9 +4,9 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { AgentProvider, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { harnessNamesForCopy, harnessShortLabel } from "../lib/harness";
+import { harnessLabel, harnessNamesForCopy } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
-import { sessionTreeDisplayTitle, sessionActivityAt, sortSessions, groupByFolder } from "../lib/sessionTitle";
+import { sessionTreeDisplayTitle, sessionActivityAt, sessionRowMark, sortSessions, groupByFolder } from "../lib/sessionTitle";
 import { normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
@@ -23,6 +23,9 @@ import {
 } from "./CreateSessionFolderPicker";
 import { ExportDialog } from "./ExportDialog";
 import styles from "./AppShell.module.css";
+
+/** Tree section key for chats that live outside any folder. */
+const NO_FOLDER_KEY = "__no_folder__";
 
 type MenuState = {
   id: string;
@@ -215,6 +218,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const deleteSession = useAppStore((s) => s.deleteSession);
   const renameSession = useAppStore((s) => s.renameSession);
   const setSessionFlags = useAppStore((s) => s.setSessionFlags);
+  const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
   const setFocusMessageId = useAppStore((s) => s.setFocusMessageId);
   const reorderFolders = useAppStore((s) => s.reorderFolders);
@@ -273,6 +277,33 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     }
   });
 
+  /**
+   * Folders whose "show more" was clicked. Deliberately in-memory only: the
+   * chat-tree limit is a display preference shared across devices, while
+   * "I want to see this one folder in full" is a short-lived action that must
+   * not survive a reload. `chatTreeRecentLimit === 0` disables truncation
+   * entirely, and `collapseExpandedFolder` undoes a single expansion.
+   */
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  const expandFolder = (key: string) => {
+    setExpandedFolders((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+  };
+
+  const collapseExpandedFolder = (key: string) => {
+    setExpandedFolders((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  };
+
   // Folders that have (or had) chats, persisted on the server so empty
   // folders survive deleting the last chat and are visible from any device.
   const knownFolders = useAppStore((s) => s.knownFolders);
@@ -327,21 +358,25 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
 
-  const openFolderMenu = (e: ReactMouseEvent, cwd: string) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const openFolderMenuAt = (
+    cwd: string,
+    x: number,
+    y: number,
+    anchorTop: number,
+    anchorBottom: number,
+  ) => {
     setMenu(null);
     setConfirmDeleteId(null);
     setConfirmDeleteFolderCwd(null);
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setFolderMenuPos(null);
-    setFolderMenu({
-      cwd,
-      x: e.clientX,
-      y: e.clientY,
-      anchorTop: rect.top,
-      anchorBottom: rect.bottom,
-    });
+    setFolderMenu({ cwd, x, y, anchorTop, anchorBottom });
+  };
+
+  const openFolderMenu = (e: ReactMouseEvent, cwd: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    openFolderMenuAt(cwd, e.clientX, e.clientY, rect.top, rect.bottom);
   };
 
   const commitDeleteFolder = (cwd: string) => {
@@ -383,21 +418,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       </div>
     </div>
   );
-  // Track newly added sessions (e.g. a freshly created chat) so the sidebar
-  // can play a subtle entrance animation on just that row, not the whole list.
-  const prevSessionIds = useRef<Set<string> | null>(null);
-  const enteringSessionIds = useRef<Set<string>>(new Set());
-  const currentSessionIds = sessions.map((s) => s.id);
-  const prevIds = prevSessionIds.current;
-  if (prevIds === null) {
-    // Seed on first render so existing sessions don't animate on mount.
-    prevSessionIds.current = new Set(currentSessionIds);
-  } else {
-    for (const id of currentSessionIds) {
-      if (!prevIds.has(id)) enteringSessionIds.current.add(id);
-    }
-    prevSessionIds.current = new Set(currentSessionIds);
-  }
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
@@ -632,6 +652,23 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const showFolderHeaders = folders.length > 1 || (folders.length === 1 && !!folders[0]?.cwd);
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
   const dateLocale = settings.locale === "en" ? "en-US" : "ru-RU";
+  const recentLimit = settings.chatTreeRecentLimit ?? 0;
+
+  /**
+   * Chats to render for a folder: the newest `chatTreeRecentLimit` unless the
+   * user expanded the folder (or the setting is 0 = show everything). The
+   * active chat is always kept so the tree never hides the one you are in.
+   */
+  const visibleFolderSessions = (folder: (typeof folders)[number]): SessionDto[] => {
+    if (recentLimit <= 0) return folder.sessions;
+    const fkey = folder.cwd || NO_FOLDER_KEY;
+    if (expandedFolders.has(fkey)) return folder.sessions;
+    const head = folder.sessions.slice(0, recentLimit);
+    if (!activeSessionId || head.some((s) => s.id === activeSessionId)) return head;
+    const active = folder.sessions.find((s) => s.id === activeSessionId);
+    if (!active) return head;
+    return folder.sessions.filter((s) => head.includes(s) || s.id === active.id);
+  };
 
   // ── Tree virtualization ────────────────────────────────────────────────────
   // The sidebar can accumulate hundreds of sessions; beyond a threshold the
@@ -640,6 +677,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   type TreeRow =
     | { kind: "folder-head"; key: string; folder: (typeof folders)[number] }
     | { kind: "folder-empty"; key: string; cwd: string }
+    | { kind: "folder-more"; key: string; cwd: string; fkey: string; hidden: number }
+    | { kind: "folder-fewer"; key: string; fkey: string }
     | { kind: "folder-confirm"; key: string; cwd: string }
     | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
@@ -648,9 +687,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
   const treeRows = useMemo<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
-    const noFolder = "__no_folder__";
     for (const folder of folders) {
-      const fkey = folder.cwd || noFolder;
+      const fkey = folder.cwd || NO_FOLDER_KEY;
       if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
         rows.push({ kind: "folder-confirm", key: `fc:${fkey}`, cwd: folder.cwd });
         continue;
@@ -663,9 +701,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         rows.push({ kind: "folder-empty", key: `fe:${fkey}`, cwd: folder.cwd });
         continue;
       }
-      const useTimeGroups = folder.sessions.length > 1;
+      const shown = visibleFolderSessions(folder);
+      const hidden = folder.sessions.length - shown.length;
+      const useTimeGroups = shown.length > 1;
       if (useTimeGroups) {
-        const timeGroups = groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs);
+        const timeGroups = groupSessionsByActivity(shown, dateLocale, t, nowMs);
         for (const group of timeGroups) {
           for (const s of group.sessions) {
             rows.push({
@@ -679,7 +719,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           }
         }
       } else {
-        for (const s of folder.sessions) {
+        for (const s of shown) {
           rows.push({
             kind: "session",
             key: `s:${s.id}`,
@@ -690,9 +730,32 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           });
         }
       }
+      if (hidden > 0) {
+        rows.push({
+          kind: "folder-more",
+          key: `fm:${fkey}`,
+          cwd: folder.cwd,
+          fkey,
+          hidden,
+        });
+      } else if (expandedFolders.has(fkey) && recentLimit > 0 && folder.sessions.length > recentLimit) {
+        rows.push({ kind: "folder-fewer", key: `ff:${fkey}`, fkey });
+      }
     }
     return rows;
-  }, [folders, collapsedFolders, showFolderHeaders, dateLocale, t, nowMs, confirmDeleteFolderCwd]);
+  }, [
+    folders,
+    collapsedFolders,
+    expandedFolders,
+    recentLimit,
+    // The cap always keeps the active chat, so switching chats re-cuts the list.
+    activeSessionId,
+    showFolderHeaders,
+    dateLocale,
+    t,
+    nowMs,
+    confirmDeleteFolderCwd,
+  ]);
 
   const TREE_VIRT_THRESHOLD = 80;
   const treeVirtual = treeRows.length > TREE_VIRT_THRESHOLD;
@@ -708,6 +771,10 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           return 28;
         case "folder-empty":
           return 26;
+        case "folder-more":
+          return 28;
+        case "folder-fewer":
+          return 28;
         case "folder-confirm":
           return 84;
         case "session":
@@ -722,79 +789,12 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     overscan: 8,
   });
 
-  // FLIP-animate tree rows only when session *order* actually changes
-  // (e.g. promote after a finished turn). Layout noise from Stop / status
-  // badges / relative-time text must not trigger motion.
-  const treeOrderKey = useMemo(
-    () =>
-      treeRows
-        .filter((r): r is Extract<TreeRow, { kind: "session" }> => r.kind === "session")
-        .map((r) => r.session.id)
-        .join("\n"),
-    [treeRows],
-  );
-  const treeFlipTops = useRef<Map<string, number>>(new Map());
-  const prevTreeOrderKey = useRef<string | null>(null);
-  useLayoutEffect(() => {
-    const root = sessionListRef.current;
-    if (!root || treeVirtual) {
-      treeFlipTops.current = new Map();
-      prevTreeOrderKey.current = treeOrderKey;
-      return;
-    }
-    const nodes = root.querySelectorAll<HTMLElement>("[data-tree-flip]");
-    const next = new Map<string, number>();
-    nodes.forEach((el) => {
-      const key = el.dataset.treeFlip;
-      if (!key) return;
-      next.set(key, el.getBoundingClientRect().top);
-    });
-
-    const orderChanged =
-      prevTreeOrderKey.current != null && prevTreeOrderKey.current !== treeOrderKey;
-    prevTreeOrderKey.current = treeOrderKey;
-
-    if (!orderChanged) {
-      treeFlipTops.current = next;
-      return;
-    }
-
-    const moving: { el: HTMLElement; dy: number }[] = [];
-    nodes.forEach((el) => {
-      const key = el.dataset.treeFlip;
-      if (!key) return;
-      const top = next.get(key);
-      const prev = treeFlipTops.current.get(key);
-      if (top == null || prev == null) return;
-      const dy = prev - top;
-      // Ignore tiny shifts — only real reorder slides.
-      if (Math.abs(dy) > 6) moving.push({ el, dy });
-    });
-    treeFlipTops.current = next;
-    if (!moving.length) return;
-
-    for (const { el, dy } of moving) {
-      el.style.transition = "none";
-      el.style.transform = `translateY(${dy}px)`;
-    }
-    void root.offsetHeight;
-    for (const { el } of moving) {
-      el.style.transition = "transform 0.48s cubic-bezier(0.22, 1, 0.36, 1)";
-      el.style.transform = "";
-    }
-    const clearId = window.setTimeout(() => {
-      for (const { el } of moving) {
-        el.style.transition = "";
-      }
-    }, 520);
-    return () => window.clearTimeout(clearId);
-  }, [treeRows, treeVirtual, treeOrderKey]);
-
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
     const isActive = s.id === activeSessionId;
     const away = s.id !== activeSessionId;
-    const showRunning = away && (s.status === "running" || s.status === "waiting");
-    const showUnseen = away && !showRunning && Boolean(unseenFinishedTurns[s.id]);
+    // `waiting` means parked on the user (open question / permission prompt):
+    // the row must not claim the agent is working (see sessionRowMark).
+    const mark = sessionRowMark(s.status, away, Boolean(unseenFinishedTurns[s.id]));
     const inPane = chatSplitOn && chatPaneIds.length > 1 && chatPaneIds.includes(s.id);
     const isRenaming = renamingId === s.id;
     const menuOpen = menu?.id === s.id;
@@ -848,12 +848,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         key={s.id}
         data-session-id={s.id}
         data-is-toplevel={!s.cwd ? "true" : "false"}
-        data-tree-flip={`s:${s.id}`}
         className={`${styles.sessionItem} ${isActive || menuOpen ? styles.active : ""} ${
           inPane && !isActive ? styles.sessionInPane : ""
-        } ${
-          menuOpen ? styles.sessionMenuOpen : ""
-        } ${enteringSessionIds.current.has(s.id) ? styles.entering : ""}${isDragging ? ` ${styles.sessionDragging}` : ""}`}
+        } ${menuOpen ? styles.sessionMenuOpen : ""}${isDragging ? ` ${styles.sessionDragging}` : ""}`}
         onPointerDown={!s.cwd ? onSessionPointerDown(s) : (e) => {
           // Open from anywhere on the row — pin/archive/⋯ stop propagation.
           if (e.button !== 0) return;
@@ -901,25 +898,31 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 >
                   {sessionTreeDisplayTitle(s.title, s.provider, t("common.newChat"))}
                 </span>
-                {(showRunning || showUnseen) && (
-                  showRunning ? (
-                    <span
-                      className={styles.sessionRunning}
-                      title={t("chat.sessionRunning")}
-                      aria-label={t("chat.sessionRunning")}
-                    >
-                      <span className={styles.sessionRunningBar} />
-                      <span className={styles.sessionRunningBar} />
-                      <span className={styles.sessionRunningBar} />
-                    </span>
-                  ) : (
-                    <span
-                      className={styles.sessionUnseen}
-                      title={t("chat.sessionUnseen")}
-                      aria-label={t("chat.sessionUnseen")}
-                    />
-                  )
-                )}
+                {mark === "running" ? (
+                  <span
+                    className={styles.sessionRunning}
+                    title={t("chat.sessionRunning")}
+                    aria-label={t("chat.sessionRunning")}
+                  >
+                    <span className={styles.sessionRunningBar} />
+                    <span className={styles.sessionRunningBar} />
+                    <span className={styles.sessionRunningBar} />
+                  </span>
+                ) : mark === "waiting" ? (
+                  // Static ring, deliberately not the animated equalizer: the
+                  // agent is idle until the reader answers.
+                  <span
+                    className={styles.sessionWaiting}
+                    title={t("chat.sessionWaiting")}
+                    aria-label={t("chat.sessionWaiting")}
+                  />
+                ) : mark === "unseen" ? (
+                  <span
+                    className={styles.sessionUnseen}
+                    title={t("chat.sessionUnseen")}
+                    aria-label={t("chat.sessionUnseen")}
+                  />
+                ) : null}
               </span>
             </button>
             {s.provider && showProviderBadge(s.provider) ? (
@@ -931,9 +934,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                     ? ` ${styles.sessionAgentBadgeOff}`
                     : ""
                 }`}
-                title={harnessShortLabel(s.provider)}
+                title={harnessLabel(s.provider, adapters)}
               >
-                {harnessShortLabel(s.provider)}
+                {harnessLabel(s.provider, adapters)}
               </span>
             ) : null}
             <div className={styles.sessionRowActions}>
@@ -1061,97 +1064,140 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     );
   };
 
-  const onFolderPointerDown = (cwd: string) => (e: ReactMouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) => {
-    if (!cwd) return; // Don't drag the top-level "No Folder" container
-    if (e.button !== 0) return;
-    const target = e.target as HTMLElement;
-    if (target.closest("button") || target.closest("input")) return;
+  /** Persist a folder order: optimistic local list, then the server. */
+  const commitFolderOrder = (list: string[]) => {
+    useAppStore.setState({ knownFolders: list });
+    return reorderFolders(list.map((cwd, i) => ({ cwd, sortOrder: i })));
+  };
 
-    const pointerId = (e as React.PointerEvent).pointerId;
-    const startY = e.clientY;
-    const startX = e.clientX;
-    let moved = false;
-    let currentOverCwd: string | null = null;
-    let currentInsertPos: "above" | "below" | null = null;
+  /** Move a folder one slot up/down — the keyboard/menu path to reordering. */
+  const moveFolder = (cwd: string, dir: -1 | 1) => {
+    const list = [...useAppStore.getState().knownFolders];
+    const from = list.indexOf(cwd);
+    const to = from + dir;
+    if (from === -1 || to < 0 || to >= list.length) return;
+    [list[from], list[to]] = [list[to]!, list[from]!];
+    void commitFolderOrder(list);
+  };
 
-    const onMove = (ev: PointerEvent) => {
-      if (ev.pointerId !== pointerId) return;
-      if (!moved) {
-        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
-        moved = true;
-        setDraggingFolderCwd(cwd);
-      }
+  const canMoveFolder = (cwd: string, dir: -1 | 1) => {
+    const list = useAppStore.getState().knownFolders;
+    const to = list.indexOf(cwd) + dir;
+    return to >= 0 && to < list.length;
+  };
 
-      const elements = document.elementsFromPoint(ev.clientX, ev.clientY);
-      let targetCwd: string | null = null;
-      let targetEl: HTMLElement | null = null;
-      for (const el of elements) {
-        const folderEl = el.closest("[data-folder-cwd]") as HTMLElement;
-        if (folderEl) {
-          targetCwd = folderEl.getAttribute("data-folder-cwd");
-          targetEl = folderEl;
-          break;
-        }
-      }
+  /**
+   * Drag a folder group to a new slot. Mouse users grab anywhere on the head;
+   * touch users grab the dedicated grip, because a swipe starting on the head
+   * itself belongs to the list (the grip carries `touch-action: none`).
+   */
+  const onFolderPointerDown =
+    (cwd: string, opts?: { grip?: boolean }) =>
+    (e: ReactMouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) => {
+      if (!cwd) return; // Don't drag the top-level "No Folder" container
+      if (e.button !== 0) return;
+      if (!opts?.grip && (e as React.PointerEvent).pointerType !== "mouse") return;
+      const target = e.target as HTMLElement;
+      if (target.closest("input")) return;
+      if (!opts?.grip && target.closest("button")) return;
 
-      const activeDragCwd = cwd || noFolderKey;
-      if (targetCwd && targetEl && targetCwd !== activeDragCwd) {
-        const rect = targetEl.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        const position = ev.clientY < midY ? "above" : "below";
-        currentOverCwd = targetCwd;
-        currentInsertPos = position;
-        setDragOverFolderCwd(targetCwd);
-        setDragInsertPosition(position);
-      } else {
-        currentOverCwd = null;
-        currentInsertPos = null;
+      const el = e.currentTarget as HTMLElement;
+      const pointerId = (e as React.PointerEvent).pointerId;
+      const startY = e.clientY;
+      const startX = e.clientX;
+      let moved = false;
+      let currentOverCwd: string | null = null;
+      let currentInsertPos: "above" | "below" | null = null;
+
+      const finish = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        setDraggingFolderCwd(null);
         setDragOverFolderCwd(null);
         setDragInsertPosition(null);
-      }
-    };
+      };
 
-    const onUp = async (ev: PointerEvent) => {
-      if (ev.pointerId !== pointerId) return;
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      setDraggingFolderCwd(null);
-      setDragOverFolderCwd(null);
-      setDragInsertPosition(null);
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        if (!moved) {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+          moved = true;
+          setDraggingFolderCwd(cwd);
+        }
 
-      if (moved && currentOverCwd && currentInsertPos) {
-        const realTargetCwd = currentOverCwd === noFolderKey ? "" : currentOverCwd;
-        const list = [...useAppStore.getState().knownFolders];
-        const idxA = list.indexOf(cwd);
-
-        if (idxA !== -1) {
-          // Remove cwd from its old position
-          list.splice(idxA, 1);
-
-          if (realTargetCwd === "") {
-            // We are dragging relative to the "No Folder" top-level container
-            list.push(cwd);
-          } else {
-            let idxB = list.indexOf(realTargetCwd);
-            if (idxB !== -1) {
-              if (currentInsertPos === "above") {
-                list.splice(idxB, 0, cwd);
-              } else {
-                list.splice(idxB + 1, 0, cwd);
-              }
-            }
+        const elements = document.elementsFromPoint(ev.clientX, ev.clientY);
+        let targetCwd: string | null = null;
+        let targetEl: HTMLElement | null = null;
+        for (const node of elements) {
+          const folderEl = node.closest("[data-folder-cwd]") as HTMLElement | null;
+          if (folderEl) {
+            targetCwd = folderEl.getAttribute("data-folder-cwd");
+            targetEl = folderEl;
+            break;
           }
+        }
 
-          useAppStore.setState({ knownFolders: list });
-          const items = list.map((f, i) => ({ cwd: f, sortOrder: i }));
-          await reorderFolders(items);
+        // The dragged folder itself is the one exception to "hover a target".
+        const overCwd = targetCwd === cwd ? null : targetCwd;
+        if (overCwd && targetEl) {
+          const rect = targetEl.getBoundingClientRect();
+          const position = ev.clientY < rect.top + rect.height / 2 ? "above" : "below";
+          currentOverCwd = overCwd;
+          currentInsertPos = position;
+          setDragOverFolderCwd(overCwd);
+          setDragInsertPosition(position);
+        } else {
+          currentOverCwd = null;
+          currentInsertPos = null;
+          setDragOverFolderCwd(null);
+          setDragInsertPosition(null);
+        }
+      };
+
+      /** A cancelled gesture (browser took over the touch) must drop the drag. */
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish();
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        const over = currentOverCwd;
+        const pos = currentInsertPos;
+        finish();
+
+        if (!moved || !over || !pos) return;
+        const realTargetCwd = over === NO_FOLDER_KEY ? "" : over;
+        const list = [...useAppStore.getState().knownFolders];
+        const from = list.indexOf(cwd);
+        if (from === -1) return;
+        list.splice(from, 1);
+
+        if (realTargetCwd === "") {
+          // Dropped on the unfiled chats: folders sort above them, so last.
+          list.push(cwd);
+        } else {
+          const to = list.indexOf(realTargetCwd);
+          if (to === -1) return;
+          list.splice(pos === "above" ? to : to + 1, 0, cwd);
+        }
+        void commitFolderOrder(list);
+      };
+
+      // Touch pointers keep streaming to this element via capture, so the
+      // gesture survives leaving the header row.
+      if (opts?.grip) {
+        try {
+          el.setPointerCapture(pointerId);
+        } catch {
+          // capture is best-effort (pointer may already be gone)
         }
       }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
     };
-
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  };
 
   const onSessionPointerDown = (session: SessionDto) => (e: ReactMouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement>) => {
     if (session.cwd) return; // Only drag top-level sessions
@@ -1217,15 +1263,52 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     window.addEventListener("pointerup", onUp);
   };
 
-  const noFolderKey = "__no_folder__";
   const activeFolderKey = useMemo(() => {
     const active = sessions.find((s) => s.id === activeSessionId);
     if (!active || active.archived) return null;
-    return normalizeCwd(active.cwd) || noFolderKey;
+    return normalizeCwd(active.cwd) || NO_FOLDER_KEY;
   }, [sessions, activeSessionId]);
 
+  /**
+   * Mobile chat tree: the sheet opens at the top of the list, so the chat the
+   * user is actually in (usually far down) had to be hunted for by scrolling.
+   * Scroll the active row into view whenever the tree opens on a phone — once
+   * per open, not on every row re-render (a running turn re-sorts the list).
+   */
+  const autoScrolledForOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (!sidebarOpen || typeof window === "undefined" || window.innerWidth >= 900) {
+      autoScrolledForOpen.current = false;
+      return;
+    }
+    if (autoScrolledForOpen.current || !activeSessionId) return;
+    const index = treeRows.findIndex(
+      (row) => row.kind === "session" && row.session.id === activeSessionId,
+    );
+    // Active chat not in the tree yet (still loading, archived, or its folder
+    // is collapsed) — leave the flag unset so a later render can retry.
+    if (index === -1) return;
+    autoScrolledForOpen.current = true;
+    if (treeVirtual) {
+      // Windowed rows are unmounted, so the element cannot be queried.
+      treeVirtualizer.scrollToIndex(index, { align: "center" });
+      return;
+    }
+    sessionListRef.current
+      ?.querySelector<HTMLElement>(`[data-session-id="${activeSessionId}"]`)
+      ?.scrollIntoView({ block: "center" });
+  }, [
+    sidebarOpen,
+    activeSessionId,
+    treeRows,
+    treeVirtual,
+    treeVirtualizer,
+    collapsedFolders,
+    recentLimit,
+  ]);
+
   const renderFolderHead = (folder: (typeof folders)[number]) => {
-    const fkey = folder.cwd || noFolderKey;
+    const fkey = folder.cwd || NO_FOLDER_KEY;
     const isActiveFolder = activeFolderKey === fkey;
     const isDragging = draggingFolderCwd === folder.cwd;
     const isDragOver = dragOverFolderCwd === fkey;
@@ -1264,6 +1347,30 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <span className={styles.folderLabel}>
           {folderLabel(folder.cwd, t("common.noFolder"))}
         </span>
+        {folder.cwd ? (
+          <span
+            className={styles.folderGrip}
+            role="button"
+            tabIndex={-1}
+            data-folder-grip
+            title={t("chat.reorderFolder")}
+            aria-label={t("chat.reorderFolder")}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              onFolderPointerDown(folder.cwd, { grip: true })(e);
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden>
+              <circle cx="2.5" cy="2.5" r="1.2" />
+              <circle cx="7.5" cy="2.5" r="1.2" />
+              <circle cx="2.5" cy="7" r="1.2" />
+              <circle cx="7.5" cy="7" r="1.2" />
+              <circle cx="2.5" cy="11.5" r="1.2" />
+              <circle cx="7.5" cy="11.5" r="1.2" />
+            </svg>
+          </span>
+        ) : null}
         {folder.cwd ? (
           <button
             type="button"
@@ -1309,6 +1416,25 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             />
           </svg>
         </button>
+        {isTouch && folder.cwd ? (
+          <button
+            type="button"
+            className={styles.folderMenuBtn}
+            title={t("common.chatMenu")}
+            aria-label={t("common.chatMenu")}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              openFolderMenuAt(folder.cwd, rect.left, rect.bottom + 4, rect.top, rect.bottom);
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <circle cx="5" cy="12" r="1.5" />
+              <circle cx="12" cy="12" r="1.5" />
+              <circle cx="19" cy="12" r="1.5" />
+            </svg>
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -1376,6 +1502,26 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         return renderFolderHead(row.folder);
       case "folder-empty":
         return <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>;
+      case "folder-more":
+        return (
+          <button
+            type="button"
+            className={styles.folderMore}
+            onClick={() => expandFolder(row.fkey)}
+          >
+            {t("chat.showMoreChats", { count: row.hidden })}
+          </button>
+        );
+      case "folder-fewer":
+        return (
+          <button
+            type="button"
+            className={styles.folderMore}
+            onClick={() => collapseExpandedFolder(row.fkey)}
+          >
+            {t("chat.showFewerChats")}
+          </button>
+        );
       case "folder-confirm":
         return renderFolderDeleteConfirm(row.cwd);
       case "session":
@@ -1502,7 +1648,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                       row.kind === "session" && row.indent
                         ? `${styles.treeVirtNested}${
                             activeFolderKey != null &&
-                            (normalizeCwd(row.session.cwd) || noFolderKey) === activeFolderKey
+                            (normalizeCwd(row.session.cwd) || NO_FOLDER_KEY) === activeFolderKey
                               ? ` ${styles.treeVirtNestedActive}`
                               : ""
                           }`
@@ -1521,7 +1667,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                           ? 3
                           : row.kind === "folder-head"
                             ? 10
-                            : 8,
+                            : row.kind === "folder-more"
+                              ? 4
+                              : 8,
                     }}
                   >
                     {renderTreeRow(row)}
@@ -1536,18 +1684,24 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
               return renderFolderDeleteConfirm(folder.cwd);
             }
-            const useTimeGroups = folder.sessions.length > 1;
-            const timeGroups = useTimeGroups
-              ? groupSessionsByActivity(folder.sessions, dateLocale, t, nowMs)
-              : null;
-            const fkey = folder.cwd || "__no_folder__";
+            const fkey = folder.cwd || NO_FOLDER_KEY;
             const isActiveFolder = activeFolderKey === fkey;
+            const shown = visibleFolderSessions(folder);
+            const hidden = folder.sessions.length - shown.length;
+            const canCollapse =
+              hidden === 0 &&
+              expandedFolders.has(fkey) &&
+              recentLimit > 0 &&
+              folder.sessions.length > recentLimit;
+            const useTimeGroups = shown.length > 1;
+            const timeGroups = useTimeGroups
+              ? groupSessionsByActivity(shown, dateLocale, t, nowMs)
+              : null;
 
             return (
               <div
                 key={fkey}
                 className={styles.folderGroup}
-                data-tree-flip={`fg:${fkey}`}
               >
                 {showFolderHeaders && renderFolderHead(folder)}
                 {!collapsedFolders.has(fkey) && (
@@ -1567,8 +1721,25 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                         </div>
                       ))
                     ) : (
-                      folder.sessions.map((s) => renderSessionRow(s, true))
+                      shown.map((s) => renderSessionRow(s, true))
                     )}
+                    {hidden > 0 ? (
+                      <button
+                        type="button"
+                        className={styles.folderMore}
+                        onClick={() => expandFolder(fkey)}
+                      >
+                        {t("chat.showMoreChats", { count: hidden })}
+                      </button>
+                    ) : canCollapse ? (
+                      <button
+                        type="button"
+                        className={styles.folderMore}
+                        onClick={() => collapseExpandedFolder(fkey)}
+                      >
+                        {t("chat.showFewerChats")}
+                      </button>
+                    ) : null}
                   </div>
                 )}
               </div>
@@ -1877,6 +2048,46 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 />
               </MenuIcon>
               {t("chat.newInFolder")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canMoveFolder(folderMenu.cwd, -1)}
+              onClick={() => {
+                moveFolder(folderMenu.cwd, -1);
+                setFolderMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 19V5m0 0-6 6m6-6 6 6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.moveFolderUp")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canMoveFolder(folderMenu.cwd, 1)}
+              onClick={() => {
+                moveFolder(folderMenu.cwd, 1);
+                setFolderMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 5v14m0 0-6-6m6 6 6-6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.moveFolderDown")}
             </button>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button
