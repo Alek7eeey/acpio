@@ -785,7 +785,7 @@ export function ModelPicker({
                         ? styles.paramChipFast
                         : chip.kind === "effort"
                           ? styles.paramChipEffort
-                          : ""
+                          : styles.paramChipContext
                     }`}
                     title={chip.title}
                   >

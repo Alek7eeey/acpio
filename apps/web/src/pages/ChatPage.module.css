@@ -3080,7 +3080,10 @@ button.userSlashCmd:focus-visible {
   }
 }
 
-@container chat-composer (max-width: 900px) {
+/* Single-row composer in a narrow column: cap the model trigger so the mic and
+   send buttons keep their room. Below 720px the footer stacks, so the phone
+   layout gets the wider cap from the rule above instead of this one. */
+@container chat-composer (min-width: 721px) and (max-width: 900px) {
   .pillFooterEnd .composerModel {
     max-width: min(168px, 100%);
   }

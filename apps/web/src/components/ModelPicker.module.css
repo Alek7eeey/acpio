@@ -159,6 +159,11 @@
   border-color: var(--border);
 }
 
+/* Context window size — numeric, so keep its digits from jittering. */
+.paramChipContext {
+  font-variant-numeric: tabular-nums;
+}
+
 .triggerParamsSpinner {
   width: 14px;
   height: 14px;
@@ -704,7 +709,10 @@
     max-width: 72px;
   }
 
-  .paramChip {
+  /* Effort is the reasoning level a turn actually runs at, so it keeps its
+     chip on a narrow composer; the secondary Fast/context chips yield instead. */
+  .paramChipFast,
+  .paramChipContext {
     display: none;
   }
 
