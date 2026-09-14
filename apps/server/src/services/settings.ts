@@ -219,6 +219,15 @@ function mergeSettings(raw: unknown): AppSettings {
   ) {
     merged.defaultModelParamsByProvider = {};
   }
+  for (const key of [
+    "modelParamsByProviderModel",
+    "recentModelsByProvider",
+    "favoriteModelsByProvider",
+  ] as const) {
+    if (!merged[key] || typeof merged[key] !== "object" || Array.isArray(merged[key])) {
+      merged[key] = {};
+    }
+  }
   if (
     merged.defaultProvider &&
     merged.defaultModel &&

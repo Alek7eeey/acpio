@@ -28,6 +28,8 @@ import {
   modelForProvider,
   modelForSession,
   modelParamsForSession,
+  resolveParamsForModel,
+  pushRecentModel,
   type AgentMode,
   type MessageDto,
   type MessagePartDto,
@@ -3559,6 +3561,7 @@ function ChatThread() {
   const pageRef = useRef<HTMLDivElement>(null);
   const setGitPanelOpen = useAppStore((s) => s.setGitPanelOpen);
   const saveSettings = useAppStore((s) => s.saveSettings);
+  const toggleFavoriteModel = useAppStore((s) => s.toggleFavoriteModel);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
   const sendPrompt = useCallback(
     (text: string, opts?: { editMessageId?: string; attachments?: PendingAttachment[] }) =>
@@ -4402,7 +4405,12 @@ function ChatThread() {
       });
       return;
     }
-    const migrated = migrateModelParamValues(modelParamsForSession(settings, session), exposed);
+    const pinned = session?.modelParams;
+    const base =
+      pinned && Object.keys(pinned).length
+        ? pinned
+        : resolveParamsForModel(settings, agentProvider, nextModel, exposed);
+    const migrated = migrateModelParamValues(base, exposed);
     const nextParams = Object.keys(migrated).length
       ? migrated
       : Object.fromEntries(
@@ -4417,6 +4425,8 @@ function ChatThread() {
     settings.defaultModelParams,
     settings.defaultModelByProvider,
     settings.defaultModelParamsByProvider,
+    settings.modelParamsByProviderModel,
+    settings.recentModelsByProvider,
     agentProvider,
     activeSession?.id,
     activeSession?.model,
@@ -4429,6 +4439,9 @@ function ChatThread() {
     /** Schema to migrate `nextParams` against — the target model's own params
      *  when a flyout on another row picked values, else the current model's. */
     schema?: ModelParamDto[],
+    /** True only when the user explicitly picked params in a ⋯ flyout: those
+     *  values then belong to this model and are remembered per-model. */
+    explicitParams = false,
   ) => {
     const targetParams = schema ?? modelParams;
     // Alias-aware prune (effort ↔ reasoning). Don't wipe before options load.
@@ -4452,13 +4465,32 @@ function ChatThread() {
           ...s.settings.defaultModelByProvider,
           [provider]: nextModel,
         };
-        settingsPatch.defaultModelParamsByProvider = {
-          ...s.settings.defaultModelParamsByProvider,
-          [provider]: supported,
+        settingsPatch.recentModelsByProvider = {
+          ...s.settings.recentModelsByProvider,
+          [provider]: pushRecentModel(s.settings.recentModelsByProvider?.[provider], nextModel),
         };
+        if (explicitParams) {
+          settingsPatch.modelParamsByProviderModel = {
+            ...s.settings.modelParamsByProviderModel,
+            [provider]: {
+              ...s.settings.modelParamsByProviderModel?.[provider],
+              [nextModel]: supported,
+            },
+          };
+        }
+        // Provider default follows the last known-good value for this model:
+        // explicit picks propagate, plain switches keep prior effort.
+        if (supported && Object.keys(supported).length > 0) {
+          settingsPatch.defaultModelParamsByProvider = {
+            ...s.settings.defaultModelParamsByProvider,
+            [provider]: supported,
+          };
+          if (s.settings.defaultProvider === provider) {
+            settingsPatch.defaultModelParams = supported;
+          }
+        }
         if (s.settings.defaultProvider === provider) {
           settingsPatch.defaultModel = nextModel;
-          settingsPatch.defaultModelParams = supported;
         }
       }
       return {
@@ -4515,6 +4547,22 @@ function ChatThread() {
             at: Date.now(),
           });
           setModelParamValues((prev) => migrateModelParamValues(prev, nextModelParams));
+          if (explicitParams && Object.keys(supported).length > 0) {
+            // The agent confirmed the pick — persist it for this model so a
+            // later switch back restores exactly this effort.
+            const cur = useAppStore.getState().settings;
+            void api
+              .updateSettings({
+                modelParamsByProviderModel: {
+                  ...cur.modelParamsByProviderModel,
+                  [agentProvider]: {
+                    ...cur.modelParamsByProviderModel?.[agentProvider],
+                    [nextModel]: supported,
+                  },
+                },
+              })
+              .catch(() => {});
+          }
           return nextModelParams;
         }
       } catch (err) {
@@ -4525,18 +4573,39 @@ function ChatThread() {
       }
     } else {
       try {
+        const cur = useAppStore.getState().settings;
         await saveSettings({
           defaultModelByProvider: {
-            ...settings.defaultModelByProvider,
+            ...cur.defaultModelByProvider,
             [agentProvider]: nextModel,
           },
-          defaultModelParamsByProvider: {
-            ...settings.defaultModelParamsByProvider,
-            [agentProvider]: supported,
+          recentModelsByProvider: {
+            ...cur.recentModelsByProvider,
+            [agentProvider]: pushRecentModel(cur.recentModelsByProvider?.[agentProvider], nextModel),
           },
-          ...(settings.defaultProvider === agentProvider
-            ? { defaultModel: nextModel, defaultModelParams: supported }
+          ...(explicitParams
+            ? {
+                modelParamsByProviderModel: {
+                  ...cur.modelParamsByProviderModel,
+                  [agentProvider]: {
+                    ...cur.modelParamsByProviderModel?.[agentProvider],
+                    [nextModel]: supported,
+                  },
+                },
+              }
             : {}),
+          ...(Object.keys(supported).length > 0
+            ? {
+                defaultModelParamsByProvider: {
+                  ...cur.defaultModelParamsByProvider,
+                  [agentProvider]: supported,
+                },
+                ...(cur.defaultProvider === agentProvider
+                  ? { defaultModelParams: supported }
+                  : {}),
+              }
+            : {}),
+          ...(cur.defaultProvider === agentProvider ? { defaultModel: nextModel } : {}),
         });
       } catch (err) {
         rollbackModelSelection();
@@ -4612,9 +4681,12 @@ function ChatThread() {
   }, [agentProvider, model, activeSession?.id, loadParamsForModel]);
 
   const onModelChange = async (value: string) => {
-    // Don't carry Fast/Effort from the previous model — they often aren't valid
-    // for the new one and used to leave the ACP session broken.
-    await applyModelSelection(value, {});
+    // Effort is sequential: provider's last value is the base, an explicit
+    // per-model pick wins. Never carry the *previous* model's raw values —
+    // they often aren't valid for the new one and used to break the session.
+    const schema = paramsByModel[value] ?? (value === model ? modelParams : []);
+    const resolved = resolveParamsForModel(settings, agentProvider, value, schema);
+    await applyModelSelection(value, resolved, schema.length ? schema : undefined);
     void loadParamsForModel(value);
   };
 
@@ -4681,7 +4753,7 @@ function ChatThread() {
     // The ⋯ flyout belongs to `target`'s row: apply against target's own schema
     // and switch the session to it, so the pick actually reaches the agent.
     const schema = target === model ? modelParams : (paramsByModel[target] ?? modelParams);
-    const fresh = await applyModelSelection(target, next, schema);
+    const fresh = await applyModelSelection(target, next, schema, true);
     if (fresh?.length) {
       commitParams(target, fresh);
       if (target === modelRef.current) {
@@ -5910,6 +5982,9 @@ function ChatThread() {
                   onParamsOpen={(v) => loadParamsForModel(v)}
                   onParamsChange={(target, next) => void onParamsChange(target, next)}
                   showParamsMenu
+                  recentModels={agentProvider ? settings.recentModelsByProvider?.[agentProvider] : undefined}
+                  favoriteModels={agentProvider ? settings.favoriteModelsByProvider?.[agentProvider] : undefined}
+                  onToggleFavorite={(v) => agentProvider && toggleFavoriteModel(agentProvider, v)}
                 />
                 )}
 

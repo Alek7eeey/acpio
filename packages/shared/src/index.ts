@@ -592,6 +592,12 @@ export interface AppSettings {
   defaultModelByProvider: Partial<Record<AgentProvider, string>>;
   /** Parameter picker values per harness. */
   defaultModelParamsByProvider: Partial<Record<AgentProvider, Record<string, string>>>;
+  /** Explicitly picked params per model (provider → model → params); overrides the provider default. */
+  modelParamsByProviderModel: Partial<Record<AgentProvider, Record<string, Record<string, string>>>>;
+  /** Last used models per harness, newest first. */
+  recentModelsByProvider: Partial<Record<AgentProvider, string[]>>;
+  /** Starred models per harness (right-click in the picker). */
+  favoriteModelsByProvider: Partial<Record<AgentProvider, string[]>>;
   /** User-defined ACP agents (Settings → Connect) — registered at runtime. */
   customAgents: CustomAgentSpec[];
   cursorCommand: string;
@@ -714,6 +720,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultModelParams: {},
   defaultModelByProvider: {},
   defaultModelParamsByProvider: {},
+  modelParamsByProviderModel: {},
+  recentModelsByProvider: {},
+  favoriteModelsByProvider: {},
   customAgents: [],
   cursorCommand: "agent",
   cursorArgs: ["acp"],
@@ -803,6 +812,45 @@ export function modelParamsForSession(
   const pinned = session?.modelParams;
   if (pinned && Object.keys(pinned).length) return pinned;
   return modelParamsForProvider(settings, session?.provider);
+}
+
+/** Cap for the recent-models history kept per harness. */
+export const RECENT_MODELS_LIMIT = 8;
+
+/** Explicitly picked params for one model, if the user ever set them. */
+export function savedModelParamsForModel(
+  settings: AppSettings,
+  provider: AgentProvider | null | undefined,
+  model: string,
+): Record<string, string> | undefined {
+  if (!provider || !model) return undefined;
+  return settings.modelParamsByProviderModel?.[provider]?.[model];
+}
+
+/**
+ * Params a model should run with when it gets selected: provider default first,
+ * explicitly picked per-model values on top, both alias-migrated onto the
+ * schema the agent currently exposes for that model.
+ */
+export function resolveParamsForModel(
+  settings: AppSettings,
+  provider: AgentProvider | null | undefined,
+  model: string,
+  exposed: Array<{ id: string; options?: Array<{ value: string }>; currentValue?: string }>,
+): Record<string, string> {
+  const base = migrateModelParamValues(modelParamsForProvider(settings, provider), exposed);
+  const explicit = savedModelParamsForModel(settings, provider, model);
+  if (!explicit || Object.keys(explicit).length === 0) return base;
+  const merged = { ...base, ...migrateModelParamValues(explicit, exposed) };
+  return merged;
+}
+
+/** Push `model` to the head of a per-provider model list, deduped and capped. */
+export function pushRecentModel(list: string[] | undefined, model: string): string[] {
+  const trimmed = model.trim();
+  if (!trimmed) return list ?? [];
+  const rest = (list ?? []).filter((m) => m !== trimmed);
+  return [trimmed, ...rest].slice(0, RECENT_MODELS_LIMIT);
 }
 
 /** Billing / credits failure from OMP when a model cannot be used. */

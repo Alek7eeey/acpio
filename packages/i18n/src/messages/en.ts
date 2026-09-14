@@ -718,6 +718,10 @@ export const en = {
     yes: "Yes",
     no: "No",
     provider: "Provider",
+    recent: "Recent",
+    favorites: "Favorites",
+    favorite: "Add to favorites",
+    unfavorite: "Remove from favorites",
   },
   errors: {
     usernameRequired: "Enter a username",

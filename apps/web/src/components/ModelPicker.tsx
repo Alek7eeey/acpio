@@ -240,6 +240,12 @@ type ModelPickerProps = {
   className?: string;
   disabled?: boolean;
   loading?: boolean;
+  /** Recent models per harness, newest first (settings.recentModelsByProvider). */
+  recentModels?: string[];
+  /** Starred models per harness (settings.favoriteModelsByProvider). */
+  favoriteModels?: string[];
+  /** Right-click on a row → add/remove from favorites. Omit to hide the menu. */
+  onToggleFavorite?: (modelValue: string) => void;
 };
 
 export function ModelPicker({
@@ -260,6 +266,9 @@ export function ModelPicker({
   className,
   disabled = false,
   loading = false,
+  recentModels,
+  favoriteModels,
+  onToggleFavorite,
 }: ModelPickerProps) {
   const t = useT();
   const paramLabels = { yes: t("models.yes"), no: t("models.no") };
@@ -327,6 +336,29 @@ export function ModelPicker({
       (m) => m.name.toLowerCase().includes(q) || m.value.toLowerCase().includes(q),
     );
   }, [options, q]);
+  /** Rows for the pinned sections, in settings order; unknown ids are dropped. */
+  const pickSection = (ids: string[] | undefined) => {
+    if (!ids || ids.length === 0) return [];
+    const byId: Record<string, (typeof options)[number]> = {};
+    for (const m of options) byId[m.value] = m;
+    return ids.map((id) => byId[id]).filter(Boolean);
+  };
+  /** Pinned sections show only without an active filter — search hits the full list. */
+  const favoriteOptions = useMemo(
+    () => (q ? [] : pickSection(favoriteModels)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [favoriteModels, options, q],
+  );
+  const recentOptions = useMemo(() => {
+    if (q) return [];
+    const favs = favoriteModels ?? [];
+    return pickSection(recentModels).filter((m) => !favs.includes(m.value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recentModels, favoriteModels, options, q]);
+  /** Right-click menu open for this model value, anchored at the cursor. */
+  const [ctxMenu, setCtxMenu] = useState<{ modelValue: string; x: number; y: number } | null>(
+    null,
+  );
   const paramSummary = activeParamSummary(visibleParams, resolvedParams, paramLabels, effortPrefix, contextPrefix);
   const paramChips = useMemo(() => {
     const fromSchema = activeParamChips(
@@ -593,6 +625,24 @@ export function ModelPicker({
       document.removeEventListener("keydown", onKey);
     };
   }, [open, paramsFor]);
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onDoc = (e: globalThis.MouseEvent) => {
+      const t = e.target as Node;
+      // Clicks inside the context menu are handled by its own buttons.
+      if (t instanceof Element && t.closest("[data-model-ctx-menu]")) return;
+      setCtxMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxMenu(null);
+    };
+    document.addEventListener("mousedown", onDoc, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ctxMenu]);
 
   // After load: if the flyout's model has nothing to configure — close it.
   useEffect(() => {
@@ -721,6 +771,102 @@ export function ModelPicker({
   const rowParamsBusy = (modelValue: string) =>
     (paramsLoading && paramsLoadingFor === modelValue) ||
     (localParamsBusy && paramsFor === modelValue);
+  const renderModelRow = (m: (typeof options)[number], key?: string) => {
+    const selected = m.value === model;
+    const rowActive = paramsFor === m.value;
+    return (
+      <div
+        key={key ?? m.value}
+        ref={(el) => {
+          if (el) rowRefs.current.set(m.value, el);
+          else rowRefs.current.delete(m.value);
+        }}
+        className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
+          rowActive ? styles.modelRowExpanded : ""
+        }`}
+        onContextMenu={
+          onToggleFavorite
+            ? (e) => {
+                e.preventDefault();
+                setParamsFor(null);
+                setCtxMenu({ modelValue: m.value, x: e.clientX, y: e.clientY });
+              }
+            : undefined
+        }
+      >
+        <button
+          type="button"
+          role="option"
+          aria-selected={selected}
+          title={[m.name, m.provider].filter(Boolean).join(" · ")}
+          className={styles.modelRowMain}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            onChange(m.value);
+            closeParams();
+            setOpen(false);
+          }}
+        >
+          <span className={styles.modelOptionName}>
+            {(favoriteModels ?? []).includes(m.value) ? (
+              <svg
+                className={styles.rowStar}
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden
+              >
+                <path d="M12 2.5l2.9 6.2 6.6.7-4.9 4.5 1.3 6.6L12 17.2 6.1 20.5l1.3-6.6-4.9-4.5 6.6-.7z" />
+              </svg>
+            ) : null}
+            {m.name}
+          </span>
+          {m.provider ? (
+            <span
+              className={styles.modelOptionProvider}
+              title={`${t("models.provider")}: ${m.provider}`}
+            >
+              {m.provider}
+            </span>
+          ) : null}
+        </button>
+        {showMore && (
+          <button
+            type="button"
+            ref={(el) => {
+              if (el) moreBtnRefs.current.set(m.value, el);
+              else moreBtnRefs.current.delete(m.value);
+            }}
+            className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
+            aria-label={paramsLabel || t("common.params")}
+            aria-expanded={rowActive}
+            aria-haspopup="dialog"
+            title={paramsLabel || t("common.params")}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (paramsFor === m.value) {
+                closeParams();
+                return;
+              }
+              void openParamsFor(m.value, e.currentTarget);
+            }}
+          >
+            {rowParamsBusy(m.value) ? (
+              <span className={`${styles.paramsSpinner} ${styles.rowMoreSpinner}`} aria-hidden />
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <circle cx="5" cy="12" r="1.7" />
+                <circle cx="12" cy="12" r="1.7" />
+                <circle cx="19" cy="12" r="1.7" />
+              </svg>
+            )}
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -887,79 +1033,19 @@ export function ModelPicker({
               <div className={styles.modelEmpty}>{t("common.modelSearchEmpty")}</div>
             )}
             <div className={styles.modelList} ref={listRef}>
-              {visibleOptions.map((m) => {
-                const selected = m.value === model;
-                const rowActive = paramsFor === m.value;
-                return (
-                  <div
-                    key={m.value}
-                    ref={(el) => {
-                      if (el) rowRefs.current.set(m.value, el);
-                      else rowRefs.current.delete(m.value);
-                    }}
-                    className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
-                      rowActive ? styles.modelRowExpanded : ""
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      title={[m.name, m.provider].filter(Boolean).join(" · ")}
-                      className={styles.modelRowMain}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        onChange(m.value);
-                        closeParams();
-                        setOpen(false);
-                      }}
-                    >
-                      <span className={styles.modelOptionName}>{m.name}</span>
-                      {m.provider ? (
-                        <span
-                          className={styles.modelOptionProvider}
-                          title={`${t("models.provider")}: ${m.provider}`}
-                        >
-                          {m.provider}
-                        </span>
-                      ) : null}
-                    </button>
-                    {showMore && (
-                      <button
-                        type="button"
-                        ref={(el) => {
-                          if (el) moreBtnRefs.current.set(m.value, el);
-                          else moreBtnRefs.current.delete(m.value);
-                        }}
-                        className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
-                        aria-label={paramsLabel || t("common.params")}
-                        aria-expanded={rowActive}
-                        aria-haspopup="dialog"
-                        title={paramsLabel || t("common.params")}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (paramsFor === m.value) {
-                            closeParams();
-                            return;
-                          }
-                          void openParamsFor(m.value, e.currentTarget);
-                        }}
-                      >
-                        {rowParamsBusy(m.value) ? (
-                          <span className={`${styles.paramsSpinner} ${styles.rowMoreSpinner}`} aria-hidden />
-                        ) : (
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                            <circle cx="5" cy="12" r="1.7" />
-                            <circle cx="12" cy="12" r="1.7" />
-                            <circle cx="19" cy="12" r="1.7" />
-                          </svg>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+              {favoriteOptions.length > 0 ? (
+                <>
+                  <div className={styles.sectionHead}>{t("models.favorites")}</div>
+                  {favoriteOptions.map((m) => renderModelRow(m, `fav-${m.value}`))}
+                </>
+              ) : null}
+              {recentOptions.length > 0 ? (
+                <>
+                  <div className={styles.sectionHead}>{t("models.recent")}</div>
+                  {recentOptions.map((m) => renderModelRow(m, `rec-${m.value}`))}
+                </>
+              ) : null}
+              {visibleOptions.map((m) => renderModelRow(m))}
             </div>
           </div>,
           document.body,
@@ -978,6 +1064,36 @@ export function ModelPicker({
           </div>,
           document.body,
         )}
+
+      {ctxMenu && onToggleFavorite
+        ? createPortal(
+            <div
+              data-model-ctx-menu
+              className={styles.ctxMenu}
+              style={{
+                top: Math.min(ctxMenu.y, window.innerHeight - 90),
+                left: Math.min(ctxMenu.x, window.innerWidth - 190),
+              }}
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.ctxMenuItem}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleFavorite(ctxMenu.modelValue);
+                  setCtxMenu(null);
+                }}
+              >
+                {(favoriteModels ?? []).includes(ctxMenu.modelValue)
+                  ? t("models.unfavorite")
+                  : t("models.favorite")}
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

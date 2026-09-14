@@ -741,6 +741,10 @@ export const ru = {
     yes: "Да",
     no: "Нет",
     provider: "Провайдер",
+    recent: "Недавние",
+    favorites: "Избранное",
+    favorite: "В избранное",
+    unfavorite: "Убрать из избранного",
   },
   errors: {
     usernameRequired: "Укажите имя пользователя",

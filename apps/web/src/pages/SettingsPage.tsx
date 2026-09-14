@@ -28,6 +28,7 @@ import {
   parseMcpRemoteConfig,
   isMcpServerConfigured,
   mcpServerEndpoint,
+  pushRecentModel,
 } from "@acpio/shared";
 import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
@@ -1234,27 +1235,37 @@ export function SettingsPage() {
     let savePatch: Partial<AppSettings> | null = null;
     setForm((prev) => {
       const defaultModelByProvider = { ...prev.defaultModelByProvider, [provider]: value };
-      const defaultModelParamsByProvider = {
-        ...prev.defaultModelParamsByProvider,
-        [provider]: params,
+      const recentModelsByProvider = {
+        ...prev.recentModelsByProvider,
+        [provider]: pushRecentModel(prev.recentModelsByProvider?.[provider], value),
       };
+      // Params picked from the ⋯ flyout belong to this model explicitly; a plain
+      // model switch passes {} and must not touch either store.
+      const hasParams = Object.keys(params).length > 0;
+      const defaultModelParamsByProvider = hasParams
+        ? { ...prev.defaultModelParamsByProvider, [provider]: params }
+        : prev.defaultModelParamsByProvider;
+      const modelParamsByProviderModel = hasParams
+        ? {
+            ...prev.modelParamsByProviderModel,
+            [provider]: { ...prev.modelParamsByProviderModel?.[provider], [value]: params },
+          }
+        : prev.modelParamsByProviderModel;
       savePatch = {
         defaultModelByProvider,
-        defaultModelParamsByProvider,
-        ...(prev.defaultProvider === provider
-          ? { defaultModel: value, defaultModelParams: params }
-          : {}),
+        recentModelsByProvider,
+        ...(hasParams ? { defaultModelParamsByProvider, modelParamsByProviderModel } : {}),
+        ...(prev.defaultProvider === provider && hasParams
+          ? { defaultModelParams: params }
+          : prev.defaultProvider === provider
+            ? { defaultModel: value }
+            : {}),
       };
-      return {
-        ...prev,
-        defaultModelByProvider,
-        defaultModelParamsByProvider,
-        ...(prev.defaultProvider === provider
-          ? { defaultModel: value, defaultModelParams: params }
-          : {}),
-      };
+      return { ...prev, ...savePatch };
     });
     if (savePatch) {
+      // Model picks apply live, exactly like the chat composer's picker —
+      // they are defaults, not part of the Save-gated form.
       void saveSettings(savePatch).finally(() => {
         delete pendingModelPickRef.current[provider];
       });
@@ -2292,6 +2303,11 @@ export function SettingsPage() {
                         placement="down"
                         variant="block"
                         loading={modelsLoading && models.length === 0}
+                        recentModels={form.recentModelsByProvider?.[item.id]}
+                        favoriteModels={form.favoriteModelsByProvider?.[item.id]}
+                        onToggleFavorite={(value) =>
+                          useAppStore.getState().toggleFavoriteModel(item.id, value)
+                        }
                       />
                     </SettingRow>
                   );

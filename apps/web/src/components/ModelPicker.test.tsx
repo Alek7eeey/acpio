@@ -321,4 +321,60 @@ describe("ModelPicker", () => {
     expect(await screen.findByText("Ultra")).toBeTruthy();
     expect(dialog.textContent).not.toContain("Загрузка настроек модели…");
   });
+
+  it("renders Recent and Favorites sections above the full list", async () => {
+    const user = userEvent.setup();
+    renderPicker({ recentModels: ["deepseek"], favoriteModels: ["claude"] });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    expect(await screen.findByText("Избранное")).toBeTruthy();
+    expect(screen.getByText("Недавние")).toBeTruthy();
+    // Duplicated ids: favorited claude also stays in the main list. The star
+    // marker must appear on every row showing that model, nowhere else.
+    const starred = screen
+      .getAllByRole("option")
+      .filter((el) => el.querySelector("svg") && el.textContent?.includes("Claude Sonnet"));
+    expect(starred.length).toBeGreaterThan(0);
+    const unstarredDeepSeek = screen
+      .getAllByRole("option")
+      .filter((el) => !el.querySelector("svg") && el.textContent?.includes("DeepSeek R1"));
+    expect(unstarredDeepSeek.length).toBeGreaterThan(0);
+  });
+
+  it("hides pinned sections while a search filter is active", async () => {
+    const user = userEvent.setup();
+    renderPicker({ recentModels: ["deepseek"], favoriteModels: ["claude"] });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    await screen.findByText("Избранное");
+    await user.type(screen.getByRole("textbox"), "dee");
+    expect(screen.queryByText("Избранное")).toBeNull();
+    expect(screen.queryByText("Недавние")).toBeNull();
+    expect(screen.getAllByRole("option", { name: /DeepSeek R1/ })).toHaveLength(1);
+  });
+
+  it("right-click on a row opens the favorites menu and toggles it", async () => {
+    const user = userEvent.setup();
+    const onToggleFavorite = vi.fn();
+    renderPicker({ onToggleFavorite, favoriteModels: [] });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    const row = await screen.findByRole("option", { name: /DeepSeek R1/ });
+    await user.pointer({ target: row, keys: "[MouseRight]" });
+    const item = await screen.findByRole("menuitem", { name: "В избранное" });
+    await user.click(item);
+    expect(onToggleFavorite).toHaveBeenCalledWith("deepseek");
+    expect(screen.queryByRole("menuitem")).toBeNull();
+  });
+
+  it("right-click on a favorite offers removal instead", async () => {
+    const user = userEvent.setup();
+    const onToggleFavorite = vi.fn();
+    renderPicker({ onToggleFavorite, favoriteModels: ["claude"] });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    // The favorite row appears twice (section + main list); either may be clicked.
+    const rows = screen
+      .getAllByRole("option")
+      .filter((el) => el.textContent?.includes("Claude Sonnet"));
+    await user.pointer({ target: rows[0], keys: "[MouseRight]" });
+    await user.click(await screen.findByRole("menuitem", { name: "Убрать из избранного" }));
+    expect(onToggleFavorite).toHaveBeenCalledWith("claude");
+  });
 });

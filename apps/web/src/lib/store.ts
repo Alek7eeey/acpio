@@ -323,6 +323,8 @@ type AppState = {
     result: Record<string, unknown>,
   ) => Promise<void>;
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
+  /** Add/remove a model from the per-harness favorites list (right-click in the picker). */
+  toggleFavoriteModel: (provider: AgentProvider, model: string) => void;
   rememberModelsCatalog: (catalog: ModelsCatalog) => void;
   ensureModels: (
     provider: AgentProvider,
@@ -3115,6 +3117,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     const pending = get().pendingQuestion;
     if (!pending) return;
     await get().answerQuestionFor(pending.sessionId, pending.requestId, result);
+  },
+
+  toggleFavoriteModel(provider, model) {
+    const trimmed = model.trim();
+    if (!trimmed) return;
+    const current = get().settings;
+    const list = current.favoriteModelsByProvider?.[provider] ?? [];
+    const next = list.includes(trimmed) ? list.filter((m) => m !== trimmed) : [trimmed, ...list];
+    // Optimistic: the picker re-renders instantly; a failed save is rolled back.
+    set({
+      settings: {
+        ...current,
+        favoriteModelsByProvider: { ...current.favoriteModelsByProvider, [provider]: next },
+      },
+    });
+    void api
+      .updateSettings({
+        favoriteModelsByProvider: { ...current.favoriteModelsByProvider, [provider]: next },
+      })
+      .catch(() => {
+        set({ settings: current });
+      });
   },
 
   async saveSettings(patch) {

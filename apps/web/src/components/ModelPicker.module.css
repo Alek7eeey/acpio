@@ -778,3 +778,50 @@
     max-height: min(55vh, 460px);
   }
 }
+
+.sectionHead {
+  padding: 6px 10px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.rowStar {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -1px;
+  color: var(--accent);
+}
+
+.ctxMenu {
+  position: fixed;
+  z-index: 1300;
+  min-width: 170px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  animation: rise 0.12s ease;
+}
+
+.ctxMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ctxMenuItem:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}

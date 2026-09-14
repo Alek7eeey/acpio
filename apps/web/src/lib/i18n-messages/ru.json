@@ -907,7 +907,11 @@
     "minimal": "Minimal",
     "yes": "Да",
     "no": "Нет",
-    "provider": "Провайдер"
+    "provider": "Провайдер",
+    "recent": "Недавние",
+    "favorites": "Избранное",
+    "favorite": "В избранное",
+    "unfavorite": "Убрать из избранного"
   },
   "errors": {
     "usernameRequired": "Укажите имя пользователя",
