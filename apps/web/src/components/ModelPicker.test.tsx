@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
@@ -399,5 +399,52 @@ describe("ModelPicker", () => {
     const favRow = rows[0];
     // The ref lives on the wrapper div; accept either the row or its wrapper.
     expect(last === favRow || last?.contains(favRow)).toBe(true);
+  });
+
+  it("opens the ⋯ flyout from a favorites row while the general-list copy is scrolled away", async () => {
+    const user = userEvent.setup();
+    const effort = {
+      id: "effort",
+      name: "Effort",
+      currentValue: "high",
+      options: [
+        { value: "low", name: "Low" },
+        { value: "high", name: "High" },
+      ],
+    };
+    renderPicker({
+      showParamsMenu: true,
+      favoriteModels: ["claude"],
+      params: [effort],
+      paramsByModel: { claude: [effort] },
+      onParamsOpen: () => {},
+    });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    // Rows in DOM order: claude (Избранное), gpt-4o, claude (general list), deepseek.
+    const rows = await screen.findAllByRole("option");
+    const favRow = rows[0].parentElement as HTMLElement;
+    const mainRow = rows[2].parentElement as HTMLElement;
+    const list = favRow.parentElement as HTMLElement;
+    const box = (top: number) =>
+      ({
+        top,
+        left: 100,
+        bottom: top + 30,
+        right: 300,
+        width: 200,
+        height: 30,
+        x: 100,
+        y: top,
+      }) as DOMRect;
+    // jsdom reports zero rects, so the picker's "⋯ scrolled out of the list"
+    // check is inert here: give the list a viewport and push the general-list
+    // copy far below it, the way a long model list looks in the browser.
+    list.getBoundingClientRect = () => box(100);
+    within(favRow).getByRole("button", { name: "Effort" }).getBoundingClientRect = () => box(120);
+    within(mainRow).getByRole("button", { name: "Effort" }).getBoundingClientRect = () => box(1400);
+
+    await user.click(within(favRow).getByRole("button", { name: "Effort" }));
+
+    expect(await screen.findByRole("dialog")).toBeTruthy();
   });
 });

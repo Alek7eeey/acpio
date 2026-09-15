@@ -289,7 +289,10 @@ export function ModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const paramsPopupRef = useRef<HTMLDivElement>(null);
-  const moreBtnRefs = useRef(new Map<string, HTMLButtonElement>());
+  /** ⋯ button the open flyout hangs off. A favorited model renders twice
+   *  (Избранное + general list), so a value-keyed lookup can resolve to the
+   *  other copy and anchor — or drop — the flyout on the wrong row. */
+  const paramsBtnRef = useRef<HTMLButtonElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const paramsReqRef = useRef(0);
   const resolvedParams = useMemo(
@@ -389,6 +392,7 @@ export function ModelPicker({
 
   const closeParams = () => {
     paramsReqRef.current += 1;
+    paramsBtnRef.current = null;
     setParamsFor(null);
     setParamsAnchor(null);
     setMenuAnchor(null);
@@ -401,8 +405,12 @@ export function ModelPicker({
       setMenuAnchor(null);
       return;
     }
-    const btn = moreBtnRefs.current.get(paramsFor);
-    if (!btn) return;
+    const btn = paramsBtnRef.current;
+    // Row unmounted under the open flyout (its section collapsed) — nothing to hang on to.
+    if (!btn || !btn.isConnected) {
+      closeParams();
+      return;
+    }
     const r = btn.getBoundingClientRect();
     const clipEl = listRef.current ?? menuRef.current;
     const clip = clipEl?.getBoundingClientRect();
@@ -652,6 +660,7 @@ export function ModelPicker({
 
   const openParamsFor = async (modelValue: string, btn: HTMLButtonElement) => {
     const req = ++paramsReqRef.current;
+    paramsBtnRef.current = btn;
     const r = btn.getBoundingClientRect();
     setParamsAnchor({ top: r.top, left: r.left, bottom: r.bottom, right: r.right });
     const menu = menuRef.current?.getBoundingClientRect();
@@ -843,10 +852,6 @@ export function ModelPicker({
         {showMore && (
           <button
             type="button"
-            ref={(el) => {
-              if (el) moreBtnRefs.current.set(m.value, el);
-              else moreBtnRefs.current.delete(m.value);
-            }}
             className={`${styles.rowMore} ${rowActive ? styles.rowMoreOpen : ""}`}
             aria-label={paramsLabel || t("common.params")}
             aria-expanded={rowActive}
