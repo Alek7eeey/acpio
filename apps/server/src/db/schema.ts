@@ -46,7 +46,7 @@ export const sessions = sqliteTable("sessions", {
     .$defaultFn(() => []),
   /** Latest ACP-reported token/context usage (null until/if reported). */
   usage: text("usage", { mode: "json" }),
-  /** Model chosen in this chat; empty means follow settings. */
+  /** Model pinned to this chat at creation; empty means follow settings (legacy rows). */
   model: text("model").notNull().default(""),
   modelParams: text("model_params", { mode: "json" })
     .notNull()

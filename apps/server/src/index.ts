@@ -8,7 +8,7 @@ import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
-import { reconcileStaleSessions } from "./services/sessions.js";
+import { pinResolvedSessionModels, reconcileStaleSessions } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
@@ -100,6 +100,17 @@ async function main() {
     }
   } catch (err) {
     console.error("[sessions] reconcile failed", err);
+  }
+
+  // Pin the starting model of chats created before creation-time pinning, so
+  // they stop following the global default (and its prompt-cache churn).
+  try {
+    const pinned = await pinResolvedSessionModels();
+    if (pinned > 0) {
+      console.log(`[sessions] pinned the resolved model on ${pinned} existing chat(s)`);
+    }
+  } catch (err) {
+    console.error("[sessions] model pin failed", err);
   }
 }
 

@@ -3289,8 +3289,15 @@ export async function syncSessionAgent(
   const rt = runtimes.get(sessionId);
   if (rt) resetAcpClient(rt);
   // The stored ACP session belongs to the old provider — a resume would load
-  // the wrong agent's context.
-  const updated = await updateSession(sessionId, { provider, acpSessionId: null });
+  // the wrong agent's context. The pinned model belongs to the old harness
+  // too: re-pin it to the new provider's default instead of leaving a model
+  // id the new agent does not know.
+  const updated = await updateSession(sessionId, {
+    provider,
+    acpSessionId: null,
+    model: modelForProvider(settings, provider),
+    modelParams: modelParamsForProvider(settings, provider),
+  });
   return updated
     ? { ...detail, ...updated, messages: detail.messages }
     : { ...detail, provider };

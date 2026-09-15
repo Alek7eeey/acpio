@@ -11,7 +11,11 @@ import type {
   SessionStatus,
   AcpUsage,
 } from "@acpio/shared";
-import { SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import {
+  modelForProvider,
+  modelParamsForProvider,
+  SHELL_SESSION_PROVIDER,
+} from "@acpio/shared";
 import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
@@ -166,12 +170,24 @@ export async function createSession(input: {
   mode: AgentMode;
   themeId?: string | null;
   model?: string;
+  modelParams?: Record<string, string>;
   acpSessionId?: string;
 }): Promise<SessionDto> {
   const siblings = await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
   const settings = await getSettings();
   const cwd = normalizeCwd(input.cwd);
+  // Pin the model this chat starts on. An empty `model` means "follow the
+  // settings default", which silently follows every pick made in ANY chat: the
+  // next message then boots a different model on the same ACP session, wiping
+  // the prompt cache and (for some harnesses) the agent's context. Only an
+  // explicit pick inside this chat may change it afterwards (setSessionModel).
+  const pinnedModel =
+    input.model?.trim() ||
+    (input.provider === SHELL_SESSION_PROVIDER ? "" : modelForProvider(settings, input.provider));
+  const pinnedParams =
+    input.modelParams ??
+    (pinnedModel ? modelParamsForProvider(settings, input.provider) : {});
   const defaultTitle =
     input.provider === SHELL_SESSION_PROVIDER
       ? path.basename(cwd) || defaultSessionTitle(settings.locale)
@@ -187,7 +203,8 @@ export async function createSession(input: {
       status: "idle",
       themeId: input.themeId ?? null,
       sortOrder,
-      ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+      ...(pinnedModel ? { model: pinnedModel } : {}),
+      ...(Object.keys(pinnedParams).length ? { modelParams: pinnedParams } : {}),
       ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
     })
     .returning();
@@ -516,6 +533,32 @@ const STUCK_TOOL_STATUSES = new Set(["pending", "in_progress", "running"]);
 
 const INTERRUPT_NOTE =
   "Сервер был перезапущен — этот ход прерван. Отправьте сообщение ещё раз.";
+
+/**
+ * Pin the resolved model on chats created before creation-time pinning: they
+ * still carry an empty `model` and follow the global settings default, so a
+ * pick made in another chat would switch them mid-conversation. Pinning uses
+ * the value each chat resolves to right now, so the next message is unchanged.
+ * One-shot per chat: a non-empty `model` is never touched again.
+ */
+export async function pinResolvedSessionModels(): Promise<number> {
+  const settings = await getSettings();
+  const rows = await db.select().from(sessions);
+  let pinned = 0;
+  for (const row of rows) {
+    if (row.model || row.provider === SHELL_SESSION_PROVIDER) continue;
+    const provider = row.provider as AgentProvider;
+    const model = modelForProvider(settings, provider);
+    if (!model) continue;
+    const params = modelParamsForProvider(settings, provider);
+    await updateSession(row.id, {
+      model,
+      ...(Object.keys(params).length ? { modelParams: params } : {}),
+    });
+    pinned++;
+  }
+  return pinned;
+}
 
 /**
  * After a server restart no ACP runtime survives. Two stale things remain in

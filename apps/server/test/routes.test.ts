@@ -294,6 +294,39 @@ describe("sessions", () => {
     expect(detail.slashCommands).toEqual([]);
   });
 
+  it("pins the chat's starting model and keeps it when the default moves", async () => {
+    await connectAgent();
+    const setDefault = (model: string) =>
+      app.inject({
+        method: "PUT",
+        url: "/api/settings",
+        payload: { defaultModelByProvider: { omp: model } },
+      });
+
+    await setDefault("model-a");
+    const first = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(first.json().model).toBe("model-a");
+    runtimeSessionIds.push(first.json().id);
+
+    // Picking a model in another chat moves the harness default; the chat that
+    // started on "model-a" must keep running on it.
+    await setDefault("model-b");
+    const second = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(second.json().model).toBe("model-b");
+    runtimeSessionIds.push(second.json().id);
+
+    const list: SessionDetailDto[] = (await app.inject({ method: "GET", url: "/api/sessions" })).json();
+    expect(list.find((s) => s.id === first.json().id)?.model).toBe("model-a");
+
+    // Console chats have no agent model to pin.
+    const shell = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { provider: "shell" },
+    });
+    expect(shell.json().model).toBe("");
+  });
+
   it("keeps reasoning phases as separate thought parts interleaved with tools", async () => {
     const conn = await connectAgent();
     expect(conn.statusCode).toBe(200);

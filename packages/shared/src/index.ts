@@ -1216,9 +1216,11 @@ export interface SessionDto {
   mcpDisabledIds: string[];
   /** Token/context usage reported by the harness via ACP (null until/if reported). */
   usage?: AcpUsage | null;
-  /** Model chosen in this chat. Empty/null → settings default for the harness. */
+  /** Model pinned to this chat: resolved from settings when the chat is
+   *  created, then changed only by an explicit pick inside the chat.
+   *  Empty/null → settings default for the harness (legacy rows). */
   model?: string | null;
-  /** Parameter picker values for this chat's model. */
+  /** Parameter picker values for this chat's model (pinned with the model). */
   modelParams?: Record<string, string> | null;
   createdAt: string;
   updatedAt: string;
