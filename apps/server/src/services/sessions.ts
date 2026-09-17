@@ -630,7 +630,9 @@ export async function reconcileStaleSessions(): Promise<{
         and(
           eq(messages.sessionId, sessionId),
           eq(messageParts.type, "error"),
-          eq(sql`json_extract(${messageParts.payload}, '$.interrupted')`, "true"),
+          // `json_extract` yields TEXT; comparing it to the boolean bind never matched,
+          // so every restart appended another identical interrupt note.
+          eq(sql`json_extract(${messageParts.payload}, '$.interrupted')`, sql`'true'`),
         ),
       )
       .limit(1);

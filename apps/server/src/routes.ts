@@ -47,6 +47,7 @@ import {
   restartSessionMcp,
   resetAllAgentSessions,
   replayPendingInteractive,
+  getLiveTurnState,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { browseDirectory } from "./services/browseDirectory.js";
@@ -203,6 +204,7 @@ const settingsSchema = z.object({
   chatSplit: z.boolean().optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
+  composerDrafts: z.record(z.string().max(20_000)).optional(),
   mcpServers: z
     .array(
       z.object({
@@ -1124,6 +1126,13 @@ export async function registerRoutes(app: FastifyInstance) {
     return { ok: true, status: "running" };
   });
 
+  /** Whether the server process still has a live turn for this chat. The DB row can
+   *  lag behind it, so a client that reloaded asks here instead of trusting status. */
+  app.get("/api/sessions/:id/turn", async (req) => {
+    const { id } = req.params as { id: string };
+    return getLiveTurnState(id) ?? { running: false, waiting: false };
+  });
+
   app.get("/api/sessions/:id/attachments/:fileId", async (req, reply) => {
     const { id, fileId } = req.params as { id: string; fileId: string };
     // \w is ASCII-only — fileIds from real filenames may contain Cyrillic etc.
@@ -1290,7 +1299,8 @@ export async function registerRoutes(app: FastifyInstance) {
         if (msg.type === "subscribe" && msg.sessionId) {
           subscribeClient(client, msg.sessionId);
           // The subscriber may have missed live prompts while its socket was
-          // down — re-emit whatever is still waiting on the user.
+          // down — re-emit whatever is still waiting on the user. Turn status is
+          // reconciled over REST (`GET /api/sessions/:id/turn`), not by broadcasting.
           replayPendingInteractive(msg.sessionId);
           return;
         }

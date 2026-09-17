@@ -56,6 +56,12 @@ import {
   removeGitPanelOpenSession,
   persistGitPanelOpen,
 } from "./sessionGitPanel";
+import {
+  composerDraftSnapshot,
+  forgetComposerDraft,
+  seedComposerDrafts,
+  setComposerDraftPersistSink,
+} from "./composerDrafts";
 
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
@@ -610,7 +616,6 @@ function reviveRunningIfTurnActive(
   const pane = liveDetail(state, sessionId);
   if (!pane || pane.status === "running" || pane.status === "waiting") return;
   clearDelayedIdle(sessionId);
-  serverConfirmedBusy.add(sessionId);
   const nextSessions = state.sessions.map((s) =>
     s.id === sessionId ? { ...s, status: "running" as const } : s,
   );
@@ -620,6 +625,64 @@ function reviveRunningIfTurnActive(
   } else {
     commitDetail(get, set, { ...pane, status: "running", messages });
   }
+}
+
+/**
+ * Adopt a status the server itself reported. `inflightBySession` only counts prompts
+ * this tab sent, so after a reload it is 0 and Stop would vanish for a turn still
+ * running in the server process; this set is what keeps the button alive across it.
+ */
+function confirmServerBusy(sessionId: string, status: "running" | "waiting") {
+  clearDelayedIdle(sessionId);
+  serverConfirmedBusy.add(sessionId);
+  useAppStore.setState((state) => ({
+    sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+  }));
+}
+
+/** Ask the server process whether a turn is still live for this chat and adopt that
+ *  status. The DB row can lag behind it (a warm-up `idle` write racing a prompt
+ *  start), so trusting the row alone left a reloaded tab streaming with no Stop. */
+async function adoptLiveTurnStatus(sessionId: string) {
+  try {
+    const live = await api.getLiveTurn(sessionId);
+    if (!live.running) return;
+    confirmServerBusy(sessionId, live.waiting ? "waiting" : "running");
+    const state = useAppStore.getState();
+    const pane = liveDetail(state, sessionId);
+    if (pane && pane.status !== "running" && pane.status !== "waiting") {
+      commitDetail(useAppStore.getState, useAppStore.setState, {
+        ...pane,
+        status: live.waiting ? "waiting" : "running",
+      });
+    }
+  } catch {
+    // Server unreachable — nothing to reconcile; the next WS event decides.
+  }
+}
+
+/** After a fresh list, ask the server which chats actually have a live turn and
+ *  adopt that status. Only upgrades idle→running/waiting — a downgrade would
+ *  fight the WS `session.updated` flow, which owns the terminal transitions. */
+async function reconcileLiveTurnStatuses(sessions: SessionDto[]): Promise<void> {
+  const candidates = sessions.filter(
+    (s) => s.status !== "running" && s.status !== "waiting" && !isShellSession(s.provider),
+  );
+  if (!candidates.length) return;
+  await Promise.all(
+    candidates.map(async (s) => {
+      try {
+        const live = await api.getLiveTurn(s.id);
+        if (!live.running) return;
+        // A newer WS frame may have settled this chat while we were asking.
+        const cur = useAppStore.getState().sessions.find((x) => x.id === s.id);
+        if (!cur || cur.status === "running" || cur.status === "waiting") return;
+        confirmServerBusy(s.id, live.waiting ? "waiting" : "running");
+      } catch {
+        // Server unreachable — the next list/WS event decides.
+      }
+    }),
+  );
 }
 
 function clearDelayedIdle(sessionId: string) {
@@ -1102,6 +1165,34 @@ function clearUnseenFinished(
   set({ unseenFinishedTurns: next });
 }
 
+/** Debounce typing into a composer from hitting the settings row on each key. */
+const DRAFT_PERSIST_DELAY_MS = 600;
+let draftPersistTimer: number | null = null;
+
+function scheduleComposerDraftPersist(get: () => AppState) {
+  if (typeof window === "undefined") return;
+  if (draftPersistTimer !== null) window.clearTimeout(draftPersistTimer);
+  draftPersistTimer = window.setTimeout(() => {
+    draftPersistTimer = null;
+    const current = get().settings.composerDrafts ?? {};
+    const next = composerDraftSnapshot();
+    let changed = Object.keys(current).length !== Object.keys(next).length;
+    if (!changed) {
+      for (const [k, v] of Object.entries(next)) {
+        if (current[k] !== v) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (!changed) return;
+    void get().saveSettings({ composerDrafts: next });
+  }, DRAFT_PERSIST_DELAY_MS);
+}
+
+setComposerDraftPersistSink(() => scheduleComposerDraftPersist(useAppStore.getState));
+
+
 async function loadAppData(
   set: (partial: Partial<AppState>) => void,
   get: () => AppState,
@@ -1123,6 +1214,9 @@ async function loadAppData(
   } catch {
     /* ignore */
   }
+  // Restore persisted composer text before any pane mounts, so the first paint
+  // already shows the draft (the pane reads the registry on session bind).
+  seedComposerDrafts(settings.composerDrafts);
   set({ settings: { ...settings, theme, locale }, sessions, themes: [], serverPlatform });
   void get().probeAllAgents({
     quiet: hasStoredAgentAvailability(get().agentAvailability),
@@ -1636,6 +1730,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   async refreshSessions() {
     const sessions = await api.listSessions();
     set({ sessions });
+    // The list is raw DB rows. A turn the server accepted but has not started
+    // yet (ACP cold start) still reads "idle" there for a moment, and any row
+    // whose status write raced is stale too — ask the live runtime about every
+    // non-terminal row so the tree's running icon survives a reload even for
+    // chats that are not open in a pane (nothing else polls their /turn).
+    void reconcileLiveTurnStatuses(sessions);
   },
 
   async refreshThemes() {
@@ -1737,6 +1837,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           });
           return;
         }
+        // The server is authoritative about a turn this tab did not start: after a
+        // reload `inflight` is 0, and without this the fetched running status would
+        // be dropped and Stop never reappear.
+        if (detail.status === "running" || detail.status === "waiting") {
+          confirmServerBusy(id, detail.status);
+        } else {
+          await adoptLiveTurnStatus(id);
+        }
         if (sessionDetailQuickEqual(live, detail)) {
           if (get().sessionLoading) set({ sessionLoading: false });
           return;
@@ -1746,7 +1854,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           sessionLoading: false,
           error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
         });
-        clearMessageIdAliases(id);
+        // Wiping aliases also drops the adopted server-busy marker — skip it when a
+        // live turn was just confirmed for this chat.
+        if (!serverConfirmedBusy.has(id)) clearMessageIdAliases(id);
       } catch (err) {
         if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
         set({
@@ -1813,6 +1923,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
         return;
       }
+      // Same as the warm path: a reload must not lose a turn the server is still
+      // running just because this tab never sent its prompt.
+      if (detail.status === "running" || detail.status === "waiting") {
+        confirmServerBusy(id, detail.status);
+      } else {
+        await adoptLiveTurnStatus(id);
+      }
       if (sessionDetailQuickEqual(get().activeSession, detail) && !get().sessionLoading) {
         return;
       }
@@ -1826,7 +1943,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (detail.messages.length) markRestoringDone(get, set, id);
       // The fetched detail is server-authoritative: the optimistic aliases for
       // this session are obsolete (their local messages are gone).
-      clearMessageIdAliases(id);
+      if (!serverConfirmedBusy.has(id)) clearMessageIdAliases(id);
     } catch (err) {
       if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
       set({
@@ -2090,11 +2207,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else if (panes !== get().chatPaneIds) {
       const focus = Math.min(get().focusedPaneIndex, panes.length - 1);
       persistPanes(panes, focus);
-      set({ chatPaneIds: panes, focusedPaneIndex: focus });
     }
     const details = { ...get().sessionDetails };
     delete details[id];
     slashCommandsCache.delete(id);
+    forgetComposerDraft(id);
     sessionDetailCache.delete(id);
     const unseen = { ...get().unseenFinishedTurns };
     delete unseen[id];
@@ -2248,6 +2365,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     if (sid) {
+      // A new prompt starts a fresh turn: drop the busy marker adopted from an
+      // earlier reload probe. Its delayed-idle path still clears inflight, but
+      // the set would keep `isClientTurnLive` true after this turn finishes.
+      serverConfirmedBusy.delete(sid);
       const inflightBySession = { ...get().inflightBySession, [sid]: inf + 1 };
       set({
         inflightBySession,
@@ -2325,6 +2446,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   async runSendPrompt(text, opts, { optimistic = true } = {}) {
     const id = opts?.sessionId ?? get().activeSessionId;
     set({ error: null });
+    // The text is now a real message; its composer draft must not linger in the
+    // persisted map (or resurrect after a reload). Drop it from the live
+    // registry too, so a later keystroke cannot re-persist the sent text.
+    if (id) forgetComposerDraft(id);
     // A chat created moments ago may still be in flight to the server; sending
     // now would 404 on the missing row. Wait for the POST, then proceed.
     const pendingCreate = id ? pendingCreateById.get(id) : undefined;
@@ -2635,8 +2760,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...event.session, status: "idle" as const }
           : event.session;
       if (session.status === "running" || session.status === "waiting") {
-        serverConfirmedBusy.add(event.sessionId);
-        clearDelayedIdle(event.sessionId);
+        confirmServerBusy(event.sessionId, session.status);
       }
       // createMessage (and similar) used to broadcast idle while the client had
       // already painted optimistic running — that hid/reshowed the Steps header.

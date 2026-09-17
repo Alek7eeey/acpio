@@ -718,6 +718,12 @@ export interface AppSettings {
   remoteAccessKey: string;
   /** MCP servers attached to the agent (HTTP local/remote + stdio). */
   mcpServers: McpServerConfig[];
+  /**
+   * Composer drafts persisted so typed text survives a reload, keyed by chat id.
+   * Empty values are pruned server-side; a chat's draft is dropped when it is
+   * deleted or its message is sent.
+   */
+  composerDrafts: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -785,6 +791,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
   mcpServers: [],
+  composerDrafts: {},
 };
 
 export function modelForProvider(

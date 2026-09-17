@@ -13,7 +13,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RemoteKeyGate } from "./components/RemoteKeyGate";
 import { api } from "./lib/api";
-import { hasUnsavedComposerWork } from "./lib/composerDrafts";
+import { hasUnsavedComposerAttachments } from "./lib/composerDrafts";
 
 export function App() {
   const loadBootstrap = useAppStore((s) => s.loadBootstrap);
@@ -70,15 +70,13 @@ export function App() {
 
   useEffect(() => {
     // A reload costs nothing the server owns: the running turn, the queue the
-    // server already drains, and a parked question all outlive the socket — the
-    // client re-subscribes and re-reads them on boot. Only what never left the
-    // tab is lost: text in a composer, its attachment chips (uploaded, but
-    // referenced by no message yet), and prompts still waiting in the local
-    // queue. Session status is deliberately not consulted — warning about a
-    // turn the server keeps running is what made this dialog fire on every F5.
+    // server already drains, a parked question, and now the composer drafts too
+    // (persisted into app settings, restored on boot). What still cannot be
+    // rebuilt from the tab alone are staged attachment chips — uploaded blobs no
+    // message references yet — so only those justify the warning.
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       const state = useAppStore.getState();
-      if (state.promptQueue.length === 0 && !hasUnsavedComposerWork()) return;
+      if (state.promptQueue.length === 0 && !hasUnsavedComposerAttachments()) return;
       e.preventDefault();
       e.returnValue = "";
     };

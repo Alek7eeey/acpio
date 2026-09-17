@@ -488,6 +488,7 @@ describe("DEFAULT_SETTINGS", () => {
     },
     remoteAccessKey: "",
     mcpServers: [],
+    composerDrafts: {},
   };
 
   it("contains every AppSettings key", () => {

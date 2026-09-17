@@ -17,6 +17,8 @@ import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
 const SETTINGS_KEY = "app";
+/** Total persisted composer-draft payload cap (keys + text), in characters. */
+const COMPOSER_DRAFTS_MAX_BYTES = 200_000;
 
 /** True when the provider is a registered harness adapter. */
 function isKnownProvider(provider: unknown): provider is string {
@@ -274,6 +276,29 @@ function mergeSettings(raw: unknown): AppSettings {
         }
         return s;
       });
+  }
+  // Composer drafts persist so typed text survives a reload. Heal the map:
+  // only string keys with non-empty trimmed string values survive, and the
+  // whole blob is capped so it cannot grow without bound.
+  {
+    const rawDrafts = merged.composerDrafts;
+    const drafts: Record<string, string> = {};
+    let bytes = 0;
+    if (rawDrafts && typeof rawDrafts === "object" && !Array.isArray(rawDrafts)) {
+      for (const [key, value] of Object.entries(rawDrafts as Record<string, unknown>)) {
+        if (!key.trim()) continue;
+        // Ephemeral pre-chat pane tokens are never persisted.
+        if (key.startsWith("pane:")) continue;
+        if (typeof value !== "string") continue;
+        const text = value.trim() ? value : "";
+        if (!text) continue;
+        const cost = key.length + text.length;
+        if (bytes + cost > COMPOSER_DRAFTS_MAX_BYTES) break;
+        drafts[key] = text;
+        bytes += cost;
+      }
+    }
+    merged.composerDrafts = drafts;
   }
   return merged;
 }

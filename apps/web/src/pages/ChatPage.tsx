@@ -54,7 +54,7 @@ import {
 } from "../lib/composerDrafts";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
-import { buildAgentTimeline, finalAnswerPart, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { McpChatDialog } from "../components/McpChatDialog";
@@ -1964,6 +1964,7 @@ function StepsSpoiler({
   durations,
   timeMs,
   body,
+  skipOuter,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
@@ -1981,6 +1982,10 @@ function StepsSpoiler({
    *  here so the finished turn keeps the same structure it streamed with;
    *  without it the spoiler renders `parts` flat. */
   body?: ReactNode;
+  /** True when the phased body holds exactly one item (one run, or a lone
+   *  text/question). The outer header would only wrap that single inner
+   *  spoiler, so the caller lets the body render directly instead. */
+  skipOuter?: boolean;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -2028,6 +2033,12 @@ function StepsSpoiler({
   const liveHeader = streaming || holdEmptyLive || (Boolean(turnActive) && parts.length === 0);
 
   if (parts.length === 0 && !liveHeader) return null;
+
+  // A finished turn whose whole transcript is one item — a single run, or a
+  // lone intermediate text — does not need the outer header: it would wrap
+  // exactly one inner spoiler (or nothing to hide). The caller passes the
+  // phased body already rendered; show it as-is.
+  if (skipOuter && body) return <div className={styles.steps}>{body}</div>;
 
   const stepsLength = parts.length;
   const subagentParts = parts.filter((p) => p.type === "subagent");
@@ -2167,6 +2178,26 @@ function ThoughtBlock({
   );
 }
 
+/** Renders one timeline part at run depth: thoughts get their own spoiler,
+ *  tools/subagents a bare row. */
+function renderTimelinePart(
+  part: MessagePartDto,
+  streaming: boolean,
+  autoExpand: boolean,
+  durationMs?: number,
+) {
+  return part.type === "thought" ? (
+    <ThoughtBlock
+      part={part}
+      autoExpand={autoExpand}
+      streaming={streaming}
+      durationMs={durationMs}
+    />
+  ) : (
+    renderTimelineAction(part, streaming, durationMs)
+  );
+}
+
 /** One contiguous stretch of agent activity — thoughts and tool calls in
  *  emission order. While the turn runs this is what streams on screen; after it
  *  stops the same block is what sits inside the single collapsed spoiler.
@@ -2239,15 +2270,11 @@ function ActivityRunBlock({
             const isLast = idx === parts.length - 1;
             return (
               <Fragment key={part.id}>
-                {part.type === "thought" ? (
-                  <ThoughtBlock
-                    part={part}
-                    autoExpand={autoExpand}
-                    streaming={streaming && isLast}
-                    durationMs={durations.get(part.id)}
-                  />
-                ) : (
-                  renderTimelineAction(part, streaming && isLast, durations.get(part.id))
+                {renderTimelinePart(
+                  part,
+                  streaming && isLast,
+                  autoExpand,
+                  durations.get(part.id),
                 )}
               </Fragment>
             );
@@ -3399,6 +3426,7 @@ function AssistantParts({
           durations={durations}
           timeMs={sumDurations(stepsParts, durations)}
           stepsGlobalTick={stepsGlobalTick}
+          skipOuter={isSingleItemTimeline(timelineItems)}
           body={
             <AgentTimelineItems
               items={timelineItems}

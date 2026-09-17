@@ -222,3 +222,15 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
   flushRun();
   return items;
 }
+
+/** True when the whole timeline is one item — a single run, or a lone
+ *  text/question. The finished turn wraps its phased items in an outer
+ *  "Работал" spoiler; over one item that header only nests a second spoiler
+ *  (or hides nothing), so the caller can drop it and show the item directly.
+ *  A run with no parts (the empty live block) still needs the header — there
+ *  would be nothing to show without it. */
+export function isSingleItemTimeline(items: AgentTimelineItem[]): boolean {
+  return (
+    items.length === 1 && !(items[0]?.kind === "run" && items[0].parts.length === 0)
+  );
+}

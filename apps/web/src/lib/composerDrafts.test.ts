@@ -6,59 +6,78 @@ async function freshRegistry() {
   return import("./composerDrafts");
 }
 
-describe("hasUnsavedComposerWork", () => {
+describe("hasUnsavedComposerAttachments", () => {
   it("reports nothing to lose before anything is typed", async () => {
-    const { hasUnsavedComposerWork } = await freshRegistry();
+    const { hasUnsavedComposerAttachments } = await freshRegistry();
 
-    expect(hasUnsavedComposerWork()).toBe(false);
+    expect(hasUnsavedComposerAttachments()).toBe(false);
   });
 
-  it("counts a draft typed into a chat", async () => {
-    const { hasUnsavedComposerWork, readComposerDraft, setComposerDraft } = await freshRegistry();
+  it("does not warn about typed text — drafts persist across a reload", async () => {
+    const { hasUnsavedComposerAttachments, setComposerDraft } = await freshRegistry();
     setComposerDraft("s1", "напиши тест");
 
-    expect(hasUnsavedComposerWork()).toBe(true);
-    expect(readComposerDraft("s1")).toBe("напиши тест");
+    expect(hasUnsavedComposerAttachments()).toBe(false);
   });
 
+  it("keeps warning about the chips of an attachment-rich composer", async () => {
+    const { hasUnsavedComposerAttachments, setComposerAttachments } = await freshRegistry();
+    setComposerAttachments("s1", 2);
+
+    expect(hasUnsavedComposerAttachments()).toBe(true);
+    setComposerAttachments("s1", 0);
+    expect(hasUnsavedComposerAttachments()).toBe(false);
+  });
+});
+
+describe("readComposerDraft / setComposerDraft", () => {
   it("forgets the draft as soon as the composer is emptied", async () => {
-    const { hasUnsavedComposerWork, readComposerDraft, setComposerDraft } = await freshRegistry();
+    const { readComposerDraft, setComposerDraft } = await freshRegistry();
     setComposerDraft("s1", "черновик");
     setComposerDraft("s1", "");
 
-    expect(hasUnsavedComposerWork()).toBe(false);
     expect(readComposerDraft("s1")).toBe("");
   });
 
-  it("does not warn about whitespace alone", async () => {
-    const { hasUnsavedComposerWork, setComposerDraft } = await freshRegistry();
-    setComposerDraft("s1", "  \n\t ");
-
-    expect(hasUnsavedComposerWork()).toBe(false);
-  });
-
-  it("keeps warning about the chips of an attachment-rich composer with empty text", async () => {
-    const { hasUnsavedComposerWork, setComposerAttachments, setComposerDraft } =
-      await freshRegistry();
-    setComposerAttachments("s1", 2);
-    setComposerDraft("s1", "");
-
-    expect(hasUnsavedComposerWork()).toBe(true);
-    setComposerAttachments("s1", 0);
-    expect(hasUnsavedComposerWork()).toBe(false);
-  });
-
   it("drops the pre-chat pane token once the chat exists", async () => {
-    const { discardComposerPaneWork, hasUnsavedComposerWork, newComposerPaneKey, setComposerDraft } =
+    const { discardComposerPaneWork, newComposerPaneKey, readComposerDraft, setComposerDraft } =
       await freshRegistry();
     const paneKey = newComposerPaneKey();
     setComposerDraft(paneKey, "первое сообщение");
-    setComposerDraft("s1", "черновик в существующем чате");
 
     discardComposerPaneWork(paneKey);
-    expect(hasUnsavedComposerWork()).toBe(true);
+    expect(readComposerDraft(paneKey)).toBe("");
+  });
+});
 
-    setComposerDraft("s1", "");
-    expect(hasUnsavedComposerWork()).toBe(false);
+describe("composerDraftSnapshot / seedComposerDrafts", () => {
+  it("persists only non-pane keys with real text", async () => {
+    const { composerDraftSnapshot, newComposerPaneKey, setComposerDraft } = await freshRegistry();
+    const paneKey = newComposerPaneKey();
+    setComposerDraft(paneKey, "не в базу");
+    setComposerDraft("s1", "сохрани меня");
+    setComposerDraft("s2", "   \n ");
+
+    expect(composerDraftSnapshot()).toEqual({ s1: "сохрани меня" });
+  });
+
+  it("restores a persisted map into the registry", async () => {
+    const { readComposerDraft, seedComposerDrafts } = await freshRegistry();
+    seedComposerDrafts({ s1: "восстановлен", s2: "", "pane:9": "игнор" });
+
+    expect(readComposerDraft("s1")).toBe("восстановлен");
+    expect(readComposerDraft("s2")).toBe("");
+    expect(readComposerDraft("pane:9")).toBe("");
+  });
+
+  it("notifies the persist sink when a draft changes", async () => {
+    const { setComposerDraft, setComposerDraftPersistSink } = await freshRegistry();
+    let calls = 0;
+    setComposerDraftPersistSink(() => {
+      calls += 1;
+    });
+
+    setComposerDraft("s1", "текст");
+    expect(calls).toBe(1);
   });
 });

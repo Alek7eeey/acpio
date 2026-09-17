@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePartDto } from "@acpio/shared";
-import { buildAgentTimeline, finalAnswerPart, lastTextPart, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools, unansweredQuestionParts } from "./assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, lastTextPart, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools, unansweredQuestionParts } from "./assistantTurnTimeline.js";
 
 function part(
   type: MessagePartDto["type"],
@@ -278,5 +278,40 @@ describe("buildAgentTimeline", () => {
       part("tool_call", 2, { title: "Read a.ts:raw", status: "completed" }),
     ];
     expect(shape(parts)).toEqual(["run(1)", "question", "run(1)"]);
+  });
+});
+
+describe("isSingleItemTimeline", () => {
+  // The finished turn folds everything but the answer into one outer "Работал"
+  // spoiler. When its transcript is a single run, that header only nests a
+  // second identical spoiler — the caller must drop the outer one.
+  it("flags a timeline of one run", () => {
+    const items = buildAgentTimeline([
+      part("thought", 0, { text: "Plan." }),
+      part("tool_call", 1, { title: "Read a.ts", status: "completed" }),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(isSingleItemTimeline(items)).toBe(true);
+  });
+
+  it("flags a lone intermediate text or question", () => {
+    expect(isSingleItemTimeline(buildAgentTimeline([part("text", 0, { text: "hi" })]))).toBe(true);
+    expect(
+      isSingleItemTimeline(buildAgentTimeline([part("question", 0, { requestId: "q1" })])),
+    ).toBe(true);
+  });
+
+  it("keeps the outer header once a second item appears", () => {
+    const items = buildAgentTimeline([
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("text", 1, { text: "Interim narration." }),
+      part("tool_call", 2, { title: "Read b.ts", status: "completed" }),
+    ]);
+    expect(isSingleItemTimeline(items)).toBe(false);
+  });
+
+  it("does not flag an empty timeline or a contentless live run", () => {
+    expect(isSingleItemTimeline([])).toBe(false);
+    expect(isSingleItemTimeline([{ kind: "run", parts: [] }])).toBe(false);
   });
 });

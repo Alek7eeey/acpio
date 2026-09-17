@@ -553,6 +553,12 @@ class SessionRuntime {
   availableCommands: import("@acpio/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
+  /** True from the moment a prompt is accepted until its turn actually starts.
+   *  The ACP cold start (spawn + initialize) can take seconds, and `running` is
+   *  only set inside runTurn — without this flag both `GET /sessions/:id/turn`
+   *  and the warm-up boot write believe nothing is happening, so a reloaded tab
+   *  paints a starting agent as finished until the first WS status arrives. */
+  startingTurn = false;
   /**
    * Prompts accepted while a turn is already running (multitask burst).
    * User messages are persisted immediately; the turns themselves run
@@ -949,8 +955,13 @@ export async function ensureAcp(
           acpSessionId: client.sessionId,
           // Don't clobber an in-flight prompt if warm-up finishes during runPrompt,
           // and don't unlock a chat that is parked on an unanswered question —
-          // merely opening it must not pretend the agent is done asking.
-          ...(rt.running || hasPendingQuestion(detail) ? {} : { status: "idle" as const }),
+          // merely opening it must not pretend the agent is done asking. `startingTurn`
+          // covers the gap before runTurn flips `running`: the POST /prompt's own
+          // cold start finishing here would otherwise write "idle" over its
+          // "running", and a reloaded tab would restore the chat as finished.
+          ...(rt.running || rt.startingTurn || hasPendingQuestion(detail)
+            ? {}
+            : { status: "idle" as const }),
         });
         return client;
       } catch (err) {
@@ -2313,7 +2324,15 @@ export async function runPrompt(
   const settings = await getSettings();
   const locale = settings.locale ?? "en";
   let rt = getRuntime(sessionId);
-
+  // Claim the turn BEFORE any await: from here on, both `GET /sessions/:id/turn`
+  // and the warm-up boot write must treat this chat as busy. The row itself is
+  // flipped to "running" right after — a reload that races the cold start then
+  // restores "working" from the list/detail fetch alone, not only from a later
+  // WS frame. runTurn's own running=true takes over; every early exit clears it.
+  rt.startingTurn = true;
+  // Persist the busy state too (not just in memory): a reload reads the list and
+  // the detail row, and both must already say "running".
+  await updateSession(sessionId, { status: "running" }).catch(() => {});
   let promptUserText = text;
   let priorTranscript = "";
   let userMessageId: string | null = null;
@@ -2321,10 +2340,14 @@ export async function runPrompt(
   if (opts.editMessageId) {
     const detailBefore = await getSessionDetail(sessionId);
     if (!detailBefore) {
+      rt.startingTurn = false;
+      await updateSession(sessionId, { status: "idle" }).catch(() => {});
       throw Object.assign(new Error("Session not found"), { statusCode: 404 });
     }
     const target = detailBefore.messages.find((m) => m.id === opts.editMessageId);
     if (!target || target.role !== "user") {
+      rt.startingTurn = false;
+      await updateSession(sessionId, { status: "idle" }).catch(() => {});
       throw Object.assign(new Error("User message not found"), { statusCode: 404 });
     }
     await truncateMessagesAfter(sessionId, opts.editMessageId);
@@ -2340,6 +2363,7 @@ export async function runPrompt(
     }
     disposeRuntime(sessionId);
     rt = getRuntime(sessionId);
+    rt.startingTurn = true;
   }
 
   // A deferred restart (mid-turn MCP/model edit) must land BEFORE the next
@@ -2354,6 +2378,19 @@ export async function runPrompt(
   // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
   // OLD transcript (including the reply being replaced) — fresh context is correct.
   const acpReady = ensureAcp(sessionId, opts, { preferResume: !opts.editMessageId });
+  // Failures before runTurn never hit its finalize path — without restoring the
+  // row here, a rejected cold start (or any persist error) would strand the chat
+  // in "running" forever and lock the composer. Once runTurn owns the turn it
+  // finalizes status itself, so the claim is only released while `startingTurn`
+  // is still set.
+  const settlePreTurnClaim = () => {
+    if (!rt.startingTurn) return;
+    rt.startingTurn = false;
+    void updateSession(sessionId, { status: rt.pending.size > 0 ? "waiting" : "idle" }).catch(
+      () => {},
+    );
+  };
+  try {
   if (!opts.editMessageId) {
     const userMsg = await createMessage(sessionId, "user");
     userMessageId = userMsg.id;
@@ -2400,16 +2437,34 @@ export async function runPrompt(
       await updateSession(sessionId, { title });
     }
   }
+  } catch (err) {
+    settlePreTurnClaim();
+    throw err;
+  }
+  // A rejected cold start never reaches runTurn's finalize path — release the
+  // claim if boot failed before the turn took it over.
+  acpReady.catch(settlePreTurnClaim);
 
-  if (rt.running) {
+  if (rt.running || rt.pending.size > 0) {
     // A turn is already running (multitask burst): the user message above is
     // persisted immediately; the agent turn itself runs FIFO once the current
-    // turn finishes, so streams never interleave.
+    // turn finishes, so streams never interleave. The active turn owns the
+    // busy flag now — ours arrives later via dequeueTurn. If the chat was
+    // parked on a question, restore that status: our early write said
+    // "running", but the visible state is still "waiting".
+    settlePreTurnClaim();
     rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, opts });
+    if (!rt.running && rt.pending.size > 0) {
+      await updateSession(sessionId, { status: "waiting" }).catch(() => {});
+    }
     return { queued: true };
   }
 
-  return runTurn(rt, sessionId, promptUserText, priorTranscript, opts, settings, acpReady);
+  try {
+    return await runTurn(rt, sessionId, promptUserText, priorTranscript, opts, settings, acpReady);
+  } finally {
+    rt.startingTurn = false;
+  }
 }
 
 const STREAM_SETTLE_QUIET_MS = 450;
@@ -3870,6 +3925,23 @@ export function replayPendingInteractive(sessionId: string) {
       });
     }
   })();
+}
+
+/**
+ * What the server actually has in memory for a session, as the client's
+ * `isClientTurnLive` needs it. The DB row can lag behind a live runtime (a warm-up
+ * `idle` write racing a prompt start), and no further `session.updated` follows —
+ * status only changes on change — so a reload would show a streaming agent with no
+ * Stop button. A client that just subscribed asks this directly. `startingTurn`
+ * covers the accepted-but-not-yet-started gap (ACP cold start).
+ */
+export function getLiveTurnState(sessionId: string): { running: boolean; waiting: boolean } | null {
+  const rt = runtimes.get(sessionId);
+  if (!rt) return null;
+  return {
+    running: rt.running || rt.acceptingStream || rt.startingTurn,
+    waiting: rt.pending.size > 0,
+  };
 }
 
 /**

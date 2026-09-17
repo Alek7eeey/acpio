@@ -431,6 +431,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  /** Server-side truth about a live turn; the DB status can lag behind it. */
+  getLiveTurn: (id: string) =>
+    request<{ running: boolean; waiting: boolean }>(`/api/sessions/${id}/turn`),
   answerPermission: (
     id: string,
     requestId: string,
