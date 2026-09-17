@@ -8,6 +8,8 @@ Release dates use `DD.MM.YY` (author date of that day's commits).
 
 | Version | Released |
 |---------|----------|
+| 0.1.14 | 17.09.26 |
+| 0.1.13 | 16.09.26 |
 | 0.1.12 | 15.09.26 |
 | 0.1.11 | 14.09.26 |
 | 0.1.10 | 13.09.26 |
