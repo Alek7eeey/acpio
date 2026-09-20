@@ -249,6 +249,7 @@ export function GitDiffStage({
   files,
   initialPath,
   jumpToken = 0,
+  reloadToken = 0,
   compact = false,
   expanded = false,
   flushTop = false,
@@ -262,6 +263,11 @@ export function GitDiffStage({
   initialPath: string | null;
   /** Bumped by the caller on every pick, so re-picking the same file still re-centres it. */
   jumpToken?: number;
+  /**
+   * Bumped by a refresh that must re-read the diffs of the same file set: paths
+   * alone do not tell whether a file changed on disk.
+   */
+  reloadToken?: number;
   /**
    * Narrow host: the stage drops its own bottom bar and file sheet, because the
    * host's navigator is already thumb-reachable and lists the same files.
@@ -470,6 +476,25 @@ export function GitDiffStage({
     virtualizer.scrollToIndex(index, { align: "start" });
   });
 
+  /**
+   * A refresh keeps the same file set, so nothing above invalidates the loaded
+   * diffs: mark every entry stale and let the on-screen fetch effects re-request
+   * them. The reader's file and scroll anchor survive — only the text is re-read.
+   */
+  const reloadRef = useRef(reloadToken);
+  useEffect(() => {
+    if (reloadRef.current === reloadToken) return;
+    reloadRef.current = reloadToken;
+    if (entriesRef.current.length === 0) return;
+    generationRef.current += 1;
+    queueRef.current = [];
+    queuedRef.current = new Set();
+    inflightRef.current = 0;
+    const next = entriesRef.current.map<FileEntry>((entry) => ({ ...entry, status: "idle", text: "" }));
+    entriesRef.current = next;
+    setEntries(next);
+  }, [reloadToken]);
+
   // Fetch what is on screen (plus the virtualizer's overscan) and nothing else.
   useEffect(() => {
     if (single) return;
@@ -483,7 +508,7 @@ export function GitDiffStage({
       return;
     }
     for (let index = 0; index < entries.length; index += 1) requestDiff(index);
-  }, [entries.length, requestDiff, single, virtual, virtualRangeKey]);
+  }, [entries.length, requestDiff, reloadToken, single, virtual, virtualRangeKey]);
 
   // One file per screen: the visible file and its neighbours are the only diffs
   // worth loading, so paging does not stall on the network.
@@ -492,7 +517,7 @@ export function GitDiffStage({
     for (const index of [currentIndex - 1, currentIndex, currentIndex + 1]) {
       if (index >= 0 && index < entries.length) requestDiff(index);
     }
-  }, [currentIndex, entries.length, requestDiff, single]);
+  }, [currentIndex, entries.length, reloadToken, requestDiff, single]);
 
   // Switching files in the single-file layout starts at the top of the new
   // file, not wherever the previous one was scrolled to.

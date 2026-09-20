@@ -110,6 +110,8 @@ export function GitChangesSidePanel({
   const [selection, setSelection] = useState<Selection>({ kind: "working", path: null });
   /** Bumped on every file pick so the stage re-centres even on the same path. */
   const [jumpToken, setJumpToken] = useState(0);
+  /** Bumped on refresh so the stage re-reads diffs whose paths did not change. */
+  const [reloadToken, setReloadToken] = useState(0);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   /** Fetch and the stash pair are rare next to pull/push: they live behind one button. */
   const [opsAnchor, setOpsAnchor] = useState<{ left: number; bottom: number } | null>(null);
@@ -992,6 +994,7 @@ export function GitChangesSidePanel({
           className={styles.iconBtn}
           disabled={busy}
           onClick={() => {
+            setReloadToken((token) => token + 1);
             void refreshStatus();
             void refreshCommits().then(() => {
               if (selection.kind === "commit") void reloadHistorySelection();
@@ -1131,6 +1134,7 @@ export function GitChangesSidePanel({
       files={stageFiles}
       initialPath={stagePath}
       jumpToken={jumpToken}
+      reloadToken={reloadToken}
       compact={sheetNavigator && !fullscreen}
       expanded={fullscreen}
       flushTop={fullscreen || takeover}

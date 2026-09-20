@@ -194,6 +194,19 @@ describe("GitChangesSidePanel", () => {
     expect(panel.parentElement).toBe(document.body);
   });
 
+  it("re-reads the file diffs when the reader asks for a refresh", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
+    apiMock.gitDiff.mockClear();
+
+    // The same file set can still hold different content: a refresh must re-read
+    // the diff, not just the status the poll already keeps current.
+    await user.click(await screen.findByRole("button", { name: "Обновить" }));
+
+    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
+  });
+
   it("takes the whole viewport on a phone, where the shell header and dock would box it in", async () => {
     await withViewportWidth(390, async () => {
       const { container } = renderPanel();
