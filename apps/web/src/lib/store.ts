@@ -2693,16 +2693,49 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async resyncAfterReconnect() {
     // The socket only carries live traffic: whatever was broadcast while it was
-    // down is lost. Re-read what the server owns — the list plus the open chat
-    // (selectSession's warm path refreshes quietly, no skeleton, no remount).
+    // down is lost. Re-read what the server owns — the list plus the open chat.
     void get().refreshSessions().catch(() => {});
     const id = get().activeSessionId;
     if (!id) return;
-    await get().selectSession(id);
-    const detail = get().activeSession;
-    if (detail?.id !== id) return;
+    let detail: SessionDetailDto;
+    try {
+      detail = preferSlashCommands(await api.getSession(id), liveDetail(get(), id));
+    } catch {
+      // Socket is back; the next selection retries the fetch.
+      return;
+    }
+    if (get().activeSessionId !== id) return;
+    // The local thread is not merged in: it is missing everything the agent
+    // produced while the device slept, which is the window this resync exists to
+    // repair. The optimistic placeholders and their id aliases are obsolete
+    // against a full snapshot — keeping them would map replayed parts onto
+    // dropped ids.
+    clearMessageIdAliases(id);
+    const live = get().activeSession;
+    if (detail.messages.length === 0 && live?.id === id && live.messages.length > 0) {
+      // The snapshot raced the persist of the turn we are watching — keep the
+      // live thread instead of blanking it out; the stream fills the rest.
+      rememberSessionDetail(live);
+      set({ sessionLoading: false });
+      return;
+    }
+    rememberSessionDetail(detail);
+    if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
     const question = pendingQuestionFromDetail(detail);
-    if (question) set({ pendingQuestion: question });
+    set({
+      sessionLoading: false,
+      activeSession: detail,
+      sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
+      error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+      ...(question ? { pendingQuestion: question } : {}),
+    });
+    // Same as the warm path: the DB row can lag a turn still live in the server
+    // process, so let the runtime settle the status when the row says idle.
+    if (detail.status === "running" || detail.status === "waiting") {
+      confirmServerBusy(id, detail.status);
+    } else {
+      await adoptLiveTurnStatus(id);
+    }
   },
 
   setAgentAvailable(provider, available) {

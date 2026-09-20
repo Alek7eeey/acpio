@@ -35,12 +35,14 @@ export function sendWsMessage(msg: WsClientEvent) {
 // closes whatever did not answer in time, and poke() re-checks the moment the
 // page wakes up or the network comes back.
 const PING_INTERVAL_MS = 20_000;
-const PONG_TIMEOUT_MS = 8_000;
-const CONNECT_TIMEOUT_MS = 12_000;
+const PONG_TIMEOUT_MS = 5_000;
+const CONNECT_TIMEOUT_MS = 8_000;
 /** No message for this long (the phone slept) — close without waiting for a pong. */
 const STALE_AFTER_MS = 30_000;
 const RETRY_MIN_MS = 1_000;
-const RETRY_MAX_MS = 15_000;
+/** Local harness: a restarted server is back within seconds — a 15 s backoff made
+ *  reloading the page the faster way to recover. */
+const RETRY_MAX_MS = 5_000;
 /** Reconnecting faster than this is a blip — resync silently, no toast. */
 const RESTORED_TOAST_AFTER_MS = 8_000;
 
@@ -89,8 +91,11 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       if (disposed) return;
       clearRetry();
       if (!navigator.onLine) {
-        // Dialing now would just fail; the `online` listener pokes us back.
+        // Dialing now would just fail. The `online` listener pokes us back, and
+        // this timer keeps us from being stranded offline if it never fires.
         setConnection("offline");
+        retryTimer = window.setTimeout(connect, retryDelay);
+        retryDelay = Math.min(RETRY_MAX_MS, retryDelay * 2);
         return;
       }
       setConnection(everOpen ? "reconnecting" : "connecting");
@@ -99,7 +104,7 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       connectStartedAt = Date.now();
 
       socket.onopen = () => {
-        if (disposed) return;
+        if (disposed || socketRef.current !== socket) return;
         const wasReconnect = everOpen;
         const goneFor = wasReconnect && lastAliveAt > 0 ? Date.now() - lastAliveAt : 0;
         everOpen = true;
@@ -122,6 +127,7 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       };
 
       socket.onmessage = (ev) => {
+        if (socketRef.current !== socket) return;
         lastAliveAt = Date.now();
         // Traffic proves the pipe is back even without a fresh onopen — the
         // socket can survive a network hop that flagged us offline/reconnecting.
@@ -137,15 +143,44 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       };
 
       socket.onclose = () => {
-        if (socketRef.current === socket) {
-          socketRef.current = null;
-          wsSendImpl = null;
-        }
-        if (disposed) return;
+        // A superseded socket must not schedule another connect: after a wake we
+        // already dialed a fresh one, and these late closes used to leak pipes.
+        if (disposed || socketRef.current !== socket) return;
+        socketRef.current = null;
+        wsSendImpl = null;
         setConnection(navigator.onLine ? "reconnecting" : "offline");
         retryTimer = window.setTimeout(connect, retryDelay);
         retryDelay = Math.min(RETRY_MAX_MS, retryDelay * 2);
       };
+    };
+
+    /**
+     * Handlers off, socket abandoned. A half-open pipe on a sleeping tablet
+     * answers `close()` slowly (or never), so a wake-up must not wait for its
+     * onclose before dialing again.
+     */
+    const dropSocket = () => {
+      const socket = socketRef.current;
+      socketRef.current = null;
+      wsSendImpl = null;
+      if (!socket) return;
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      try {
+        socket.close();
+      } catch {
+        // already gone
+      }
+    };
+
+    /** Re-dial right now: wake-up, network return, or a dead pipe found mid-tick. */
+    const reconnectNow = () => {
+      if (disposed) return;
+      clearRetry();
+      retryDelay = RETRY_MIN_MS;
+      dropSocket();
+      connect();
     };
 
     const tick = window.setInterval(() => {
@@ -153,13 +188,13 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       const socket = socketRef.current;
       if (!socket) return;
       if (socket.readyState === WebSocket.CONNECTING) {
-        if (Date.now() - connectStartedAt > CONNECT_TIMEOUT_MS) socket.close();
+        if (Date.now() - connectStartedAt > CONNECT_TIMEOUT_MS) reconnectNow();
         return;
       }
       if (socket.readyState !== WebSocket.OPEN) return;
       const now = Date.now();
       if (lastPingAt > 0 && lastAliveAt < lastPingAt && now - lastPingAt > PONG_TIMEOUT_MS) {
-        socket.close(); // dead peer — onclose schedules a fresh attempt
+        reconnectNow(); // dead peer — don't wait for its onclose
         return;
       }
       if (now - lastPingAt >= PING_INTERVAL_MS) {
@@ -167,7 +202,7 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
         try {
           socket.send(JSON.stringify({ type: "ping" } satisfies WsClientEvent));
         } catch {
-          socket.close();
+          reconnectNow();
         }
       }
     }, 2_000);
@@ -182,23 +217,25 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
         socket.readyState === WebSocket.CLOSED ||
         socket.readyState === WebSocket.CLOSING
       ) {
-        clearRetry();
-        connect();
+        reconnectNow();
         return;
       }
-      if (socket.readyState === WebSocket.CONNECTING) return; // tick handles a hang
+      if (socket.readyState === WebSocket.CONNECTING) {
+        if (Date.now() - connectStartedAt > CONNECT_TIMEOUT_MS) reconnectNow();
+        return;
+      }
       const now = Date.now();
       if (lastAliveAt > 0 && now - lastAliveAt > STALE_AFTER_MS) {
-        // The page was frozen — assume the OS dropped the pipe underneath.
-        socket.close();
+        // The page was frozen — the OS dropped the pipe underneath. A pong can
+        // never come, so dial fresh instead of waiting out the watchdog.
+        reconnectNow();
         return;
       }
       lastPingAt = now;
       try {
         socket.send(JSON.stringify({ type: "ping" } satisfies WsClientEvent));
       } catch {
-        socket.close();
-        return;
+        reconnectNow();
       }
       // If the socket survived whatever flagged us offline, the pong lands in
       // onmessage and flips the state back to open.
