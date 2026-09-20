@@ -387,6 +387,17 @@
   height: 28px;
 }
 
+/**
+ * A manual refresh in flight. The glyph turns so a click that changes nothing on
+ * screen — the background poll keeps the lists fresh anyway — still reads as an
+ * update with a visible end.
+ */
+.iconSpin {
+  display: grid;
+  place-items: center;
+  animation: gitPanelLoaderSpin 0.8s linear infinite;
+}
+
 /* The ops the row cannot hold: one button, a menu above the bar. */
 .footMenu {
   position: fixed;

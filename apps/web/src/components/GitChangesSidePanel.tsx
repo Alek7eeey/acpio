@@ -48,6 +48,13 @@ import styles from "./GitChangesSidePanel.module.css";
 /** Assumed width of the ops menu, used to keep it inside the viewport. */
 const OPS_MENU_WIDTH = 200;
 
+/**
+ * Floor for how long the refresh button keeps spinning. A local repo answers in a
+ * few milliseconds, and a flash that short reads as a dead button rather than as
+ * an update — the floor is what makes the click's start and end legible.
+ */
+const REFRESH_MIN_VISIBLE_MS = 450;
+
 /** Single-letter badge for a commit file row in the stage's file list. */
 const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
   added: "A",
@@ -112,6 +119,9 @@ export function GitChangesSidePanel({
   const [jumpToken, setJumpToken] = useState(0);
   /** Bumped on refresh so the stage re-reads diffs whose paths did not change. */
   const [reloadToken, setReloadToken] = useState(0);
+  /** A manual refresh is in flight: the footer button turns and refuses re-clicks. */
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   /** Fetch and the stash pair are rare next to pull/push: they live behind one button. */
   const [opsAnchor, setOpsAnchor] = useState<{ left: number; bottom: number } | null>(null);
@@ -560,6 +570,34 @@ export function GitChangesSidePanel({
     }
   }, [refreshCommits, reloadHistorySelection, selection]);
 
+  /**
+   * Manual refresh: re-read status, history, and — when a commit sits on the
+   * stage — its detail. The button turns until all three settle. The background
+   * poll already keeps these fresh, so on its own the click would show nothing;
+   * the spinner is the acknowledgement, and `REFRESH_MIN_VISIBLE_MS` keeps it
+   * above the flicker threshold.
+   */
+  const runManualRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const settle = () => {
+      refreshingRef.current = false;
+      setRefreshing(false);
+    };
+    const startedAt = Date.now();
+    try {
+      setReloadToken((token) => token + 1);
+      await refreshStatus();
+      await refreshCommits();
+      if (selection.kind === "commit") await reloadHistorySelection();
+    } finally {
+      const remaining = REFRESH_MIN_VISIBLE_MS - (Date.now() - startedAt);
+      if (remaining > 0) window.setTimeout(settle, remaining);
+      else settle();
+    }
+  }, [refreshCommits, refreshStatus, reloadHistorySelection, selection]);
+
   const runSync = async (action: "fetch" | "pull" | "push") => {
     if (syncInFlightRef.current || busy) return;
     syncInFlightRef.current = true;
@@ -992,26 +1030,23 @@ export function GitChangesSidePanel({
         <button
           type="button"
           className={styles.iconBtn}
-          disabled={busy}
-          onClick={() => {
-            setReloadToken((token) => token + 1);
-            void refreshStatus();
-            void refreshCommits().then(() => {
-              if (selection.kind === "commit") void reloadHistorySelection();
-            });
-          }}
+          disabled={busy || refreshing}
+          aria-busy={refreshing}
+          onClick={() => void runManualRefresh()}
           title={t("common.refresh")}
           aria-label={t("common.refresh")}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
+          <span className={refreshing ? styles.iconSpin : undefined}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
         </button>
         <button
           type="button"

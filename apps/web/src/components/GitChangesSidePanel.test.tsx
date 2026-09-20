@@ -207,6 +207,27 @@ describe("GitChangesSidePanel", () => {
     await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
   });
 
+  it("marks the refresh button busy while the re-read is still running", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => expect(apiMock.gitDiff).toHaveBeenCalledWith("s1", "src/a.ts"));
+
+    // The poll already keeps the lists current, so a manual refresh can finish
+    // without changing a pixel: the button itself has to say the work is pending.
+    const gate = Promise.withResolvers<typeof STATUS>();
+    apiMock.gitStatus.mockImplementation(() => gate.promise);
+    const button = await screen.findByRole("button", { name: "Обновить" });
+    expect(button.getAttribute("aria-busy")).toBe("false");
+
+    await user.click(button);
+    await waitFor(() => expect(button.getAttribute("aria-busy")).toBe("true"));
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+
+    gate.resolve(STATUS);
+    await waitFor(() => expect(button.getAttribute("aria-busy")).toBe("false"), { timeout: 2000 });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("takes the whole viewport on a phone, where the shell header and dock would box it in", async () => {
     await withViewportWidth(390, async () => {
       const { container } = renderPanel();
