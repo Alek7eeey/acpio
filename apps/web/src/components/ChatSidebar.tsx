@@ -308,6 +308,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   // folders survive deleting the last chat and are visible from any device.
   const knownFolders = useAppStore((s) => s.knownFolders);
   const deleteFolder = useAppStore((s) => s.deleteFolder);
+  const archiveSessions = useAppStore((s) => s.archiveSessions);
 
   const toggleFolder = (key: string) => {
     setCollapsedFolders((prev) => {
@@ -358,6 +359,16 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
 
+  // Active (non-archived) chats inside the folder whose menu is open — the
+  // "archive all" item is dead when the folder has none left.
+  const folderMenuActiveCount = useMemo(
+    () =>
+      folderMenu?.cwd
+        ? sessions.filter((s) => !s.archived && normalizeCwd(s.cwd) === folderMenu.cwd).length
+        : 0,
+    [folderMenu?.cwd, sessions],
+  );
+
   const openFolderMenuAt = (
     cwd: string,
     x: number,
@@ -383,6 +394,20 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     setConfirmDeleteFolderCwd(null);
     void deleteFolder(cwd);
     showToast(t("chat.folderDeleted"), { tone: "info" });
+  };
+
+  /** Move every active chat of a folder to the archive in one go. */
+  const archiveFolderSessions = (cwd: string) => {
+    const ids = sessions
+      .filter((s) => !s.archived && normalizeCwd(s.cwd) === cwd)
+      .map((s) => s.id);
+    setFolderMenu(null);
+    if (!ids.length) return;
+    void archiveSessions(ids);
+    showToast(t("common.toastArchiveAll"), {
+      tone: "info",
+      id: `archive-folder-${cwd}`,
+    });
   };
 
   const renderFolderDeleteConfirm = (cwd: string) => (
@@ -2088,6 +2113,29 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                 />
               </MenuIcon>
               {t("chat.moveFolderDown")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={folderMenuActiveCount === 0}
+              onClick={() => archiveFolderSessions(folderMenu.cwd)}
+            >
+              <MenuIcon>
+                <path
+                  d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M4.5 7.5V5.5A1.5 1.5 0 0 1 6 4h12a1.5 1.5 0 0 1 1.5 1.5v2M12 12v4.5m0 0-1.8-1.8m1.8 1.8 1.8-1.8"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.archiveAllInFolder")}
             </button>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button

@@ -296,6 +296,8 @@ type AppState = {
     id: string,
     patch: { pinned?: boolean; archived?: boolean; mcpDisabledIds?: string[] },
   ) => Promise<void>;
+  /** Archive several chats at once (folder menu). The focused chat goes last. */
+  archiveSessions: (ids: string[]) => Promise<void>;
   reorderSessions: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
   ) => Promise<void>;
@@ -2315,6 +2317,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     } catch {
       // keep the optimistic value
+    }
+  },
+
+  async archiveSessions(ids) {
+    const active = get().activeSessionId;
+    const targets = ids.filter((id) => {
+      const row = get().sessions.find((s) => s.id === id);
+      return row != null && !row.archived;
+    });
+    if (!targets.length) return;
+    // The focused chat goes last: setSessionFlags hands focus to a survivor of
+    // the tree, and that pick must already see the rest of the batch archived
+    // so it can never land on a chat this same call is about to archive.
+    await Promise.all(
+      targets
+        .filter((id) => id !== active)
+        .map((id) => get().setSessionFlags(id, { archived: true })),
+    );
+    if (active && targets.includes(active)) {
+      await get().setSessionFlags(active, { archived: true });
     }
   },
 
