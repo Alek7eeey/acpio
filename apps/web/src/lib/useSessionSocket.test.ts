@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook } from "@testing-library/react";
 import { useSessionSocket } from "./useSessionSocket";
+import { useAppStore } from "./store";
 
 /** Socket double. `close()` deliberately never fires `onclose`: that is how a
  *  half-open pipe behaves after a device sleeps, and the client must not depend
@@ -91,5 +92,29 @@ describe("useSessionSocket recovery", () => {
 
     expect(FakeSocket.instances.length).toBe(1);
     visibility.mockRestore();
+  });
+
+  it("dials the socket while the OS reports no internet", () => {
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+
+    renderHook(() => useSessionSocket("s1", true));
+
+    // The harness is same-origin and reachable over HTTP even behind a proxy
+    // that makes Windows report "no internet" — the dial must still happen.
+    expect(FakeSocket.instances.length).toBe(1);
+    online.mockRestore();
+  });
+
+  it("re-dials on an offline event instead of declaring the session offline", () => {
+    renderHook(() => useSessionSocket("s1", true));
+    const socket = lastSocket();
+    socket.answersPings = true;
+    socket.open();
+    expect(useAppStore.getState().connection).toBe("open");
+
+    window.dispatchEvent(new Event("offline"));
+
+    expect(FakeSocket.instances.length).toBe(2);
+    expect(useAppStore.getState().connection).not.toBe("offline");
   });
 });

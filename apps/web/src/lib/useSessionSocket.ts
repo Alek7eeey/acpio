@@ -58,7 +58,8 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
   // Keep one socket for the app lifetime — reconnecting on every chat switch felt laggy.
   useEffect(() => {
     if (!enabled) {
-      setConnection("offline");
+      // No socket on purpose (boot / remote gate), not a connection failure.
+      setConnection("connecting");
       socketRef.current?.close();
       socketRef.current = null;
       wsSendImpl = null;
@@ -90,14 +91,10 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
     const connect = () => {
       if (disposed) return;
       clearRetry();
-      if (!navigator.onLine) {
-        // Dialing now would just fail. The `online` listener pokes us back, and
-        // this timer keeps us from being stranded offline if it never fires.
-        setConnection("offline");
-        retryTimer = window.setTimeout(connect, retryDelay);
-        retryDelay = Math.min(RETRY_MAX_MS, retryDelay * 2);
-        return;
-      }
+      // `navigator.onLine` reports whether the OS sees *internet*, and Windows
+      // says "no internet" behind a corporate proxy/NCSI while the harness on
+      // the same origin answers fine. Dialing anyway is the only way to learn
+      // the truth: a refused dial lands in onclose and backs off like any other.
       setConnection(everOpen ? "reconnecting" : "connecting");
       const socket = new WebSocket(wsUrl());
       socketRef.current = socket;
@@ -244,8 +241,11 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
     const onVisibility = () => {
       if (document.visibilityState === "visible") poke();
     };
+    // The OS losing its network is a hint, not a verdict — same-origin traffic
+    // still works. Re-dial and let the dial decide, instead of painting
+    // "Нет соединения" over a live session.
     const onOffline = () => {
-      if (!disposed) setConnection("offline");
+      if (!disposed) reconnectNow();
     };
     window.addEventListener("focus", poke);
     document.addEventListener("visibilitychange", onVisibility);
