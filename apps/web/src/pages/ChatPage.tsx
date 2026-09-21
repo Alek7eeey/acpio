@@ -42,6 +42,7 @@ import {
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
 import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
+import { followsThreadBottom, showsJumpToLatest } from "../lib/chatScroll";
 import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
@@ -5141,6 +5142,13 @@ function ChatThread() {
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
+    /** One reading of the scrollport, shared by both scroll questions. */
+    const metrics = (prevScrollTop: number) => ({
+      scrollTop: thread.scrollTop,
+      prevScrollTop,
+      scrollHeight: thread.scrollHeight,
+      clientHeight: thread.clientHeight,
+    });
     const onScroll = () => {
       const top = thread.scrollTop;
       const prevTop = lastScrollTopRef.current;
@@ -5153,20 +5161,15 @@ function ChatThread() {
         setScrolledAway(false);
         return;
       }
-      // Any upward scroll is the reader taking over. The old rule released the
-      // pin only once the gap passed 140px, which a slow phone drag never
-      // covered — the next token grew the thread and the pin pulled the reader
-      // back down, so only a hard fling escaped.
-      const scrolledUp = top < prevTop - 2;
-      // Growth during stream can temporarily look like "scrolled away" before we catch up.
-      const gap = thread.scrollHeight - top - thread.clientHeight;
-      const stuck = !scrolledUp && gap < 140;
-      stickToBottomRef.current = stuck;
-      setScrolledAway(!stuck);
+      const next = metrics(prevTop);
+      stickToBottomRef.current = followsThreadBottom(next);
+      setScrolledAway(showsJumpToLatest(next));
     };
     // Opening a block is the reader choosing what to read: stop following the
     // stream, or the growth re-pins to the bottom and the block's first line
-    // scrolls out of view the moment it is expanded.
+    // scrolls out of view the moment it is expanded. The pill is not raised
+    // here — the expansion itself decides how much ends up out of sight, and
+    // the resize observer watching the thread reports that.
     const onPointerDown = (e: Event) => {
       const target = e.target as HTMLElement | null;
       const onBlockHeader = target?.closest(
@@ -5174,7 +5177,6 @@ function ChatThread() {
       );
       if (!onBlockHeader) return;
       stickToBottomRef.current = false;
-      setScrolledAway(true);
     };
     thread.addEventListener("scroll", onScroll, { passive: true });
     thread.addEventListener("pointerdown", onPointerDown);
@@ -5190,7 +5192,22 @@ function ChatThread() {
     const ro = new ResizeObserver(() => {
       if (stickToBottomRef.current || userJustSentRef.current || pendingBottomPinRef.current) {
         scrollThreadToEnd();
+        return;
       }
+      // Detached from the stream, growth only changes how much of the thread is
+      // out of sight: the pin stays where the reader left it, and the pill is
+      // the one thing to re-read. Without this a long reply arriving below the
+      // fold would never raise it — nothing scrolls, so no scroll event fires.
+      const thread = threadRef.current;
+      if (!thread) return;
+      setScrolledAway(
+        showsJumpToLatest({
+          scrollTop: thread.scrollTop,
+          prevScrollTop: thread.scrollTop,
+          scrollHeight: thread.scrollHeight,
+          clientHeight: thread.clientHeight,
+        }),
+      );
     });
     ro.observe(inner);
     return () => ro.disconnect();
