@@ -304,10 +304,14 @@ export function ChatQuestionPrompt({
                 />
               ) : (
                 <>
-                  <div className={styles.qOptions} role={q.allowMultiple ? "group" : "radiogroup"}>
+                  <div
+                    className={`${styles.qOptions}${q.options.some((o) => String(o.description ?? "").trim()) ? ` ${styles.qOptionsStack}` : ""}`}
+                    role={q.allowMultiple ? "group" : "radiogroup"}
+                  >
                     {q.options.map((opt) => {
                       const active = (selected[q.id] ?? []).includes(opt.id);
                       const focused = navIndexFor(q.id, opt.id) === activeNavIndex;
+                      const description = String(opt.description ?? "").trim();
                       return (
                         <button
                           key={opt.id}
@@ -326,7 +330,8 @@ export function ChatQuestionPrompt({
                           }}
                           onClick={() => selectOption(q, opt.id, Boolean(q.allowMultiple))}
                         >
-                          {opt.label}
+                          <span className={styles.optLabel}>{opt.label}</span>
+                          {description ? <span className={styles.optDesc}>{description}</span> : null}
                         </button>
                       );
                     })}

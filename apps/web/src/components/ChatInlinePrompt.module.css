@@ -120,6 +120,35 @@
   gap: 6px;
 }
 
+/* Options carrying an explanation stack as full-width rows instead of pills. */
+.qOptionsStack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.qOptionsStack .opt,
+.qOptionsStack .optActive {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 11px;
+}
+
+.optLabel {
+  display: block;
+}
+
+.optDesc {
+  font-weight: 400;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .opt {
   background: color-mix(in srgb, var(--bg) 70%, transparent);
   color: var(--text-secondary);

@@ -26,6 +26,33 @@ describe("elicitationSchemaToQuestionPayload", () => {
     expect(payload.questions[0]?.freeTextField).toBe("q0__other");
   });
 
+  it("carries oneOf option descriptions onto the mapped options", () => {
+    const payload = elicitationSchemaToQuestionPayload("Publish the review?", {
+      type: "object",
+      properties: {
+        q0: {
+          type: "string",
+          title: "Publish the review?",
+          oneOf: [
+            {
+              const: "comment",
+              title: "Comment in PR",
+              description: "Posts a comment in the PR thread.",
+            },
+            { const: "skip", title: "Do not publish" },
+          ],
+        },
+      },
+    });
+    const options = payload.questions[0]?.options ?? [];
+    expect(options[0]).toMatchObject({
+      id: "comment",
+      label: "Comment in PR",
+      description: "Posts a comment in the PR thread.",
+    });
+    expect(options[1]?.description).toBeUndefined();
+  });
+
   it("maps select/input/confirm value schemas", () => {
     const select = elicitationSchemaToQuestionPayload("Pick one", {
       type: "object",
