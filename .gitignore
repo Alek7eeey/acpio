@@ -19,3 +19,4 @@ dist-app/
 /.tmp-perf/
 /.acpio-attachments/
 /.tmp-check/
+/tmp/
