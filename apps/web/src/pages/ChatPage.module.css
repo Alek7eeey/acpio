@@ -381,6 +381,28 @@
   width: 100%;
 }
 
+/**
+ * A split pane the reader is not working in: the wheel over it must not move it.
+ * `hidden` takes away every way of scrolling the thread itself — touch, the
+ * keyboard, the scrollbar — without touching the offset, so the streaming pin,
+ * the jump-to-latest landing and a deep-linked message all keep scrolling it
+ * programmatically. The wheel, which also reaches the scroll areas nested in the
+ * thread, is swallowed by the pane (see the wheel guard in ChatPage).
+ */
+.threadScrollLocked {
+  overflow: hidden;
+}
+
+/**
+ * Both panes keep the scrollbar gutter while split. The scrollbar of the
+ * unlocked pane is a 10px column the text is laid out around (see
+ * ::-webkit-scrollbar), and taking it away on the click that moves focus would
+ * reflow the thread at exactly the moment the reader looks at it.
+ */
+.pageInSplit .thread {
+  scrollbar-gutter: stable;
+}
+
 .threadInner {
   display: flex;
   flex-direction: column;

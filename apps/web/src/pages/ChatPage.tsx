@@ -5374,6 +5374,33 @@ function ChatThread() {
   };
 
   const paneFocused = !bind || bind.focused;
+  /**
+   * A split pane the reader is not working in does not scroll: the wheel spends
+   * far more time over the other half of the window than the reader means it to,
+   * and a pane that moves under them is a pane they have to find their place in
+   * again. One click anywhere in it focuses it, so nothing is out of reach.
+   */
+  const paneScrollLocked = Boolean(bind && bind.paneCount > 1 && !bind.focused);
+  /**
+   * The wheel is the only input that reaches a pane without focusing it, and it
+   * reaches the scroll areas nested inside it too (a tall tool output has its own
+   * `overflow: auto`) — `overflow: hidden` on the thread cannot stop those, so a
+   * locked pane swallows the wheel outright.
+   */
+  useEffect(() => {
+    const pane = pageRef.current;
+    if (!paneScrollLocked || !pane) return;
+    const onWheel = (e: WheelEvent) => {
+      // Ctrl+wheel is the browser's page zoom, and the trackpad pinch that
+      // reports itself the same way: that is the reader sizing the window, not
+      // scrolling this pane.
+      if (e.ctrlKey || e.metaKey) return;
+      e.preventDefault();
+    };
+    pane.addEventListener("wheel", onWheel, { passive: false });
+    return () => pane.removeEventListener("wheel", onWheel);
+  }, [paneScrollLocked]);
+
   const activeRightPanel =
     planPanelOpen && activePlan
       ? "plan"
@@ -5416,7 +5443,10 @@ function ChatThread() {
         </div>
       ) : (
       <>
-      <div className={styles.thread} ref={threadRef}>
+      <div
+        className={`${styles.thread}${paneScrollLocked ? ` ${styles.threadScrollLocked}` : ""}`}
+        ref={threadRef}
+      >
         {showThreadSkeleton ? (
           <div className={styles.threadSkeleton} role="status" aria-label={t("chat.loadingChat")}>
             <div className={styles.skeletonTurn}>

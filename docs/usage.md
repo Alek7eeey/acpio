@@ -42,7 +42,9 @@ history. Results jump to the matching message in the feed.
 
 Enable **Settings → Two chats side by side**, then use the split button under the header.
 `Ctrl+click` a chat in the tree to open it in the other pane. Each pane has its own
-composer and scroll position.
+composer and scroll position. Only the pane you are working in scrolls: the wheel over the
+other one does nothing until you click into it, so a reply streaming on the left stays put
+while you read on the right.
 
 ### Per-chat MCP
 
