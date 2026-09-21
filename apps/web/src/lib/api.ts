@@ -311,6 +311,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rev, tag }),
     }),
+  gitDeleteBranch: (id: string, branch: string, force?: boolean) =>
+    request<{ ok: boolean; unmerged: boolean; status: GitStatusDto }>(
+      `/api/sessions/${id}/git/delete-branch`,
+      { method: "POST", body: JSON.stringify({ branch, force }) },
+    ),
   gitDiscard: (id: string, paths: string[]) =>
     request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/discard`, {
       method: "POST",

@@ -1262,6 +1262,12 @@ export interface GitStatusDto {
   aheadCount: number;
   /** Commits on the upstream not in HEAD (unpulled). */
   behindCount: number;
+  /**
+   * Local branches the app will not delete: the checked-out one and the
+   * repository's main one. The delete button is hidden for these, and the
+   * delete route refuses them independently.
+   */
+  protectedBranches: string[];
 }
 
 export interface GitCommitDto {

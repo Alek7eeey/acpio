@@ -5755,6 +5755,7 @@ function ChatThread() {
                     branchBusy: git.branchBusy,
                     branchesLoading: git.branchesLoading,
                     onCheckout: git.checkout,
+                    onDeleteBranch: git.deleteBranch,
                     onLoadBranches: () => void git.loadBranches(),
                     changesOpen: gitPanelOpen,
                     onOpenChanges: openGitChangesPanel,
@@ -6112,6 +6113,7 @@ function ChatThread() {
                   status={git.status}
                   branchBusy={git.branchBusy}
                   onCheckout={git.checkout}
+                  onDeleteBranch={git.deleteBranch}
                   onLoadBranches={() => void git.loadBranches()}
                   branchesLoading={git.branchesLoading}
                 />
@@ -6285,6 +6287,7 @@ function ChatThread() {
           onClose={() => setGitPanelOpen(false)}
           onStatusChange={git.applyStatus}
           onCheckout={git.checkout}
+          onDeleteBranch={git.deleteBranch}
           onFullscreenChange={setGitFullscreen}
         />
       ) : null}

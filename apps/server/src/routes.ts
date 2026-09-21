@@ -84,6 +84,7 @@ import {
   commitGit,
   createGitBranchAt,
   createGitTagAt,
+  deleteGitBranch,
   deleteGitFiles,
   discardGitChanges,
   getGitBlame,
@@ -969,6 +970,35 @@ export async function registerRoutes(app: FastifyInstance) {
     const result = await createGitTagAt(cwd, body.tag, body.rev);
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Create tag failed" });
     return { ok: true, status: await getGitStatus(cwd) };
+  });
+
+  app.post("/api/sessions/:id/git/delete-branch", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        branch: z.string().min(1).max(255),
+        /** Repeat call after the reader confirms losing an unmerged branch. */
+        force: z.boolean().optional(),
+      })
+      .parse(req.body);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await deleteGitBranch(cwd, body.branch, { force: body.force });
+    // A branch git refuses to drop because nothing else has its commits is the
+    // question the reader answers next, not a failed request — same shape as a
+    // pull that stops on a conflict: 200 with the outcome and the fresh status.
+    if (!result.ok && !result.unmerged) {
+      req.log.warn(
+        { sessionId: id, cwd: cwd, branch: body.branch, error: result.error },
+        "git branch delete failed",
+      );
+      return reply.code(400).send({ error: result.error ?? "Delete branch failed" });
+    }
+    return {
+      ok: result.ok,
+      unmerged: result.unmerged ?? false,
+      status: await getGitStatus(cwd),
+    };
   });
 
   app.post("/api/sessions/:id/git/discard", async (req, reply) => {

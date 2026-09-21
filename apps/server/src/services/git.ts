@@ -196,6 +196,45 @@ function validateBranchName(name: string): string | null {
   return null;
 }
 
+/**
+ * The names the repository considers its main branch, as local branch names.
+ *
+ * `origin/HEAD` is the authoritative answer, but it needs a remote and a
+ * `remote set-head` to exist — a local-only repo has only the two conventional
+ * names left. One `for-each-ref` asks for all three candidates at once on
+ * purpose: the status summary runs on a poll, and must not pay more than one
+ * process for this.
+ */
+async function mainBranchNames(root: string): Promise<string[]> {
+  const refs = await runGit(root, [
+    "for-each-ref",
+    "--format=%(refname:short)%09%(symref)",
+    "refs/remotes/origin/HEAD",
+    "refs/heads/main",
+    "refs/heads/master",
+  ]);
+  if (!refs.ok) return [];
+  const names = new Set<string>();
+  for (const line of refs.out.split("\n")) {
+    if (!line.trim()) continue;
+    const [short = "", symref = ""] = line.split("\t");
+    // The `origin/HEAD` row is a symbolic ref: its short name is the remote
+    // ("origin"), so only the ref it points at names a branch.
+    const name = symref ? symref.replace(/^refs\/remotes\/[^/]+\//, "") : short;
+    if (name) names.add(name);
+  }
+  return [...names];
+}
+
+/**
+ * Branches the app will not delete: the checked-out one and the main one(s).
+ * The status carries this list so the menu can hide the row's delete button,
+ * and `deleteGitBranch` refuses the same names — one rule, both sides.
+ */
+async function protectedBranchNames(root: string, current: string): Promise<string[]> {
+  return [...new Set([current, ...(await mainBranchNames(root))].filter(Boolean))];
+}
+
 /** `git diff --shortstat` → line totals (untracked files are not included). */
 export function parseShortstat(output: string): { additions: number; deletions: number } {
   let additions = 0;
@@ -346,13 +385,14 @@ async function trackedLineTotals(root: string): Promise<{ additions: number; del
 }
 
 async function buildStatusSummary(root: string): Promise<GitStatusDto> {
-  // Four independent reads: run them together, then the slowest one decides.
+  // Five independent reads: run them together, then the slowest one decides.
   const branchCall = runGit(root, ["branch", "--show-current"]);
-  const [branch, porcelain, totals, aheadBehind] = await Promise.all([
+  const [branch, porcelain, totals, aheadBehind, protectedBranches] = await Promise.all([
     branchCall,
     runGit(root, ["status", "--porcelain=v1", "-uall"]),
     trackedLineTotals(root),
     branchCall.then((result) => gitAheadBehind(root, result.ok ? result.out : "")),
+    branchCall.then((result) => protectedBranchNames(root, result.ok ? result.out : "")),
   ]);
   const files = parsePorcelain(porcelain.out, new Map());
   const conflict = files.some(isConflictFile);
@@ -376,14 +416,16 @@ async function buildStatusSummary(root: string): Promise<GitStatusDto> {
     stashCount: 0,
     aheadCount: ahead,
     behindCount: behind,
+    protectedBranches,
   };
 }
 
 async function buildStatus(root: string): Promise<GitStatusDto> {
   // Independent reads, one wave: the branch list, the staged and worktree
-  // numstats, the stash, the ahead/behind probe and the HEAD totals.
+  // numstats, the stash, the ahead/behind probe, the HEAD totals and the
+  // branches the app refuses to delete.
   const branchCall = runGit(root, ["branch", "--show-current"]);
-  const [branch, branches, porcelain, cachedNumstat, worktreeNumstat, stashList, aheadBehind, totals] =
+  const [branch, branches, porcelain, cachedNumstat, worktreeNumstat, stashList, aheadBehind, totals, protectedBranches] =
     await Promise.all([
       branchCall,
       runGit(root, ["branch", "--format=%(refname:short)"]),
@@ -393,6 +435,7 @@ async function buildStatus(root: string): Promise<GitStatusDto> {
       runGit(root, ["stash", "list"]),
       branchCall.then((result) => gitAheadBehind(root, result.ok ? result.out : "")),
       trackedLineTotals(root),
+      branchCall.then((result) => protectedBranchNames(root, result.ok ? result.out : "")),
     ]);
 
   const numstat = new Map<string, { additions: number; deletions: number }>();
@@ -427,6 +470,7 @@ async function buildStatus(root: string): Promise<GitStatusDto> {
     stashCount,
     aheadCount: ahead,
     behindCount: behind,
+    protectedBranches,
   };
 }
 
@@ -446,6 +490,7 @@ export async function getGitStatus(cwd: string, opts?: { summary?: boolean }): P
     stashCount: 0,
     aheadCount: 0,
     behindCount: 0,
+    protectedBranches: [],
   };
   const root = await resolveGitRoot(cwd);
   if (!root) return empty;
@@ -863,6 +908,43 @@ export async function createGitBranchAt(
   if (!name) return { ok: false, error: "Invalid revision" };
   const result = await runGit(root, ["branch", branch.trim(), name]);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Create branch failed" };
+}
+
+/**
+ * Delete a local branch.
+ *
+ * The checked-out branch and the repository's main branch are refused: git
+ * would drop a merged main without complaint, and there is no way back to it
+ * from the app. The same names hide the row's delete button in the menu.
+ *
+ * Without `force` git refuses a branch whose tip is not merged anywhere else.
+ * That refusal is not an error the caller can do nothing about: it is the
+ * question "lose those commits?", so it is reported as `unmerged` and the
+ * caller repeats the call with `force` once the reader answers.
+ */
+export async function deleteGitBranch(
+  cwd: string,
+  branch: string,
+  opts?: { force?: boolean },
+): Promise<{ ok: boolean; unmerged?: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const invalid = validateBranchName(branch);
+  if (invalid) return { ok: false, error: invalid };
+  const name = branch.trim();
+  const current = await runGit(root, ["branch", "--show-current"]);
+  const currentName = current.ok ? current.out : "";
+  if (currentName === name) return { ok: false, error: "Cannot delete the checked out branch" };
+  if ((await mainBranchNames(root)).includes(name)) {
+    return { ok: false, error: "Cannot delete the main branch" };
+  }
+  const result = await runGit(root, ["branch", opts?.force ? "-D" : "-d", name]);
+  if (result.ok) return { ok: true };
+  const message = gitFailureMessage(result) || "Delete branch failed";
+  if (!opts?.force && /not fully merged/i.test(message)) {
+    return { ok: false, unmerged: true, error: message };
+  }
+  return { ok: false, error: message };
 }
 
 export async function createGitTagAt(

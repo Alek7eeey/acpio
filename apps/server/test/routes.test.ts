@@ -1592,4 +1592,84 @@ describe("git routes", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ repo: false, root: "", files: [] });
   });
+
+  it("deletes a local branch, asking again before it drops unmerged commits", async () => {
+    const dir = await gitRepo();
+    const base = git(dir, ["branch", "--show-current"]).trim();
+    const session = await seedSession({ cwd: dir });
+    const url = `/api/sessions/${session.id}/git/delete-branch`;
+
+    // A branch at HEAD is reachable from HEAD, so git drops it without force.
+    git(dir, ["branch", "merged-branch"]);
+    const merged = await app.inject({ method: "POST", url, payload: { branch: "merged-branch" } });
+    expect(merged.statusCode).toBe(200);
+    expect(merged.json()).toMatchObject({ ok: true, unmerged: false });
+    expect(git(dir, ["branch", "--list"]).trim()).toBe(`* ${base}`);
+
+    // A branch with its own commit is not: the refusal is the question.
+    git(dir, ["checkout", "-b", "unmerged-branch"]);
+    await fsp.writeFile(path.join(dir, "own.txt"), "own\n");
+    git(dir, ["add", "own.txt"]);
+    git(dir, ["commit", "-m", "own work"]);
+    git(dir, ["checkout", base]);
+
+    const refused = await app.inject({ method: "POST", url, payload: { branch: "unmerged-branch" } });
+    expect(refused.statusCode).toBe(200);
+    expect(refused.json()).toMatchObject({ ok: false, unmerged: true });
+    expect(git(dir, ["branch", "--list", "unmerged-branch"]).trim()).toBe("unmerged-branch");
+
+    const forced = await app.inject({
+      method: "POST",
+      url,
+      payload: { branch: "unmerged-branch", force: true },
+    });
+    expect(forced.statusCode).toBe(200);
+    const forcedBody = forced.json() as { ok: boolean; unmerged: boolean; status: GitStatusDto };
+    expect(forcedBody).toMatchObject({ ok: true, unmerged: false });
+    expect(forcedBody.status.branches).toEqual([base]);
+  });
+
+  it("refuses to delete the checked out branch", async () => {
+    const dir = await gitRepo();
+    const session = await seedSession({ cwd: dir });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/git/delete-branch`,
+      payload: { branch: git(dir, ["branch", "--show-current"]).trim() },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toContain("checked out");
+  });
+
+  it("refuses the main branch even from another branch, and says so in the status", async () => {
+    const dir = await gitRepo();
+    // Merged into HEAD, so git itself would drop any of these without complaint.
+    git(dir, ["branch", "main"]);
+    git(dir, ["branch", "keep"]);
+    git(dir, ["branch", "gone"]);
+    git(dir, ["checkout", "keep"]);
+    const session = await seedSession({ cwd: dir });
+    const url = (suffix: string) => `/api/sessions/${session.id}${suffix}`;
+
+    const status = await app.inject({ method: "GET", url: url("/git/status") });
+    expect((status.json() as GitStatusDto).protectedBranches).toEqual(
+      expect.arrayContaining(["keep", "main"]),
+    );
+    // The composer poll asks for the summary; it must carry the same protection,
+    // or the menu would offer a delete for main until the full status lands.
+    const summary = await app.inject({ method: "GET", url: url("/git/status?summary=1") });
+    expect((summary.json() as GitStatusDto).protectedBranches).toEqual(
+      expect.arrayContaining(["keep", "main"]),
+    );
+
+    const gone = await app.inject({ method: "POST", url: url("/git/delete-branch"), payload: { branch: "gone" } });
+    expect(gone.statusCode).toBe(200);
+    expect(gone.json()).toMatchObject({ ok: true });
+
+    const main = await app.inject({ method: "POST", url: url("/git/delete-branch"), payload: { branch: "main" } });
+    expect(main.statusCode).toBe(400);
+    expect(main.json().error).toContain("main branch");
+    expect(git(dir, ["branch", "--list", "main"]).trim()).toBe("main");
+  });
 });

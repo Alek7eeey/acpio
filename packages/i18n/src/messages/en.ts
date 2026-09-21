@@ -620,6 +620,13 @@ export const en = {
     checkoutOk: "Branch switched",
     checkoutBlocked: "Cannot switch branch — local changes would be overwritten",
     checkoutBlockedHint: "Commit or stash your changes first.",
+    deleteBranch: "Delete branch",
+    deleteBranchLabel: "Delete branch {{branch}}",
+    deleteBranchConfirm: "Delete branch {{branch}}?",
+    deleteBranchUnmergedConfirm:
+      "Branch {{branch}} has commits that are not merged anywhere else. Delete it and lose them?",
+    deleteBranchOk: "Branch deleted",
+    deleteBranchFailed: "Could not delete branch",
     stagedCount: "{{count}} staged",
     unstagedCount: "{{count}} unstaged",
     stagedSection: "Staged · {{count}}",

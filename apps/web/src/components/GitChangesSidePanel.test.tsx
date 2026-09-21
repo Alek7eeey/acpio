@@ -42,6 +42,7 @@ const STATUS = {
   stashCount: 0,
   aheadCount: 0,
   behindCount: 0,
+  protectedBranches: ["main"],
 };
 
 function fileDiff(path: string) {
@@ -66,6 +67,7 @@ function renderPanel(props: Partial<Parameters<typeof GitChangesSidePanel>[0]> =
           onClose={vi.fn()}
           onStatusChange={vi.fn()}
           onCheckout={vi.fn().mockResolvedValue(undefined)}
+          onDeleteBranch={vi.fn().mockResolvedValue({ ok: true, unmerged: false })}
           onFullscreenChange={onFullscreenChange}
           {...props}
         />

@@ -24,7 +24,7 @@ import {
 } from "./GitChangesCommitPane";
 import { GitCommitHistory } from "./GitCommitHistory";
 import { GitCommitDetail } from "./GitCommitDetail";
-import { GitBranchSwitcher } from "./ComposerGitBar";
+import { GitBranchSwitcher, type GitBranchDeleteOutcome } from "./ComposerGitBar";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { showToast } from "../lib/toast";
@@ -94,6 +94,7 @@ export function GitChangesSidePanel({
   onClose,
   onStatusChange,
   onCheckout,
+  onDeleteBranch,
   onFullscreenChange,
 }: {
   sessionId: string;
@@ -107,6 +108,7 @@ export function GitChangesSidePanel({
   onClose: () => void;
   onStatusChange: (status: GitStatusDto) => void;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
   onFullscreenChange: (fullscreen: boolean) => void;
 }) {
   const t = useT();
@@ -856,6 +858,7 @@ export function GitChangesSidePanel({
                 status={status}
                 branchBusy={branchBusy}
                 onCheckout={handleCheckout}
+                onDeleteBranch={onDeleteBranch}
                 variant="panelHeader"
               />
             ) : (

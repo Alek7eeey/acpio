@@ -434,14 +434,32 @@
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
 }
 
+.branchRow {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.branchRow:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
+}
+
+.branchRowActive {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
 .menuItem {
   display: block;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   border: none;
   border-radius: 8px;
   background: transparent;
   color: var(--text);
   text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 8px 10px;
   cursor: pointer;
   font: inherit;
@@ -459,16 +477,35 @@
   font-size: 0.74rem;
 }
 
-.menuItem:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-tertiary) 75%, transparent);
-}
-
-.menuItemActive {
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-}
-
 .menuItem:disabled {
   opacity: 0.6;
+  cursor: wait;
+}
+
+.branchDelete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin-right: 3px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.branchDelete:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  opacity: 1;
+}
+
+.branchDelete:disabled {
+  opacity: 0.35;
   cursor: wait;
 }
 
@@ -507,6 +544,15 @@
 .createBranch button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+@media (pointer: coarse) {
+  /* The delete affordance sits in a row a finger picks from: hand it a finger. */
+  .branchDelete {
+    width: 32px;
+    height: 32px;
+    margin-right: 2px;
+  }
 }
 
 @media (max-width: 700px) {

@@ -192,7 +192,12 @@ const GIT_PATH_PATTERN = /[\w.-]+(?:\/[\w.-]+)+/g;
 /** Cap for the git explanation appended to a toast; stderr can be a wall of hints. */
 const GIT_ERROR_DETAIL_MAX = 480;
 
-type GitErrorToastKey = "git.checkoutBlocked" | "git.checkoutBlockedHint" | "git.checkoutFailed" | "git.syncFailed";
+type GitErrorToastKey =
+  | "git.checkoutBlocked"
+  | "git.checkoutBlockedHint"
+  | "git.checkoutFailed"
+  | "git.deleteBranchFailed"
+  | "git.syncFailed";
 
 function normalizeGitCliError(raw: string) {
   return raw

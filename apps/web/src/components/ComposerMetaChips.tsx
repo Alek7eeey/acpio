@@ -21,7 +21,12 @@ import { isShellSession } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { showToast } from "../lib/toast";
 import { OptionPicker } from "./OptionPicker";
-import { ComposerGitChangesButton, GitChangesChipLoader, GitBranchSwitcher } from "./ComposerGitBar";
+import {
+  ComposerGitChangesButton,
+  GitChangesChipLoader,
+  GitBranchSwitcher,
+  type GitBranchDeleteOutcome,
+} from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
 import { MiddleTruncate } from "./MiddleTruncate";
 import styles from "../pages/ChatPage.module.css";
@@ -187,6 +192,7 @@ export function ComposerMetaChips({
     branchBusy: boolean;
     branchesLoading?: boolean;
     onCheckout: (branch: string, create?: boolean) => Promise<void>;
+    onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
     onLoadBranches?: () => void;
     changesOpen: boolean;
     onOpenChanges: () => void;
@@ -319,6 +325,7 @@ export function ComposerMetaChips({
                 status={gitChip.status}
                 branchBusy={gitChip.branchBusy}
                 onCheckout={gitChip.onCheckout}
+                onDeleteBranch={gitChip.onDeleteBranch}
                 onRequestFullStatus={gitChip.onLoadBranches}
                 branchesLoading={gitChip.branchesLoading}
                 fixedMenu

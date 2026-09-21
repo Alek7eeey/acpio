@@ -22,6 +22,12 @@ function gitCwdKey(cwd: string | undefined): string | null {
   return trimmed.replace(/\\/g, "/").toLowerCase();
 }
 
+/** What a branch deletion answered: done, or git refusing to lose unmerged commits. */
+export type GitBranchDeleteOutcome = {
+  ok: boolean;
+  unmerged: boolean;
+};
+
 export function useGitStatus(
   sessionId: string | null,
   onStatusChange?: (status: GitStatusDto | null) => void,
@@ -186,12 +192,43 @@ export function useGitStatus(
     }
   }, [applyStatus, boundStatus?.branch, branchBusy, t]);
 
+  /**
+   * Delete a local branch. The first call lets git refuse a branch whose commits
+   * are not merged anywhere else; the caller asks the reader about losing them
+   * and repeats the call with `force`. Both calls return the outcome, so the
+   * question is asked by the surface that can phrase it with the branch name.
+   */
+  const deleteBranch = useCallback(
+    async (branch: string, opts?: { force?: boolean }): Promise<GitBranchDeleteOutcome> => {
+      const sid = sessionRef.current;
+      if (!sid || branchBusy) return { ok: false, unmerged: false };
+      setBranchBusy(true);
+      try {
+        const result = await api.gitDeleteBranch(sid, branch, opts?.force);
+        if (sessionRef.current !== sid) return { ok: false, unmerged: false };
+        applyStatus(result.status);
+        if (result.ok) showToast(t("git.deleteBranchOk"), { tone: "success" });
+        return { ok: result.ok, unmerged: result.unmerged };
+      } catch (e) {
+        const raw = e instanceof Error ? e.message : "";
+        showToast(formatGitErrorToast(raw, t, { fallback: t("git.deleteBranchFailed") }), {
+          tone: "danger",
+        });
+        return { ok: false, unmerged: false };
+      } finally {
+        setBranchBusy(false);
+      }
+    },
+    [applyStatus, branchBusy, t],
+  );
+
   return {
     status: boundStatus,
     loading: pending,
     awaiting,
     refresh,
     checkout,
+    deleteBranch,
     branchBusy,
     branchesLoading,
     loadBranches,
@@ -338,6 +375,7 @@ export function GitBranchSwitcher({
   status,
   branchBusy,
   onCheckout,
+  onDeleteBranch,
   onRequestFullStatus,
   branchesLoading = false,
   variant = "default",
@@ -346,6 +384,7 @@ export function GitBranchSwitcher({
   status: GitStatusDto;
   branchBusy: boolean;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
   onRequestFullStatus?: () => void;
   /** The branch list has not arrived yet — the menu is showing a partial list. */
   branchesLoading?: boolean;
@@ -455,6 +494,20 @@ export function GitBranchSwitcher({
     });
   };
 
+  /**
+   * Deletion is asked twice on purpose: git only drops a branch whose commits
+   * are merged somewhere else without `force`, so a second question — naming
+   * what is lost — appears exactly when the commits would go with it.
+   */
+  const removeBranch = (branch: string) => {
+    if (!window.confirm(t("git.deleteBranchConfirm", { branch }))) return;
+    void onDeleteBranch(branch).then((result) => {
+      if (!result.unmerged) return;
+      if (!window.confirm(t("git.deleteBranchUnmergedConfirm", { branch }))) return;
+      void onDeleteBranch(branch, { force: true });
+    });
+  };
+
   const switcherClass =
     variant === "panelHeader"
       ? `${styles.switcher} ${styles.switcherPanelHeader}`
@@ -507,23 +560,55 @@ export function GitBranchSwitcher({
                   {t("git.loadingBranches")}
                 </span>
               ) : null}
-              {branches.map((branch) => (
-                <button
-                  key={branch}
-                  type="button"
-                  role="option"
-                  aria-selected={branch === status.branch}
-                  className={`${styles.menuItem}${branch === status.branch ? ` ${styles.menuItemActive}` : ""}`}
-                  onClick={() =>
-                    void onCheckout(branch).then(() => {
-                      setMenuOpen(false);
-                    })
-                  }
-                  disabled={branchBusy}
-                >
-                  {branch}
-                </button>
-              ))}
+              {branches.map((branch) => {
+                // No delete for the checked-out branch or the repository's main
+                // one: git drops a merged main without complaint, and the app
+                // has no way back to it once it is gone.
+                const deletable = !status.protectedBranches.includes(branch);
+                return (
+                  <div
+                    key={branch}
+                    className={`${styles.branchRow}${
+                      branch === status.branch ? ` ${styles.branchRowActive}` : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={branch === status.branch}
+                      className={styles.menuItem}
+                      onClick={() =>
+                        void onCheckout(branch).then(() => {
+                          setMenuOpen(false);
+                        })
+                      }
+                      disabled={branchBusy}
+                    >
+                      {branch}
+                    </button>
+                    {deletable ? (
+                      <button
+                        type="button"
+                        className={styles.branchDelete}
+                        title={t("git.deleteBranch")}
+                        aria-label={t("git.deleteBranchLabel", { branch })}
+                        onClick={() => removeBranch(branch)}
+                        disabled={branchBusy}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                            stroke="currentColor"
+                            strokeWidth="1.7"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
               <div className={styles.createBranch}>
                 <input
                   value={newBranch}
@@ -560,6 +645,7 @@ export function ComposerGitBranchBar({
   status,
   branchBusy,
   onCheckout,
+  onDeleteBranch,
   onLoadBranches,
   branchesLoading = false,
   changesOpen,
@@ -569,6 +655,7 @@ export function ComposerGitBranchBar({
   status: GitStatusDto;
   branchBusy: boolean;
   onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
   /** Called when the branch menu opens, to fetch the full branch list. */
   onLoadBranches?: () => void;
   branchesLoading?: boolean;
@@ -595,6 +682,7 @@ export function ComposerGitBranchBar({
         status={status}
         branchBusy={branchBusy}
         onCheckout={onCheckout}
+        onDeleteBranch={onDeleteBranch}
         onRequestFullStatus={onLoadBranches}
         branchesLoading={branchesLoading}
         variant={branchVariant}
