@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { ChatChangesMetrics, GitStatusDto, SessionStatus } from "@acpio/shared";
 import { useT } from "../lib/i18n";
@@ -438,8 +438,15 @@ export function GitBranchSwitcher({
 
   const branches = status.branches.length ? status.branches : status.branch ? [status.branch] : [];
 
-  const onCreateBranch = (e: FormEvent) => {
-    e.preventDefault();
+  /**
+   * The switcher sits inside the composer's own `<form>` when the branch bar is
+   * the row under the input. A form inside a form is invalid DOM: the browser
+   * truncates the inner submit event at the outer form, so React's onSubmit
+   * never runs, the default GET submission reloads the app and the branch is
+   * never created. The create row is therefore a plain div, and its action is
+   * wired to the button and to Enter explicitly.
+   */
+  const createBranch = () => {
     const name = newBranch.trim();
     if (!name) return;
     void onCheckout(name, true).then(() => {
@@ -517,18 +524,27 @@ export function GitBranchSwitcher({
                   {branch}
                 </button>
               ))}
-              <form className={styles.createBranch} onSubmit={onCreateBranch}>
+              <div className={styles.createBranch}>
                 <input
                   value={newBranch}
                   onChange={(e) => setNewBranch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    createBranch();
+                  }}
                   placeholder={t("git.newBranchPlaceholder")}
                   aria-label={t("git.newBranchPlaceholder")}
                   disabled={branchBusy}
                 />
-                <button type="submit" disabled={branchBusy || !newBranch.trim()}>
+                <button
+                  type="button"
+                  onClick={createBranch}
+                  disabled={branchBusy || !newBranch.trim()}
+                >
                   {t("git.createBranch")}
                 </button>
-              </form>
+              </div>
             </div>
           );
           return useFixedMenu && typeof document !== "undefined"
