@@ -466,6 +466,15 @@ export function splitInlineThinking(raw: string): { thought: string; text: strin
   };
 }
 
+// Streaming chunk kinds — logged per token, they would drown everything else.
+const NOISY_UPDATE_KINDS: ReadonlySet<AcpUpdate["kind"]> = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "user_message_chunk",
+  "mixed_chunks",
+  "tool_call_content_chunk",
+]);
+
 export class AcpClient extends EventEmitter {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private nextId = 1;
@@ -1374,7 +1383,11 @@ export class AcpClient extends EventEmitter {
       const params = (msg.params ?? {}) as Record<string, unknown>;
       const update = (params.update ?? params) as Record<string, unknown>;
       const mapped = this.mapUpdate(update);
-      this.emit("log", `update ${mapped.kind}`);
+      // Token/content chunks arrive per-message and drown the log; log only
+      // discrete events (tool lifecycle, plan, mode, …).
+      if (!NOISY_UPDATE_KINDS.has(mapped.kind)) {
+        this.emit("log", `update ${mapped.kind}`);
+      }
       this.emit("update", mapped);
       return;
     }
