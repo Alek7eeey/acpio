@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "npm run build -w @acpio/shared && npm run build -w @acpio/i18n && npm run build -w @acpio/adapter-cursor && npm run build -w @acpio/adapter-omp && npm run build -w @acpio/server && npm run build -w @acpio/web",
+    "postinstall": "node scripts/patch-node-pty.mjs",
     "prestart": "node scripts/ensure-built.mjs",
     "start": "npm run start -w @acpio/server",
     "dist": "node scripts/package-dist.mjs",
