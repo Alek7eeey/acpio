@@ -705,9 +705,22 @@ describe("applyModelSelection against an enumerated model list", () => {
     expect(calls).toEqual([["my-agent.model", WIRE]]);
   });
 
-  it("skips a model this agent does not know instead of sending it", async () => {
+  it("sends a model the agent did not enumerate, since the list can lag its catalog", async () => {
     const calls: Array<[string, string]> = [];
     await makeClient(calls).applyModelSelection("builtin:bigmodel/GLM-5.3");
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([["my-agent.model", "builtin:bigmodel/GLM-5.3"]]);
+  });
+
+  it("keeps the agent's own model when it rejects an unenumerated value", async () => {
+    const acp = makeClient([]);
+    const sent: string[] = [];
+    acp.setConfigOption = async (_id, value) => {
+      sent.push(value);
+      throw new Error("Unknown ACP model");
+    };
+    await expect(
+      acp.applyModelSelection("builtin:bigmodel/GLM-5.3"),
+    ).resolves.toBeUndefined();
+    expect(sent).toEqual(["builtin:bigmodel/GLM-5.3"]);
   });
 });

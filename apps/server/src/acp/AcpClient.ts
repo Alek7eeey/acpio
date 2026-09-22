@@ -880,7 +880,9 @@ export class AcpClient extends EventEmitter {
     // Cursor catalogs embed params in the model values ("composer-2.5[fast=true]")
     // and accept ONLY exact listed values. Prefer the exact listed wire for the
     // base with the user's params merged in; never send a bare base it rejects.
-    let target: string | null;
+    let target: string;
+    // A value the agent did not enumerate: it can still accept it (see below).
+    let tentative = false;
     if (!allowedModels.length) {
       target = base;
     } else if (allowedModels.includes(wire)) {
@@ -897,20 +899,25 @@ export class AcpClient extends EventEmitter {
           .join(",")}]`;
         target = allowedModels.includes(rebuilt) ? rebuilt : sameBase;
       } else {
-        // The agent enumerated its models and knows nothing about this one —
-        // sending it anyway only earns a -32602. Keep the agent's own default.
-        target = null;
+        // The agent's list can lag its own catalog: omp's `session/new`
+        // enumeration omits models its live provider feed added (new SKUs)
+        // while `session/set_config_option` accepts them. Send the requested
+        // value and let the agent decide; a rejection (handled below) leaves
+        // its own model in place, exactly like the old pre-check did.
+        target = wire;
+        tentative = true;
       }
     }
-    if (!target) {
+    try {
+      await this.setConfigOption(modelId, target);
+    } catch (err) {
+      if (!tentative) throw err;
       this.emit(
         "log",
-        `model skip: "${base}" is not in this agent's model list (${this.provider})`,
+        `model skip: "${base}" was rejected by ${this.provider}: ${String(err)}`,
       );
       return;
     }
-
-    await this.setConfigOption(modelId, target);
     this.emit("log", `model set to ${target}`);
 
     // Re-read after model change — Cursor swaps effort ↔ reasoning and may
