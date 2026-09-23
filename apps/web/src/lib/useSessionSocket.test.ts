@@ -105,16 +105,41 @@ describe("useSessionSocket recovery", () => {
     online.mockRestore();
   });
 
-  it("re-dials on an offline event instead of declaring the session offline", () => {
+  it("verifies the pipe on an offline event instead of dropping it", () => {
     renderHook(() => useSessionSocket("s1", true));
     const socket = lastSocket();
     socket.answersPings = true;
     socket.open();
     expect(useAppStore.getState().connection).toBe("open");
 
+    // The OS's internet verdict says nothing about a same-origin socket: keep the
+    // pipe, ask it for a pong, and stay open. Dropping it here flashed
+    // "Переподключение" every time Windows reported no internet behind the proxy.
     window.dispatchEvent(new Event("offline"));
 
-    expect(FakeSocket.instances.length).toBe(2);
-    expect(useAppStore.getState().connection).not.toBe("offline");
+    expect(FakeSocket.instances.length).toBe(1);
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "ping" }));
+    expect(useAppStore.getState().connection).toBe("open");
+
+    vi.advanceTimersByTime(2_000);
+    expect(FakeSocket.instances.length).toBe(1);
+  });
+
+  it("keeps the live socket when a frozen page comes back with a stale reply clock", () => {
+    renderHook(() => useSessionSocket("s1", true));
+    const socket = lastSocket();
+    socket.answersPings = true;
+    socket.open();
+
+    // The tab was frozen: no JS ran, so the pongs the network stack answered were
+    // never observed here and `lastAliveAt` went stale. The pipe is fine, and the
+    // pong to the re-ping proves it — dialing a fresh socket over it flashed
+    // "Переподключение" on every return to the tab.
+    vi.setSystemTime(new Date(Date.now() + 40_000));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(FakeSocket.instances.length).toBe(1);
+    expect(socket.sent.at(-1)).toBe(JSON.stringify({ type: "ping" }));
+    expect(useAppStore.getState().connection).toBe("open");
   });
 });

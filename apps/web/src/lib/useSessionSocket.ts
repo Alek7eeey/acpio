@@ -32,13 +32,13 @@ export function sendWsMessage(msg: WsClientEvent) {
 // Mobile OSes drop the TCP pipe while the page is frozen (phone locked) without
 // telling the socket: readyState stays OPEN on a corpse, so onclose never fires
 // and nothing reconnects. The heartbeat pings on a timer, the tick watchdog
-// closes whatever did not answer in time, and poke() re-checks the moment the
-// page wakes up or the network comes back.
+// closes whatever did not answer in time, and poke() re-pings the moment the
+// page wakes up or the network comes back. Every recovery path proves the pipe
+// is dead before it drops it: a quiet-but-live socket looks exactly like a
+// corpse from this side, and dialing over one flashes "Переподключение".
 const PING_INTERVAL_MS = 20_000;
 const PONG_TIMEOUT_MS = 5_000;
 const CONNECT_TIMEOUT_MS = 8_000;
-/** No message for this long (the phone slept) — close without waiting for a pong. */
-const STALE_AFTER_MS = 30_000;
 const RETRY_MIN_MS = 1_000;
 /** Local harness: a restarted server is back within seconds — a 15 s backoff made
  *  reloading the page the faster way to recover. */
@@ -221,14 +221,11 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
         if (Date.now() - connectStartedAt > CONNECT_TIMEOUT_MS) reconnectNow();
         return;
       }
-      const now = Date.now();
-      if (lastAliveAt > 0 && now - lastAliveAt > STALE_AFTER_MS) {
-        // The page was frozen — the OS dropped the pipe underneath. A pong can
-        // never come, so dial fresh instead of waiting out the watchdog.
-        reconnectNow();
-        return;
-      }
-      lastPingAt = now;
+      // An idle pipe carries nothing, so `lastAliveAt` ages out even while the
+      // socket is perfectly alive — a frozen tab looks the same from here as a
+      // dead peer. Ping instead of dialing: the pong proves the pipe, and the
+      // tick watchdog re-dials if it never comes.
+      lastPingAt = Date.now();
       try {
         socket.send(JSON.stringify({ type: "ping" } satisfies WsClientEvent));
       } catch {
@@ -242,10 +239,11 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
       if (document.visibilityState === "visible") poke();
     };
     // The OS losing its network is a hint, not a verdict — same-origin traffic
-    // still works. Re-dial and let the dial decide, instead of painting
-    // "Нет соединения" over a live session.
+    // still works. Ask the pipe rather than dropping it, instead of painting
+    // "Переподключение" over a live session; a pipe that really died still ends
+    // up in onclose or in the pong watchdog.
     const onOffline = () => {
-      if (!disposed) reconnectNow();
+      if (!disposed) poke();
     };
     window.addEventListener("focus", poke);
     document.addEventListener("visibilitychange", onVisibility);
