@@ -122,6 +122,7 @@ type CreateSessionFolderPickerProps = {
   onClose: () => void;
   onConfirm: (cwd: string, provider: SessionTarget) => void | Promise<void>;
   onOpenExisting?: (session: HarnessSessionDto) => void | Promise<void>;
+  onCreateBoard?: (name: string) => void | Promise<void>;
 };
 
 export function CreateSessionFolderPicker({
@@ -136,6 +137,7 @@ export function CreateSessionFolderPicker({
   onClose,
   onConfirm,
   onOpenExisting,
+  onCreateBoard,
 }: CreateSessionFolderPickerProps) {
   const t = useT();
   const [searchQuery, setSearchQuery] = useState("");
@@ -163,7 +165,8 @@ export function CreateSessionFolderPicker({
     return onlineAgents[0]?.id ?? null;
   });
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
-  const [sessionKind, setSessionKind] = useState<"agent" | "terminal">("agent");
+  const [sessionKind, setSessionKind] = useState<"agent" | "terminal" | "board">("agent");
+  const [boardName, setBoardName] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const agentRowRef = useRef<HTMLDivElement>(null);
@@ -194,7 +197,7 @@ export function CreateSessionFolderPicker({
   }, []);
 
   useEffect(() => {
-    if (sessionKind === "terminal" || !provider || !onOpenExisting || provider === SHELL_SESSION_PROVIDER) {
+    if (sessionKind !== "agent" || !provider || !onOpenExisting || provider === SHELL_SESSION_PROVIDER) {
       setExisting([]);
       setExistingLoading(false);
       return;
@@ -377,11 +380,24 @@ export function CreateSessionFolderPicker({
     <p className={styles.pickerEmpty}>{t("chat.openExistingEmpty")}</p>
   );
 
-  const selectSessionKind = (kind: "agent" | "terminal") => {
+  const selectSessionKind = (kind: "agent" | "terminal" | "board") => {
     setSessionKind(kind);
-    if (kind === "terminal") {
+    if (kind !== "agent") {
       setAgentMenuOpen(false);
       setExistingMenuOpen(false);
+    }
+  };
+
+  const submitBoard = async () => {
+    const name = boardName.trim();
+    if (busy || !name || !onCreateBoard) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onCreateBoard(name);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
     }
   };
 
@@ -414,6 +430,25 @@ export function CreateSessionFolderPicker({
       >
         {t("common.sessionKindTerminal")}
       </button>
+      {lockFolder ? null : (
+        <>
+          <span className={styles.pickerKindSep} aria-hidden>
+            /
+          </span>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sessionKind === "board"}
+            className={`${styles.pickerKindLink}${
+              sessionKind === "board" ? ` ${styles.pickerKindLinkOn}` : ""
+            }`}
+            disabled={busy}
+            onClick={() => selectSessionKind("board")}
+          >
+            {t("common.sessionKindBoard")}
+          </button>
+        </>
+      )}
     </div>
   );
 
@@ -640,6 +675,32 @@ export function CreateSessionFolderPicker({
       <div className={styles.pickerKindBar}>{sessionKindSwitch}</div>
       {agentPicker}
 
+      {sessionKind === "board" ? (
+        <div>
+          <div className={styles.pickerHead}>{t("chat.newBoard")}</div>
+          <input
+            className={styles.pickerSearchInput}
+            type="text"
+            value={boardName}
+            onChange={(e) => setBoardName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submitBoard();
+            }}
+            placeholder={t("chat.boardName")}
+            aria-label={t("chat.boardName")}
+            autoFocus={!mobileSheet}
+          />
+          <button
+            type="button"
+            className={styles.pickerCreateBtn}
+            disabled={busy || !boardName.trim() || !onCreateBoard}
+            onClick={() => void submitBoard()}
+          >
+            {t("common.create")}
+          </button>
+        </div>
+      ) : (
+        <>
       {/* Search */}
       <div className={styles.pickerSearch}>
         <svg className={styles.pickerSearchIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -725,6 +786,8 @@ export function CreateSessionFolderPicker({
           </svg>
         </span>
       </button>
+        </>
+      )}
 
       {existingHover}
 

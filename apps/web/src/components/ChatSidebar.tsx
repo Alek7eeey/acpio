@@ -1,13 +1,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
-import type { AgentProvider, SessionDto } from "@acpio/shared";
+import { useLocation, useNavigate } from "react-router-dom";
+import type { AgentProvider, BoardDto, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { harnessLabel, harnessNamesForCopy } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
 import { sessionTreeDisplayTitle, sessionActivityAt, sessionRowMark, sortSessions, groupByFolder } from "../lib/sessionTitle";
-import { normalizeCwd } from "../lib/pathSegments";
+import { folderLabel, normalizeCwd } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { useAppStore } from "../lib/store";
@@ -44,6 +44,17 @@ type FolderPickerState = {
   lockedCwd?: string;
 };
 
+/** Kanban board glyph for the chat tree: three task columns. */
+function BoardGlyph() {
+  return (
+    <svg width="14" height="13" viewBox="0 0 24 20" fill="none" aria-hidden>
+      <rect x="3" y="3" width="4.4" height="14" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="9.8" y="3" width="4.4" height="9" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+      <rect x="16.6" y="3" width="4.4" height="12" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
 /** Filled manila folder glyph for the chat tree. */
 function FolderGlyph() {
   return (
@@ -63,13 +74,6 @@ function FolderGlyph() {
       <path className={styles.folderIconFront} d="M1.5 8h21v2.4H1.5Z" opacity="0.55" />
     </svg>
   );
-}
-
-function folderLabel(cwd: string, noFolderLabel: string) {
-  const normalized = normalizeCwd(cwd);
-  if (!normalized) return noFolderLabel;
-  const parts = normalized.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || normalized;
 }
 
 function startOfLocalDay(d: Date) {
@@ -202,6 +206,10 @@ function MenuIcon({ children }: { children: ReactNode }) {
 export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const t = useT();
   const navigate = useNavigate();
+  const location = useLocation();
+  const activeBoardId = location.pathname.startsWith("/board/")
+    ? location.pathname.slice("/board/".length)
+    : null;
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
   const activeSessionId = useAppStore((s) => s.activeSessionId);
@@ -249,9 +257,13 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [exportDialogId, setExportDialogId] = useState<string | null>(null);
   const [folderPicker, setFolderPicker] = useState<FolderPickerState | null>(null);
-  const [draggingFolderCwd, setDraggingFolderCwd] = useState<string | null>(null);
-  const [dragOverFolderCwd, setDragOverFolderCwd] = useState<string | null>(null);
+  /** Row being dragged: folder key or `b:<board id>`. */
+  const [draggingRowKey, setDraggingRowKey] = useState<string | null>(null);
+  /** Row under the pointer during a folder/board drag: folder key or `b:<id>`. */
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [dragInsertPosition, setDragInsertPosition] = useState<"above" | "below" | null>(null);
+  /** A row drag ends on a pointerup the browser still reports as a click. */
+  const suppressRowClickRef = useRef(false);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -310,6 +322,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const knownFolders = useAppStore((s) => s.knownFolders);
   const deleteFolder = useAppStore((s) => s.deleteFolder);
   const archiveSessions = useAppStore((s) => s.archiveSessions);
+  const boards = useAppStore((s) => s.boards);
+  const createBoard = useAppStore((s) => s.createBoard);
+  const renameBoard = useAppStore((s) => s.renameBoard);
+  const deleteBoard = useAppStore((s) => s.deleteBoard);
+  const reorderBoards = useAppStore((s) => s.reorderBoards);
 
   const toggleFolder = (key: string) => {
     setCollapsedFolders((prev) => {
@@ -361,6 +378,15 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   /** Folder whose per-folder MCP override dialog is open (null = closed). */
   const [mcpFolderCwd, setMcpFolderCwd] = useState<string | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
+  /** Board row context menu + inline rename/delete confirm. */
+  const [boardMenu, setBoardMenu] = useState<{ board: BoardDto; x: number; y: number } | null>(
+    null,
+  );
+  const boardMenuRef = useRef<HTMLDivElement>(null);
+  const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
+  const [boardDraft, setBoardDraft] = useState("");
+  const [confirmDeleteBoardId, setConfirmDeleteBoardId] = useState<string | null>(null);
+  const boardConfirmRef = useRef<HTMLDivElement>(null);
 
   // Active (non-archived) chats inside the folder whose menu is open — the
   // "archive all" item is dead when the folder has none left.
@@ -558,14 +584,16 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   }, [renamingId]);
 
   useEffect(() => {
-    if (!menu && !confirmDeleteId && !folderMenu && !confirmDeleteFolderCwd) return;
+    if (!menu && !confirmDeleteId && !folderMenu && !confirmDeleteFolderCwd && !boardMenu && !confirmDeleteBoardId) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
         menuRef.current?.contains(target) ||
         confirmRef.current?.contains(target) ||
         folderMenuRef.current?.contains(target) ||
-        folderConfirmRef.current?.contains(target)
+        folderConfirmRef.current?.contains(target) ||
+        boardMenuRef.current?.contains(target) ||
+        boardConfirmRef.current?.contains(target)
       )
         return;
       setMenu(null);
@@ -579,6 +607,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         setConfirmDeleteId(null);
         setFolderMenu(null);
         setConfirmDeleteFolderCwd(null);
+        setBoardMenu(null);
+        setConfirmDeleteBoardId(null);
       }
     };
     document.addEventListener("mousedown", onDown);
@@ -587,7 +617,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [menu, confirmDeleteId, folderMenu, confirmDeleteFolderCwd]);
+  }, [menu, confirmDeleteId, folderMenu, confirmDeleteFolderCwd, boardMenu, confirmDeleteBoardId]);
 
   useEffect(() => {
     if (!confirmDeleteId) return;
@@ -598,6 +628,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     if (!confirmDeleteFolderCwd) return;
     folderConfirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
   }, [confirmDeleteFolderCwd]);
+
+  useEffect(() => {
+    if (!confirmDeleteBoardId) return;
+    boardConfirmRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, [confirmDeleteBoardId]);
 
   const startRenameSession = (s: SessionDto) => {
     setMenu(null);
@@ -708,14 +743,60 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     | { kind: "folder-more"; key: string; cwd: string; fkey: string; hidden: number }
     | { kind: "folder-fewer"; key: string; fkey: string }
     | { kind: "folder-confirm"; key: string; cwd: string }
+    | { kind: "board"; key: string; board: BoardDto }
     | { kind: "session"; key: string; session: SessionDto; showActivity: boolean; inArchive: boolean; indent: boolean }
     | { kind: "archive-head"; key: string; count: number }
     | { kind: "liked-head"; key: string; count: number }
     | { kind: "liked"; key: string; item: LikedMessage };
 
+  type TreeSection =
+    | { kind: "folder"; key: string; folder: (typeof folders)[number] }
+    | { kind: "board"; key: string; board: BoardDto };
+
+  /** A sidebar row addressed by kind + id, used for ordering operations. */
+  type TreeToken = { kind: "folder" | "board"; id: string };
+
+  /**
+   * Folders and boards share one display sequence, so a board can sit anywhere
+   * between folders. A board's `sortOrder` is its slot index in that sequence;
+   * folders keep their own relative order and flow into the remaining slots.
+   */
+  const treeSections = useMemo<TreeSection[]>(() => {
+    const realFolders = folders.filter((f) => !!f.cwd);
+    const noFolder = folders.find((f) => !f.cwd) ?? null;
+    const slots = realFolders.length + boards.length;
+    const ordered = [...boards].sort((a, b) => a.sortOrder - b.sortOrder);
+    const placed: (BoardDto | null)[] = new Array(slots).fill(null);
+    // Slots must stay strictly increasing so a clamped or duplicate sortOrder
+    // never collapses two boards onto one row.
+    let minNext = 0;
+    ordered.forEach((board, idx) => {
+      const upper = slots - (ordered.length - idx);
+      const slot = Math.min(Math.max(board.sortOrder, minNext), Math.max(minNext, upper));
+      placed[slot] = board;
+      minNext = slot + 1;
+    });
+    const out: TreeSection[] = [];
+    let fi = 0;
+    for (let i = 0; i < slots; i++) {
+      const board = placed[i];
+      if (board) out.push({ kind: "board", key: `b:${board.id}`, board });
+      else if (realFolders[fi])
+        out.push({ kind: "folder", key: `f:${realFolders[fi]!.cwd}`, folder: realFolders[fi++]! });
+    }
+    // Unfiled chats are a bucket, not a movable folder — pin them last.
+    if (noFolder) out.push({ kind: "folder", key: `f:${NO_FOLDER_KEY}`, folder: noFolder });
+    return out;
+  }, [folders, boards]);
+
   const treeRows = useMemo<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
-    for (const folder of folders) {
+    for (const section of treeSections) {
+      if (section.kind === "board") {
+        rows.push({ kind: "board", key: `b:${section.board.id}`, board: section.board });
+        continue;
+      }
+      const folder = section.folder;
       const fkey = folder.cwd || NO_FOLDER_KEY;
       if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
         rows.push({ kind: "folder-confirm", key: `fc:${fkey}`, cwd: folder.cwd });
@@ -772,7 +853,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     }
     return rows;
   }, [
-    folders,
+    treeSections,
     collapsedFolders,
     expandedFolders,
     recentLimit,
@@ -805,6 +886,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           return 28;
         case "folder-confirm":
           return 84;
+        case "board":
+          return 28;
         case "session":
           return 34;
         case "archive-head":
@@ -1114,15 +1197,107 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     return to >= 0 && to < list.length;
   };
 
+  const openBoardMenu = (e: ReactMouseEvent, board: BoardDto) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenu(null);
+    setConfirmDeleteId(null);
+    setFolderMenu(null);
+    setConfirmDeleteFolderCwd(null);
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setBoardMenu({
+      board,
+      x: Math.max(12, Math.min(rect.right - 8, window.innerWidth - 215)),
+      y: Math.min(rect.bottom + 6, window.innerHeight - 185),
+    });
+  };
+
   /**
-   * Drag a folder group to a new slot. Mouse users grab anywhere on the head;
-   * touch users grab the dedicated grip, because a swipe starting on the head
-   * itself belongs to the list (the grip carries `touch-action: none`).
+   * Sidebar rows in display order: folders and boards share one sequence. A
+   * board's `sortOrder` is its slot index in that sequence; folders keep their
+   * own relative order and flow into the remaining slots. The "unfiled chats"
+   * bucket rides last and never takes a slot of its own.
    */
-  const onFolderPointerDown =
-    (cwd: string, opts?: { grip?: boolean }) =>
+  const treeSequence = (): TreeToken[] =>
+    treeSections.map<TreeToken>((section) =>
+      section.kind === "board"
+        ? { kind: "board", id: section.board.id }
+        : { kind: "folder", id: section.folder.cwd || NO_FOLDER_KEY },
+    );
+
+  /** The rows that can be reordered — everything but the pinned bucket. */
+  const movableTreeTokens = (): TreeToken[] =>
+    treeSequence().filter((token) => token.id !== NO_FOLDER_KEY);
+
+  /** DOM selector/value for a row: the drop targets carry these keys. */
+  const rowKey = (token: TreeToken) => (token.kind === "board" ? `b:${token.id}` : token.id);
+
+  /** Persist each board's slot index in the given display sequence. */
+  const persistBoardSlots = (sequence: TreeToken[]) => {
+    const items = sequence
+      .filter((token) => token.id !== NO_FOLDER_KEY)
+      .flatMap((token, i) => (token.kind === "board" ? [{ id: token.id, sortOrder: i }] : []));
+    return reorderBoards(items);
+  };
+
+  /**
+   * Persist one combined order: the folder list and the board slots are two
+   * views of the same row sequence, so a drop recomputes both.
+   */
+  const commitTreeOrder = (sequence: TreeToken[]) => {
+    const folderKeys = sequence
+      .filter((token) => token.kind === "folder" && token.id !== NO_FOLDER_KEY)
+      .map((token) => token.id);
+    void commitFolderOrder(folderKeys);
+    void persistBoardSlots(sequence);
+  };
+
+  /** Move a board one slot up/down in the folder+board sequence. */
+  const moveBoard = (boardId: string, dir: -1 | 1) => {
+    const tokens = movableTreeTokens();
+    const from = tokens.findIndex((token) => token.kind === "board" && token.id === boardId);
+    const to = from + dir;
+    if (from === -1 || to < 0 || to >= tokens.length) return;
+    [tokens[from], tokens[to]] = [tokens[to]!, tokens[from]!];
+    void persistBoardSlots(tokens);
+  };
+
+  const canMoveBoard = (boardId: string, dir: -1 | 1) => {
+    const tokens = movableTreeTokens();
+    const to = tokens.findIndex((token) => token.kind === "board" && token.id === boardId) + dir;
+    return to >= 0 && to < tokens.length;
+  };
+
+  const commitBoardRename = () => {
+    const id = renamingBoardId;
+    setRenamingBoardId(null);
+    const name = boardDraft.trim();
+    if (id && name) void renameBoard(id, name);
+  };
+
+  /** The row under the point: a board row, else a folder head, else null. */
+  const rowAtPoint = (x: number, y: number): { key: string; el: HTMLElement } | null => {
+    for (const node of document.elementsFromPoint(x, y)) {
+      const boardEl = node.closest("[data-board-id]") as HTMLElement | null;
+      if (boardEl) return { key: `b:${boardEl.getAttribute("data-board-id")}`, el: boardEl };
+      const folderEl = node.closest("[data-folder-cwd]") as HTMLElement | null;
+      if (folderEl) return { key: folderEl.getAttribute("data-folder-cwd") ?? "", el: folderEl };
+    }
+    return null;
+  };
+
+  /**
+   * Pointer drag for a tree row — a folder head or a board row. Mouse users
+   * grab anywhere on the row; touch users grab the dedicated grip, because a
+   * swipe starting on the row itself belongs to the list (the grip carries
+   * `touch-action: none`). On release the dragged row lands above or below the
+   * row under the pointer, and that one combined order is persisted: the folder
+   * list and the board slots are two views of the same sequence.
+   */
+  const startRowDrag =
+    (dragged: TreeToken, opts?: { grip?: boolean }) =>
     (e: ReactMouseEvent<HTMLElement> | React.PointerEvent<HTMLElement>) => {
-      if (!cwd) return; // Don't drag the top-level "No Folder" container
+      if (dragged.kind === "folder" && !dragged.id) return; // the unfiled bucket is pinned
       if (e.button !== 0) return;
       if (!opts?.grip && (e as React.PointerEvent).pointerType !== "mouse") return;
       const target = e.target as HTMLElement;
@@ -1133,17 +1308,21 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       const pointerId = (e as React.PointerEvent).pointerId;
       const startY = e.clientY;
       const startX = e.clientX;
+      const draggedKey = rowKey(dragged);
       let moved = false;
-      let currentOverCwd: string | null = null;
+      let currentOverKey: string | null = null;
       let currentInsertPos: "above" | "below" | null = null;
+      // The browser still fires a click on the pointerup that ends a drag.
+      suppressRowClickRef.current = false;
 
       const finish = () => {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
-        setDraggingFolderCwd(null);
-        setDragOverFolderCwd(null);
+        setDraggingRowKey(null);
+        setDragOverKey(null);
         setDragInsertPosition(null);
+        if (moved) suppressRowClickRef.current = true;
       };
 
       const onMove = (ev: PointerEvent) => {
@@ -1151,34 +1330,22 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         if (!moved) {
           if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
           moved = true;
-          setDraggingFolderCwd(cwd);
+          setDraggingRowKey(draggedKey);
         }
 
-        const elements = document.elementsFromPoint(ev.clientX, ev.clientY);
-        let targetCwd: string | null = null;
-        let targetEl: HTMLElement | null = null;
-        for (const node of elements) {
-          const folderEl = node.closest("[data-folder-cwd]") as HTMLElement | null;
-          if (folderEl) {
-            targetCwd = folderEl.getAttribute("data-folder-cwd");
-            targetEl = folderEl;
-            break;
-          }
-        }
-
-        // The dragged folder itself is the one exception to "hover a target".
-        const overCwd = targetCwd === cwd ? null : targetCwd;
-        if (overCwd && targetEl) {
-          const rect = targetEl.getBoundingClientRect();
+        const hit = rowAtPoint(ev.clientX, ev.clientY);
+        // Hovering the row being dragged itself means "no target".
+        if (hit && hit.key !== draggedKey) {
+          const rect = hit.el.getBoundingClientRect();
           const position = ev.clientY < rect.top + rect.height / 2 ? "above" : "below";
-          currentOverCwd = overCwd;
+          currentOverKey = hit.key;
           currentInsertPos = position;
-          setDragOverFolderCwd(overCwd);
+          setDragOverKey(hit.key);
           setDragInsertPosition(position);
         } else {
-          currentOverCwd = null;
+          currentOverKey = null;
           currentInsertPos = null;
-          setDragOverFolderCwd(null);
+          setDragOverKey(null);
           setDragInsertPosition(null);
         }
       };
@@ -1191,26 +1358,19 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
 
       const onUp = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
-        const over = currentOverCwd;
+        const over = currentOverKey;
         const pos = currentInsertPos;
         finish();
 
         if (!moved || !over || !pos) return;
-        const realTargetCwd = over === NO_FOLDER_KEY ? "" : over;
-        const list = [...useAppStore.getState().knownFolders];
-        const from = list.indexOf(cwd);
+        const sequence = treeSequence();
+        const from = sequence.findIndex((token) => rowKey(token) === draggedKey);
         if (from === -1) return;
-        list.splice(from, 1);
-
-        if (realTargetCwd === "") {
-          // Dropped on the unfiled chats: folders sort above them, so last.
-          list.push(cwd);
-        } else {
-          const to = list.indexOf(realTargetCwd);
-          if (to === -1) return;
-          list.splice(pos === "above" ? to : to + 1, 0, cwd);
-        }
-        void commitFolderOrder(list);
+        const [landing] = sequence.splice(from, 1);
+        const to = sequence.findIndex((token) => rowKey(token) === over);
+        if (to === -1 || !landing) return;
+        sequence.splice(pos === "above" ? to : to + 1, 0, landing);
+        commitTreeOrder(sequence);
       };
 
       // Touch pointers keep streaming to this element via capture, so the
@@ -1338,8 +1498,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const renderFolderHead = (folder: (typeof folders)[number]) => {
     const fkey = folder.cwd || NO_FOLDER_KEY;
     const isActiveFolder = activeFolderKey === fkey;
-    const isDragging = draggingFolderCwd === folder.cwd;
-    const isDragOver = dragOverFolderCwd === fkey;
+    const isDragging = draggingRowKey === fkey;
+    const isDragOver = dragOverKey === fkey;
     const dragOverClass = isDragOver
       ? dragInsertPosition === "above"
         ? ` ${styles.folderHeadDragOverAbove}`
@@ -1348,12 +1508,15 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     return (
       <div
         data-folder-cwd={fkey}
-        onPointerDown={onFolderPointerDown(folder.cwd)}
+        onPointerDown={startRowDrag({ kind: "folder", id: folder.cwd })}
         className={`${styles.folderHead} ${
           collapsedFolders.has(fkey) ? "" : styles.folderHeadOpen
         }${isActiveFolder ? ` ${styles.folderHeadActive}` : ""}${isDragging ? ` ${styles.folderHeadDragging}` : ""}${dragOverClass}`}
         title={folder.cwd || undefined}
-        onClick={() => toggleFolder(fkey)}
+        onClick={() => {
+          if (suppressRowClickRef.current) return;
+          toggleFolder(fkey);
+        }}
         onContextMenu={(e) => openFolderMenu(e, folder.cwd)}
       >
         {folder.cwd ? (
@@ -1366,7 +1529,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             aria-label={t("chat.reorderFolder")}
             onPointerDown={(e) => {
               e.stopPropagation();
-              onFolderPointerDown(folder.cwd, { grip: true })(e);
+              startRowDrag({ kind: "folder", id: folder.cwd }, { grip: true })(e);
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1467,6 +1630,210 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     );
   };
 
+  /** One folder group of the plain (unvirtualized) chat tree. */
+  const renderFolderGroup = (folder: (typeof folders)[number]) => {
+    if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
+      return renderFolderDeleteConfirm(folder.cwd);
+    }
+    const fkey = folder.cwd || NO_FOLDER_KEY;
+    const isActiveFolder = activeFolderKey === fkey;
+    const shown = visibleFolderSessions(folder);
+    const hidden = folder.sessions.length - shown.length;
+    const canCollapse =
+      hidden === 0 &&
+      expandedFolders.has(fkey) &&
+      recentLimit > 0 &&
+      folder.sessions.length > recentLimit;
+    const useTimeGroups = shown.length > 1;
+    const timeGroups = useTimeGroups
+      ? groupSessionsByActivity(shown, dateLocale, t, nowMs)
+      : null;
+
+    return (
+      <div key={fkey} className={styles.folderGroup}>
+        {showFolderHeaders && renderFolderHead(folder)}
+        {!collapsedFolders.has(fkey) && (
+          <div
+            className={`${showFolderHeaders ? styles.folderBody : styles.ungroupedSessions}${
+              showFolderHeaders && isActiveFolder ? ` ${styles.folderBodyActive}` : ""
+            }`}
+          >
+            {folder.sessions.length === 0 ? (
+              <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>
+            ) : timeGroups ? (
+              timeGroups.map((group) => (
+                <div key={group.key} className={styles.timeGroup}>
+                  {group.sessions.map((s) => renderSessionRow(s, true))}
+                </div>
+              ))
+            ) : (
+              shown.map((s) => renderSessionRow(s, true))
+            )}
+            {hidden > 0 ? (
+              <button
+                type="button"
+                className={styles.folderMore}
+                onClick={() => expandFolder(fkey)}
+              >
+                {t("chat.showMoreChats", { count: hidden })}
+              </button>
+            ) : canCollapse ? (
+              <button
+                type="button"
+                className={styles.folderMore}
+                onClick={() => collapseExpandedFolder(fkey)}
+              >
+                {t("chat.showFewerChats")}
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBoardRow = (board: BoardDto) => {
+    const isActive = activeBoardId === board.id;
+    const menuOpen = boardMenu?.board.id === board.id;
+    const confirming = confirmDeleteBoardId === board.id;
+    const isRenaming = renamingBoardId === board.id;
+    const boardKey = `b:${board.id}`;
+    const isDragging = draggingRowKey === boardKey;
+    const isDragOver = dragOverKey === boardKey;
+    const dragOverClass = isDragOver
+      ? dragInsertPosition === "above"
+        ? ` ${styles.folderHeadDragOverAbove}`
+        : ` ${styles.folderHeadDragOverBelow}`
+      : "";
+
+    if (confirming) {
+      return (
+        <div
+          key={board.id}
+          ref={boardConfirmRef}
+          className={styles.sessionConfirm}
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("chat.deleteBoardTitle")}
+        >
+          <div className={styles.sessionConfirmCopy}>
+            <div className={styles.sessionConfirmTitle}>{t("chat.deleteBoardTitle")}</div>
+            <p className={styles.sessionConfirmText}>{t("chat.deleteBoardBody")}</p>
+          </div>
+          <div className={styles.sessionConfirmActions}>
+            <button
+              type="button"
+              className={styles.sessionConfirmCancel}
+              onClick={() => setConfirmDeleteBoardId(null)}
+            >
+              {t("common.cancel")}
+            </button>
+            <button
+              type="button"
+              className={styles.sessionConfirmDelete}
+              onClick={() => {
+                setConfirmDeleteBoardId(null);
+                void deleteBoard(board.id);
+                if (activeBoardId === board.id) navigate("/chat");
+              }}
+            >
+              {t("common.delete")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        data-board-id={board.id}
+        className={`${styles.folderHead} ${
+          isActive || menuOpen ? styles.folderHeadActive : ""
+        }${isDragging ? ` ${styles.folderHeadDragging}` : ""}${dragOverClass}`}
+        title={board.name}
+        onPointerDown={startRowDrag({ kind: "board", id: board.id })}
+        onClick={() => {
+          if (isRenaming || suppressRowClickRef.current) return;
+          navigate(`/board/${board.id}`);
+          closeMobile();
+        }}
+        onContextMenu={(e) => openBoardMenu(e, board)}
+        onDoubleClick={(e) => {
+          if (suppressRowClickRef.current) return;
+          e.preventDefault();
+          setBoardMenu(null);
+          setBoardDraft(board.name);
+          setRenamingBoardId(board.id);
+        }}
+      >
+        <span
+          className={styles.folderGrip}
+          role="button"
+          tabIndex={-1}
+          data-board-grip
+          title={t("chat.reorderFolder")}
+          aria-label={t("chat.reorderFolder")}
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            startRowDrag({ kind: "board", id: board.id }, { grip: true })(e);
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden>
+            <circle cx="2.5" cy="2.5" r="1.2" />
+            <circle cx="7.5" cy="2.5" r="1.2" />
+            <circle cx="2.5" cy="7" r="1.2" />
+            <circle cx="7.5" cy="7" r="1.2" />
+            <circle cx="2.5" cy="11.5" r="1.2" />
+            <circle cx="7.5" cy="11.5" r="1.2" />
+          </svg>
+        </span>
+        <span className={styles.folderLead} aria-hidden>
+          <span className={styles.folderIcon}>
+            <BoardGlyph />
+          </span>
+        </span>
+        {isRenaming ? (
+          <input
+            className={styles.renameInput}
+            value={boardDraft}
+            autoFocus
+            onChange={(e) => setBoardDraft(e.target.value)}
+            onBlur={() => commitBoardRename()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitBoardRename();
+              if (e.key === "Escape") setRenamingBoardId(null);
+            }}
+          />
+        ) : (
+          <span className={styles.folderLabel}>{board.name}</span>
+        )}
+        <button
+          type="button"
+          className={styles.folderDelete}
+          title={t("common.delete")}
+          aria-label={t("common.delete")}
+          onClick={(e) => {
+            e.stopPropagation();
+            setConfirmDeleteBoardId(board.id);
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
   const renderSectionHead = (
     sectionKey: "__archive__" | "__liked__",
     count: number,
@@ -1552,6 +1919,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         );
       case "folder-confirm":
         return renderFolderDeleteConfirm(row.cwd);
+      case "board":
+        return renderBoardRow(row.board);
       case "session":
         return renderSessionRow(row.session, row.showActivity, row.inArchive);
       case "archive-head":
@@ -1706,75 +2075,16 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               })}
             </div>
           )}
-          {!treeVirtual && (
-            <>
-          {folders.map((folder) => {
-            if (folder.cwd && folder.cwd === confirmDeleteFolderCwd) {
-              return renderFolderDeleteConfirm(folder.cwd);
-            }
-            const fkey = folder.cwd || NO_FOLDER_KEY;
-            const isActiveFolder = activeFolderKey === fkey;
-            const shown = visibleFolderSessions(folder);
-            const hidden = folder.sessions.length - shown.length;
-            const canCollapse =
-              hidden === 0 &&
-              expandedFolders.has(fkey) &&
-              recentLimit > 0 &&
-              folder.sessions.length > recentLimit;
-            const useTimeGroups = shown.length > 1;
-            const timeGroups = useTimeGroups
-              ? groupSessionsByActivity(shown, dateLocale, t, nowMs)
-              : null;
-
-            return (
-              <div
-                key={fkey}
-                className={styles.folderGroup}
-              >
-                {showFolderHeaders && renderFolderHead(folder)}
-                {!collapsedFolders.has(fkey) && (
-                  <div
-                    className={`${
-                      showFolderHeaders ? styles.folderBody : styles.ungroupedSessions
-                    }${
-                      showFolderHeaders && isActiveFolder ? ` ${styles.folderBodyActive}` : ""
-                    }`}
-                  >
-                    {folder.sessions.length === 0 ? (
-                      <div className={styles.folderEmpty}>{t("chat.emptyFolder")}</div>
-                    ) : timeGroups ? (
-                      timeGroups.map((group) => (
-                        <div key={group.key} className={styles.timeGroup}>
-                          {group.sessions.map((s) => renderSessionRow(s, true))}
-                        </div>
-                      ))
-                    ) : (
-                      shown.map((s) => renderSessionRow(s, true))
-                    )}
-                    {hidden > 0 ? (
-                      <button
-                        type="button"
-                        className={styles.folderMore}
-                        onClick={() => expandFolder(fkey)}
-                      >
-                        {t("chat.showMoreChats", { count: hidden })}
-                      </button>
-                    ) : canCollapse ? (
-                      <button
-                        type="button"
-                        className={styles.folderMore}
-                        onClick={() => collapseExpandedFolder(fkey)}
-                      >
-                        {t("chat.showFewerChats")}
-                      </button>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-            </>
-          )}
+          {!treeVirtual &&
+            treeSections.map((section) =>
+              section.kind === "board" ? (
+                <div key={`b:${section.board.id}`} className={styles.folderGroup}>
+                  {renderBoardRow(section.board)}
+                </div>
+              ) : (
+                renderFolderGroup(section.folder)
+              ),
+            )}
           {archivedSessions.length > 0 && (
             <div className={styles.archiveGroup}>
               <div className={styles.archiveHead}>
@@ -2201,6 +2511,18 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             setFolderPicker(null);
             await startNewSession(cwd, provider);
           }}
+          onCreateBoard={async (name) => {
+            const board = await createBoard(name);
+            setFolderPicker(null);
+            if (board) {
+              // A fresh board lands at the bottom of the tree, below folders.
+              const tokens = movableTreeTokens().filter(
+                (token) => !(token.kind === "board" && token.id === board.id),
+              );
+              void persistBoardSlots([...tokens, { kind: "board", id: board.id }]);
+              navigate(`/board/${board.id}`);
+            }
+          }}
           onOpenExisting={async (row) => {
             setFolderPicker(null);
             try {
@@ -2224,6 +2546,104 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           }}
         />
       )}
+
+      {boardMenu &&
+        createPortal(
+          <div
+            ref={boardMenuRef}
+            className={styles.contextMenu}
+            style={{ left: boardMenu.x, top: boardMenu.y }}
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setBoardDraft(boardMenu.board.name);
+                setRenamingBoardId(boardMenu.board.id);
+                setBoardMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M12.8 6.8 17.2 11.2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </MenuIcon>
+              {t("chat.renameSession")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canMoveBoard(boardMenu.board.id, -1)}
+              onClick={() => {
+                moveBoard(boardMenu.board.id, -1);
+                setBoardMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 19V5m0 0-6 6m6-6 6 6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.moveFolderUp")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canMoveBoard(boardMenu.board.id, 1)}
+              onClick={() => {
+                moveBoard(boardMenu.board.id, 1);
+                setBoardMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 5v14m0 0-6-6m6 6 6-6"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.moveFolderDown")}
+            </button>
+            <div className={styles.contextMenuDivider} aria-hidden />
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuDanger}
+              onClick={() => {
+                setConfirmDeleteBoardId(boardMenu.board.id);
+                setBoardMenu(null);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("common.delete")}
+            </button>
+          </div>,
+          document.body,
+        )}
 
       {mcpFolderCwd &&
         createPortal(

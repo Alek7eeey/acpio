@@ -1,5 +1,5 @@
 import path from "node:path";
-import { and, asc, desc, eq, gt, inArray, lte, max, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, max, or, sql } from "drizzle-orm";
 import type {
   MessageDto,
   MessagePartDto,
@@ -48,6 +48,10 @@ function mapSession(
     sortOrder: row.sortOrder ?? 0,
     pinned: row.pinned ?? false,
     archived: row.archived ?? false,
+    boardId: row.boardId ?? null,
+    taskDescription: row.taskDescription ?? null,
+    startedAt: row.startedAt ? row.startedAt.toISOString() : null,
+    doneAt: row.doneAt ? row.doneAt.toISOString() : null,
     mcpDisabledIds: Array.isArray(row.mcpDisabledIds)
       ? (row.mcpDisabledIds as string[])
       : [],
@@ -100,8 +104,8 @@ async function withLastMessageAt(
   return mapSession(row, lastAts.get(row.id) ?? null);
 }
 
-export async function listSessions(): Promise<SessionDto[]> {
-  const rows = await db.select().from(sessions);
+/** Sort + map a batch of session rows by activity, then board/sidebar order. */
+async function mapSessionRows(rows: (typeof sessions.$inferSelect)[]): Promise<SessionDto[]> {
   const lastAts = await loadLastMessageAts(rows.map((r) => r.id));
   const mapped = rows.map((row) => mapSession(row, lastAts.get(row.id) ?? null));
   mapped.sort(
@@ -110,6 +114,22 @@ export async function listSessions(): Promise<SessionDto[]> {
       a.sortOrder - b.sortOrder,
   );
   return mapped;
+}
+
+/** Regular chats only — board tasks are partitioned out of the chat tree. */
+export async function listSessions(): Promise<SessionDto[]> {
+  return mapSessionRows(await db.select().from(sessions).where(isNull(sessions.boardId)));
+}
+
+/** Tasks of one board — the board page's session list, in the user's own order. */
+export async function listBoardSessions(boardId: string): Promise<SessionDto[]> {
+  return mapSessionRows(
+    await db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.boardId, boardId))
+      .orderBy(asc(sessions.sortOrder), asc(sessions.createdAt)),
+  );
 }
 
 export async function getSessionDetail(id: string): Promise<SessionDetailDto | null> {
@@ -172,8 +192,14 @@ export async function createSession(input: {
   model?: string;
   modelParams?: Record<string, string>;
   acpSessionId?: string;
+  /** Board partition — set only for tasks created from a board. */
+  boardId?: string | null;
+  /** Task description (card text / first-message prefill) for board tasks. */
+  taskDescription?: string | null;
 }): Promise<SessionDto> {
-  const siblings = await db.select().from(sessions);
+  const siblings = input.boardId
+    ? await db.select().from(sessions).where(eq(sessions.boardId, input.boardId))
+    : await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
   const settings = await getSettings();
   const cwd = normalizeCwd(input.cwd);
@@ -206,10 +232,13 @@ export async function createSession(input: {
       ...(pinnedModel ? { model: pinnedModel } : {}),
       ...(Object.keys(pinnedParams).length ? { modelParams: pinnedParams } : {}),
       ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
+      ...(input.boardId ? { boardId: input.boardId } : {}),
+      ...(input.taskDescription != null ? { taskDescription: input.taskDescription } : {}),
     })
     .returning();
-  // Keep the folder alive after the last chat in it is deleted.
-  if (row.cwd) await rememberFolders([row.cwd]);
+  // Keep the folder alive after the last chat in it is deleted. Board tasks
+  // never seed the sidebar's folder list — their projects live on the board.
+  if (row.cwd && !input.boardId) await rememberFolders([row.cwd]);
   return mapSession(row);
 }
 
@@ -229,6 +258,8 @@ export async function updateSession(
     mcpDisabledIds: string[];
     model?: string;
     modelParams?: Record<string, string>;
+    taskDescription?: string | null;
+    doneAt?: Date | null;
   }>,
 ): Promise<SessionDto | null> {
   if (patch.cwd !== undefined) patch.cwd = normalizeCwd(patch.cwd);
@@ -242,6 +273,17 @@ export async function updateSession(
   broadcastToSession(id, { type: "session.updated", sessionId: id, session: dto });
   return dto;
 }
+/**
+ * Stamp the first turn start of a board task — the Todo ⇄ Wait split marker.
+ * Idempotent: only fires while the task has never started.
+ */
+export async function markBoardTaskStarted(id: string): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ startedAt: new Date() })
+    .where(and(eq(sessions.id, id), isNotNull(sessions.boardId), isNull(sessions.startedAt)));
+}
+
 export async function saveSessionUsage(id: string, usage: AcpUsage | null): Promise<void> {
   await db
     .update(sessions)
@@ -263,7 +305,9 @@ export async function reorderSessions(
       })
       .where(eq(sessions.id, item.id));
   }
-  return listSessions();
+  const ids = items.map((i) => i.id);
+  if (ids.length === 0) return [];
+  return mapSessionRows(await db.select().from(sessions).where(inArray(sessions.id, ids)));
 }
 
 export async function deleteSession(id: string): Promise<boolean> {

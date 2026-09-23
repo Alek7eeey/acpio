@@ -3,6 +3,7 @@ import type {
   AgentProbeResult,
   AgentProvider,
   AppSettings,
+  BoardDto,
   ChatThemeDto,
   DiagnosticsDumpDto,
   DiagnosticsDumpMeta,
@@ -179,6 +180,20 @@ export const api = {
     request<{ ok: boolean }>(`/api/folders?cwd=${encodeURIComponent(cwd)}`, {
       method: "DELETE",
     }),
+  listBoards: () => request<BoardDto[]>("/api/boards"),
+  createBoard: (name: string) =>
+    request<BoardDto>("/api/boards", { method: "POST", body: JSON.stringify({ name }) }),
+  updateBoard: (id: string, patch: { name?: string; sortOrder?: number }) =>
+    request<BoardDto>(`/api/boards/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  setBoardFolders: (id: string, cwds: string[]) =>
+    request<{ ok: boolean; folders: string[] }>(`/api/boards/${id}/folders`, {
+      method: "PUT",
+      body: JSON.stringify({ cwds }),
+    }),
+  deleteBoard: (id: string) =>
+    request<{ ok: boolean; boards: BoardDto[] }>(`/api/boards/${id}`, { method: "DELETE" }),
+  listBoardSessions: (boardId: string) =>
+    request<SessionDto[]>(`/api/sessions?boardId=${encodeURIComponent(boardId)}`),
   listHarnessSessions: (provider: AgentProvider, cwd?: string) => {
     const q = new URLSearchParams({ provider });
     if (cwd?.trim()) q.set("cwd", cwd.trim());
@@ -208,6 +223,11 @@ export const api = {
       pinned?: boolean;
       archived?: boolean;
       mcpDisabledIds?: string[];
+      /** Board task fields: description edit (Todo) and Wait ⇄ Done toggle. */
+      taskDescription?: string | null;
+      doneAt?: string | null;
+      /** Pre-start agent pick for a board task. */
+      provider?: AgentProvider;
     },
   ) =>
     request<SessionDto>(`/api/sessions/${id}`, {

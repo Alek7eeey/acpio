@@ -36,6 +36,7 @@ import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
 import { SearchDialog, type SearchDialogTab } from "./SearchDialog";
 import { ThemeToggle } from "./ThemeToggle";
+import { BoardPage } from "../pages/BoardPage";
 import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
 import styles from "./AppShell.module.css";
@@ -79,10 +80,16 @@ function readStoredWidth() {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
 }
 
+/** AppShell renders pages from the pathname (it has no <Outlet/>), so a route's
+ * params never reach the page; the board id is sliced out of the path here. */
 function ShellPage({ pathname }: { pathname: string }) {
   if (pathname === "/" || pathname === "") return <ChatPage />;
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
+  if (pathname.startsWith("/board/")) {
+    const boardId = decodeURIComponent(pathname.slice("/board/".length).split("/")[0] ?? "");
+    return <BoardPage boardId={boardId} />;
+  }
   return <ChatPage />;
 }
 
@@ -95,6 +102,7 @@ export function AppShell() {
   const sessions = useAppStore((s) => s.sessions);
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
+  const createBoard = useAppStore((s) => s.createBoard);
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
@@ -205,7 +213,11 @@ export function AppShell() {
 
   const isChat = pathname === "/" || pathname.startsWith("/chat");
   const isSettings = pathname.startsWith("/settings");
-  const showSidebar = isChat || isSettings;
+  const isBoard = pathname.startsWith("/board/");
+  // The board is a workspace of its own: its sidebar carries the board rows and
+  // the chat tree, so it stays visible there too.
+  const treeRoute = isChat || isBoard;
+  const showSidebar = treeRoute || isSettings;
 
   const sheetRef = useRef<HTMLElement | null>(null);
   const sheetSnapRef = useRef(2);
@@ -826,7 +838,7 @@ export function AppShell() {
         <aside
           ref={sheetRef}
           className={`${styles.sidebar} ${sidebarOpen ? styles.open : ""} ${
-            isChat ? styles.treeBrand : ""
+            treeRoute ? styles.treeBrand : ""
           }`}
           role={sidebarOpen ? "dialog" : undefined}
           aria-modal={sidebarOpen ? true : undefined}
@@ -893,7 +905,7 @@ export function AppShell() {
             </button>
           </div>
 
-          {isChat && (
+          {treeRoute && (
             <ChatSidebar onOpenSearch={() => openSearch("chats")} />
           )}
 
@@ -1268,6 +1280,11 @@ export function AppShell() {
           }))}
           preferredProvider={settings.defaultProvider}
           onClose={() => setRailFolderPicker(null)}
+          onCreateBoard={async (name) => {
+            const board = await createBoard(name);
+            setRailFolderPicker(null);
+            if (board) navigate(`/board/${board.id}`);
+          }}
           onConfirm={async (cwd, provider) => {
             setRailFolderPicker(null);
             try {

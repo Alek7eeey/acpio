@@ -1,4 +1,4 @@
-import { and, eq, ne, asc, sql } from "drizzle-orm";
+import { and, eq, isNull, ne, asc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { chatFolders, sessions } from "../db/schema.js";
 import { normalizeCwd } from "./sessions.js";
@@ -16,7 +16,7 @@ export async function listFolders(): Promise<string[]> {
   const used = await db
     .selectDistinct({ cwd: sessions.cwd })
     .from(sessions)
-    .where(ne(sessions.cwd, ""));
+    .where(and(ne(sessions.cwd, ""), isNull(sessions.boardId)));
   const seen = new Set<string>();
   const orderedList: string[] = [];
 
@@ -92,7 +92,14 @@ export async function deleteFolder(cwd: string): Promise<boolean> {
   if (!normalized) return false;
   await db
     .delete(sessions)
-    .where(and(eq(sessions.cwd, normalized), eq(sessions.archived, false)));
+    .where(
+      and(
+        eq(sessions.cwd, normalized),
+        eq(sessions.archived, false),
+        // Board tasks belong to their board, not to the sidebar folder.
+        isNull(sessions.boardId),
+      ),
+    );
   const rows = await db
     .delete(chatFolders)
     .where(eq(chatFolders.cwd, normalized))

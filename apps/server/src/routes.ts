@@ -4,7 +4,7 @@ import path from "node:path";
 import { z, ZodError } from "zod";
 import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
-import { messages, messageParts } from "./db/schema.js";
+import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, normalizeMcpCwd, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
@@ -13,6 +13,7 @@ import {
   deleteSession,
   getSessionCwd,
   getSessionDetail,
+  listBoardSessions,
   listSessions,
   reorderSessions,
   updateSession,
@@ -56,6 +57,15 @@ import {
   stageSessionUpload,
 } from "./services/attachmentUpload.js";
 import { listFolders, rememberFolders, deleteFolder, reorderFolders } from "./services/folders.js";
+import {
+  boardAcceptsCwd,
+  createBoard,
+  deleteBoard,
+  deleteBoardSessions,
+  listBoards,
+  setBoardFolders,
+  updateBoard,
+} from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
 import { searchMessages } from "./services/search.js";
@@ -552,7 +562,11 @@ export async function registerRoutes(app: FastifyInstance) {
     return next;
   });
 
-  app.get("/api/sessions", async () => listSessions());
+  app.get("/api/sessions", async (req) => {
+    const query = z.object({ boardId: z.string().max(64).optional() }).parse(req.query ?? {});
+    if (query.boardId) return listBoardSessions(query.boardId);
+    return listSessions();
+  });
 
   // Folders that have ever held chats (empty ones included) — survives
   // deleting the last chat so folders persist across devices.
@@ -592,6 +606,47 @@ export async function registerRoutes(app: FastifyInstance) {
     await deleteFolder(query.cwd);
     await forgetMcpFolderConfig(normalized);
     return { ok: true, folders: await listFolders() };
+  });
+
+  // Kanban boards — isolated workspaces: own folders, own tasks.
+  app.get("/api/boards", async () => listBoards());
+  app.post("/api/boards", async (req) => {
+    const body = z.object({ name: z.string().min(1).max(80) }).parse(req.body ?? {});
+    return createBoard(body.name);
+  });
+  app.patch("/api/boards/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        name: z.string().min(1).max(80).optional(),
+        sortOrder: z.number().int().optional(),
+      })
+      .parse(req.body ?? {});
+    const updated = await updateBoard(id, body);
+    if (!updated) return reply.code(404).send({ error: "Not found" });
+    return updated;
+  });
+  app.put("/api/boards/:id/folders", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ cwds: z.array(z.string().min(1).max(4096)).max(200) })
+      .parse(req.body ?? {});
+    const folders = await setBoardFolders(id, body.cwds);
+    if (folders === null) return reply.code(404).send({ error: "Not found" });
+    return { ok: true, folders };
+  });
+  app.delete("/api/boards/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    // Tear down live agents of the board's tasks before deleting their rows.
+    const tasks = await listBoardSessions(id);
+    for (const s of tasks) {
+      disposeRuntime(s.id);
+      forgetSessionSlashCommands(s.id);
+    }
+    if (tasks.length > 0) await deleteBoardSessions(id);
+    const ok = await deleteBoard(id);
+    if (!ok) return reply.code(404).send({ error: "Not found" });
+    return { ok: true, boards: await listBoards() };
   });
 
   app.get("/api/sessions/harness", async (req, reply) => {
@@ -656,9 +711,27 @@ export async function registerRoutes(app: FastifyInstance) {
         pinned: z.boolean().optional(),
         archived: z.boolean().optional(),
         mcpDisabledIds: z.array(z.string().min(1).max(64)).optional(),
+        taskDescription: z.string().max(20000).nullable().optional(),
+        doneAt: z.string().datetime().nullable().optional(),
+        /** Pre-start only: a task picks its agent before the first turn. */
+        provider: registeredProviderSchema.optional(),
       })
       .parse(req.body ?? {});
-    const updated = await updateSession(id, body);
+    if (body.provider) {
+      const rows = await db
+        .select({ acpSessionId: sessions.acpSessionId })
+        .from(sessions)
+        .where(eq(sessions.id, id))
+        .limit(1);
+      if (!rows[0]) return reply.code(404).send({ error: "Not found" });
+      if (rows[0].acpSessionId) return reply.code(400).send({ error: "alreadyStarted" });
+    }
+    const { doneAt, provider, ...rest } = body;
+    const updated = await updateSession(id, {
+      ...rest,
+      ...(provider ? { provider } : {}),
+      ...(doneAt !== undefined ? { doneAt: doneAt === null ? null : new Date(doneAt) } : {}),
+    });
     if (!updated) return reply.code(404).send({ error: "Not found" });
     // A chat-level MCP change needs a fresh agent attach, same as a global one.
     if (body.mcpDisabledIds) void restartSessionMcp(id);
@@ -676,6 +749,9 @@ export async function registerRoutes(app: FastifyInstance) {
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
         model: z.string().max(200).optional(),
+        /** Board task: partition id + description; created without a live turn. */
+        boardId: z.string().uuid().optional(),
+        taskDescription: z.string().max(20000).optional(),
       })
       .parse(req.body ?? {});
     const settings = await getSettings();
@@ -684,7 +760,14 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!isShellSession(provider) && !adapters.get(provider)) {
       return reply.code(400).send({ error: "unknownAgent" });
     }
-    if (
+    if (body.boardId) {
+      if (isShellSession(provider)) {
+        return reply.code(400).send({ error: "boardTaskNeedsAgent" });
+      }
+      if (!(await boardAcceptsCwd(body.boardId, cwd))) {
+        return reply.code(400).send({ error: "unknownBoardFolder" });
+      }
+    } else if (
       !isShellSession(provider) &&
       (settings.disabledProviders.includes(provider) || !getAgentAvailability(provider))
     ) {
@@ -698,8 +781,11 @@ export async function registerRoutes(app: FastifyInstance) {
       mode: body.mode ?? settings.defaultMode,
       themeId: body.themeId,
       model: body.model,
+      boardId: body.boardId ?? null,
+      taskDescription: body.taskDescription ?? null,
     });
-    if (!isShellSession(session.provider)) {
+    // Board tasks must not boot an agent: the start action may pick another one.
+    if (!body.boardId && !isShellSession(session.provider)) {
       void warmAcp(session.id, {
         provider: session.provider,
         cwd: session.cwd,

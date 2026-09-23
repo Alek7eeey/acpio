@@ -29,6 +29,7 @@ import {
   mcpStdioEnv,
   normalizeMcpCwd,
   toAcpMcpServer,
+  boardColumn,
 } from "@acpio/shared";
 
 describe("parseModelWire", () => {
@@ -954,3 +955,24 @@ describe("parseMcpProjectFile", () => {
   });
 });
 
+describe("boardColumn", () => {
+  it("places a task by what the session row says", () => {
+    const at = "2026-09-22T10:00:00.000Z";
+    expect(boardColumn({ status: "idle", startedAt: null, doneAt: null })).toBe("todo");
+    expect(boardColumn({ status: "running", startedAt: at, doneAt: null })).toBe("progress");
+    expect(boardColumn({ status: "idle", startedAt: at, doneAt: null })).toBe("wait");
+    expect(boardColumn({ status: "waiting", startedAt: at, doneAt: null })).toBe("wait");
+    expect(boardColumn({ status: "error", startedAt: at, doneAt: null })).toBe("wait");
+    expect(boardColumn({ status: "closed", startedAt: at, doneAt: null })).toBe("wait");
+  });
+
+  it("keeps a finished task in Done even while a turn is live", () => {
+    expect(
+      boardColumn({
+        status: "running",
+        startedAt: "2026-09-22T10:00:00.000Z",
+        doneAt: "2026-09-22T11:00:00.000Z",
+      }),
+    ).toBe("done");
+  });
+});

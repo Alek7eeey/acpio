@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
 
@@ -47,7 +47,7 @@ export async function searchMessages(raw: string, limit = 50): Promise<MessageSe
     .from(messageParts)
     .innerJoin(messages, eq(messageParts.messageId, messages.id))
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(eq(messageParts.type, "text"))
+    .where(and(eq(messageParts.type, "text"), isNull(sessions.boardId)))
     .orderBy(desc(messages.createdAt));
 
   return rows

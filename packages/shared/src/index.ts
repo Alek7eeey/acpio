@@ -831,6 +831,38 @@ export type MessagePartType =
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
+/** Kanban board workspace: own folders, own tasks, isolated from the chat tree. */
+export interface BoardDto {
+  id: string;
+  name: string;
+  /** Folder paths (projects) in display order — doubles as the Todo group order. */
+  folders: string[];
+  sortOrder: number;
+  createdAt: string;
+}
+
+/** Board columns are derived from the session row, never stored. */
+export type BoardColumn = "todo" | "progress" | "wait" | "done";
+
+/**
+ * Map a board task to its column. Derivation, in order:
+ *  - doneAt set               → done   (user closed the task)
+ *  - running                  → progress (agent turn is live)
+ *  - waiting | error | closed → wait   (needs the user's attention)
+ *  - idle, no startedAt       → todo   (created, work never started)
+ *  - idle, startedAt          → wait   (turn finished, awaiting the user)
+ */
+export function boardColumn(s: {
+  status: SessionStatus;
+  startedAt: string | null;
+  doneAt: string | null;
+}): BoardColumn {
+  if (s.doneAt) return "done";
+  if (s.status === "running") return "progress";
+  if (s.status !== "idle") return "wait";
+  return s.startedAt ? "wait" : "todo";
+}
+
 /** Windows shell for the in-app session terminal. */
 export type TerminalShell = "cmd" | "powershell";
 
@@ -1485,6 +1517,16 @@ export interface SessionDto {
   pinned: boolean;
   /** Archived sessions are hidden from the main tree (Архив section). */
   archived: boolean;
+  /** Board partition: null = regular chat; a value = task on that board.
+   *  Board tasks never show in the chat tree or global search. */
+  boardId: string | null;
+  /** Task description written at creation: card text and the prefill for the
+   *  first message. Null for regular chats. */
+  taskDescription: string | null;
+  /** Server-set when the board task's first turn starts (Todo ⇄ Wait split). */
+  startedAt: string | null;
+  /** Set while the user considers the task finished (Wait ⇄ Done). */
+  doneAt: string | null;
   /** MCP server ids disabled for THIS chat only (global list still applies to others). */
   mcpDisabledIds: string[];
   /** Token/context usage reported by the harness via ACP (null until/if reported). */

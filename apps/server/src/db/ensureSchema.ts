@@ -64,6 +64,26 @@ export async function ensureSchema() {
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;
   }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN board_id TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN task_description TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN started_at INTEGER`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN done_at INTEGER`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
 
   db.run(sql`
     CREATE TABLE IF NOT EXISTS messages (
@@ -108,6 +128,29 @@ export async function ensureSchema() {
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;
   }
+
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS boards (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+    )
+  `);
+
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS board_folders (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      cwd TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  db.run(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS board_folders_board_cwd
+    ON board_folders(board_id, cwd)
+  `);
 
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (

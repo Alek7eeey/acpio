@@ -63,6 +63,7 @@ import {
   updatePart,
   updateSession,
   saveSessionUsage,
+  markBoardTaskStarted,
 } from "../services/sessions.js";
 import { broadcastToSession } from "../services/wsHub.js";
 import { adapterCommand, adapters, getAdapter } from "../adapters/registry.js";
@@ -2333,6 +2334,8 @@ export async function runPrompt(
   // Persist the busy state too (not just in memory): a reload reads the list and
   // the detail row, and both must already say "running".
   await updateSession(sessionId, { status: "running" }).catch(() => {});
+  // Board task: the first claimed turn stamps the Todo ⇄ Wait "work began" mark.
+  await markBoardTaskStarted(sessionId).catch(() => {});
   let promptUserText = text;
   let priorTranscript = "";
   let userMessageId: string | null = null;

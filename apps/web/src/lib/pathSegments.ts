@@ -10,6 +10,14 @@ export function normalizeCwd(cwd: string | null | undefined): string {
   return (cwd ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+/** Last segment of a working directory — the label used by the tree, board and menus. */
+export function folderLabel(cwd: string, noFolderLabel: string): string {
+  const normalized = normalizeCwd(cwd);
+  if (!normalized) return noFolderLabel;
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
 /** Extensions rendered as inline image previews (see IMAGE_MIME on the server). */
 export const IMAGE_EXT = new Set([
   "png",

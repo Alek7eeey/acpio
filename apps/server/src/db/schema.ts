@@ -51,6 +51,14 @@ export const sessions = sqliteTable("sessions", {
   modelParams: text("model_params", { mode: "json" })
     .notNull()
     .$defaultFn(() => ({})),
+  /** Board partition: null = regular chat; otherwise the owning board id. */
+  boardId: text("board_id"),
+  /** Board task description (card text / first-message prefill). */
+  taskDescription: text("task_description"),
+  /** First turn start of a board task (Todo ⇄ Wait split). */
+  startedAt: integer("started_at", { mode: "timestamp_ms" }),
+  /** User-marked completion of a board task (Wait ⇄ Done). */
+  doneAt: integer("done_at", { mode: "timestamp_ms" }),
   createdAt: createdAt(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" })
     .notNull()
@@ -82,6 +90,24 @@ export const chatFolders = sqliteTable("chat_folders", {
   cwd: text("cwd").primaryKey(),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: createdAt(),
+});
+
+/** Kanban boards: isolated workspaces with their own folders and tasks. */
+export const boards = sqliteTable("boards", {
+  id: id(),
+  name: text("name").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+});
+
+/** The board's configured project folders, in display/group order. */
+export const boardFolders = sqliteTable("board_folders", {
+  id: id(),
+  boardId: text("board_id")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  cwd: text("cwd").notNull(),
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 export const users = sqliteTable("users", {

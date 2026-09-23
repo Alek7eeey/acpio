@@ -4332,7 +4332,6 @@
 
   .shellDock {
     --composer-safe-bottom: 4px;
-    --mobile-dock-h: calc(28px + env(safe-area-inset-bottom, 0px));
   }
 
   .shellDock .content {

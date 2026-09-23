@@ -9,6 +9,7 @@ import { AgentGate, AgentOfflineWarning } from "./components/AgentGate";
 import { BootSplash } from "./components/BootSplash";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { ToastHost } from "./components/ToastHost";
+import { BoardPage } from "./pages/BoardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RemoteKeyGate } from "./components/RemoteKeyGate";
@@ -95,6 +96,7 @@ export function App() {
         <Route element={<AppShell />}>
           <Route index element={<ChatPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="board/:boardId" element={<BoardPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Route>

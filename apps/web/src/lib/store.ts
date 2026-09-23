@@ -3,6 +3,7 @@ import type {
   AgentProvider,
   AppLocale,
   AppSettings,
+  BoardDto,
   ChatThemeDto,
   MessageDto,
   MessagePartDto,
@@ -205,6 +206,35 @@ type AppState = {
   /** Rescan folder MCP files — one folder, or every known one. */
   refreshProjectMcp: (cwd?: string | null) => Promise<void>;
   reorderFolders: (items: Array<{ cwd: string; sortOrder: number }>) => Promise<void>;
+  /** Kanban boards — sidebar entries and board pages (isolated workspaces). */
+  boards: BoardDto[];
+  refreshBoards: () => Promise<void>;
+  createBoard: (name: string) => Promise<BoardDto | null>;
+  renameBoard: (id: string, name: string) => Promise<void>;
+  deleteBoard: (id: string) => Promise<void>;
+  /**
+   * Set board sort orders explicitly — a board's order is its slot in the
+   * sidebar tree, where folders and boards share one sequence.
+   */
+  reorderBoards: (items: Array<{ id: string; sortOrder: number }>) => Promise<void>;
+  setBoardFolders: (id: string, cwds: string[]) => Promise<void>;
+  /** Tasks of the open board — the partitioned session list for /board/:id. */
+  boardSessions: SessionDto[];
+  refreshBoardSessions: (boardId: string) => Promise<void>;
+  createBoardTask: (input: {
+    boardId: string;
+    cwd: string;
+    description: string;
+  }) => Promise<SessionDto | null>;
+  setTaskDone: (id: string, done: boolean) => Promise<void>;
+  /** Board task: pick the agent before the first turn (the server accepts it only then). */
+  setTaskProvider: (id: string, provider: AgentProvider) => Promise<void>;
+  /** Board task: order within its project group (persisted as `sortOrder`). */
+  reorderBoardTasks: (
+    items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
+  ) => Promise<void>;
+  /** Board task: delete the task and its messages. */
+  deleteBoardTask: (id: string) => Promise<void>;
   /** Live details for open split panes (and the focused chat). */
   sessionDetails: Record<string, SessionDetailDto>;
   setChatPaneCount: (count: number) => void;
@@ -1383,6 +1413,142 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
+  boards: [],
+  refreshBoards: async () => {
+    try {
+      set({ boards: await api.listBoards() });
+    } catch {
+      // server offline — keep the current list
+    }
+  },
+  createBoard: async (name) => {
+    try {
+      const board = await api.createBoard(name);
+      set((s) => ({ boards: [...s.boards, board] }));
+      return board;
+    } catch {
+      return null;
+    }
+  },
+  renameBoard: async (id, name) => {
+    try {
+      const board = await api.updateBoard(id, { name });
+      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+    } catch {
+      // server offline — keep the current name
+    }
+  },
+  deleteBoard: async (id) => {
+    try {
+      const res = await api.deleteBoard(id);
+      set((s) => ({
+        boards: res.boards ?? s.boards.filter((b) => b.id !== id),
+        boardSessions: [],
+      }));
+    } catch {
+      // server offline — keep the board
+    }
+  },
+  reorderBoards: async (items) => {
+    const orderById = new Map(items.map((item) => [item.id, item.sortOrder]));
+    // Optimistic — the sidebar already re-flowed the rows.
+    set((s) => ({
+      boards: s.boards
+        .map((board) =>
+          orderById.has(board.id) ? { ...board, sortOrder: orderById.get(board.id)! } : board,
+        )
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)),
+    }));
+    try {
+      await Promise.all(items.map((item) => api.updateBoard(item.id, { sortOrder: item.sortOrder })));
+    } catch {
+      void get().refreshBoards();
+    }
+  },
+  setBoardFolders: async (id, cwds) => {
+    try {
+      const res = await api.setBoardFolders(id, cwds);
+      set((s) => ({
+        boards: s.boards.map((b) => (b.id === id ? { ...b, folders: res.folders } : b)),
+      }));
+    } catch {
+      // server offline — keep the current folders
+    }
+  },
+  boardSessions: [],
+  refreshBoardSessions: async (boardId) => {
+    try {
+      const tasks = await api.listBoardSessions(boardId);
+      set({ boardSessions: tasks });
+      await reconcileLiveTurnStatuses(tasks);
+    } catch {
+      // server offline — keep the current list
+    }
+  },
+  createBoardTask: async ({ boardId, cwd, description }) => {
+    try {
+      const title = description.trim().split("\n")[0]?.slice(0, 120) || "";
+      const task = await api.createSession({
+        boardId,
+        cwd,
+        taskDescription: description,
+        ...(title ? { title } : {}),
+      });
+      set((s) => ({ boardSessions: [task, ...s.boardSessions] }));
+      return task;
+    } catch {
+      return null;
+    }
+  },
+  setTaskDone: async (id, done) => {
+    try {
+      const updated = await api.updateSession(id, {
+        doneAt: done ? new Date().toISOString() : null,
+      });
+      set((s) => ({
+        boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)),
+      }));
+    } catch {
+      // server offline — the WS mirror reconciles on the next event
+    }
+  },
+  setTaskProvider: async (id, provider) => {
+    try {
+      const updated = await api.updateSession(id, { provider });
+      set((s) => ({
+        boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)),
+      }));
+    } catch {
+      // server offline — the WS mirror reconciles on the next event
+    }
+  },
+  reorderBoardTasks: async (items) => {
+    // Optimistic: the board already shows the new order. This shortcut avoids
+    // reorderSessions, whose response carries the chat tree, not board tasks.
+    const orderById = new Map(items.map((item) => [item.id, item.sortOrder]));
+    set((s) => ({
+      boardSessions: s.boardSessions.map((b) =>
+        orderById.has(b.id) ? { ...b, sortOrder: orderById.get(b.id) ?? b.sortOrder } : b,
+      ),
+    }));
+    try {
+      await api.reorderSessions(items);
+    } catch {
+      // server offline — the next refresh reconciles the stored order
+    }
+  },
+  deleteBoardTask: async (id) => {
+    try {
+      await api.deleteSession(id);
+    } catch {
+      // server offline — keep the card so nothing is silently lost
+      return;
+    }
+    set((s) => ({
+      boardSessions: s.boardSessions.filter((b) => b.id !== id),
+      ...(s.activeSessionId === id ? { activeSessionId: null, activeSession: null } : {}),
+    }));
+  },
   focusMessageId: null,
   sessionLoading: false,
   restoringSessionIds: {},
@@ -1746,6 +1912,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       void get().loadAdapters();
       void get().refreshFolders();
+      void get().refreshBoards();
       await loadAppData(set, get);
     } catch (err) {
       set({
@@ -2126,6 +2293,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       sortOrder: nextSessionSortOrder(get().sessions),
       pinned: false,
       archived: false,
+      boardId: null,
+      taskDescription: null,
+      startedAt: null,
+      doneAt: null,
       mcpDisabledIds: [],
       usage: null,
       model: pinnedModel ?? "",
@@ -2809,6 +2980,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const state = get();
 
     if (event.type === "session.updated") {
+      // Board tasks live in their own list — mirror the authoritative row there.
+      if (state.boardSessions.some((b) => b.id === event.sessionId)) {
+        set((st) => ({
+          boardSessions: st.boardSessions.map((b) =>
+            b.id === event.sessionId ? { ...b, ...event.session } : b,
+          ),
+        }));
+      }
       // Ignore transient "closed" from intentional ACP dispose during edit/regenerate.
       if (
         event.session.status === "closed" &&

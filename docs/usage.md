@@ -94,6 +94,32 @@ Reset agents**), since MCP is only handed to the agent at `session/new|resume|lo
 model/MCP changes brings back the agent's ACP session (`resume` / `load`) instead of
 starting blank. Locale changes do not restart the agent — only UI and prompt hints update.
 
+## Kanban boards
+
+A **board** is a workspace of its own, for driving work across several projects at once.
+Create one from the **Board** tab of the new-chat picker or with **New board** in the chat
+tree; the tree lists boards under the chats, and opening one keeps the tree beside it. The
+board page shows four columns — **Todo**, **In Progress**, **Wait**, **Done** — and a rail of
+the folders the board works in.
+
+A board's folders are its projects: **Board folders** in the board header adds and removes
+them, and the rail lists each one with its task count. Clicking a folder filters the whole
+board down to it, **All projects** clears the filter, and the **+** on a rail row starts a
+task in that folder. **Todo** groups its cards by project, and both the groups and the cards
+inside them move up and down — the order is saved on the server, so it survives a reload.
+
+Every task is a chat session of its own. **+** on a group writes a card carrying the project
+chip; the play icon on the card opens the chat with the default agent and the task
+description already in the composer — nothing is sent yet, so pressing Enter (or picking a
+slash command) starts the turn, and leaving the chat leaves the task on the board.
+Right-clicking the play icon offers **Start with another agent**, which switches that task to
+a different harness before the turn starts. A card's column follows the session instead of a
+stored status: a task whose first turn never ran sits in **Todo**, a live turn shows in **In
+Progress**, and a finished turn, a question waiting for you or a failed turn lands in
+**Wait** — where the card carries **Mark done** for work you call finished. **Done** outranks
+a live turn, and **Reopen** sends the task back to **Todo**. Board tasks never show up in the
+chat tree, and deleting a board deletes its tasks with it.
+
 ## Connecting an agent (Cursor / OMP)
 
 1. **Settings → Agents → Connect**.
