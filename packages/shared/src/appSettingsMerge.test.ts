@@ -105,6 +105,16 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatGitBranchPosition: "weird" }).chatGitBranchPosition).toBe("below");
   });
 
+  it("defaults the attach source to the browser device", () => {
+    expect(mergeClientAppSettings({}).attachDefaultSource).toBe("device");
+    expect(mergeClientAppSettings({ attachDefaultSource: "server" }).attachDefaultSource).toBe(
+      "server",
+    );
+    expect(mergeClientAppSettings({ attachDefaultSource: "weird" }).attachDefaultSource).toBe(
+      "device",
+    );
+  });
+
   it("defaults chip options and heals partial objects", () => {
     const defaults = mergeClientAppSettings({}).chatChipOptions;
     expect(defaults).toEqual({

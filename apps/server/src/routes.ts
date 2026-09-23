@@ -216,6 +216,7 @@ const settingsSchema = z.object({
   consoleChipStyle: z.enum(["full", "icon"]).optional(),
   terminalShell: z.enum(["cmd", "powershell"]).optional(),
   chatComposerButtons: z.array(z.string()).optional(),
+  attachDefaultSource: z.enum(["device", "server"]).optional(),
   chatTreeElements: z.array(z.string()).optional(),
   chatTreeMenu: z.array(z.string()).optional(),
   chatTreeShowArchive: z.boolean().optional(),

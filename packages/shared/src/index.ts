@@ -816,6 +816,11 @@ export type ChatHeaderIconId = "lang" | "install" | "theme";
  *  always visible. */
 export type ChatComposerButtonId = "attach" | "mic" | "model" | "mode";
 
+/** Where the composer's attach button looks for a file by default.
+ *  "device" — the browser's device (uploaded into the session folder);
+ *  "server" — the filesystem of the machine running the server. */
+export type AttachSource = "device" | "server";
+
 export type MessagePartType =
   | "text"
   | "thought"
@@ -963,6 +968,12 @@ export interface AppSettings {
   terminalShell: TerminalShell;
   /** Optional composer buttons (attach, mic, model, mode picker). */
   chatComposerButtons: ChatComposerButtonId[];
+  /**
+   * Which source the attach button opens on a plain click. Right-click opens
+   * the other source. "device" (default) = the browser's device, "server" =
+   * the machine running the server.
+   */
+  attachDefaultSource: AttachSource;
   /** Tree sidebar controls shown (search, per-row actions). */
   chatTreeElements: ChatTreeElementId[];
   /** Commands in the session "⋯" context menu. */
@@ -1072,6 +1083,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   consoleChipStyle: "full",
   terminalShell: "cmd",
   chatComposerButtons: ["attach", "mic", "model", "mode"],
+  attachDefaultSource: "device",
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
   chatTreeMenu: ["rename", "move", "export", "delete"],
   chatTreeShowArchive: true,

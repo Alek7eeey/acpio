@@ -14,6 +14,7 @@ import {
   type AdapterRestoreMode,
   type AgentProvider,
   type AppSettings,
+  type AttachSource,
   type ChatActionId,
   type ChatComposerButtonId,
   type ChatHeaderIconId,
@@ -436,6 +437,36 @@ function ChatInteractiveConfigRows({
                     toggleInOrder(form.chatComposerButtons ?? [], id, CHAT_COMPOSER_ORDER),
                   )
                 }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        label={t("settings.attachDefaultSource")}
+        hint={t("settings.attachDefaultSourceHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["device", t("settings.attachSourceDevice")],
+              ["server", t("settings.attachSourceServer")],
+            ] as Array<[AttachSource, string]>
+          ).map(([id, label]) => {
+            const on = (form.attachDefaultSource ?? "device") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => {
+                  patch("attachDefaultSource", id);
+                  void saveSettings({ attachDefaultSource: id });
+                }}
               >
                 {label}
               </button>

@@ -153,6 +153,8 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...partial };
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
+  // Anything but an explicit "server" falls back to the device default.
+  merged.attachDefaultSource = partial.attachDefaultSource === "server" ? "server" : "device";
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);

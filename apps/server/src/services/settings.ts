@@ -267,6 +267,9 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   merged.chatToolbarStyle =
     merged.chatToolbarStyle === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
+  if (merged.attachDefaultSource !== "server") {
+    merged.attachDefaultSource = "device";
+  }
   if (typeof merged.remoteAccessKey !== "string") {
     merged.remoteAccessKey = "";
   }

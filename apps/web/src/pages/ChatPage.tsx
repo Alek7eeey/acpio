@@ -38,6 +38,7 @@ import {
   type SlashCommandDto,
   isShellSession,
   effectiveMcpServers,
+  type AttachSource,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
@@ -390,6 +391,15 @@ function clipboardImageName(file: File, index: number): string {
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `clipboard-${stamp}${index > 0 ? `-${index + 1}` : ""}${ext}`;
+}
+
+/** Picked files keep their real name; the server appends an extension from the
+ *  MIME type when a nameless file has none. */
+function deviceFileName(file: File, index: number): string {
+  const raw = (file.name || "").trim();
+  if (raw) return raw;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return `file-${stamp}${index > 0 ? `-${index + 1}` : ""}`;
 }
 
 function MessageArticle({
@@ -3754,6 +3764,8 @@ function ChatThread() {
   const previewUrlsRef = useRef(new Map<string, string>());
   const [attachError, setAttachError] = useState<string | null>(null);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
+  /** Native picker for files on the device the browser runs on. */
+  const deviceFileInputRef = useRef<HTMLInputElement>(null);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [listening, setListening] = useState(false);
   const [voiceHint, setVoiceHint] = useState<string | null>(null);
@@ -4214,15 +4226,15 @@ function ChatThread() {
     [slashCommands],
   );
 
-  const attachPastedImages = useCallback(
-    (files: File[]) => {
+  const stageDeviceFiles = useCallback(
+    (files: File[], resolveName: (file: File, index: number) => string) => {
       const sessionId = activeSession?.id;
       if (!sessionId || files.length === 0) return;
       if (editingMessageId || composerLocked || turnBusy) return;
 
       const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
       if (oversized) {
-        setAttachError(t("chat.fileTooLarge", { name: oversized.name || "image" }));
+        setAttachError(t("chat.fileTooLarge", { name: oversized.name || "file" }));
       }
       const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
       if (ok.length === 0) return;
@@ -4236,11 +4248,13 @@ function ChatThread() {
       // the upload fills in the staged path in the background.
       const entries: ComposerAttachment[] = accepted.map((file, i) => {
         const id = nextComposerAttachmentId();
-        const previewUrl = URL.createObjectURL(file);
-        previewUrlsRef.current.set(id, previewUrl);
+        // Preview only real images: an <img> pointed at an icon-less blob
+        // (a PDF, an archive) would just render broken.
+        const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+        if (previewUrl) previewUrlsRef.current.set(id, previewUrl);
         return {
           id,
-          name: clipboardImageName(file, i),
+          name: resolveName(file, i),
           path: null,
           size: file.size,
           status: "uploading",
@@ -4255,8 +4269,8 @@ function ChatThread() {
           prev.map((f) => (f.id === id ? { ...f, ...next } : f)),
         );
       };
-      // Uploads run in parallel: each pasted image gets its own request, so a
-      // slow one never holds up the others.
+      // Uploads run in parallel: each file gets its own request, so a slow one
+      // never holds up the others.
       accepted.forEach((file, i) => {
         const entry = entries[i]!;
         void api
@@ -4287,6 +4301,37 @@ function ChatThread() {
       turnBusy,
     ],
   );
+
+  const attachPastedImages = useCallback(
+    (files: File[]) => stageDeviceFiles(files, clipboardImageName),
+    [stageDeviceFiles],
+  );
+
+  const attachPickedFiles = useCallback(
+    (files: File[]) => stageDeviceFiles(files, deviceFileName),
+    [stageDeviceFiles],
+  );
+
+  const attachDefaultSource: AttachSource =
+    settings.attachDefaultSource === "server" ? "server" : "device";
+  const attachOtherSource: AttachSource = attachDefaultSource === "server" ? "device" : "server";
+
+  const openAttachSource = useCallback((source: AttachSource) => {
+    if (source === "server") {
+      setAttachDialogOpen(true);
+      return;
+    }
+    const input = deviceFileInputRef.current;
+    if (!input) return;
+    // Re-picking the same file must fire onChange again.
+    input.value = "";
+    input.click();
+  }, []);
+
+  const attachSourceLabels: Record<AttachSource, string> = {
+    device: t("chat.attachPickDevice"),
+    server: t("chat.attachPickServer"),
+  };
 
   const removePendingFile = useCallback((id: string) => {
     const url = previewUrlsRef.current.get(id);
@@ -6032,10 +6077,16 @@ function ChatThread() {
               <button
                 type="button"
                 className={styles.attachBtn}
-                aria-label={t("chat.attachFiles")}
-                title={t("chat.attachFiles")}
+                aria-label={attachSourceLabels[attachDefaultSource]}
+                title={`${attachSourceLabels[attachDefaultSource]} · ${t("chat.attachSwapHint", {
+                  other: attachSourceLabels[attachOtherSource],
+                })}`}
                 disabled={composerLocked || editingMessageId !== null || turnBusy}
-                onClick={() => setAttachDialogOpen(true)}
+                onClick={() => openAttachSource(attachDefaultSource)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openAttachSource(attachOtherSource);
+                }}
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
@@ -6048,6 +6099,17 @@ function ChatThread() {
                 </svg>
               </button>
               )}
+              <input
+                ref={deviceFileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.currentTarget.files ?? []);
+                  e.currentTarget.value = "";
+                  attachPickedFiles(files);
+                }}
+              />
 
               {voiceHint && <span className={styles.voiceHint}>{voiceHint}</span>}
 
