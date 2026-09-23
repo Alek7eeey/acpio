@@ -22,6 +22,7 @@ import {
   type HarnessAdapter,
   type McpServerConfig,
   isMcpServerAttached,
+  isMcpServerConfigured,
   mcpCommandNeedsAbsolute,
   toAcpMcpServer,
 } from "@acpio/shared";
@@ -712,8 +713,16 @@ export class AcpClient extends EventEmitter {
           this.emit("log", `authenticate skipped/failed: ${String(err)}`);
         }
       }
+      // A caller-supplied list is already the chat's effective one — folder
+      // overrides and chat switches resolved by `effectiveMcpServers` — so only
+      // its transport fields are re-checked here. Testing `enabled` again would
+      // undo a folder that switched a globally disabled server on. The fallback
+      // (probe clients never pass a list) is the raw settings list and does
+      // still need the global flag.
       const mcpServers = (await resolveMcpStdioCommands(
-        (opts?.mcpServers ?? this.settings.mcpServers ?? []).filter(isMcpServerAttached),
+        (opts?.mcpServers ?? (this.settings.mcpServers ?? []).filter(isMcpServerAttached)).filter(
+          isMcpServerConfigured,
+        ),
         env,
       )).map(toAcpMcpServer);
 

@@ -1,6 +1,7 @@
 import {
   DEFAULT_CHAT_CHIP_OPTIONS,
   DEFAULT_SETTINGS,
+  normalizeMcpProjectFiles,
   type AgentProvider,
   type AppSettings,
   type ChatChangesMetrics,
@@ -155,6 +156,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
+  merged.mcpProjectFiles = normalizeMcpProjectFiles(partial.mcpProjectFiles);
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }

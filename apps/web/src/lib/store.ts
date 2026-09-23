@@ -8,6 +8,7 @@ import type {
   MessagePartDto,
   ModelOption,
   ModelParamDto,
+  ProjectMcpInfo,
   SessionDetailDto,
   SessionDto,
   SlashCommandDto,
@@ -195,6 +196,14 @@ type AppState = {
   knownFolders: string[];
   refreshFolders: () => Promise<void>;
   deleteFolder: (cwd: string) => Promise<void>;
+  /**
+   * MCP servers discovered in each folder's own files, keyed by canonical cwd
+   * (`normalizeCwd`). Refreshed from the server; an unfetched folder simply
+   * contributes nothing to the chat until it is scanned.
+   */
+  projectMcp: Record<string, ProjectMcpInfo>;
+  /** Rescan folder MCP files — one folder, or every known one. */
+  refreshProjectMcp: (cwd?: string | null) => Promise<void>;
   reorderFolders: (items: Array<{ cwd: string; sortOrder: number }>) => Promise<void>;
   /** Live details for open split panes (and the focused chat). */
   sessionDetails: Record<string, SessionDetailDto>;
@@ -270,6 +279,13 @@ type AppState = {
   /** Background chats whose turn finished while the user was elsewhere. */
   unseenFinishedTurns: Record<string, true>;
   loading: boolean;
+  /**
+   * True once the first bootstrap payload has been applied. `settings` is
+   * DEFAULT_SETTINGS before that, so a page mounting early must mirror the
+   * payload when this flips — and never again afterwards (the store re-sets
+   * `settings` around every save).
+   */
+  bootstrapped: boolean;
   error: string | null;
   setTheme: (theme: Theme) => Promise<void>;
   applyTheme: (theme: Theme) => void;
@@ -1336,8 +1352,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore malformed local data
       }
       set({ knownFolders: folders });
+      void get().refreshProjectMcp();
     } catch {
       // server offline — keep the current list
+    }
+  },
+  projectMcp: {},
+  refreshProjectMcp: async (cwd) => {
+    try {
+      const folders = await api.projectMcp(cwd);
+      set((s) => ({ projectMcp: { ...s.projectMcp, ...folders } }));
+    } catch {
+      // server offline — keep the last known discovery
     }
   },
   deleteFolder: async (cwd) => {
@@ -1394,6 +1420,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   cancelledPromptEpochBySession: {},
   unseenFinishedTurns: {},
   loading: false,
+  bootstrapped: false,
   error: null,
 
   // Apply the persisted theme before the first paint: theme-scoped rules
@@ -1725,7 +1752,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      set({ loading: false });
+      set({ loading: false, bootstrapped: true });
     }
   },
 
@@ -3349,6 +3376,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (nextPatch.locale) get().applyLocale(nextPatch.locale);
     set({ settings: nextSettings });
     applyAppearance(nextSettings);
+    if (
+      nextPatch.mcpServers !== undefined ||
+      nextPatch.mcpFolderConfigs !== undefined ||
+      nextPatch.mcpProjectFiles !== undefined
+    ) {
+      void get().refreshProjectMcp();
+    }
     if (nextPatch.disabledProviders !== undefined || nextPatch.customAgents !== undefined) {
       // A switched-off harness keeps no probe state and leaves the registry
       // list, so nothing (pickers, gate, header) can mention it any more.

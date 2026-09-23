@@ -15,6 +15,8 @@ const apiMock = vi.hoisted(() => ({
     const { DEFAULT_SETTINGS: defaults } = await import("@acpio/shared");
     return { ...defaults, ...patch };
   }),
+  // The MCP leaf polls the live probe status while it is open.
+  mcpStatus: vi.fn(async () => ({})),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
@@ -31,12 +33,12 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  useAppStore.setState({ settings: DEFAULT_SETTINGS });
+  useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false });
 });
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ settings: DEFAULT_SETTINGS });
+  useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false });
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -55,9 +57,48 @@ describe("SettingsPage form state", () => {
     expect(limitField().value).toBe("0");
 
     act(() => {
-      useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, chatTreeRecentLimit: 7 } });
+      useAppStore.setState({
+        settings: { ...DEFAULT_SETTINGS, chatTreeRecentLimit: 7 },
+        bootstrapped: true,
+      });
     });
     expect(limitField().value).toBe("7");
+  });
+
+  // Regression: the guard used to be "the first settings object that differs
+  // from the one at mount", so a page mounted after bootstrap hydrated on the
+  // first save-echo instead — and that echo carries the pre-save payload, which
+  // reverted the switches the user had just set (they came back after a second
+  // attempt, once the guard had fired).
+  it("keeps the switches the user set when the store echoes a settings snapshot", async () => {
+    const user = userEvent.setup();
+    const saved = {
+      ...DEFAULT_SETTINGS,
+      mcpServers: [
+        { id: "mcp-a", name: "Alpha", enabled: true, type: "remote" as const, url: "http://a/mcp" },
+      ],
+    };
+    useAppStore.setState({ settings: saved, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=mcp"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByRole("checkbox", { name: "Enabled" }) as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    expect(toggle.checked).toBe(false);
+
+    // What saveSettings does around a save: a fresh object holding the values
+    // from before the edit.
+    act(() => {
+      useAppStore.setState({ settings: { ...saved, chatSplit: false } });
+    });
+
+    expect(toggle.checked).toBe(false);
   });
 
   // Regression: an unconditional `setForm(settings)` sync reverted the form on
@@ -73,7 +114,10 @@ describe("SettingsPage form state", () => {
         </I18nProvider>
       </MemoryRouter>,
     );
-    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, chatTreeRecentLimit: 7 } });
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, chatTreeRecentLimit: 7 },
+      bootstrapped: true,
+    });
     await waitFor(() => expect(limitField().value).toBe("7"));
 
     const field = limitField();

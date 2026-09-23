@@ -328,6 +328,25 @@ export type McpServerConfig = {
   envConfig?: string;
 };
 
+/**
+ * Per-folder MCP overrides, keyed by the folder's canonical cwd (see
+ * `normalizeMcpCwd`). A folder can switch individual servers on or off — a
+ * server that is off globally included, so the global list stays the single
+ * place a server is defined — and add servers that only exist for chats
+ * opened in it.
+ */
+export type McpFolderConfig = {
+  /**
+   * Explicit per-server switch for this folder, keyed by server id (`true`
+   * attaches it here even when it is off globally, `false` switches it off
+   * here). An id that is absent inherits the server's own `enabled` flag, so
+   * a later global change still reaches every folder that has no opinion.
+   */
+  overrides: Record<string, boolean>;
+  /** Servers that exist only in this folder (merged after the global list). */
+  servers: McpServerConfig[];
+};
+
 function legacyMcpHttpHeaders(server: McpServerConfig): Array<{ name: string; value: string }> {
   const out: Array<{ name: string; value: string }> = [];
   if (server.type === "remote" && server.token?.trim()) {
@@ -484,6 +503,238 @@ export function mcpServersFingerprint(servers: McpServerConfig[] | undefined): s
     })
     .sort()
     .join("\u0000");
+}
+
+/**
+ * Canonical folder key for MCP folder configs: forward slashes, no trailing
+ * separator. `E:\proj` and `E:/proj/` must resolve to one config.
+ */
+export function normalizeMcpCwd(cwd: string | null | undefined): string {
+  return (cwd ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** MCP override saved for a folder, or undefined when the folder has none. */
+export function mcpFolderConfig(
+  settings: { mcpFolderConfigs?: Record<string, McpFolderConfig> } | null | undefined,
+  cwd: string | null | undefined,
+): McpFolderConfig | undefined {
+  const key = normalizeMcpCwd(cwd);
+  if (!key) return undefined;
+  return settings?.mcpFolderConfigs?.[key];
+}
+
+/**
+ * Attachment state of one MCP server inside a folder: the folder's explicit
+ * switch wins, otherwise the server's own `enabled` flag (for a server found
+ * in a folder MCP file: the file's own `enabled`).
+ */
+export function mcpServerInFolder(
+  config: McpFolderConfig | undefined,
+  server: McpServerConfig,
+): boolean {
+  return config?.overrides?.[server.id] ?? Boolean(server.enabled);
+}
+
+/**
+ * Folder MCP files read for every chat by default, relative to the chat's own
+ * cwd — the per-project conventions tools already write there. Configurable in
+ * Settings → MCP; an empty list turns folder files off entirely.
+ */
+export const DEFAULT_MCP_PROJECT_FILES: readonly string[] = [
+  ".omp/mcp.json",
+  ".cursor/mcp.json",
+  ".agents/mcp.json",
+];
+
+/**
+ * Configured folder MCP files: trimmed, forward-slashed, de-duplicated.
+ * Absolute paths and paths escaping the folder are dropped — the list may only
+ * point inside the chat's own cwd. A non-array (absent setting) means defaults.
+ */
+export function normalizeMcpProjectFiles(files: unknown): string[] {
+  if (!Array.isArray(files)) return [...DEFAULT_MCP_PROJECT_FILES];
+  const out: string[] = [];
+  for (const raw of files) {
+    if (typeof raw !== "string") continue;
+    const path = raw
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/{2,}/g, "/");
+    if (!path || path.startsWith("/") || /^[a-z]:/i.test(path)) continue;
+    if (path.split("/").some((seg) => seg === "..")) continue;
+    if (!out.includes(path)) out.push(path);
+  }
+  return out;
+}
+
+const MCP_VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+
+/**
+ * `${VAR}` / `${VAR:-default}` expansion for values coming out of a folder MCP
+ * file. Unresolved placeholders stay literal, and a variable set to an empty
+ * string counts as unset (matching OMP's own non-empty rule).
+ */
+export function expandMcpVars(value: string, env: Record<string, string | undefined>): string {
+  return value.replace(MCP_VAR_RE, (whole, name: string, fallback?: string) => {
+    const found = env[name];
+    if (found) return found;
+    return fallback ?? whole;
+  });
+}
+
+/** Folder MCP file parse result: ACP-ready servers plus human-readable problems. */
+export type McpProjectFileResult = { servers: McpServerConfig[]; warnings: string[] };
+
+/** One folder's discovered MCP servers, plus problems worth showing (API wire). */
+export type ProjectMcpInfo = { servers: McpServerConfig[]; warnings: string[] };
+
+/** String array from a JSON value, or undefined when the shape is wrong. */
+function mcpStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((v): v is string => typeof v === "string");
+}
+
+/** `{ name: value }` map from a JSON value as string rows (env / headers). */
+function mcpNameValueRows(raw: unknown): Array<{ name: string; value: string }> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const rows: Array<{ name: string; value: string }> = [];
+  for (const [name, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!name.trim()) continue;
+    if (typeof value === "object" && value !== null) continue;
+    rows.push({ name, value: String(value ?? "") });
+  }
+  return rows.length ? rows : undefined;
+}
+
+/**
+ * Parse one folder MCP file — the `{ "mcpServers": { name: … } }` convention
+ * shared by OMP, Cursor and Claude Code. `${VAR}` placeholders are expanded
+ * here (the ACP agent receives literal values), and ids are
+ * `file:<path>:<name>` so a chat or its folder can switch a discovered server
+ * off exactly like an app-configured one.
+ */
+export function parseMcpProjectFile(
+  text: string,
+  relPath: string,
+  env: Record<string, string | undefined> = {},
+): McpProjectFileResult {
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch {
+    return { servers: [], warnings: [`${relPath}: invalid JSON`] };
+  }
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
+    return { servers: [], warnings: [`${relPath}: not a JSON object`] };
+  }
+  if (!("mcpServers" in root) || !root.mcpServers) {
+    return { servers: [], warnings: [`${relPath}: missing "mcpServers" object`] };
+  }
+  const map = root.mcpServers;
+  if (typeof map !== "object" || Array.isArray(map)) {
+    return { servers: [], warnings: [`${relPath}: missing "mcpServers" object`] };
+  }
+  const ex = (value: string) => expandMcpVars(value, env);
+  const servers: McpServerConfig[] = [];
+  const warnings: string[] = [];
+  for (const [name, raw] of Object.entries(map)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      warnings.push(`${relPath}: server "${name}" is not an object`);
+      continue;
+    }
+    const id = `file:${relPath}:${name}`;
+    const enabled = !("enabled" in raw) || raw.enabled !== false;
+    const command =
+      "command" in raw && typeof raw.command === "string" ? ex(raw.command.trim()) : "";
+    const url = "url" in raw && typeof raw.url === "string" ? ex(raw.url.trim()) : "";
+    if (command && url) {
+      warnings.push(`${relPath}: server "${name}" sets both "command" and "url"`);
+      continue;
+    }
+    if (command) {
+      servers.push({
+        id,
+        name,
+        enabled,
+        type: "stdio",
+        command,
+        args: "args" in raw ? mcpStringArray(raw.args)?.map(ex) : undefined,
+        env:
+          "env" in raw
+            ? mcpNameValueRows(raw.env)?.map((row) => ({ name: row.name, value: ex(row.value) }))
+            : undefined,
+      });
+      continue;
+    }
+    if (url) {
+      const headers =
+        "headers" in raw
+          ? mcpNameValueRows(raw.headers)?.map((row) => ({
+              name: row.name,
+              value: ex(row.value),
+            }))
+          : undefined;
+      if ("type" in raw && raw.type === "sse") {
+        warnings.push(`${relPath}: server "${name}": sse is sent as http`);
+      }
+      servers.push({
+        id,
+        name,
+        enabled,
+        type: "remote",
+        url,
+        remoteConfig: headers?.length
+          ? JSON.stringify({
+              headers: Object.fromEntries(headers.map((row) => [row.name, row.value])),
+            })
+          : undefined,
+      });
+      continue;
+    }
+    warnings.push(`${relPath}: server "${name}" has neither "command" nor "url"`);
+  }
+  return { servers, warnings };
+}
+
+/**
+ * MCP servers a chat actually gets: servers the app configures (minus the ones
+ * its folder switched off, plus the ones its folder switched on — a folder may
+ * attach a server that is off globally), then the folder's own servers, then
+ * servers found in the folder's own MCP files, minus the ids the chat itself
+ * disabled. Folder-specific servers are ordinary ids, so a chat can disable one
+ * exactly like a global server.
+ */
+export function effectiveMcpServers(
+  settings: AppSettings,
+  disabledIds: string[] | null | undefined,
+  cwd?: string | null,
+  projectServers: McpServerConfig[] = [],
+): McpServerConfig[] {
+  const folder = mcpFolderConfig(settings, cwd);
+  const disabledInChat = new Set(disabledIds ?? []);
+  const out = (settings.mcpServers ?? []).filter(
+    (s) => isMcpServerConfigured(s) && mcpServerInFolder(folder, s) && !disabledInChat.has(s.id),
+  );
+  for (const s of folder?.servers ?? []) {
+    if (isMcpServerAttached(s) && !disabledInChat.has(s.id)) out.push(s);
+  }
+  // Folder files come last and never shadow a server configured in the app
+  // (whether that one is attached or not): the attached list must not carry
+  // two entries with the same ACP server name.
+  const names = new Set(
+    [...(settings.mcpServers ?? []), ...(folder?.servers ?? [])]
+      .filter(isMcpServerConfigured)
+      .map((s) => s.name),
+  );
+  for (const s of projectServers) {
+    if (!isMcpServerConfigured(s) || !mcpServerInFolder(folder, s)) continue;
+    if (disabledInChat.has(s.id)) continue;
+    if (names.has(s.name)) continue;
+    names.add(s.name);
+    out.push(s);
+  }
+  return out;
 }
 
 export type Theme = "light" | "dark";
@@ -719,6 +970,19 @@ export interface AppSettings {
   /** MCP servers attached to the agent (HTTP local/remote + stdio). */
   mcpServers: McpServerConfig[];
   /**
+   * Per-folder MCP overrides, keyed by canonical cwd: which servers a folder
+   * switches on or off (a globally disabled one included), plus servers that
+   * exist only in that folder. Chats opened in the folder additionally apply
+   * their own `mcpDisabledIds`.
+   */
+  mcpFolderConfigs: Record<string, McpFolderConfig>;
+  /**
+   * Folder MCP files read for every chat, relative to the chat's own cwd
+   * (`DEFAULT_MCP_PROJECT_FILES` unless changed). Servers found there attach
+   * like app-configured ones; an empty list ignores folder files entirely.
+   */
+  mcpProjectFiles: string[];
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent.
@@ -791,6 +1055,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
   mcpServers: [],
+  mcpFolderConfigs: {},
+  mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
   composerDrafts: {},
 };
 

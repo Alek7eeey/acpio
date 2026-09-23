@@ -56,6 +56,38 @@ name (`npx`, `mcp-gitea`) is resolved to its full path before the session starts
 console logs `stdio "<name>": <command> -> <path>`. If it cannot be resolved, put the binary's
 full path in Settings → MCP.
 
+### Per-folder MCP
+
+**MCP servers** in a folder's context menu in the chat tree overrides the global list for that
+folder: switch individual servers on or off — a server that is off globally included, so the
+global list stays the only place a server is defined — and add servers that exist only for
+chats opened there. A globally off server is still listed in the folder dialog (marked *off
+globally*) and can be switched on for that one folder. Chats resolve their list as
+*app-configured servers with the folder's switches applied + folder-only + servers from the
+folder's MCP files − chat-disabled*, so the per-chat picker (the MCP chip in the composer)
+still applies on top. Only the live chats whose effective list actually changed are restarted.
+Deleting a folder deletes its override with it.
+
+### Folder MCP files
+
+Chats in a folder also pick up the MCP servers that folder already declares for other tools:
+**Settings → MCP → Folder MCP files** lists the files read from each chat's own folder,
+relative to it — by default `.omp/mcp.json`, `.cursor/mcp.json` and `.agents/mcp.json`, one
+path per line. The first file in the list that declares a name owns it, and a name already
+used by a server configured in the app keeps the app's configuration — whether that server is
+switched on or off globally. `${VAR}` and
+`${VAR:-default}` placeholders in `command`, `args`, `env`, `url` and `headers` are expanded
+from the server's environment before the session starts (unresolved ones stay literal). An
+`sse` URL is sent as HTTP, and an entry with neither `command` nor `url`, a file that is not
+valid JSON, or a missing `mcpServers` object shows up as a warning in the folder's **MCP
+servers** dialog instead of breaking the chat. Discovered servers appear there under **From
+folder files** and can be switched on or off for that folder (and per chat), exactly like
+app-configured ones; clearing the path list ignores folder files entirely. Server-side
+executables still need an absolute `command` — a bare `npx` is resolved the same way as for
+app-configured stdio servers. Editing a folder file applies the next time the folder's chats
+start their agent (a model/MCP settings change, a server restart, or **Settings → Agents →
+Reset agents**), since MCP is only handed to the agent at `session/new|resume|load`.
+
 ### Resume agent context
 
 **Settings → Resume agent context** controls whether reopening a chat or restarting after

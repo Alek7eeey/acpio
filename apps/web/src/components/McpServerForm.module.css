@@ -1,0 +1,127 @@
+.form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font: inherit;
+  font-size: var(--settings-control-size);
+  font-weight: var(--settings-control-weight);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--settings-focus-ring);
+}
+
+.tlsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--settings-control-size);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.tlsRow input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.tlsHint {
+  color: var(--text-secondary);
+  font-size: var(--settings-hint-size);
+}
+
+/* Inline note under the stdio command field: bare names need the agent's PATH. */
+.fieldHint {
+  margin: -4px 0 0;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.jsonBlock {
+  display: grid;
+  gap: 6px;
+}
+
+.jsonInput {
+  width: 100%;
+  min-height: 8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: 0.78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 10px 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.jsonLabel {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.cancelBtn {
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cancelBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.cancelBtn:disabled {
+  opacity: 0.6;
+}
+
+.saveBtn {
+  border: none;
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.saveBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

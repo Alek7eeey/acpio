@@ -22,6 +22,7 @@ import {
   CreateSessionFolderPicker,
 } from "./CreateSessionFolderPicker";
 import { ExportDialog } from "./ExportDialog";
+import { McpFolderDialog } from "./McpFolderDialog";
 import styles from "./AppShell.module.css";
 
 /** Tree section key for chats that live outside any folder. */
@@ -357,6 +358,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     anchorBottom: number;
   } | null>(null);
   const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** Folder whose per-folder MCP override dialog is open (null = closed). */
+  const [mcpFolderCwd, setMcpFolderCwd] = useState<string | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
 
   // Active (non-archived) chats inside the folder whose menu is open — the
@@ -2137,6 +2140,26 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               </MenuIcon>
               {t("chat.archiveAllInFolder")}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const cwd = folderMenu.cwd;
+                setFolderMenu(null);
+                setMcpFolderCwd(cwd);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Zm0 3.5v10M8.5 7 12 10.5 15.5 7M8.5 13 12 16.5 15.5 13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.mcpFolderMenu")}
+            </button>
             <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"
@@ -2201,6 +2224,16 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           }}
         />
       )}
+
+      {mcpFolderCwd &&
+        createPortal(
+          <McpFolderDialog
+            open
+            cwd={mcpFolderCwd}
+            onClose={() => setMcpFolderCwd(null)}
+          />,
+          document.body,
+        )}
 
       {exportDialogId &&
         createPortal(

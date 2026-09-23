@@ -8,6 +8,8 @@
 //                                  and waits for the client's decision
 //   prompt starting with "ELICIT:" → issues elicitation/create (form mode),
 //                                  waits, then echoes the answer back
+//   prompt starting with "MCP-LIST" → replies with the MCP server names the
+//                                  client sent for this session (new/load/resume)
 //   prompt starting with "ELICIT-DIE:" → issues elicitation/create, ends the
 //                                  turn, then exits(1) before any answer
 import readline from "node:readline";
@@ -36,6 +38,8 @@ const CONFIG_OPTIONS = [
 
 let nextSession = 1;
 const sessions = new Set();
+/** sessionId → server names the client passed at new/resume/load. */
+const mcpBySession = new Map();
 const pending = new Map(); // requestId → { resolve }
 
 function write(msg) {
@@ -66,6 +70,12 @@ async function handle(method, params, id) {
     case "session/new": {
       const sessionId = `fake-sess-${nextSession++}`;
       sessions.add(sessionId);
+      if (Array.isArray(params.mcpServers)) {
+        mcpBySession.set(
+          sessionId,
+          params.mcpServers.map((s) => String(s?.name ?? "")),
+        );
+      }
       return {
         sessionId,
         configOptions: structuredClone(CONFIG_OPTIONS),
@@ -75,11 +85,23 @@ async function handle(method, params, id) {
     case "session/resume": {
       const sid = String(params.sessionId ?? "");
       if (!sid.startsWith("fake-sess-")) throw new Error(`ACP session not found: ${sid}`);
+      if (Array.isArray(params.mcpServers)) {
+        mcpBySession.set(
+          sid,
+          params.mcpServers.map((s) => String(s?.name ?? "")),
+        );
+      }
       return { configOptions: structuredClone(CONFIG_OPTIONS) };
     }
     case "session/load": {
       const sid = String(params.sessionId ?? "");
       if (!sid.startsWith("fake-sess-")) throw new Error(`ACP session not found: ${sid}`);
+      if (Array.isArray(params.mcpServers)) {
+        mcpBySession.set(
+          sid,
+          params.mcpServers.map((s) => String(s?.name ?? "")),
+        );
+      }
       // Per ACP: replay stored history via session/update before responding.
       notify("session/update", {
         sessionId: sid,
@@ -155,6 +177,18 @@ async function handle(method, params, id) {
           },
         });
         setTimeout(() => process.exit(1), 150);
+        return { stopReason: "end_turn" };
+      }
+      if (text.startsWith("MCP-LIST")) {
+        const names = mcpBySession.get(String(params.sessionId ?? "")) ?? [];
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "mcp-list",
+            content: { type: "text", text: `mcp=${names.join(",")}` },
+          },
+        });
         return { stopReason: "end_turn" };
       }
       if (text.startsWith("ELICIT:")) {

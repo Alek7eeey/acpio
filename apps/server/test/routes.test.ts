@@ -18,6 +18,7 @@ import {
   sessions as sessionsTable,
   messages as messagesTable,
   messageParts as messagePartsTable,
+  settings as settingsTable,
 } from "../src/db/schema.js";
 import { disposeRuntime, setAgentAvailable } from "../src/acp/sessionManager.js";
 import {
@@ -191,6 +192,145 @@ describe("health & settings", () => {
       gitChanges: { compress: true, metrics: "none" },
       context: { format: "percent" },
     });
+  });
+
+  it("PUT /api/settings stores per-folder MCP switches under a canonical cwd", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        mcpServers: [
+          { id: "global", name: "Global", enabled: true, type: "local", url: "http://127.0.0.1:9" },
+          { id: "off", name: "Off", enabled: false, type: "local", url: "http://127.0.0.1:8" },
+        ],
+        mcpFolderConfigs: {
+          "E:\\proj\\": {
+            overrides: { global: false, off: true },
+            servers: [{ id: "own", name: "Own", enabled: true, type: "stdio", command: "npx" }],
+          },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    // `E:\proj\` and `E:/proj` are the same folder: one canonical key.
+    expect(Object.keys(body.mcpFolderConfigs)).toEqual(["E:/proj"]);
+    // A folder switches a global server off and a globally off one back on.
+    expect(body.mcpFolderConfigs["E:/proj"].overrides).toEqual({ global: false, off: true });
+    expect(body.mcpFolderConfigs["E:/proj"].servers[0]).toMatchObject({
+      id: "own",
+      type: "stdio",
+      command: "npx",
+    });
+  });
+
+  it("drops a folder override that no longer overrides anything", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        mcpFolderConfigs: {
+          "E:/empty": { overrides: {}, servers: [] },
+          "E:/kept": { overrides: { x: false }, servers: [] },
+        },
+      },
+    });
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.mcpFolderConfigs).toEqual({
+      "E:/kept": { overrides: { x: false }, servers: [] },
+    });
+  });
+
+  it("heals a stored folder override saved before the cwd/row rules", async () => {
+    await db.insert(settingsTable).values({
+      key: "app",
+      value: {
+        mcpFolderConfigs: {
+          "E:\\legacy\\": {
+            // A pre-tri-state row stored switched-off ids as a plain list.
+            disabledIds: ["ok", 7],
+            overrides: { on: true, bad: "yes" },
+            servers: [{ nope: true }, { id: "s", name: "S", enabled: true, type: "stdio", command: " npx " }],
+          },
+        },
+      },
+    });
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.mcpFolderConfigs["E:/legacy"].overrides).toEqual({ on: true, ok: false });
+    expect(body.mcpFolderConfigs["E:/legacy"].servers.map((s: { id: string }) => s.id)).toEqual(["s"]);
+  });
+
+  it("heals mcpProjectFiles to relative paths, keeping an empty list empty", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        mcpProjectFiles: [" .cursor\\mcp.json ", "C:/outside/mcp.json", "../escape/mcp.json", ".omp/mcp.json"],
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.mcpProjectFiles).toEqual([".cursor/mcp.json", ".omp/mcp.json"]);
+
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { mcpProjectFiles: [] } });
+    expect((await app.inject({ method: "GET", url: "/api/settings" })).json().mcpProjectFiles).toEqual(
+      [],
+    );
+  });
+
+  it("GET /api/mcp/project reads a folder's own MCP files", async () => {
+    const cwd = await newTempDir("acpio-mcp-route-");
+    await fsp.mkdir(path.join(cwd, ".omp"), { recursive: true });
+    await fsp.mkdir(path.join(cwd, ".cursor"), { recursive: true });
+    await fsp.writeFile(
+      path.join(cwd, ".omp", "mcp.json"),
+      '{"mcpServers":{"fs":{"command":"npx","args":["-y","mcp-fs"]}}}',
+      "utf8",
+    );
+    await fsp.writeFile(path.join(cwd, ".cursor", "mcp.json"), "{oops", "utf8");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/mcp/project?cwd=${encodeURIComponent(cwd)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      folders: Record<string, { servers: unknown[]; warnings: string[] }>;
+    };
+    const key = cwd.replace(/\\/g, "/");
+    expect(body.folders[key]).toEqual({
+      servers: [
+        {
+          id: "file:.omp/mcp.json:fs",
+          name: "fs",
+          enabled: true,
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "mcp-fs"],
+        },
+      ],
+      warnings: [".cursor/mcp.json: invalid JSON"],
+    });
+
+    // Clearing the file list stops folder files contributing entirely.
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { mcpProjectFiles: [] } });
+    const cleared = (
+      await app.inject({ method: "GET", url: `/api/mcp/project?cwd=${encodeURIComponent(cwd)}` })
+    ).json() as { folders: Record<string, unknown> };
+    expect(cleared.folders[key]).toEqual({ servers: [], warnings: [] });
+  });
+
+  it("DELETE /api/folders drops the folder's MCP override with it", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { mcpFolderConfigs: { "E:/gone": { overrides: { x: false }, servers: [] } } },
+    });
+    const del = await app.inject({ method: "DELETE", url: "/api/folders?cwd=E:/gone" });
+    expect(del.statusCode).toBe(200);
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.mcpFolderConfigs).toEqual({});
   });
 
   it("generates a remote access key by default; LAN needs it until explicitly cleared", async () => {
@@ -1071,38 +1211,118 @@ describe("agent status", () => {
   });
 });
 
-describe("durable questions", () => {
-  /** Poll GET /api/sessions/:id until `check` passes. The warm-up/agent side is
-   *  a real child process, so fake timers cannot advance it. */
-  async function waitForDetail(
-    sessionId: string,
-    check: (detail: SessionDetailDto) => boolean,
-    timeoutMs = 8000,
-  ) {
-    const deadline = Date.now() + timeoutMs;
-    let lastSeen = "no detail fetched";
-    while (Date.now() < deadline) {
-      const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
-      if (res.statusCode === 200) {
-        const detail = res.json() as SessionDetailDto;
-        if (check(detail)) return detail;
-        lastSeen = `status=${detail.status} parts=${detail.messages
-          .flatMap((m) => m.parts)
-          .map(
-            (p) =>
-              `${p.type}:${p.payload.pending ? "pending" : "settled"}${
-                typeof p.payload.text === "string" ? `(${p.payload.text.slice(0, 120)})` : ""
-              }`,
-          )
-          .join(",")}`;
-      }
-      const { promise, resolve } = Promise.withResolvers<void>();
-      setTimeout(resolve, 50);
-      await promise;
+/** Poll GET /api/sessions/:id until `check` passes. The warm-up/agent side is
+ *  a real child process, so fake timers cannot advance it. */
+async function waitForDetail(
+  sessionId: string,
+  check: (detail: SessionDetailDto) => boolean,
+  timeoutMs = 8000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen = "no detail fetched";
+  while (Date.now() < deadline) {
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
+    if (res.statusCode === 200) {
+      const detail = res.json() as SessionDetailDto;
+      if (check(detail)) return detail;
+      lastSeen = `status=${detail.status} parts=${detail.messages
+        .flatMap((m) => m.parts)
+        .map(
+          (p) =>
+            `${p.type}:${p.payload.pending ? "pending" : "settled"}${
+              typeof p.payload.text === "string" ? `(${p.payload.text.slice(0, 120)})` : ""
+            }`,
+        )
+        .join(",")}`;
     }
-    throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 50);
+    await promise;
   }
+  throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
+}
 
+function questionPart(detail: SessionDetailDto): MessagePartDto | undefined {
+  for (const message of detail.messages) {
+    const part = message.parts.find((p) => p.type === "question");
+    if (part) return part;
+  }
+  return undefined;
+}
+
+function textParts(detail: SessionDetailDto): string[] {
+  return detail.messages
+    .flatMap((m) => m.parts)
+    .filter((p) => p.type === "text")
+    .map((p) => String(p.payload.text ?? ""));
+}
+
+describe("folder MCP files reach the agent", () => {
+  it("passes a folder's own MCP file server to the chat's agent session", async () => {
+    const cwd = await newTempDir("acpio-mcp-session-");
+    await fsp.mkdir(path.join(cwd, ".omp"), { recursive: true });
+    await fsp.writeFile(
+      path.join(cwd, ".omp", "mcp.json"),
+      '{"mcpServers":{"folder-fs":{"command":"C:/Tools/mcp.exe","args":["--stdio"]}}}',
+      "utf8",
+    );
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "MCP-LIST" },
+    });
+    const detail = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => text.startsWith("mcp=")),
+    );
+    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe("mcp=folder-fs");
+  });
+
+  it("attaches a globally disabled server the chat's folder switched on", async () => {
+    const cwd = await newTempDir("acpio-mcp-folder-on-");
+    const key = cwd.replace(/\\/g, "/");
+    await connectAgent();
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        mcpServers: [
+          { id: "off", name: "folder-on", enabled: false, type: "stdio", command: "C:/Tools/mcp.exe" },
+          { id: "on", name: "folder-off", enabled: true, type: "stdio", command: "C:/Tools/mcp2.exe" },
+        ],
+        mcpFolderConfigs: {
+          [key]: { overrides: { off: true, on: false }, servers: [] },
+        },
+      },
+    });
+
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "MCP-LIST" },
+    });
+    const detail = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => text.startsWith("mcp=")),
+    );
+    // The folder's switch decides, in both directions: the globally off server
+    // attaches, the globally on one does not.
+    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe("mcp=folder-on");
+  });
+});
+
+describe("durable questions", () => {
   /** Inline-question UI answer shape (elicitation accept with one option). */
   const PICK_GREEN = {
     outcome: {
@@ -1110,21 +1330,6 @@ describe("durable questions", () => {
       answers: [{ questionId: "answer", selectedOptionIds: ["green"] }],
     },
   };
-
-  function questionPart(detail: SessionDetailDto): MessagePartDto | undefined {
-    for (const message of detail.messages) {
-      const part = message.parts.find((p) => p.type === "question");
-      if (part) return part;
-    }
-    return undefined;
-  }
-
-  function textParts(detail: SessionDetailDto): string[] {
-    return detail.messages
-      .flatMap((m) => m.parts)
-      .filter((p) => p.type === "text")
-      .map((p) => String(p.payload.text ?? ""));
-  }
 
   it("answers a live elicitation and feeds it back to the agent", async () => {
     await connectAgent();

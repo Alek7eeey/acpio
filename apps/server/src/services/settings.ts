@@ -2,12 +2,15 @@ import { eq } from "drizzle-orm";
 import {
   AppSettings,
   DEFAULT_SETTINGS,
+  McpServerConfig,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
   normalizeChatTreeRecentLimit,
   normalizeCustomAgents,
+  normalizeMcpCwd,
+  normalizeMcpProjectFiles,
   readSettingsSchema,
 } from "@acpio/shared";
 import { db, REPO_ROOT } from "../db/client.js";
@@ -29,6 +32,66 @@ function isKnownProvider(provider: unknown): provider is string {
  *  An empty result is valid (the user may disable every item). */
 function filterValid<T extends string>(values: unknown[], valid: T[]): T[] {
   return values.filter((v): v is T => typeof v === "string" && valid.includes(v as T));
+}
+
+/** Drop malformed rows and upgrade pre-stdio rows stored as `local` + command. */
+function healMcpServerList(raw: unknown): McpServerConfig[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (s) =>
+        s &&
+        typeof s === "object" &&
+        typeof s.id === "string" &&
+        typeof s.name === "string" &&
+        (s.type === "local" || s.type === "remote" || s.type === "stdio"),
+    )
+    .map((s) => {
+      // Pre-stdio UI stored local processes as type "local" + command, no URL.
+      if (
+        s.type === "local" &&
+        typeof s.command === "string" &&
+        s.command.trim() &&
+        !(typeof s.url === "string" && s.url.trim())
+      ) {
+        return { ...s, type: "stdio" as const };
+      }
+      return s;
+    });
+}
+
+/** Per-folder switches kept for one folder (a folder has far fewer servers). */
+const MCP_FOLDER_OVERRIDES_MAX = 200;
+
+/**
+ * Folder MCP switches: boolean rows only. Rows saved before the tri-state
+ * switch stored a plain `disabledIds` list — those become explicit `false`
+ * entries, which is exactly what they meant.
+ */
+function healMcpFolderOverrides(cfg: {
+  overrides?: unknown;
+  disabledIds?: unknown;
+}): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  const rawOverrides =
+    cfg.overrides && typeof cfg.overrides === "object" && !Array.isArray(cfg.overrides)
+      ? Object.entries(cfg.overrides as Record<string, unknown>)
+      : [];
+  const rawIds = Array.isArray(cfg.disabledIds) ? cfg.disabledIds : [];
+  for (const [rawId, rawOn] of rawOverrides) {
+    const id = rawId.trim();
+    if (!id || typeof rawOn !== "boolean") continue;
+    if (Object.keys(out).length >= MCP_FOLDER_OVERRIDES_MAX) break;
+    out[id] = rawOn;
+  }
+  for (const rawId of rawIds) {
+    const id = typeof rawId === "string" ? rawId.trim() : "";
+    if (!id) continue;
+    if (Object.keys(out).length >= MCP_FOLDER_OVERRIDES_MAX) break;
+    // A legacy disabled id never overrides an explicit switch already read.
+    out[id] ??= false;
+  }
+  return out;
 }
 
 function mergeSettings(raw: unknown): AppSettings {
@@ -252,31 +315,32 @@ function mergeSettings(raw: unknown): AppSettings {
   ] as const) {
     delete (merged as Record<string, unknown>)[stale];
   }
-  if (!Array.isArray(merged.mcpServers)) {
-    merged.mcpServers = [];
-  } else {
-    merged.mcpServers = merged.mcpServers
-      .filter(
-        (s) =>
-          s &&
-          typeof s === "object" &&
-          typeof s.id === "string" &&
-          typeof s.name === "string" &&
-          (s.type === "local" || s.type === "remote" || s.type === "stdio"),
-      )
-      .map((s) => {
-        // Pre-stdio UI stored local processes as type "local" + command, no URL.
-        if (
-          s.type === "local" &&
-          typeof s.command === "string" &&
-          s.command.trim() &&
-          !(typeof s.url === "string" && s.url.trim())
-        ) {
-          return { ...s, type: "stdio" as const };
-        }
-        return s;
-      });
+  merged.mcpServers = healMcpServerList(merged.mcpServers);
+  // Per-folder switches: canonical cwd keys, validated servers, boolean rows.
+  // A folder with nothing left to say is dropped so the map stays sparse and a
+  // later global change is inherited instead of being blocked by a stale entry.
+  {
+    const rawFolders = merged.mcpFolderConfigs;
+    const folders: AppSettings["mcpFolderConfigs"] = {};
+    if (rawFolders && typeof rawFolders === "object" && !Array.isArray(rawFolders)) {
+      for (const [rawCwd, value] of Object.entries(rawFolders as Record<string, unknown>)) {
+        const key = normalizeMcpCwd(rawCwd);
+        if (!key) continue;
+        const cfg = (value ?? {}) as {
+          overrides?: unknown;
+          disabledIds?: unknown;
+          servers?: unknown;
+        };
+        const servers = healMcpServerList(cfg.servers);
+        const overrides = healMcpFolderOverrides(cfg);
+        if (!servers.length && !Object.keys(overrides).length) continue;
+        folders[key] = { overrides, servers };
+      }
+    }
+    merged.mcpFolderConfigs = folders;
   }
+  // Folder MCP files: relative paths inside the chat's own cwd only.
+  merged.mcpProjectFiles = normalizeMcpProjectFiles(merged.mcpProjectFiles);
   // Composer drafts persist so typed text survives a reload. Heal the map:
   // only string keys with non-empty trimmed string values survive, and the
   // whole blob is capped so it cannot grow without bound.
@@ -339,6 +403,17 @@ export async function getSettings(): Promise<AppSettings> {
   }
   syncDeepLoggingFromSettings(merged);
   return merged;
+}
+
+/** Drop a folder's MCP override (the folder and its chats are gone). */
+export async function forgetMcpFolderConfig(cwd: string): Promise<void> {
+  const key = normalizeMcpCwd(cwd);
+  if (!key) return;
+  const current = await getSettings();
+  if (!current.mcpFolderConfigs[key]) return;
+  const next = { ...current.mcpFolderConfigs };
+  delete next[key];
+  await updateSettings({ mcpFolderConfigs: next });
 }
 
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {

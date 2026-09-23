@@ -28,7 +28,6 @@ import {
   type AppSettings,
   type HarnessAdapter,
   type HarnessSessionDto,
-  type McpServerConfig,
   type ModelOption,
   type ModelParamDto,
   type SessionDetailDto,
@@ -36,7 +35,7 @@ import {
   type SlashCommandDto,
   type SubagentCardUpdate,
   titleFromUserText,
-  isMcpServerAttached,
+  effectiveMcpServers,
   mcpServerEndpoint,
   mcpServersFingerprint,
   permissionOptionsLookLikeQuestion,
@@ -49,6 +48,7 @@ import {
 } from "@acpio/shared";
 import { defaultSessionTitle, errorMessage, t } from "@acpio/i18n";
 import { getSettings, updateSettings } from "../services/settings.js";
+import { discoverProjectMcp } from "../services/projectMcp.js";
 import { appendDeepLog } from "../services/deepLogging.js";
 import {
   appendPart,
@@ -615,6 +615,13 @@ class SessionRuntime {
 
 const runtimes = new Map<string, SessionRuntime>();
 
+/**
+ * MCP list fingerprint currently applied to each live agent session. Needed to
+ * restart only the chats whose effective list actually changed — a folder edit
+ * must not respawn agents in unrelated folders.
+ */
+const appliedMcpFingerprints = new Map<string, string>();
+
 function getRuntime(sessionId: string) {
   let rt = runtimes.get(sessionId);
   if (!rt) {
@@ -669,20 +676,6 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
 }
 
 export type RestoreMode = "new" | "resume" | "load";
-
-/**
- * MCP servers a chat's agent session actually gets: globally enabled ones
- * minus the ids this chat disabled. Passed verbatim to session/new|resume|load.
- */
-export function effectiveMcpServers(
-  settings: AppSettings,
-  disabledIds: string[] | null | undefined,
-): McpServerConfig[] {
-  const disabled = new Set(disabledIds ?? []);
-  return (settings.mcpServers ?? []).filter(
-    (s) => isMcpServerAttached(s) && !disabled.has(s.id),
-  );
-}
 
 /**
  * Decide how a fresh ACP spawn should attach to the agent:
@@ -785,8 +778,13 @@ export async function ensureAcp(
     detail,
     boot?.forceRestore,
   );
-  // This chat's MCP list: globally enabled minus ids disabled for this chat.
-  const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds);
+  // This chat's MCP list: global (minus folder-disabled ids, plus the
+  // folder's own servers and the servers its MCP files declare) minus ids
+  // disabled for this chat.
+  const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds, opts.cwd, [
+    ...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers,
+  ]);
+  appliedMcpFingerprints.set(sessionId, mcpServersFingerprint(mcpServers));
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
     const adapter = getAdapter(opts.provider);
@@ -3211,18 +3209,6 @@ function resetAcpClient(rt: SessionRuntime) {
   rt.availableCommands = [];
 }
 
-/** Last MCP server list we already applied to live sessions (name-keyed). */
-let lastMcpSnapshot = "";
-
-/**
- * Restart live ACP sessions so a changed MCP server list actually takes
- * effect. The OMP/Cursor protocol only accepts mcpServers at session/new —
- * there is no runtime update — so a running agent keeps its old MCP tools
- * until its process is re-created. Sessions mid-turn are restarted when they
- * idle (their current turn finishes against the old agent, which is safer
- * than killing a running prompt). Idempotent: no-op unless the effective
- * list changed.
- */
 /** Model + params the runtime currently runs with — preserved across restarts. */
 function liveModelSnapshot(
   rt: SessionRuntime,
@@ -3278,15 +3264,26 @@ export async function restartSessionMcp(sessionId: string): Promise<boolean> {
  */
 export async function restartSessionsForMcpChange(): Promise<void> {
   const settings = await getSettings();
-  const desired = mcpServersFingerprint(settings.mcpServers);
-  if (desired === lastMcpSnapshot) return;
-  lastMcpSnapshot = desired;
-
+  const rows = new Map((await listSessions()).map((s) => [s.id, s]));
   let restarted = 0;
-  for (const sessionId of runtimes.keys()) {
+  for (const sessionId of [...runtimes.keys()]) {
+    const rt = runtimes.get(sessionId);
+    if (!rt?.client && !rt?.clientReady) continue;
+    const row = rows.get(sessionId);
+    if (!row) continue;
+    // Only sessions whose OWN effective list changed (a folder edit must not
+    // respawn agents opened in other folders).
+    const desired = mcpServersFingerprint(
+      effectiveMcpServers(settings, row.mcpDisabledIds, row.cwd, [
+        ...(await discoverProjectMcp(row.cwd, settings.mcpProjectFiles)).servers,
+      ]),
+    );
+    if (appliedMcpFingerprints.get(sessionId) === desired) continue;
     if (await restartSessionMcp(sessionId)) restarted += 1;
   }
-  console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
+  if (restarted) {
+    console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
+  }
 }
 
 const rememberedSlashCommands = new Map<
@@ -4099,4 +4096,5 @@ export function disposeRuntime(sessionId: string) {
     rt.client?.dispose();
   }
   runtimes.delete(sessionId);
+  appliedMcpFingerprints.delete(sessionId);
 }

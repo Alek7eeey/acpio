@@ -37,7 +37,7 @@ import {
   type SessionDetailDto,
   type SlashCommandDto,
   isShellSession,
-  isMcpServerAttached,
+  effectiveMcpServers,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
@@ -95,7 +95,7 @@ import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
-import { isImageFile } from "../lib/pathSegments";
+import { isImageFile, normalizeCwd } from "../lib/pathSegments";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
   prefersHotkeyHints,
@@ -3841,12 +3841,28 @@ function ChatThread() {
   // otherwise the button vanishes for seconds while Cursor is still thinking.
   const showStop = turnBusy;
 
-  // MCP servers this chat's agent session runs with: globally enabled minus
-  // the ids this chat disabled in its MCP dialog.
-  const enabledMcp = (settings.mcpServers ?? []).filter(isMcpServerAttached);
-  const chatMcp = activeSession
-    ? enabledMcp.filter((s) => !(activeSession.mcpDisabledIds ?? []).includes(s.id))
+  // MCP servers this chat's agent session runs with: the folder's list
+  // (globals minus folder-disabled, plus folder-specific) plus the servers its
+  // own MCP files declare, minus the ids this chat disabled in its dialog.
+  const projectMcp = useAppStore((s) => s.projectMcp);
+  const refreshProjectMcp = useAppStore((s) => s.refreshProjectMcp);
+  const projectServers = activeSession
+    ? (projectMcp[normalizeCwd(activeSession.cwd)]?.servers ?? [])
     : [];
+  const chatMcp = activeSession
+    ? effectiveMcpServers(
+        settings,
+        activeSession.mcpDisabledIds,
+        activeSession.cwd,
+        projectServers,
+      )
+    : [];
+  // Folder MCP files can change on disk at any time; rescan for the folder the
+  // open chat runs in, so the chip and both dialogs reflect the current file.
+  const activeCwd = activeSession?.cwd ?? null;
+  useEffect(() => {
+    if (activeCwd) void refreshProjectMcp(activeCwd);
+  }, [activeCwd, refreshProjectMcp]);
   const promptEpoch = useAppStore((s) => s.promptEpoch);
   const cancelledPromptEpoch = useAppStore((s) => s.cancelledPromptEpoch);
 
@@ -5777,7 +5793,12 @@ function ChatThread() {
             autoExpandSteps={autoExpandSteps}
             onToggleAutoExpandSteps={() => syncAutoExpandSteps(!autoExpandSteps)}
             chatMcp={chatMcp}
-            enabledMcpCount={enabledMcp.length}
+            availableMcpCount={
+              activeSession
+                ? effectiveMcpServers(settings, undefined, activeSession.cwd, projectServers)
+                    .length
+                : 0
+            }
             contextDisplay={contextDisplay}
             consoleOpen={activeRightPanel === "console"}
             onToggleConsole={() => toggleConsolePanel()}
@@ -6253,7 +6274,9 @@ function ChatThread() {
       <McpChatDialog
         open={mcpDialogOpen}
         sessionId={activeSession?.id ?? null}
+        cwd={activeSession?.cwd}
         mcpDisabledIds={activeSession?.mcpDisabledIds}
+        projectServers={projectServers}
         onClose={() => setMcpDialogOpen(false)}
       />
       {paneFocused ? (

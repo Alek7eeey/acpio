@@ -25,9 +25,7 @@ import {
   type McpServerConfig,
   type ModelOption,
   type ModelParamDto,
-  parseMcpRemoteConfig,
-  isMcpServerConfigured,
-  mcpCommandNeedsAbsolute,
+  DEFAULT_MCP_PROJECT_FILES,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -49,25 +47,9 @@ import { applyAppearance } from "../lib/appearance";
 import { DARK_SCHEMES, LIGHT_SCHEMES, SYSTEM_SWATCH } from "../lib/themeSchemes";
 import { showToast } from "../lib/toast";
 import { truncateSessionTitle } from "../lib/sessionTitle";
-import { mcpTypeMessageKey } from "../lib/mcpUi";
+import { mcpEnvConfigDraft, mcpRemoteConfigDraft, mcpTypeMessageKey, normalizeMcpDraft } from "../lib/mcpUi";
+import { McpServerForm } from "../components/McpServerForm";
 import styles from "./SettingsPage.module.css";
-
-function mcpRemoteConfigDraft(server: McpServerConfig): string {
-  if (server.remoteConfig?.trim()) return server.remoteConfig;
-  const merged = parseMcpRemoteConfig(server);
-  return Object.keys(merged).length ? JSON.stringify(merged, null, 2) : "";
-}
-
-function mcpEnvConfigDraft(server: McpServerConfig): string {
-  if (server.envConfig?.trim()) return server.envConfig;
-  if (!server.env?.length) return "";
-  const obj: Record<string, string> = {};
-  for (const row of server.env) {
-    const name = row.name?.trim();
-    if (name) obj[name] = row.value ?? "";
-  }
-  return Object.keys(obj).length ? JSON.stringify(obj, null, 2) : "";
-}
 
 /** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
 type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
@@ -905,18 +887,21 @@ export function SettingsPage() {
   /** Blocks catalog ingest from clobbering an in-flight default-model save. */
   const pendingModelPickRef = useRef<Partial<Record<AgentProvider, string>>>({});
 
-  // The form picks the store payload up exactly once: the store holds
-  // DEFAULT_SETTINGS until bootstrap resolves, while a deep link paints this
-  // page immediately. Never re-sync afterwards — echoing later snapshots
-  // reverts in-progress edits after saveSettings (the bug 2fb5d4c fixed), and
-  // against a server that predates a field it erased each keystroke of it.
-  const bootSettings = useRef(settings);
-  const formHydrated = useRef(false);
+  // The form picks the store payload up exactly once — when bootstrap resolves.
+  // The store holds DEFAULT_SETTINGS until then and a deep link paints this page
+  // before that, so the arrival is the one moment the payload is news. Never
+  // re-sync afterwards: `saveSettings` re-sets `settings` twice around every
+  // save (an optimistic chatSplit, then the PUT response) and the shell's
+  // theme/locale toggles do too — echoing those snapshots reverted the edits in
+  // progress, which is what dropped the MCP switches on the first save of a page
+  // mounted after bootstrap (bug 2fb5d4c was the same class of revert).
+  const bootstrapped = useAppStore((s) => s.bootstrapped);
+  const formHydrated = useRef(bootstrapped);
   useEffect(() => {
-    if (formHydrated.current || settings === bootSettings.current) return;
+    if (formHydrated.current || !bootstrapped) return;
     formHydrated.current = true;
     setForm(settings);
-  }, [settings]);
+  }, [bootstrapped, settings]);
 
   useEffect(() => {
     if (leaf !== "diagnostics") return;
@@ -1069,46 +1054,12 @@ export function SettingsPage() {
 
   const saveMcp = () => {
     if (!mcpDraft) return;
-    const name = mcpDraft.name.trim();
-    const id = mcpDraft.id || `mcp-${Date.now().toString(36)}`;
-    const type = mcpDraft.type === "stdio" ? "stdio" : mcpDraft.type === "remote" ? "remote" : "local";
-    let next: McpServerConfig;
-    if (type === "stdio") {
-      const command = (mcpDraft.command ?? "").trim();
-      if (!name || !command) return;
-      const args = (mcpDraft.args ?? []).map((a) => a.trim()).filter(Boolean);
-      next = {
-        id,
-        name,
-        enabled: mcpDraft.enabled,
-        type: "stdio",
-        command,
-        args,
-        envConfig: mcpDraft.envConfig?.trim() || undefined,
-        env: undefined,
-      };
-    } else {
-      const url = (mcpDraft.url ?? "").trim();
-      if (!name || !url) return;
-      next = {
-        ...mcpDraft,
-        id,
-        name,
-        type,
-        url,
-        token: undefined,
-        headers: undefined,
-        remoteConfig: mcpDraft.remoteConfig?.trim() || undefined,
-        command: undefined,
-        args: undefined,
-        env: undefined,
-        envConfig: undefined,
-      };
-    }
+    const next = normalizeMcpDraft(mcpDraft);
+    if (!next) return;
     patch(
       "mcpServers",
-      mcpServers.some((s) => s.id === id)
-        ? mcpServers.map((s) => (s.id === id ? next : s))
+      mcpServers.some((s) => s.id === next.id)
+        ? mcpServers.map((s) => (s.id === next.id ? next : s))
         : [...mcpServers, next],
     );
     setMcpDraft(null);
@@ -2685,115 +2636,54 @@ export function SettingsPage() {
             </button>
 
             {mcpDraft && (
-              <div className={styles.mcpForm}>
-                <input
-                  className={styles.mcpInput}
-                  placeholder={t("settings.mcpName")}
-                  value={mcpDraft.name}
-                  onChange={(e) => setMcpDraft({ ...mcpDraft, name: e.target.value })}
-                />
-                <OptionPicker
-                  variant="block"
-                  placement="down"
-                  menuTitle={t("settings.mcpType")}
-                  value={mcpDraft.type}
-                  onChange={(v) =>
-                    setMcpDraft({
-                      ...mcpDraft,
-                      type: v === "stdio" ? "stdio" : v === "remote" ? "remote" : "local",
-                    })
-                  }
-                  options={[
-                    { value: "local", label: t("settings.mcpLocal") },
-                    { value: "remote", label: t("settings.mcpRemote") },
-                    { value: "stdio", label: t("settings.mcpStdio") },
-                  ]}
-                />
-                {mcpDraft.type === "stdio" ? (
-                  <>
-                    <input
-                      className={styles.mcpInput}
-                      placeholder={t("settings.mcpCommand")}
-                      value={mcpDraft.command ?? ""}
-                      onChange={(e) => setMcpDraft({ ...mcpDraft, command: e.target.value })}
-                    />
-                    {mcpCommandNeedsAbsolute(mcpDraft) ? (
-                      <span className={styles.mcpFieldHint}>{t("settings.mcpCommandHint")}</span>
-                    ) : null}
-                    <input
-                      className={styles.mcpInput}
-                      placeholder={t("settings.mcpArgs")}
-                      value={(mcpDraft.args ?? []).join(" ")}
-                      onChange={(e) =>
-                        setMcpDraft({
-                          ...mcpDraft,
-                          args: e.target.value.split(/\s+/).filter(Boolean),
-                        })
-                      }
-                    />
-                    <label className={styles.mcpJsonBlock}>
-                      <span className={styles.mcpHeadersLabel}>{t("settings.mcpEnv")}</span>
-                      <textarea
-                        className={styles.mcpJsonInput}
-                        rows={6}
-                        spellCheck={false}
-                        placeholder={'{\n  "API_KEY": ""\n}'}
-                        value={mcpDraft.envConfig ?? ""}
-                        onChange={(e) => setMcpDraft({ ...mcpDraft, envConfig: e.target.value })}
-                      />
-                    </label>
-                  </>
-                ) : (
-                  <>
-                    <input
-                      className={styles.mcpInput}
-                      placeholder={t("settings.mcpUrl")}
-                      value={mcpDraft.url ?? ""}
-                      onChange={(e) => setMcpDraft({ ...mcpDraft, url: e.target.value })}
-                    />
-                    {mcpDraft.type !== "remote" && (
-                      <label className={styles.mcpTlsRow}>
-                        <input
-                          type="checkbox"
-                          checked={mcpDraft.insecureTls === true}
-                          onChange={(e) => setMcpDraft({ ...mcpDraft, insecureTls: e.target.checked })}
-                        />
-                        <span>{t("settings.mcpInsecureTls")}</span>
-                        <span className={styles.mcpTlsHint}>{t("settings.mcpInsecureTlsHint")}</span>
-                      </label>
-                    )}
-                    <label className={styles.mcpJsonBlock}>
-                      <span className={styles.mcpHeadersLabel}>{t("settings.mcpRemoteConfig")}</span>
-                      <textarea
-                        className={styles.mcpJsonInput}
-                        rows={8}
-                        spellCheck={false}
-                        placeholder={'{\n  "headers": {\n    "Authorization": "Bearer ..."\n  }\n}'}
-                        value={mcpDraft.remoteConfig ?? ""}
-                        onChange={(e) => setMcpDraft({ ...mcpDraft, remoteConfig: e.target.value })}
-                      />
-                    </label>
-                  </>
-                )}
-                <div className={styles.mcpFormActions}>
-                  <button
-                    type="button"
-                    className={styles.secondaryBtn}
-                    onClick={() => setMcpDraft(null)}
-                  >
-                    {t("common.cancel")}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.primaryBtn}
-                    disabled={!mcpDraft.name.trim() || !isMcpServerConfigured(mcpDraft)}
-                    onClick={saveMcp}
-                  >
-                    {t("common.save")}
-                  </button>
-                </div>
-              </div>
+              <McpServerForm
+                draft={mcpDraft}
+                onChange={setMcpDraft}
+                onSave={saveMcp}
+                onCancel={() => setMcpDraft(null)}
+              />
             )}
+
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.mcpFolderFilesTitle")}
+                hint={t("settings.mcpFolderFilesHint")}
+                terms={[
+                  t("settings.mcpFolderFilesTitle"),
+                  t("settings.mcpFolderFilesHint"),
+                  ".omp/mcp.json",
+                  ".cursor/mcp.json",
+                  ".agents/mcp.json",
+                  "mcp.json",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={4}
+                  spellCheck={false}
+                  value={(form.mcpProjectFiles ?? []).join("\n")}
+                  onChange={(e) =>
+                    patch(
+                      "mcpProjectFiles",
+                      e.target.value
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  aria-label={t("settings.mcpFolderFilesTitle")}
+                  placeholder={DEFAULT_MCP_PROJECT_FILES.join("\n")}
+                />
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("mcpProjectFiles", [...DEFAULT_MCP_PROJECT_FILES])}
+                >
+                  {t("settings.mcpFolderFilesReset")}
+                </button>
+              </SettingRow>
+            </SettingTable>
           </>
         )}
 

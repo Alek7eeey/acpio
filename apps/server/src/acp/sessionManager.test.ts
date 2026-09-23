@@ -11,7 +11,6 @@ import {
   normalizePlanPartPayload,
   paramsFromModelWire,
   parseRpcId,
-  effectiveMcpServers,
   pickRestoreMode,
   requestIdFor,
   toModelParams,
@@ -447,46 +446,4 @@ describe("toModelParams", () => {
   });
 });
 
-describe("effectiveMcpServers", () => {
-  const mcp = (id: string, enabled = true) => ({
-    id,
-    name: id,
-    enabled,
-    type: "local" as const,
-    url: `http://localhost/${id}`,
-  });
-  const settings = {
-    mcpServers: [mcp("a"), mcp("b"), mcp("c", false)],
-  } as never; // narrow: effectiveMcpServers only reads mcpServers
 
-  it.each([
-    ["no disabled ids → all enabled servers", undefined, ["a", "b"]],
-    ["empty disabled list", [], ["a", "b"]],
-    ["one disabled", ["a"], ["b"]],
-    ["all disabled", ["a", "b"], []],
-    ["unknown ids ignored", ["nope"], ["a", "b"]],
-    ["disabled applies to disabled server too (no-op)", ["c"], ["a", "b"]],
-  ] as const)("%s", (_name, disabledIds, expected) => {
-    const result = effectiveMcpServers(settings, disabledIds);
-    expect(result.map((s) => s.id)).toEqual(expected);
-  });
-
-  it("filters by enabled and url regardless of disabled list", () => {
-    const withEmptyUrl = { ...settings, mcpServers: [{ ...mcp("x"), url: "  " }] };
-    expect(effectiveMcpServers(withEmptyUrl, [])).toEqual([]);
-  });
-
-  it("includes enabled stdio servers that have a command", () => {
-    const stdio = {
-      id: "fs",
-      name: "fs",
-      enabled: true,
-      type: "stdio" as const,
-      command: "npx",
-      args: ["-y", "mcp"],
-    };
-    const mixed = { mcpServers: [mcp("a"), stdio, { ...stdio, id: "off", enabled: false }] };
-    expect(effectiveMcpServers(mixed as never, [])).toEqual([mcp("a"), stdio]);
-    expect(effectiveMcpServers(mixed as never, ["fs"]).map((s) => s.id)).toEqual(["a"]);
-  });
-});

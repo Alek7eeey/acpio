@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { isMcpServerAttached, mcpServerEndpoint } from "@acpio/shared";
+import { effectiveMcpServers, mcpServerEndpoint, type McpServerConfig } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { settingsPath } from "../lib/settingsNav";
@@ -10,19 +10,27 @@ import modal from "./Modal.module.css";
 import styles from "./McpChatDialog.module.css";
 
 /**
- * Per-chat MCP picker: which globally-enabled MCP servers attach to THIS
- * chat's agent. Toggling persists `sessions.mcpDisabledIds` and restarts the
- * chat's agent (resume keeps history; the new list is passed to the session).
+ * Per-chat MCP picker: which MCP servers attach to THIS chat's agent. The
+ * candidates are what the chat's folder allows (global servers minus the ones
+ * the folder switched off, plus the folder's own servers and the servers its
+ * MCP files declare, minus ids already disabled here). Toggling persists
+ * `sessions.mcpDisabledIds` and restarts the chat's agent (resume keeps
+ * history; the new list is passed to the session).
  */
 export function McpChatDialog({
   open,
   sessionId,
+  cwd,
   mcpDisabledIds,
+  projectServers,
   onClose,
 }: {
   open: boolean;
   sessionId: string | null;
+  cwd: string | null | undefined;
   mcpDisabledIds: string[] | undefined;
+  /** Servers the chat's folder declares in its own MCP files. */
+  projectServers: McpServerConfig[];
   onClose: () => void;
 }) {
   const t = useT();
@@ -32,7 +40,7 @@ export function McpChatDialog({
 
   if (!open || !sessionId) return null;
 
-  const servers = (settings.mcpServers ?? []).filter(isMcpServerAttached);
+  const servers = effectiveMcpServers(settings, undefined, cwd, projectServers);
   const disabled = new Set(mcpDisabledIds ?? []);
 
   const toggle = async (id: string) => {

@@ -6,8 +6,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
-import { getSettings, updateSettings } from "./services/settings.js";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, normalizeMcpCwd, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
   deleteSession,
@@ -57,6 +57,7 @@ import {
 } from "./services/attachmentUpload.js";
 import { listFolders, rememberFolders, deleteFolder, reorderFolders } from "./services/folders.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
+import { discoverProjectMcp } from "./services/projectMcp.js";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -122,6 +123,36 @@ const IMAGE_MIME: Record<string, string> = {
   ico: "image/x-icon",
   avif: "image/avif",
 };
+
+const mcpServerSchema = z.object({
+  id: z.string().min(1).max(64),
+  name: z.string().min(1).max(80),
+  enabled: z.boolean(),
+  type: z.enum(["local", "remote", "stdio"]),
+  command: z.string().max(300).optional(),
+  args: z.array(z.string().max(300)).optional(),
+  env: z
+    .array(
+      z.object({
+        name: z.string().max(80),
+        value: z.string().max(2000),
+      }),
+    )
+    .optional(),
+  envConfig: z.string().max(20_000).optional(),
+  url: z.string().max(500).optional(),
+  token: z.string().max(500).optional(),
+  insecureTls: z.boolean().optional(),
+  remoteConfig: z.string().max(20_000).optional(),
+  headers: z
+    .array(
+      z.object({
+        name: z.string().max(80),
+        value: z.string().max(500),
+      }),
+    )
+    .optional(),
+});
 
 const settingsSchema = z.object({
   theme: z.enum(["light", "dark"]).optional(),
@@ -206,39 +237,22 @@ const settingsSchema = z.object({
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
   composerDrafts: z.record(z.string().max(20_000)).optional(),
-  mcpServers: z
-    .array(
+  mcpServers: z.array(mcpServerSchema).max(100).optional(),
+  mcpFolderConfigs: z
+    .record(
+      z.string().max(4096),
       z.object({
-        id: z.string().min(1).max(64),
-        name: z.string().min(1).max(80),
-        enabled: z.boolean(),
-        type: z.enum(["local", "remote", "stdio"]),
-        command: z.string().max(300).optional(),
-        args: z.array(z.string().max(300)).optional(),
-        env: z
-          .array(
-            z.object({
-              name: z.string().max(80),
-              value: z.string().max(2000),
-            }),
-          )
-          .optional(),
-        envConfig: z.string().max(20_000).optional(),
-        url: z.string().max(500).optional(),
-        token: z.string().max(500).optional(),
-        insecureTls: z.boolean().optional(),
-        remoteConfig: z.string().max(20_000).optional(),
-        headers: z
-          .array(
-            z.object({
-              name: z.string().max(80),
-              value: z.string().max(500),
-            }),
-          )
-          .optional(),
+        /**
+         * Explicit per-server switch for this folder: `true` attaches a server
+         * here even when it is off globally, `false` switches it off here.
+         * Absent ids inherit the server's own `enabled` flag.
+         */
+        overrides: z.record(z.string().min(1), z.boolean()),
+        servers: z.array(mcpServerSchema).max(100),
       }),
     )
     .optional(),
+  mcpProjectFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only
@@ -488,6 +502,25 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/mcp/status", async () => getMcpStatus());
 
+  // Servers found in each folder's own MCP files, keyed by canonical cwd. The
+  // web reads this to show what a folder brings in and to size the MCP chip.
+  app.get("/api/mcp/project", async (req) => {
+    const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
+    const settings = await getSettings();
+    const folders = new Set(await listFolders());
+    if (query.cwd?.trim()) folders.add(query.cwd);
+    const entries = await Promise.all(
+      [...folders].map(
+        async (folder) =>
+          [
+            normalizeMcpCwd(folder),
+            await discoverProjectMcp(folder, settings.mcpProjectFiles),
+          ] as const,
+      ),
+    );
+    return { folders: Object.fromEntries(entries.filter(([key]) => key)) };
+  });
+
   app.get("/api/search", async (req) => {
     const q = (req.query as { q?: unknown }).q;
     const rawLimit = Number((req.query as { limit?: unknown }).limit ?? 50);
@@ -505,7 +538,7 @@ export async function registerRoutes(app: FastifyInstance) {
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
     }
-    if (patch.mcpServers) {
+    if (patch.mcpServers || patch.mcpFolderConfigs || patch.mcpProjectFiles) {
       // The agent protocol snapshots MCP servers at session/new — restart live
       // sessions so a disabled/edited server stops being visible in the chat.
       void restartSessionsForMcpChange();
@@ -548,7 +581,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.delete("/api/folders", async (req) => {
     const query = z.object({ cwd: z.string().min(1) }).parse(req.query);
-    const normalized = query.cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalized = normalizeMcpCwd(query.cwd);
     // Tear down live agents of the chats inside before deleting their rows.
     for (const s of await listSessions()) {
       if (s.cwd === normalized) {
@@ -557,6 +590,7 @@ export async function registerRoutes(app: FastifyInstance) {
       }
     }
     await deleteFolder(query.cwd);
+    await forgetMcpFolderConfig(normalized);
     return { ok: true, folders: await listFolders() };
   });
 

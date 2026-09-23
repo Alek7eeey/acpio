@@ -17,11 +17,17 @@ import {
   toolDisplayTitle,
   estimateContextUsage,
   extractSubagentLiveContent,
+  effectiveMcpServers,
+  expandMcpVars,
+  normalizeMcpProjectFiles,
+  parseMcpProjectFile,
   isMcpServerAttached,
+  mcpFolderConfig,
   mcpServerEndpoint,
   mcpServersFingerprint,
   mcpCommandNeedsAbsolute,
   mcpStdioEnv,
+  normalizeMcpCwd,
   toAcpMcpServer,
 } from "@acpio/shared";
 
@@ -488,6 +494,8 @@ describe("DEFAULT_SETTINGS", () => {
     },
     remoteAccessKey: "",
     mcpServers: [],
+    mcpFolderConfigs: {},
+    mcpProjectFiles: [".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"],
     composerDrafts: {},
   };
 
@@ -641,3 +649,308 @@ describe("MCP helpers", () => {
     expect(mcpCommandNeedsAbsolute(http)).toBe(false);
   });
 });
+
+describe("effectiveMcpServers", () => {
+  const mcp = (id: string, enabled = true) => ({
+    id,
+    name: id,
+    enabled,
+    type: "local" as const,
+    url: `http://localhost/${id}`,
+  });
+  const folderServer = { ...mcp("own"), name: "own" };
+  const base = {
+    ...DEFAULT_SETTINGS,
+    mcpServers: [mcp("a"), mcp("b"), mcp("c", false)],
+  };
+
+  it.each([
+    ["no disabled ids → all enabled servers", undefined, ["a", "b"]],
+    ["empty disabled list", [], ["a", "b"]],
+    ["one disabled", ["a"], ["b"]],
+    ["all disabled", ["a", "b"], []],
+    ["unknown ids ignored", ["nope"], ["a", "b"]],
+    ["disabled applies to disabled server too (no-op)", ["c"], ["a", "b"]],
+  ] as const)("%s", (_name, disabledIds, expected) => {
+    const result = effectiveMcpServers(base, disabledIds);
+    expect(result.map((s) => s.id)).toEqual(expected);
+  });
+
+  it("filters by enabled and url regardless of disabled list", () => {
+    const withEmptyUrl = { ...base, mcpServers: [{ ...mcp("x"), url: "  " }] };
+    expect(effectiveMcpServers(withEmptyUrl, [])).toEqual([]);
+  });
+
+  it("includes enabled stdio servers that have a command", () => {
+    const stdio = {
+      id: "fs",
+      name: "fs",
+      enabled: true,
+      type: "stdio" as const,
+      command: "npx",
+      args: ["-y", "mcp"],
+    };
+    const mixed = {
+      ...base,
+      mcpServers: [mcp("a"), stdio, { ...stdio, id: "off", enabled: false }],
+    };
+    expect(effectiveMcpServers(mixed, [])).toEqual([mcp("a"), stdio]);
+    expect(effectiveMcpServers(mixed, ["fs"]).map((s) => s.id)).toEqual(["a"]);
+  });
+
+  it("drops servers the folder switched off", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: { a: false }, servers: [] } },
+    };
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(["b"]);
+    // An unrelated folder keeps the global list untouched.
+    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("attaches a server the folder switched on even though it is off globally", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: { c: true }, servers: [] } },
+    };
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+      "c",
+    ]);
+    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    // The chat's own switch still wins over the folder's.
+    expect(effectiveMcpServers(settings, ["c"], "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("matches a folder regardless of slash style and trailing separators", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: { a: false }, servers: [] } },
+    };
+    expect(effectiveMcpServers(settings, undefined, "E:\\proj\\").map((s) => s.id)).toEqual(["b"]);
+  });
+
+  it("appends the folder's own servers after the globals", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: {
+        "E:/proj": { overrides: {}, servers: [folderServer, { ...mcp("off", false) }] },
+      },
+    };
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+      "own",
+    ]);
+  });
+
+  it("drops a folder server that has no usable endpoint", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: {
+        "E:/proj": { overrides: {}, servers: [{ ...folderServer, url: "  " }] },
+      },
+    };
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("lets the chat disable a folder server, same as a global one", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: {}, servers: [folderServer] } },
+    };
+    expect(effectiveMcpServers(settings, ["own"], "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(settings, ["a"], "E:/proj").map((s) => s.id)).toEqual(["b", "own"]);
+  });
+
+  it("resolves a folder config only for a non-empty cwd", () => {
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "": { overrides: { a: false }, servers: [folderServer] } },
+    };
+    expect(mcpFolderConfig(settings, "")).toBeUndefined();
+    expect(mcpFolderConfig(settings, "  ")).toBeUndefined();
+    expect(normalizeMcpCwd("E:\\proj\\")).toBe("E:/proj");
+  });
+
+  it("appends servers from the folder's own MCP files", () => {
+    const fileServer = { ...mcp("file:.omp/mcp.json:fs"), name: "fs" };
+    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer]).map((s) => s.id)).toEqual([
+      "a",
+      "b",
+      "file:.omp/mcp.json:fs",
+    ]);
+    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer, mcp("off", false)]).length).toBe(3);
+  });
+
+  it("keeps an app-configured server when a file reuses its name", () => {
+    const shadow = { ...mcp("file:.cursor/mcp.json:a"), name: "a" };
+    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("reserves the name of a server that is off globally", () => {
+    const shadow = { ...mcp("file:.cursor/mcp.json:c"), name: "c" };
+    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(["a", "b"]);
+  });
+
+  it("lets the folder and the chat switch a file server by id", () => {
+    const fileServer = { ...mcp("file:.omp/mcp.json:fs"), name: "fs" };
+    const settings = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: {}, servers: [] } },
+    };
+    expect(effectiveMcpServers(settings, ["file:.omp/mcp.json:fs"], "E:/proj", [fileServer])).toEqual(
+      effectiveMcpServers(base, [], "E:/proj"),
+    );
+    // Off in the file it came from, but this folder switches it on.
+    const off = { ...fileServer, enabled: false };
+    expect(effectiveMcpServers(base, [], "E:/proj", [off]).map((s) => s.id)).toEqual(["a", "b"]);
+    const onForFolder = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: { [off.id]: true }, servers: [] } },
+    };
+    expect(
+      effectiveMcpServers(onForFolder, [], "E:/proj", [off]).map((s) => s.id),
+    ).toEqual(["a", "b", "file:.omp/mcp.json:fs"]);
+  });
+});
+
+describe("normalizeMcpProjectFiles", () => {
+  it("falls back to the defaults for a missing setting", () => {
+    expect(normalizeMcpProjectFiles(undefined)).toEqual([
+      ".omp/mcp.json",
+      ".cursor/mcp.json",
+      ".agents/mcp.json",
+    ]);
+    expect(normalizeMcpProjectFiles("nope")).toEqual([".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"]);
+  });
+
+  it("keeps an explicitly empty list empty", () => {
+    expect(normalizeMcpProjectFiles([])).toEqual([]);
+  });
+
+  it("trims, slashes and de-duplicates entries", () => {
+    expect(normalizeMcpProjectFiles([" .cursor\\mcp.json ", "./.cursor/mcp.json"])).toEqual([
+      ".cursor/mcp.json",
+    ]);
+    expect(normalizeMcpProjectFiles([".omp//mcp.json"])).toEqual([".omp/mcp.json"]);
+  });
+
+  it("drops absolute paths and paths escaping the folder", () => {
+    expect(normalizeMcpProjectFiles(["C:/other/mcp.json"])).toEqual([]);
+    expect(normalizeMcpProjectFiles(["/etc/mcp.json"])).toEqual([]);
+    expect(normalizeMcpProjectFiles(["../outside/mcp.json"])).toEqual([]);
+    expect(normalizeMcpProjectFiles([".config/../mcp.json"])).toEqual([]);
+    expect(normalizeMcpProjectFiles(["", "   ", 7])).toEqual([]);
+  });
+});
+
+describe("parseMcpProjectFile", () => {
+  it("parses stdio and http entries", () => {
+    const result = parseMcpProjectFile(
+      JSON.stringify({
+        mcpServers: {
+          fs: { command: "npx", args: ["-y", "mcp-fs"], env: { TOKEN: "abc" } },
+          gitea: {
+            url: "https://gitea.example/mcp",
+            headers: { Authorization: "Bearer abc" },
+          },
+        },
+      }),
+      ".omp/mcp.json",
+    );
+    expect(result.warnings).toEqual([]);
+    expect(result.servers).toEqual([
+      {
+        id: "file:.omp/mcp.json:fs",
+        name: "fs",
+        enabled: true,
+        type: "stdio",
+        command: "npx",
+        args: ["-y", "mcp-fs"],
+        env: [{ name: "TOKEN", value: "abc" }],
+      },
+      {
+        id: "file:.omp/mcp.json:gitea",
+        name: "gitea",
+        enabled: true,
+        type: "remote",
+        url: "https://gitea.example/mcp",
+        remoteConfig: JSON.stringify({ headers: { Authorization: "Bearer abc" } }),
+      },
+    ]);
+  });
+
+  it("keeps disabled entries as disabled", () => {
+    const result = parseMcpProjectFile(
+      '{"mcpServers":{"fs":{"command":"npx","enabled":false}}}',
+      "mcp.json",
+    );
+    expect(result.servers[0].enabled).toBe(false);
+  });
+
+  it("expands environment placeholders and leaves unresolved ones literal", () => {
+    const result = parseMcpProjectFile(
+      JSON.stringify({
+        mcpServers: {
+          fs: { command: "${MCP_BIN}", env: { A: "${TOKEN}", B: "${MISSING:-fallback}" } },
+        },
+      }),
+      "mcp.json",
+      { MCP_BIN: "C:/Tools/mcp.exe", TOKEN: "secret" },
+    );
+    expect(result.servers[0].command).toBe("C:/Tools/mcp.exe");
+    expect(result.servers[0].env).toEqual([
+      { name: "A", value: "secret" },
+      { name: "B", value: "fallback" },
+    ]);
+    expect(expandMcpVars("${NOPE}", {})).toBe("${NOPE}");
+    expect(expandMcpVars("${EMPTY}", { EMPTY: "" })).toBe("${EMPTY}");
+  });
+
+  it("warns instead of failing on malformed files and entries", () => {
+    expect(parseMcpProjectFile("{oops", "mcp.json").warnings).toEqual([
+      "mcp.json: invalid JSON",
+    ]);
+    expect(parseMcpProjectFile("[]", "mcp.json").warnings).toEqual([
+      "mcp.json: not a JSON object",
+    ]);
+    expect(parseMcpProjectFile('{"servers":{}}', "mcp.json").warnings).toEqual([
+      'mcp.json: missing "mcpServers" object',
+    ]);
+    const mixed = parseMcpProjectFile(
+      JSON.stringify({
+        mcpServers: {
+          bad: "nope",
+          empty: {},
+          both: { command: "x", url: "https://x" },
+          ok: { command: "x" },
+        },
+      }),
+      "mcp.json",
+    );
+    expect(mixed.warnings).toEqual([
+      'mcp.json: server "bad" is not an object',
+      'mcp.json: server "empty" has neither "command" nor "url"',
+      'mcp.json: server "both" sets both "command" and "url"',
+    ]);
+    expect(mixed.servers.map((s) => s.id)).toEqual(["file:mcp.json:ok"]);
+  });
+
+  it("flags an sse url, which is sent as http", () => {
+    const result = parseMcpProjectFile(
+      '{"mcpServers":{"gh":{"type":"sse","url":"https://x/sse"}}}',
+      "mcp.json",
+    );
+    expect(result.warnings).toEqual(['mcp.json: server "gh": sse is sent as http']);
+    expect(result.servers[0].type).toBe("remote");
+  });
+});
+

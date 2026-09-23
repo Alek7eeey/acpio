@@ -148,7 +148,7 @@ export function ComposerMetaChips({
   autoExpandSteps,
   onToggleAutoExpandSteps,
   chatMcp,
-  enabledMcpCount,
+  availableMcpCount,
   contextDisplay,
   consoleOpen,
   onToggleConsole,
@@ -168,7 +168,8 @@ export function ComposerMetaChips({
   autoExpandSteps: boolean;
   onToggleAutoExpandSteps: () => void;
   chatMcp: Array<{ id: string; name: string }>;
-  enabledMcpCount: number;
+  /** Servers this chat can attach (folder list), even if all are disabled here. */
+  availableMcpCount: number;
   /** ACP-reported context usage; null hides the chip (no estimate fallback). */
   contextDisplay: { label: string; title: string } | null;
   consoleOpen: boolean;
@@ -371,7 +372,7 @@ export function ComposerMetaChips({
             ) : null}
           </button>
         );
-      } else if (id === "mcp" && activeSession && enabledMcpCount > 0) {
+      } else if (id === "mcp" && activeSession && availableMcpCount > 0) {
         node = (
           <button
             type="button"
@@ -469,7 +470,7 @@ export function ComposerMetaChips({
     consoleOpen,
     contextDisplay?.label,
     contextDisplay?.title,
-    enabledMcpCount,
+    availableMcpCount,
     gitChip,
     isDesktop,
     onOpenMcpDialog,

@@ -11,6 +11,7 @@ import type {
   GitCommitDetailDto,
   ModelOption,
   ModelParamDto,
+  ProjectMcpInfo,
   SessionDetailDto,
   SessionDto,
   HarnessSessionDto,
@@ -60,6 +61,13 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
   mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
+  /** Servers found in each folder's own MCP files, keyed by canonical cwd. */
+  projectMcp: (cwd?: string | null) => {
+    const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
+    return request<{ folders: Record<string, ProjectMcpInfo> }>(`/api/mcp/project${qs}`).then(
+      (r) => r.folders,
+    );
+  },
   searchMessages: (q: string, limit?: number) => {
     const qs = new URLSearchParams({ q });
     if (limit) qs.set("limit", String(limit));
