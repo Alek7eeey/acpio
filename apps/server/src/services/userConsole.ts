@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { TerminalShell } from "@acpio/shared";
 import { clampConsoleTerminalSize } from "@acpio/shared";
@@ -58,7 +58,20 @@ function pushOutput(sessionId: string, chunk: string) {
   }, OUTPUT_FLUSH_MS);
 }
 
-function resolveWindowsShell(shell: TerminalShell): { file: string; args: string[] } {
+/** Console cwd must exist; a missing workspace falls back to the server's own directory. */
+async function resolveConsoleRoot(cwd: string): Promise<string> {
+  const root = path.resolve(cwd || process.cwd());
+  try {
+    await fs.access(root);
+    return root;
+  } catch {
+    return process.cwd();
+  }
+}
+
+async function resolveWindowsShell(
+  shell: TerminalShell,
+): Promise<{ file: string; args: string[] }> {
   if (shell === "powershell") {
     const pwsh7 = path.join(
       process.env.ProgramFiles || "C:\\Program Files",
@@ -66,7 +79,12 @@ function resolveWindowsShell(shell: TerminalShell): { file: string; args: string
       "7",
       "pwsh.exe",
     );
-    if (fs.existsSync(pwsh7)) return { file: pwsh7, args: ["-NoLogo"] };
+    try {
+      await fs.access(pwsh7);
+      return { file: pwsh7, args: ["-NoLogo"] };
+    } catch {
+      // PowerShell 7 is not installed — use the in-box Windows PowerShell.
+    }
     const winPs = path.join(
       process.env.SystemRoot || "C:\\Windows",
       "System32",
@@ -79,7 +97,7 @@ function resolveWindowsShell(shell: TerminalShell): { file: string; args: string
   return { file: process.env.COMSPEC || "cmd.exe", args: [] };
 }
 
-function shellCommand(kind: ConsoleShell): { file: string; args: string[] } {
+async function shellCommand(kind: ConsoleShell): Promise<{ file: string; args: string[] }> {
   if (kind === "unix") {
     const sh = process.env.SHELL || "/bin/bash";
     return { file: sh, args: ["-l"] };
@@ -101,11 +119,11 @@ async function spawnPtyBackend(
 ): Promise<PtyLike | null> {
   try {
     const pty = await import("node-pty");
-    const { file, args } = shellCommand(shell);
+    const { file, args } = await shellCommand(shell);
     const proc = pty.spawn(file, args, {
       name: "xterm-256color",
       cwd,
-      env: getConsoleEnv(),
+      env: await getConsoleEnv(),
       cols: clampConsoleTerminalSize({ cols: initialSize?.cols ?? 100, rows: 28 }).cols,
       rows: clampConsoleTerminalSize({ cols: 100, rows: initialSize?.rows ?? 28 }).rows,
     });
@@ -127,11 +145,11 @@ async function spawnPtyBackend(
   }
 }
 
-function spawnPipeBackend(cwd: string, shell: ConsoleShell): PtyLike {
-  const { file, args } = shellCommand(shell);
+async function spawnPipeBackend(cwd: string, shell: ConsoleShell): Promise<PtyLike> {
+  const { file, args } = await shellCommand(shell);
   const child: ChildProcessWithoutNullStreams = spawn(file, args, {
     cwd,
-    env: getConsoleEnv(),
+    env: await getConsoleEnv(),
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: false,
   });
@@ -166,12 +184,10 @@ async function spawnConsole(
   shell: ConsoleShell,
   initialSize?: { cols?: number; rows?: number },
 ) {
-  let root = path.resolve(cwd || process.cwd());
-  if (!fs.existsSync(root)) {
-    root = process.cwd();
-  }
+  const root = await resolveConsoleRoot(cwd);
   const backend =
-    (await spawnPtyBackend(root, shell, initialSize)) ?? spawnPipeBackend(root, shell);
+    (await spawnPtyBackend(root, shell, initialSize)) ??
+    (await spawnPipeBackend(root, shell));
   const entry: ConsoleEntry = { cwd: root, backend, shell };
   consoles.set(sessionId, entry);
   backend.onData((chunk) => pushOutput(sessionId, chunk));
@@ -186,10 +202,7 @@ export async function attachUserConsole(
   initialSize?: { cols?: number; rows?: number },
 ): Promise<void> {
   const shell = await resolveConsoleShell(preferredShell);
-  let root = path.resolve(cwd || process.cwd());
-  if (!fs.existsSync(root)) {
-    root = process.cwd();
-  }
+  const root = await resolveConsoleRoot(cwd);
   const existing = consoles.get(sessionId);
   if (existing && existing.shell === shell && existing.cwd === root) return;
 
@@ -198,10 +211,7 @@ export async function attachUserConsole(
 
   const task = (async () => {
     const latestShell = await resolveConsoleShell(preferredShell);
-    let latestRoot = path.resolve(cwd || process.cwd());
-    if (!fs.existsSync(latestRoot)) {
-      latestRoot = process.cwd();
-    }
+    const latestRoot = await resolveConsoleRoot(cwd);
     const current = consoles.get(sessionId);
     if (current && current.shell === latestShell && current.cwd === latestRoot) return;
     if (current) releaseUserConsole(sessionId);

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import fs from "node:fs/promises";
 import { exec } from "node:child_process";
 import path from "node:path";
 
@@ -15,7 +15,7 @@ export interface OpenPathResult {
  * primarily runs against a Windows machine; other platforms get an honest
  * "unsupported" error instead of a silent no-op.
  */
-export function openPath(rawPath: string): OpenPathResult {
+export async function openPath(rawPath: string): Promise<OpenPathResult> {
   const trimmed = rawPath.trim();
   if (!trimmed || trimmed.length > 4096 || trimmed.includes("\0")) {
     return { ok: false, opened: "", kind: null, error: "invalid path" };
@@ -23,10 +23,13 @@ export function openPath(rawPath: string): OpenPathResult {
   if (!path.isAbsolute(trimmed)) {
     return { ok: false, opened: trimmed, kind: null, error: "path must be absolute" };
   }
-  if (!existsSync(trimmed)) {
+  // A missing path and a path whose stat fails for any other reason (e.g. a
+  // permission error) both report "path does not exist", like before.
+  const stat = await fs.stat(trimmed).catch(() => null);
+  if (!stat) {
     return { ok: false, opened: trimmed, kind: null, error: "path does not exist" };
   }
-  const kind = statSync(trimmed).isDirectory() ? "directory" : "file";
+  const kind = stat.isDirectory() ? "directory" : "file";
   if (process.platform !== "win32") {
     return { ok: false, opened: trimmed, kind, error: "opening paths is supported on Windows only" };
   }

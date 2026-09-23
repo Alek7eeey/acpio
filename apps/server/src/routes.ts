@@ -358,7 +358,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const q = req.query as { path?: string; files?: string };
     const rawPath = typeof q.path === "string" ? q.path : undefined;
     try {
-      return browseDirectory(rawPath, { includeFiles: q.files === "1" });
+      return await browseDirectory(rawPath, { includeFiles: q.files === "1" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
@@ -370,7 +370,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .object({ path: z.string().optional(), files: z.boolean().optional() })
       .parse(req.body ?? {});
     try {
-      return browseDirectory(body.path, { includeFiles: body.files === true });
+      return await browseDirectory(body.path, { includeFiles: body.files === true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(400).send({ error: message });
@@ -379,7 +379,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.post("/api/fs/open", async (req, reply) => {
     const body = z.object({ path: z.string().min(1).max(4096) }).parse(req.body ?? {});
-    const result = openPath(body.path);
+    const result = await openPath(body.path);
     if (!result.ok) {
       return reply.code(400).send({ error: result.error });
     }

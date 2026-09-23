@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,12 +10,12 @@ export function defaultPickerPath(): string {
   return os.homedir();
 }
 
-function resolvePickerStartPath(initialPath?: string): string {
+async function resolvePickerStartPath(initialPath?: string): Promise<string> {
   const trimmed = (initialPath ?? "").trim();
   if (trimmed) {
     try {
       const resolved = path.resolve(trimmed);
-      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      if ((await fs.stat(resolved)).isDirectory()) {
         return resolved;
       }
     } catch {
@@ -60,12 +60,12 @@ function run(
   });
 }
 
-function normalizePicked(raw: string): string | null {
+async function normalizePicked(raw: string): Promise<string | null> {
   const trimmed = raw.trim().replace(/^file:\/\//i, "");
   if (!trimmed) return null;
   try {
     const resolved = path.resolve(trimmed);
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return null;
+    if (!(await fs.stat(resolved)).isDirectory()) return null;
     return resolved;
   } catch {
     return null;
@@ -73,7 +73,7 @@ function normalizePicked(raw: string): string | null {
 }
 
 async function pickWindows(initialPath?: string): Promise<string | null> {
-  const initial = resolvePickerStartPath(initialPath).replace(/'/g, "''");
+  const initial = (await resolvePickerStartPath(initialPath)).replace(/'/g, "''");
   const script = `
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -98,7 +98,7 @@ if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 
 async function pickMac(initialPath?: string): Promise<string | null> {
-  const initial = resolvePickerStartPath(initialPath).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const initial = (await resolvePickerStartPath(initialPath)).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const script =
     "try\n" +
     `  set defaultLocation to POSIX file "${initial}"\n` +
@@ -112,19 +112,19 @@ async function pickMac(initialPath?: string): Promise<string | null> {
 }
 
 async function pickLinux(initialPath?: string): Promise<string | null> {
-  const initial = resolvePickerStartPath(initialPath);
+  const initial = await resolvePickerStartPath(initialPath);
   const args = ["--file-selection", "--directory", "--title=Выберите рабочую папку"];
   args.push(`--filename=${initial}`);
   try {
     const { code, stdout } = await run("zenity", args);
     if (code !== 0) return null;
-    return normalizePicked(stdout);
+    return await normalizePicked(stdout);
   } catch {
     try {
       const kdialogArgs = ["--getexistingdirectory", initial];
       const { code, stdout } = await run("kdialog", kdialogArgs);
       if (code !== 0) return null;
-      return normalizePicked(stdout);
+      return await normalizePicked(stdout);
     } catch {
       throw new Error(
         "Не найден zenity/kdialog для выбора папки. Установите один из них или укажите путь вручную.",

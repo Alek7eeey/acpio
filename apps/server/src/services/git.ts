@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
 
@@ -708,21 +708,26 @@ export async function addGitIgnoreEntries(
     if (abs !== rootAbs && !abs.startsWith(rootAbs + path.sep)) {
       return { ok: false, error: "Invalid path", added: [] };
     }
-    const isDir = fs.statSync(abs, { throwIfNoEntry: false })?.isDirectory() ?? false;
+    // A path that cannot be stat'ed (already deleted) is treated as a file
+    // pattern, matching the old `throwIfNoEntry: false` result.
+    const isDir = await fs
+      .stat(abs)
+      .then((s) => s.isDirectory())
+      .catch(() => false);
     patterns.push(toGitIgnorePattern(p, isDir));
   }
 
   const file = path.join(rootAbs, ".gitignore");
   let existing = "";
   try {
-    existing = fs.readFileSync(file, "utf8");
+    existing = await fs.readFile(file, "utf8");
   } catch {
     /* no .gitignore yet — it will be created */
   }
   const { content, added } = appendGitIgnoreEntries(existing, patterns);
   if (added.length === 0) return { ok: true, added };
   try {
-    fs.writeFileSync(file, content, "utf8");
+    await fs.writeFile(file, content, "utf8");
   } catch {
     return { ok: false, error: "Could not update .gitignore", added: [] };
   }
@@ -738,7 +743,11 @@ export async function getGitBlame(cwd: string, filePath: string): Promise<string
   const tracked = await runGit(root, ["ls-files", "--error-unmatch", "--", rel]);
   if (!tracked.ok) return "";
 
-  const exists = fs.existsSync(path.join(root, rel));
+  // Blame the worktree copy when the file is present; otherwise blame HEAD.
+  const exists = await fs
+    .stat(path.join(root, rel))
+    .then(() => true)
+    .catch(() => false);
   const args = exists
     ? ["blame", "--date=short", "--", rel]
     : ["blame", "--date=short", "HEAD", "--", rel];
@@ -746,11 +755,12 @@ export async function getGitBlame(cwd: string, filePath: string): Promise<string
   return result.ok ? result.out : result.err || "";
 }
 
-function readWorktreeLines(root: string, rel: string): string[] | null {
+async function readWorktreeLines(root: string, rel: string): Promise<string[] | null> {
   const abs = path.join(root, rel);
-  if (!fs.existsSync(abs)) return null;
+  // Reading directly swallows both "missing" and "unreadable" into `null`,
+  // which is what the previous existsSync + try/catch pair produced.
   try {
-    const content = fs.readFileSync(abs, "utf8");
+    const content = await fs.readFile(abs, "utf8");
     return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   } catch {
     return null;
@@ -782,7 +792,7 @@ export async function getGitFileLines(
 
   let allLines: string[] | null = null;
   if (source.mode === "working") {
-    allLines = side === "new" ? readWorktreeLines(root, rel) : await readRefLines(root, rel, "HEAD");
+    allLines = side === "new" ? await readWorktreeLines(root, rel) : await readRefLines(root, rel, "HEAD");
   } else {
     const rev = source.rev.trim();
     if (!rev || rev.includes("..") || /[\0\r\n]/.test(rev)) return null;

@@ -59,25 +59,25 @@ function fixture() {
 }
 
 describe("OMP local sessions", () => {
-  it("lists jsonl sessions with cwd and title", () => {
+  it("lists jsonl sessions with cwd and title", async () => {
     const { root, id } = fixture();
-    const rows = listOmpSessions({ root, cwd: "E:/share/acpio" });
+    const rows = await listOmpSessions({ root, cwd: "E:/share/acpio" });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.sessionId).toBe(id);
     expect(rows[0]?.title).toBe("Restore probe");
     expect(rows[0]?.cwd.replace(/\\/g, "/")).toMatch(/share\/acpio$/i);
   });
 
-  it("reads user/assistant turns and skips tools", () => {
+  it("reads user/assistant turns and skips tools", async () => {
     const { root, id } = fixture();
-    const tx = readOmpSessionTranscript(id, { root });
+    const tx = await readOmpSessionTranscript(id, { root });
     expect(tx?.turns).toEqual([
       { role: "user", text: "ping from console" },
       { role: "assistant", text: "pong", thought: "short thought" },
     ]);
   });
 
-  it("skips probe/temp session folders", () => {
+  it("skips probe/temp session folders", async () => {
     const { root, id } = fixture();
     const junk = path.join(root, "-tmp-omp-acp-probe-zzzz-proj");
     fs.mkdirSync(junk);
@@ -88,11 +88,11 @@ describe("OMP local sessions", () => {
         JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: "probe" }] } }),
       "utf8",
     );
-    const rows = listOmpSessions({ root });
+    const rows = await listOmpSessions({ root });
     expect(rows.map((r) => r.sessionId)).toEqual([id]);
   });
 
-  it("filters by exact cwd, not parent or nested folders", () => {
+  it("filters by exact cwd, not parent or nested folders", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omp-sessions-"));
     dirs.push(root);
     const write = (cwd: string, id: string) => {
@@ -113,7 +113,7 @@ describe("OMP local sessions", () => {
     write("C:/MyFolder/ips", "019fea5d-0001-7000-86cd-c486c1ed8a72");
     write("C:/MyFolder/ips/ips_10", "019fea5d-0002-7000-86cd-c486c1ed8a72");
     write("C:/MyFolder/ips/ips_10/consoleServer", "019fea5d-0003-7000-86cd-c486c1ed8a72");
-    const rows = listOmpSessions({ root, cwd: "C:/MyFolder/ips/ips_10" });
+    const rows = await listOmpSessions({ root, cwd: "C:/MyFolder/ips/ips_10" });
     expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/MyFolder/ips/ips_10"]);
   });
 });

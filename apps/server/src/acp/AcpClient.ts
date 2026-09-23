@@ -4,7 +4,6 @@ import {
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { execFile } from "node:child_process";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -34,6 +33,21 @@ import {
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 
 const execFileAsync = promisify(execFile);
+
+// ACPIO_ACP_WIRE debug dumps fire once per frame (including token chunks), so a
+// synchronous append would block the event loop for every chunk of a turn.
+// Chain the appends instead: order stays per-process, and a failed write must
+// never break the agent.
+let wireChain = Promise.resolve();
+
+function appendWireFrame(wirePath: string, dir: "in" | "out", msg: unknown) {
+  const line = `${JSON.stringify({ ts: new Date().toISOString(), dir, msg })}\n`;
+  wireChain = wireChain
+    .then(() => fsp.appendFile(wirePath, line, "utf8"))
+    .catch(() => {
+      /* ignore */
+    });
+}
 
 type JsonRpcId = number | string;
 
@@ -246,7 +260,7 @@ export function mergeConfigOptions(prev: ConfigOption[], next: ConfigOption[]): 
   return next.map((o) => byId.get(o.id) ?? o);
 }
 
-function winKnownBins(command: string, adapter: HarnessAdapter): string[] {
+async function winKnownBins(command: string, adapter: HarnessAdapter): Promise<string[]> {
   const home = process.env.USERPROFILE ?? "";
   const local = process.env.LOCALAPPDATA ?? "";
   const appData = process.env.APPDATA ?? "";
@@ -262,14 +276,18 @@ function winKnownBins(command: string, adapter: HarnessAdapter): string[] {
     appData ? path.join(appData, "npm") : "",
   ].filter(Boolean);
 
-  const out: string[] = [];
-  for (const dir of dirs) {
-    for (const name of names) {
-      const full = path.join(dir, name);
-      if (fs.existsSync(full)) out.push(full);
-    }
-  }
-  return out;
+  const candidates = dirs.flatMap((dir) => names.map((name) => path.join(dir, name)));
+  const found = await Promise.all(
+    candidates.map(async (full) => {
+      try {
+        await fsp.stat(full);
+        return full;
+      } catch {
+        return "";
+      }
+    }),
+  );
+  return found.filter(Boolean);
 }
 
 export async function resolveCommand(
@@ -281,7 +299,7 @@ export async function resolveCommand(
   }
 
   if (process.platform === "win32") {
-    const known = adapter ? winKnownBins(command, adapter) : [];
+    const known = adapter ? await winKnownBins(command, adapter) : [];
     if (known[0]) {
       return { cmd: known[0], shell: /\.(cmd|bat)$/i.test(known[0]) };
     }
@@ -628,7 +646,12 @@ export class AcpClient extends EventEmitter {
     const cwd = this.cwd || process.cwd();
     // A missing cwd makes the child die with a generic "cannot find the path"
     // error that reads like a missing command — fail fast with a clear message.
-    if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+    // Async stat: a dead network drive must not freeze the event loop.
+    const cwdIsDir = await fsp
+      .stat(cwd)
+      .then((st) => st.isDirectory())
+      .catch(() => false);
+    if (!cwdIsDir) {
       throw new Error(`Рабочая папка не существует: ${cwd}. Выберите другую папку в настройках.`);
     }
 
@@ -636,7 +659,10 @@ export class AcpClient extends EventEmitter {
       resolved.cmd.includes("/") ||
       resolved.cmd.includes("\\") ||
       /\.(exe|cmd|bat)$/i.test(resolved.cmd)
-        ? fs.existsSync(resolved.cmd)
+        ? await fsp
+            .stat(resolved.cmd)
+            .then(() => true)
+            .catch(() => false)
         : false;
     if (!resolvedExists && process.platform === "win32") {
       try {
@@ -1319,16 +1345,7 @@ export class AcpClient extends EventEmitter {
       data: msg,
     });
     const wirePath = process.env.ACPIO_ACP_WIRE;
-    if (wirePath) {
-      try {
-        fs.appendFileSync(
-          wirePath,
-          `${JSON.stringify({ ts: new Date().toISOString(), dir: "out", msg })}\n`,
-        );
-      } catch {
-        /* ignore */
-      }
-    }
+    if (wirePath) appendWireFrame(wirePath, "out", msg);
     this.proc.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
@@ -1355,16 +1372,7 @@ export class AcpClient extends EventEmitter {
       data: msg,
     });
     const wirePath = process.env.ACPIO_ACP_WIRE;
-    if (wirePath) {
-      try {
-        fs.appendFileSync(
-          wirePath,
-          `${JSON.stringify({ ts: new Date().toISOString(), dir: "in", msg })}\n`,
-        );
-      } catch {
-        /* ignore */
-      }
-    }
+    if (wirePath) appendWireFrame(wirePath, "in", msg);
 
     if ("id" in msg && (msg.result !== undefined || msg.error !== undefined) && !msg.method) {
       const id = msg.id as JsonRpcId;

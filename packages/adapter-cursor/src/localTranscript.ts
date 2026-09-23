@@ -1,4 +1,5 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { AdapterTranscriptClient, SubagentTranscriptPage } from "@acpio/shared";
@@ -26,26 +27,38 @@ function projectsRoot(): string {
 }
 
 /** Locate `agent-transcripts/<id>/<id>.jsonl` for a Cursor subagent. */
-export function findCursorAgentTranscript(cwd: string | undefined, agentId: string): string | null {
+export async function findCursorAgentTranscript(
+  cwd: string | undefined,
+  agentId: string,
+): Promise<string | null> {
   const id = agentId.trim();
   if (!id) return null;
   const root = projectsRoot();
-  if (!fs.existsSync(root)) return null;
+  try {
+    await fs.stat(root);
+  } catch {
+    return null;
+  }
 
-  const tryPath = (slug: string): string | null => {
+  const tryPath = async (slug: string): Promise<string | null> => {
     const file = path.join(root, slug, "agent-transcripts", id, `${id}.jsonl`);
-    return fs.existsSync(file) ? file : null;
+    try {
+      await fs.stat(file);
+      return file;
+    } catch {
+      return null;
+    }
   };
 
   for (const slug of cwd ? cursorProjectSlugs(cwd) : []) {
-    const hit = tryPath(slug);
+    const hit = await tryPath(slug);
     if (hit) return hit;
   }
 
   try {
-    for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
+    for (const ent of await fs.readdir(root, { withFileTypes: true })) {
       if (!ent.isDirectory() || ent.name.startsWith(".")) continue;
-      const hit = tryPath(ent.name);
+      const hit = await tryPath(ent.name);
       if (hit) return hit;
     }
   } catch {
@@ -58,16 +71,20 @@ export function findCursorAgentTranscript(cwd: string | undefined, agentId: stri
  * When Cursor ACP has not yet exposed agentId, find freshly written transcripts.
  * Returns newest-first ids (optionally filtered by prompt/description match).
  */
-export function findRecentCursorAgentIds(opts: {
+export async function findRecentCursorAgentIds(opts: {
   cwd?: string;
   prompt?: string;
   description?: string;
   newerThanMs?: number;
   limit?: number;
   exclude?: Iterable<string>;
-}): string[] {
+}): Promise<string[]> {
   const root = projectsRoot();
-  if (!fs.existsSync(root)) return [];
+  try {
+    await fs.stat(root);
+  } catch {
+    return [];
+  }
   const newerThan = opts.newerThanMs ?? Date.now() - 15 * 60_000;
   const limit = opts.limit ?? 8;
   const excluded = new Set([...(opts.exclude ?? [])].map((s) => s.trim()).filter(Boolean));
@@ -80,14 +97,24 @@ export function findRecentCursorAgentIds(opts: {
   const dirs: string[] = [];
   for (const slug of slugs) {
     const d = path.join(root, slug, "agent-transcripts");
-    if (fs.existsSync(d)) dirs.push(d);
+    try {
+      await fs.stat(d);
+      dirs.push(d);
+    } catch {
+      /* not present */
+    }
   }
   if (!dirs.length) {
     try {
-      for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
+      for (const ent of await fs.readdir(root, { withFileTypes: true })) {
         if (!ent.isDirectory() || ent.name.startsWith(".")) continue;
         const d = path.join(root, ent.name, "agent-transcripts");
-        if (fs.existsSync(d)) dirs.push(d);
+        try {
+          await fs.stat(d);
+          dirs.push(d);
+        } catch {
+          /* not present */
+        }
       }
     } catch {
       return [];
@@ -97,47 +124,50 @@ export function findRecentCursorAgentIds(opts: {
   type Hit = { id: string; mtime: number; score: number };
   const hits: Hit[] = [];
   for (const dir of dirs) {
-    let ents: fs.Dirent[];
+    let ents: Dirent[];
     try {
-      ents = fs.readdirSync(dir, { withFileTypes: true });
+      ents = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const ent of ents) {
-      if (!ent.isDirectory()) continue;
-      const id = ent.name;
-      if (excluded.has(id)) continue;
-      const file = path.join(dir, id, `${id}.jsonl`);
-      let st: fs.Stats;
-      try {
-        st = fs.statSync(file);
-      } catch {
-        continue;
+    const candidates = ents.filter((ent) => ent.isDirectory() && !excluded.has(ent.name));
+    // Chunk the per-file stat/head pass: thousands of concurrent syscalls would
+    // exhaust the libuv threadpool without improving latency here.
+    for (let i = 0; i < candidates.length; i += 32) {
+      const batch = await Promise.all(
+        candidates.slice(i, i + 32).map(async (ent): Promise<Hit | null> => {
+          const id = ent.name;
+          const file = path.join(dir, id, `${id}.jsonl`);
+          const st = await fs.stat(file).catch(() => null);
+          if (!st || st.mtimeMs < newerThan) return null;
+          let score = 1;
+          if (needles.length) {
+            try {
+              const head = (await fs.readFile(file, "utf8")).slice(0, 4000).toLowerCase();
+              score = needles.some((n) => head.includes(n)) ? 10 : 0;
+            } catch {
+              score = 0;
+            }
+          }
+          return score > 0 ? { id, mtime: st.mtimeMs, score } : null;
+        }),
+      );
+      for (const hit of batch) {
+        if (hit) hits.push(hit);
       }
-      if (st.mtimeMs < newerThan) continue;
-      let score = 1;
-      if (needles.length) {
-        try {
-          const head = fs.readFileSync(file, { encoding: "utf8" }).slice(0, 4000).toLowerCase();
-          score = needles.some((n) => head.includes(n)) ? 10 : 0;
-        } catch {
-          score = 0;
-        }
-      }
-      if (score > 0) hits.push({ id, mtime: st.mtimeMs, score });
     }
   }
   hits.sort((a, b) => b.score - a.score || b.mtime - a.mtime);
   return hits.slice(0, limit).map((h) => h.id);
 }
 
-export function findRecentCursorAgentId(opts: {
+export async function findRecentCursorAgentId(opts: {
   cwd?: string;
   prompt?: string;
   description?: string;
   newerThanMs?: number;
-}): string | null {
-  return findRecentCursorAgentIds({ ...opts, limit: 1 })[0] ?? null;
+}): Promise<string | null> {
+  return (await findRecentCursorAgentIds({ ...opts, limit: 1 }))[0] ?? null;
 }
 
 function thinkingBlock(text: string): { type: "thinking"; thinking: string } | null {
@@ -210,22 +240,22 @@ export async function readCursorAgentTranscript(
   agentId: string,
   fromByte: number,
 ): Promise<SubagentTranscriptPage | undefined> {
-  const file = findCursorAgentTranscript(client.cwd, agentId);
+  const file = await findCursorAgentTranscript(client.cwd, agentId);
   if (!file) {
     return { fromByte, nextByte: fromByte, messages: [] };
   }
 
-  const stat = fs.statSync(file);
+  const stat = await fs.stat(file);
   const size = stat.size;
   if (size <= fromByte) {
     return { fromByte, nextByte: fromByte, messages: [] };
   }
 
-  const fd = fs.openSync(file, "r");
+  const handle = await fs.open(file, "r");
   try {
     const length = size - fromByte;
     const buf = Buffer.alloc(length);
-    fs.readSync(fd, buf, 0, length, fromByte);
+    await handle.read(buf, 0, length, fromByte);
     const chunk = buf.toString("utf8");
     const lastNl = chunk.lastIndexOf("\n");
     if (lastNl < 0) {
@@ -244,7 +274,7 @@ export async function readCursorAgentTranscript(
       messages: content.length ? [{ role: "assistant", content }] : [],
     };
   } finally {
-    fs.closeSync(fd);
+    await handle.close();
   }
 }
 
@@ -266,9 +296,9 @@ function cwdRelated(cwd: string, filter: string): boolean {
   return a === filter;
 }
 
-function storeBytes(storePath: string): number {
+async function storeBytes(storePath: string): Promise<number> {
   try {
-    return fs.statSync(storePath).size;
+    return (await fs.stat(storePath)).size;
   } catch {
     return 0;
   }
@@ -278,49 +308,106 @@ function storeBytes(storePath: string): number {
  * Cursor ACP sessions on disk (`~/.cursor/acp-sessions/<id>/`).
  * Empty probe folders (no title and tiny/missing store.db) are skipped.
  */
-export function listCursorAcpSessions(opts?: {
+export async function listCursorAcpSessions(opts?: {
   root?: string;
   chatsRoot?: string;
   cwd?: string;
   excludeIds?: Iterable<string>;
   limit?: number;
-}): CursorAcpSessionInfo[] {
+}): Promise<CursorAcpSessionInfo[]> {
   const exclude = new Set([...(opts?.excludeIds ?? [])].map((s) => s.trim()).filter(Boolean));
   const cwdFilter = opts?.cwd ? normCwd(opts.cwd).toLowerCase() : "";
   const limit = opts?.limit ?? 24;
   const hits: Array<CursorAcpSessionInfo & { mtime: number; prefer: number }> = [];
 
   const acpRoot = opts?.root ?? path.join(os.homedir(), ".cursor", "acp-sessions");
-  if (fs.existsSync(acpRoot)) {
-    let ents: fs.Dirent[];
+  let ents: Dirent[] = [];
+  try {
+    ents = await fs.readdir(acpRoot, { withFileTypes: true });
+  } catch {
+    /* missing or unreadable root */
+  }
+  for (const ent of ents) {
+    if (!ent.isDirectory()) continue;
+    const sessionId = ent.name.trim();
+    if (!sessionId || exclude.has(sessionId)) continue;
+    const dir = path.join(acpRoot, sessionId);
+    const metaPath = path.join(dir, "meta.json");
+    const storePath = path.join(dir, "store.db");
+    let cwd = "";
+    let title = "";
     try {
-      ents = fs.readdirSync(acpRoot, { withFileTypes: true });
+      const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as {
+        cwd?: unknown;
+        title?: unknown;
+      };
+      cwd = typeof meta.cwd === "string" ? meta.cwd : "";
+      title = typeof meta.title === "string" ? meta.title.trim() : "";
     } catch {
-      ents = [];
+      /* missing or invalid meta */
     }
-    for (const ent of ents) {
-      if (!ent.isDirectory()) continue;
-      const sessionId = ent.name.trim();
+    const size = await storeBytes(storePath);
+    // Probes from this app leave an empty store.db and no title.
+    if (!title && size < 4096) continue;
+    if (cwdFilter && !cwdRelated(cwd, cwdFilter)) continue;
+    let mtime = 0;
+    try {
+      mtime = (await fs.stat(size ? storePath : dir)).mtimeMs;
+    } catch {
+      continue;
+    }
+    hits.push({
+      sessionId,
+      cwd,
+      title,
+      updatedAt: new Date(mtime).toISOString(),
+      mtime,
+      prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
+    });
+  }
+
+  const chatsRoot = opts?.chatsRoot ?? path.join(os.homedir(), ".cursor", "chats");
+  let hashes: Dirent[] = [];
+  try {
+    hashes = await fs.readdir(chatsRoot, { withFileTypes: true });
+  } catch {
+    /* missing or unreadable root */
+  }
+  for (const hashEnt of hashes) {
+    if (!hashEnt.isDirectory()) continue;
+    const hashDir = path.join(chatsRoot, hashEnt.name);
+    let ids: Dirent[];
+    try {
+      ids = await fs.readdir(hashDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const idEnt of ids) {
+      if (!idEnt.isDirectory()) continue;
+      const sessionId = idEnt.name.trim();
       if (!sessionId || exclude.has(sessionId)) continue;
-      const dir = path.join(acpRoot, sessionId);
+      const dir = path.join(hashDir, sessionId);
       const metaPath = path.join(dir, "meta.json");
       const storePath = path.join(dir, "store.db");
       let cwd = "";
       let title = "";
       try {
-        const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as { cwd?: unknown; title?: unknown };
+        const meta = JSON.parse(await fs.readFile(metaPath, "utf8")) as {
+          cwd?: unknown;
+          title?: unknown;
+          name?: unknown;
+        };
         cwd = typeof meta.cwd === "string" ? meta.cwd : "";
-        title = typeof meta.title === "string" ? meta.title.trim() : "";
+        title = String(meta.title ?? meta.name ?? "").trim();
       } catch {
-        /* missing or invalid meta */
+        continue;
       }
-      const size = storeBytes(storePath);
-      // Probes from this app leave an empty store.db and no title.
+      const size = await storeBytes(storePath);
       if (!title && size < 4096) continue;
       if (cwdFilter && !cwdRelated(cwd, cwdFilter)) continue;
       let mtime = 0;
       try {
-        mtime = fs.statSync(size ? storePath : dir).mtimeMs;
+        mtime = (await fs.stat(size ? storePath : dir)).mtimeMs;
       } catch {
         continue;
       }
@@ -332,65 +419,6 @@ export function listCursorAcpSessions(opts?: {
         mtime,
         prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
       });
-    }
-  }
-
-  const chatsRoot = opts?.chatsRoot ?? path.join(os.homedir(), ".cursor", "chats");
-  if (fs.existsSync(chatsRoot)) {
-    let hashes: fs.Dirent[];
-    try {
-      hashes = fs.readdirSync(chatsRoot, { withFileTypes: true });
-    } catch {
-      hashes = [];
-    }
-    for (const hashEnt of hashes) {
-      if (!hashEnt.isDirectory()) continue;
-      const hashDir = path.join(chatsRoot, hashEnt.name);
-      let ids: fs.Dirent[];
-      try {
-        ids = fs.readdirSync(hashDir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const idEnt of ids) {
-        if (!idEnt.isDirectory()) continue;
-        const sessionId = idEnt.name.trim();
-        if (!sessionId || exclude.has(sessionId)) continue;
-        const dir = path.join(hashDir, sessionId);
-        const metaPath = path.join(dir, "meta.json");
-        const storePath = path.join(dir, "store.db");
-        if (!fs.existsSync(metaPath)) continue;
-        let cwd = "";
-        let title = "";
-        try {
-          const meta = JSON.parse(fs.readFileSync(metaPath, "utf8")) as {
-            cwd?: unknown;
-            title?: unknown;
-            name?: unknown;
-          };
-          cwd = typeof meta.cwd === "string" ? meta.cwd : "";
-          title = String(meta.title ?? meta.name ?? "").trim();
-        } catch {
-          continue;
-        }
-        const size = storeBytes(storePath);
-        if (!title && size < 4096) continue;
-        if (cwdFilter && !cwdRelated(cwd, cwdFilter)) continue;
-        let mtime = 0;
-        try {
-          mtime = fs.statSync(size ? storePath : dir).mtimeMs;
-        } catch {
-          continue;
-        }
-        hits.push({
-          sessionId,
-          cwd,
-          title,
-          updatedAt: new Date(mtime).toISOString(),
-          mtime,
-          prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
-        });
-      }
     }
   }
 

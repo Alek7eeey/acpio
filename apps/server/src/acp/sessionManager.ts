@@ -1038,7 +1038,7 @@ export async function listUnlinkedHarnessSessions(
 
     if (provider === "omp") {
       try {
-        for (const row of listOmpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
+        for (const row of await listOmpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
           if (byId.has(row.sessionId)) {
             const prev = byId.get(row.sessionId)!;
             byId.set(row.sessionId, {
@@ -1064,7 +1064,7 @@ export async function listUnlinkedHarnessSessions(
 
     if (provider === "cursor") {
       try {
-        for (const row of listCursorAcpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
+        for (const row of await listCursorAcpSessions({ cwd, excludeIds: exclude, limit: 24 })) {
           if (byId.has(row.sessionId)) {
             const prev = byId.get(row.sessionId)!;
             byId.set(row.sessionId, {
@@ -1114,7 +1114,7 @@ export async function importHarnessSession(input: {
   }
   const settings = await getSettings();
   const disk =
-    input.provider === "omp" ? readOmpSessionTranscript(acpSessionId) : null;
+    input.provider === "omp" ? await readOmpSessionTranscript(acpSessionId) : null;
   const cwd = (input.cwd || disk?.cwd || settings.defaultCwd || process.cwd()).trim();
   const title = (
     input.title ||
@@ -1869,13 +1869,13 @@ function startCursorStorePoll(rt: SessionRuntime, toolCallId: string, partId: st
       const detail = await getSessionDetail(rt.sessionId);
       const acpSessionId = rt.client?.sessionId || detail?.acpSessionId || null;
       const prev = (await getPartPayload(partId)) ?? {};
-      let enrich = enrichCursorToolFromStore(acpSessionId, toolCallId);
+      let enrich = await enrichCursorToolFromStore(acpSessionId, toolCallId);
       if (!enrich?.agentId) {
         const bound = new Set(
           [...rt.subagentPartByAgentId.keys()].filter((k) => CURSOR_AGENT_UUID_RE.test(k)),
         );
         const guessed =
-          findRecentCursorAgentId({
+          (await findRecentCursorAgentId({
             cwd: detail?.cwd,
             prompt: String(prev.prompt ?? ""),
             description:
@@ -1884,13 +1884,15 @@ function startCursorStorePoll(rt: SessionRuntime, toolCallId: string, partId: st
                 ? String(prev.description ?? prev.title ?? "")
                 : "",
             newerThanMs: startedAt - 5_000,
-          }) ||
-          findRecentCursorAgentIds({
-            cwd: detail?.cwd,
-            newerThanMs: startedAt - 5_000,
-            limit: 4,
-            exclude: bound,
-          })[0];
+          })) ||
+          (
+            await findRecentCursorAgentIds({
+              cwd: detail?.cwd,
+              newerThanMs: startedAt - 5_000,
+              limit: 4,
+              exclude: bound,
+            })
+          )[0];
         if (guessed) enrich = { ...(enrich ?? {}), agentId: guessed, status: "running" };
       }
       if (!enrich) return;

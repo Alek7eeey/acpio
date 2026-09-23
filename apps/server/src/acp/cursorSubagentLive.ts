@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -144,17 +144,24 @@ function enrichmentFromProviderOptions(obj: Record<string, unknown>): CursorStor
 /**
  * Read Cursor `store.db` for one Task toolCallId. Returns null when the session
  * DB is missing or the call has not been flushed yet.
+ *
+ * The probe runs off a 400 ms poll, so the file check is async; the `store.db`
+ * read itself stays synchronous — better-sqlite3 has no async API.
  */
-export function enrichCursorToolFromStore(
+export async function enrichCursorToolFromStore(
   acpSessionId: string | null | undefined,
   toolCallId: string,
-): CursorStoreEnrichment | null {
+): Promise<CursorStoreEnrichment | null> {
   const sessionId = String(acpSessionId ?? "").trim();
   const variants = toolCallIdVariants(toolCallId);
   if (!sessionId || !variants.length) return null;
 
   const dbPath = path.join(os.homedir(), ".cursor", "acp-sessions", sessionId, "store.db");
-  if (!fs.existsSync(dbPath)) return null;
+  try {
+    await fs.stat(dbPath);
+  } catch {
+    return null;
+  }
 
   let db: Database.Database;
   try {

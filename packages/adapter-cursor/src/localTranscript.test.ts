@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 describe("listCursorAcpSessions", () => {
-  it("skips empty probe folders and keeps titled stores", () => {
+  it("skips empty probe folders and keeps titled stores", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cursor-acp-"));
     dirs.push(root);
     const probe = path.join(root, "11111111-1111-4111-8111-111111111111");
@@ -27,13 +27,13 @@ describe("listCursorAcpSessions", () => {
       JSON.stringify({ cwd: "E:/share/acpio", title: "How are you" }),
     );
     fs.writeFileSync(path.join(real, "store.db"), Buffer.alloc(8192, 1));
-    const rows = listCursorAcpSessions({ root, chatsRoot: path.join(root, "no-chats") });
+    const rows = await listCursorAcpSessions({ root, chatsRoot: path.join(root, "no-chats") });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.sessionId).toBe("22222222-2222-4222-8222-222222222222");
     expect(rows[0]?.title).toBe("How are you");
   });
 
-  it("filters by exact cwd, not parent or nested folders", () => {
+  it("filters by exact cwd, not parent or nested folders", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "cursor-acp-"));
     dirs.push(root);
     const write = (id: string, cwd: string) => {
@@ -46,7 +46,7 @@ describe("listCursorAcpSessions", () => {
     write("22222222-2222-4222-8222-222222222222", "C:/MyFolder/ips/ips_10");
     write("33333333-3333-4333-8333-333333333333", "C:/MyFolder/ips/ips_10/consoleServer");
     write("44444444-4444-4444-8444-444444444444", "C:/MyFolder");
-    const rows = listCursorAcpSessions({
+    const rows = await listCursorAcpSessions({
       root,
       chatsRoot: path.join(root, "no-chats"),
       cwd: "C:/MyFolder/ips/ips_10",

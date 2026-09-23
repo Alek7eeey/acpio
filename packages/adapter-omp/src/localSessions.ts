@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -90,20 +90,39 @@ function cwdRelated(cwd: string, filter: string): boolean {
   return normCwd(cwd) === filter;
 }
 
-function collectJsonlFiles(dir: string, out: string[], budget: number): void {
-  if (out.length >= budget) return;
-  let ents: fs.Dirent[];
-  try {
-    ents = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
+// Fixed-size IO waves: enough parallelism to stay near the old sync latency, few
+// enough concurrent handles for a cold scan over the 20_000-file budget.
+const IO_BATCH = 32;
+
+/** Map `items` in `IO_BATCH`-sized waves, preserving input order in the result. */
+async function mapInBatches<T, R>(items: readonly T[], worker: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = [];
+  for (let i = 0; i < items.length; i += IO_BATCH) {
+    out.push(...(await Promise.all(items.slice(i, i + IO_BATCH).map((item) => worker(item)))));
   }
+  return out;
+}
+
+/** `mtimeMs`, or null when the file vanished after the scan — callers skip those rows. */
+async function statMtime(filePath: string): Promise<number | null> {
+  try {
+    return (await fs.stat(filePath)).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+async function collectJsonlFiles(dir: string, out: string[], budget: number): Promise<void> {
+  if (out.length >= budget) return;
+  // A missing or unreadable folder is not an error here: it just contributes no sessions.
+  const ents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
   for (const ent of ents) {
     if (out.length >= budget) return;
     const full = path.join(dir, ent.name);
     if (ent.isDirectory()) {
       if (isEphemeralOmpDir(ent.name)) continue;
-      collectJsonlFiles(full, out, budget);
+      // Sequential: parallel descent would reorder `out`, which decides mtime ties below.
+      await collectJsonlFiles(full, out, budget);
       continue;
     }
     if (ent.isFile() && ent.name.endsWith(".jsonl") && ID_FROM_NAME.test(ent.name)) {
@@ -117,125 +136,128 @@ function fileSessionId(filePath: string): string {
   return match?.[1] ?? "";
 }
 
-function readHead(filePath: string, bytes = 8_192): string {
-  const fd = fs.openSync(filePath, "r");
+async function readHead(filePath: string, bytes = 8_192): Promise<string> {
+  const handle = await fs.open(filePath, "r");
   try {
     const buf = Buffer.alloc(bytes);
-    const n = fs.readSync(fd, buf, 0, bytes, 0);
-    return buf.toString("utf8", 0, n);
+    const { bytesRead } = await handle.read(buf, 0, bytes, 0);
+    return buf.toString("utf8", 0, bytesRead);
   } finally {
-    fs.closeSync(fd);
+    await handle.close();
   }
 }
 
 /** Native OMP sessions on disk under ~/.omp/agent/sessions. */
-export function listOmpSessions(opts?: {
+export async function listOmpSessions(opts?: {
   root?: string;
   cwd?: string;
   excludeIds?: Iterable<string>;
   limit?: number;
-}): OmpSessionInfo[] {
+}): Promise<OmpSessionInfo[]> {
   const root = ompSessionsRoot(opts?.root);
-  if (!fs.existsSync(root)) return [];
   const exclude = new Set([...(opts?.excludeIds ?? [])].map((s) => s.trim()).filter(Boolean));
   const cwdFilter = opts?.cwd ? normCwd(opts.cwd) : "";
   const limit = opts?.limit ?? 24;
   const files: string[] = [];
-  collectJsonlFiles(root, files, 20_000);
+  // A missing root yields no files, so it lists nothing — same as the old existsSync guard.
+  await collectJsonlFiles(root, files, 20_000);
 
   type FileHit = { file: string; sessionId: string; mtime: number };
-  const newestById = new Map<string, FileHit>();
-  for (const file of files) {
+  const candidates = files.filter((file) => {
     const fromName = fileSessionId(file);
-    if (!fromName || exclude.has(fromName)) continue;
-    let mtime = 0;
-    try {
-      mtime = fs.statSync(file).mtimeMs;
-    } catch {
-      continue;
-    }
-    const prev = newestById.get(fromName);
+    return Boolean(fromName) && !exclude.has(fromName);
+  });
+  // Stat in waves, then rank in scan order so equal mtimes still keep the first hit.
+  const mtimes = await mapInBatches(candidates, statMtime);
+  const newestById = new Map<string, FileHit>();
+  for (let i = 0; i < candidates.length; i++) {
+    const mtime = mtimes[i];
+    if (mtime == null) continue;
+    const file = candidates[i]!;
+    const sessionId = fileSessionId(file);
+    const prev = newestById.get(sessionId);
     if (prev && prev.mtime >= mtime) continue;
-    newestById.set(fromName, { file, sessionId: fromName, mtime });
+    newestById.set(sessionId, { file, sessionId, mtime });
   }
 
   const ranked = [...newestById.values()].sort((a, b) => b.mtime - a.mtime);
   const hits: Array<OmpSessionInfo & { prefer: number }> = [];
   const scanCap = Math.max(limit * 5, 80);
-  for (const row of ranked) {
-    if (hits.length >= scanCap) break;
-    let cwd = "";
-    let title = "";
-    let sessionId = row.sessionId;
-    let head = "";
-    try {
-      head = readHead(row.file, 24_576);
+  // Heads are read one wave at a time; the scanCap check inside the wave keeps the read
+  // volume within one batch of what the old one-file-at-a-time loop touched.
+  for (let start = 0; start < ranked.length && hits.length < scanCap; start += IO_BATCH) {
+    const batch = ranked.slice(start, start + IO_BATCH);
+    const heads = await Promise.all(
+      batch.map(async (row) => {
+        try {
+          return await readHead(row.file, 24_576);
+        } catch {
+          /* filename is enough to list */
+          return "";
+        }
+      }),
+    );
+    for (let i = 0; i < batch.length; i++) {
+      if (hits.length >= scanCap) break;
+      const row = batch[i]!;
+      const head = heads[i] ?? "";
       const header = parseHeader(head);
+      let sessionId = row.sessionId;
       if (header.sessionId) sessionId = header.sessionId;
-      cwd = header.cwd;
-      title = header.title;
-    } catch {
-      /* filename is enough to list */
+      const cwd = header.cwd;
+      const title = header.title;
+      if (exclude.has(sessionId)) continue;
+      if (cwdFilter && (!cwd || !cwdRelated(cwd, cwdFilter))) continue;
+      if (!/"role"\s*:\s*"user"/i.test(head) && !title) continue;
+      hits.push({
+        sessionId,
+        cwd,
+        title,
+        updatedAt: new Date(row.mtime).toISOString(),
+        prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
+      });
     }
-    if (exclude.has(sessionId)) continue;
-    if (cwdFilter && (!cwd || !cwdRelated(cwd, cwdFilter))) continue;
-    if (!/"role"\s*:\s*"user"/i.test(head) && !title) continue;
-    hits.push({
-      sessionId,
-      cwd,
-      title,
-      updatedAt: new Date(row.mtime).toISOString(),
-      prefer: cwdFilter && cwd && cwdRelated(cwd, cwdFilter) ? 1 : 0,
-    });
   }
   hits.sort((a, b) => b.prefer - a.prefer || b.updatedAt.localeCompare(a.updatedAt));
   return hits.slice(0, limit).map(({ prefer: _p, ...row }) => row);
 }
 
-export function findOmpSessionFile(sessionId: string, root?: string): string | null {
+export async function findOmpSessionFile(sessionId: string, root?: string): Promise<string | null> {
   const id = sessionId.trim();
   if (!id) return null;
   const base = ompSessionsRoot(root);
-  if (!fs.existsSync(base)) return null;
   const files: string[] = [];
-  collectJsonlFiles(base, files, 20_000);
+  await collectJsonlFiles(base, files, 20_000);
   const suffix = `_${id}.jsonl`.toLowerCase();
+  // The name filter is pure, so it runs before the stats: only real candidates hit the disk.
+  const matches = files.filter((file) => path.basename(file).toLowerCase().endsWith(suffix));
+  const mtimes = await mapInBatches(matches, statMtime);
   let best: { file: string; mtime: number } | null = null;
-  for (const file of files) {
-    if (!path.basename(file).toLowerCase().endsWith(suffix)) continue;
-    let mtime = 0;
-    try {
-      mtime = fs.statSync(file).mtimeMs;
-    } catch {
-      continue;
-    }
-    if (!best || mtime > best.mtime) best = { file, mtime };
+  for (let i = 0; i < matches.length; i++) {
+    const mtime = mtimes[i];
+    if (mtime == null) continue;
+    if (!best || mtime > best.mtime) best = { file: matches[i]!, mtime };
   }
   return best?.file ?? null;
 }
 
 /** User/assistant turns from an OMP jsonl (tools omitted). */
-export function readOmpSessionTranscript(
+export async function readOmpSessionTranscript(
   sessionId: string,
   opts?: { root?: string; maxTurns?: number },
-): OmpSessionTranscript | null {
-  const filePath = findOmpSessionFile(sessionId, opts?.root);
+): Promise<OmpSessionTranscript | null> {
+  const filePath = await findOmpSessionFile(sessionId, opts?.root);
   if (!filePath) return null;
   let raw = "";
   try {
-    raw = fs.readFileSync(filePath, "utf8");
+    raw = await fs.readFile(filePath, "utf8");
   } catch {
     return null;
   }
   const header = parseHeader(raw.slice(0, 16_384));
   const maxTurns = opts?.maxTurns ?? 200;
   const turns: OmpTranscriptTurn[] = [];
-  let st: fs.Stats | null = null;
-  try {
-    st = fs.statSync(filePath);
-  } catch {
-    /* ignore */
-  }
+  const mtime = await statMtime(filePath);
 
   for (const line of raw.split(/\r?\n/)) {
     if (turns.length >= maxTurns) break;
@@ -269,7 +291,7 @@ export function readOmpSessionTranscript(
     sessionId: header.sessionId || sessionId,
     cwd: header.cwd,
     title: header.title,
-    updatedAt: st ? new Date(st.mtimeMs).toISOString() : new Date().toISOString(),
+    updatedAt: mtime != null ? new Date(mtime).toISOString() : new Date().toISOString(),
     filePath,
     turns,
   };

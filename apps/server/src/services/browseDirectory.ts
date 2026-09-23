@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultPickerPath } from "./pickDirectory.js";
 
@@ -27,14 +27,14 @@ function isWindowsDriveRoot(dir: string): boolean {
   return /^[a-zA-Z]:\\$/.test(normalized);
 }
 
-function listWindowsDrives(): BrowseDirectoryEntry[] {
+async function listWindowsDrives(): Promise<BrowseDirectoryEntry[]> {
   const entries: BrowseDirectoryEntry[] = [];
   for (let code = 65; code <= 90; code++) {
     const letter = String.fromCharCode(code);
     const root = `${letter}:\\`;
     try {
-      if (!fs.existsSync(root)) continue;
-      fs.readdirSync(root);
+      // Probing with `readdir` both proves the drive exists and that it is readable.
+      await fs.readdir(root);
       entries.push({ name: `${letter}:`, path: root });
     } catch {
       // skip missing / inaccessible drives
@@ -43,14 +43,17 @@ function listWindowsDrives(): BrowseDirectoryEntry[] {
   return entries;
 }
 
-function resolveBrowsePath(raw?: string): string {
+async function resolveBrowsePath(raw?: string): Promise<string> {
   const trimmed = (raw ?? "").trim();
   if (!trimmed) return defaultPickerPath();
   const resolved = path.resolve(trimmed);
-  if (!fs.existsSync(resolved)) {
+  // A missing path and a path whose stat fails for any other reason (e.g. a
+  // permission error) both surface as "Path not found", exactly like the
+  // previous `existsSync` check did.
+  const stat = await fs.stat(resolved).catch(() => null);
+  if (!stat) {
     throw new Error("Path not found");
   }
-  const stat = fs.statSync(resolved);
   if (!stat.isDirectory()) {
     throw new Error("Not a directory");
   }
@@ -72,7 +75,7 @@ function isDrivesRootRequest(raw?: string): boolean {
 /** Standard per-user folders for quick access (Desktop, Downloads, …).
  *  On Linux/macOS the XDG user dirs are honored, so localized folder names
  *  (e.g. ~/Загрузки) are found; only folders that exist are listed. */
-function quickAccessFolders(): BrowseDirectoryEntry[] {
+async function quickAccessFolders(): Promise<BrowseDirectoryEntry[]> {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   if (!home) return [];
   const candidates: Array<{ name: string; path: string }> = [];
@@ -87,7 +90,7 @@ function quickAccessFolders(): BrowseDirectoryEntry[] {
       VIDEOS: "Videos",
     };
     try {
-      const text = fs.readFileSync(dirsFile, "utf8");
+      const text = await fs.readFile(dirsFile, "utf8");
       for (const line of text.split(/\r?\n/)) {
         const m = line.match(/^XDG_([A-Z_]+)_DIR="([^"]*)"/);
         if (!m) continue;
@@ -109,7 +112,7 @@ function quickAccessFolders(): BrowseDirectoryEntry[] {
   const out: BrowseDirectoryEntry[] = [];
   for (const c of candidates) {
     try {
-      if (fs.existsSync(c.path) && fs.statSync(c.path).isDirectory()) {
+      if ((await fs.stat(c.path)).isDirectory()) {
         out.push({ name: c.name, path: c.path, isDir: true });
       }
     } catch {
@@ -120,21 +123,21 @@ function quickAccessFolders(): BrowseDirectoryEntry[] {
 }
 
 /** List subdirectories (and optionally files) for in-browser picking (mobile / remote). */
-export function browseDirectory(
+export async function browseDirectory(
   raw?: string,
   opts?: { includeFiles?: boolean },
-): BrowseDirectoryResult {
+): Promise<BrowseDirectoryResult> {
   if (isDrivesRootRequest(raw)) {
     return {
       path: WINDOWS_DRIVES_ROOT,
       parent: null,
       kind: "drives",
-      entries: listWindowsDrives(),
-      quick: quickAccessFolders(),
+      entries: await listWindowsDrives(),
+      quick: await quickAccessFolders(),
     };
   }
 
-  const current = resolveBrowsePath(raw);
+  const current = await resolveBrowsePath(raw);
   let parent: string | null = null;
   const parentDir = path.dirname(current);
 
@@ -146,29 +149,44 @@ export function browseDirectory(
 
   let names: string[] = [];
   try {
-    names = fs.readdirSync(current);
+    names = await fs.readdir(current);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(`Cannot read directory: ${message}`);
   }
 
   const entries: BrowseDirectoryEntry[] = [];
-  for (const name of names) {
-    if (!name || name === "." || name === "..") continue;
-    if (name.startsWith(".")) continue;
-    const full = path.join(current, name);
-    try {
-      if (fs.statSync(full).isDirectory()) {
-        entries.push({ name, path: full, isDir: true });
-      } else if (opts?.includeFiles) {
-        entries.push({ name, path: full, isDir: false, size: fs.statSync(full).size });
-      }
-    } catch {
-      // skip unreadable entries
+  // Stat in bounded batches instead of one unbounded `Promise.all`: a huge
+  // directory would otherwise queue thousands of syscalls at once. The batch
+  // boundaries preserve the readdir order the (stable) sort below relies on.
+  const STAT_BATCH = 32;
+  for (let i = 0; i < names.length; i += STAT_BATCH) {
+    const batch = names.slice(i, i + STAT_BATCH);
+    const stats = await Promise.all(
+      batch.map(async (name): Promise<BrowseDirectoryEntry | null> => {
+        if (!name || name === "." || name === "..") return null;
+        if (name.startsWith(".")) return null;
+        const full = path.join(current, name);
+        try {
+          const stat = await fs.stat(full);
+          if (stat.isDirectory()) {
+            return { name, path: full, isDir: true };
+          }
+          if (opts?.includeFiles) {
+            return { name, path: full, isDir: false, size: stat.size };
+          }
+        } catch {
+          // skip unreadable entries
+        }
+        return null;
+      }),
+    );
+    for (const entry of stats) {
+      if (entry) entries.push(entry);
     }
   }
 
   entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
-  return { path: current, parent, kind: "directory", entries, quick: quickAccessFolders() };
+  return { path: current, parent, kind: "directory", entries, quick: await quickAccessFolders() };
 }

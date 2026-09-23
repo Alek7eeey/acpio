@@ -1,7 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 
 export type EnvMap = Record<string, string>;
+
+const execFileAsync = promisify(execFile);
 
 const WINDOWS_IDENTITY_KEYS = [
   "USERNAME",
@@ -17,6 +20,10 @@ const WINDOWS_IDENTITY_KEYS = [
 ] as const;
 
 let cached: EnvMap | null = null;
+let inflight: Promise<EnvMap> | null = null;
+// Bumped by resetConsoleEnvCache so a load that started before the reset cannot
+// install its stale result (or clear the promise of the load that replaced it).
+let generation = 0;
 
 /** Copy `process.env` into a plain string map (node-pty cannot read Node's env object). */
 export function stringEnv(source: NodeJS.ProcessEnv): EnvMap {
@@ -97,7 +104,7 @@ export function parseWindowsEnvDump(stdout: string): EnvMap {
   return parseEnvDump(stdout);
 }
 
-function readWindowsEnvBlock(scope: "Machine" | "User"): EnvMap {
+function readWindowsEnvBlock(scope: "Machine" | "User"): Promise<EnvMap> {
   const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
   const powershell = path.join(
     systemRoot,
@@ -113,31 +120,67 @@ function readWindowsEnvBlock(scope: "Machine" | "User"): EnvMap {
     "foreach($entry in $table.GetEnumerator()){" +
     "Write-Output(([string]$entry.Key)+'='+([string]$entry.Value))" +
     "}";
-  const result = spawnSync(
-    powershell,
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-    {
-      encoding: "utf8",
-      windowsHide: true,
-      timeout: 15_000,
-      env: process.env,
-    },
-  );
-  if (result.error || result.status !== 0) return {};
-  return parseEnvDump(result.stdout ?? "");
+  return readEnvBlock(powershell, script);
+}
+
+/**
+ * Reading the registry blocks costs a PowerShell startup, so it must not run
+ * synchronously: a blocked event loop here freezes every session for the whole
+ * shell launch.
+ */
+async function readEnvBlock(powershell: string, script: string): Promise<EnvMap> {
+  try {
+    const { stdout } = await execFileAsync(
+      powershell,
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        timeout: 15_000,
+        env: process.env,
+      },
+    );
+    return parseEnvDump(stdout);
+  } catch {
+    // Missing PowerShell, non-zero exit or the 15 s timeout: fall back to process.env only.
+    return {};
+  }
+}
+
+/** Loads both registry blocks at once, then folds them over `process.env`. */
+async function loadConsoleEnv(): Promise<EnvMap> {
+  if (process.platform !== "win32") return mergeConsoleEnv({ processEnv: process.env });
+  // Machine and User are independent reads — run them together so the first
+  // attach pays one PowerShell startup instead of two.
+  const [machine, user] = await Promise.all([
+    readWindowsEnvBlock("Machine"),
+    readWindowsEnvBlock("User"),
+  ]);
+  return mergeConsoleEnv({ processEnv: process.env, machine, user });
 }
 
 /** Environment for the interactive user console (cached for the process lifetime). */
-export function getConsoleEnv(): EnvMap {
-  if (cached) return cached;
-  cached = mergeConsoleEnv({
-    processEnv: process.env,
-    machine: process.platform === "win32" ? readWindowsEnvBlock("Machine") : undefined,
-    user: process.platform === "win32" ? readWindowsEnvBlock("User") : undefined,
-  });
-  return cached;
+export function getConsoleEnv(): Promise<EnvMap> {
+  if (cached) return Promise.resolve(cached);
+  if (!inflight) {
+    const gen = generation;
+    inflight = loadConsoleEnv()
+      .then((env) => {
+        if (gen === generation) cached = env;
+        return env;
+      })
+      .finally(() => {
+        if (gen === generation) inflight = null;
+      });
+  }
+  // Concurrent first calls share this promise, so PowerShell is spawned once.
+  return inflight;
 }
 
 export function resetConsoleEnvCache(): void {
   cached = null;
+  generation += 1;
+  // The load already running belongs to the previous generation: drop it so the
+  // next call starts a fresh read instead of awaiting a stale one.
+  inflight = null;
 }
