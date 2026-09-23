@@ -775,6 +775,8 @@ export const en = {
     favorites: "Favorites",
     favorite: "Add to favorites",
     unfavorite: "Remove from favorites",
+    pickRejected:
+      "The agent rejected model \"{{model}}\" and kept \"{{actual}}\". The pick was not saved.",
   },
   errors: {
     usernameRequired: "Enter a username",

@@ -799,6 +799,8 @@ export const ru = {
     favorites: "Избранное",
     favorite: "В избранное",
     unfavorite: "Убрать из избранного",
+    pickRejected:
+      "Агент отклонил модель «{{model}}» и оставил «{{actual}}». Выбор не сохранён.",
   },
   errors: {
     usernameRequired: "Укажите имя пользователя",

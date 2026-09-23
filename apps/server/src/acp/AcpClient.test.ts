@@ -683,7 +683,7 @@ describe("applyModelSelection against an enumerated model list", () => {
     setConfigOption: (id: string, value: string) => Promise<void>;
   };
 
-  function makeClient(calls: Array<[string, string]>) {
+  function makeClient(calls: Array<[string, string]>, modelValues: string[] = [WIRE]) {
     const acp = new AcpClient(
       customAgentAdapter({ id: "my-agent", label: "My Agent", command: "agent.exe", args: [] }),
       DEFAULT_SETTINGS,
@@ -691,7 +691,11 @@ describe("applyModelSelection against an enumerated model list", () => {
       "agent" as AgentMode,
     ) as unknown as TestableModelAcp;
     acp.configOptions = [
-      { id: "my-agent.model", category: "model", options: [{ value: WIRE, name: "Flash" }] },
+      {
+        id: "my-agent.model",
+        category: "model",
+        options: modelValues.map((value) => ({ value, name: value })),
+      },
     ];
     acp.setConfigOption = async (id, value) => {
       calls.push([id, value]);
@@ -703,6 +707,14 @@ describe("applyModelSelection against an enumerated model list", () => {
     const calls: Array<[string, string]> = [];
     await makeClient(calls).applyModelSelection(WIRE);
     expect(calls).toEqual([["my-agent.model", WIRE]]);
+  });
+
+  it("translates a pick to the agent's wire when only the provider prefix differs", async () => {
+    const calls: Array<[string, string]> = [];
+    await makeClient(calls, ["alibaba-token-plan/deepseek-v4.1-flash"]).applyModelSelection(
+      "opencode-go/deepseek-v4.1-flash",
+    );
+    expect(calls).toEqual([["my-agent.model", "alibaba-token-plan/deepseek-v4.1-flash"]]);
   });
 
   it("sends a model the agent did not enumerate, since the list can lag its catalog", async () => {

@@ -18,6 +18,7 @@ import {
   modelProviderFromValue,
   normalizeToolCallId,
   parseModelWire,
+  modelIdFromValue,
   subagentFieldsFromRaw,
   textFromUnknown,
   toolDisplayTitle,
@@ -3407,17 +3408,39 @@ export async function setSessionModel(
     );
     const modelParams = toModelParams(client.configOptions);
     const modes = toModesList(client.configOptions, getAdapter(detail.provider).defaultModes, client.sessionModes);
-    const currentModel = pickCurrentModel(
-      models,
-      findModelConfigOption(client.configOptions)?.currentValue ?? model,
-    );
+    // Trust only what the agent reports as current — never echo the pick back.
+    const reported = findModelConfigOption(client.configOptions)?.currentValue;
+    const currentModel = pickCurrentModel(models, reported);
     rememberModels(detail.provider, currentModel, models, modelParams, modes);
+    if (reported && !modelSelectionApplied(client.configOptions, model)) {
+      // The agent rejected the pick and kept its own model. Restore the chat's
+      // previous pick so the stored model stays the one that actually runs,
+      // and tell the composer so it rolls its optimistic state back too.
+      await updateSession(sessionId, {
+        ...(detail.model ? { model: detail.model } : {}),
+        ...(detail.modelParams ? { modelParams: detail.modelParams } : {}),
+      });
+      return {
+        ok: true,
+        model,
+        appliedLive: false,
+        restarted: true,
+        currentModel: reported,
+        models,
+        modelParams,
+        modes,
+        message: t(settings.locale ?? "en", "modelPickRejected", {
+          model,
+          actual: reported,
+        }),
+      };
+    }
     return {
       ok: true,
       model,
       appliedLive: true,
       restarted: true,
-      currentModel,
+      currentModel: currentModel ?? model,
       models,
       modelParams,
       modes,
@@ -3568,6 +3591,19 @@ function configOptionsMatchModel(options: ConfigOption[], model: string): boolea
     rawCurrent === base ||
     (Boolean(base) && currentBase === base)
   );
+}
+
+/**
+ * True when the agent reports running `model` — exactly or under another
+ * provider prefix (applyModelSelection legitimately translates a pick to the
+ * agent's own enumerated wire, e.g. "opencode-go/x" → "alibaba-token-plan/x").
+ */
+function modelSelectionApplied(options: ConfigOption[], model: string): boolean {
+  if (configOptionsMatchModel(options, model)) return true;
+  const reported = findModelConfigOption(options)?.currentValue;
+  if (!reported) return false;
+  const wanted = modelIdFromValue(parseModelWire(model).base);
+  return Boolean(wanted) && modelIdFromValue(parseModelWire(reported).base) === wanted;
 }
 
 async function probeModelParams(provider: AgentProvider, model: string): Promise<ModelParamDto[]> {

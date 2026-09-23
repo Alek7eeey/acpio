@@ -4623,6 +4623,20 @@ function ChatThread() {
     if (sessionId) {
       try {
         const res = await api.setSessionModel(sessionId, nextModel, supported);
+        if (!res.pending && res.appliedLive === false) {
+          // The agent rejected the pick and kept its own model. Show reality:
+          // roll the optimistic chip state back to the model that still runs.
+          rollbackModelSelection();
+          useAppStore.setState({
+            error:
+              res.message ??
+              t("models.pickRejected", {
+                model: nextModel,
+                actual: res.currentModel ?? "",
+              }),
+          });
+          return targetParams;
+        }
         // Prefer agent-refreshed params, but keep prior Effort if the payload is empty.
         const nextModelParams =
           res.modelParams && res.modelParams.length > 0 ? res.modelParams : targetParams;

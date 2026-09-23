@@ -1261,6 +1261,20 @@ export function modelProviderFromValue(value: string): string | undefined {
   return prefix;
 }
 
+/**
+ * Model id without its provider prefix: `zai/glm-5.2` -> `glm-5.2`. Bare ids
+ * and prefixless values pass through whole, so `gpt-5.2` matches `openai/gpt-5.2`
+ * but two prefixed values only match when the trailing id matches. Undefined
+ * only for empty input.
+ */
+export function modelIdFromValue(value: string): string | undefined {
+  const { base } = parseModelWire(value);
+  if (!base) return undefined;
+  const slash = base.indexOf("/");
+  if (slash <= 0 || slash === base.length - 1) return base;
+  return base.slice(slash + 1).trim() || base;
+}
+
 function hasModelParams(label: string): boolean {
   return /\[[^\]]*[=:][^\]]*\]/.test(label);
 }

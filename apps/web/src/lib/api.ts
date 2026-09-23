@@ -128,10 +128,13 @@ export const api = {
       ok: boolean;
       model: string;
       appliedLive: boolean;
+      pending?: boolean;
+      restarted?: boolean;
       currentModel?: string;
       models?: ModelOption[];
       modelParams?: ModelParamDto[];
       modes?: Array<{ value: string; name: string }>;
+      message?: string;
     }>(`/api/sessions/${id}/model`, {
       method: "POST",
       body: JSON.stringify({ model, params }),

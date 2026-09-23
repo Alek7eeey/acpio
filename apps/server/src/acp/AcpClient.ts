@@ -14,6 +14,7 @@ import {
   parseModelWire,
   resolveModelParamValue,
   modelParamFamily,
+  modelIdFromValue,
   normalizeToolCallId,
   type AgentMode,
   type AgentProvider,
@@ -934,13 +935,25 @@ export class AcpClient extends EventEmitter {
           .join(",")}]`;
         target = allowedModels.includes(rebuilt) ? rebuilt : sameBase;
       } else {
-        // The agent's list can lag its own catalog: omp's `session/new`
-        // enumeration omits models its live provider feed added (new SKUs)
-        // while `session/set_config_option` accepts them. Send the requested
-        // value and let the agent decide; a rejection (handled below) leaves
-        // its own model in place, exactly like the old pre-check did.
-        target = wire;
-        tentative = true;
+        // OMP catalogs one model under different provider prefixes (`models
+        // --json` offers "opencode-go/x" while the session list carries
+        // "alibaba-token-plan/x"). Prefer the agent's own enumerated wire for
+        // the same model id — the agent listed it, so it is accepted as is.
+        const wantedId = modelIdFromValue(base);
+        const sameId = wantedId
+          ? allowedModels.find((v) => modelIdFromValue(parseModelWire(v).base) === wantedId)
+          : undefined;
+        if (sameId) {
+          target = sameId;
+        } else {
+          // The agent's list can lag its own catalog: omp's `session/new`
+          // enumeration omits models its live provider feed added (new SKUs)
+          // while `session/set_config_option` accepts them. Send the requested
+          // value and let the agent decide; a rejection (handled below) leaves
+          // its own model in place, exactly like the old pre-check did.
+          target = wire;
+          tentative = true;
+        }
       }
     }
     try {
