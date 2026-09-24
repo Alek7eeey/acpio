@@ -1021,6 +1021,16 @@
   pointer-events: none;
 }
 
+/* Phone-only control: it exists to close a long transcript from where it is
+   being read, because the phase header has scrolled away on a small screen.
+   On a desktop the header is one wheel-scroll away, so the button would only
+   float over the transcript — including a narrow pane of the split view. */
+@media (hover: hover) and (pointer: fine) {
+  .stepsCollapse {
+    display: none;
+  }
+}
+
 .thoughtEmbedded {
   display: grid;
   gap: 0;
