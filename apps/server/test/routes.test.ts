@@ -1322,6 +1322,91 @@ describe("folder MCP files reach the agent", () => {
   });
 });
 
+describe("folder MCP settings reach live board tasks", () => {
+  it("picks up a folder's MCP config in a running board-task agent", async () => {
+    const cwd = await newTempDir("acpio-mcp-board-");
+    const key = cwd.replace(/\\/g, "/");
+    await connectAgent();
+    const board = (
+      await app.inject({ method: "POST", url: "/api/boards", payload: { name: "MCP board" } })
+    ).json() as { id: string };
+    const folders = await app.inject({
+      method: "PUT",
+      url: `/api/boards/${board.id}/folders`,
+      payload: { cwds: [cwd] },
+    });
+    expect(folders.statusCode).toBe(200);
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { cwd, boardId: board.id },
+    });
+    expect(created.statusCode).toBe(200);
+    const session = created.json() as { id: string };
+    runtimeSessionIds.push(session.id);
+
+    // The first turn boots the board task's agent — no folder server yet.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "MCP-LIST" },
+    });
+    const before = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => text.startsWith("mcp=")),
+    );
+    expect(textParts(before).find((text) => text.startsWith("mcp="))).toBe("mcp=");
+
+    // The folder gains a server while that agent is alive: the settings route
+    // fires the restart sweep, which must reach board tasks too.
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        mcpFolderConfigs: {
+          [key]: {
+            overrides: {},
+            servers: [
+              {
+                id: "own",
+                name: "folder-own",
+                enabled: true,
+                type: "stdio",
+                command: "C:/Tools/mcp.exe",
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+
+    // The sweep is fire-and-forget (a mid-turn change restarts on idle), so
+    // keep asking until the restarted agent answers with the new list — a
+    // board-task agent the sweep skips never does.
+    const deadline = Date.now() + 10_000;
+    let pickedUp = false;
+    while (!pickedUp && Date.now() < deadline) {
+      await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "MCP-LIST" },
+      });
+      try {
+        await waitForDetail(
+          session.id,
+          (d) => textParts(d).some((text) => text === "mcp=folder-own"),
+          3_000,
+        );
+        pickedUp = true;
+      } catch {
+        // restart still pending — ask again
+      }
+    }
+    expect(pickedUp).toBe(true);
+  });
+});
+
 describe("durable questions", () => {
   /** Inline-question UI answer shape (elicitation accept with one option). */
   const PICK_GREEN = {

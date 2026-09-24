@@ -549,14 +549,17 @@ export async function registerRoutes(app: FastifyInstance) {
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
     }
+    const next = await updateSettings(patch as Partial<AppSettings>);
     if (patch.mcpServers || patch.mcpFolderConfigs || patch.mcpProjectFiles) {
       // The agent protocol snapshots MCP servers at session/new — restart live
       // sessions so a disabled/edited server stops being visible in the chat.
+      // Fires only AFTER the write: the sweep re-reads settings, and the driver
+      // runs that read synchronously, so firing before the write made the sweep
+      // always see the pre-edit list and skip every restart.
       void restartSessionsForMcpChange();
       // Warm the status cache so the indicator reflects the new list quickly.
       void refreshMcpStatus();
     }
-    const next = await updateSettings(patch as Partial<AppSettings>);
     if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {
       void reconcileUserConsolesShell();
     }

@@ -122,6 +122,13 @@ export async function listSessions(): Promise<SessionDto[]> {
   return mapSessionRows(await db.select().from(sessions).where(isNull(sessions.boardId)));
 }
 
+/** Sessions by id across every partition (chat tree and boards) — for sweeps
+ *  over live agent runtimes, which are not partitioned. */
+export async function listSessionsByIds(ids: string[]): Promise<SessionDto[]> {
+  if (!ids.length) return [];
+  return mapSessionRows(await db.select().from(sessions).where(inArray(sessions.id, ids)));
+}
+
 /** Tasks of one board — the board page's session list, in the user's own order. */
 export async function listBoardSessions(boardId: string): Promise<SessionDto[]> {
   return mapSessionRows(

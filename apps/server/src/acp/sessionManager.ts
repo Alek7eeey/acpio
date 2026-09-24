@@ -59,6 +59,7 @@ import {
   getPartPayload,
   getSessionDetail,
   listSessions,
+  listSessionsByIds,
   replaceUserMessageText,
   truncateMessagesAfter,
   updatePart,
@@ -3408,7 +3409,9 @@ export async function restartSessionMcp(sessionId: string): Promise<boolean> {
  */
 export async function restartSessionsForMcpChange(): Promise<void> {
   const settings = await getSettings();
-  const rows = new Map((await listSessions()).map((s) => [s.id, s]));
+  // Live runtimes span both partitions — `listSessions` hides board tasks, and
+  // looking them up through it left board-task agents on the stale MCP list.
+  const rows = new Map((await listSessionsByIds([...runtimes.keys()])).map((s) => [s.id, s]));
   let restarted = 0;
   for (const sessionId of [...runtimes.keys()]) {
     const rt = runtimes.get(sessionId);
