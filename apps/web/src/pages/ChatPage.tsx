@@ -4138,9 +4138,16 @@ function ChatThread() {
   const gitBranchBelow =
     gitBranchChipOn && (settings.chatGitBranchPosition ?? "below") !== "above";
   // Empty chats stay centered while models/ACP warm up — OMP is slower than Cursor.
+  // A chat whose agent runtime is still coming up takes no input at all: text
+  // typed into it would race the start (and a prompt sent from a chat the agent
+  // has not booted for is what leaves it spinning). `initializingSessionIds`
+  // clears when the runtime answers, on the first send, or after its own
+  // safety timeout, so the lock cannot outlive the boot.
+  const chatInitializing = initializing && !isShellSessionActive;
   const composerLocked =
     agentMissing ||
     agentUnavailable ||
+    chatInitializing ||
     (!isEmptyChat &&
       !!agentProvider &&
       !turnBusy &&
@@ -5838,6 +5845,7 @@ function ChatThread() {
             {!editingMessageId &&
               !agentMissing &&
               !agentUnavailable &&
+              !chatInitializing &&
               composerLocked &&
               !turnBusy && (
                 <div className={styles.typingBar}>
@@ -5996,9 +6004,11 @@ function ChatThread() {
               }}
               placeholder={
                 slashInputHint ??
-                (composerLocked && !agentMissing && !agentUnavailable
-                  ? t("common.loadingModels")
-                  : t("common.messageOrCommand"))
+                (chatInitializing
+                  ? ""
+                  : composerLocked && !agentMissing && !agentUnavailable
+                    ? t("common.loadingModels")
+                    : t("common.messageOrCommand"))
               }
               rows={1}
               disabled={composerLocked}
