@@ -60,6 +60,13 @@ import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, stepsPartsSt
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
+import {
+  chatMessageWindow,
+  chatWindowNeedsSlide,
+  chatWindowSidePx,
+  CHAT_WINDOW_MIN_SIDE,
+  type ChatMessageWindow,
+} from "../lib/chatWindow.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { ChatPromptRail } from "../components/ChatPromptRail";
 import { McpChatDialog } from "../components/McpChatDialog";
@@ -3532,10 +3539,19 @@ type ChatPaneBind = {
 
 const ChatPaneContext = createContext<ChatPaneBind | null>(null);
 
+/** Stable empty list: a fresh `[]` would defeat every memo keyed on messages. */
+const NO_MESSAGES: MessageDto[] = [];
+
+/** Viewports of history above which the feed renders a window, not the lot. */
+const CHAT_WINDOW_TRIGGER_VIEWPORTS = 3;
+
 /** Share of the thread's height that counts as "where the reader is": a prompt
  *  becomes current once its message passes the middle of the viewport, which is
  *  also where a jump from the rail parks the message it targets. */
 const ACTIVE_PROMPT_LINE = 0.5;
+
+/** Hidden pixels that still count as "at the end of the chat". */
+const ACTIVE_PROMPT_BOTTOM_PX = 24;
 
 function useDesktopSplit() {
   const desktop = useChatSplitAllowed();
@@ -3751,10 +3767,26 @@ function ChatThread() {
   const threadRef = useRef<HTMLDivElement>(null);
   /** Thread viewport box (top + height) — the prompt rail's track. */
   const [threadBox, setThreadBox] = useState({ top: 0, height: 0 });
+  /** Rendered slice of a long chat; null while the whole feed fits. */
+  const [msgWindow, setMsgWindow] = useState<ChatMessageWindow | null>(null);
+  /** Visible row captured before the window slides, restored after it does. */
+  const windowAnchorRef = useRef<{ id: string; offset: number } | null>(null);
+  /** Message id → index in the session, for reading the viewport back. */
+  const messageIndexRef = useRef<Map<string, number>>(new Map());
+  /** Row heights, keyed by the message object the store handed out. */
+  const rowHeightRef = useRef<WeakMap<MessageDto, number>>(new WeakMap());
+  /** Latest window state for the scroll listener, which outlives one render. */
+  const windowStateRef = useRef<{
+    windowed: boolean;
+    win: ChatMessageWindow | null;
+    messages: MessageDto[];
+  }>({ windowed: false, win: null, messages: NO_MESSAGES });
   /** Prompt whose turn the reader is in — lit in the rail. */
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
   /** Ids the rail actually shows, so an attachment-only prompt never wins. */
   const railPromptIdsRef = useRef<Set<string>>(new Set());
+  /** Bottom-most rail pill: the prompt the reader ends on when at the end. */
+  const lastPromptIdRef = useRef<string | null>(null);
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
@@ -4944,14 +4976,45 @@ function ChatThread() {
   const composerHeld =
     renderSkeleton || (!activeSession && (sessionLoading || loading || hasSessions));
   const showThreadSkeleton = composerHeld;
+  // ── Message window ────────────────────────────────────────────────────────
+  // A chat that keeps its whole history in the scroll height ends up with a
+  // scrollbar thumb a few pixels tall — hundreds of thousands of pixels for a
+  // few hundred messages, impossible to grab or drag. Past a few viewports the
+  // feed therefore mounts a window around the reader instead: the visible rows
+  // plus about a viewport of context on each side, sliding as they scroll, so
+  // history arrives as it is approached and the thumb stays usable.
+  const allMessages = activeSession?.messages ?? NO_MESSAGES;
+  /** Row heights are keyed by the message object: the store hands out a new
+   *  object only when that message changed, so streaming re-measures one row. */
+  const rowHeight = useCallback((msg: MessageDto) => {
+    const cached = rowHeightRef.current.get(msg);
+    if (cached != null) return cached;
+    const height = estimateMessageRowHeight(msg);
+    rowHeightRef.current.set(msg, height);
+    return height;
+  }, []);
+  const windowed = useMemo(() => {
+    if (threadBox.height <= 0) return false;
+    let total = 0;
+    const budget = threadBox.height * CHAT_WINDOW_TRIGGER_VIEWPORTS;
+    for (const msg of allMessages) {
+      total += rowHeight(msg);
+      if (total > budget) return true;
+    }
+    return false;
+  }, [allMessages, threadBox.height, rowHeight]);
+  const windowMessages = useMemo(
+    () => (msgWindow ? allMessages.slice(msgWindow.from, msgWindow.to) : allMessages),
+    [allMessages, msgWindow],
+  );
+  windowStateRef.current = { windowed, win: msgWindow, messages: allMessages };
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
   const segments = useMemo(() => {
-    const msgs = activeSession?.messages ?? [];
     const out: MessageDto[][] = [];
     let current: MessageDto[] = [];
-    for (const m of msgs) {
+    for (const m of windowMessages) {
       if (m.role === "user" && current.length > 0) {
         out.push(current);
         current = [];
@@ -4960,7 +5023,7 @@ function ChatThread() {
     }
     if (current.length > 0) out.push(current);
     return out;
-  }, [activeSession?.messages]);
+  }, [windowMessages]);
 
   // ── Message virtualization ────────────────────────────────────────────────
   // Beyond a threshold the flat message feed is windowed with
@@ -4982,21 +5045,22 @@ function ChatThread() {
       ),
     [segments, settings.multitask, inflight, lastMessageId],
   );
-  // Prompt rail: the user's prompts as an ordered column beside the thread.
-  const promptRailItems = useMemo(
-    () => buildPromptRailItems(messageRows.map((r) => r.msg)),
-    [messageRows],
-  );
+  // Prompt rail: every prompt of the chat, not just the mounted ones — a pill
+  // for an unmounted prompt still jumps to it (the window moves to the target).
+  const promptRailItems = useMemo(() => buildPromptRailItems(allMessages), [allMessages]);
   // Window sooner than the tree: reply messages can be huge (long texts, many
   // tool parts), so a session with a few dozen messages is already expensive.
   // Trigger on message count OR estimated total height (~px, from the same
   // heuristic the virtualizer seeds unmeasured rows with).
   const CHAT_VIRT_MIN_MESSAGES = 25;
   const CHAT_VIRT_MAX_ESTIMATED_PX = 8000;
+  // The window already caps what is mounted; virtualisation only serves the
+  // unwindowed feed (a transcript that still fits in a few viewports).
   const chatVirtual =
-    messageRows.length > CHAT_VIRT_MIN_MESSAGES ||
-    messageRows.reduce((acc, r) => acc + estimateMessageRowHeight(r.msg), 0) >
-      CHAT_VIRT_MAX_ESTIMATED_PX;
+    !windowed &&
+    (messageRows.length > CHAT_VIRT_MIN_MESSAGES ||
+      messageRows.reduce((acc, r) => acc + estimateMessageRowHeight(r.msg), 0) >
+        CHAT_VIRT_MAX_ESTIMATED_PX);
   const chatVirtualizer = useVirtualizer({
     count: chatVirtual ? messageRows.length : 0,
     getScrollElement: () => threadRef.current,
@@ -5017,6 +5081,26 @@ function ChatThread() {
     const paneSessionId = bind?.sessionId ?? storeActiveSessionId;
     if (paneSessionId && storeActiveSessionId && paneSessionId !== storeActiveSessionId) return;
     if (sessionLoading || showSkeleton) return;
+
+    // A target outside the mounted window has no row to scroll to: move the
+    // window onto it first and let this effect run again with the row mounted.
+    const fullIdx = allMessages.findIndex((m) => m.id === focusMessageId);
+    if (fullIdx < 0) return;
+    const covered = !msgWindow || (fullIdx >= msgWindow.from && fullIdx < msgWindow.to);
+    if (windowed && !covered) {
+      const heights = allMessages.map(rowHeight);
+      const sidePx = chatWindowSidePx(threadRef.current?.clientHeight ?? 0);
+      setMsgWindow(
+        chatMessageWindow({
+          heights,
+          firstVisible: fullIdx,
+          lastVisible: fullIdx,
+          sidePx,
+          minSide: CHAT_WINDOW_MIN_SIDE,
+        }),
+      );
+      return;
+    }
 
     const idx = messageRows.findIndex((r) => r.msg.id === focusMessageId);
     if (idx < 0) return;
@@ -5079,6 +5163,10 @@ function ChatThread() {
     showSkeleton,
     storeActiveSessionId,
     bind?.sessionId,
+    allMessages,
+    msgWindow,
+    windowed,
+    rowHeight,
   ]);
 
   const renderArticle = (msg: MessageDto, isLiveAssistant: boolean) => {
@@ -5218,6 +5306,90 @@ function ChatThread() {
     });
   };
 
+  /**
+   * Rows touching the thread viewport, in session order, plus the anchor (the
+   * topmost visible row and its offset) used to keep the same content under the
+   * reader's eyes when the window slides.
+   */
+  const visibleMessageRange = () => {
+    const thread = threadRef.current;
+    if (!thread) return null;
+    const rect = thread.getBoundingClientRect();
+    const indexById = messageIndexRef.current;
+    let first = -1;
+    let last = -1;
+    let anchorId: string | null = null;
+    let anchorOffset = 0;
+    for (const el of thread.querySelectorAll<HTMLElement>("[data-message-id]")) {
+      const id = el.dataset.messageId;
+      const index = id ? indexById.get(id) : undefined;
+      if (id == null || index == null) continue;
+      const row = el.getBoundingClientRect();
+      if (row.bottom < rect.top) continue;
+      if (row.top > rect.bottom) break;
+      if (first < 0) {
+        first = index;
+        anchorId = id;
+        anchorOffset = row.top - rect.top;
+      }
+      last = index;
+    }
+    return first < 0 || anchorId == null ? null : { first, last, anchorId, anchorOffset };
+  };
+
+  /**
+   * Keep the mounted window around the reader. Recomputing it is not free (the
+   * feed is remounted), so it only happens when they come close to a mounted
+   * edge — the next stretch has to be mounted before they reach it — or drift
+   * deep enough into the middle that the context on a side is worth trimming.
+   */
+  const syncMessageWindow = () => {
+    const thread = threadRef.current;
+    const { windowed: enabled, win, messages } = windowStateRef.current;
+    if (!thread || !enabled || messages.length === 0) return;
+    const visible = visibleMessageRange();
+    if (!visible) return;
+    // Mounted rows are measured, the rest estimated: without this the window
+    // budgets in estimates that are well under the real rows (a 900px answer
+    // estimates as 720), and the mounted slice drifts far past the target.
+    const measured = new Map<string, number>();
+    for (const el of thread.querySelectorAll<HTMLElement>("[data-message-id]")) {
+      const id = el.dataset.messageId;
+      if (!id || !messageIndexRef.current.has(id)) continue;
+      measured.set(id, el.getBoundingClientRect().height);
+    }
+    const heights = messages.map((msg) => measured.get(msg.id) ?? rowHeight(msg));
+    const sidePx = chatWindowSidePx(thread.clientHeight);
+    const current =
+      win ??
+      chatMessageWindow({
+        heights,
+        firstVisible: visible.first,
+        lastVisible: visible.last,
+        sidePx,
+        minSide: CHAT_WINDOW_MIN_SIDE,
+      });
+    const slides = chatWindowNeedsSlide({
+      heights,
+      window: current,
+      firstVisible: visible.first,
+      lastVisible: visible.last,
+      viewportPx: thread.clientHeight,
+    });
+    const next = slides
+      ? chatMessageWindow({
+          heights,
+          firstVisible: visible.first,
+          lastVisible: visible.last,
+          sidePx,
+          minSide: CHAT_WINDOW_MIN_SIDE,
+        })
+      : current;
+    if (win && next.from === win.from && next.to === win.to) return;
+    windowAnchorRef.current = { id: visible.anchorId, offset: visible.anchorOffset };
+    setMsgWindow(next);
+  };
+
   // Which prompt's turn the reader is in: the last rail prompt whose message
   // starts above the reading line (ACTIVE_PROMPT_LINE). That line always falls
   // inside the virtualiser's window, which is why the DOM is enough here.
@@ -5226,6 +5398,15 @@ function ChatThread() {
     const ids = railPromptIdsRef.current;
     if (!thread || ids.size === 0) {
       setActivePromptId(null);
+      return;
+    }
+    // At the very end the reader is on the last prompt, whatever the viewport
+    // shows: the answer to it can be shorter than the previous turn, leaving the
+    // last prompt above the reading line and the pill above it lit instead.
+    const hidden = thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+    if (hidden <= ACTIVE_PROMPT_BOTTOM_PX && lastPromptIdRef.current) {
+      const last = lastPromptIdRef.current;
+      setActivePromptId((prev) => (prev === last ? prev : last));
       return;
     }
     const line =
@@ -5283,6 +5464,7 @@ function ChatThread() {
       const prevTop = lastScrollTopRef.current;
       lastScrollTopRef.current = top;
       syncActivePrompt();
+      syncMessageWindow();
       if (suppressScrollWatchRef.current) return;
       // While pinning a freshly opened chat, ignore intermediate layouts that
       // look like "scrolled away" (skeleton → content height jumps).
@@ -5365,9 +5547,62 @@ function ChatThread() {
   // prompt the reader is in once the new rows have laid out.
   useEffect(() => {
     railPromptIdsRef.current = new Set(promptRailItems.map((item) => item.id));
+    lastPromptIdRef.current = promptRailItems[promptRailItems.length - 1]?.id ?? null;
     const raf = window.requestAnimationFrame(syncActivePrompt);
     return () => window.cancelAnimationFrame(raf);
   }, [promptRailItems, storeActiveSessionId]);
+
+  useEffect(() => {
+    const index = new Map<string, number>();
+    allMessages.forEach((msg, i) => index.set(msg.id, i));
+    messageIndexRef.current = index;
+  }, [allMessages]);
+
+  // The window only exists in a chat long enough to need one: a shorter thread
+  // renders whole (and, past the row threshold, virtualised) as before.
+  useEffect(() => {
+    if (windowed) {
+      const raf = window.requestAnimationFrame(syncMessageWindow);
+      return () => window.cancelAnimationFrame(raf);
+    }
+    setMsgWindow((prev) => (prev ? null : prev));
+    return undefined;
+  }, [windowed, storeActiveSessionId]);
+
+  // The window slid: put the row that was under the reader back where it was.
+  // Without this the mounted slice shifts by the height of whatever left the
+  // window, and the transcript jumps under them mid-scroll.
+  useLayoutEffect(() => {
+    const anchor = windowAnchorRef.current;
+    const thread = threadRef.current;
+    if (!anchor || !thread) return undefined;
+    windowAnchorRef.current = null;
+    if (stickToBottomRef.current) {
+      scrollThreadToEnd();
+      return undefined;
+    }
+    const el = thread.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(anchor.id)}"]`);
+    if (el) {
+      // Place the row back at its old distance from the top of the viewport.
+      // Computed from the content offset (not from the scroll delta) because
+      // mounting or dropping rows can make the browser clamp `scrollTop` — as it
+      // does on the very first mount, when the full transcript becomes a window.
+      const rowTop = el.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+      const target = thread.scrollTop + rowTop - anchor.offset;
+      const max = Math.max(0, thread.scrollHeight - thread.clientHeight);
+      const next = Math.min(Math.max(0, target), max);
+      if (Math.abs(next - thread.scrollTop) >= 1) thread.scrollTop = next;
+    }
+    // The reader can be parked against an edge — the top of the thread, or a
+    // drag that stopped at the end of the mounted slice. Mount the next stretch
+    // now, so the edge they are pushing against is not the end of what exists;
+    // the window stops growing here because the fresh context ends the edge.
+    const raf = window.requestAnimationFrame(() => {
+      syncMessageWindow();
+      syncActivePrompt();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [msgWindow]);
 
   useEffect(() => {
     return () => {
@@ -5382,6 +5617,9 @@ function ChatThread() {
     stickToBottomRef.current = true;
     userJustSentRef.current = false;
     pendingBottomPinRef.current = Boolean(storeActiveSessionId);
+    // Window indices belong to the outgoing chat: drop them before the new one
+    // paints, or the first frame shows a slice of the previous transcript.
+    setMsgWindow(null);
     if (!shouldAutoFocusComposer()) {
       pendingEmptyChatFocusRef.current = false;
       textareaRef.current?.blur();
