@@ -1,6 +1,12 @@
 // Deterministic fake ACP agent (NDJSON over stdio) for the AcpClient
 // integration suite. Behavior is fixed; a few env vars switch error paths:
 //   FAKE_PROMPT_ERROR=1   → session/prompt fails
+//   FAKE_PROMPT_BUSY=1    → every session/prompt fails OMP-style session_busy
+//                            (-32003, data.reason="session_busy")
+//   FAKE_PROMPT_BUSY_ONCE=1 → only the first session/prompt fails that way
+//   FAKE_AUTONOMOUS=1     → streams an autonomous turn after session/new with
+//                            no owning prompt (OMP background-job wake);
+//                            session/prompt while it streams answers session_busy
 //   prompt containing "EXIT-NOW" → process exits with code 1 mid-turn
 //   prompt containing "SLOW-ACTIVE" → streams updates then finishes (tests timeout extend)
 //   prompt containing "SLOW-SILENT" → stays quiet then finishes (tests hard timeout)
@@ -42,6 +48,50 @@ const sessions = new Set();
 const mcpBySession = new Map();
 const pending = new Map(); // requestId → { resolve }
 
+/** Remaining session/prompt calls that answer session_busy (env-driven, read at spawn). */
+let busyPromptsLeft =
+  process.env.FAKE_PROMPT_BUSY === "1"
+    ? Number.POSITIVE_INFINITY
+    : process.env.FAKE_PROMPT_BUSY_ONCE === "1"
+      ? 1
+      : 0;
+/** True while the autonomous (never-prompted) turn streams. */
+let autonomousBusy = false;
+
+/** The exact shape OMP answers a prompt issued during its own turn with. */
+function sessionBusyError() {
+  const err = new Error(
+    "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion.",
+  );
+  err.code = -32003;
+  err.data = { reason: "session_busy", hint: "steer|followUp|wait" };
+  return err;
+}
+
+/** After session/new, stream a turn the host never prompted (OMP bg-job wake). */
+function startAutonomousTurn(sessionId) {
+  if (process.env.FAKE_AUTONOMOUS !== "1") return;
+  autonomousBusy = true;
+  void (async () => {
+    try {
+      const chunks = ["autonomous start", "autonomous middle", "autonomous done"];
+      for (let i = 0; i < chunks.length; i++) {
+        await sleep(i === 0 ? 100 : 450);
+        notify("session/update", {
+          sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: `auto-${i}`,
+            content: { type: "text", text: chunks[i] },
+          },
+        });
+      }
+    } finally {
+      autonomousBusy = false;
+    }
+  })();
+}
+
 function write(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
 }
@@ -76,6 +126,7 @@ async function handle(method, params, id) {
           params.mcpServers.map((s) => String(s?.name ?? "")),
         );
       }
+      startAutonomousTurn(sessionId);
       return {
         sessionId,
         configOptions: structuredClone(CONFIG_OPTIONS),
@@ -125,6 +176,11 @@ async function handle(method, params, id) {
       if (process.env.FAKE_PROMPT_ERROR === "1") {
         throw new Error("fake prompt failure");
       }
+      if (busyPromptsLeft > 0) {
+        busyPromptsLeft -= 1;
+        throw sessionBusyError();
+      }
+      if (autonomousBusy) throw sessionBusyError();
       const text = String(params.prompt?.[0]?.text ?? "");
       if (text.includes("EXIT-NOW")) {
         process.exit(1);
@@ -342,11 +398,16 @@ rl.on("line", (line) => {
   if (msg.id === undefined) return; // client notification — ignore
   handle(String(msg.method ?? ""), msg.params ?? {}, msg.id)
     .then((result) => write({ jsonrpc: "2.0", id: msg.id, result }))
-    .catch((err) =>
+    .catch((err) => {
+      const e = err instanceof Error ? err : new Error(String(err));
       write({
         jsonrpc: "2.0",
         id: msg.id,
-        error: { code: -32000, message: err instanceof Error ? err.message : String(err) },
-      }),
-    );
+        error: {
+          code: typeof e.code === "number" ? e.code : -32000,
+          message: e.message,
+          ...(e.data === undefined ? {} : { data: e.data }),
+        },
+      });
+    });
 });

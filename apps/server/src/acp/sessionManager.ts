@@ -71,6 +71,7 @@ import { adapterCommand, adapters, getAdapter } from "../adapters/registry.js";
 import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
+  AcpRpcError,
   findModeConfigOption,
   findModelConfigOption,
   isSwitchableModeList,
@@ -561,6 +562,9 @@ class SessionRuntime {
    *  and the warm-up boot write believe nothing is happening, so a reloaded tab
    *  paints a starting agent as finished until the first WS status arrives. */
   startingTurn = false;
+  /** Stop timestamp — OMP flushes stragglers after session/cancel, and those
+   *  late tokens must not re-adopt the turn the user just halted. */
+  lastStopAt = 0;
   /**
    * Prompts accepted while a turn is already running (multitask burst).
    * User messages are persisted immediately; the turns themselves run
@@ -845,6 +849,28 @@ export async function ensureAcp(
             update.kind === "agent_message_chunk" ||
             update.kind === "agent_thought_chunk" ||
             update.kind === "mixed_chunks";
+          // OMP runs turns it started itself — a finished background job is
+          // injected as a follow-up — with no owning ACP prompt. Dropping those
+          // updates left the chat idle-looking while the agent worked, and the
+          // next user prompt then died on session_busy. Adopt the turn: claim it
+          // as ours so runPrompt queues behind it and settle it like a prompted
+          // one. The Stop grace keeps OMP's post-cancel stragglers from
+          // resurrecting a turn the user just halted; replay, an open question,
+          // a claimed/queued turn or an in-flight prompt all mean the update
+          // belongs elsewhere, not to an adoption.
+          if (
+            (isStream || update.kind === "tool_call") &&
+            !rt.ingestingReplay &&
+            !rt.acceptingStream &&
+            !rt.running &&
+            !rt.startingTurn &&
+            !rt.client?.isPromptPending() &&
+            rt.pending.size === 0 &&
+            rt.turnQueue.length === 0 &&
+            Date.now() - rt.lastStopAt >= STOP_ADOPT_GRACE_MS
+          ) {
+            adoptAutonomousTurn(rt);
+          }
           // Drop tokens from a cancelled / superseded prompt (including chunks that
           // arrive AFTER Stop — the old epoch check only ignored pre-queued ones).
           if (isStream && !rt.ingestingReplay && (!rt.acceptingStream || rt.streamGen !== gen)) {
@@ -2496,6 +2522,12 @@ const POST_ELICITATION_IDLE_BREAK_MS = 4_000;
 const LATE_INTERACTIVE_GRACE_MS = 400;
 const LATE_INTERACTIVE_OMP_GRACE_MS = 1_200;
 const STUCK_TURN_PART = new Set(["pending", "in_progress", "running"]);
+/** Stop → autonomous re-adoption grace: OMP flushes stragglers briefly after session/cancel. */
+const STOP_ADOPT_GRACE_MS = 10_000;
+/** Backoff between session/prompt retries while the agent finishes its own turn. */
+const PROMPT_BUSY_RETRY_MS = 1_000;
+/** Give up on session_busy after this long and surface the agent's error (Stop is the escape hatch meanwhile). */
+const PROMPT_BUSY_MAX_WAIT_MS = 30 * 60_000;
 
 function isActiveToolStatus(status: string | undefined): boolean {
   const s = String(status ?? "pending").toLowerCase();
@@ -2769,6 +2801,99 @@ async function stampThoughtDurations(sessionId: string, durationMs: number) {
   }
 }
 
+/**
+ * Claim a turn the agent started on its own: flip the same state runTurn opens
+ * with (no streamGen bump — the update that triggered adoption was captured
+ * under the current gen), then settle and finalize it on the prompted-turn
+ * path, handing any message the user queued while we looked idle to
+ * dequeueTurn. No user prompt exists, so there is nothing to return/answer.
+ */
+function adoptAutonomousTurn(rt: SessionRuntime) {
+  const sessionId = rt.sessionId;
+  const agentStartedAt = Date.now();
+  rt.running = true;
+  rt.acceptingStream = true;
+  rt.lastStreamAt = Date.now();
+  rt.assistantMessageId = null;
+  rt.openTextPartId = null;
+  rt.openThoughtPartId = null;
+  rt.turnThoughtPartId = null;
+  rt.turnHasText = false;
+  rt.turnHasThought = false;
+  rt.inFlightToolCalls = 0;
+  rt.toolStatusByCallId.clear();
+  rt.interactiveAnswerAt = null;
+  rt.streamedAfterInteractiveAnswer = false;
+  rt.elicitationThisTurn = false;
+  rt.toolPartByCallId.clear();
+  rt.toolStartRawByCallId.clear();
+  void updateSession(sessionId, { status: "running" }).catch(() => {});
+  void settleAdoptedTurn(rt, sessionId, agentStartedAt);
+}
+
+async function settleAdoptedTurn(
+  rt: SessionRuntime,
+  sessionId: string,
+  agentStartedAt: number,
+) {
+  try {
+    await settlePromptStream(rt);
+    await waitForPendingClientRequests(rt);
+    await drainPostInteractiveStream(rt);
+    // Stop claimed the turn while we waited — cancelPrompt already finalized it.
+    if (!rt.acceptingStream) return;
+    await finalizeTurn(sessionId, rt, agentStartedAt);
+  } catch (err) {
+    console.error(`[acp:${sessionId}] adopted autonomous turn failed`, err);
+    await finishTurnSessionStatus(sessionId, rt, "idle").catch(() => {});
+  } finally {
+    rt.running = false;
+    rt.acceptingStream = false;
+    void dequeueTurn(rt);
+  }
+}
+
+/** OMP answers a prompt issued during its own autonomous turn with session_busy. */
+function isSessionBusyError(err: unknown): boolean {
+  if (err instanceof AcpRpcError) {
+    const data = err.data as { reason?: unknown } | null | undefined;
+    if (data?.reason === "session_busy") return true;
+  }
+  return err instanceof Error && /Agent is already processing/i.test(err.message);
+}
+
+/**
+ * session/prompt rejected as session_busy: the agent is mid-turn on an
+ * autonomous run it started itself (a finished background job is injected as a
+ * follow-up), and ACP's PromptRequest has no streamingBehavior — queueing over
+ * the wire is impossible, so wait the turn out (acceptingStream is already
+ * open, so its stream lands in this turn's message) and re-prompt. Stop during
+ * the wait yields a cancelled result instead of a busy error.
+ */
+async function promptAwaitingAgentIdle(
+  rt: SessionRuntime,
+  client: AcpClient,
+  promptText: string,
+): Promise<{ stopReason?: string; raw: unknown }> {
+  const deadline = Date.now() + PROMPT_BUSY_MAX_WAIT_MS;
+  for (;;) {
+    try {
+      return await client.prompt(promptText);
+    } catch (err) {
+      if (!rt.acceptingStream) return { stopReason: "cancelled", raw: null };
+      if (!isSessionBusyError(err)) throw err;
+      if (Date.now() >= deadline) throw err;
+      // Drain the agent's own turn into this turn's message, then try again.
+      // Long silent model calls make "quiet" ≠ "idle", so settle exiting alone
+      // doesn't mean the retry will land — back off between attempts.
+      await settlePromptStream(rt);
+      await waitForPendingClientRequests(rt);
+      if (!rt.acceptingStream) return { stopReason: "cancelled", raw: null };
+      await new Promise((r) => setTimeout(r, PROMPT_BUSY_RETRY_MS));
+    }
+  }
+}
+
 async function runTurn(
   rt: SessionRuntime,
   sessionId: string,
@@ -2850,7 +2975,7 @@ async function runTurn(
     });
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     agentStartedAt = Date.now();
-    const result = await client.prompt(promptText);
+    const result = await promptAwaitingAgentIdle(rt, client, promptText);
     appendDeepLog({
       kind: "prompt-complete",
       sessionId,
@@ -3002,12 +3127,26 @@ async function dequeueTurn(rt: SessionRuntime) {
   }
   const next = rt.turnQueue.shift();
   if (!next) return;
+  // Claim synchronously across the awaits below — otherwise an autonomous
+  // update arriving in the gap sees an idle runtime and adopts a turn that the
+  // queued runTurn is about to start (two turns, one runtime).
+  rt.running = true;
+  let started = false;
   try {
     const settings = await getSettings();
     const acpReady = ensureAcp(rt.sessionId, next.opts);
+    started = true;
     await runTurn(rt, rt.sessionId, next.text, "", next.opts, settings, acpReady);
   } catch (err) {
     console.error(`[acp:${rt.sessionId}] queued turn failed`, err);
+  } finally {
+    if (!started) {
+      // Failed before runTurn claimed the turn — release the claim or the
+      // chat stays "running" and the rest of the queue never drains.
+      rt.running = false;
+      await updateSession(rt.sessionId, { status: "idle" }).catch(() => {});
+      void dequeueTurn(rt);
+    }
   }
 }
 
@@ -3016,6 +3155,7 @@ export async function cancelPrompt(sessionId: string) {
   if (rt) {
     rt.acceptingStream = false;
     rt.running = false;
+    rt.lastStopAt = Date.now();
     // Stop drops every queued turn too — the user asked to halt work.
     rt.turnQueue = [];
     rt.openTextPartId = null;

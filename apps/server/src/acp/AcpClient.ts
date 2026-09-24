@@ -92,6 +92,23 @@ export type AcpRequest =
   | { kind: "create_plan"; id: JsonRpcId; params: Record<string, unknown> }
   | { kind: "elicitation"; id: JsonRpcId; params: Record<string, unknown> };
 
+/**
+ * A JSON-RPC error response from the agent, with its structured `code`/`data`
+ * kept: callers classify failures by `data` (OMP answers a prompt issued
+ * during its own autonomous turn with `data.reason === "session_busy"`), not
+ * by matching message text.
+ */
+export class AcpRpcError extends Error {
+  readonly code: number | undefined;
+  readonly data: unknown;
+  constructor(message: string, code?: number, data?: unknown) {
+    super(message);
+    this.name = "AcpRpcError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
 export type ConfigOption = {
   id: string;
   name?: string;
@@ -1402,9 +1419,13 @@ export class AcpClient extends EventEmitter {
       if (!waiter) return;
       this.pending.delete(id);
       if (msg.error) {
-        const err = msg.error as { message?: string; data?: unknown };
+        const err = msg.error as { code?: number; message?: string; data?: unknown };
         waiter.reject(
-          new Error(err.message ?? "ACP error" + (err.data ? ` ${JSON.stringify(err.data)}` : "")),
+          new AcpRpcError(
+            err.message ?? "ACP error" + (err.data ? ` ${JSON.stringify(err.data)}` : ""),
+            err.code,
+            err.data,
+          ),
         );
       } else {
         waiter.resolve(msg.result);

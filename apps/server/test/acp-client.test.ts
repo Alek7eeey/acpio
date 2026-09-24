@@ -9,6 +9,7 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import {
   AcpClient,
+  AcpRpcError,
   listAgentModes,
   type AcpRequest,
   type AcpUpdate,
@@ -288,6 +289,27 @@ describe("AcpClient against the fake agent", () => {
       });
     } finally {
       AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
+  it("a session_busy rejection keeps its JSON-RPC code and data for callers", async () => {
+    process.env.FAKE_PROMPT_BUSY = "1";
+    try {
+      await withClient(async (client) => {
+        let caught: unknown;
+        try {
+          await client.prompt("hello");
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(AcpRpcError);
+        const rpc = caught as AcpRpcError;
+        expect(rpc.message).toMatch(/Agent is already processing/);
+        expect(rpc.code).toBe(-32003);
+        expect(rpc.data).toEqual({ reason: "session_busy", hint: "steer|followUp|wait" });
+      });
+    } finally {
+      delete process.env.FAKE_PROMPT_BUSY;
     }
   });
 

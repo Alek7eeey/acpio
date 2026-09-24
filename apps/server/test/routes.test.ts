@@ -1520,6 +1520,72 @@ describe("durable questions", () => {
   });
 });
 
+describe("session_busy and autonomous turns", () => {
+  it("waits out an agent turn it didn't prompt and delivers the message instead of erroring", async () => {
+    await connectAgent();
+    process.env.FAKE_PROMPT_BUSY_ONCE = "1";
+    try {
+      const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+      expect(created.statusCode).toBe(200);
+      const session = created.json();
+      runtimeSessionIds.push(session.id);
+      await waitForAcpSessionId(session.id);
+
+      await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "busy once" },
+      });
+      // The first session/prompt answers session_busy; the turn must retry and
+      // land the answer rather than surface the raw agent error as chat state.
+      await waitForDetail(
+        session.id,
+        (d) =>
+          d.status === "idle" && textParts(d).some((t) => t.includes("echo: busy once")),
+      );
+    } finally {
+      delete process.env.FAKE_PROMPT_BUSY_ONCE;
+    }
+  });
+
+  it("adopts a turn the agent started itself and queues the next user prompt behind it", async () => {
+    await connectAgent();
+    process.env.FAKE_AUTONOMOUS = "1";
+    try {
+      const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+      expect(created.statusCode).toBe(200);
+      const session = created.json();
+      runtimeSessionIds.push(session.id);
+      await waitForAcpSessionId(session.id);
+
+      // The host never prompted this turn — without adoption its chunks were
+      // dropped and the chat sat idle-looking while the agent worked.
+      await waitForDetail(session.id, (d) =>
+        textParts(d).some((t) => t.includes("autonomous start")),
+      );
+      const turn = await app.inject({ method: "GET", url: `/api/sessions/${session.id}/turn` });
+      expect(turn.statusCode).toBe(200);
+      expect(turn.json().running).toBe(true);
+
+      await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "queued behind autonomous" },
+      });
+      await waitForDetail(session.id, (d) => {
+        const texts = textParts(d);
+        return (
+          d.status === "idle" &&
+          texts.some((t) => t.includes("autonomous done")) &&
+          texts.some((t) => t.includes("echo: queued behind autonomous"))
+        );
+      });
+    } finally {
+      delete process.env.FAKE_AUTONOMOUS;
+    }
+  });
+});
+
 describe("disabled providers", () => {
   it("flags a switched-off harness in /api/adapters and drops it from agent status", async () => {
     await connectAgent();
