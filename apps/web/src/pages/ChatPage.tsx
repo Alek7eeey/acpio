@@ -96,7 +96,8 @@ import { MarkdownContent } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
-import { isImageFile, normalizeCwd } from "../lib/pathSegments";
+import { canonicalCwd } from "@acpio/shared";
+import { isImageFile } from "../lib/pathSegments";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import {
   prefersHotkeyHints,
@@ -3859,7 +3860,7 @@ function ChatThread() {
   const projectMcp = useAppStore((s) => s.projectMcp);
   const refreshProjectMcp = useAppStore((s) => s.refreshProjectMcp);
   const projectServers = activeSession
-    ? (projectMcp[normalizeCwd(activeSession.cwd)]?.servers ?? [])
+    ? (projectMcp[canonicalCwd(activeSession.cwd)]?.servers ?? [])
     : [];
   const chatMcp = activeSession
     ? effectiveMcpServers(

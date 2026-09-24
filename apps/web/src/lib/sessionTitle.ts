@@ -7,7 +7,7 @@ export {
 
 import type { MessageDto, SessionDto } from "@acpio/shared";
 import { isShellSession, sanitizeTitleSource, truncateSessionTitle } from "@acpio/shared";
-import { normalizeCwd } from "./pathSegments.js";
+import { canonicalCwd } from "@acpio/shared";
 
 export function sortSessions(list: SessionDto[]) {
   return [...list].sort(
@@ -54,7 +54,7 @@ export function sessionRowMark(
 export function groupByFolder(list: SessionDto[], knownFolders: string[] = []) {
   const map = new Map<string, SessionDto[]>();
   for (const s of list) {
-    const key = normalizeCwd(s.cwd);
+    const key = canonicalCwd(s.cwd);
     const bucket = map.get(key);
     if (bucket) bucket.push(s);
     else map.set(key, [s]);

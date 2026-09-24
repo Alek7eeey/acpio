@@ -7,7 +7,8 @@ import { useT } from "../lib/i18n";
 import { harnessLabel, harnessNamesForCopy } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
 import { sessionTreeDisplayTitle, sessionActivityAt, sessionRowMark, sortSessions, groupByFolder } from "../lib/sessionTitle";
-import { folderLabel, normalizeCwd } from "../lib/pathSegments";
+import { canonicalCwd } from "@acpio/shared";
+import { folderLabel } from "../lib/pathSegments";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { useAppStore } from "../lib/store";
@@ -393,7 +394,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const folderMenuActiveCount = useMemo(
     () =>
       folderMenu?.cwd
-        ? sessions.filter((s) => !s.archived && normalizeCwd(s.cwd) === folderMenu.cwd).length
+        ? sessions.filter((s) => !s.archived && canonicalCwd(s.cwd) === folderMenu.cwd).length
         : 0,
     [folderMenu?.cwd, sessions],
   );
@@ -428,7 +429,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   /** Move every active chat of a folder to the archive in one go. */
   const archiveFolderSessions = (cwd: string) => {
     const ids = sessions
-      .filter((s) => !s.archived && normalizeCwd(s.cwd) === cwd)
+      .filter((s) => !s.archived && canonicalCwd(s.cwd) === cwd)
       .map((s) => s.id);
     setFolderMenu(null);
     if (!ids.length) return;
@@ -1454,7 +1455,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const activeFolderKey = useMemo(() => {
     const active = sessions.find((s) => s.id === activeSessionId);
     if (!active || active.archived) return null;
-    return normalizeCwd(active.cwd) || NO_FOLDER_KEY;
+    return canonicalCwd(active.cwd) || NO_FOLDER_KEY;
   }, [sessions, activeSessionId]);
 
   /**
@@ -2045,7 +2046,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
                       row.kind === "session" && row.indent
                         ? `${styles.treeVirtNested}${
                             activeFolderKey != null &&
-                            (normalizeCwd(row.session.cwd) || NO_FOLDER_KEY) === activeFolderKey
+                            (canonicalCwd(row.session.cwd) || NO_FOLDER_KEY) === activeFolderKey
                               ? ` ${styles.treeVirtNestedActive}`
                               : ""
                           }`

@@ -9,7 +9,7 @@ import {
   normalizeChatMetaChips,
   normalizeChatTreeRecentLimit,
   normalizeCustomAgents,
-  normalizeMcpCwd,
+  canonicalCwd,
   normalizeMcpProjectFiles,
   readSettingsSchema,
 } from "@acpio/shared";
@@ -327,7 +327,7 @@ function mergeSettings(raw: unknown): AppSettings {
     const folders: AppSettings["mcpFolderConfigs"] = {};
     if (rawFolders && typeof rawFolders === "object" && !Array.isArray(rawFolders)) {
       for (const [rawCwd, value] of Object.entries(rawFolders as Record<string, unknown>)) {
-        const key = normalizeMcpCwd(rawCwd);
+        const key = canonicalCwd(rawCwd);
         if (!key) continue;
         const cfg = (value ?? {}) as {
           overrides?: unknown;
@@ -410,7 +410,7 @@ export async function getSettings(): Promise<AppSettings> {
 
 /** Drop a folder's MCP override (the folder and its chats are gone). */
 export async function forgetMcpFolderConfig(cwd: string): Promise<void> {
-  const key = normalizeMcpCwd(cwd);
+  const key = canonicalCwd(cwd);
   if (!key) return;
   const current = await getSettings();
   if (!current.mcpFolderConfigs[key]) return;

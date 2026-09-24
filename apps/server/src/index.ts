@@ -8,7 +8,7 @@ import cors from "@fastify/cors";
 import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
-import { pinResolvedSessionModels, reconcileStaleSessions } from "./services/sessions.js";
+import { pinResolvedSessionModels, reconcileStaleSessions, repairStoredCwds } from "./services/sessions.js";
 import { registerRoutes } from "./routes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
@@ -111,6 +111,17 @@ async function main() {
     }
   } catch (err) {
     console.error("[sessions] model pin failed", err);
+  }
+
+  // Chats and folders stored in the pre-fix cwd form (a drive root written as
+  // the drive-relative "C:") cannot boot any agent — rewrite them in place.
+  try {
+    const repaired = await repairStoredCwds();
+    if (repaired.length) {
+      console.log(`[sessions] repaired cwd: ${repaired.join(", ")}`);
+    }
+  } catch (err) {
+    console.error("[sessions] cwd repair failed", err);
   }
 }
 

@@ -330,7 +330,7 @@ export type McpServerConfig = {
 
 /**
  * Per-folder MCP overrides, keyed by the folder's canonical cwd (see
- * `normalizeMcpCwd`). A folder can switch individual servers on or off — a
+ * `canonicalCwd`). A folder can switch individual servers on or off — a
  * server that is off globally included, so the global list stays the single
  * place a server is defined — and add servers that only exist for chats
  * opened in it.
@@ -506,11 +506,17 @@ export function mcpServersFingerprint(servers: McpServerConfig[] | undefined): s
 }
 
 /**
- * Canonical folder key for MCP folder configs: forward slashes, no trailing
- * separator. `E:\proj` and `E:/proj/` must resolve to one config.
+ * Canonical working-directory form: forward slashes, no trailing separator —
+ * except a filesystem root, where the separator is the whole path. `E:\proj`
+ * and `E:/proj/` are one folder, while `C:\` and `C:/` must stay roots: a
+ * stripped drive root becomes the drive-relative `C:`, which harnesses reject
+ * outright (OMP answers `session/new` with `-32603 Internal error`).
  */
-export function normalizeMcpCwd(cwd: string | null | undefined): string {
-  return (cwd ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+export function canonicalCwd(cwd: string | null | undefined): string {
+  const slashed = (cwd ?? "").trim().replace(/\\/g, "/");
+  if (/^\/+$/.test(slashed)) return "/";
+  const trimmed = slashed.replace(/\/+$/, "");
+  return /^[a-zA-Z]:$/.test(trimmed) ? `${trimmed}/` : trimmed;
 }
 
 /** MCP override saved for a folder, or undefined when the folder has none. */
@@ -518,7 +524,7 @@ export function mcpFolderConfig(
   settings: { mcpFolderConfigs?: Record<string, McpFolderConfig> } | null | undefined,
   cwd: string | null | undefined,
 ): McpFolderConfig | undefined {
-  const key = normalizeMcpCwd(cwd);
+  const key = canonicalCwd(cwd);
   if (!key) return undefined;
   return settings?.mcpFolderConfigs?.[key];
 }

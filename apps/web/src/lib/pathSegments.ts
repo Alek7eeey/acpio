@@ -1,18 +1,12 @@
+import { canonicalCwd } from "@acpio/shared";
+
 /** Path helpers shared by the server-browse dialogs (attach + folder picker). */
 
 export const DRIVES_ROOT = "Computer";
 
-/**
- * Canonical working-directory form: forward slashes, no trailing separator.
- * `E:\proj` and `E:/proj/` must group as the same folder in the chat tree.
- */
-export function normalizeCwd(cwd: string | null | undefined): string {
-  return (cwd ?? "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
-}
-
 /** Last segment of a working directory — the label used by the tree, board and menus. */
 export function folderLabel(cwd: string, noFolderLabel: string): string {
-  const normalized = normalizeCwd(cwd);
+  const normalized = canonicalCwd(cwd);
   if (!normalized) return noFolderLabel;
   const parts = normalized.split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || normalized;

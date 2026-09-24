@@ -4,26 +4,26 @@ import type { AgentProvider, HarnessSessionDto, SessionDto } from "@acpio/shared
 import { SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
-import { normalizeCwd } from "../lib/pathSegments";
+import { canonicalCwd } from "@acpio/shared";
 import { ServerFolderBrowseDialog } from "./ServerFolderBrowseDialog";
 import styles from "./AppShell.module.css";
 
 function folderName(pathValue: string, fallback: string) {
-  const normalized = normalizeCwd(pathValue);
+  const normalized = canonicalCwd(pathValue);
   const parts = normalized.split("/").filter(Boolean);
   return parts[parts.length - 1] || normalized || fallback;
 }
 
 function cwdMatchesFolder(sessionCwd: string, folderCwd: string) {
-  const a = normalizeCwd(sessionCwd).toLowerCase();
-  const b = normalizeCwd(folderCwd).toLowerCase();
+  const a = canonicalCwd(sessionCwd).toLowerCase();
+  const b = canonicalCwd(folderCwd).toLowerCase();
   if (!b) return true;
   if (!a) return false;
   return a === b;
 }
 
 function parentPath(pathValue: string) {
-  const normalized = normalizeCwd(pathValue);
+  const normalized = canonicalCwd(pathValue);
   const cut = normalized.lastIndexOf("/");
   if (cut <= 0) return "";
   const parent = normalized.slice(0, cut);
@@ -40,7 +40,7 @@ export function collectRecentCwds(
   const seen = new Set<string>();
   const out: string[] = [];
   const push = (raw: string | null | undefined) => {
-    const key = normalizeCwd(raw);
+    const key = canonicalCwd(raw);
     if (!key || seen.has(key.toLowerCase())) return;
     seen.add(key.toLowerCase());
     out.push((raw ?? "").trim());

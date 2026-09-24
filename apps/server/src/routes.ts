@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, normalizeMcpCwd, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, canonicalCwd, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
@@ -524,7 +524,7 @@ export async function registerRoutes(app: FastifyInstance) {
       [...folders].map(
         async (folder) =>
           [
-            normalizeMcpCwd(folder),
+            canonicalCwd(folder),
             await discoverProjectMcp(folder, settings.mcpProjectFiles),
           ] as const,
       ),
@@ -596,7 +596,7 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.delete("/api/folders", async (req) => {
     const query = z.object({ cwd: z.string().min(1) }).parse(req.query);
-    const normalized = normalizeMcpCwd(query.cwd);
+    const normalized = canonicalCwd(query.cwd);
     // Tear down live agents of the chats inside before deleting their rows.
     for (const s of await listSessions()) {
       if (s.cwd === normalized) {

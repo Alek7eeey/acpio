@@ -27,7 +27,7 @@ import {
   mcpServersFingerprint,
   mcpCommandNeedsAbsolute,
   mcpStdioEnv,
-  normalizeMcpCwd,
+  canonicalCwd,
   toAcpMcpServer,
   boardColumn,
 } from "@acpio/shared";
@@ -779,7 +779,11 @@ describe("effectiveMcpServers", () => {
     };
     expect(mcpFolderConfig(settings, "")).toBeUndefined();
     expect(mcpFolderConfig(settings, "  ")).toBeUndefined();
-    expect(normalizeMcpCwd("E:\\proj\\")).toBe("E:/proj");
+    expect(canonicalCwd("E:\\proj\\")).toBe("E:/proj");
+    expect(canonicalCwd("C:\\")).toBe("C:/");
+    expect(canonicalCwd("C:")).toBe("C:/");
+    expect(canonicalCwd("/")).toBe("/");
+    expect(canonicalCwd("")).toBe("");
   });
 
   it("appends servers from the folder's own MCP files", () => {

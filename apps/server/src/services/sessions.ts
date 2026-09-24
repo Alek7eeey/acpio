@@ -12,13 +12,14 @@ import type {
   AcpUsage,
 } from "@acpio/shared";
 import {
+  canonicalCwd,
   modelForProvider,
   modelParamsForProvider,
   SHELL_SESSION_PROVIDER,
 } from "@acpio/shared";
 import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
-import { messageParts, messages, sessions } from "../db/schema.js";
+import { boardFolders, chatFolders, messageParts, messages, sessions } from "../db/schema.js";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
 import { rememberFolders } from "./folders.js";
@@ -40,7 +41,7 @@ function mapSession(
     id: row.id,
     title: row.title,
     provider: row.provider as AgentProvider,
-    cwd: row.cwd,
+    cwd: canonicalCwd(row.cwd),
     mode: row.mode as AgentMode,
     status: row.status as SessionStatus,
     acpSessionId: row.acpSessionId,
@@ -169,16 +170,43 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
  */
 export async function getSessionCwd(id: string): Promise<string | null> {
   const rows = await db.select({ cwd: sessions.cwd }).from(sessions).where(eq(sessions.id, id)).limit(1);
-  return rows[0]?.cwd ?? null;
+  return rows[0] ? canonicalCwd(rows[0].cwd) : null;
 }
 
 /**
- * Canonical working-directory form: forward slashes, no trailing separator.
- * `E:\proj` and `E:/proj/` are the same folder — the chat tree must not
- * split them into two groups, so every write stores one canonical form.
+ * Rewrite working directories stored in the pre-fix canonical form. A drive
+ * root used to be written as the drive-relative `C:` (see `canonicalCwd`),
+ * which no harness can start in — OMP answers `session/new` with an opaque
+ * `-32603 Internal error` and the chat spins forever. Folder MCP overrides
+ * hang off the same key, so chats and folders move together. Idempotent:
+ * only values whose canonical form differs are touched.
  */
-export function normalizeCwd(cwd: string): string {
-  return cwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+export async function repairStoredCwds(): Promise<string[]> {
+  const stored = [
+    ...(await db.selectDistinct({ cwd: sessions.cwd }).from(sessions)),
+    ...(await db.select({ cwd: chatFolders.cwd }).from(chatFolders)),
+    ...(await db.selectDistinct({ cwd: boardFolders.cwd }).from(boardFolders)),
+  ];
+  const stale = new Map<string, string>();
+  for (const row of stored) {
+    const next = canonicalCwd(row.cwd);
+    if (next && next !== row.cwd) stale.set(row.cwd, next);
+  }
+  if (!stale.size) return [];
+
+  for (const [from, to] of stale) {
+    await db.update(sessions).set({ cwd: to }).where(eq(sessions.cwd, from));
+    await db.update(boardFolders).set({ cwd: to }).where(eq(boardFolders.cwd, from));
+    // chat_folders keys on cwd, and both spellings can be present at once.
+    const [existing] = await db
+      .select({ cwd: chatFolders.cwd })
+      .from(chatFolders)
+      .where(eq(chatFolders.cwd, to))
+      .limit(1);
+    if (existing) await db.delete(chatFolders).where(eq(chatFolders.cwd, from));
+    else await db.update(chatFolders).set({ cwd: to }).where(eq(chatFolders.cwd, from));
+  }
+  return [...stale].map(([from, to]) => `${from} -> ${to}`);
 }
 
 export async function createSession(input: {
@@ -202,7 +230,7 @@ export async function createSession(input: {
     : await db.select().from(sessions);
   const sortOrder = siblings.reduce((max, s) => Math.max(max, s.sortOrder ?? 0), -1) + 1;
   const settings = await getSettings();
-  const cwd = normalizeCwd(input.cwd);
+  const cwd = canonicalCwd(input.cwd);
   // Pin the model this chat starts on. An empty `model` means "follow the
   // settings default", which silently follows every pick made in ANY chat: the
   // next message then boots a different model on the same ACP session, wiping
@@ -262,7 +290,7 @@ export async function updateSession(
     doneAt?: Date | null;
   }>,
 ): Promise<SessionDto | null> {
-  if (patch.cwd !== undefined) patch.cwd = normalizeCwd(patch.cwd);
+  if (patch.cwd !== undefined) patch.cwd = canonicalCwd(patch.cwd);
   const [row] = await db
     .update(sessions)
     .set({ ...patch, updatedAt: new Date() })

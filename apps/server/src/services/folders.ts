@@ -1,7 +1,7 @@
 import { and, eq, isNull, ne, asc, sql } from "drizzle-orm";
 import { db } from "../db/client.js";
 import { chatFolders, sessions } from "../db/schema.js";
-import { normalizeCwd } from "./sessions.js";
+import { canonicalCwd } from "@acpio/shared";
 
 /**
  * Folders that have ever held chats: persisted rows plus every cwd currently
@@ -40,7 +40,7 @@ export async function listFolders(): Promise<string[]> {
 /** Record folders (used by the web to seed/migrate locally known ones). */
 export async function rememberFolders(cwds: string[]): Promise<void> {
   for (const raw of cwds) {
-    const cwd = normalizeCwd(raw);
+    const cwd = canonicalCwd(raw);
     if (!cwd) continue;
 
     // Check if already exists first
@@ -69,7 +69,7 @@ export async function reorderFolders(
   items: Array<{ cwd: string; sortOrder: number }>,
 ): Promise<string[]> {
   for (const item of items) {
-    const normalized = normalizeCwd(item.cwd);
+    const normalized = canonicalCwd(item.cwd);
     if (!normalized) continue;
     await db
       .update(chatFolders)
@@ -88,7 +88,7 @@ export async function reorderFolders(
  * them when its empty shell is removed.
  */
 export async function deleteFolder(cwd: string): Promise<boolean> {
-  const normalized = normalizeCwd(cwd);
+  const normalized = canonicalCwd(cwd);
   if (!normalized) return false;
   await db
     .delete(sessions)

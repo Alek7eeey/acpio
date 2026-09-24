@@ -30,7 +30,7 @@ import { api } from "./api";
 import { turnStillHasLiveTools } from "./assistantTurnTimeline.js";
 import { groupByFolder } from "./sessionTitle";
 import { createTranslator } from "./translator";
-import { normalizeCwd } from "./pathSegments";
+import { canonicalCwd } from "@acpio/shared";
 import { migrateExpandedStepsMessageId } from "./expandedSteps";
 import { applyAppearance } from "./appearance";
 import {
@@ -199,7 +199,7 @@ type AppState = {
   deleteFolder: (cwd: string) => Promise<void>;
   /**
    * MCP servers discovered in each folder's own files, keyed by canonical cwd
-   * (`normalizeCwd`). Refreshed from the server; an unfetched folder simply
+   * (`canonicalCwd`). Refreshed from the server; an unfetched folder simply
    * contributes nothing to the chat until it is scanned.
    */
   projectMcp: Record<string, ProjectMcpInfo>;
@@ -2277,7 +2277,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const previousActiveId = get().activeSessionId;
     const id = newSessionId();
     const now = new Date().toISOString();
-    const cwdValue = normalizeCwd(trimmedCwd ?? get().settings.defaultCwd ?? "");
+    const cwdValue = canonicalCwd(trimmedCwd ?? get().settings.defaultCwd ?? "");
     const pinnedModel = model?.trim();
     const optimistic: SessionDto = {
       id,

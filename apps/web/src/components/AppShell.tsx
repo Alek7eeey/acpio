@@ -28,7 +28,7 @@ import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessLabel } from "../lib/harness";
-import { normalizeCwd } from "../lib/pathSegments";
+import { canonicalCwd } from "@acpio/shared";
 import { firstUserTitleLine, localizePlaceholderSessionTitle, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
@@ -53,7 +53,7 @@ const SHEET_SNAPS_CHAT = [0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.94] as const;
 const SHEET_SNAPS_SETTINGS = [0.42, 0.5, 0.58, 0.66, 0.74, 0.82, 0.9] as const;
 
 function headerFolderLabel(cwd: string | null | undefined) {
-  const normalized = normalizeCwd(cwd);
+  const normalized = canonicalCwd(cwd);
   if (!normalized) return "";
   if (normalized.length <= 28) return normalized;
   const parts = normalized.split("/").filter(Boolean);

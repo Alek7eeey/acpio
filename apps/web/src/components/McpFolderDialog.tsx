@@ -7,7 +7,7 @@ import {
   type McpServerConfig,
 } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { normalizeCwd } from "../lib/pathSegments";
+import { canonicalCwd } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import {
   mcpEnvConfigDraft,
@@ -53,7 +53,7 @@ export function McpFolderDialog({
 
   if (!open || !cwd) return null;
 
-  const key = normalizeCwd(cwd);
+  const key = canonicalCwd(cwd);
   const config = mcpFolderConfig(settings, key);
   const overrides = config?.overrides ?? {};
   // Every app-configured server is listed, including the ones switched off

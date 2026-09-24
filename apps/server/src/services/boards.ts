@@ -3,7 +3,7 @@ import type { BoardDto } from "@acpio/shared";
 import { db } from "../db/client.js";
 import { boardFolders, boards, sessions } from "../db/schema.js";
 import { listFolders } from "./folders.js";
-import { normalizeCwd } from "./sessions.js";
+import { canonicalCwd } from "@acpio/shared";
 
 /** Attach each board row's folders (ordered) — one query for all of them. */
 async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<BoardDto[]> {
@@ -90,7 +90,7 @@ export async function setBoardFolders(boardId: string, cwds: string[]): Promise<
   const seen = new Set<string>();
   const ordered: string[] = [];
   for (const raw of cwds) {
-    const cwd = normalizeCwd(raw);
+    const cwd = canonicalCwd(raw);
     if (!cwd || seen.has(cwd)) continue;
     seen.add(cwd);
     ordered.push(cwd);
@@ -105,7 +105,7 @@ export async function setBoardFolders(boardId: string, cwds: string[]): Promise<
 
 /** True when the board exists and the cwd is one of its configured folders. */
 export async function boardAcceptsCwd(boardId: string, cwd: string): Promise<boolean> {
-  const key = normalizeCwd(cwd);
+  const key = canonicalCwd(cwd);
   if (!key) return false;
   const rows = await db
     .select({ cwd: boardFolders.cwd })

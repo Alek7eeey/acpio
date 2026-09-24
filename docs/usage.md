@@ -185,6 +185,11 @@ The adapter then appears on its own:
   the adapter and includes install steps.
 - **Model does not apply** — check that the value is in the agent's model list; Cursor accepts
   only the listed `model[param=value]` combinations.
+- **A chat "thinks" forever with nothing but `Internal error`** — the agent rejected the
+  chat's working directory. OMP refuses `session/new` for a drive-relative path (`C:` instead
+  of `C:/`); folder paths are stored in one canonical form (forward slashes, no trailing
+  separator, but a drive root stays a root), and rows from older versions are repaired when
+  the server starts.
 - **After `git pull`** — hard-refresh the browser (`Ctrl+Shift+R`): old CSS/JS modules are cached.
 
 ## Mobile and remote access

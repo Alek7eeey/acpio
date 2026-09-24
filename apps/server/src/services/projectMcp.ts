@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { type McpServerConfig, type ProjectMcpInfo, normalizeMcpCwd, normalizeMcpProjectFiles, parseMcpProjectFile } from "@acpio/shared";
+import { type McpServerConfig, type ProjectMcpInfo, canonicalCwd, normalizeMcpProjectFiles, parseMcpProjectFile } from "@acpio/shared";
 
 /**
  * Read the configured MCP files under one chat's folder (Settings → MCP list,
@@ -14,7 +14,7 @@ export async function discoverProjectMcp(
   cwd: string | null | undefined,
   files: unknown,
 ): Promise<ProjectMcpInfo> {
-  const root = normalizeMcpCwd(cwd);
+  const root = canonicalCwd(cwd);
   const rels = root ? normalizeMcpProjectFiles(files) : [];
   if (!root || !rels.length) return { servers: [], warnings: [] };
 

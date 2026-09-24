@@ -1,31 +1,45 @@
 import { describe, it, expect } from "vitest";
-import { DRIVES_ROOT, isImageFile, normalizeCwd, splitPathSegments } from "./pathSegments";
+import { canonicalCwd } from "@acpio/shared";
+import { DRIVES_ROOT, isImageFile, splitPathSegments } from "./pathSegments";
 
-describe("normalizeCwd", () => {
+describe("canonicalCwd", () => {
   it("canonicalizes backslashes to forward slashes", () => {
-    expect(normalizeCwd("E:\\testYura")).toBe("E:/testYura");
+    expect(canonicalCwd("E:\\testYura")).toBe("E:/testYura");
   });
 
   it("strips trailing separators in either style", () => {
-    expect(normalizeCwd("E:/testYura/")).toBe("E:/testYura");
-    expect(normalizeCwd("E:\\testYura\\")).toBe("E:/testYura");
+    expect(canonicalCwd("E:/testYura/")).toBe("E:/testYura");
+    expect(canonicalCwd("E:\\testYura\\")).toBe("E:/testYura");
+  });
+
+  it("keeps a windows drive root rooted", () => {
+    expect(canonicalCwd("C:\\")).toBe("C:/");
+    expect(canonicalCwd("C:/")).toBe("C:/");
+    // A drive-relative "C:" is not a folder any harness can start in (OMP
+    // rejects session/new with -32603): repair it to the drive root.
+    expect(canonicalCwd("C:")).toBe("C:/");
+  });
+
+  it("keeps the unix root rooted", () => {
+    expect(canonicalCwd("/")).toBe("/");
+    expect(canonicalCwd("\\")).toBe("/");
   });
 
   it("treats mixed-slash spellings of the same folder identically", () => {
-    const forward = normalizeCwd("E:/testYura");
-    const backward = normalizeCwd("E:\\testYura");
+    const forward = canonicalCwd("E:/testYura");
+    const backward = canonicalCwd("E:\\testYura");
     expect(forward).toBe(backward);
   });
 
   it("keeps unix paths intact", () => {
-    expect(normalizeCwd("/home/user/proj/")).toBe("/home/user/proj");
+    expect(canonicalCwd("/home/user/proj/")).toBe("/home/user/proj");
   });
 
   it("returns an empty string for empty/nullish input", () => {
-    expect(normalizeCwd("")).toBe("");
-    expect(normalizeCwd("   ")).toBe("");
-    expect(normalizeCwd(null)).toBe("");
-    expect(normalizeCwd(undefined)).toBe("");
+    expect(canonicalCwd("")).toBe("");
+    expect(canonicalCwd("   ")).toBe("");
+    expect(canonicalCwd(null)).toBe("");
+    expect(canonicalCwd(undefined)).toBe("");
   });
 });
 
