@@ -328,16 +328,16 @@ describe("ModelPicker", () => {
     await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
     expect(await screen.findByText("Избранное")).toBeTruthy();
     expect(screen.getByText("Недавние")).toBeTruthy();
-    // Duplicated ids: favorited claude also stays in the main list. The star
-    // marker must appear on every row showing that model, nowhere else.
+    // Every row of the pinned model carries the star marker — and there is only
+    // one such row: the general list drops the ids its sections already show.
     const starred = screen
       .getAllByRole("option")
       .filter((el) => el.querySelector("svg") && el.textContent?.includes("Claude Sonnet"));
-    expect(starred.length).toBeGreaterThan(0);
-    const unstarredDeepSeek = screen
+    expect(starred).toHaveLength(1);
+    const recentRows = screen
       .getAllByRole("option")
       .filter((el) => !el.querySelector("svg") && el.textContent?.includes("DeepSeek R1"));
-    expect(unstarredDeepSeek.length).toBeGreaterThan(0);
+    expect(recentRows).toHaveLength(1);
   });
 
   it("hides pinned sections while a search filter is active", async () => {
@@ -369,7 +369,6 @@ describe("ModelPicker", () => {
     const onToggleFavorite = vi.fn();
     renderPicker({ onToggleFavorite, favoriteModels: ["claude"] });
     await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
-    // The favorite row appears twice (section + main list); either may be clicked.
     const rows = screen
       .getAllByRole("option")
       .filter((el) => el.textContent?.includes("Claude Sonnet"));
@@ -380,9 +379,8 @@ describe("ModelPicker", () => {
 
   it("centers the favorites-section row when the selected model is favorited", async () => {
     const user = userEvent.setup();
-    // Track which DOM node gets scrolled. The favorited model renders twice
-    // (Избранное + general list); the target must be the favorites copy, which
-    // comes first in DOM order and carries the section star marker.
+    // Track which DOM node gets scrolled: the favorited model has exactly one
+    // row (Избранное), which is the node the picker must center.
     const scrolled: HTMLElement[] = [];
     HTMLElement.prototype.scrollIntoView = function scroll(this: HTMLElement) {
       scrolled.push(this);
@@ -393,7 +391,7 @@ describe("ModelPicker", () => {
     const rows = screen
       .getAllByRole("option")
       .filter((el) => el.textContent?.includes("Claude Sonnet"));
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(1);
     expect(scrolled.length).toBeGreaterThan(0);
     const last = scrolled[scrolled.length - 1];
     const favRow = rows[0];
@@ -401,7 +399,7 @@ describe("ModelPicker", () => {
     expect(last === favRow || last?.contains(favRow)).toBe(true);
   });
 
-  it("opens the ⋯ flyout from a favorites row while the general-list copy is scrolled away", async () => {
+  it("opens the ⋯ flyout from a favorites row", async () => {
     const user = userEvent.setup();
     const effort = {
       id: "effort",
@@ -420,28 +418,10 @@ describe("ModelPicker", () => {
       onParamsOpen: () => {},
     });
     await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
-    // Rows in DOM order: claude (Избранное), gpt-4o, claude (general list), deepseek.
-    const rows = await screen.findAllByRole("option");
-    const favRow = rows[0].parentElement as HTMLElement;
-    const mainRow = rows[2].parentElement as HTMLElement;
-    const list = favRow.parentElement as HTMLElement;
-    const box = (top: number) =>
-      ({
-        top,
-        left: 100,
-        bottom: top + 30,
-        right: 300,
-        width: 200,
-        height: 30,
-        x: 100,
-        y: top,
-      }) as DOMRect;
-    // jsdom reports zero rects, so the picker's "⋯ scrolled out of the list"
-    // check is inert here: give the list a viewport and push the general-list
-    // copy far below it, the way a long model list looks in the browser.
-    list.getBoundingClientRect = () => box(100);
-    within(favRow).getByRole("button", { name: "Effort" }).getBoundingClientRect = () => box(120);
-    within(mainRow).getByRole("button", { name: "Effort" }).getBoundingClientRect = () => box(1400);
+    await screen.findByText("Избранное");
+    const favRow = screen
+      .getAllByRole("option")
+      .filter((el) => el.textContent?.includes("Claude Sonnet"))[0].parentElement as HTMLElement;
 
     await user.click(within(favRow).getByRole("button", { name: "Effort" }));
 

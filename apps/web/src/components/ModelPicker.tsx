@@ -358,6 +358,19 @@ export function ModelPicker({
     return pickSection(recentModels).filter((m) => !favs.includes(m.value));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recentModels, favoriteModels, options, q]);
+  /** Values the pinned sections above already render. */
+  const pinnedValues = useMemo(
+    () => new Set([...favoriteOptions, ...recentOptions].map((m) => m.value)),
+    [favoriteOptions, recentOptions],
+  );
+  /** The full list, without the models the pinned sections already show: a
+   *  favorited model used to appear a second time here, so the selected ring
+   *  and the star were drawn twice. A search hides those sections and scans
+   *  the whole list as always. */
+  const listOptions = useMemo(
+    () => visibleOptions.filter((m) => !pinnedValues.has(m.value)),
+    [visibleOptions, pinnedValues],
+  );
   /** Right-click menu open for this model value, anchored at the cursor. */
   const [ctxMenu, setCtxMenu] = useState<{ modelValue: string; x: number; y: number } | null>(
     null,
@@ -554,14 +567,14 @@ export function ModelPicker({
       window.visualViewport?.removeEventListener("resize", place);
       window.visualViewport?.removeEventListener("scroll", place);
     };
-  }, [open, placement, disabled, options.length, visibleOptions.length]);
+  }, [open, placement, disabled, options.length, listOptions.length]);
 
   useLayoutEffect(() => {
     if (!open || !model || !listRef.current) return;
     const row = rowRefs.current.get(model);
     if (!row) return;
     row.scrollIntoView({ block: "center", inline: "nearest" });
-  }, [open, model, visibleOptions.length, favoriteOptions]);
+  }, [open, model, listOptions.length, favoriteOptions]);
 
   useLayoutEffect(() => {
     if (!paramsFor) return;
@@ -787,17 +800,10 @@ export function ModelPicker({
       <div
         key={key ?? m.value}
         ref={(el) => {
-          // A favorited model renders twice (favorites section + main list). React
-          // remounts the favorites row on every open, and its unmount fires *after*
-          // the new one mounts — so `set` must not overwrite an existing entry and
-          // `delete` must only drop it when it is still the registered node.
-          // Otherwise the map ends up pointing at the stale detached node and
-          // scrollIntoView centers the general-list copy instead of the favorite.
-          if (el) {
-            if (!rowRefs.current.has(m.value)) rowRefs.current.set(m.value, el);
-          } else if (rowRefs.current.get(m.value) === el) {
-            rowRefs.current.delete(m.value);
-          }
+          // One row per value now that the general list drops the pinned ids, so
+          // the map can name it directly; `delete` only runs for that node.
+          if (el) rowRefs.current.set(m.value, el);
+          else if (rowRefs.current.get(m.value) === el) rowRefs.current.delete(m.value);
         }}
         className={`${styles.modelRow} ${selected ? styles.modelRowActive : ""} ${
           rowActive ? styles.modelRowExpanded : ""
@@ -1059,7 +1065,7 @@ export function ModelPicker({
                   {recentOptions.map((m) => renderModelRow(m, `rec-${m.value}`))}
                 </>
               ) : null}
-              {visibleOptions.map((m) => renderModelRow(m))}
+              {listOptions.map((m) => renderModelRow(m))}
             </div>
           </div>,
           document.body,
