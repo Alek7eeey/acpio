@@ -71,7 +71,9 @@ export function turnAnswerVisible(parts: MessagePartDto[]): boolean {
  *
  * While streaming, only peel text when it is the trailing part. Otherwise
  * intermediate agent_message text between thought phases disappears from the
- * steps block (it gets promoted to the answer slot too early).
+ * steps block (it gets promoted to the answer slot too early). The same holds
+ * before the first tool of the turn: the trailing text is the answer being
+ * written, so it is peeled out and rendered as the answer right away.
  */
 export function finalAnswerPart(
   parts: MessagePartDto[],
@@ -101,9 +103,17 @@ export function finalAnswerPart(
     }
     return null;
   }
-  // Cursor may emit short status lines as text before any tool — keep them in the
-  // timeline while the turn is still streaming.
-  if (streaming) return null;
+  // No tool has run yet: while streaming, the trailing text is the answer so
+  // far. Peeling it out immediately is what makes it render in the answer's own
+  // style from the first token — inside the steps block the very same text is
+  // the dimmed "intermediate narration" style, so it used to turn from grey to
+  // white (and from 0.86rem to 0.96rem) the moment the turn ended. A thought or
+  // tool arriving next demotes it back into the steps block, exactly like text
+  // between two tool calls.
+  if (streaming) {
+    const last = sorted.at(-1);
+    return last?.type === "text" && partText(last).length > 0 ? last : null;
+  }
   return lastTextOverall;
 }
 

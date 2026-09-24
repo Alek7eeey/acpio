@@ -122,14 +122,25 @@ describe("finalAnswerPart", () => {
     expect(finalAnswerPart(parts)?.payload.text).toBe("final");
   });
 
-  it("ignores pre-tool status text while streaming", () => {
+  it("peels trailing text before the first tool while streaming", () => {
     const parts = [
       part("thought", 0, { text: "planning" }),
       part("text", 1, { text: "checking settings" }),
     ];
-    expect(finalAnswerPart(parts, { streaming: true })).toBeNull();
+    // The trailing text is the answer being written: it must render in the
+    // answer's own style from the first token, not turn white when the turn ends.
+    expect(finalAnswerPart(parts, { streaming: true })?.payload.text).toBe("checking settings");
     expect(finalAnswerPart(parts, { streaming: false })?.payload.text).toBe("checking settings");
     expect(turnAnswerVisible(parts)).toBe(false);
+  });
+
+  it("demotes pre-tool text back into the steps block once a thought follows", () => {
+    const parts = [
+      part("text", 0, { text: "checking settings" }),
+      part("thought", 1, { text: "revising" }),
+    ];
+    expect(finalAnswerPart(parts, { streaming: true })).toBeNull();
+    expect(finalAnswerPart(parts, { streaming: false })?.payload.text).toBe("checking settings");
   });
 
   it("keeps intermediate post-tool text in steps when more thoughts follow", () => {
