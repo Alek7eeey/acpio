@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { MarkdownContent } from "./MarkdownContent";
 import { useT } from "../lib/i18n";
 import styles from "./Modal.module.css";
@@ -27,8 +26,9 @@ function todoLabel(todo: PlanTodo) {
   return String(todo.content ?? todo.id ?? "").trim();
 }
 
+/** Todos are reported by the agent, not ticked by the reader: the rows show the
+ *  status the payload carries and are deliberately not interactive. */
 function TodoList({ todos }: { todos: PlanTodo[] }) {
-  const [toggled, setToggled] = useState<Record<string, boolean>>({});
   if (!todos.length) return null;
   return (
     <ul className={styles.planTodos}>
@@ -36,11 +36,8 @@ function TodoList({ todos }: { todos: PlanTodo[] }) {
         const label = todoLabel(todo);
         if (!label) return null;
         const key = todo.id ?? `${label}-${i}`;
-        const baseStatus = String(todo.status ?? "pending").toLowerCase();
-        const done =
-          baseStatus === "completed" || baseStatus === "complete" || toggled[key] === true;
-        const status = done ? "completed" : baseStatus;
-        const toggle = () => setToggled((p) => ({ ...p, [key]: !p[key] }));
+        const status = String(todo.status ?? "pending").toLowerCase();
+        const done = status === "completed" || status === "complete";
         return (
           <li
             key={key}
@@ -48,14 +45,7 @@ function TodoList({ todos }: { todos: PlanTodo[] }) {
             data-status={status}
             role="checkbox"
             aria-checked={done}
-            tabIndex={0}
-            onClick={toggle}
-            onKeyDown={(e) => {
-              if (e.key === " " || e.key === "Enter") {
-                e.preventDefault();
-                toggle();
-              }
-            }}
+            aria-disabled="true"
           >
             <span className={styles.planTodoMark} aria-hidden>
               {done ? (

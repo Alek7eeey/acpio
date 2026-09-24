@@ -143,6 +143,8 @@
   gap: 6px;
 }
 
+/* Rows report the agent's status: no pointer cursor, no hover/focus affordance,
+   and text stays selectable so a plan can be copied out. */
 .planTodo {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -154,19 +156,6 @@
   background: color-mix(in srgb, var(--bg) 70%, var(--surface));
   font-size: 0.9rem;
   line-height: 1.4;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-
-.planTodo:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--bg) 55%, var(--surface));
-}
-
-.planTodo:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 .planTodoMark {
@@ -179,7 +168,7 @@
   border: 1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   background: transparent;
   color: #fff;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .planTodoMark svg {
@@ -192,11 +181,6 @@
 .planTodo[data-status="complete"] .planTodoMark {
   background: var(--accent);
   border-color: var(--accent);
-}
-
-.planTodo[data-status="completed"] .planTodoMark:active,
-.planTodo[data-status="complete"] .planTodoMark:active {
-  transform: scale(0.9);
 }
 
 .planTodo[data-status="in_progress"] .planTodoMark,
