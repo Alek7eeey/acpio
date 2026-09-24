@@ -431,6 +431,19 @@
   background: var(--bg-secondary);
 }
 
+/* Creation form: one-shot "start immediately" switch, parked left of the
+   buttons so Cancel/Create keep the right edge. */
+.autoStartBtn {
+  margin-right: auto;
+}
+
+.autoStartBtnOn,
+.autoStartBtnOn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .dangerBtn {
   height: 28px;
   padding: 0 10px;
@@ -620,6 +633,22 @@
 
 .menuItem:hover {
   background: var(--bg-secondary);
+}
+
+/* Mode row above the agent entries: decides what picking one does. */
+.menuToggle {
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.menuToggleOn,
+.menuToggleOn:hover {
+  color: var(--accent);
+}
+
+.menuCheck {
+  margin-left: auto;
+  font-weight: 700;
 }
 
 .dot {

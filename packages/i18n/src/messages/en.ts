@@ -288,6 +288,7 @@ export const en = {
     boardTaskPlaceholder: "Describe the task…",
     boardStart: "Start work",
     boardStartOther: "Start with another agent",
+    boardAutoStart: "Start immediately",
     boardMarkDone: "Mark done",
     boardReopen: "Reopen",
     boardFoldersTitle: "Board folders",

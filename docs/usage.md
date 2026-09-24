@@ -109,11 +109,15 @@ task in that folder. **Todo** groups its cards by project, and both the groups a
 inside them move up and down — the order is saved on the server, so it survives a reload.
 
 Every task is a chat session of its own. **+** on a group writes a card carrying the project
-chip; the play icon on the card opens the chat with the default agent and the task
-description already in the composer — nothing is sent yet, so pressing Enter (or picking a
-slash command) starts the turn, and leaving the chat leaves the task on the board.
-Right-clicking the play icon offers **Start with another agent**, which switches that task to
-a different harness before the turn starts. A card's column follows the session instead of a
+chip; the **Start immediately** switch in the creation form starts the task the moment it is
+created — the default agent gets the description as the first message while you stay on the
+board. The play icon on the card starts work right away too: the description goes out as the
+first message, the card leaves **Todo**, and the chat does not open. Right-clicking the play
+icon opens the agent picker with the same **Start immediately** switch: on, the task starts at
+once with the agent you pick; off, the chat opens with the description already in the composer,
+so pressing Enter (or picking a slash command) starts the turn. Clicking the card itself just
+opens the chat: a never-started task gets its description in the composer, a started one leaves
+it empty — the description was already sent. A card's column follows the session instead of a
 stored status: a task whose first turn never ran sits in **Todo**, a live turn shows in **In
 Progress**, and a finished turn, a question waiting for you or a failed turn lands in
 **Wait** — where the card carries **Mark done** for work you call finished. **Done** outranks

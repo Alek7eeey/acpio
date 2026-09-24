@@ -45,11 +45,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
   const reorderBoardTasks = useAppStore((s) => s.reorderBoardTasks);
   const selectSession = useAppStore((s) => s.selectSession);
+  const sendPrompt = useAppStore((s) => s.sendPrompt);
 
   const [filterCwd, setFilterCwd] = useState<string | null>(null);
   const [addingCwd, setAddingCwd] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
+  /** Creation form: send the description as the first message on create. */
+  const [createAutoStart, setCreateAutoStart] = useState(false);
+  /** Agent menu, per run: start at once (on) vs open the chat to review (off). */
+  const [menuAutoStart, setMenuAutoStart] = useState(true);
   const [agentMenu, setAgentMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
     null,
   );
@@ -142,16 +147,31 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const visibleGroups = filterCwd ? groups.filter((group) => group.cwd === filterCwd) : groups;
 
   /**
-   * Open a task in the normal chat. The task description is seeded into the
-   * composer draft (never sent): the first turn starts when the user presses
-   * Enter, exactly like any other chat.
+   * Open a task in the normal chat. A task that never started seeds its
+   * description into the composer draft (never sent): the first turn starts
+   * when the user presses Enter, exactly like any other chat. A started task
+   * opens clean — its description was already sent as the first message, and
+   * re-seeding would copy it into the input on every reopen.
    */
   const openTask = async (task: SessionDto, provider?: AgentProvider) => {
     if (provider && provider !== task.provider) await setTaskProvider(task.id, provider);
     const description = task.taskDescription?.trim();
-    if (description && !readComposerDraft(task.id)) setComposerDraft(task.id, description);
+    if (!task.startedAt && description && !readComposerDraft(task.id)) {
+      setComposerDraft(task.id, description);
+    }
     await selectSession(task.id);
     navigate("/chat");
+  };
+
+  /**
+   * Start a task from the board: send the description as the first message
+   * and stay put. The claimed turn stamps startedAt server-side, so the card
+   * leaves Todo over the session mirror — no navigation, no draft.
+   */
+  const startTask = async (task: SessionDto, provider?: AgentProvider) => {
+    if (provider && provider !== task.provider) await setTaskProvider(task.id, provider);
+    const text = task.taskDescription?.trim() || task.title;
+    if (text) await sendPrompt(text, { sessionId: task.id });
   };
 
   const submitNewTask = async (cwd: string) => {
@@ -163,6 +183,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (!created) return; // keep the form so nothing the user typed is lost
     setDraft("");
     setAddingCwd(null);
+    if (createAutoStart) void startTask(created);
   };
 
   const moveGroup = (cwd: string, dir: -1 | 1) => {
@@ -230,7 +251,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setAgentMenu({
       task,
       x: Math.max(12, Math.min(rect.left, window.innerWidth - 240)),
-      y: Math.min(rect.bottom + 6, window.innerHeight - 260),
+      y: Math.min(rect.bottom + 6, window.innerHeight - 300),
     });
   };
 
@@ -260,7 +281,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   aria-label={t("chat.boardStart")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    void openTask(task);
+                    void startTask(task);
                   }}
                   onContextMenu={(e) => openAgentMenu(e, task)}
                 >
@@ -595,6 +616,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               <div className={styles.composerActions}>
                                 <button
                                   type="button"
+                                  className={`${styles.ghostBtn} ${styles.autoStartBtn}${
+                                    createAutoStart ? ` ${styles.autoStartBtnOn}` : ""
+                                  }`}
+                                  aria-pressed={createAutoStart}
+                                  title={t("chat.boardAutoStart")}
+                                  onClick={() => setCreateAutoStart((on) => !on)}
+                                >
+                                  {t("chat.boardAutoStart")}
+                                </button>
+                                <button
+                                  type="button"
                                   className={styles.ghostBtn}
                                   onClick={() => {
                                     setAddingCwd(null);
@@ -689,6 +721,20 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             role="menu"
           >
             <div className={styles.menuHead}>{t("chat.boardStartOther")}</div>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={menuAutoStart}
+              className={`${styles.menuItem} ${styles.menuToggle} ${
+                menuAutoStart ? styles.menuToggleOn : ""
+              }`}
+              onClick={() => setMenuAutoStart((on) => !on)}
+            >
+              {t("chat.boardAutoStart")}
+              <span className={styles.menuCheck} aria-hidden>
+                {menuAutoStart ? "✓" : ""}
+              </span>
+            </button>
             {adapters.map((adapter) => (
               <button
                 key={adapter.id}
@@ -698,7 +744,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 onClick={() => {
                   const task = agentMenu.task;
                   setAgentMenu(null);
-                  void openTask(task, adapter.id);
+                  const run = menuAutoStart ? startTask : openTask;
+                  void run(task, adapter.id);
                 }}
               >
                 <span
