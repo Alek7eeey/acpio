@@ -924,7 +924,8 @@
     "diffLoadFailed": "Не удалось загрузить diff"
   },
   "planPanel": {
-    "title": "План работ"
+    "title": "План работ",
+    "remove": "Удалить план"
   },
   "question": {
     "plan": "План",

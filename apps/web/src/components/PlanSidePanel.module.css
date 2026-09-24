@@ -120,6 +120,36 @@
   padding: 3px 8px;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.removeBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.removeBtn:hover {
+  color: var(--danger, #dc2626);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--border));
+  background: var(--surface);
+}
+
 .closeBtn {
   width: 32px;
   height: 32px;

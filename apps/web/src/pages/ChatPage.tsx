@@ -60,6 +60,7 @@ import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, stepsPartsSt
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
+import { readDismissedPlanIds, rememberDismissedPlan } from "../lib/dismissedPlans.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { ChatPromptRail } from "../components/ChatPromptRail";
 import { McpChatDialog } from "../components/McpChatDialog";
@@ -3486,17 +3487,23 @@ function AssistantParts({
   );
 }
 
-function findLatestPlan(session: { messages: MessageDto[] } | null): PlanPayload | null {
+/** Latest plan-ish part of the session, with the id of the part that carried it. */
+function findLatestPlanPart(
+  session: { messages: MessageDto[] } | null,
+  dismissed: ReadonlySet<string>,
+): { id: string; payload: PlanPayload } | null {
   if (!session) return null;
+  // Only the newest one counts: once the reader removes it, an older plan must
+  // not pop back into the panel in its place.
   for (let mi = session.messages.length - 1; mi >= 0; mi -= 1) {
     const parts = session.messages[mi]?.parts ?? [];
     for (let pi = parts.length - 1; pi >= 0; pi -= 1) {
       const part = parts[pi];
       if (!part) continue;
-      if (part.type === "plan" || part.type === "question" || part.type === "permission") {
-        const coerced = coercePlanPayload(part.payload);
-        if (coerced) return coerced;
-      }
+      if (part.type !== "plan" && part.type !== "question" && part.type !== "permission") continue;
+      if (dismissed.has(part.id)) return null;
+      const coerced = coercePlanPayload(part.payload);
+      return coerced ? { id: part.id, payload: coerced } : null;
     }
   }
   return null;
@@ -3902,12 +3909,31 @@ function ChatThread() {
   }, [turnBusy, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
 
   const planPending = pendingQuestion?.kind === "create_plan";
-  const activePlan = useMemo((): PlanPayload | null => {
+  /** Plans the reader removed from the right-hand panel, by the part that carried them. */
+  const [dismissedPlanIds, setDismissedPlanIds] = useState<ReadonlySet<string>>(
+    () => new Set(readDismissedPlanIds()),
+  );
+  const activePlanPart = useMemo((): { id: string; payload: PlanPayload } | null => {
     if (planPending && pendingQuestion) {
-      return coercePlanPayload(pendingQuestion.payload) ?? null;
+      const payload = coercePlanPayload(pendingQuestion.payload);
+      return payload ? { id: pendingQuestion.requestId ?? "pending", payload } : null;
     }
-    return findLatestPlan(activeSession);
-  }, [planPending, pendingQuestion, activeSession]);
+    return findLatestPlanPart(activeSession, dismissedPlanIds);
+  }, [planPending, pendingQuestion, activeSession, dismissedPlanIds]);
+  const activePlan = activePlanPart?.payload ?? null;
+  /** Drop the plan from the panel — the thread keeps the message it came from,
+   *  so it is the panel and the composer chip that go away, not the history. */
+  const removeActivePlan = () => {
+    const part = activePlanPart;
+    if (!part || planPending) return;
+    setDismissedPlanIds((prev) => {
+      const next = new Set(prev);
+      next.add(part.id);
+      return next;
+    });
+    rememberDismissedPlan(part.id);
+    setPlanPanelOpen(false);
+  };
 
   const planSignature = useMemo(() => {
     if (!activePlan) return "";
@@ -6482,6 +6508,7 @@ function ChatThread() {
           pending={planPending}
           fillPane={panelFillsChat}
           onClose={() => setPlanPanelOpen(false)}
+          onRemove={planPending ? undefined : removeActivePlan}
           onAccept={
             planPending
               ? () => void answerQuestion({ outcome: { outcome: "accepted" } })

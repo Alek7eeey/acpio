@@ -33,6 +33,7 @@ export function PlanSidePanel({
   pending,
   fillPane = false,
   onClose,
+  onRemove,
   onAccept,
   onReject,
 }: {
@@ -42,6 +43,8 @@ export function PlanSidePanel({
   /** Take the full chat column instead of a fixed side width. */
   fillPane?: boolean;
   onClose: () => void;
+  /** Drop the plan from the panel entirely; absent while it waits for an answer. */
+  onRemove?: () => void;
   onAccept?: () => void;
   onReject?: () => void;
 }) {
@@ -136,16 +139,37 @@ export function PlanSidePanel({
           <span className={styles.eyebrow}>{t("planPanel.title")}</span>
           {pending ? <span className={styles.pendingBadge}>{t("question.planAwaiting")}</span> : null}
         </div>
-        <button type="button" className={styles.closeBtn} onClick={onClose} aria-label={t("common.cancel")}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M6 6l12 12M18 6L6 18"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        <div className={styles.headerActions}>
+          {onRemove ? (
+            <button
+              type="button"
+              className={styles.removeBtn}
+              onClick={onRemove}
+              aria-label={t("planPanel.remove")}
+              title={t("planPanel.remove")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
+          <button type="button" className={styles.closeBtn} onClick={onClose} aria-label={t("common.cancel")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        </div>
       </div>
       <div className={styles.body}>
         <PlanApprovalBody payload={plan} fallbackTitle={t("question.plan")} scrollable={false} />

@@ -904,7 +904,8 @@
     "diffLoadFailed": "Could not load the diff"
   },
   "planPanel": {
-    "title": "Outline"
+    "title": "Outline",
+    "remove": "Remove plan"
   },
   "question": {
     "plan": "Plan",
