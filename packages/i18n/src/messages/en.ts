@@ -22,6 +22,7 @@ export const en = {
     edit: "Edit",
     send: "Send",
     stop: "Stop",
+    cancelQuestion: "Dismiss question",
     actions: "Actions",
     code: "Code",
     refresh: "Refresh",

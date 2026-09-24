@@ -57,7 +57,7 @@ import {
 } from "../lib/composerDrafts";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
-import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
@@ -1330,6 +1330,46 @@ function QuestionPartView({ part, sessionId }: { part: MessagePartDto; sessionId
   return <ChatQuestionAnswered payload={payload} />;
 }
 
+/** A prompt plus the lead-in text that introduced it. The model narrates
+ *  ("I need to check X") and then asks; that text sits inside the same wrapper
+ *  as the prompt, so it can never be read as a loose answer floating above the
+ *  question or fall under a closed spoiler of its own.
+ *
+ *  An unanswered prompt also states the state of the turn: the agent is parked
+ *  on the reader, no token is coming, and the harness-reported time above is a
+ *  frozen figure, not a running one. Without that line the only "busy" signals
+ *  on screen (a pulsing header, a live timer, a Stop button) all claimed work
+ *  while the agent had already stopped. */
+function QuestionBucketView({
+  item,
+  sessionId,
+}: {
+  item: AgentQuestionItem;
+  sessionId: string;
+}) {
+  const t = useT();
+  return (
+    <div className={styles.questionBucket}>
+      {item.preamble.map((part) => (
+        <div key={part.id} className={styles.questionPreamble}>
+          {part.type === "text" ? (
+            <MarkdownContent text={String(part.payload.text ?? "")} />
+          ) : (
+            renderTimelinePart(part, false, false)
+          )}
+        </div>
+      ))}
+      <QuestionPartView part={item.part} sessionId={sessionId} />
+      {item.part.payload.pending ? (
+        <div className={styles.questionParked}>
+          <span className={styles.questionParkedDot} aria-hidden />
+          {t("common.waitingInput")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Icon for thinking toggle (composer) and in-message thinking header. */
 function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
   return (
@@ -2082,6 +2122,24 @@ function StepsSpoiler({
     );
   };
 
+  // A parked question renders joined to its lead-in text; every other part keeps
+  // the flat emission-order body. The lead-in is claimed here (and filtered out
+  // of `parts` by the caller), so it is never rendered twice.
+  const parkedPreambles = useMemo(() => {
+    if (!unansweredQuestionParts(parts).length) return null;
+    return new Map(
+      buildAgentTimeline(parts)
+        .filter((item): item is AgentQuestionItem => item.kind === "question")
+        .map((item) => [item.key, item] as const),
+    );
+  }, [parts]);
+
+  const renderFlatPart = (part: MessagePartDto, idx: number) => {
+    const bucket = parkedPreambles?.get(part.id);
+    if (bucket) return <QuestionBucketView key={part.id} item={bucket} sessionId={sessionId} />;
+    return renderPart(part, idx, stepsLength);
+  };
+
   return (
     <div className={`${styles.steps} ${open ? styles.stepsOpen : ""}`} ref={blockRef}>
       <StickyStepsToggle
@@ -2104,7 +2162,7 @@ function StepsSpoiler({
           {body ??
             [...parts]
               .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-              .map((part, idx) => renderPart(part, idx, stepsLength))}
+              .map((part, idx) => renderFlatPart(part, idx))}
           <StepsCollapseButton onClick={collapseBlock} />
         </div>
       )}
@@ -2215,6 +2273,7 @@ function renderTimelinePart(
 function ActivityRunBlock({
   parts,
   streaming,
+  paused = false,
   autoExpand,
   runKey,
   durationMs,
@@ -2224,6 +2283,9 @@ function ActivityRunBlock({
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
+  /** Turn parked on the user: the header must state the block as finished
+   *  rather than pulse "Работаю…" over an agent that is waiting. */
+  paused?: boolean;
   autoExpand: boolean;
   runKey: string;
   durationMs: number;
@@ -2260,13 +2322,13 @@ function ActivityRunBlock({
     setOpen(autoExpand);
   }, [stepsGlobalTick, autoExpand, setOpen]);
 
-  const label = streaming ? t("common.working") : t("common.worked");
+  const label = streaming && !paused ? t("common.working") : t("common.worked");
 
   return (
     <div className={styles.agentPhase} ref={blockRef}>
       <StickyStepsToggle
         open={open}
-        liveHeader={streaming}
+        liveHeader={streaming && !paused}
         label={label}
         time={formatDuration(durationMs, locale, t)}
         sticky={sticky}
@@ -2299,6 +2361,7 @@ function ActivityRunBlock({
 function AgentTimelineItems({
   items,
   streaming,
+  paused = false,
   autoExpand,
   messageId,
   sessionId,
@@ -2308,6 +2371,8 @@ function AgentTimelineItems({
 }: {
   items: AgentTimelineItem[];
   streaming: boolean;
+  /** Turn parked on the user (see ActivityRunBlock). */
+  paused?: boolean;
   autoExpand: boolean;
   messageId: string;
   sessionId: string;
@@ -2333,6 +2398,7 @@ function AgentTimelineItems({
               key={runKey}
               parts={item.parts}
               streaming={streaming && isLast}
+              paused={paused}
               autoExpand={autoExpand}
               runKey={runKey}
               durationMs={sumDurations(item.parts, durations)}
@@ -2349,7 +2415,7 @@ function AgentTimelineItems({
         }
 
         if (item.kind === "question") {
-          return <QuestionPartView key={item.key} part={item.part} sessionId={sessionId} />;
+          return <QuestionBucketView key={item.key} item={item} sessionId={sessionId} />;
         }
         return null;
       })}
@@ -2363,6 +2429,7 @@ const EMPTY_LIVE_RUN: AgentTimelineItem = { kind: "run", parts: [] };
 function AgentTurnTimeline({
   parts,
   streaming,
+  paused = false,
   autoExpand,
   messageId,
   sessionId,
@@ -2371,6 +2438,10 @@ function AgentTurnTimeline({
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
+  /** The turn is parked on the user (open question / permission prompt): no
+   *  token is coming until they answer, so nothing may claim to be working or
+   *  keep counting. */
+  paused?: boolean;
   autoExpand: boolean;
   messageId: string;
   sessionId: string;
@@ -2392,7 +2463,7 @@ function AgentTurnTimeline({
     return () => window.clearTimeout(id);
   }, [streaming, parts.length]);
 
-  const liveHeader = streaming || holdEmptyLive;
+  const liveHeader = (streaming || holdEmptyLive) && !paused;
   if (items.length === 0 && !liveHeader) return null;
   // A live turn opens before its first part exists. That empty block goes
   // through the same list as the real runs so it keeps its identity when the
@@ -2404,7 +2475,8 @@ function AgentTurnTimeline({
     <div className={styles.agentTimeline}>
       <AgentTimelineItems
         items={shown}
-        streaming={streaming || items.length === 0}
+        streaming={(streaming || items.length === 0) && !paused}
+        paused={paused}
         autoExpand={autoExpand}
         messageId={messageId}
         sessionId={sessionId}
@@ -3353,15 +3425,32 @@ function AssistantParts({
   // header never covers an agent that is really waiting for the user.
   const parkedQuestions = useMemo(() => unansweredQuestionParts(parts), [parts]);
   const parked = parkedQuestions.length > 0;
+  // Text the model wrote right before a parked question is that question's own
+  // lead-in: it renders joined to the prompt, never as a loose block above it.
+  // Peeled into the answer slot it sat under a closed "Работал" header with the
+  // prompt below — a preamble detached from the question it introduces.
+  const preamblesByQuestion = useMemo(
+    () => (parked ? splitQuestionPreamble(parts) : new Map<string, MessagePartDto[]>()),
+    [parked, parts],
+  );
+  const parkedPreambleParts = useMemo(() => {
+    const ids = new Set<string>();
+    for (const list of preamblesByQuestion.values()) for (const p of list) ids.add(p.id);
+    return ids;
+  }, [preamblesByQuestion]);
   // The final answer (last text part in emission order) stays outside the
   // steps block; intermediate texts, tools, and subagents interleave inside
   // it in emission order — same nesting as Cursor's thinking transcript.
   const stepsParts = useMemo(() => {
     const finalText = finalAnswerPart(parts, { streaming: stepsStreaming });
     return parts.filter(
-      (p) => p !== finalText && p.type !== "error" && !parkedQuestions.includes(p),
+      (p) =>
+        p !== finalText &&
+        p.type !== "error" &&
+        !parkedQuestions.includes(p) &&
+        !parkedPreambleParts.has(p.id),
     );
-  }, [parts, stepsStreaming, parkedQuestions]);
+  }, [parts, stepsStreaming, parkedQuestions, parkedPreambleParts]);
   const stepsLive = useMemo(
     () => stepsPartsStillLive(parts, stepsStreaming),
     [parts, stepsStreaming],
@@ -3404,6 +3493,17 @@ function AssistantParts({
     () => (agentTurnTimeline ? buildAgentTimeline(stepsParts) : []),
     [agentTurnTimeline, stepsParts],
   );
+  // A parked question renders in its own slot below (never inside a spoiler), so
+  // its lead-in text has to travel with it: the bucket is the only place that
+  // transcript appears on screen.
+  const parkedBuckets = useMemo<AgentQuestionItem[]>(() => {
+    const items: AgentQuestionItem[] = [];
+    for (const [id, preamble] of preamblesByQuestion) {
+      const part = parts.find((p) => p.id === id);
+      if (part) items.push({ kind: "question", part, preamble, key: id });
+    }
+    return items;
+  }, [preamblesByQuestion, parts]);
 
   return (
     <div
@@ -3422,6 +3522,7 @@ function AssistantParts({
         <AgentTurnTimeline
           parts={stepsParts}
           streaming={!parked && (stepsStreaming || turnActive)}
+          paused={parked}
           autoExpand={autoExpandSteps}
           messageId={message.id}
           sessionId={message.sessionId}
@@ -3465,8 +3566,8 @@ function AssistantParts({
           stepsGlobalTick={stepsGlobalTick}
         />
       ) : null}
-      {parkedQuestions.map((part) => (
-        <QuestionPartView key={part.id} part={part} sessionId={message.sessionId} />
+      {parkedBuckets.map((item) => (
+        <QuestionBucketView key={item.key} item={item} sessionId={message.sessionId} />
       ))}
       {mainParts.map((part, idx) => {
         const isLast = idx === mainParts.length - 1;
@@ -3915,6 +4016,9 @@ function ChatThread() {
   }, [turnBusy, activeSession?.title, promptEpoch, cancelledPromptEpoch]);
 
   const planPending = pendingQuestion?.kind === "create_plan";
+  // Parked on an open prompt: Stop no longer aborts running work — the agent is
+  // idle, and pressing it dismisses the question. The button has to say so.
+  const questionParked = pendingQuestion?.kind === "ask_question";
   /** Plans the reader removed from the right-hand panel, by the part that carried them. */
   const [dismissedPlanIds, setDismissedPlanIds] = useState<ReadonlySet<string>>(
     () => new Set(readDismissedPlanIds()),
@@ -6296,8 +6400,8 @@ function ChatThread() {
                   <button
                     type="button"
                     className={styles.stopBtn}
-                    title={t("common.stop")}
-                    aria-label={t("common.stop")}
+                    title={questionParked ? t("common.cancelQuestion") : t("common.stop")}
+                    aria-label={questionParked ? t("common.cancelQuestion") : t("common.stop")}
                     onClick={() => void cancelPrompt()}
                   >
                     <svg className={styles.stopIcon} width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

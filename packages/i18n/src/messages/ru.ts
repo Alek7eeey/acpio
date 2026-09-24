@@ -22,6 +22,7 @@ export const ru = {
     edit: "Редактировать",
     send: "Отправить",
     stop: "Остановить",
+    cancelQuestion: "Отменить вопрос",
     actions: "Действия",
     code: "Код",
     refresh: "Обновить",

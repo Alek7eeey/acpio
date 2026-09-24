@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePartDto } from "@acpio/shared";
-import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, lastTextPart, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools, unansweredQuestionParts } from "./assistantTurnTimeline.js";
+import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, lastTextPart, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, turnStillHasLiveTools, unansweredQuestionParts } from "./assistantTurnTimeline.js";
 
 function part(
   type: MessagePartDto["type"],
@@ -324,6 +324,151 @@ describe("isSingleItemTimeline", () => {
   it("does not flag an empty timeline or a contentless live run", () => {
     expect(isSingleItemTimeline([])).toBe(false);
     expect(isSingleItemTimeline([{ kind: "run", parts: [] }])).toBe(false);
+  });
+});
+
+describe("question preamble", () => {
+  // The model narrates ("I need to know X") and then asks. That lead-in belongs
+  // to the question: peeled into the answer column it left the text loose above
+  // the prompt, and the timeline above it kept a closed "Работал" header
+  // claiming the turn was over while the agent was parked.
+  const sameMessage = (type: MessagePartDto["type"], order: number, payload: Record<string, unknown>) => ({
+    ...part(type, order, payload),
+    messageId: "turn-1",
+  });
+  const live = () => [
+    sameMessage("thought", 0, { text: "Смотрю конфиг." }),
+    sameMessage("tool_call", 1, { status: "completed", title: "Read config" }),
+    sameMessage("text", 2, { text: "Мне нужно уточнить: какой порт?" }),
+    sameMessage("question", 3, { requestId: "q1", pending: true, title: "Выберите порт" }),
+  ];
+
+  it("joins the lead-in text to the question", () => {
+    const items = buildAgentTimeline(live());
+    expect(items.map((item) => item.kind)).toEqual(["run", "question"]);
+    const question = items[1];
+    if (question?.kind !== "question") throw new Error("expected a question item");
+    expect(question.preamble.map((p) => p.payload.text)).toEqual([
+      "Мне нужно уточнить: какой порт?",
+    ]);
+  });
+
+  it("reports the lead-in text as the question's preamble", () => {
+    const map = splitQuestionPreamble(live());
+    expect((map.get("question-3") ?? []).map((p) => p.type)).toEqual(["text"]);
+  });
+
+  // Work that produced the question is not the question: thoughts and tool rows
+  // keep their own block above the prompt, with their own measured span.
+  it("leaves thoughts and tool rows in the timeline above the prompt", () => {
+    const items = buildAgentTimeline(live());
+    const run = items[0];
+    if (run?.kind !== "run") throw new Error("expected a run");
+    expect(run.parts.map((p) => p.type)).toEqual(["thought", "tool_call"]);
+  });
+
+  // The reported layout: a question in a turn of its own, nothing before it in
+  // the message. Whatever an earlier message holds stays where it was.
+  it("does not reach back into an earlier assistant message", () => {
+    const parts = [
+      part("tool_call", 0, { status: "completed", title: "Read a.ts" }),
+      part("thought", 1, { text: "Работа прошлого хода." }),
+      { ...part("question", 2, { requestId: "q1", pending: true }), messageId: "turn-2" },
+    ];
+    const items = buildAgentTimeline(parts);
+    expect(items.map((item) => item.kind)).toEqual(["run", "question"]);
+    const question = items[1];
+    if (question?.kind !== "question") throw new Error("expected a question item");
+    expect(question.preamble).toEqual([]);
+  });
+
+  it("stops the lead-in at a tool row even in the same message", () => {
+    const parts = [
+      sameMessage("text", 0, { text: "Сначала посмотрю файлы." }),
+      sameMessage("tool_call", 1, { status: "completed", title: "Read a.ts" }),
+      sameMessage("text", 2, { text: "Какой порт использовать?" }),
+      sameMessage("question", 3, { requestId: "q1", pending: true }),
+    ];
+    const items = buildAgentTimeline(parts);
+    expect(items.map((item) => item.kind)).toEqual(["text", "run", "question"]);
+    const question = items[2];
+    if (question?.kind !== "question") throw new Error("expected a question item");
+    expect(question.preamble.map((p) => p.payload.text)).toEqual(["Какой порт использовать?"]);
+  });
+
+  it("takes a multi-part lead-in, not just the last one", () => {
+    const parts = [
+      sameMessage("tool_call", 0, { status: "completed", title: "Read a.ts" }),
+      sameMessage("text", 1, { text: "Прочитал конфиг." }),
+      sameMessage("text", 2, { text: "Но не знаю, какой порт использовать." }),
+      sameMessage("question", 3, { requestId: "q1", pending: true }),
+    ];
+    const items = buildAgentTimeline(parts);
+    const question = items.at(-1);
+    if (question?.kind !== "question") throw new Error("expected a question item");
+    expect(question.preamble.map((p) => p.payload.text)).toEqual([
+      "Прочитал конфиг.",
+      "Но не знаю, какой порт использовать.",
+    ]);
+  });
+
+  it("never promotes a parked question's lead-in to the answer slot", () => {
+    // Pressing Stop while parked used to flip `streaming` off, and the lead-in
+    // text then became the "final answer" — rendered loose above the prompt it
+    // introduces, next to the very bucket that already shows it.
+    const parts = live();
+    expect(finalAnswerPart(parts, { streaming: true })).toBeNull();
+    expect(finalAnswerPart(parts, { streaming: false })).toBeNull();
+  });
+
+  it("keeps the lead-in out of the timeline body as well", () => {
+    const stepsParts = live().filter((p) => p.type !== "question");
+    const attached = new Set(
+      [...splitQuestionPreamble(live()).values()].flat().map((p) => p.id),
+    );
+    const body = stepsParts.filter((p) => !attached.has(p.id));
+    expect(body.map((p) => p.type)).toEqual(["thought", "tool_call"]);
+  });
+
+  it("keeps an answered question a plain timeline item", () => {
+    const parts = live().map((p) =>
+      p.type === "question" ? { ...p, payload: { ...p.payload, pending: false } } : p,
+    );
+    expect(buildAgentTimeline(parts).map((item) => item.kind)).toEqual([
+      "run",
+      "text",
+      "question",
+    ]);
+    expect(splitQuestionPreamble(parts).size).toBe(0);
+  });
+
+  // The bucket is two things joined on screen — the text, then the prompt. The
+  // single-item shortcut would drop the header and take the text above its own
+  // question with it.
+  it("does not take the single-item shortcut for a question with a lead-in", () => {
+    const items = buildAgentTimeline([
+      sameMessage("text", 0, { text: "Какой порт?" }),
+      sameMessage("question", 1, { requestId: "q1", pending: true }),
+    ]);
+    expect(items).toHaveLength(1);
+    expect(isSingleItemTimeline(items)).toBe(false);
+  });
+
+  it("still takes the shortcut for a bare question", () => {
+    const items = buildAgentTimeline([part("question", 0, { requestId: "q1", pending: true })]);
+    expect(isSingleItemTimeline(items)).toBe(true);
+  });
+
+  it("does not absorb a question from an earlier turn", () => {
+    const parts = [
+      part("question", 0, { requestId: "q0", pending: false }),
+      sameMessage("text", 1, { text: "Готово." }),
+      sameMessage("question", 2, { requestId: "q1", pending: true }),
+    ];
+    const items = buildAgentTimeline(parts);
+    const question = items.find((item) => item.kind === "question" && item.key === "question-2");
+    if (question?.kind !== "question") throw new Error("expected the pending question");
+    expect(question.preamble.map((p) => p.id)).toEqual(["text-1"]);
   });
 });
 

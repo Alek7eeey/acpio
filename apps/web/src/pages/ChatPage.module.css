@@ -854,6 +854,58 @@
   background: transparent;
 }
 
+/* A prompt joined to the transcript that introduced it. The model narrates and
+   then asks, so the two are one unit: the text never floats loose above the
+   card, and never ends up behind a spoiler header of its own. */
+.questionBucket {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* The preamble rides the question rail: same indent as the transcript rows
+   above it, so the card reads as the continuation the model meant it to be. */
+.questionPreamble {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin-left: 7px;
+  padding: 2px 0 4px 14px;
+  border-left: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
+  font-size: 0.86rem;
+  color: color-mix(in srgb, var(--text) 78%, transparent);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.agentTimeline .questionPreamble {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+/* State of a parked turn, under the prompt. Deliberately static: the agent has
+   stopped, and anything that moves here would read as work in progress. */
+.questionParked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0 14px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.questionParkedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning, #b45309);
+  flex: none;
+}
+
 .stepsLive {
   border: none;
 }
@@ -1149,6 +1201,20 @@
 .agentTimeline .textEmbedded {
   font-size: 0.86rem;
   color: color-mix(in srgb, var(--text) 68%, transparent);
+}
+
+/* MarkdownContent carries its own thread-sized type; inside a question preamble
+   the paragraph has to take the block's size instead. The wrapper is the sized
+   element, so its own markdown root is reset to inherit. */
+.questionPreamble > :global(div) {
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+.questionPreamble p {
+  font-size: inherit;
+  color: inherit;
 }
 
 /* Outcome of the tool (file path / output snippet) on its own line. */
