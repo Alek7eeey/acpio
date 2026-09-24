@@ -274,6 +274,7 @@
     "newSession": "New session",
     "jumpToLatest": "Jump to latest",
     "promptQueue": "Request queue",
+    "promptRail": "Prompts in this chat",
     "queueCount": "Queued: {{count}}",
     "sessionRunning": "Working…",
     "sessionWaiting": "Waiting for you",

@@ -58,7 +58,10 @@ import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
+import { messagePlainText } from "../lib/messageText.js";
+import { buildPromptRailItems } from "../lib/promptRail.js";
 import { AttachDialog } from "../components/AttachDialog";
+import { ChatPromptRail } from "../components/ChatPromptRail";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
 import {
@@ -188,15 +191,6 @@ function writeMessageRating(messageId: string, rating: MsgRating | null) {
   } catch {
     // ignore
   }
-}
-
-/** Plain text of a message (text parts only) — shared by render + actions. */
-function messagePlainText(message: MessageDto): string {
-  return message.parts
-    .filter((p) => p.type === "text")
-    .map((p) => String(p.payload.text ?? ""))
-    .join("\n")
-    .trim();
 }
 
 function composerCaretOnFirstLine(el: HTMLTextAreaElement): boolean {
@@ -3538,6 +3532,11 @@ type ChatPaneBind = {
 
 const ChatPaneContext = createContext<ChatPaneBind | null>(null);
 
+/** Share of the thread's height that counts as "where the reader is": a prompt
+ *  becomes current once its message passes the middle of the viewport, which is
+ *  also where a jump from the rail parks the message it targets. */
+const ACTIVE_PROMPT_LINE = 0.5;
+
 function useDesktopSplit() {
   const desktop = useChatSplitAllowed();
   const collapseToSinglePane = useAppStore((s) => s.collapseToSinglePane);
@@ -3750,6 +3749,12 @@ function ChatThread() {
   const composerHistoryDraftRef = useRef("");
   const composerHistoryApplyingRef = useRef(false);
   const threadRef = useRef<HTMLDivElement>(null);
+  /** Thread viewport box (top + height) — the prompt rail's track. */
+  const [threadBox, setThreadBox] = useState({ top: 0, height: 0 });
+  /** Prompt whose turn the reader is in — lit in the rail. */
+  const [activePromptId, setActivePromptId] = useState<string | null>(null);
+  /** Ids the rail actually shows, so an attachment-only prompt never wins. */
+  const railPromptIdsRef = useRef<Set<string>>(new Set());
   const messageEndRef = useRef<HTMLDivElement>(null);
   const userJustSentRef = useRef(false);
   const keepComposerFocus = useRef(false);
@@ -4977,6 +4982,11 @@ function ChatThread() {
       ),
     [segments, settings.multitask, inflight, lastMessageId],
   );
+  // Prompt rail: the user's prompts as an ordered column beside the thread.
+  const promptRailItems = useMemo(
+    () => buildPromptRailItems(messageRows.map((r) => r.msg)),
+    [messageRows],
+  );
   // Window sooner than the tree: reply messages can be huge (long texts, many
   // tool parts), so a session with a few dozen messages is already expensive.
   // Trigger on message count OR estimated total height (~px, from the same
@@ -5024,10 +5034,19 @@ function ChatThread() {
     const tryFocus = () => {
       if (cancelled) return;
       focusScrollTriesRef.current += 1;
-      const el = document.querySelector(
+      // Scoped to the thread: the prompt rail tags its pills with the same id,
+      // and a message outside the virtualiser's window is simply not in the DOM
+      // yet — a document-wide lookup would find the pill and scroll nothing.
+      const el = threadRef.current?.querySelector(
         `[data-message-id="${CSS.escape(focusMessageId)}"]`,
       );
       if (el) {
+        // One highlight at a time. Jumps from the prompt rail land back to
+        // back, and the previous target stays lit for its own 2.4s — two lit
+        // messages read as "the click went to the neighbour".
+        for (const lit of document.querySelectorAll(`.${styles.msgFocus}`)) {
+          lit.classList.remove(styles.msgFocus);
+        }
         el.scrollIntoView({ block: "center", behavior: "smooth" });
         el.classList.add(styles.msgFocus);
         window.setTimeout(() => el.classList.remove(styles.msgFocus), 2400);
@@ -5199,6 +5218,33 @@ function ChatThread() {
     });
   };
 
+  // Which prompt's turn the reader is in: the last rail prompt whose message
+  // starts above the reading line (ACTIVE_PROMPT_LINE). That line always falls
+  // inside the virtualiser's window, which is why the DOM is enough here.
+  const syncActivePrompt = () => {
+    const thread = threadRef.current;
+    const ids = railPromptIdsRef.current;
+    if (!thread || ids.size === 0) {
+      setActivePromptId(null);
+      return;
+    }
+    const line =
+      thread.getBoundingClientRect().top + thread.clientHeight * ACTIVE_PROMPT_LINE;
+    let first: string | null = null;
+    let active: string | null = null;
+    for (const el of thread.querySelectorAll<HTMLElement>("[data-message-id]")) {
+      const id = el.dataset.messageId;
+      if (!id || !ids.has(id)) continue;
+      if (!first) first = id;
+      if (el.getBoundingClientRect().top > line) break;
+      active = id;
+    }
+    // Nothing above the line yet (the reader is at the very top): the prompt
+    // on screen is the first one.
+    const next = active ?? first;
+    setActivePromptId((prev) => (prev === next ? prev : next));
+  };
+
   const scheduleScrollToEnd = () => {
     if (!stickToBottomRef.current && !userJustSentRef.current && !pendingBottomPinRef.current) {
       return;
@@ -5236,6 +5282,7 @@ function ChatThread() {
       const top = thread.scrollTop;
       const prevTop = lastScrollTopRef.current;
       lastScrollTopRef.current = top;
+      syncActivePrompt();
       if (suppressScrollWatchRef.current) return;
       // While pinning a freshly opened chat, ignore intermediate layouts that
       // look like "scrolled away" (skeleton → content height jumps).
@@ -5295,6 +5342,32 @@ function ChatThread() {
     ro.observe(inner);
     return () => ro.disconnect();
   }, [storeActiveSessionId, renderSkeleton]);
+
+  // Rail geometry: the thread's own box, so the pills stop where the composer
+  // starts instead of running across it. The thread keeps its height while its
+  // content scrolls, so a resize observer is the whole subscription.
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread || typeof ResizeObserver === "undefined") return;
+    const sync = () => {
+      const next = { top: thread.offsetTop, height: thread.clientHeight };
+      setThreadBox((prev) =>
+        prev.top === next.top && prev.height === next.height ? prev : next,
+      );
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(thread);
+    return () => ro.disconnect();
+  }, [storeActiveSessionId, isShellSessionActive, renderSkeleton]);
+
+  // The rail's prompt list changed (chat opened, message arrived): re-read which
+  // prompt the reader is in once the new rows have laid out.
+  useEffect(() => {
+    railPromptIdsRef.current = new Set(promptRailItems.map((item) => item.id));
+    const raf = window.requestAnimationFrame(syncActivePrompt);
+    return () => window.cancelAnimationFrame(raf);
+  }, [promptRailItems, storeActiveSessionId]);
 
   useEffect(() => {
     return () => {
@@ -6376,6 +6449,15 @@ function ChatThread() {
       ) : null}
       </>
       )}
+      {!isShellSessionActive && promptRailItems.length > 0 ? (
+        <ChatPromptRail
+          items={promptRailItems}
+          top={threadBox.top}
+          height={threadBox.height}
+          activeId={activePromptId}
+          onSelect={setFocusMessageId}
+        />
+      ) : null}
       </div>
 
       <div className={styles.planPanelDock}>

@@ -294,6 +294,7 @@
     "newSession": "Новый чат",
     "jumpToLatest": "Перейти к последним сообщениям",
     "promptQueue": "Очередь запросов",
+    "promptRail": "Промпты в этом чате",
     "queueCount": "В очереди: {{count}}",
     "sessionRunning": "Работает…",
     "sessionWaiting": "Ждёт вас",
