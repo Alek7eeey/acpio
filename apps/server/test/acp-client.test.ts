@@ -239,9 +239,11 @@ describe("AcpClient against the fake agent", () => {
 
   it("extends request timeout while the agent keeps sending updates", async () => {
     const prev = AcpClient.requestTimeoutMs;
-    AcpClient.requestTimeoutMs = 80;
     try {
       await withClient(async (client) => {
+        // Arm the short ceiling only after initialize: spawn+handshake is not
+        // what this test is about, and under full-suite load it can exceed 80ms.
+        AcpClient.requestTimeoutMs = 80;
         const result = await client.prompt("SLOW-ACTIVE please");
         expect(result.stopReason).toBe("end_turn");
       });
@@ -252,9 +254,9 @@ describe("AcpClient against the fake agent", () => {
 
   it("times out a prompt that stays silent past the idle ceiling", async () => {
     const prev = AcpClient.requestTimeoutMs;
-    AcpClient.requestTimeoutMs = 80;
     try {
       await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
         await expect(client.prompt("SLOW-SILENT please")).rejects.toThrow(/Таймаут ответа ACP/);
       });
     } finally {
@@ -264,9 +266,9 @@ describe("AcpClient against the fake agent", () => {
 
   it("never times out a prompt while the agent waits for a user answer", async () => {
     const prev = AcpClient.requestTimeoutMs;
-    AcpClient.requestTimeoutMs = 80;
     try {
       await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
         const requestPromise = once(client, "request") as Promise<[AcpRequest]>;
         const promptPromise = client.prompt("ELICIT: pick a colour");
         const [request] = await requestPromise;
@@ -290,9 +292,9 @@ describe("AcpClient against the fake agent", () => {
 
   it("times out again after an answered request releases the exemption", async () => {
     const prev = AcpClient.requestTimeoutMs;
-    AcpClient.requestTimeoutMs = 80;
     try {
       await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
         const requestPromise = once(client, "request") as Promise<[AcpRequest]>;
         const first = client.prompt("ELICIT: pick a colour");
         const [request] = await requestPromise;
