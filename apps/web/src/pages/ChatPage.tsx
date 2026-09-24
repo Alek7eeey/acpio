@@ -63,12 +63,12 @@ import { buildPromptRailItems } from "../lib/promptRail.js";
 import {
   chatMessageWindow,
   chatWindowNeedsSlide,
-  chatWindowSidePx,
-  CHAT_WINDOW_MIN_SIDE,
+  chatWindowTargetPx,
   type ChatMessageWindow,
 } from "../lib/chatWindow.js";
 import { AttachDialog } from "../components/AttachDialog";
 import { ChatPromptRail } from "../components/ChatPromptRail";
+import { ChatScrollbar } from "../components/ChatScrollbar";
 import { McpChatDialog } from "../components/McpChatDialog";
 import { submitDiagnosticsDump } from "../lib/diagnostics";
 import {
@@ -3543,7 +3543,9 @@ const ChatPaneContext = createContext<ChatPaneBind | null>(null);
 const NO_MESSAGES: MessageDto[] = [];
 
 /** Viewports of history above which the feed renders a window, not the lot. */
-const CHAT_WINDOW_TRIGGER_VIEWPORTS = 3;
+const CHAT_WINDOW_TRIGGER_VIEWPORTS = 4;
+/** Messages below which a session is never windowed: it renders whole. */
+const CHAT_WINDOW_MIN_MESSAGES = 30;
 
 /** Share of the thread's height that counts as "where the reader is": a prompt
  *  becomes current once its message passes the middle of the viewport, which is
@@ -3769,8 +3771,12 @@ function ChatThread() {
   const [threadBox, setThreadBox] = useState({ top: 0, height: 0 });
   /** Rendered slice of a long chat; null while the whole feed fits. */
   const [msgWindow, setMsgWindow] = useState<ChatMessageWindow | null>(null);
+  /** True once the chat proved long enough to need a mounted window. */
+  const [windowing, setWindowing] = useState(false);
   /** Visible row captured before the window slides, restored after it does. */
   const windowAnchorRef = useRef<{ id: string; offset: number } | null>(null);
+  /** History offset the reader picked on the scrollbar, to apply after render. */
+  const seekScrollRef = useRef<{ id: string; within: number } | null>(null);
   /** Message id → index in the session, for reading the viewport back. */
   const messageIndexRef = useRef<Map<string, number>>(new Map());
   /** Row heights, keyed by the message object the store handed out. */
@@ -4993,21 +4999,25 @@ function ChatThread() {
     rowHeightRef.current.set(msg, height);
     return height;
   }, []);
-  const windowed = useMemo(() => {
-    if (threadBox.height <= 0) return false;
-    let total = 0;
-    const budget = threadBox.height * CHAT_WINDOW_TRIGGER_VIEWPORTS;
-    for (const msg of allMessages) {
-      total += rowHeight(msg);
-      if (total > budget) return true;
-    }
-    return false;
-  }, [allMessages, threadBox.height, rowHeight]);
+  const windowed = windowing;
   const windowMessages = useMemo(
     () => (msgWindow ? allMessages.slice(msgWindow.from, msgWindow.to) : allMessages),
     [allMessages, msgWindow],
   );
   windowStateRef.current = { windowed, win: msgWindow, messages: allMessages };
+  /** Estimated height of the whole history — what the chat's scrollbar reports. */
+  const historyHeightPx = useMemo(
+    () => allMessages.reduce((acc, msg) => acc + rowHeight(msg), 0),
+    [allMessages, rowHeight],
+  );
+  /** Estimated height of everything above the mounted slice. */
+  const windowTopPx = useMemo(() => {
+    let acc = 0;
+    for (let i = 0; i < (msgWindow?.from ?? 0) && i < allMessages.length; i += 1) {
+      acc += rowHeight(allMessages[i]!);
+    }
+    return acc;
+  }, [allMessages, msgWindow, rowHeight]);
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
@@ -5089,14 +5099,13 @@ function ChatThread() {
     const covered = !msgWindow || (fullIdx >= msgWindow.from && fullIdx < msgWindow.to);
     if (windowed && !covered) {
       const heights = allMessages.map(rowHeight);
-      const sidePx = chatWindowSidePx(threadRef.current?.clientHeight ?? 0);
+      const targetPx = chatWindowTargetPx(threadRef.current?.clientHeight ?? 0);
       setMsgWindow(
         chatMessageWindow({
           heights,
           firstVisible: fullIdx,
           lastVisible: fullIdx,
-          sidePx,
-          minSide: CHAT_WINDOW_MIN_SIDE,
+          targetPx,
         }),
       );
       return;
@@ -5307,6 +5316,68 @@ function ChatThread() {
   };
 
   /**
+   * Bring an offset of the whole history into view: move the mounted slice onto
+   * the message that owns it and scroll the remainder into place. Used by the
+   * chat's scrollbar, where a drag has to walk the whole chat, not just the
+   * mounted slice.
+   */
+  const seekToOffset = (offset: number) => {
+    const thread = threadRef.current;
+    if (!thread || allMessages.length === 0) return;
+    // Dragging the handle is the reader taking over: stop following the stream,
+    // or the next render pulls the view back to the bottom.
+    stickToBottomRef.current = false;
+    setScrolledAway(true);
+    if (!windowed) {
+      // The thread holds the whole history: the offset is a real scroll offset.
+      const max = Math.max(0, thread.scrollHeight - thread.clientHeight);
+      thread.scrollTop = Math.min(Math.max(0, offset), max);
+      return;
+    }
+    let acc = 0;
+    let index = allMessages.length - 1;
+    let within = 0;
+    for (let i = 0; i < allMessages.length; i += 1) {
+      const height = rowHeight(allMessages[i]!);
+      if (acc + height > offset) {
+        index = i;
+        within = Math.max(0, offset - acc);
+        break;
+      }
+      acc += height;
+      within = Math.max(0, offset - acc);
+    }
+    const targetId = allMessages[index]?.id;
+    if (!targetId) return;
+    if (windowed) {
+      const heights = allMessages.map(rowHeight);
+      setMsgWindow(
+        chatMessageWindow({
+          heights,
+          firstVisible: index,
+          lastVisible: index,
+          targetPx: chatWindowTargetPx(thread.clientHeight),
+        }),
+      );
+    }
+    seekScrollRef.current = { id: targetId, within };
+    window.requestAnimationFrame(applySeekScroll);
+  };
+
+  /** Put the pending seek target at the top of the viewport. */
+  const applySeekScroll = () => {
+    const pending = seekScrollRef.current;
+    const thread = threadRef.current;
+    if (!pending || !thread) return;
+    const el = thread.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(pending.id)}"]`);
+    if (!el) return;
+    seekScrollRef.current = null;
+    const rowTop = el.getBoundingClientRect().top - thread.getBoundingClientRect().top;
+    const max = Math.max(0, thread.scrollHeight - thread.clientHeight);
+    thread.scrollTop = Math.min(Math.max(0, thread.scrollTop + rowTop + pending.within), max);
+  };
+
+  /**
    * Rows touching the thread viewport, in session order, plus the anchor (the
    * topmost visible row and its offset) used to keep the same content under the
    * reader's eyes when the window slides.
@@ -5359,15 +5430,14 @@ function ChatThread() {
       measured.set(id, el.getBoundingClientRect().height);
     }
     const heights = messages.map((msg) => measured.get(msg.id) ?? rowHeight(msg));
-    const sidePx = chatWindowSidePx(thread.clientHeight);
+    const targetPx = chatWindowTargetPx(thread.clientHeight);
     const current =
       win ??
       chatMessageWindow({
         heights,
         firstVisible: visible.first,
         lastVisible: visible.last,
-        sidePx,
-        minSide: CHAT_WINDOW_MIN_SIDE,
+        targetPx,
       });
     const slides = chatWindowNeedsSlide({
       heights,
@@ -5381,8 +5451,7 @@ function ChatThread() {
           heights,
           firstVisible: visible.first,
           lastVisible: visible.last,
-          sidePx,
-          minSide: CHAT_WINDOW_MIN_SIDE,
+          targetPx,
         })
       : current;
     if (win && next.from === win.from && next.to === win.to) return;
@@ -5558,6 +5627,23 @@ function ChatThread() {
     messageIndexRef.current = index;
   }, [allMessages]);
 
+  // The window only exists in a chat long enough to need one. The decision comes
+  // from the thread's measured scroll height, not from estimated row heights:
+  // those overshoot short rows by a lot and would window a chat that already
+  // fits. A short session is never windowed, however tall its rows measure.
+  useEffect(() => {
+    if (windowing || renderSkeleton || isShellSessionActive) return undefined;
+    if (allMessages.length < CHAT_WINDOW_MIN_MESSAGES) return undefined;
+    const raf = window.requestAnimationFrame(() => {
+      const thread = threadRef.current;
+      if (!thread) return;
+      if (thread.scrollHeight > thread.clientHeight * CHAT_WINDOW_TRIGGER_VIEWPORTS) {
+        setWindowing(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [windowing, allMessages, threadBox.height, renderSkeleton, isShellSessionActive]);
+
   // The window only exists in a chat long enough to need one: a shorter thread
   // renders whole (and, past the row threshold, virtualised) as before.
   useEffect(() => {
@@ -5573,6 +5659,12 @@ function ChatThread() {
   // Without this the mounted slice shifts by the height of whatever left the
   // window, and the transcript jumps under them mid-scroll.
   useLayoutEffect(() => {
+    // A scrollbar drag owns the scroll position: it moved the slice and placed
+    // the target itself, so nothing here should second-guess it.
+    if (seekScrollRef.current) {
+      applySeekScroll();
+      return undefined;
+    }
     const anchor = windowAnchorRef.current;
     const thread = threadRef.current;
     if (!anchor || !thread) return undefined;
@@ -5620,6 +5712,7 @@ function ChatThread() {
     // Window indices belong to the outgoing chat: drop them before the new one
     // paints, or the first frame shows a slice of the previous transcript.
     setMsgWindow(null);
+    setWindowing(false);
     if (!shouldAutoFocusComposer()) {
       pendingEmptyChatFocusRef.current = false;
       textareaRef.current?.blur();
@@ -6694,6 +6787,16 @@ function ChatThread() {
           height={threadBox.height}
           activeId={activePromptId}
           onSelect={setFocusMessageId}
+        />
+      ) : null}
+      {!isShellSessionActive && threadBox.height > 0 ? (
+        <ChatScrollbar
+          threadRef={threadRef}
+          top={threadBox.top}
+          height={threadBox.height}
+          contentHeight={windowed ? historyHeightPx : 0}
+          contentTop={windowTopPx}
+          onSeek={seekToOffset}
         />
       ) : null}
       </div>

@@ -394,13 +394,20 @@
 }
 
 /**
- * Both panes keep the scrollbar gutter while split. The scrollbar of the
- * unlocked pane is a 10px column the text is laid out around (see
- * ::-webkit-scrollbar), and taking it away on the click that moves focus would
- * reflow the thread at exactly the moment the reader looks at it.
+ * The thread draws its own scrollbar (ChatScrollbar) so the handle stays
+ * grabbable in a long chat; the native bar — a 10px column the text used to be
+ * laid out around — is hidden for that pointer. Touch keeps the platform's
+ * overlay bar, which costs no layout width either way.
  */
-.pageInSplit .thread {
-  scrollbar-gutter: stable;
+@media (hover: hover) and (pointer: fine) {
+  .thread {
+    scrollbar-width: none;
+  }
+
+  .thread::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
 }
 
 .threadInner {

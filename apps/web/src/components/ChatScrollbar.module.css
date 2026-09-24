@@ -1,0 +1,43 @@
+/**
+ * The chat's own scrollbar, over the thread's right edge. The thread hides the
+ * native bar (see ChatPage.module.css) so this is the only one on a fine
+ * pointer; the thumb keeps a floor on its height so a long chat stays draggable.
+ */
+.track {
+  position: absolute;
+  right: 0;
+  width: 12px;
+  z-index: 9;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.track[data-scrollable="true"] {
+  opacity: 1;
+}
+
+.thumb {
+  position: absolute;
+  top: 0;
+  left: 3px;
+  right: 3px;
+  min-height: 12px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  cursor: grab;
+}
+
+.thumb:active {
+  cursor: grabbing;
+}
+
+.track:hover .thumb {
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--text-secondary));
+}
+
+/* Touch: the platform's overlay bar and the gesture are enough. */
+@media (hover: none), (pointer: coarse) {
+  .track {
+    display: none;
+  }
+}
