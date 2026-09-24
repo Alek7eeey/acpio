@@ -326,3 +326,44 @@ describe("isSingleItemTimeline", () => {
     expect(isSingleItemTimeline([{ kind: "run", parts: [] }])).toBe(false);
   });
 });
+
+describe("harness empty-message filler", () => {
+  // OMP answers a model turn that produced no visible text with a protocol
+  // filler message. The server now drops it, but sessions recorded before
+  // that still hold it as a text part — none of it may render or close a run.
+  const filler = "[System: Empty message content sanitised to satisfy protocol]";
+  const shape = (parts: MessagePartDto[]) =>
+    buildAgentTimeline(parts).map((item) => (item.kind === "run" ? `run(${item.parts.length})` : item.kind));
+
+  it("buildAgentTimeline: filler is transparent — it neither opens nor closes a run", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("text", 1, { text: filler }),
+      part("thought", 2, { text: "Still working." }),
+    ];
+    expect(shape(parts)).toEqual(["run(2)"]);
+    expect(shape([part("text", 0, { text: filler })])).toEqual([]);
+  });
+
+  it("finalAnswerPart: filler never becomes the answer", () => {
+    const parts = [
+      part("thought", 0, { text: "x" }),
+      part("tool_call", 1, { status: "completed", title: "Read" }),
+      part("text", 2, { text: filler }),
+    ];
+    expect(finalAnswerPart(parts)).toBeNull();
+    expect(finalAnswerPart(parts, { streaming: true })).toBeNull();
+  });
+
+  it("turnAnswerVisible: a turn that only said the filler shows no answer", () => {
+    const parts = [
+      part("tool_call", 0, { status: "completed", title: "Read" }),
+      part("text", 1, { text: filler }),
+    ];
+    expect(turnAnswerVisible(parts)).toBe(false);
+  });
+
+  it("stepsPartsStillLive: trailing filler does not keep the live block up", () => {
+    expect(stepsPartsStillLive([part("text", 0, { text: filler })], true)).toBe(false);
+  });
+});

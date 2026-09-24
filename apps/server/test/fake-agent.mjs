@@ -344,6 +344,30 @@ async function handle(method, params, id) {
         });
         return { stopReason: "end_turn" };
       }
+      if (text.includes("PLACEHOLDER")) {
+        // OMP-style filler for a model message that came out empty: the harness
+        // sends it as a regular message chunk after the turn's activity.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            messageId: "am1",
+            content: { type: "text", text: "worked, said nothing" },
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "am2",
+            content: {
+              type: "text",
+              text: "[System: Empty message content sanitised to satisfy protocol]",
+            },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
       notify("session/update", {
         sessionId: params.sessionId,
         update: {

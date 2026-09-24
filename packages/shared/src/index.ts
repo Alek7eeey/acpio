@@ -34,6 +34,7 @@ export {
   SHELL_SESSION_PROVIDER,
 } from "./adapters.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
+export { isProtocolPlaceholder } from "./protocolPlaceholder.js";
 export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./ports.js";
 
 export { BUILD_INFO } from "./buildInfo.js";

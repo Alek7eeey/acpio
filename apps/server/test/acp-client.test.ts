@@ -102,6 +102,20 @@ describe("AcpClient against the fake agent", () => {
     });
   });
 
+  it("prompt('PLACEHOLDER') drops the harness empty-message filler, keeps the thought", async () => {
+    await withClient(async (client) => {
+      const chunks: string[] = [];
+      const thoughts: string[] = [];
+      client.on("update", (u: AcpUpdate) => {
+        if (u.kind === "agent_message_chunk") chunks.push(u.text);
+        if (u.kind === "agent_thought_chunk") thoughts.push(u.text);
+      });
+      await client.prompt("PLACEHOLDER");
+      expect(chunks).toEqual([]);
+      expect(thoughts).toEqual(["worked, said nothing"]);
+    });
+  });
+
   it("prompt('hello') emits agent_thought_chunk with 'thinking hard'", async () => {
     await withClient(async (client) => {
       const thoughts: string[] = [];

@@ -38,6 +38,7 @@ import {
   type SlashCommandDto,
   isShellSession,
   effectiveMcpServers,
+  isProtocolPlaceholder,
   type AttachSource,
 } from "@acpio/shared";
 import { api } from "../lib/api";
@@ -2417,7 +2418,12 @@ function AgentTurnTimeline({
 function hasRenderableAssistantContent(parts: MessagePartDto[]) {
   return parts.some((p) => {
     if (p.type === "question") return true;
-    if (p.type === "text" || p.type === "thought") {
+    // Harness filler for empty model messages renders as nothing.
+    if (p.type === "text") {
+      const text = String(p.payload.text ?? "");
+      return Boolean(text.trim()) && !isProtocolPlaceholder(text);
+    }
+    if (p.type === "thought") {
       return Boolean(String(p.payload.text ?? "").trim());
     }
     if (p.type === "subagent" || p.type === "tool_call") {
@@ -2429,7 +2435,7 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
 
 function assistantPlainText(message: MessageDto) {
   return coalesceParts(message.parts)
-    .filter((p) => p.type === "text")
+    .filter((p) => p.type === "text" && !isProtocolPlaceholder(String(p.payload.text ?? "")))
     .map((p) => String(p.payload.text ?? ""))
     .join("\n\n")
     .trim();

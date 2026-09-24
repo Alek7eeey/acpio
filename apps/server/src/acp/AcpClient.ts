@@ -16,6 +16,7 @@ import {
   modelParamFamily,
   modelIdFromValue,
   normalizeToolCallId,
+  isProtocolPlaceholder,
   type AgentMode,
   type AgentProvider,
   type AcpUsage,
@@ -1538,6 +1539,12 @@ export class AcpClient extends EventEmitter {
       }
       const raw = extractText(content);
       const split = splitInlineThinking(raw);
+      // Harnesses emit this filler for a model message that came out empty; it
+      // is protocol filler for the model's history, not content for the user.
+      if (isProtocolPlaceholder(split.text || raw)) {
+        if (split.thought) return { kind: "agent_thought_chunk", text: split.thought };
+        return { kind: "other", sessionUpdate, raw: update };
+      }
       if (split.thought && split.text) {
         return { kind: "mixed_chunks", thought: split.thought, text: split.text };
       }

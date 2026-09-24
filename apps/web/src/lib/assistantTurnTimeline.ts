@@ -1,4 +1,4 @@
-import type { MessagePartDto } from "@acpio/shared";
+import { isProtocolPlaceholder, type MessagePartDto } from "@acpio/shared";
 
 const ACTIVE_STEP_PART = new Set(["pending", "in_progress", "running"]);
 
@@ -24,6 +24,16 @@ function hasBlockingActiveTools(parts: MessagePartDto[]): boolean {
 
 function partText(part: MessagePartDto): string {
   return String(part.payload.text ?? "").trim();
+}
+
+/** Visible message text: harness filler for messages the model left empty
+ *  renders as nothing. Sessions recorded before the server started dropping
+ *  the filler still hold it as a text part, so display-side filtering is
+ *  needed regardless. */
+function visibleText(part: MessagePartDto): string {
+  if (part.type !== "text") return "";
+  const text = partText(part);
+  return isProtocolPlaceholder(text) ? "" : text;
 }
 
 export function lastToolOrder(parts: MessagePartDto[]): number {
@@ -62,7 +72,7 @@ export function turnAnswerVisible(parts: MessagePartDto[]): boolean {
   if (toolOrder < 0) return false;
   const last = sorted.at(-1);
   if (!last || last.type !== "text") return false;
-  return (last.order ?? 0) > toolOrder && partText(last).length > 0;
+  return (last.order ?? 0) > toolOrder && visibleText(last).length > 0;
 }
 
 /**
@@ -85,7 +95,7 @@ export function finalAnswerPart(
   let lastTextOverall: MessagePartDto | null = null;
   let lastTextAfterTools: MessagePartDto | null = null;
   for (const part of sorted) {
-    if (part.type !== "text") continue;
+    if (part.type !== "text" || !visibleText(part)) continue;
     lastTextOverall = part;
     if ((part.order ?? 0) > toolOrder) {
       lastTextAfterTools = part;
@@ -97,7 +107,7 @@ export function finalAnswerPart(
     if (
       last?.type === "text" &&
       (last.order ?? 0) > toolOrder &&
-      partText(last).length > 0
+      visibleText(last).length > 0
     ) {
       return last;
     }
@@ -161,7 +171,8 @@ export function stepsPartsStillLive(parts: MessagePartDto[], streaming: boolean)
   }
 
   if (toolOrder < 0) {
-    const last = sorted[sorted.length - 1];
+    const renderable = sorted.filter((p) => p.type !== "text" || visibleText(p).length > 0);
+    const last = renderable[renderable.length - 1];
     return last?.type === "thought" || last?.type === "text";
   }
 
@@ -224,7 +235,7 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
       items.push({ kind: "question", part, key: part.id });
       continue;
     }
-    if (part.type === "text" && partText(part)) {
+    if (part.type === "text" && visibleText(part)) {
       flushRun();
       items.push({ kind: "text", part, key: part.id });
     }
