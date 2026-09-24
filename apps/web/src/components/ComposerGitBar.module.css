@@ -168,8 +168,11 @@
 
 .changesChipBadge {
   position: absolute;
-  top: -3px;
-  right: -3px;
+  /* Kept inside the chip's box: the row around it is a single clipped line
+     (`overflow: hidden`/`clip` on the composer meta row), so a badge hanging
+     above the chip had its top pixel — the top of the digit — cut off. */
+  top: 0;
+  right: 0;
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
