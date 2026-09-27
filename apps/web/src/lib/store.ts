@@ -80,6 +80,18 @@ const MODELS_CACHE_KEY = "acpio.modelsCatalog.v7";
 const MODELS_CACHE_KEY_LEGACY = "acpio.modelsCatalog.v6";
 const MODELS_SESSION_KEY = "acpio.modelsCatalog.session.v1";
 const ACTIVE_SESSION_KEY = "acpio.activeSessionId";
+/** Desktop tree collapse preference ("1" open, "0" collapsed). */
+const SIDEBAR_OPEN_KEY = "acpio.sidebarOpen.v1";
+/** The settings nav collapses independently of the chat tree, so it keeps its own. */
+const SETTINGS_SIDEBAR_OPEN_KEY = "acpio.sidebarOpen.settings.v1";
+
+/** Which sidebar the live `sidebarOpen` flag describes. */
+export type SidebarPanel = "tree" | "settings";
+let activeSidebarPanel: SidebarPanel = "tree";
+const SIDEBAR_OPEN_KEYS: Record<SidebarPanel, string> = {
+  tree: SIDEBAR_OPEN_KEY,
+  settings: SETTINGS_SIDEBAR_OPEN_KEY,
+};
 /** Soft TTL: serve instantly, refresh quietly in background after this. */
 const MODELS_SOFT_TTL_MS = 30 * 60_000;
 const MODELS_CLOUD_SOFT_TTL_MS = 30_000;
@@ -373,6 +385,12 @@ type AppState = {
   setMultitask: (value: boolean) => Promise<void>;
   cancelPrompt: (sessionId?: string) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
+  /**
+   * Point the collapse flag at another sidebar scope and restore the state it
+   * remembered. Returns the restored value so a route-driven swap can tell the
+   * brand-bounce animation apart from a user toggle.
+   */
+  setSidebarPanel: (panel: SidebarPanel) => boolean;
   setConnection: (connection: ConnectionState) => void;
   /** Re-read server-owned state after the socket returns (missed events are never replayed). */
   resyncAfterReconnect: () => Promise<void>;
@@ -1330,6 +1348,36 @@ if (typeof document !== "undefined") {
   }
 }
 
+/**
+ * Desktop panel collapse preference for `panel`, read synchronously so a reload
+ * restores the panel without flashing it open. The mobile sheet is transient (it
+ * starts closed and is dismissed on navigation), so below 900px the stored value
+ * is ignored.
+ */
+function readStoredSidebarOpen(panel: SidebarPanel): boolean {
+  if (typeof window === "undefined") return true;
+  if (window.innerWidth < 900) return false;
+  try {
+    const raw = localStorage.getItem(SIDEBAR_OPEN_KEYS[panel]);
+    if (raw !== null) return raw !== "0";
+    // The settings nav has no preference of its own yet — start from the tree's,
+    // so opening settings never springs a collapsed panel back open.
+    return panel === "settings" ? readStoredSidebarOpen("tree") : true;
+  } catch {
+    return true;
+  }
+}
+
+/** Mirror of {@link readStoredSidebarOpen} — mobile sheet toggles are not kept. */
+function writeStoredSidebarOpen(panel: SidebarPanel, open: boolean) {
+  if (typeof window === "undefined" || window.innerWidth < 900) return;
+  try {
+    localStorage.setItem(SIDEBAR_OPEN_KEYS[panel], open ? "1" : "0");
+  } catch {
+    // ignore
+  }
+}
+
 const initialActiveSessionId =
   typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
 const initialConsoleOpenSessions = readConsoleOpenSessions();
@@ -1573,7 +1621,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   allAdapters: [],
   adapters: [],
   adaptersLoaded: false,
-  sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
+  sidebarOpen: readStoredSidebarOpen("tree"),
   boardFoldersOpen: false,
   connected: false,
   connection: "connecting",
@@ -2894,6 +2942,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarOpen(open) {
     set({ sidebarOpen: open });
+    writeStoredSidebarOpen(activeSidebarPanel, open);
+  },
+
+  setSidebarPanel(panel) {
+    if (panel === activeSidebarPanel) return get().sidebarOpen;
+    activeSidebarPanel = panel;
+    const open = readStoredSidebarOpen(panel);
+    set({ sidebarOpen: open });
+    return open;
   },
 
   setBoardFoldersOpen(open) {

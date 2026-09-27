@@ -104,6 +104,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const sidebarOpen = useAppStore((s) => s.sidebarOpen);
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen);
+  const setSidebarPanel = useAppStore((s) => s.setSidebarPanel);
   const sessions = useAppStore((s) => s.sessions);
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
@@ -274,12 +275,6 @@ export function AppShell() {
     [sheetSnaps],
   );
 
-  // Close chat tree when entering settings on mobile (don't auto-open).
-  useEffect(() => {
-    if (!isSettings) return;
-    if (window.innerWidth < 900) setSidebarOpen(false);
-  }, [isSettings, setSidebarOpen]);
-
   const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
     agent: true,
@@ -334,6 +329,12 @@ export function AppShell() {
   // Bounce the app title whenever the tree (sidebar) collapses or expands.
   const [brandBump, setBrandBump] = useState(false);
   const prevSidebarOpen = useRef(sidebarOpen);
+  // The settings nav and the chat/board tree remember their collapse state
+  // separately: crossing between them restores the panel's own state. The ref is
+  // updated first so a route swap is not mistaken for a user toggle.
+  useLayoutEffect(() => {
+    prevSidebarOpen.current = setSidebarPanel(isSettings ? "settings" : "tree");
+  }, [isSettings, setSidebarPanel]);
   useEffect(() => {
     if (prevSidebarOpen.current === sidebarOpen) return;
     const wasOpen = prevSidebarOpen.current;
