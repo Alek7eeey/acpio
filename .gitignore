@@ -20,3 +20,5 @@ dist-app/
 /.acpio-attachments/
 /.tmp-check/
 /tmp/
+/bench/.work/
+/bench/results/
