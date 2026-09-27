@@ -803,6 +803,43 @@ export async function ensureAcp(
   if (rt.clientReady) return rt.clientReady;
   if (rt.client) return rt.client;
 
+  // Reserve the boot slot BEFORE bootAcp's async lookups: a chat created and
+  // prompted in the same tick used to pass both guards above twice, start two
+  // agents and leave `rt.client` pointing at the second one. The first agent
+  // then kept running the turn, but its permission answers were routed through
+  // `rt.client` to the idle second agent — the prompt hung forever.
+  const ready = bootAcp(rt, sessionId, opts, boot);
+  rt.clientReady = ready;
+  try {
+    return await ready;
+  } catch (err) {
+    // The boot failed before startClient could claim the slot (or it cleared
+    // both itself) — only this call may release what it reserved.
+    if (rt.clientReady === ready) {
+      rt.clientReady = null;
+      rt.client = null;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Boot body for {@link ensureAcp}. Callers reach it only through the guard in
+ * ensureAcp, which reserves `rt.clientReady` synchronously first.
+ */
+async function bootAcp(
+  rt: SessionRuntime,
+  sessionId: string,
+  opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
+  boot?: {
+    preferResume?: boolean;
+    /** Re-apply this exact model at boot (defaults to settings.defaultModel). */
+    model?: string;
+    modelParams?: Record<string, string>;
+    /** Open a stored harness session even if resume-on-restart is off. */
+    forceRestore?: boolean;
+  },
+): Promise<AcpClient> {
   const settings = await getSettings();
   const detail = await getSessionDetail(sessionId);
   const bootModel =
