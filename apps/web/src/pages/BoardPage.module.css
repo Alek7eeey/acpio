@@ -7,29 +7,6 @@
   background: var(--bg);
 }
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-}
-
-.headerTitle {
-  font-size: 0.98rem;
-  font-weight: 650;
-  color: var(--text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.headerSpacer {
-  flex: 1;
-}
-
 /* Bottom action bar — mobile only: the board's actions sit under the thumb
    instead of in the two top corners. */
 .actions {
@@ -76,27 +53,6 @@
 /* Mobile-only drawer parts: the rail is inline everywhere else. */
 .railScrim {
   display: none;
-}
-
-.headerBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.headerBtn:hover {
-  color: var(--text);
-  background: var(--bg-secondary);
 }
 
 .body {
@@ -172,6 +128,15 @@
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 650;
+}
+
+/* A project row's selected tint lives on .railRow, but the row's own button
+   covers it with an opaque hover fill. Touch keeps :hover on the tapped
+   project until the next tap, so a freshly selected row read as unselected
+   and only regained the tint once the tap moved elsewhere. Let the row's tint
+   show through instead of repainting the button. */
+.railRowOn .railItem:hover {
+  background: transparent;
 }
 
 .railLabel {
@@ -387,6 +352,7 @@
 
 .composerActions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: flex-end;
 }
@@ -431,17 +397,68 @@
   background: var(--bg-secondary);
 }
 
-/* Creation form: one-shot "start immediately" switch, parked left of the
-   buttons so Cancel/Create keep the right edge. */
-.autoStartBtn {
-  margin-right: auto;
+/* Creation form: "start immediately" reads as a switch — label left, track
+   right — and owns its own line, because a 264px board column has no room to
+   squeeze the label between the track and Cancel/Create. The track/knob are
+   shared with the agent menu's copy of the same switch. */
+.autoStart {
+  flex: 0 0 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.autoStartBtnOn,
-.autoStartBtnOn:hover {
-  border-color: var(--accent);
+.autoStart:hover {
+  color: var(--text);
+}
+
+.autoStart.switchOn,
+.autoStart.switchOn:hover {
   color: var(--accent);
-  background: var(--accent-soft);
+}
+
+.switchTrack {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s ease;
+}
+
+.switchOn .switchTrack {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.switchOn .switchKnob {
+  left: 16px;
+}
+
+/* Menu copy: same track, pinned to the row's right edge. */
+.switchTrackEnd {
+  margin-left: auto;
 }
 
 .dangerBtn {
@@ -473,6 +490,14 @@
   background: var(--surface);
   box-shadow: var(--shadow-soft);
   cursor: pointer;
+  transition:
+    transform 0.08s ease,
+    border-color 0.15s ease;
+}
+
+/* Press feedback: the card answers the pointer down, not the round-trip. */
+.card:active {
+  transform: scale(0.98);
 }
 
 .card:hover {
@@ -646,11 +671,6 @@
   color: var(--accent);
 }
 
-.menuCheck {
-  margin-left: auto;
-  font-weight: 700;
-}
-
 .dot {
   width: 7px;
   height: 7px;
@@ -752,10 +772,6 @@
     padding: 8px 10px;
     border-top: 1px solid var(--border);
     background: var(--surface);
-  }
-
-  .headerBtn {
-    display: none;
   }
 
   /* Same reason as the action bar: a centered dialog puts its buttons in the

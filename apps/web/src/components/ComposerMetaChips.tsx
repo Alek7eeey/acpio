@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 import type {
   AgentMode,
   AppSettings,
@@ -18,6 +19,7 @@ import type {
   GitStatusDto,
 } from "@acpio/shared";
 import { isShellSession } from "@acpio/shared";
+import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
 import { showToast } from "../lib/toast";
 import { OptionPicker } from "./OptionPicker";
@@ -202,6 +204,8 @@ export function ComposerMetaChips({
 }) {
   const t = useT();
   const isDesktop = useDesktopMetaLayout();
+  const navigate = useNavigate();
+  const boards = useAppStore((s) => s.boards);
 
   const shellRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -304,6 +308,29 @@ export function ComposerMetaChips({
             )}
           </button>
         );
+      } else if (id === "board") {
+        const boardId = activeSession?.boardId ?? null;
+        const board = boardId ? (boards.find((b) => b.id === boardId) ?? null) : null;
+        if (board) {
+          node = (
+            <button
+              type="button"
+              className={styles.metaChip}
+              aria-label={t("common.backToBoard", { name: board.name })}
+              title={t("common.backToBoard", { name: board.name })}
+              onClick={() => navigate(`/board/${board.id}`)}
+            >
+              <span className={styles.metaChipIcon} aria-hidden>
+                <svg width="14" height="13" viewBox="0 0 24 20" fill="none">
+                  <rect x="3" y="3" width="4.4" height="14" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+                  <rect x="9.8" y="3" width="4.4" height="9" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+                  <rect x="16.6" y="3" width="4.4" height="12" rx="1.2" stroke="currentColor" strokeWidth="1.6" />
+                </svg>
+              </span>
+              <span className={styles.metaChipLabel}>{board.name}</span>
+            </button>
+          );
+        }
       } else if (id === "gitBranch" && (gitChip?.awaiting || gitChip?.loading)) {
         if (settings.chatGitBranchPosition === "above") {
           node = (
@@ -461,6 +488,7 @@ export function ComposerMetaChips({
     return items;
   }, [
     activeSession,
+    boards,
     autoExpandSteps,
     chatMcp,
     chipOptions.folder.truncate,

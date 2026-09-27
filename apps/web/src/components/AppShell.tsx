@@ -80,6 +80,12 @@ function readStoredWidth() {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, raw));
 }
 
+/** `/board/<id>` → that id, decoded; null on every other route. */
+function boardIdFromPath(pathname: string): string | null {
+  if (!pathname.startsWith("/board/")) return null;
+  return decodeURIComponent(pathname.slice("/board/".length).split("/")[0] ?? "");
+}
+
 /** AppShell renders pages from the pathname (it has no <Outlet/>), so a route's
  * params never reach the page; the board id is sliced out of the path here. */
 function ShellPage({ pathname }: { pathname: string }) {
@@ -87,8 +93,7 @@ function ShellPage({ pathname }: { pathname: string }) {
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
   if (pathname.startsWith("/board/")) {
-    const boardId = decodeURIComponent(pathname.slice("/board/".length).split("/")[0] ?? "");
-    return <BoardPage boardId={boardId} />;
+    return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
   }
   return <ChatPage />;
 }
@@ -103,6 +108,7 @@ export function AppShell() {
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
   const createBoard = useAppStore((s) => s.createBoard);
+  const setBoardFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
@@ -119,6 +125,7 @@ export function AppShell() {
   const chatPaneIds = useAppStore((s) => s.chatPaneIds);
   const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
   const connection = useAppStore((s) => s.connection);
+  const boards = useAppStore((s) => s.boards);
   const headerSession = useMemo(() => {
     const focusedId =
       (chatPaneIds?.length ?? 0) > 1
@@ -128,6 +135,14 @@ export function AppShell() {
     if (activeSession?.id === focusedId) return activeSession;
     return sessions.find((s) => s.id === focusedId) ?? activeSession;
   }, [activeSession, chatPaneIds, focusedPaneIndex, sessions]);
+  /**
+   * The board a board-task chat belongs to — the header's one-click way back.
+   * Null for regular chats (and for a board deleted in the meantime).
+   */
+  const headerBoard = useMemo(() => {
+    const id = headerSession?.boardId ?? null;
+    return id ? (boards.find((b) => b.id === id) ?? null) : null;
+  }, [headerSession, boards]);
   const headerTitle = useMemo(() => {
     if (!headerSession) return "";
     const detail =
@@ -214,6 +229,18 @@ export function AppShell() {
   const isChat = pathname === "/" || pathname.startsWith("/chat");
   const isSettings = pathname.startsWith("/settings");
   const isBoard = pathname.startsWith("/board/");
+  /**
+   * The board open in the view. Its name takes the header's context slot while
+   * its page is on screen — that slot would otherwise keep showing the chat
+   * context of a chat the user is not looking at.
+   */
+  const openBoard = isBoard
+    ? (boards.find((b) => b.id === boardIdFromPath(pathname)) ?? null)
+    : null;
+  /** Board the rail's boards button marks: the open board, or the one owning the open task. */
+  const activeRailBoardId = openBoard?.id ?? headerBoard?.id ?? null;
+  /** The owning board is a way back, so it only exists while off the board. */
+  const backToBoard = isChat && headerBoard ? headerBoard : null;
   // The board is a workspace of its own: its sidebar carries the board rows and
   // the chat tree, so it stays visible there too.
   const treeRoute = isChat || isBoard;
@@ -261,7 +288,12 @@ export function AppShell() {
   const [dragging, setDragging] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [railRecentsPos, setRailRecentsPos] = useState<{ x: number; y: number } | null>(null);
-  const [railFolderPicker, setRailFolderPicker] = useState<{ x: number; y: number } | null>(null);
+  const [railBoardsPos, setRailBoardsPos] = useState<{ x: number; y: number } | null>(null);
+  const [railFolderPicker, setRailFolderPicker] = useState<{
+    x: number;
+    y: number;
+    initialKind?: "agent" | "terminal" | "board";
+  } | null>(null);
   const [railSettingsMenu, setRailSettingsMenu] = useState<{
     section: SettingsSection;
     x: number;
@@ -295,6 +327,7 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [searchEnabled, searchOpen, openSearch]);
   const railRecentsRef = useRef<HTMLDivElement>(null);
+  const railBoardsRef = useRef<HTMLDivElement>(null);
   const railSettingsRef = useRef<HTMLDivElement>(null);
 
   const railMode = showSidebar && !sidebarOpen && settings.sidebarCollapse === "rail";
@@ -353,6 +386,23 @@ export function AppShell() {
   }, [railRecentsPos]);
 
   useEffect(() => {
+    if (!railBoardsPos) return;
+    const onDown = (e: MouseEvent) => {
+      if (railBoardsRef.current?.contains(e.target as Node)) return;
+      setRailBoardsPos(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRailBoardsPos(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [railBoardsPos]);
+
+  useEffect(() => {
     if (!railSettingsMenu) return;
     const onDown = (e: MouseEvent) => {
       if (railSettingsRef.current?.contains(e.target as Node)) return;
@@ -372,10 +422,30 @@ export function AppShell() {
   const openRailRecents = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setRailFolderPicker(null);
+    setRailBoardsPos(null);
     setRailRecentsPos({
       x: Math.min(rect.right + 8, window.innerWidth - 300),
       y: Math.min(rect.top, window.innerHeight - 360),
     });
+  };
+
+  /** Board picker in the rail: choose an open board, or create a new one. */
+  const openRailBoards = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRailRecentsPos(null);
+    setRailFolderPicker(null);
+    setRailBoardsPos({
+      x: Math.min(rect.right + 8, window.innerWidth - 300),
+      y: Math.min(rect.top, window.innerHeight - 360),
+    });
+  };
+
+  /** "New board" from the rail's board menu: reuse the session picker on its board tab. */
+  const openRailNewBoard = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setRailBoardsPos(null);
+    setRailRecentsPos(null);
+    setRailFolderPicker({ x: rect.right + 8, y: rect.top, initialKind: "board" });
   };
 
   const openRailSettings = (
@@ -384,6 +454,7 @@ export function AppShell() {
   ) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setRailRecentsPos(null);
+    setRailBoardsPos(null);
     setRailFolderPicker(null);
     setRailSettingsMenu({
       section,
@@ -395,6 +466,7 @@ export function AppShell() {
   const openRailNewChat = (e: ReactPointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setRailRecentsPos(null);
+    setRailBoardsPos(null);
     setRailFolderPicker({ x: rect.right + 8, y: rect.top });
   };
 
@@ -1020,10 +1092,11 @@ export function AppShell() {
           <button
             type="button"
             className={styles.railBtn}
-            title={t("common.openTree")}
-            aria-label={t("common.openTree")}
+            title={t(isSettings ? "common.openTree" : "common.railChats")}
+            aria-label={t(isSettings ? "common.openTree" : "common.railChats")}
             onClick={() => {
               setRailRecentsPos(null);
+              setRailBoardsPos(null);
               setRailFolderPicker(null);
               setSidebarOpen(true);
             }}
@@ -1111,6 +1184,46 @@ export function AppShell() {
             })
           ) : (
             <>
+              <button
+                type="button"
+                className={`${styles.railBtn}${
+                  activeRailBoardId ? ` ${styles.railBtnActive}` : ""
+                }`}
+                title={t("common.railBoards")}
+                aria-label={t("common.railBoards")}
+                aria-expanded={railBoardsPos != null}
+                onClick={openRailBoards}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 20" fill="none" aria-hidden>
+                  <rect
+                    x="3"
+                    y="3"
+                    width="4.4"
+                    height="14"
+                    rx="1.2"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <rect
+                    x="9.8"
+                    y="3"
+                    width="4.4"
+                    height="9.5"
+                    rx="1.2"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <rect
+                    x="16.6"
+                    y="3"
+                    width="4.4"
+                    height="12"
+                    rx="1.2"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                </svg>
+              </button>
               <button
                 type="button"
                 className={styles.railBtn}
@@ -1207,6 +1320,81 @@ export function AppShell() {
               document.body,
             )}
 
+          {railBoardsPos &&
+            createPortal(
+              <div
+                ref={railBoardsRef}
+                className={styles.railMenu}
+                style={{ left: railBoardsPos.x, top: railBoardsPos.y }}
+                role="menu"
+                aria-label={t("common.railBoards")}
+              >
+                <div className={styles.railMenuHead}>{t("common.railBoards")}</div>
+                <div className={styles.railMenuList}>
+                  {boards.length === 0 ? (
+                    <p className={styles.railMenuEmpty}>{t("common.railNoBoards")}</p>
+                  ) : (
+                    [...boards]
+                      .sort((a, b) => a.sortOrder - b.sortOrder)
+                      .map((b) => {
+                        const active = activeRailBoardId === b.id;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            role="menuitem"
+                            className={`${styles.railMenuItem}${
+                              active ? ` ${styles.railMenuItemActive}` : ""
+                            }`}
+                            onClick={() => {
+                              setRailBoardsPos(null);
+                              navigate(`/board/${b.id}`);
+                            }}
+                          >
+                            <span className={styles.railMenuItemText}>{b.name}</span>
+                            {active ? (
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                aria-hidden
+                                className={styles.railMenuItemCheck}
+                              >
+                                <path
+                                  d="M5 12.5l4.5 4.5L19 7.5"
+                                  stroke="currentColor"
+                                  strokeWidth="2.2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            ) : null}
+                          </button>
+                        );
+                      })
+                  )}
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`${styles.railMenuItem} ${styles.railMenuAction}`}
+                  onClick={openRailNewBoard}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M12 5v14M5 12h14"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className={styles.railMenuItemText}>{t("chat.newBoard")}</span>
+                </button>
+              </div>,
+              document.body,
+            )}
+
           {railSettingsMenu && (
             (() => {
               const branch = settingsTree.find((b) => b.id === railSettingsMenu.section);
@@ -1279,6 +1467,7 @@ export function AppShell() {
             online: agentAvailability[id] === true,
           }))}
           preferredProvider={settings.defaultProvider}
+          initialKind={railFolderPicker.initialKind}
           onClose={() => setRailFolderPicker(null)}
           onCreateBoard={async (name) => {
             const board = await createBoard(name);
@@ -1399,13 +1588,51 @@ export function AppShell() {
             ) : null}
             <span
               className={
-                isSettings ? styles.headerBrandHideOnMobile : styles.headerBrandWrap
+                isSettings
+                  ? styles.headerBrandHideOnMobile
+                  : backToBoard || openBoard
+                    // The chip replaces the brand on phones — there the open
+                    // board's name is the page identity. On desktop the wrap
+                    // still hands the header brand over to the open tree.
+                    ? `${styles.headerBrandWrap} ${styles.headerBrandHideOnMobile}`
+                    : styles.headerBrandWrap
               }
             >
               {renderBrandButton({ bump: true })}
             </span>
+            {backToBoard ? (
+              <button
+                type="button"
+                className={styles.headerBackToBoard}
+                onClick={() => navigate(`/board/${backToBoard.id}`)}
+                title={t("common.backToBoard", { name: backToBoard.name })}
+                aria-label={t("common.backToBoard", { name: backToBoard.name })}
+              >
+                <span className={styles.headerBackToChatIcon} aria-hidden>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <path
+                      d="M14.2 5.8 8.5 12l5.7 6.2"
+                      stroke="currentColor"
+                      strokeWidth="2.15"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                <span className={styles.headerBackToChatLabel}>{backToBoard.name}</span>
+              </button>
+            ) : null}
           </span>
-          {!isSettings && headerSession ? (
+          {openBoard ? (
+            // The board's title row: one top bar for the whole view, so the
+            // board's name sits where a chat's context would.
+            <div
+              className={`${styles.headerChatCtx} ${styles.headerCtxBoard}`}
+              title={openBoard.name}
+            >
+              <span className={styles.headerChatTitle}>{openBoard.name}</span>
+            </div>
+          ) : !isSettings && headerSession ? (
             <>
               <HoverTip as="div" wrap className={styles.headerChatCtx} text={headerTitle}>
                 {headerFolderLabel(headerSession.cwd) ? (
@@ -1440,6 +1667,16 @@ export function AppShell() {
             </div>
           ) : null}
           <div className={styles.headerActions}>
+            {openBoard ? (
+              <button
+                type="button"
+                className={styles.headerBoardFolders}
+                title={t("chat.boardFoldersTitle")}
+                onClick={() => setBoardFoldersOpen(true)}
+              >
+                {t("chat.boardFoldersTitle")}
+              </button>
+            ) : null}
             <div ref={agentChipRef} className={styles.agentChipWrap}>
               <button
                 type="button"

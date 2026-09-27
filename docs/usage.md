@@ -103,20 +103,27 @@ tree; the tree lists boards under the chats, and opening one keeps the tree besi
 board page shows four columns — **Todo**, **In Progress**, **Wait**, **Done** — and a rail of
 the folders the board works in.
 
-A board's folders are its projects: **Board folders** in the board header adds and removes
-them, and the rail lists each one with its task count. Clicking a folder filters the whole
-board down to it, **All projects** clears the filter, and the **+** on a rail row starts a
-task in that folder. **Todo** groups its cards by project, and both the groups and the cards
-inside them move up and down — the order is saved on the server, so it survives a reload.
+The board's name sits in the top bar above, in the pill a chat's title would carry — one bar
+for the whole view instead of a second title row of its own. A board's folders are its
+projects: **Board folders** in that bar adds and removes them, and the rail lists each one
+with its task count. Clicking a folder filters the whole board down to it, **All projects**
+clears the filter, and the **+** on a rail row starts a task in that folder. **Todo** groups
+its cards by project, and both the groups and the cards inside them move up and down — the
+order is saved on the server, so it survives a reload.
 
 Every task is a chat session of its own. **+** on a group writes a card carrying the project
-chip; the **Start immediately** switch in the creation form starts the task the moment it is
+chip; **right-clicking** that **+** (on a group or a rail row) opens the standard new-chat picker
+with the folder locked, and confirming it creates the task empty — no description form — then
+opens its chat, so the first message is what names and forms it. That is the shape a chat has
+when it comes from the folder tree, and the fresh card rests in **Todo** until that turn runs.
+The **Start immediately** switch in the creation form starts the task the moment it is
 created — the default agent gets the description as the first message while you stay on the
 board. The play icon on the card starts work right away too: the description goes out as the
 first message, the card leaves **Todo**, and the chat does not open. Right-clicking the play
 icon opens the agent picker with the same **Start immediately** switch: on, the task starts at
 once with the agent you pick; off, the chat opens with the description already in the composer,
-so pressing Enter (or picking a slash command) starts the turn. Clicking the card itself just
+so pressing Enter (or picking a slash command) starts the turn. Both **Start immediately**
+switches remember their state across page reloads. Clicking the card itself just
 opens the chat: a never-started task gets its description in the composer, a started one leaves
 it empty — the description was already sent. A card's column follows the session instead of a
 stored status: a task whose first turn never ran sits in **Todo**, a live turn shows in **In
@@ -124,6 +131,15 @@ Progress**, and a finished turn, a question waiting for you or a failed turn lan
 **Wait** — where the card carries **Mark done** for work you call finished. **Done** outranks
 a live turn, and **Reopen** sends the task back to **Todo**. Board tasks never show up in the
 chat tree, and deleting a board deletes its tasks with it.
+
+A chat opened from the board stays tied to it: the header carries a **‹ board name** pill next
+to the brand, and one click on it is back to the board (on phones the pill takes the brand's
+place). The context row above the input carries the same trip as a **Board** chip next to the
+folder chip — right under the thumb while you type — and **Settings → Interface → Chat →
+Advanced** turns it off or moves it. The way back keeps the reading position: the lanes and the
+folder rail open where you left them, and the card you left through stays in view. The tree
+lights up the board the task belongs to as well, so its row is another way back — the task
+itself never appears there.
 
 ## Built-in agent (no install)
 

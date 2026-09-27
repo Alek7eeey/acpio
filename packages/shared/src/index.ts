@@ -763,6 +763,7 @@ export type ChatActionId =
 /** Chips shown in the composer bar above the input. */
 export type ChatMetaChipId =
   | "folder"
+  | "board"
   | "gitBranch"
   | "gitChanges"
   | "thoughts"
@@ -1347,7 +1348,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"],
+  chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"],
   thoughtsChipStyle: "full",
   consoleChipStyle: "full",
   terminalShell: "cmd",

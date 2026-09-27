@@ -123,6 +123,13 @@ type CreateSessionFolderPickerProps = {
   onConfirm: (cwd: string, provider: SessionTarget) => void | Promise<void>;
   onOpenExisting?: (session: HarnessSessionDto) => void | Promise<void>;
   onCreateBoard?: (name: string) => void | Promise<void>;
+  /** Session kind the picker opens on (the rail's boards button lands on "board"). */
+  initialKind?: "agent" | "terminal" | "board";
+  /**
+   * Drop the kind switch: only an agent session can be created. The board's
+   * task picker uses it — a board task is always an agent chat, never a shell.
+   */
+  agentOnly?: boolean;
 };
 
 export function CreateSessionFolderPicker({
@@ -138,6 +145,8 @@ export function CreateSessionFolderPicker({
   onConfirm,
   onOpenExisting,
   onCreateBoard,
+  initialKind = "agent",
+  agentOnly = false,
 }: CreateSessionFolderPickerProps) {
   const t = useT();
   const [searchQuery, setSearchQuery] = useState("");
@@ -165,7 +174,9 @@ export function CreateSessionFolderPicker({
     return onlineAgents[0]?.id ?? null;
   });
   const [agentMenuOpen, setAgentMenuOpen] = useState(false);
-  const [sessionKind, setSessionKind] = useState<"agent" | "terminal" | "board">("agent");
+  const [sessionKind, setSessionKind] = useState<"agent" | "terminal" | "board">(
+    agentOnly ? "agent" : initialKind,
+  );
   const [boardName, setBoardName] = useState("");
   const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -401,7 +412,7 @@ export function CreateSessionFolderPicker({
     }
   };
 
-  const sessionKindSwitch = (
+  const sessionKindSwitch = agentOnly ? null : (
     <div className={styles.pickerKindInline} role="tablist" aria-label={t("common.pickAgent")}>
       <button
         type="button"

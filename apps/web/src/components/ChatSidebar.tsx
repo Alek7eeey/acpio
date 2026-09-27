@@ -208,9 +208,18 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
+  /** The task chat currently open — board tasks live outside the tree. */
+  const activeSessionBoardId = useAppStore((s) => s.activeSession?.boardId ?? null);
+  /**
+   * The board the sidebar marks: the open board page, or — while its task is
+   * being read in the chat — that task's own board, so the row that leads back
+   * is the one lit up.
+   */
   const activeBoardId = location.pathname.startsWith("/board/")
     ? location.pathname.slice("/board/".length)
-    : null;
+    : location.pathname === "/" || location.pathname.startsWith("/chat")
+      ? activeSessionBoardId
+      : null;
   const sessions = useAppStore((s) => s.sessions);
   const settings = useAppStore((s) => s.settings);
   const activeSessionId = useAppStore((s) => s.activeSessionId);

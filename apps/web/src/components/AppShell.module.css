@@ -140,6 +140,95 @@
   display: none;
 }
 
+/**
+ * Header pill that jumps away from the current page: the settings "← Chat"
+ * control (mobile only, see below) and the "← <board>" control a board-task
+ * chat shows in place of the brand. Always visible for the board.
+ */
+.headerBackToChat,
+.headerBackToBoard {
+  align-items: center;
+  gap: 7px;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 30px;
+  margin: 0;
+  padding: 0 12px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
+  -webkit-tap-highlight-color: transparent;
+  animation: headerBackIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    background var(--motion),
+    border-color var(--motion),
+    transform 0.18s ease,
+    box-shadow var(--motion);
+}
+
+.headerBackToBoard {
+  display: inline-flex;
+}
+
+.headerBackToChatIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.headerBackToChatIcon svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  margin-left: -1px;
+}
+
+.headerBackToChatLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-bottom: 0.5px;
+}
+
+.headerBackToChat:active,
+.headerBackToBoard:active {
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  transform: scale(0.97);
+}
+
+.headerBackToBoard:hover {
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+@keyframes headerBackIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 .headerBrandHideOnMobile {
   display: contents;
 }
@@ -484,6 +573,24 @@
   padding: 10px;
   font-size: 0.85rem;
   color: var(--text-secondary);
+}
+
+/* Long board lists scroll inside the menu instead of running off-screen. */
+.railMenuList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(52vh, 360px);
+  overflow-y: auto;
+}
+
+/* Trailing action ("New board") sits apart from the pick list above it. */
+.railMenuAction {
+  margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 0 0 10px 10px;
+  color: var(--accent);
+  font-weight: 650;
 }
 
 .railMenuItem {
@@ -3556,6 +3663,42 @@
   margin-left: auto;
 }
 
+/* "Board folders" — the board page's own header button, moved up into the one
+   top bar the whole view shares. */
+.headerBoardFolders {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+  backdrop-filter: blur(16px) saturate(1.08);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.headerBoardFolders:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+@media (max-width: 899px) {
+  /* Phones keep it in the board's bottom action bar, under the thumb. */
+  .headerBoardFolders {
+    display: none;
+  }
+}
+
 /* Agent status — separate from the language/theme toolbar cluster. */
 .agentChipWrap {
   position: relative;
@@ -4065,7 +4208,9 @@
 :global([data-theme="light"]) .header .iconBtn,
 :global([data-theme="light"]) .headerBrandSlot .headerBrand,
 :global([data-theme="light"]) .headerChatCtx,
-:global([data-theme="light"]) .headerBackToChat {
+:global([data-theme="light"]) .headerBoardFolders,
+:global([data-theme="light"]) .headerBackToChat,
+:global([data-theme="light"]) .headerBackToBoard {
   background: color-mix(in srgb, var(--surface) 58%, transparent);
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 72%, transparent),
@@ -4406,6 +4551,13 @@
     display: none;
   }
 
+  /* The open board's context pill is exempt: unlike a chat's context it is the
+     page's identity, carrying the title row the board page no longer draws. */
+  .headerChatCtx.headerCtxBoard {
+    display: flex;
+    max-width: min(52%, 20rem);
+  }
+
   .headerSpacerMobile {
     display: block;
     flex: 1;
@@ -4418,78 +4570,10 @@
     max-height: min(70dvh, calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px));
   }
 
+  /* The pill itself lives at the top with .headerBackToBoard; mobile only
+     turns the settings back control on. */
   .headerBackToChat {
     display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    flex: 0 1 auto;
-    min-width: 0;
-    height: 30px;
-    margin: 0;
-    padding: 0 12px 0 4px;
-    border: 1px solid color-mix(in srgb, var(--border) 58%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--surface) 46%, transparent);
-    backdrop-filter: blur(16px) saturate(1.08);
-    color: var(--text);
-    font: inherit;
-    font-size: 0.82rem;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    cursor: pointer;
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
-      0 1px 3px color-mix(in srgb, var(--bg) 10%, transparent);
-    -webkit-tap-highlight-color: transparent;
-    animation: headerBackIn 0.32s cubic-bezier(0.22, 1, 0.36, 1);
-    transition:
-      background var(--motion),
-      border-color var(--motion),
-      transform 0.18s ease,
-      box-shadow var(--motion);
-  }
-
-  .headerBackToChatIcon {
-    display: grid;
-    place-items: center;
-    flex: 0 0 auto;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-
-  .headerBackToChatIcon svg {
-    display: block;
-    width: 13px;
-    height: 13px;
-    margin-left: -1px;
-  }
-
-  .headerBackToChatLabel {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding-bottom: 0.5px;
-  }
-
-  .headerBackToChat:active {
-    background: color-mix(in srgb, var(--surface) 62%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-    transform: scale(0.97);
-  }
-
-  @keyframes headerBackIn {
-    from {
-      opacity: 0;
-      transform: translateX(-8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
   }
 
   /* Legacy dock chrome — unused after sheet puller. */

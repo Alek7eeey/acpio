@@ -225,6 +225,8 @@ type AppState = {
     boardId: string;
     cwd: string;
     description: string;
+    /** Pre-start agent pick — a board task may be created for a chosen agent. */
+    provider?: AgentProvider;
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
   /** Board task: pick the agent before the first turn (the server accepts it only then). */
@@ -265,6 +267,13 @@ type AppState = {
   loadAdapters: () => Promise<void>;
   modelsLoading: boolean;
   sidebarOpen: boolean;
+  /**
+   * The board folders dialog is open. Its button sits in the shell header (the
+   * open board's title row) while the dialog itself belongs to the board page,
+   * so the flag lives here rather than in either component's local state.
+   */
+  boardFoldersOpen: boolean;
+  setBoardFoldersOpen: (open: boolean) => void;
   connected: boolean;
   /** Fine-grained socket state for the toolbar chip; `connected` mirrors it. */
   connection: ConnectionState;
@@ -1485,13 +1494,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description }) => {
+  createBoardTask: async ({ boardId, cwd, description, provider }) => {
     try {
       const title = description.trim().split("\n")[0]?.slice(0, 120) || "";
       const task = await api.createSession({
         boardId,
         cwd,
         taskDescription: description,
+        ...(provider ? { provider } : {}),
         ...(title ? { title } : {}),
       });
       set((s) => ({ boardSessions: [task, ...s.boardSessions] }));
@@ -1564,6 +1574,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   adapters: [],
   adaptersLoaded: false,
   sidebarOpen: typeof window !== "undefined" ? window.innerWidth >= 900 : true,
+  boardFoldersOpen: false,
   connected: false,
   connection: "connecting",
   agentAvailable: false,
@@ -2883,6 +2894,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSidebarOpen(open) {
     set({ sidebarOpen: open });
+  },
+
+  setBoardFoldersOpen(open) {
+    set({ boardFoldersOpen: open });
   },
 
   setConnection(connection) {

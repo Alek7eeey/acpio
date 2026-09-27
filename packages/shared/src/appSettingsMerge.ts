@@ -12,10 +12,11 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 5;
+export const SETTINGS_SCHEMA_VERSION = 6;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "folder",
+  "board",
   "gitBranch",
   "gitChanges",
   "thoughts",
@@ -70,6 +71,13 @@ export function normalizeChatMetaChips(
   }
   if (schemaVersion < 5) {
     next = expandLegacyGitChip(next);
+  }
+  if (schemaVersion < 6 && !next.includes("board")) {
+    const folderIdx = next.indexOf("folder");
+    next =
+      folderIdx >= 0
+        ? [...next.slice(0, folderIdx + 1), "board", ...next.slice(folderIdx + 1)]
+        : ["board", ...next];
   }
 
   const seen = new Set<ChatMetaChipId>();

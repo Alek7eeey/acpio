@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import { boardColumn, type AgentProvider, type BoardColumn, type SessionDto } from "@acpio/shared";
+import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { McpFolderDialog } from "../components/McpFolderDialog";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
+import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore } from "../lib/store";
@@ -12,6 +14,22 @@ import styles from "./BoardPage.module.css";
 
 /** Column order on the board — the same order the spec's four lanes read in. */
 const COLUMN_ORDER: BoardColumn[] = ["todo", "progress", "wait", "done"];
+
+/** Where the reader left a board: rail, horizontal lane strip, each lane. */
+type BoardScrollState = {
+  rail: number;
+  /** On phones the rail scrolls inside its own list, on desktop it is the rail. */
+  railList: number;
+  columnsX: number;
+  columns: Partial<Record<BoardColumn, number>>;
+};
+
+/**
+ * Reading positions kept while a task's chat takes the screen — the board
+ * unmounts on the way out, so coming back starts at the top without this.
+ * In-memory on purpose: a scroll offset is a reading position, not data.
+ */
+const boardScrollByBoard: Record<string, BoardScrollState> = {};
 
 const COLUMN_TITLE = {
   todo: "chat.colTodo",
@@ -35,6 +53,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const board = boards.find((b) => b.id === boardId) ?? null;
   const tasks = useAppStore((s) => s.boardSessions);
   const defaultCwd = useAppStore((s) => s.settings.defaultCwd ?? "");
+  const preferredProvider = useAppStore((s) => s.settings.defaultProvider ?? null);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
@@ -46,19 +65,33 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const reorderBoardTasks = useAppStore((s) => s.reorderBoardTasks);
   const selectSession = useAppStore((s) => s.selectSession);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
+  // Shared with the shell header, whose board title row carries the button that
+  // opens this page's folders dialog.
+  const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
+  const setFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
+
+  /** Agents for the task picker — the same shape the chat tree's picker takes. */
+  const agentOptions = useMemo(
+    () =>
+      adapters.map((a) => ({ id: a.id, label: a.label, online: agentAvailability[a.id] === true })),
+    [adapters, agentAvailability],
+  );
+
+  const [newTaskPicker, setNewTaskPicker] = useState<{ x: number; y: number; cwd: string } | null>(
+    null,
+  );
 
   const [filterCwd, setFilterCwd] = useState<string | null>(null);
   const [addingCwd, setAddingCwd] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [creating, setCreating] = useState(false);
   /** Creation form: send the description as the first message on create. */
-  const [createAutoStart, setCreateAutoStart] = useState(false);
+  const createAutoStart = useBoardAutoStart("create");
   /** Agent menu, per run: start at once (on) vs open the chat to review (off). */
-  const [menuAutoStart, setMenuAutoStart] = useState(true);
+  const menuAutoStart = useBoardAutoStart("menu");
   const [agentMenu, setAgentMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
     null,
   );
-  const [foldersOpen, setFoldersOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
@@ -67,15 +100,82 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
+  const railListRef = useRef<HTMLDivElement>(null);
+  const columnsRef = useRef<HTMLDivElement>(null);
+  const columnRefs = useRef(new Map<BoardColumn, HTMLDivElement>());
+  /** Lanes being put back are mid-restore: their scroll events are ours, not
+   *  the reader's, and must not overwrite the position we are restoring to. */
+  const restoringRef = useRef(false);
+  const restoredBoardRef = useRef<string | null>(null);
 
+  /** Tasks arrive over the network; the position waits for this board's list. */
+  const [tasksReady, setTasksReady] = useState(false);
   useEffect(() => {
-    if (boardId) void refreshBoardSessions(boardId);
+    setTasksReady(false);
+    if (!boardId) return;
+    void refreshBoardSessions(boardId).finally(() => setTasksReady(true));
   }, [boardId, refreshBoardSessions]);
+
+  const saveScroll = () => {
+    if (!boardId || restoringRef.current) return;
+    const columns: Partial<Record<BoardColumn, number>> = {};
+    for (const column of COLUMN_ORDER) {
+      columns[column] = columnRefs.current.get(column)?.scrollTop ?? 0;
+    }
+    boardScrollByBoard[boardId] = {
+      rail: railRef.current?.scrollTop ?? 0,
+      railList: railListRef.current?.scrollTop ?? 0,
+      columnsX: columnsRef.current?.scrollLeft ?? 0,
+      columns,
+    };
+  };
+
+  /**
+   * Coming back from a task: put the reader where they left the board — same
+   * rail, same lanes — then make sure the card the trip started at is on
+   * screen (`nearest` scrolls only if it drifted out of view). Retry on the
+   * next list change while the lanes are still too short to hold the position.
+   */
+  useLayoutEffect(() => {
+    if (!tasksReady || restoredBoardRef.current === boardId) return;
+    const saved = boardId ? boardScrollByBoard[boardId] : undefined;
+    if (!saved) {
+      restoredBoardRef.current = boardId;
+      return;
+    }
+    restoringRef.current = true;
+    if (railRef.current) railRef.current.scrollTop = saved.rail;
+    if (railListRef.current) railListRef.current.scrollTop = saved.railList;
+    if (columnsRef.current) columnsRef.current.scrollLeft = saved.columnsX;
+    for (const column of COLUMN_ORDER) {
+      const el = columnRefs.current.get(column);
+      if (el) el.scrollTop = saved.columns[column] ?? 0;
+    }
+    for (const column of COLUMN_ORDER) {
+      const el = columnRefs.current.get(column);
+      const top = saved.columns[column] ?? 0;
+      if (!el || top <= 0) continue;
+      const maxTop = el.scrollHeight - el.clientHeight;
+      if (el.scrollTop < top - 1 && el.scrollTop < maxTop - 1) return;
+    }
+    restoredBoardRef.current = boardId;
+    restoringRef.current = false;
+    const origin = useAppStore.getState().activeSessionId;
+    if (!origin) return;
+    document
+      .querySelector<HTMLElement>(`[data-task-id="${origin}"]`)
+      ?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [boardId, tasks, tasksReady]);
 
   // A board that vanished (deleted elsewhere) must not strand the user here.
   useEffect(() => {
     if (boards.length && !board) navigate("/chat", { replace: true });
   }, [boards, board, navigate]);
+
+  // The open flag is shared with the shell header, so leaving the board has to
+  // clear it: a dialog still open at unmount would otherwise pop up by itself
+  // on the next visit to the board.
+  useEffect(() => () => setFoldersOpen(false), [setFoldersOpen]);
 
   // The composer only exists while a group has it open.
   useEffect(() => {
@@ -154,13 +254,19 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * re-seeding would copy it into the input on every reopen.
    */
   const openTask = async (task: SessionDto, provider?: AgentProvider) => {
-    if (provider && provider !== task.provider) await setTaskProvider(task.id, provider);
     const description = task.taskDescription?.trim();
     if (!task.startedAt && description && !readComposerDraft(task.id)) {
       setComposerDraft(task.id, description);
     }
-    await selectSession(task.id);
+    // The click answers before the network: navigate runs with no await
+    // ahead of it, and on the common path selectSession's synchronous prefix
+    // (active id + loading skeleton) lands in the same React batch — the
+    // detail GET streams in behind the chat instead of gating it. The
+    // agent-menu PATCH keeps its place ahead of that GET: a detail fetched
+    // first would adopt the provider the user just replaced.
     navigate("/chat");
+    if (provider && provider !== task.provider) await setTaskProvider(task.id, provider);
+    await selectSession(task.id);
   };
 
   /**
@@ -184,6 +290,28 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setDraft("");
     setAddingCwd(null);
     if (createAutoStart) void startTask(created);
+  };
+
+  /**
+   * Right-click on a folder's **+**: rather than the inline description form,
+   * open the standard new-chat picker with the folder locked, then create the
+   * task empty for the agent it confirms — the shape a chat has when it comes
+   * from the folder tree, where nothing is described up front and the first
+   * message is what names and forms the task. The card rests in **Todo** until
+   * that first turn runs.
+   */
+  const openTaskPicker = (e: React.MouseEvent, cwd: string) => {
+    e.preventDefault();
+    setNewTaskPicker({ x: e.clientX, y: e.clientY, cwd });
+  };
+
+  const createEmptyTask = async (cwd: string, provider: AgentProvider) => {
+    if (creating) return;
+    setCreating(true);
+    const created = await createBoardTask({ boardId, cwd, description: "", provider });
+    setCreating(false);
+    if (!created) return;
+    await openTask(created);
   };
 
   const moveGroup = (cwd: string, dir: -1 | 1) => {
@@ -395,17 +523,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <span className={styles.headerTitle}>{board?.name ?? ""}</span>
-        <span className={styles.headerSpacer} />
-        <button
-          type="button"
-          className={styles.headerBtn}
-          onClick={() => setFoldersOpen(true)}
-        >
-          {t("chat.boardFoldersTitle")}
-        </button>
-      </header>
+      {/* The board's title row lives in the shell header, above the page: one
+          top bar for the whole view instead of a second header under it. */}
 
       <div className={styles.body}>
         {railOpen ? (
@@ -420,6 +539,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         <aside
           ref={railRef}
           className={`${styles.rail} ${railOpen ? styles.railOpen : ""}`}
+          onScroll={saveScroll}
         >
           {/* Mobile sheet handle: the rail is pulled up from the bottom there,
               so it must be draggable back down. */}
@@ -431,7 +551,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             onPointerUp={onRailGrabberUp}
             onPointerCancel={onRailGrabberUp}
           />
-          <div className={styles.railList}>
+          <div ref={railListRef} className={styles.railList} onScroll={saveScroll}>
             <button
               type="button"
               data-rail-all=""
@@ -467,13 +587,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <button
                   type="button"
                   className={styles.railAdd}
-                  title={t("chat.boardAddTask")}
+                  title={t("chat.boardAddTaskHint")}
                   aria-label={t("chat.boardAddTask")}
                   onClick={() => {
                     setFilterCwd(group.cwd);
                     setAddingCwd(group.cwd);
                     setRailOpen(false);
                   }}
+                  onContextMenu={(e) => openTaskPicker(e, group.cwd)}
                 >
                   +
                 </button>
@@ -492,7 +613,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </div>
         </aside>
 
-        <div className={styles.columns}>
+        <div ref={columnsRef} className={styles.columns} onScroll={saveScroll}>
           {COLUMN_ORDER.map((column) => {
             const cards = filterCwd
               ? columns[column].filter((task) => task.cwd === filterCwd)
@@ -503,7 +624,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   <span>{t(COLUMN_TITLE[column])}</span>
                   <span className={styles.columnCount}>{cards.length}</span>
                 </div>
-                <div className={styles.columnBody}>
+                <div
+                  ref={(el) => {
+                    if (el) columnRefs.current.set(column, el);
+                    else columnRefs.current.delete(column);
+                  }}
+                  className={styles.columnBody}
+                  onScroll={saveScroll}
+                >
                   {column === "todo"
                     ? visibleGroups.map((group, groupIndex) => (
                         <div key={group.cwd} className={styles.group} data-group={group.cwd}>
@@ -569,12 +697,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               <button
                                 type="button"
                                 className={styles.iconBtn}
-                                title={t("chat.boardAddTask")}
+                                title={t("chat.boardAddTaskHint")}
                                 aria-label={t("chat.boardAddTask")}
                                 onClick={() => {
                                   setAddingCwd(group.cwd);
                                   setDraft("");
                                 }}
+                                onContextMenu={(e) => openTaskPicker(e, group.cwd)}
                               >
                                 <svg
                                   width="12"
@@ -616,14 +745,18 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               <div className={styles.composerActions}>
                                 <button
                                   type="button"
-                                  className={`${styles.ghostBtn} ${styles.autoStartBtn}${
-                                    createAutoStart ? ` ${styles.autoStartBtnOn}` : ""
+                                  role="switch"
+                                  aria-checked={createAutoStart}
+                                  className={`${styles.autoStart}${
+                                    createAutoStart ? ` ${styles.switchOn}` : ""
                                   }`}
-                                  aria-pressed={createAutoStart}
                                   title={t("chat.boardAutoStart")}
-                                  onClick={() => setCreateAutoStart((on) => !on)}
+                                  onClick={() => toggleBoardAutoStart("create")}
                                 >
                                   {t("chat.boardAutoStart")}
+                                  <span className={styles.switchTrack} aria-hidden>
+                                    <span className={styles.switchKnob} />
+                                  </span>
                                 </button>
                                 <button
                                   type="button"
@@ -726,13 +859,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               role="menuitemcheckbox"
               aria-checked={menuAutoStart}
               className={`${styles.menuItem} ${styles.menuToggle} ${
-                menuAutoStart ? styles.menuToggleOn : ""
+                menuAutoStart ? `${styles.menuToggleOn} ${styles.switchOn}` : ""
               }`}
-              onClick={() => setMenuAutoStart((on) => !on)}
+              onClick={() => toggleBoardAutoStart("menu")}
             >
               {t("chat.boardAutoStart")}
-              <span className={styles.menuCheck} aria-hidden>
-                {menuAutoStart ? "✓" : ""}
+              <span className={`${styles.switchTrack} ${styles.switchTrackEnd}`} aria-hidden>
+                <span className={styles.switchKnob} />
               </span>
             </button>
             {adapters.map((adapter) => (
@@ -910,6 +1043,23 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           if (!folders.includes(path)) void setBoardFolders(boardId, [...folders, path]);
         }}
       />
+
+      {newTaskPicker && (
+        <CreateSessionFolderPicker
+          x={newTaskPicker.x}
+          y={newTaskPicker.y}
+          lockedCwd={newTaskPicker.cwd}
+          agentOnly
+          recentCwds={[]}
+          agents={agentOptions}
+          preferredProvider={preferredProvider}
+          onClose={() => setNewTaskPicker(null)}
+          onConfirm={async (cwd, provider) => {
+            setNewTaskPicker(null);
+            await createEmptyTask(cwd, provider as AgentProvider);
+          }}
+        />
+      )}
     </div>
   );
 }

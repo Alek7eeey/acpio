@@ -39,6 +39,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["folder", "thoughts", "mcp", "context", "console"];
     expect(normalizeChatMetaChips(chips, 2)).toEqual([
       "folder",
+      "board",
       "gitBranch",
       "gitChanges",
       "thoughts",
@@ -52,6 +53,21 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["folder", "thoughts", "mcp", "context"];
     expect(normalizeChatMetaChips(chips, 1)).toEqual([
       "folder",
+      "board",
+      "gitBranch",
+      "gitChanges",
+      "thoughts",
+      "mcp",
+      "context",
+      "console",
+    ]);
+  });
+
+  it("adds board after folder for settings saved before the board chip", () => {
+    const chips = ["folder", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"];
+    expect(normalizeChatMetaChips(chips, 5)).toEqual([
+      "folder",
+      "board",
       "gitBranch",
       "gitChanges",
       "thoughts",
@@ -65,6 +81,7 @@ describe("normalizeChatMetaChips", () => {
     const chips = ["folder", "console"];
     expect(normalizeChatMetaChips(chips, 1)).toEqual([
       "folder",
+      "board",
       "gitBranch",
       "gitChanges",
       "console",

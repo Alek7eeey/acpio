@@ -85,6 +85,7 @@ type CustomAgentTest = {
 /** Canonical display order for composer chips. */
 const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "folder",
+  "board",
   "gitBranch",
   "gitChanges",
   "thoughts",
@@ -211,6 +212,7 @@ function ChatInteractiveConfigRows({
           {(
             [
               ["folder", t("settings.chatMetaChipFolder")],
+              ["board", t("settings.chatMetaChipBoard")],
               ["gitBranch", t("settings.chatMetaChipGitBranch")],
               ["gitChanges", t("settings.chatMetaChipGitChanges")],
               ["thoughts", t("settings.chatMetaChipThoughts")],
