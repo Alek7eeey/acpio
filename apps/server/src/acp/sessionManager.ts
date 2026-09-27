@@ -1,5 +1,5 @@
 import path from "node:path";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import {
   isGenericToolTitle,
   isModelAccessError,
@@ -80,6 +80,7 @@ import {
   listModelParamOptions,
   type AcpRequest,
   type ConfigOption,
+  type PromptImageBlock,
 } from "./AcpClient.js";
 import {
   agentIdFromToolText,
@@ -438,7 +439,7 @@ type TurnOpts = {
   titleHint?: string;
   /** Edit existing user message: truncate later turns and regenerate. */
   editMessageId?: string;
-  /** Files to attach to a NEW user message (base64 payloads). */
+  /** Files to attach to a NEW user message; paths on the server machine. */
   attachments?: AttachmentInput[];
 };
 
@@ -465,6 +466,37 @@ type SavedAttachment = {
   size: number;
   mime: string;
 };
+
+/** IANA types for the image extensions the composer offers. */
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  avif: "image/avif",
+};
+
+/**
+ * Ceiling on one embedded image. The bytes travel as base64 inside a single
+ * JSON-RPC frame and stay in the built-in agent's stored conversation, so a
+ * huge screenshot is better left as a path hint than copied twice.
+ */
+const MAX_EMBEDDED_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Read one attached image into a `session/prompt` block, or null when it is
+ *  not a raster image, is empty, too large, or unreadable. */
+async function readPromptImage(f: SavedAttachment): Promise<PromptImageBlock | null> {
+  if (!f.mime.startsWith("image/") || f.size <= 0 || f.size > MAX_EMBEDDED_IMAGE_BYTES) {
+    return null;
+  }
+  try {
+    return { data: (await readFile(f.absPath)).toString("base64"), mimeType: f.mime };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Resolve user-attached files (server paths). No copies are made: files
@@ -503,7 +535,9 @@ async function saveAttachments(
         absPath: abs,
         relPath: inCwd ? path.relative(cwdRoot, abs) : abs,
         size,
-        mime: "application/octet-stream",
+        mime:
+          IMAGE_MIME_BY_EXT[name.split(".").pop()?.toLowerCase() ?? ""] ??
+          "application/octet-stream",
       });
     } catch {
       continue; // unreadable source — skip
@@ -571,7 +605,12 @@ class SessionRuntime {
    * User messages are persisted immediately; the turns themselves run
    * strictly one at a time in FIFO order, so streams never interleave.
    */
-  turnQueue: Array<{ userMessageId: string; text: string; opts: TurnOpts }> = [];
+  turnQueue: Array<{
+    userMessageId: string;
+    text: string;
+    images: PromptImageBlock[];
+    opts: TurnOpts;
+  }> = [];
   /**
    * Active prompt generation. Bumped when a prompt starts.
    * Stream chunks captured under an older gen (or while acceptingStream=false) are dropped.
@@ -2365,6 +2404,8 @@ export async function runPrompt(
   // Board task: the first claimed turn stamps the Todo ⇄ Wait "work began" mark.
   await markBoardTaskStarted(sessionId).catch(() => {});
   let promptUserText = text;
+  /** Images that ride with this prompt (built-in agent only). */
+  const promptImages: PromptImageBlock[] = [];
   let priorTranscript = "";
   let userMessageId: string | null = null;
 
@@ -2452,11 +2493,29 @@ export async function runPrompt(
           path: f.absPath,
         });
       }
+      // Pixels only go to the in-process agent: its `read` tool decodes text,
+      // so without an image block a screenshot reaches the model as mojibake.
+      // Cursor/OMP open the attached path with their own image-aware tools and
+      // have never been sent `image` blocks — leaving them on the path hint
+      // keeps their prompt shape unchanged.
+      const embedded = new Set<string>();
+      if (opts.provider === "builtin") {
+        for (const f of saved) {
+          const block = await readPromptImage(f);
+          if (!block) continue;
+          promptImages.push(block);
+          embedded.add(f.fileId);
+        }
+      }
       // The agent-facing text gets the file hint; the UI text part stays raw
-      // (files render as separate chips).
-      promptUserText += `\n\n[Прикреплённые файлы: ${saved
-        .map((f) => f.relPath)
-        .join(", ")} — прочитайте их при необходимости.]`;
+      // (files render as separate chips). Embedded images are named as already
+      // attached so the model does not waste a tool call reading them as text.
+      const listed = saved.map((f) =>
+        embedded.has(f.fileId) ? `${f.name} (изображение приложено)` : f.relPath,
+      );
+      promptUserText += `\n\n[Прикреплённые файлы: ${listed.join(", ")}${
+        embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
+      }]`;
     }
   } else {
     userMessageId = opts.editMessageId;
@@ -2484,7 +2543,7 @@ export async function runPrompt(
     // parked on a question, restore that status: our early write said
     // "running", but the visible state is still "waiting".
     settlePreTurnClaim();
-    rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, opts });
+    rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, images: promptImages, opts });
     if (!rt.running && rt.pending.size > 0) {
       await updateSession(sessionId, { status: "waiting" }).catch(() => {});
     }
@@ -2492,7 +2551,16 @@ export async function runPrompt(
   }
 
   try {
-    return await runTurn(rt, sessionId, promptUserText, priorTranscript, opts, settings, acpReady);
+    return await runTurn(
+      rt,
+      sessionId,
+      promptUserText,
+      promptImages,
+      priorTranscript,
+      opts,
+      settings,
+      acpReady,
+    );
   } finally {
     rt.startingTurn = false;
   }
@@ -2875,11 +2943,12 @@ async function promptAwaitingAgentIdle(
   rt: SessionRuntime,
   client: AcpClient,
   promptText: string,
+  images: PromptImageBlock[],
 ): Promise<{ stopReason?: string; raw: unknown }> {
   const deadline = Date.now() + PROMPT_BUSY_MAX_WAIT_MS;
   for (;;) {
     try {
-      return await client.prompt(promptText);
+      return await client.prompt(promptText, images);
     } catch (err) {
       if (!rt.acceptingStream) return { stopReason: "cancelled", raw: null };
       if (!isSessionBusyError(err)) throw err;
@@ -2899,6 +2968,7 @@ async function runTurn(
   rt: SessionRuntime,
   sessionId: string,
   promptUserText: string,
+  images: PromptImageBlock[],
   priorTranscript: string,
   opts: TurnOpts,
   settings: AppSettings,
@@ -2972,11 +3042,12 @@ async function runTurn(
         slashArgs: slash?.args,
         isSkill: slash ? /^skill:/i.test(slash.name) : false,
         edit: Boolean(opts.editMessageId),
+        images: images.length,
       },
     });
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     agentStartedAt = Date.now();
-    const result = await promptAwaitingAgentIdle(rt, client, promptText);
+    const result = await promptAwaitingAgentIdle(rt, client, promptText, images);
     appendDeepLog({
       kind: "prompt-complete",
       sessionId,
@@ -3137,7 +3208,7 @@ async function dequeueTurn(rt: SessionRuntime) {
     const settings = await getSettings();
     const acpReady = ensureAcp(rt.sessionId, next.opts);
     started = true;
-    await runTurn(rt, rt.sessionId, next.text, "", next.opts, settings, acpReady);
+    await runTurn(rt, rt.sessionId, next.text, next.images, "", next.opts, settings, acpReady);
   } catch (err) {
     console.error(`[acp:${rt.sessionId}] queued turn failed`, err);
   } finally {
@@ -3263,12 +3334,32 @@ async function probeAgentOnce(
   selected: AgentProvider,
   opts?: { catalogOnly?: boolean },
 ) {
+  const settings = await getSettings();
+  // A harness that declares it cannot run yet (no endpoint configured) must
+  // report offline without booting — "online" should never mean "the process
+  // started" while every prompt would fail.
+  const adapter = getAdapter(selected);
+  const unavailable = adapter.unavailableReason?.(settings) ?? null;
+  if (unavailable) {
+    setAgentAvailable(selected, false);
+    return {
+      ok: false as const,
+      provider: selected,
+      command: adapterCommand(adapter, settings),
+      message: unavailable,
+      details: "",
+      currentModel: undefined,
+      models: [] as ModelOption[],
+      modelParams: [] as ModelParamDto[],
+      modes: [] as ModeOption[],
+    };
+  }
+
   const live = liveAcpClient(selected);
   if (live) {
     return probeResultFromClient(selected, live, "", true);
   }
 
-  const settings = await getSettings();
   const client = new AcpClient(
     getAdapter(selected),
     settings,
@@ -3430,6 +3521,25 @@ export async function restartSessionsForMcpChange(): Promise<void> {
   }
   if (restarted) {
     console.log(`[mcp] config changed — restarted ${restarted} live session(s)`);
+  }
+}
+
+/**
+ * The built-in agent snapshots endpoint/settings when its transport boots, so
+ * a Settings edit would otherwise only reach chats created afterwards. Restart
+ * every live built-in session the moment the endpoint or its model list
+ * changes. `restartSessionMcp` is the generic "restart one session's agent,
+ * keep its model" helper — the name is historical.
+ */
+export async function restartSessionsForBuiltinChange(): Promise<void> {
+  let restarted = 0;
+  for (const sessionId of [...runtimes.keys()]) {
+    const rt = runtimes.get(sessionId);
+    if (rt?.provider !== "builtin") continue;
+    if (await restartSessionMcp(sessionId)) restarted += 1;
+  }
+  if (restarted) {
+    console.log(`[builtin] endpoint changed — restarted ${restarted} live session(s)`);
   }
 }
 

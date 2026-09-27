@@ -1,6 +1,6 @@
 # Acpio
 
-Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP).
+Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP), with a built-in agent that runs inside the server — no external CLI needed.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
 **Current version:** 0.1.20

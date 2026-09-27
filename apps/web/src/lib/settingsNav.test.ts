@@ -11,7 +11,7 @@ import type { SettingsSection } from "./settingsNav";
 const t = (key: string) => key;
 
 describe("parseSettingsSearch", () => {
-  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it.each(["connect", "model", "builtin", "advanced", "remote", "diagnostics", "mcp"] as const)(
     "parses the agent leaf %j",
     (leaf) => {
       expect(parseSettingsSearch(`?section=agent&leaf=${leaf}`)).toEqual({
@@ -131,7 +131,7 @@ describe("settingsPath", () => {
     expect(settingsPath("interface", "voice")).toBe("/settings?section=interface&leaf=voice");
   });
 
-  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it.each(["connect", "model", "builtin", "advanced", "remote", "diagnostics", "mcp"] as const)(
     "round-trips the agent leaf %j",
     (leaf) => {
       const path = settingsPath("agent", leaf);
@@ -180,6 +180,7 @@ describe("getSettingsTree", () => {
     expect(tree[0].children.map((c) => c.id)).toEqual([
       "connect",
       "model",
+      "builtin",
       "advanced",
       "mcp",
       "diagnostics",
@@ -188,6 +189,7 @@ describe("getSettingsTree", () => {
     expect(tree[0].children.map((c) => c.label)).toEqual([
       "settings.connection",
       "settings.modelSection",
+      "settings.builtinTitle",
       "settings.advanced",
       "settings.mcpTitle",
       "settings.diagnostics",

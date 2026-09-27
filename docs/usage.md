@@ -1,7 +1,8 @@
 # Using Harnesses and Plugins
 
-Acpio connects agents through **harness adapters**. Two are bundled: **Cursor** and
-**OMP**. Any other harness is added as a plugin adapter (see the
+Acpio connects agents through **harness adapters**. Three are bundled: **Cursor**,
+**OMP** (external CLIs) and the **built-in agent** that runs inside the server itself.
+Any other harness is added as a plugin adapter (see the
 [developer guide](adapters.md)) and shows up in the UI automatically — the core needs no changes.
 
 ## Chat interface
@@ -123,6 +124,39 @@ Progress**, and a finished turn, a question waiting for you or a failed turn lan
 **Wait** — where the card carries **Mark done** for work you call finished. **Done** outranks
 a live turn, and **Reopen** sends the task back to **Todo**. Board tasks never show up in the
 chat tree, and deleting a board deletes its tasks with it.
+
+## Built-in agent (no install)
+
+The **builtin** provider needs no CLI: its agent runs inside the server process, so there is
+nothing to `npm i -g` and no separate login — the only requirement is an OpenAI-compatible
+endpoint it can reach.
+
+- **Settings → Agents → Built-in agent** — the providers: add as many OpenAI-compatible
+  endpoints as you like (name + URL + API key), each with its own models. The model editor
+  per provider pulls that endpoint's `GET /models` list, so you tick the models the agent
+  may use, rename one or set its context window, search a long catalog, and add by hand
+  whatever the API does not advertise. A model's context window comes from the endpoint
+  when `/models` reports one, otherwise it is looked up in the public
+  [models.dev](https://models.dev) registry by that endpoint's base URL and model id
+  (an offline server keeps the assumed 128k); a window you type yourself is an override
+  that later refreshes do not replace. Only ticked models are offered in pickers; the agent
+  picks the change up on save, and every model runs on the provider that owns it.
+- The agent gets `read`, `write`, `edit` and `bash` tools. Edits land through the same
+  three-way merge the other harnesses use, `bash` runs on the host, and both ask for
+  permission through the chat's permission card; **Settings → MCP** servers attach as
+  `mcp__*` tools.
+- **Attached images reach the model itself.** A raster image you attach (PNG, JPEG, GIF,
+  WebP, BMP, AVIF — up to 8 MB) is sent as an inline image part alongside your text, so a
+  screenshot works on any vision-capable model the endpoint serves; anything else stays a
+  path hint that the agent opens with `read`. The session file keeps the newest turn's
+  images; older ones stay in the running conversation but are stored as a placeholder
+  rather than growing the file by megabytes per screenshot.
+- Sessions restore from Acpio's own history rather than an agent-side session file, so a
+  server restart keeps the conversation without a resume call.
+
+It appears in the agent picker like any other provider once an endpoint is
+configured (without one the probe reports it offline), and can be made the default under
+**Settings → Agents → Connect → Default agent**.
 
 ## Connecting an agent (Cursor / OMP)
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   CHAT_TREE_RECENT_LIMIT_MAX,
@@ -15,6 +15,7 @@ import {
   type AgentProvider,
   type AppSettings,
   type AttachSource,
+  type BuiltinProviderConfig,
   type ChatActionId,
   type ChatComposerButtonId,
   type ChatHeaderIconId,
@@ -37,6 +38,7 @@ import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSe
 import { useT } from "../lib/i18n";
 import { cachedModelsFor, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
+import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
@@ -1442,7 +1444,9 @@ export function SettingsPage() {
           ? t("settings.agentConnectTitle")
           : leaf === "model"
             ? t("settings.agentModelTitle")
-            : leaf === "remote"
+            : leaf === "builtin"
+              ? t("settings.builtinTitle")
+              : leaf === "remote"
               ? t("settings.remoteAccessTitle")
               : leaf === "diagnostics"
                 ? t("settings.diagnosticsTitle")
@@ -1462,8 +1466,10 @@ export function SettingsPage() {
             : t("settings.sidebarCollapseHint")
       : section === "agent" && leaf === "mcp"
         ? t("settings.mcpHint")
-        : section === "agent" && leaf === "advanced"
-        ? t("settings.agentAdvancedDesc")
+    : section === "agent" && leaf === "advanced"
+      ? t("settings.agentAdvancedDesc")
+      : section === "agent" && leaf === "builtin"
+        ? t("settings.builtinHint")
         : section === "agent" && leaf === "remote"
           ? t("settings.remoteAccessDesc")
           : section === "agent" && leaf === "diagnostics"
@@ -2300,6 +2306,140 @@ export function SettingsPage() {
           )
         )}
 
+        {section === "agent" && leaf === "builtin" && (
+          <>
+            <p className={styles.hint}>{t("settings.builtinDesc")}</p>
+            <SettingTable>
+              {form.builtinProviders.map((provider, index) => {
+                const displayName =
+                  provider.name.trim() ||
+                  `${t("settings.builtinProviderUntitled")} ${index + 1}`;
+                const update = (patchRow: Partial<BuiltinProviderConfig>) =>
+                  patch(
+                    "builtinProviders",
+                    form.builtinProviders.map((p, i) =>
+                      i === index ? { ...p, ...patchRow } : p,
+                    ),
+                  );
+                const remove = () =>
+                  patch(
+                    "builtinProviders",
+                    form.builtinProviders.filter((_, i) => i !== index),
+                  );
+                const nameLabel = `${displayName} · ${t("settings.builtinProviderName")}`;
+                const urlLabel = `${displayName} · ${t("settings.builtinUrlTitle")}`;
+                const keyLabel = `${displayName} · ${t("settings.builtinKeyTitle")}`;
+                const modelsLabel = `${displayName} · ${t("settings.builtinModelsTitle")}`;
+                return (
+                  <Fragment key={provider.id}>
+                    <SettingRow
+                      layout="stack"
+                      label={nameLabel}
+                      hint={t("settings.builtinProviderNameHint")}
+                      terms={[provider.name, displayName]}
+                    >
+                      <div className={styles.cwdPickRow}>
+                        <input
+                          type="text"
+                          autoComplete="off"
+                          value={provider.name}
+                          onChange={(e) => update({ name: e.target.value })}
+                          placeholder={t("settings.builtinProviderNamePlaceholder")}
+                          aria-label={nameLabel}
+                        />
+                        <button
+                          type="button"
+                          className={styles.secondaryBtn}
+                          onClick={remove}
+                          aria-label={`${t("common.delete")} · ${displayName}`}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                    </SettingRow>
+                    <SettingRow
+                      layout="stack"
+                      label={urlLabel}
+                      hint={t("settings.builtinUrlHint")}
+                      terms={[provider.url]}
+                    >
+                      <input
+                        type="text"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={provider.url}
+                        onChange={(e) => update({ url: e.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                        aria-label={urlLabel}
+                      />
+                    </SettingRow>
+                    <SettingRow
+                      layout="stack"
+                      label={keyLabel}
+                      hint={t("settings.builtinKeyHint")}
+                    >
+                      <input
+                        type="password"
+                        autoComplete="off"
+                        value={provider.apiKey}
+                        onChange={(e) => update({ apiKey: e.target.value })}
+                        placeholder="sk-…"
+                        aria-label={keyLabel}
+                      />
+                    </SettingRow>
+                    <SettingRow
+                      layout="stack"
+                      label={modelsLabel}
+                      hint={t("settings.builtinModelsHint")}
+                      terms={[provider.name]}
+                    >
+                      <BuiltinModelsEditor
+                        endpointUrl={provider.url}
+                        apiKey={provider.apiKey}
+                        value={provider.models}
+                        onChange={(models) => update({ models })}
+                      />
+                    </SettingRow>
+                  </Fragment>
+                );
+              })}
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinProvidersTitle")}
+                hint={
+                  form.builtinProviders.length
+                    ? t("settings.builtinProvidersHint")
+                    : t("settings.builtinProvidersEmpty")
+                }
+                terms={[
+                  t("settings.builtinProviderAdd"),
+                  t("settings.builtinProvidersHint"),
+                  t("settings.builtinProvidersEmpty"),
+                ]}
+              >
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() =>
+                    patch("builtinProviders", [
+                      ...form.builtinProviders,
+                      {
+                        id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
+                        name: "",
+                        url: "",
+                        apiKey: "",
+                        models: [],
+                      },
+                    ])
+                  }
+                >
+                  + {t("settings.builtinProviderAdd")}
+                </button>
+              </SettingRow>
+            </SettingTable>
+          </>
+        )}
+
         {section === "agent" && leaf === "advanced" && (
           <>
             <SettingTable>
@@ -2523,7 +2663,9 @@ export function SettingsPage() {
               <div className={styles.cliDisclosureBody}>
                 <p className={styles.fieldHint}>{highlightText(t("settings.agentAdvancedDesc"), settingsQuery)}</p>
                 <SettingTable>
-                  {adapters.filter((a) => a.custom !== true).map((a) => {
+                  {adapters
+                    .filter((a) => a.custom !== true && a.commandField)
+                    .map((a) => {
                     const command = String(
                       (form as unknown as Record<string, unknown>)[a.commandField] ?? "",
                     );

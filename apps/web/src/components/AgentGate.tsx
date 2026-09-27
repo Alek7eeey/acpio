@@ -107,9 +107,13 @@ export function AgentGate() {
   const dismissAgentGate = useAppStore((s) => s.dismissAgentGate);
 
   // Enabled harnesses only, and nothing before /api/adapters answers: guessing
-  // here could name an agent the user switched off.
-  const ids: readonly string[] = adapters.map((a) => a.id);
-  // Every harness switched off — there is nothing to check, so no gate.
+  // here could name an agent the user switched off. The built-in agent runs
+  // inside the server — a startup status row about it carries no signal, so it
+  // is not listed and the gate does not wait on its probe.
+  const ids: readonly string[] = adapters
+    .map((a) => a.id)
+    .filter((id) => id !== "builtin");
+  // Every listable harness switched off — there is nothing to check, so no gate.
   if (!ids.length) return null;
   const started = Object.keys(probing).length > 0 || Object.keys(availability).length > 0;
   const settled = ids.filter((id) => started && !probing[id] && availability[id] != null).length;
@@ -146,8 +150,10 @@ export function AgentGate() {
 export function AgentOfflineWarning() {
   const t = useT();
   const adapters = useAppStore((s) => s.adapters);
-  const ids = useAppStore((s) => s.agentOfflineWarning);
+  const wentOffline = useAppStore((s) => s.agentOfflineWarning);
   const dismiss = useAppStore((s) => s.dismissAgentOfflineWarning);
+  // Same rule as the gate: the built-in agent's own status is noise.
+  const ids = wentOffline.filter((id) => id !== "builtin");
   if (!ids.length) return null;
 
   return (

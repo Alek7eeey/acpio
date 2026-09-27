@@ -3,6 +3,7 @@
  * agents are data (Settings → Connect → Custom agents): the core only ever sees
  * a {@link HarnessAdapter}, never a vendor.
  */
+import { builtinAdapter } from "@acpio/adapter-builtin";
 import { cursorAdapter } from "@acpio/adapter-cursor";
 import { ompAdapter } from "@acpio/adapter-omp";
 import { customAgentAdapter, SHELL_SESSION_PROVIDER } from "@acpio/shared";
@@ -13,7 +14,7 @@ import type {
   HarnessAdapter,
 } from "@acpio/shared";
 
-const BUILT_IN: HarnessAdapter[] = [cursorAdapter, ompAdapter];
+const BUILT_IN: HarnessAdapter[] = [cursorAdapter, ompAdapter, builtinAdapter];
 
 /** Ids a user-defined agent may not take: built-ins and the shell session. */
 export const RESERVED_AGENT_IDS: readonly string[] = [

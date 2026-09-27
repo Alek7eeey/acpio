@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
+    "@acpio/adapter-builtin": "*",
     "@acpio/adapter-cursor": "*",
     "@acpio/adapter-omp": "*",
     "@acpio/i18n": "*",

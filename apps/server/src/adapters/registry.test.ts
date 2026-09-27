@@ -11,10 +11,11 @@ import { cursorAdapter } from "@acpio/adapter-cursor";
 import { ompAdapter } from "@acpio/adapter-omp";
 
 describe("adapter registry", () => {
-  it("registers the two built-in harnesses", () => {
-    expect(adapters.ids().sort()).toEqual(["cursor", "omp"]);
+  it("registers the three built-in harnesses", () => {
+    expect(adapters.ids().sort()).toEqual(["builtin", "cursor", "omp"]);
     expect(adapters.get("cursor")).toBe(cursorAdapter);
     expect(adapters.get("omp")).toBe(ompAdapter);
+    expect(adapters.get("builtin")).toBeDefined();
   });
 
   it("throws for unknown providers", () => {
@@ -48,7 +49,7 @@ describe("user-defined agents", () => {
 
   it("builds a resolvable adapter whose command lives in the spec", () => {
     setCustomAdapters([spec]);
-    expect(adapters.ids()).toEqual(["cursor", "omp", "my-agent"]);
+    expect(adapters.ids()).toEqual(["cursor", "omp", "builtin", "my-agent"]);
     expect(adapters.get("my-agent")?.custom).toBe(true);
     // Empty settings fields fall through to the spec's command/args.
     expect(adapterCommand(getAdapter("my-agent"), DEFAULT_SETTINGS)).toBe("C:\\tools\\agent.exe");
@@ -58,7 +59,7 @@ describe("user-defined agents", () => {
   it("forgets a removed agent", () => {
     setCustomAdapters([spec]);
     setCustomAdapters([]);
-    expect(adapters.ids()).toEqual(["cursor", "omp"]);
+    expect(adapters.ids()).toEqual(["cursor", "omp", "builtin"]);
     expect(adapters.get("my-agent")).toBeUndefined();
     expect(() => getAdapter("my-agent")).toThrow(/Неизвестный агент/);
   });

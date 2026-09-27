@@ -25,3 +25,5 @@ client.pragma("foreign_keys = ON");
 export const db = drizzle(client, { schema });
 export type Db = typeof db;
 export const REPO_ROOT = rootDir;
+/** Install-level state directory: the DB's folder (`:memory:` → `<root>/data`). */
+export const DATA_DIR = dbPath === ":memory:" ? path.join(rootDir, "data") : path.dirname(dbPath);

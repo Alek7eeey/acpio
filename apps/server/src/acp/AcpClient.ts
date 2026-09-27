@@ -8,9 +8,11 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import readline from "node:readline";
+import { PassThrough, Readable, Writable } from "node:stream";
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import {
+  type InProcessAgentTransport,
   parseModelWire,
   resolveModelParamValue,
   modelParamFamily,
@@ -34,6 +36,7 @@ import {
   type DeepLogContext,
 } from "../services/deepLogging.js";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
+import { DATA_DIR } from "../db/client.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -70,6 +73,17 @@ type TerminalEntry = {
   signal: string | null;
   byteLimit: number;
 };
+
+/**
+ * The two ends the client drives: a spawned ACP CLI
+ * (`ChildProcessWithoutNullStreams` fits structurally) or an in-process agent
+ * wrapped into the same shape by {@link AcpClient.bindInProcess}.
+ */
+interface AgentPipe {
+  stdin: Writable;
+  stdout: Readable;
+  kill(): void;
+}
 
 export type AcpUpdate =
   | { kind: "agent_message_chunk"; text: string }
@@ -513,8 +527,16 @@ const NOISY_UPDATE_KINDS: ReadonlySet<AcpUpdate["kind"]> = new Set([
   "tool_call_content_chunk",
 ]);
 
+/** One ACP `image` content block: base64 payload plus its IANA type. */
+export interface PromptImageBlock {
+  /** Base64 bytes — no `data:` prefix. */
+  data: string;
+  /** Full media type, e.g. `image/png`. */
+  mimeType: string;
+}
+
 export class AcpClient extends EventEmitter {
-  private proc: ChildProcessWithoutNullStreams | null = null;
+  private proc: AgentPipe | null = null;
   private nextId = 1;
   private pending = new Map<JsonRpcId, Pending>();
   /**
@@ -591,8 +613,6 @@ export class AcpClient extends EventEmitter {
     child: ChildProcessWithoutNullStreams,
     commandName: string,
   ) {
-    this.proc = child;
-
     child.on("error", (err) => {
       const msg =
         (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -624,23 +644,79 @@ export class AcpClient extends EventEmitter {
     });
 
     child.on("exit", (code, signal) => {
-      this.closed = true;
       const tail = this.stderrBuf.slice(-500);
-      const message = looksLikeCommandNotFound(tail)
-        ? installHintFor(this.adapter, commandName)
-        : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`;
-      const err = new Error(message);
-      for (const [, p] of this.pending) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.pending.clear();
-      this.awaitingReply.clear();
-      this.killAllTerminals();
-      this.emit("exit", { code, signal });
+      this.handleAgentExit(
+        code,
+        signal,
+        looksLikeCommandNotFound(tail)
+          ? installHintFor(this.adapter, commandName)
+          : `ACP process exited (${code ?? signal})${tail ? `: ${tail}` : ""}`,
+      );
     });
 
+    this.proc = {
+      stdin: child.stdin,
+      stdout: child.stdout,
+      kill: () => void child.kill(),
+    };
+
     const rl = readline.createInterface({ input: child.stdout });
+    rl.on("line", (line) => this.onLine(line));
+  }
+
+  /** Terminal state shared by both transports: fail pending RPCs, drop host
+   *  terminals, let the session layer drop its client. */
+  private handleAgentExit(
+    code: number | null,
+    signal?: string | null,
+    message?: string,
+  ) {
+    this.closed = true;
+    const err = new Error(
+      message ?? `ACP agent stopped (${code ?? signal ?? "closed"})`,
+    );
+    for (const [, p] of this.pending) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
+    this.pending.clear();
+    this.awaitingReply.clear();
+    this.killAllTerminals();
+    this.emit("exit", { code, signal });
+  }
+
+  /**
+   * Drive an in-process agent through the same pipe a spawned CLI has.
+   *
+   * Lines are deferred a microtask in BOTH directions: `request()` writes the
+   * frame before it registers its pending entry, so an agent answering inline
+   * would find no waiter and the reply would be dropped. Microtasks keep frame
+   * order within each direction.
+   */
+  private bindInProcess(transport: InProcessAgentTransport) {
+    const stdin = new Writable({
+      write: (chunk, _enc, cb) => {
+        queueMicrotask(() => transport.write(String(chunk)));
+        cb();
+      },
+    });
+    const stdout = new PassThrough();
+    transport.onLine((line) => queueMicrotask(() => stdout.write(`${line}\n`)));
+
+    let stopped = false;
+    transport.onClose((info) => {
+      if (stopped) return;
+      stopped = true;
+      queueMicrotask(() => this.handleAgentExit(null, null, info?.message));
+    });
+
+    this.proc = {
+      stdin,
+      stdout,
+      kill: () => transport.close(),
+    };
+
+    const rl = readline.createInterface({ input: stdout });
     rl.on("line", (line) => this.onLine(line));
   }
 
@@ -659,9 +735,6 @@ export class AcpClient extends EventEmitter {
       mcpServers?: McpServerConfig[];
     },
   ): Promise<void> {
-    const commandName = adapterCommand(this.adapter, this.settings);
-    const args = adapterArgs(this.adapter, this.settings);
-    const resolved = await resolveCommand(commandName, this.adapter);
     const env = buildAgentEnv(this.adapter, this.settings);
     const cwd = this.cwd || process.cwd();
     // A missing cwd makes the child die with a generic "cannot find the path"
@@ -675,35 +748,52 @@ export class AcpClient extends EventEmitter {
       throw new Error(`Рабочая папка не существует: ${cwd}. Выберите другую папку в настройках.`);
     }
 
-    const resolvedExists =
-      resolved.cmd.includes("/") ||
-      resolved.cmd.includes("\\") ||
-      /\.(exe|cmd|bat)$/i.test(resolved.cmd)
-        ? await fsp
-            .stat(resolved.cmd)
-            .then(() => true)
-            .catch(() => false)
-        : false;
-    if (!resolvedExists && process.platform === "win32") {
-      try {
-        await execFileAsync("where.exe", [commandName], { windowsHide: true, env });
-      } catch {
-        throw new Error(installHintFor(this.adapter, commandName));
+    if (this.adapter.createTransport) {
+      // In-process agent: no command to resolve and no process to supervise,
+      // but the same ACP frames, the same host-side fs/terminal handlers.
+      this.emit("log", `starting in-process agent cwd=${cwd}`);
+      this.bindInProcess(
+        this.adapter.createTransport({
+          settings: this.settings,
+          cwd,
+          mode: this.mode,
+          stateDir: path.join(DATA_DIR, "agent-sessions"),
+        }),
+      );
+    } else {
+      const commandName = adapterCommand(this.adapter, this.settings);
+      const args = adapterArgs(this.adapter, this.settings);
+      const resolved = await resolveCommand(commandName, this.adapter);
+      const resolvedExists =
+        resolved.cmd.includes("/") ||
+        resolved.cmd.includes("\\") ||
+        /\.(exe|cmd|bat)$/i.test(resolved.cmd)
+          ? await fsp
+              .stat(resolved.cmd)
+              .then(() => true)
+              .catch(() => false)
+          : false;
+      if (!resolvedExists && process.platform === "win32") {
+        try {
+          await execFileAsync("where.exe", [commandName], { windowsHide: true, env });
+        } catch {
+          throw new Error(installHintFor(this.adapter, commandName));
+        }
       }
+
+      this.emit("log", `starting ${resolved.cmd} ${args.join(" ")} cwd=${cwd}`);
+
+      // Never shell-wrap .exe harnesses: `shell: true` on Windows can make OMP's
+      // post-elicitation /review path exit with an empty end_turn.
+      const child = spawn(resolved.cmd, args, {
+        cwd,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: resolved.shell && !/\.exe$/i.test(resolved.cmd),
+        windowsHide: true,
+      });
+      this.bindPipeAgentProcess(child, commandName);
     }
-
-    this.emit("log", `starting ${resolved.cmd} ${args.join(" ")} cwd=${cwd}`);
-
-    // Never shell-wrap .exe harnesses: `shell: true` on Windows can make OMP's
-    // post-elicitation /review path exit with an empty end_turn.
-    const child = spawn(resolved.cmd, args, {
-      cwd,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: resolved.shell && !/\.exe$/i.test(resolved.cmd),
-      windowsHide: true,
-    });
-    this.bindPipeAgentProcess(child, commandName);
 
     const boot = async () => {
       const initResult = (await this.send("initialize", {
@@ -1004,16 +1094,25 @@ export class AcpClient extends EventEmitter {
     }
   }
 
-  async prompt(text: string): Promise<{ stopReason?: string; raw: unknown }> {
+  async prompt(
+    text: string,
+    images: PromptImageBlock[] = [],
+  ): Promise<{ stopReason?: string; raw: unknown }> {
     if (!this.sessionId) throw new Error("ACP session not started");
     // A second session/prompt while one is open cancels/queues the in-flight turn in OMP
     // (e.g. /review after elicitation). Never stack prompts on one client.
     if (this.promptRequestId != null) {
       throw new Error("ACP prompt already in flight");
     }
+    // Images ride as ACP `image` blocks after the text; the agent decides
+    // whether its model can take them.
+    const prompt: Array<Record<string, unknown>> = [{ type: "text", text }];
+    for (const img of images) {
+      prompt.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
     const { id, promise } = this.request("session/prompt", {
       sessionId: this.sessionId,
-      prompt: [{ type: "text", text }],
+      prompt,
     });
     this.promptRequestId = id;
     try {

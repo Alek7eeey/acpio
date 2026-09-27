@@ -17,6 +17,8 @@ const apiMock = vi.hoisted(() => ({
   }),
   // The MCP leaf polls the live probe status while it is open.
   mcpStatus: vi.fn(async () => ({})),
+  // Each provider's models editor fetches its endpoint's /models list.
+  builtinModels: vi.fn(async () => ({ ok: true, models: [] })),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
@@ -136,5 +138,64 @@ describe("SettingsPage form state", () => {
     });
 
     expect(field.value).toBe("12");
+  });
+});
+
+describe("Built-in providers", () => {
+  const providerA = {
+    id: "p1",
+    name: "Ollama",
+    url: "http://localhost:11434/v1",
+    apiKey: "",
+    models: [{ id: "qwen", label: "Qwen", contextWindow: 32_000 }],
+  };
+  const providerB = {
+    id: "p2",
+    name: "OpenRouter",
+    url: "https://openrouter.ai/api/v1",
+    apiKey: "sk-x",
+    models: [],
+  };
+
+  it("edits, adds and removes providers and saves them as one list", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, builtinProviders: [providerA, providerB] },
+      bootstrapped: true,
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    // Every field carries its provider's name, so the rows never collide.
+    const urlA = screen.getByLabelText("Ollama · Endpoint") as HTMLInputElement;
+    const urlB = screen.getByLabelText("OpenRouter · Endpoint") as HTMLInputElement;
+    expect(urlA.value).toBe("http://localhost:11434/v1");
+    expect(urlB.value).toBe("https://openrouter.ai/api/v1");
+    expect(screen.getByDisplayValue("Qwen")).toBeTruthy();
+
+    await user.clear(urlA);
+    await user.type(urlA, "http://localhost:11434/v2");
+
+    await user.click(screen.getByRole("button", { name: /\+ Add provider/ }));
+    expect(screen.getByLabelText("Unnamed provider 3 · Provider name")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Delete · OpenRouter" }));
+    expect(screen.queryByLabelText("OpenRouter · Endpoint")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    const patch = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
+      builtinProviders?: Array<{ id: string; name: string; url: string; models: unknown[] }>;
+    };
+    const rows = patch.builtinProviders ?? [];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ id: "p1", name: "Ollama", url: "http://localhost:11434/v2" });
+    expect(rows[0]?.models).toEqual(providerA.models);
+    expect(rows[1]).toMatchObject({ id: expect.any(String), name: "", url: "" });
   });
 });

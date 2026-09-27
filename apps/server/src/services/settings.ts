@@ -5,6 +5,7 @@ import {
   McpServerConfig,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
+  normalizeBuiltinProviders,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
   normalizeChatTreeRecentLimit,
@@ -306,6 +307,9 @@ function mergeSettings(raw: unknown): AppSettings {
       [merged.defaultProvider]: merged.defaultModel,
     };
   }
+  // After the default-model copy above so a legacy builtin default lands
+  // already rewritten to its composite `<provider>::<model>` form.
+  normalizeBuiltinProviders(merged);
   // Fields replaced by icon-level controls / never shipped.
   for (const stale of [
     "chatReadAloud",

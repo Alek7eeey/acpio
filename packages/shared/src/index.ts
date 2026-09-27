@@ -18,6 +18,8 @@ export type {
   AgentMode,
   CustomAgentSpec,
   HarnessAdapter,
+  InProcessAgentOptions,
+  InProcessAgentTransport,
   ModelOption,
   SubagentCardUpdate,
   SubagentProgressUpdate,
@@ -878,6 +880,260 @@ export function boardColumn(s: {
 /** Windows shell for the in-app session terminal. */
 export type TerminalShell = "cmd" | "powershell";
 
+/**
+ * One model the built-in agent can talk to (Settings → Built-in agent).
+ * The agent needs no catalog service, so the list is plain settings data.
+ */
+export interface BuiltinModelConfig {
+  /** Provider wire id sent to the endpoint (e.g. `gpt-5.2`, `qwen3-coder`). */
+  id: string;
+  /** Label shown in the model picker. */
+  label: string;
+  /** Context window in tokens — drives the context chip and history pruning. */
+  contextWindow: number;
+  /**
+   * Whether the model is offered in pickers. Absent = enabled (rows written
+   * before this flag existed). Disabled rows are kept so their label/window
+   * edits and hand-added models survive a re-fetch of the catalog.
+   */
+  enabled?: boolean;
+  /**
+   * Whether the user typed the window themselves. A window the sources
+   * reported (endpoint, model registry) is refreshed on re-fetch; a typed one
+   * is an override and survives.
+   */
+  contextWindowEdited?: boolean;
+}
+
+/**
+ * A model the built-in agent's endpoint advertises over `GET /models`.
+ * `label`/`contextWindow` stay undefined when the API does not report them.
+ */
+export interface DiscoveredBuiltinModel {
+  id: string;
+  label?: string;
+  contextWindow?: number;
+}
+
+/** Context window assumed for a model row that does not state one. */
+export const BUILTIN_FALLBACK_CONTEXT_WINDOW = 128_000;
+const BUILTIN_MAX_CONTEXT_WINDOW = 10_000_000;
+
+/**
+ * Heal one provider's model rows: blank/duplicate ids dropped, labels and
+ * context windows sane. Switched-off rows are kept — their edits, their
+ * hand-added ids and a chat pinned to them must still resolve a window.
+ */
+export function normalizeBuiltinModelRows(rows: unknown): BuiltinModelConfig[] {
+  const out: BuiltinModelConfig[] = [];
+  if (!Array.isArray(rows)) return out;
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const id = String(r.id ?? "").trim().slice(0, 200);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const raw = Math.round(Number(r.contextWindow) || 0);
+    const window =
+      raw > 0 ? Math.min(raw, BUILTIN_MAX_CONTEXT_WINDOW) : BUILTIN_FALLBACK_CONTEXT_WINDOW;
+    out.push({
+      id,
+      label: String(r.label ?? "").trim().slice(0, 120) || id,
+      contextWindow: window,
+      ...(r.enabled === false ? { enabled: false as const } : {}),
+      ...(r.contextWindowEdited === true ? { contextWindowEdited: true as const } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * One OpenAI-compatible endpoint the built-in agent may talk to (Settings →
+ * Built-in agent): its own URL, key and model list. Several providers may
+ * coexist — a model is addressed as `<provider id>::<model id>` so the same
+ * wire id offered by two endpoints stays selectable on both.
+ */
+export interface BuiltinProviderConfig {
+  /** Stable machine id (never shown) — the prefix of composite model values. */
+  id: string;
+  /** Display name shown next to model labels in pickers. */
+  name: string;
+  /** Base URL of an OpenAI-compatible API; empty = provider switched off. */
+  url: string;
+  /** Sent as a Bearer token ("" for local endpoints that need no key). */
+  apiKey: string;
+  /** Models this provider exposes in the agent's picker. */
+  models: BuiltinModelConfig[];
+}
+
+/** Separator inside a composite built-in model value: `<provider>::<model>`. */
+export const BUILTIN_MODEL_SEPARATOR = "::";
+
+/** Composite picker value for one provider's model. */
+export function builtinModelValue(providerId: string, modelId: string): string {
+  return `${providerId}${BUILTIN_MODEL_SEPARATOR}${modelId}`;
+}
+
+/**
+ * Split a picked/stored value. Only a prefix that names a known provider
+ * counts: a bare id (written before providers existed, or by a pinned chat)
+ * comes back with `providerId: ""` and must be resolved against the models.
+ */
+export function parseBuiltinModelValue(
+  value: string,
+  providers: readonly { id: string }[],
+): { providerId: string; modelId: string } {
+  const raw = value.trim();
+  const cut = raw.indexOf(BUILTIN_MODEL_SEPARATOR);
+  if (cut > 0 && providers.some((p) => p.id === raw.slice(0, cut))) {
+    return {
+      providerId: raw.slice(0, cut),
+      modelId: raw.slice(cut + BUILTIN_MODEL_SEPARATOR.length),
+    };
+  }
+  return { providerId: "", modelId: raw };
+}
+
+/**
+ * Read-time upgrade of the built-in agent settings, applied by both the
+ * server merge and the client merge:
+ *
+ * - folds the pre-provider fields (`builtinAgentUrl`/`builtinAgentApiKey`/
+ *   `builtinModels`) into one provider row and drops them from the object;
+ * - heals provider rows (id-less/duplicate rows dropped, models normalized);
+ * - rewrites stored builtin model values (default, recents, favorites, params)
+ *   from bare ids to composite `<provider>::<model>` where they resolve.
+ *
+ * Accepts the whole settings object because legacy keys and the model maps
+ * live next to the provider list; `settings` may be null/non-object.
+ */
+export function normalizeBuiltinProviders(settings: unknown): BuiltinProviderConfig[] {
+  const raw = (settings && typeof settings === "object" ? settings : {}) as Record<string, unknown>;
+
+  const hasLegacy =
+    "builtinAgentUrl" in raw || "builtinAgentApiKey" in raw || "builtinModels" in raw;
+  if (
+    hasLegacy &&
+    (!Array.isArray(raw.builtinProviders) || raw.builtinProviders.length === 0)
+  ) {
+    const url = typeof raw.builtinAgentUrl === "string" ? raw.builtinAgentUrl.trim() : "";
+    const apiKey = typeof raw.builtinAgentApiKey === "string" ? raw.builtinAgentApiKey.trim() : "";
+    const models = normalizeBuiltinModelRows(raw.builtinModels);
+    if (url || apiKey || models.length) {
+      raw.builtinProviders = [
+        {
+          id: "legacy",
+          name: raw.locale === "ru" ? "Основной" : "Default",
+          url: url.slice(0, 500),
+          apiKey: apiKey.slice(0, 500),
+          models,
+        },
+      ];
+    }
+  }
+  delete raw.builtinAgentUrl;
+  delete raw.builtinAgentApiKey;
+  delete raw.builtinModels;
+
+  const providers = healBuiltinProviders(raw.builtinProviders);
+  rewriteBuiltinModelValues(raw, providers);
+  raw.builtinProviders = providers;
+  return providers;
+}
+
+/** Heal stored provider rows: id-less/duplicate rows drop, models normalized. */
+export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
+  const out: BuiltinProviderConfig[] = [];
+  if (!Array.isArray(raw)) return out;
+  const seen = new Set<string>();
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const id = typeof r.id === "string" ? r.id.trim().slice(0, 64) : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const name = typeof r.name === "string" ? r.name.trim().slice(0, 120) : "";
+    const url = typeof r.url === "string" ? r.url.trim().slice(0, 500) : "";
+    out.push({
+      id,
+      name: name || url || id,
+      url,
+      apiKey: typeof r.apiKey === "string" ? r.apiKey.trim().slice(0, 500) : "",
+      models: normalizeBuiltinModelRows(r.models),
+    });
+  }
+  return out;
+}
+
+/**
+ * Resolve a bare legacy value to its composite form (first provider offering
+ * that model id wins). Already-composite or unresolvable values pass through.
+ */
+function toCompositeBuiltinValue(
+  value: string,
+  providers: readonly BuiltinProviderConfig[],
+): string {
+  const parsed = parseBuiltinModelValue(value, providers);
+  if (parsed.providerId) return value;
+  const host = providers.find((p) => p.models.some((m) => m.id === parsed.modelId));
+  return host ? builtinModelValue(host.id, parsed.modelId) : value;
+}
+
+/** Map + dedupe a per-builtin model list (recents, favorites). */
+function rewriteBuiltinModelList(
+  values: unknown,
+  providers: readonly BuiltinProviderConfig[],
+): string[] | undefined {
+  if (!Array.isArray(values)) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of values) {
+    if (typeof raw !== "string") continue;
+    const next = toCompositeBuiltinValue(raw, providers);
+    if (seen.has(next)) continue;
+    seen.add(next);
+    out.push(next);
+  }
+  return out;
+}
+
+/** Rewrite the builtin buckets of the stored model maps in place. */
+function rewriteBuiltinModelValues(
+  raw: Record<string, unknown>,
+  providers: readonly BuiltinProviderConfig[],
+): void {
+  const byProvider = (key: string): Record<string, unknown> => {
+    const current = raw[key];
+    return current && typeof current === "object" && !Array.isArray(current)
+      ? { ...(current as Record<string, unknown>) }
+      : {};
+  };
+
+  const defaultMap = byProvider("defaultModelByProvider");
+  if (typeof defaultMap.builtin === "string" && defaultMap.builtin) {
+    defaultMap.builtin = toCompositeBuiltinValue(defaultMap.builtin, providers);
+  }
+  raw.defaultModelByProvider = defaultMap;
+
+  for (const key of ["recentModelsByProvider", "favoriteModelsByProvider"] as const) {
+    const map = byProvider(key);
+    const rewritten = rewriteBuiltinModelList(map.builtin, providers);
+    if (rewritten) map.builtin = rewritten;
+    raw[key] = map;
+  }
+
+  const paramsMap = byProvider("modelParamsByProviderModel");
+  if (paramsMap.builtin && typeof paramsMap.builtin === "object" && !Array.isArray(paramsMap.builtin)) {
+    const bucket: Record<string, unknown> = {};
+    for (const [model, params] of Object.entries(paramsMap.builtin as Record<string, unknown>)) {
+      bucket[toCompositeBuiltinValue(model, providers)] = params;
+    }
+    paramsMap.builtin = bucket;
+  }
+  raw.modelParamsByProviderModel = paramsMap;
+}
+
 export interface AppSettings {
   theme: Theme;
   locale: AppLocale;
@@ -915,6 +1171,11 @@ export interface AppSettings {
   cursorApiKey: string;
   anthropicApiKey: string;
   openaiApiKey: string;
+  /**
+   * Endpoints the built-in agent may talk to — each with its own URL, key and
+   * model list (Settings → Built-in agent). Empty = the agent stays offline.
+   */
+  builtinProviders: BuiltinProviderConfig[];
   permissionPolicy: PermissionPolicy;
   permissionAllowlist: string[];
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
@@ -1064,6 +1325,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cursorApiKey: "",
   anthropicApiKey: "",
   openaiApiKey: "",
+  builtinProviders: [],
   permissionPolicy: "always",
   permissionAllowlist: [],
   diagnosticsDir: "",

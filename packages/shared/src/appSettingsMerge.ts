@@ -1,6 +1,7 @@
 import {
   DEFAULT_CHAT_CHIP_OPTIONS,
   DEFAULT_SETTINGS,
+  normalizeBuiltinProviders,
   normalizeMcpProjectFiles,
   type AgentProvider,
   type AppSettings,
@@ -151,6 +152,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
     raw && typeof raw === "object" ? (raw as Partial<AppSettings>) : ({} as Partial<AppSettings>);
   const schemaVersion = readSettingsSchema(raw);
   const merged: AppSettings = { ...DEFAULT_SETTINGS, ...partial };
+  // Folds a pre-provider payload into `builtinProviders` and rewrites stored
+  // builtin model values to their composite form.
+  normalizeBuiltinProviders(merged);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   // Anything but an explicit "server" falls back to the device default.

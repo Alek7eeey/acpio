@@ -45,12 +45,14 @@ import {
   listUnlinkedHarnessSessions,
   importHarnessSession,
   restartSessionsForMcpChange,
+  restartSessionsForBuiltinChange,
   restartSessionMcp,
   resetAllAgentSessions,
   replayPendingInteractive,
   getLiveTurnState,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
+import { fetchBuiltinModelCatalog } from "./services/builtinModelCatalog.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import {
   MAX_ATTACH_UPLOAD_BYTES,
@@ -110,7 +112,7 @@ import {
   syncGit,
 } from "./services/git.js";
 import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
-import { isErrorCode, localeFromRequest, resolveLocale, localizeError } from "./lib/locale.js";
+import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
 import {
@@ -190,6 +192,29 @@ const settingsSchema = z.object({
   cursorApiKey: z.string().optional(),
   anthropicApiKey: z.string().optional(),
   openaiApiKey: z.string().optional(),
+  builtinProviders: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().max(120).optional(),
+        url: z.string().max(500).optional(),
+        apiKey: z.string().max(500).optional(),
+        models: z
+          .array(
+            z.object({
+              id: z.string().min(1).max(200),
+              label: z.string().max(120).optional(),
+              contextWindow: z.number().int().min(1).max(10_000_000).optional(),
+              enabled: z.boolean().optional(),
+              contextWindowEdited: z.boolean().optional(),
+            }),
+          )
+          .max(1000)
+          .optional(),
+      }),
+    )
+    .max(50)
+    .optional(),
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
@@ -465,6 +490,32 @@ export async function registerRoutes(app: FastifyInstance) {
     return listModels(provider, { force });
   });
 
+  /**
+   * Models one provider's endpoint advertises (`GET /models`). The body
+   * carries the form's URL/key so the list can be fetched before Save; with
+   * nothing in the body the first configured provider is the fallback.
+   */
+  app.post("/api/agent/builtin/models", async (req) => {
+    const body = z
+      .object({ url: z.string().max(500).optional(), apiKey: z.string().max(500).optional() })
+      .parse(req.body ?? {});
+    const settings = await getSettings();
+    const fallback = settings.builtinProviders[0];
+    const url = body.url !== undefined ? body.url : (fallback?.url ?? "");
+    const apiKey = body.apiKey !== undefined ? body.apiKey : (fallback?.apiKey ?? "");
+    const result = await fetchBuiltinModelCatalog(url, apiKey);
+    if (result.ok) return result;
+    const t = serverT(await resolveLocale(req));
+    return {
+      ok: false,
+      models: [],
+      error: t(`builtinCatalog.${result.code}`, {
+        detail: result.detail ?? "",
+        status: result.detail ?? "",
+      }),
+    };
+  });
+
   app.get("/api/agent/status", async () => {
     const settings = await getSettings();
     const disabled = new Set(settings.disabledProviders);
@@ -559,6 +610,15 @@ export async function registerRoutes(app: FastifyInstance) {
       void restartSessionsForMcpChange();
       // Warm the status cache so the indicator reflects the new list quickly.
       void refreshMcpStatus();
+    }
+    if (
+      patch.builtinProviders !== undefined &&
+      JSON.stringify(patch.builtinProviders) !== JSON.stringify(current.builtinProviders)
+    ) {
+      // The transport reads providers per turn, but a live chat may be pinned
+      // to a model the edit removed — restart live built-in chats so the new
+      // endpoints/model list apply immediately.
+      void restartSessionsForBuiltinChange();
     }
     if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {
       void reconcileUserConsolesShell();

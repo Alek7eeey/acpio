@@ -4,6 +4,7 @@ export type SettingsSection = "agent" | "interface";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
+  | "builtin"
   | "advanced"
   | "remote"
   | "diagnostics"
@@ -27,6 +28,7 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
   const children: Array<{ id: SettingsAgentLeaf; label: string }> = [
     { id: "connect", label: t("settings.connection") },
     { id: "model", label: t("settings.modelSection") },
+    { id: "builtin", label: t("settings.builtinTitle") },
     { id: "advanced", label: t("settings.advanced") },
     { id: "mcp", label: t("settings.mcpTitle") },
     { id: "diagnostics", label: t("settings.diagnostics") },
@@ -71,6 +73,7 @@ export function parseSettingsSearch(search: string): {
   const rawLeaf = params.get("leaf");
   const leaf: SettingsAgentLeaf =
     rawLeaf === "model" ||
+    rawLeaf === "builtin" ||
     rawLeaf === "advanced" ||
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||

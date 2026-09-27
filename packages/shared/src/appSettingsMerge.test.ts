@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS } from "./index.js";
+import { DEFAULT_SETTINGS, normalizeBuiltinProviders } from "./index.js";
 import {
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
@@ -162,6 +162,114 @@ describe("mergeClientAppSettings", () => {
     );
     expect(mergeClientAppSettings({ chatTreeRecentLimit: "many" }).chatTreeRecentLimit).toBe(0);
     expect(mergeClientAppSettings({ chatTreeRecentLimit: Number.NaN }).chatTreeRecentLimit).toBe(0);
+  });
+
+  it("migrates a pre-provider builtin payload from the API", () => {
+    const merged = mergeClientAppSettings({
+      builtinAgentUrl: "http://localhost:11434/v1",
+      builtinModels: [{ id: "m1" }],
+    });
+    expect(merged.builtinProviders).toEqual([
+      {
+        id: "legacy",
+        name: "Default",
+        url: "http://localhost:11434/v1",
+        apiKey: "",
+        models: [{ id: "m1", label: "m1", contextWindow: 128_000 }],
+      },
+    ]);
+    expect("builtinAgentUrl" in merged).toBe(false);
+  });
+});
+
+describe("normalizeBuiltinProviders", () => {
+  it("folds the legacy single-endpoint fields into one provider row", () => {
+    const raw = {
+      locale: "ru",
+      builtinAgentUrl: " http://localhost:11434/v1 ",
+      builtinAgentApiKey: "sk-test",
+      builtinModels: [{ id: "qwen", label: "", contextWindow: 0 }],
+      defaultModelByProvider: { builtin: "qwen", cursor: "grok-4.6" },
+    };
+    const providers = normalizeBuiltinProviders(raw);
+    expect(providers).toEqual([
+      {
+        id: "legacy",
+        name: "Основной",
+        url: "http://localhost:11434/v1",
+        apiKey: "sk-test",
+        models: [{ id: "qwen", label: "qwen", contextWindow: 128_000 }],
+      },
+    ]);
+    expect("builtinAgentUrl" in raw).toBe(false);
+    expect("builtinAgentApiKey" in raw).toBe(false);
+    expect("builtinModels" in raw).toBe(false);
+    // The stored default model now names its provider explicitly.
+    expect(raw.defaultModelByProvider).toEqual({ builtin: "legacy::qwen", cursor: "grok-4.6" });
+  });
+
+  it("keeps a typed context-window override through normalization", () => {
+    const raw = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "Zen",
+          url: "https://opencode.ai/zen/go/v1",
+          apiKey: "",
+          models: [
+            { id: "typed", label: "Typed", contextWindow: 64_000, contextWindowEdited: true },
+            { id: "reported", label: "Reported", contextWindow: 128_000, contextWindowEdited: false },
+          ],
+        },
+      ],
+    };
+    expect(normalizeBuiltinProviders(raw).flatMap((p) => p.models)).toEqual([
+      { id: "typed", label: "Typed", contextWindow: 64_000, contextWindowEdited: true },
+      { id: "reported", label: "Reported", contextWindow: 128_000 },
+    ]);
+  });
+
+  it("rewrites bare builtin model values to composite and keeps unknown ones", () => {
+    const raw = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "Ollama",
+          url: "http://localhost:11434/v1",
+          apiKey: "",
+          models: [{ id: "qwen", label: "Qwen", contextWindow: 32_000 }],
+        },
+      ],
+      defaultModelByProvider: { builtin: "qwen" },
+      recentModelsByProvider: { builtin: ["qwen", "gpt-4o", "qwen"] },
+      favoriteModelsByProvider: { builtin: ["p1::qwen"] },
+      modelParamsByProviderModel: { builtin: { qwen: { effort: "high" } } },
+    };
+    normalizeBuiltinProviders(raw);
+    expect(raw.defaultModelByProvider).toEqual({ builtin: "p1::qwen" });
+    expect(raw.recentModelsByProvider).toEqual({ builtin: ["p1::qwen", "gpt-4o"] });
+    expect(raw.favoriteModelsByProvider).toEqual({ builtin: ["p1::qwen"] });
+    expect(raw.modelParamsByProviderModel).toEqual({ builtin: { "p1::qwen": { effort: "high" } } });
+  });
+
+  it("heals provider rows: id-less and duplicate rows drop, name falls back", () => {
+    const raw = {
+      builtinProviders: [
+        { id: "p1", name: "  ", url: "http://a/v1", apiKey: "", models: "junk" },
+        { id: "p1", name: "dupe", url: "http://b/v1", models: [] },
+        { name: "no id", url: "http://c/v1", models: [] },
+        "junk",
+      ],
+    };
+    expect(normalizeBuiltinProviders(raw)).toEqual([
+      { id: "p1", name: "http://a/v1", url: "http://a/v1", apiKey: "", models: [] },
+    ]);
+  });
+
+  it("keeps a fresh payload as-is", () => {
+    expect(normalizeBuiltinProviders({})).toEqual([]);
+    expect(normalizeBuiltinProviders({ builtinProviders: [] })).toEqual([]);
+    expect(normalizeBuiltinProviders(null)).toEqual([]);
   });
 });
 

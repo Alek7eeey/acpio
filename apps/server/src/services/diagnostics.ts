@@ -30,6 +30,7 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     cursorApiKey,
     anthropicApiKey,
     openaiApiKey,
+    builtinProviders,
     ...rest
   } = settings;
   return {
@@ -37,6 +38,12 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     cursorApiKey: cursorApiKey ? "[set]" : "",
     anthropicApiKey: anthropicApiKey ? "[set]" : "",
     openaiApiKey: openaiApiKey ? "[set]" : "",
+    // Every provider keeps its row (id/name/models matter for support) but
+    // never its key.
+    builtinProviders: builtinProviders.map((p) => ({
+      ...p,
+      apiKey: p.apiKey ? "[set]" : "",
+    })),
   };
 }
 

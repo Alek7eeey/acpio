@@ -7,6 +7,7 @@ import type {
   ChatThemeDto,
   DiagnosticsDumpDto,
   DiagnosticsDumpMeta,
+  DiscoveredBuiltinModel,
   GitStatusDto,
   GitCommitDto,
   GitCommitDetailDto,
@@ -27,6 +28,11 @@ export type MessageSearchHit = {
   snippet: string;
   createdAt: string;
 };
+
+/** Models the built-in agent's endpoint advertises over `GET /models`. */
+export type BuiltinModelCatalogResult =
+  | { ok: true; models: DiscoveredBuiltinModel[] }
+  | { ok: false; models: []; error: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -100,6 +106,11 @@ export const api = {
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
   },
+  builtinModels: (body: { url: string; apiKey: string }) =>
+    request<BuiltinModelCatalogResult>("/api/agent/builtin/models", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   getModelParams: (
     provider: AgentProvider,
     model: string,

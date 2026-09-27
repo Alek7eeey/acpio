@@ -244,6 +244,39 @@ export interface SubagentTranscriptPage {
 }
 
 /**
+ * Options handed to an in-process agent when its transport is created.
+ * `stateDir` is where the agent keeps state the core cannot reconstruct for it
+ * (its own conversation history, for `session/load`).
+ */
+export interface InProcessAgentOptions {
+  settings: AppSettings;
+  /** Session workspace — agent tools run against this directory. */
+  cwd: string;
+  /** Session mode at boot (agent/plan/ask). */
+  mode: AgentMode;
+  /** Per-install directory for the agent's own state. */
+  stateDir: string;
+}
+
+/**
+ * An in-process agent speaking ACP over an in-memory line transport: the same
+ * JSON-RPC frames a spawned CLI would put on stdio, without the process.
+ *
+ * Delivery is asynchronous on BOTH sides — the client registers a pending
+ * request only after writing it, so an agent answering inline would be dropped.
+ */
+export interface InProcessAgentTransport {
+  /** JSON-RPC line from the ACP client into the agent. */
+  write(line: string): void;
+  /** JSON-RPC lines the agent emits (updates, requests to the client, replies). */
+  onLine(cb: (line: string) => void): void;
+  /** The agent stopped — a fatal error, or the result of `close()`. */
+  onClose(cb: (info?: { message?: string }) => void): void;
+  /** Dispose: abort the running turn and release resources. */
+  close(): void;
+}
+
+/**
  * Everything the core needs to know about a harness. Declarative data plus a
  * few behavior hooks; adapters depend only on `@acpio/shared`.
  */
@@ -278,6 +311,12 @@ export interface HarnessAdapter {
   binaryDirs: string[];
   /** Human-readable install instructions shown when the command is missing. */
   installHint: string;
+  /**
+   * In-process agent: builds the ACP endpoint instead of spawning a CLI, so
+   * `defaultCommand`/`binaryNames`/`installHint` are never consulted. Absent =
+   * the harness runs as a child process.
+   */
+  createTransport?: (opts: InProcessAgentOptions) => InProcessAgentTransport;
 
   // ── Session lifecycle ────────────────────────────────────────────────────
   /** How a stored agent session is restored (new = never restore). */
@@ -330,6 +369,15 @@ export interface HarnessAdapter {
     agentId: string,
     fromByte: number,
   ) => Promise<SubagentTranscriptPage | undefined>;
+
+  // ── Availability ─────────────────────────────────────────────────────────
+  /**
+   * Cheap pre-boot check: a user-facing reason the harness cannot run yet
+   * (endpoint not configured), or null when it can. Absent = always try the
+   * real boot; a failed boot reports availability false anyway. Used by the
+   * probe so "online" never means merely "the process started".
+   */
+  unavailableReason?: (settings: AppSettings) => string | null;
 
   // ── Model catalog ────────────────────────────────────────────────────────
   /** Broader catalog than the ACP option list (CLI `models --json`). */

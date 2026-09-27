@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
+import http from "node:http";
 import path from "node:path";
 import os from "node:os";
 import fsp from "node:fs/promises";
@@ -21,6 +22,7 @@ import {
   settings as settingsTable,
 } from "../src/db/schema.js";
 import { disposeRuntime, setAgentAvailable } from "../src/acp/sessionManager.js";
+import { clearModelRegistryCache } from "../src/services/modelRegistry.js";
 import {
   appendPart,
   appendTextChunk,
@@ -1195,7 +1197,7 @@ describe("agent status", () => {
     expect(res.json()).toEqual({
       provider: null,
       available: false,
-      availability: { cursor: false, omp: false },
+      availability: { cursor: false, omp: false, builtin: false },
     });
   });
 
@@ -1692,10 +1694,15 @@ describe("disabled providers", () => {
     expect(adapters.map((a) => [a.id, a.enabled])).toEqual([
       ["cursor", true],
       ["omp", false],
+      ["builtin", true],
     ]);
 
     const status = (await app.inject({ method: "GET", url: "/api/agent/status" })).json();
-    expect(status).toEqual({ provider: null, available: false, availability: { cursor: false } });
+    expect(status).toEqual({
+      provider: null,
+      available: false,
+      availability: { cursor: false, builtin: false },
+    });
   });
 
   it("turning the harness back on restores its registry row", async () => {
@@ -1707,13 +1714,13 @@ describe("disabled providers", () => {
     const off = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       enabled: boolean;
     }>;
-    expect(off.map((a) => a.enabled)).toEqual([false, false]);
+    expect(off.map((a) => a.enabled)).toEqual([false, false, true]);
 
     await app.inject({ method: "PUT", url: "/api/settings", payload: { disabledProviders: [] } });
     const on = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       enabled: boolean;
     }>;
-    expect(on.map((a) => a.enabled)).toEqual([true, true]);
+    expect(on.map((a) => a.enabled)).toEqual([true, true, true]);
   });
 
   it("refuses a new session for a switched-off harness", async () => {
@@ -1799,8 +1806,8 @@ describe("user-defined agents", () => {
       commandField: string;
       defaultCommand: string;
     }>;
-    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "fake-acp"]);
-    expect(meta[2]).toMatchObject({
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "builtin", "fake-acp"]);
+    expect(meta[3]).toMatchObject({
       custom: true,
       label: "Fake ACP",
       commandField: "",
@@ -1847,7 +1854,7 @@ describe("user-defined agents", () => {
     const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       id: string;
     }>;
-    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp"]);
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "builtin"]);
 
     const res = await app.inject({
       method: "POST",
@@ -1857,6 +1864,250 @@ describe("user-defined agents", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe("unknownAgent");
   });
+});
+
+// Placed after every availability assertion in this file: the online probe
+// leaves `builtin` marked available and earlier tests pin it to false.
+describe("built-in agent probe", () => {
+  it("reports offline without an endpoint and online once one is configured", async () => {
+    const off = await app.inject({
+      method: "POST",
+      url: "/api/agent/probe",
+      payload: { provider: "builtin" },
+    });
+    expect(off.json()).toMatchObject({ ok: false, provider: "builtin" });
+    expect(String(off.json().message)).toMatch(/endpoint/i);
+    const status = (await app.inject({ method: "GET", url: "/api/agent/status" })).json();
+    expect(status.availability.builtin).toBe(false);
+
+    // Booting the in-process agent is all the probe needs — no endpoint call,
+    // so an unreachable URL must not make this assertion flaky.
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinProviders: [
+          { id: "p1", name: "Local", url: "http://127.0.0.1:1/v1", apiKey: "", models: [] },
+        ],
+      },
+    });
+    const on = await app.inject({
+      method: "POST",
+      url: "/api/agent/probe",
+      payload: { provider: "builtin" },
+    });
+    expect(on.json()).toMatchObject({ ok: true, provider: "builtin" });
+    const status2 = (await app.inject({ method: "GET", url: "/api/agent/status" })).json();
+    expect(status2.availability.builtin).toBe(true);
+  });
+});
+
+describe("built-in model catalog", () => {
+  it("fetches /models from the form's URL and explains a missing endpoint", async () => {
+    const missing = await app.inject({
+      method: "POST",
+      url: "/api/agent/builtin/models",
+      payload: {},
+    });
+    expect(missing.json()).toMatchObject({ ok: false, models: [] });
+    expect(String(missing.json().error)).toMatch(/endpoint/i);
+
+    const endpoint = http.createServer((req, res) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/registry.json") {
+        res.end(
+          JSON.stringify({
+            "test-vendor": {
+              api: `${base}/v1`,
+              models: { m1: { limit: { context: 200_000 } } },
+            },
+          }),
+        );
+        return;
+      }
+      res.end(
+        JSON.stringify({
+          data: [
+            { id: "m1", name: "Model One" },
+            { id: "m2", context_length: 64_000 },
+          ],
+        }),
+      );
+    });
+    await new Promise<void>((resolve) => endpoint.listen(0, "127.0.0.1", resolve));
+    const addr = endpoint.address();
+    if (!addr || typeof addr === "string") {
+      throw new Error("catalog endpoint did not bind a TCP port");
+    }
+    const base = `http://127.0.0.1:${addr.port}`;
+    const savedRegistry = process.env.ACP_MODELS_REGISTRY_URL;
+    process.env.ACP_MODELS_REGISTRY_URL = `${base}/registry.json`;
+    try {
+      // The unsaved URL from the form is enough — no settings write needed.
+      // m1 has no window of its own, so the registry fills it in; the window
+      // the endpoint reports for m2 is left alone.
+      const ok = await app.inject({
+        method: "POST",
+        url: "/api/agent/builtin/models",
+        payload: { url: `${base}/v1` },
+      });
+      expect(ok.json()).toEqual({
+        ok: true,
+        models: [
+          { id: "m1", label: "Model One", contextWindow: 200_000 },
+          { id: "m2", contextWindow: 64_000 },
+        ],
+      });
+    } finally {
+      if (savedRegistry === undefined) delete process.env.ACP_MODELS_REGISTRY_URL;
+      else process.env.ACP_MODELS_REGISTRY_URL = savedRegistry;
+      clearModelRegistryCache();
+      await new Promise<void>((resolve) => endpoint.close(() => resolve()));
+    }
+  });
+});
+
+describe("built-in agent image attachments", () => {
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  /** OpenAI-compatible stub: streams one sentence, records user message contents. */
+  async function startModelStub(): Promise<{
+    url: string;
+    userContents: unknown[];
+    /** Resolves with the first user message content the model receives. */
+    firstUserContent: Promise<unknown>;
+    close(): Promise<void>;
+  }> {
+    const userContents: unknown[] = [];
+    const first = Promise.withResolvers<unknown>();
+    const server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed: unknown = JSON.parse(body);
+        const rawMessages =
+          parsed && typeof parsed === "object" && "messages" in parsed ? parsed.messages : undefined;
+        const messages = Array.isArray(rawMessages) ? rawMessages : [];
+        const user = messages.find((m) => m?.role === "user");
+        if (user) {
+          userContents.push(user.content);
+          first.resolve(user.content);
+        }
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    const listening = Promise.withResolvers<void>();
+    server.listen(0, "127.0.0.1", listening.resolve);
+    await listening.promise;
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    return {
+      url: `http://127.0.0.1:${address.port}/v1`,
+      userContents,
+      firstUserContent: first.promise,
+      close: () => {
+        const closed = Promise.withResolvers<void>();
+        server.close(closed.resolve);
+        return closed.promise;
+      },
+    };
+  }
+
+  it("delivers an uploaded screenshot to the model as image content", async () => {
+    const stub = await startModelStub();
+    const cwd = await newTempDir("acpio-image-");
+    const shot = path.join(cwd, ".acpio-attachments", "shot.png");
+    await fsp.mkdir(path.dirname(shot), { recursive: true });
+    await fsp.writeFile(shot, PNG);
+    setAgentAvailable("builtin", true);
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        connectedProvider: "builtin",
+        defaultProvider: "builtin",
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      },
+    });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        payload: { provider: "builtin", cwd },
+      });
+      expect(created.statusCode).toBe(200);
+      const session = created.json() as { id: string };
+      runtimeSessionIds.push(session.id);
+
+      const sent = await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: {
+          text: "что на скриншоте?",
+          attachments: [{ name: "shot.png", path: shot }],
+        },
+      });
+      expect(sent.statusCode).toBe(200);
+
+      // The prompt route is fire-and-forget: the stub resolves when the model
+      // call actually arrives, so nothing here guesses at a duration.
+      expect(await stub.firstUserContent).toEqual([
+        { type: "text", text: expect.stringContaining("что на скриншоте?") },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${PNG.toString("base64")}` } },
+      ]);
+      // Let the turn finish before the test disposes the runtime: a real timer
+      // is the only probe here, because the route exposes no promise for it.
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const turn = (await app.inject({ method: "GET", url: `/api/sessions/${session.id}/turn` })).json() as {
+          running?: boolean;
+        };
+        if (!turn.running) break;
+        const tick = Promise.withResolvers<void>();
+        setTimeout(tick.resolve, 25);
+        await tick.promise;
+      }
+    } finally {
+      await stub.close();
+    }
+  }, 15_000);
 });
 
 describe("git routes", () => {

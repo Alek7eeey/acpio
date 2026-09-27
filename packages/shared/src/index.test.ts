@@ -449,6 +449,7 @@ describe("DEFAULT_SETTINGS", () => {
     cursorApiKey: "",
     anthropicApiKey: "",
     openaiApiKey: "",
+    builtinProviders: [],
     permissionPolicy: "always",
     permissionAllowlist: [],
     diagnosticsDir: "",
