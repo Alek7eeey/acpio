@@ -1239,6 +1239,10 @@ export class AcpClient extends EventEmitter {
   private async handleFsRead(params: Record<string, unknown>) {
     const filePath = this.assertReadablePath(String(params.path ?? ""));
     const raw = await fsp.readFile(filePath, "utf8");
+    // No window requested → return the bytes untouched: split/join would
+    // normalize CRLF to LF, and an agent that edits afterwards would rewrite
+    // every line ending in the file.
+    if (Number(params.line ?? 1) <= 1 && params.limit == null) return { content: raw };
     const lines = raw.split(/\r?\n/);
     const start = Math.max(0, Number(params.line ?? 1) - 1);
     const limit = params.limit == null ? undefined : Number(params.limit);
