@@ -350,6 +350,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
         name: `builtin:${selection.provider.id}`,
         baseURL: selection.provider.url,
         apiKey: selection.provider.apiKey || undefined,
+        // Most OpenAI-compatible servers only report usage when asked to.
+        includeUsage: true,
       });
       const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
       const outcome = await runTurn({
