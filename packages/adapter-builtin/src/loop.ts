@@ -233,22 +233,42 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   let response: ModelMessage[] = [];
   let finishReason = "stop";
   let totalTokens = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let cachedInputTokens = 0;
+  let contextTokens = 0;
   try {
-    const [produced, reason, usage] = await Promise.all([
+    const [produced, reason, usage, lastStepUsage] = await Promise.all([
       result.responseMessages,
       result.finishReason,
       result.totalUsage,
+      result.usage,
     ]);
     response = produced;
     finishReason = String(reason ?? "stop");
     totalTokens = Number(usage?.totalTokens ?? 0) || 0;
+    inputTokens = Number(usage?.inputTokens ?? 0) || 0;
+    outputTokens = Number(usage?.outputTokens ?? 0) || 0;
+    // Prompt-cache hits are the cheap part of the input: reported separately so
+    // the chip and the bench can show what the provider actually had to read.
+    cachedInputTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
+    // The context chip is about the live window, so it takes the last step's
+    // prompt + output, not the sum over every step of the turn.
+    contextTokens = Number(lastStepUsage?.totalTokens ?? 0) || 0;
   } catch (err) {
     // A cancelled turn resolves nothing — the client already knows it cancelled.
     if (!opts.abortSignal.aborted) throw err;
   }
 
   if (totalTokens > 0 && opts.contextWindow > 0) {
-    opts.emit({ sessionUpdate: "usage_update", used: totalTokens, size: opts.contextWindow });
+    opts.emit({
+      sessionUpdate: "usage_update",
+      used: contextTokens || totalTokens,
+      size: opts.contextWindow,
+      inputTokens,
+      outputTokens,
+      cachedInputTokens,
+    });
   }
 
   return {

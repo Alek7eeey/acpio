@@ -152,6 +152,7 @@ export async function runBuiltinAgent(server, { task, ws, timeoutMs }) {
     tokensIn: num(usage?.inputTokens),
     tokensOut: num(usage?.outputTokens),
     tokensTotal: num(usage?.usedTokens) || num(usage?.inputTokens) + num(usage?.outputTokens),
+    tokensCached: num(usage?.cachedInputTokens),
     contextTokens: num(usage?.contextWindow),
     cost: num(usage?.cost),
     finalText,

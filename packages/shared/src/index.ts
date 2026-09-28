@@ -1793,6 +1793,12 @@ export interface AcpUsage {
   usedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /**
+   * Input tokens served from the provider's prompt cache. They are still part
+   * of `inputTokens`; this is the cheap subset, reported separately because it
+   * is what actually costs time (and often money).
+   */
+  cachedInputTokens?: number;
   /** Cumulative cost (currency units) if the harness reports it. */
   cost?: number;
   /** Original harness payload, kept for fields we don't normalize. */

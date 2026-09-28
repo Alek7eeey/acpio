@@ -5304,6 +5304,7 @@ function ChatThread() {
     if (used == null) return null;
     const win = acp?.contextWindow;
     const cost = acp?.cost;
+    const cached = acp?.cachedInputTokens;
     // Harnesses may report a real `used` with window 0 — that is "unknown", not a
     // 0-token window, so the window clause is dropped instead of printing a zero.
     const windowKnown = win != null && win > 0;
@@ -5326,6 +5327,9 @@ function ChatThread() {
         ? t("chat.contextAcpCost", {
             cost: cost.toLocaleString(undefined, { maximumFractionDigits: 4 }),
           })
+        : null,
+      cached != null && cached > 0
+        ? t("chat.contextAcpCached", { tokens: cached.toLocaleString() })
         : null,
     ]
       .filter((part): part is string => part != null)

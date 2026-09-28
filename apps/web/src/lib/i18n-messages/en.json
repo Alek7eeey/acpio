@@ -375,6 +375,7 @@
     "loadingChat": "Loading chat…",
     "contextAcpTooltip": "Context from ACP: {{used}} / {{window}} tokens used",
     "contextAcpTooltipNoWindow": "Context from ACP: {{used}} tokens used",
+    "contextAcpCached": "{{tokens}} cached input tokens",
     "contextAcpCost": "cost {{cost}}",
     "exportChat": "Export chat",
     "exportDescription": "Download the conversation as a file or save it on the server — handy for handing work over to a client.",

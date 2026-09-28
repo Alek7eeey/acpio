@@ -1640,6 +1640,9 @@ export class AcpClient extends EventEmitter {
       costObj && typeof costObj === "object"
         ? num(costObj.amount)
         : num(u.cost ?? raw.cost);
+    const promptDetails = (u.prompt_tokens_details ?? raw.prompt_tokens_details) as
+      | Record<string, unknown>
+      | undefined;
     return {
       contextWindow: num(
         u.size ?? u.contextWindow ?? u.context_window ?? u.maxTokens ?? u.max_tokens,
@@ -1649,6 +1652,13 @@ export class AcpClient extends EventEmitter {
       ),
       inputTokens: num(u.inputTokens ?? u.promptTokens ?? u.input_tokens),
       outputTokens: num(u.outputTokens ?? u.completionTokens ?? u.output_tokens),
+      cachedInputTokens: num(
+        u.cachedInputTokens ??
+          u.cacheReadTokens ??
+          u.cachedTokens ??
+          u.cached_input_tokens ??
+          promptDetails?.cached_tokens,
+      ),
       cost,
       raw,
     };

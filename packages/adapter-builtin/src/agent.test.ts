@@ -345,6 +345,35 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("reports the endpoint's token split in usage_update", async () => {
+    const stub = await startStub();
+    try {
+      const { call, frames } = boot({
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      });
+      await call("session/new", { cwd: "/w" });
+      await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      // The stub answers with usage 1 in / 1 out / 2 total.
+      const usage = frames
+        .map((frame) => frame.params as { update?: Record<string, unknown> } | undefined)
+        .map((params) => params?.update)
+        .find((update) => update?.sessionUpdate === "usage_update");
+      expect(usage).toMatchObject({ used: 2, size: 8_000, inputTokens: 1, outputTokens: 1 });
+    } finally {
+      await stub.close();
+    }
+  });
+
   it("refuses to prompt when the selected model's provider lost its endpoint", async () => {
     const { call } = boot({
       builtinProviders: [

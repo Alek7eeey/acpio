@@ -384,6 +384,7 @@ export const ru = {
     loadingChat: "Загружаем чат…",
     contextAcpTooltip: "Контекст по ACP: {{used}} / {{window}} токенов",
     contextAcpTooltipNoWindow: "Контекст по ACP: {{used}} токенов",
+    contextAcpCached: "{{tokens}} токенов входа из кэша",
     contextAcpCost: "стоимость {{cost}}",
   },
   settings: {

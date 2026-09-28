@@ -363,6 +363,7 @@ export const en = {
     loadingChat: "Loading chat…",
     contextAcpTooltip: "Context from ACP: {{used}} / {{window}} tokens used",
     contextAcpTooltipNoWindow: "Context from ACP: {{used}} tokens used",
+    contextAcpCached: "{{tokens}} cached input tokens",
     contextAcpCost: "cost {{cost}}",
   },
   settings: {

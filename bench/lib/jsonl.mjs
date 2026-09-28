@@ -31,6 +31,7 @@ export function summarizeAgentStream(text) {
   let tokensIn = 0;
   let tokensOut = 0;
   let tokensTotal = 0;
+  let tokensCached = 0;
   let cost = 0;
   let contextTokens = 0;
   let finalText = "";
@@ -59,6 +60,13 @@ export function summarizeAgentStream(text) {
       tokensIn += num(u.input ?? u.promptTokens ?? u.prompt_tokens);
       tokensOut += num(u.output ?? u.completionTokens ?? u.completion_tokens);
       tokensTotal += num(u.totalTokens ?? u.total_tokens);
+      tokensCached += num(
+        u.cachedInputTokens ??
+          u.cacheReadTokens ??
+          u.cachedTokens ??
+          u.prompt_tokens_details?.cached_tokens ??
+          u.inputTokenDetails?.cacheReadTokens,
+      );
       contextTokens = num(u.totalTokens ?? u.total_tokens) || contextTokens;
       cost += num(u.cost?.total ?? u.cost);
       const text = Array.isArray(m.content)
@@ -86,6 +94,7 @@ export function summarizeAgentStream(text) {
     tokensIn,
     tokensOut,
     tokensTotal,
+    tokensCached,
     contextTokens,
     cost,
     finalText,

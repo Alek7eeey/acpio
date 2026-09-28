@@ -52,6 +52,35 @@ export function ensureOmpModel(profile, { provider, baseUrl, apiKey, modelId, co
   return file;
 }
 
+/**
+ * pi reads custom providers from `<configDir>/models.json`. The bench points
+ * pi at its own config dir (`PI_CODING_AGENT_DIR`) instead of `~/.pi/agent`, so
+ * a run never depends on - or mutates - the user's real provider list.
+ */
+export function ensurePiModel(configDir, { provider, baseUrl, apiKey, modelId, contextWindow }) {
+  mkdirSync(configDir, { recursive: true });
+  const file = path.join(configDir, "models.json");
+  writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        providers: {
+          [provider]: {
+            baseUrl,
+            api: "openai-completions",
+            apiKey,
+            compat: { supportsDeveloperRole: false, supportsReasoningEffort: false },
+            models: [{ id: modelId, contextWindow }],
+          },
+        },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  return file;
+}
+
 const PI_ISOLATION = [
   "--no-session",
   "--no-context-files",
@@ -101,10 +130,11 @@ export function agentCommand(agent) {
   throw new Error(`unknown cli agent: ${agent}`);
 }
 
-export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs }) {
+export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir }) {
   const { cmd, prefix } = agentCommand(agent);
   const args = [...prefix, ...agentArgs(agent, { prompt: task.prompt, provider, modelId })];
-  const res = await runProcess(cmd, args, { cwd: ws, timeoutMs });
+  const env = agent === "pi" && piConfigDir ? { PI_CODING_AGENT_DIR: piConfigDir, PI_OFFLINE: "1" } : undefined;
+  const res = await runProcess(cmd, args, { cwd: ws, timeoutMs, env });
   const summary = summarizeAgentStream(res.stdout);
   return {
     ...summary,
