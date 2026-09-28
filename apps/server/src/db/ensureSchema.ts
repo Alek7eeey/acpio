@@ -105,6 +105,14 @@ export async function ensureSchema() {
     )
   `);
 
+  // Opening a chat reads every part of every message of that session. Without
+  // these indexes each per-message parts lookup is a full scan of
+  // message_parts — 500+ MB in a long-lived install, ~40 s per large chat.
+  db.run(sql`CREATE INDEX IF NOT EXISTS messages_session_created_idx
+    ON messages(session_id, created_at)`);
+  db.run(sql`CREATE INDEX IF NOT EXISTS message_parts_message_idx
+    ON message_parts(message_id, "order", created_at)`);
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
@@ -112,7 +120,6 @@ export async function ensureSchema() {
       updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
     )
   `);
-
   // Folders that have ever held chats — survives deleting the last chat, so
   // empty folders stay visible across devices until explicitly removed.
   db.run(sql`

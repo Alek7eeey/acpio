@@ -149,21 +149,33 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
     .where(eq(messages.sessionId, id))
     .orderBy(asc(messages.createdAt));
 
-  const result: MessageDto[] = [];
-  for (const msg of msgRows) {
-    const parts = await db
-      .select()
-      .from(messageParts)
-      .where(eq(messageParts.messageId, msg.id))
-      .orderBy(asc(messageParts.order), asc(messageParts.createdAt));
-    result.push({
-      id: msg.id,
-      sessionId: msg.sessionId,
-      role: msg.role as MessageDto["role"],
-      createdAt: msg.createdAt.toISOString(),
-      parts: parts.map(mapPart),
-    });
+  // One joined query for the whole chat. The per-message loop this replaces
+  // cost a full message_parts scan per message (no covering index → ~40 s on
+  // a long chat); grouping in memory keeps it a single round trip.
+  const partRows = msgRows.length
+    ? await db
+        .select({ part: messageParts })
+        .from(messageParts)
+        .innerJoin(messages, eq(messages.id, messageParts.messageId))
+        .where(eq(messages.sessionId, id))
+        .orderBy(asc(messages.createdAt), asc(messageParts.order), asc(messageParts.createdAt))
+    : [];
+
+  const partsByMessage = new Map<string, MessagePartDto[]>();
+  for (const row of partRows) {
+    const list = partsByMessage.get(row.part.messageId);
+    const dto = mapPart(row.part);
+    if (list) list.push(dto);
+    else partsByMessage.set(row.part.messageId, [dto]);
   }
+
+  const result: MessageDto[] = msgRows.map((msg) => ({
+    id: msg.id,
+    sessionId: msg.sessionId,
+    role: msg.role as MessageDto["role"],
+    createdAt: msg.createdAt.toISOString(),
+    parts: partsByMessage.get(msg.id) ?? [],
+  }));
 
   const lastMessageAt =
     [...msgRows].reverse().find((m) => m.role === "user")?.createdAt ?? null;
