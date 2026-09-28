@@ -12,6 +12,7 @@ import type {
   ProjectMcpInfo,
   SessionDetailDto,
   SessionDto,
+  SessionStatus,
   SlashCommandDto,
   Theme,
   WsServerEvent,
@@ -715,13 +716,58 @@ function confirmServerBusy(sessionId: string, status: "running" | "waiting") {
   }));
 }
 
+/**
+ * The server has no turn left for this chat — drop every local claim of busy
+ * work: `inflight` (a prompt this tab sent), the adopted server-busy marker and
+ * the delayed-idle timer, and stamp the terminal status on the tree row and the
+ * pane alike. Anything left behind keeps Stop on screen and funnels every new
+ * prompt into the queue instead of sending it, and only a reload clears it —
+ * the counters live in memory.
+ */
+function releaseClientBusy(sessionId: string, status: SessionStatus) {
+  clearDelayedIdle(sessionId);
+  serverConfirmedBusy.delete(sessionId);
+  const state = useAppStore.getState();
+  const row = state.sessions.find((s) => s.id === sessionId);
+  const pane = liveDetail(state, sessionId);
+  const stale =
+    (state.inflightBySession?.[sessionId] ?? 0) > 0 ||
+    pane?.status !== status ||
+    (row !== undefined && row.status !== status);
+  // A warm `session.updated` echo already carries the terminal status; writing
+  // the same values back would rebuild the tree array on every one of them.
+  if (!stale) return;
+  useAppStore.setState((current) => {
+    const inflightBySession = { ...current.inflightBySession, [sessionId]: 0 };
+    const patch: Partial<AppState> = {
+      inflightBySession,
+      inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+      sessions: current.sessions.map((s) => (s.id === sessionId ? { ...s, status } : s)),
+    };
+    if (current.activeSession?.id === sessionId && current.activeSession.status !== status) {
+      patch.activeSession = { ...current.activeSession, status };
+    }
+    const live = (current.sessionDetails ?? {})[sessionId];
+    if (live && live.status !== status) {
+      patch.sessionDetails = { ...current.sessionDetails, [sessionId]: { ...live, status } };
+    }
+    return patch;
+  });
+}
+
 /** Ask the server process whether a turn is still live for this chat and adopt that
  *  status. The DB row can lag behind it (a warm-up `idle` write racing a prompt
- *  start), so trusting the row alone left a reloaded tab streaming with no Stop. */
-async function adoptLiveTurnStatus(sessionId: string) {
+ *  start), so trusting the row alone left a reloaded tab streaming with no Stop.
+ *  The opposite answer is just as authoritative: when the runtime has no turn,
+ *  whatever busy this tab still shows is stale — a `session.updated` frame lost
+ *  on a dropped socket, or a prompt that failed before it ever started. */
+async function adoptLiveTurnStatus(sessionId: string, settledStatus?: SessionStatus) {
   try {
     const live = await api.getLiveTurn(sessionId);
-    if (!live.running) return;
+    if (!live.running) {
+      if (settledStatus) releaseClientBusy(sessionId, settledStatus);
+      return;
+    }
     confirmServerBusy(sessionId, live.waiting ? "waiting" : "running");
     const state = useAppStore.getState();
     const pane = liveDetail(state, sessionId);
@@ -1201,15 +1247,29 @@ function reconcileFinishedTurn(
   get: () => AppState,
   set: (partial: Partial<AppState>) => void,
 ) {
+  const epoch = get().promptEpochBySession?.[sessionId] ?? get().promptEpoch;
   window.setTimeout(() => {
     void api
       .getSession(sessionId)
       .then((detail) => {
         const state = get();
         const current = liveDetail(state, sessionId);
-        if (!current) return;
-        commitDetail(get, set, mergeSessionQuestionAnswers(current, detail));
-        clearMessageIdAliases(sessionId);
+        if (current) {
+          commitDetail(get, set, mergeSessionQuestionAnswers(current, detail));
+          clearMessageIdAliases(sessionId);
+        }
+        // The row gets the last word: a thread whose parts still look live after
+        // the turn ended never leaves the idle timer's bail-out, so this fetch is
+        // the only thing left that can unlock the composer. Hold off once a newer
+        // prompt owns the chat — that turn is busy for real.
+        if ((get().promptEpochBySession?.[sessionId] ?? get().promptEpoch) !== epoch) return;
+        if (
+          detail.status === "idle" ||
+          detail.status === "error" ||
+          detail.status === "closed"
+        ) {
+          releaseClientBusy(sessionId, detail.status);
+        }
       })
       .catch(() => {
         // The live WS already rendered what it could; a later selection retries.
@@ -1299,14 +1359,35 @@ async function loadAppData(
   });
   const storedId =
     typeof window !== "undefined" ? localStorage.getItem(ACTIVE_SESSION_KEY) : null;
-  const pick =
-    storedId && sessions.some((s) => s.id === storedId)
-      ? storedId
-      : sessions[0]?.id ?? null;
+  const stored = readStoredChatPanes();
+  const known = new Set(sessions.map((s) => s.id));
+  const splitOn = chatSplitAllowed(get().settings.chatSplit);
+  // The tree list carries regular chats only, yet a board task can be the
+  // session in focus (or sit in a pane) — it lives in another partition.
+  // Validate the ids the list cannot vouch for against the server instead of
+  // treating them as gone, or a reload would jump to the newest chat.
+  const unlisted: string[] = [];
+  if (storedId && !known.has(storedId)) unlisted.push(storedId);
+  if (splitOn) {
+    for (const id of stored?.ids ?? []) {
+      if (id && !known.has(id)) unlisted.push(id);
+    }
+  }
+  const probed = new Map<string, SessionDetailDto>();
+  await Promise.all(
+    [...new Set(unlisted)].map(async (id) => {
+      try {
+        const detail = await api.getSession(id);
+        known.add(id);
+        probed.set(id, detail);
+        rememberSessionDetail(detail);
+      } catch {
+        // Deleted row or a stale id: drop it the way any unknown slot is dropped.
+      }
+    }),
+  );
+  const pick = storedId && known.has(storedId) ? storedId : sessions[0]?.id ?? null;
   if (pick) {
-    const known = new Set(sessions.map((s) => s.id));
-    const stored = readStoredChatPanes();
-    const splitOn = chatSplitAllowed(get().settings.chatSplit);
     const ids = splitOn
       ? sanitizeChatPanes(stored?.ids ?? [pick], known, pick)
       : [pick];
@@ -1324,6 +1405,11 @@ async function loadAppData(
     void get().selectSession(focusId);
     for (const id of ids) {
       if (!id || id === focusId) continue;
+      const warm = probed.get(id);
+      if (warm) {
+        commitDetail(get, set, warm);
+        continue;
+      }
       void api
         .getSession(id)
         .then((detail) => commitDetail(get, set, detail))
@@ -2098,7 +2184,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (detail.status === "running" || detail.status === "waiting") {
           confirmServerBusy(id, detail.status);
         } else {
-          await adoptLiveTurnStatus(id);
+          await adoptLiveTurnStatus(id, detail.status);
         }
         if (sessionDetailQuickEqual(live, detail)) {
           if (get().sessionLoading) set({ sessionLoading: false });
@@ -2183,7 +2269,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (detail.status === "running" || detail.status === "waiting") {
         confirmServerBusy(id, detail.status);
       } else {
-        await adoptLiveTurnStatus(id);
+        await adoptLiveTurnStatus(id, detail.status);
       }
       if (sessionDetailQuickEqual(get().activeSession, detail) && !get().sessionLoading) {
         return;
@@ -2656,7 +2742,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ inflight: get().inflight + 1 });
     }
-    await get().runSendPrompt(text, opts, { optimistic: true });
+    try {
+      await get().runSendPrompt(text, opts, { optimistic: true });
+    } catch (err) {
+      // No terminal frame follows a prompt that never became a turn, so nothing
+      // else would ever take `inflight` back down: Stop stayed on screen and
+      // every later prompt piled into the queue instead of reaching the wire.
+      if (sid) {
+        const inflightBySession = { ...get().inflightBySession, [sid]: 0 };
+        set({
+          inflightBySession,
+          inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+        });
+        // The server confirmed a turn of its own — leave it on screen, its own
+        // frames settle it. Otherwise the "running" was ours alone.
+        if (!serverConfirmedBusy.has(sid)) releaseClientBusy(sid, "idle");
+      } else {
+        set({ inflight: Math.max(0, get().inflight - 1) });
+      }
+      throw err;
+    }
   },
 
   removeQueuedPrompt(id) {
@@ -3000,11 +3105,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       ...(question ? { pendingQuestion: question } : {}),
     });
     // Same as the warm path: the DB row can lag a turn still live in the server
-    // process, so let the runtime settle the status when the row says idle.
+    // process, so let the runtime settle the status. It works the other way too
+    // — a frame the socket never delivered leaves this tab busy forever, and the
+    // runtime's "nothing running" is what clears it.
     if (detail.status === "running" || detail.status === "waiting") {
       confirmServerBusy(id, detail.status);
     } else {
-      await adoptLiveTurnStatus(id);
+      await adoptLiveTurnStatus(id, detail.status);
     }
   },
 
@@ -3306,22 +3413,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         });
       }
 
-      // A few ACP adapters finish their RPC before the final WS part has
-      // crossed the proxy. Reconcile only after a real in-flight turn goes idle
-      // — not on every warm/open session.updated.
-      if (
-        session.status === "idle" &&
-        wasBusy &&
-        liveDetail(get(), event.sessionId) &&
-        !cancelled
-      ) {
-        reconcileFinishedTurn(event.sessionId, get, set);
-        const inflightBySession = { ...get().inflightBySession, [event.sessionId]: 0 };
-        set({
-          inflightBySession,
-          inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
-        });
-        void get().drainPromptQueue();
+      const settled =
+        (session.status === "idle" ||
+          session.status === "error" ||
+          session.status === "closed") &&
+        !cancelled;
+      if (settled) {
+        const hadInflight = (get().inflightBySession?.[event.sessionId] ?? 0) > 0;
+        // The tree row is no witness for this: board tasks have no row at all
+        // (`listSessions` skips them) and a list refresh can land between the DB
+        // write and this frame. Tying the release to `wasBusy` left `inflight`
+        // above zero — Stop on screen, every new prompt queued instead of sent —
+        // until a reload wiped the counter.
+        releaseClientBusy(event.sessionId, session.status);
+        // A few ACP adapters finish their RPC before the final WS part has
+        // crossed the proxy. Reconcile only after a real in-flight turn goes
+        // idle — not on every warm/open session.updated.
+        if ((wasBusy || hadInflight) && liveDetail(get(), event.sessionId)) {
+          reconcileFinishedTurn(event.sessionId, get, set);
+          void get().drainPromptQueue();
+        }
       }
       return;
     }
