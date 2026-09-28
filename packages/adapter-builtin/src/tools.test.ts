@@ -18,9 +18,9 @@ const exec = (tools: Record<string, any>, name: string, input: unknown) =>
 
 describe("createBuiltinTools", () => {
   it.each([
-    ["plan", ["read"]],
-    ["ask", ["read"]],
-    ["agent", ["read", "write", "edit", "bash"]],
+    ["plan", ["read", "glob", "grep"]],
+    ["ask", ["read", "glob", "grep"]],
+    ["agent", ["read", "glob", "grep", "write", "edit", "bash"]],
   ] as const)("mode %s exposes exactly %j", (mode, expected) => {
     expect(Object.keys(setup(mode).tools)).toEqual([...expected]);
   });
@@ -69,17 +69,70 @@ describe("createBuiltinTools", () => {
     expect(host.request).not.toHaveBeenCalled();
   });
 
-  it("edit replaces a single match and writes the result back", async () => {
+  it("glob lists what the host matched", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ files: ["a.ts", "b.ts"], truncated: false });
+    await expect(exec(tools, "glob", { pattern: "**/*.ts" })).resolves.toBe("a.ts\nb.ts");
+    expect(host.request).toHaveBeenCalledWith("fs/glob", { pattern: "**/*.ts" });
+  });
+
+  it("glob says so when nothing matched", async () => {
+    const { tools } = setup("agent");
+    await expect(exec(tools, "glob", { pattern: "*.rs" })).resolves.toContain("No files match");
+  });
+
+  it("grep renders hits as path:line: text", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({
+      hits: [{ path: "a.ts", line: 3, text: "calcTotal()" }],
+      truncated: false,
+    });
+    await expect(exec(tools, "grep", { pattern: "calcTotal", ignore_case: true })).resolves.toBe(
+      "a.ts:3: calcTotal()",
+    );
+    expect(host.request).toHaveBeenCalledWith("fs/search", {
+      pattern: "calcTotal",
+      ignore_case: true,
+    });
+  });
+
+  it("grep marks a truncated result", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ hits: [{ path: "a.ts", line: 1, text: "x" }], truncated: true });
+    await expect(exec(tools, "grep", { pattern: "x" })).resolves.toContain("more matches than shown");
+  });
+
+  it("edit applies every entry against the original text", async () => {
     const { tools, host } = setup("agent");
     host.request.mockImplementation(async (method: string) =>
       method === "fs/read_text_file" ? { content: "one two three" } : {},
     );
     await expect(
-      exec(tools, "edit", { path: "f.txt", old_string: "two", new_string: "2" }),
-    ).resolves.toContain("Replaced 1");
+      exec(tools, "edit", {
+        path: "f.txt",
+        edits: [
+          { old_string: "one", new_string: "1" },
+          { old_string: "three", new_string: "3" },
+        ],
+      }),
+    ).resolves.toContain("Replaced 2");
     expect(host.request).toHaveBeenCalledWith("fs/write_text_file", {
       path: "f.txt",
-      content: "one 2 three",
+      content: "1 two 3",
+    });
+  });
+
+  it("edit replace_all rewrites every occurrence", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockImplementation(async (method: string) =>
+      method === "fs/read_text_file" ? { content: "x x" } : {},
+    );
+    await expect(
+      exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "x", new_string: "y", replace_all: true }] }),
+    ).resolves.toContain("Replaced 2");
+    expect(host.request).toHaveBeenCalledWith("fs/write_text_file", {
+      path: "f.txt",
+      content: "y y",
     });
   });
 
@@ -87,7 +140,7 @@ describe("createBuiltinTools", () => {
     const { tools, host } = setup("agent");
     host.request.mockResolvedValue({ content: "x x" });
     await expect(
-      exec(tools, "edit", { path: "f.txt", old_string: "x", new_string: "y" }),
+      exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "x", new_string: "y" }] }),
     ).rejects.toThrow(/matches 2 times/);
     expect(host.request).toHaveBeenCalledTimes(1); // read only, no write
   });
@@ -96,8 +149,23 @@ describe("createBuiltinTools", () => {
     const { tools, host } = setup("agent");
     host.request.mockResolvedValue({ content: "abc" });
     await expect(
-      exec(tools, "edit", { path: "f.txt", old_string: "zz", new_string: "y" }),
+      exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "zz", new_string: "y" }] }),
     ).rejects.toThrow(/not found/);
+    expect(host.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("edit refuses overlapping entries before writing", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ content: "abcdef" });
+    await expect(
+      exec(tools, "edit", {
+        path: "f.txt",
+        edits: [
+          { old_string: "abcd", new_string: "X" },
+          { old_string: "cdef", new_string: "Y" },
+        ],
+      }),
+    ).rejects.toThrow(/overlap/);
     expect(host.request).toHaveBeenCalledTimes(1);
   });
 
