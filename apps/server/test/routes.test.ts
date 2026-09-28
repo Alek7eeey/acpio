@@ -2125,6 +2125,147 @@ describe("built-in agent image attachments", () => {
   }, 15_000);
 });
 
+describe("built-in agent MCP tools", () => {
+  const FIXTURE = path.join(REPO_ROOT, "packages/adapter-builtin/src/fixtures/mcpStdioFixture.mjs");
+
+  /**
+   * OpenAI-compatible stub that asks for `mcp__probe_echo` on the first call and
+   * answers in prose once it sees the tool result — i.e. it drives the whole
+   * session/new → tools/list → tools/call path without a real model.
+   */
+  async function startToolStub() {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: unknown }> }> = [];
+    const called = Promise.withResolvers<void>();
+    const server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed = JSON.parse(body) as {
+          messages?: Array<{ role?: string; content?: unknown }>;
+        };
+        bodies.push(parsed);
+        const afterTool = (parsed.messages ?? []).some((m) => m.role === "tool");
+        if (afterTool) called.resolve();
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const frame = (delta: Record<string, unknown>, finish: string | null) =>
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta, finish_reason: finish }],
+          });
+        if (afterTool) {
+          res.write(frame({ role: "assistant", content: "готово" }, null));
+          res.write(frame({}, "stop"));
+        } else {
+          res.write(
+            frame(
+              {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    type: "function",
+                    function: { name: "mcp__probe_echo", arguments: JSON.stringify({ text: "hi" }) },
+                  },
+                ],
+              },
+              null,
+            ),
+          );
+          res.write(frame({}, "tool_calls"));
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    const listening = Promise.withResolvers<void>();
+    server.listen(0, "127.0.0.1", listening.resolve);
+    await listening.promise;
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    return {
+      url: `http://127.0.0.1:${address.port}/v1`,
+      bodies,
+      called: called.promise,
+      close: () => {
+        const closed = Promise.withResolvers<void>();
+        server.close(closed.resolve);
+        return closed.promise;
+      },
+    };
+  }
+
+  it("connects the session's MCP server, lists its tools and runs one end to end", async () => {
+    const stub = await startToolStub();
+    const cwd = await newTempDir("acpio-mcp-");
+    setAgentAvailable("builtin", true);
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        connectedProvider: "builtin",
+        defaultProvider: "builtin",
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+        mcpServers: [
+          {
+            id: "probe",
+            name: "probe",
+            enabled: true,
+            type: "stdio",
+            command: process.execPath,
+            args: [FIXTURE],
+          },
+        ],
+      },
+    });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        payload: { provider: "builtin", cwd },
+      });
+      expect(created.statusCode).toBe(200);
+      const session = created.json() as { id: string };
+      runtimeSessionIds.push(session.id);
+
+      const sent = await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "echo hi through the mcp tool" },
+      });
+      expect(sent.statusCode).toBe(200);
+
+      // The stub's second request is the proof: it carries the assistant's tool
+      // call and the `<hi>` the fixture server produced for it.
+      await stub.called;
+      const second = JSON.stringify(stub.bodies[1]);
+      expect(second).toContain("mcp__probe_echo");
+      expect(second).toContain("<hi>");
+
+      // Let the turn end before the test disposes the runtime, so the close is
+      // not reported as a failed prompt.
+      await waitForTurnEnd(session.id);
+    } finally {
+      await stub.close();
+    }
+  }, 20_000);
+});
+
 describe("built-in agent workspace search", () => {
   /**
    * Drives one tool per model step: the stub answers `calls[n]` while n tool

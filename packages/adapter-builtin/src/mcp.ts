@@ -4,6 +4,8 @@
 // have to speak the protocol ourselves.
 import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter, once } from "node:events";
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { Agent, request as httpsRequest } from "node:https";
 import { tool, jsonSchema, type ToolSet } from "ai";
 import type { AskPermission } from "./tools.js";
 
@@ -141,6 +143,7 @@ class McpConnection {
   private buffer = "";
   private nextId = 1;
   private httpSessionId: string | null = null;
+  private agent: Agent | null = null;
 
   constructor(private readonly spec: McpServerSpec) {}
 
@@ -184,6 +187,8 @@ class McpConnection {
 
   close(): void {
     this.lifetime.abort(new Error(`MCP server ${this.spec.name} closed`));
+    this.agent?.destroy();
+    this.agent = null;
     const child = this.child;
     this.child = null;
     if (!child) return;
@@ -200,15 +205,26 @@ class McpConnection {
   private async request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {
     const id = this.nextId++;
     const frame = { jsonrpc: "2.0", id, method, params };
-    if (this.spec.url) {
-      const messages = await this.postHttp(frame, timeoutMs);
-      const answer = messages.find((m) => m.id === id);
-      if (!answer) throw new Error(`MCP ${this.spec.name}: no reply to ${method}`);
+    try {
+      if (this.spec.url) {
+        const messages = await this.postHttp(frame, timeoutMs);
+        const answer = messages.find((m) => m.id === id);
+        if (!answer) throw new Error(`MCP ${this.spec.name}: no reply to ${method}`);
+        return this.settle(answer);
+      }
+      this.writeStdio(frame);
+      const [answer] = (await this.awaitReply(id, method, timeoutMs)) as [Record<string, unknown>];
       return this.settle(answer);
+    } catch (err) {
+      // An aborted wait rejects as a bare AbortError; the reason we aborted
+      // with — exit code, spawn failure, close — is what the model needs.
+      const reason = this.lifetime.signal.reason;
+      if (this.lifetime.signal.aborted && reason instanceof Error) throw reason;
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(`MCP ${this.spec.name}: ${method} timed out after ${timeoutMs}ms`);
+      }
+      throw err instanceof Error ? err : new Error(String(err));
     }
-    this.writeStdio(frame);
-    const [answer] = (await this.awaitReply(id, method, timeoutMs)) as [Record<string, unknown>];
-    return this.settle(answer);
   }
 
   private awaitReply(id: number, method: string, timeoutMs: number): Promise<unknown[]> {
@@ -222,7 +238,6 @@ class McpConnection {
     };
     return once(this.replies, `msg:${id}`, { signal: attempt.signal }).finally(done);
   }
-
   private notify(method: string, params: unknown): void {
     const frame = { jsonrpc: "2.0", method, params };
     try {
@@ -273,6 +288,10 @@ class McpConnection {
     child.on("exit", (code) =>
       this.lifetime.abort(new Error(`MCP ${this.spec.name} exited with code ${code ?? "null"}`)),
     );
+    // A server that dies mid-write gives EPIPE; that must surface as a failed
+    // call, not as an unhandled stream error that takes the server down.
+    child.stdin?.on("error", () => undefined);
+    child.stdout?.on("error", () => undefined);
     child.stdout?.on("data", (chunk: Buffer) => this.readStdio(chunk));
     this.child = child;
     return child;
@@ -297,25 +316,70 @@ class McpConnection {
     }
   }
 
-  /** Streamable HTTP: one POST per frame, JSON or SSE answer. */
+  /** One POST per frame; the answer is raw JSON or an SSE stream. */
   private async postHttp(frame: unknown, timeoutMs: number): Promise<Record<string, unknown>[]> {
-    if (!this.spec.url) return [];
+    const url = this.spec.url;
+    if (!url) return [];
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
       ...this.spec.headers,
     };
     if (this.httpSessionId) headers["mcp-session-id"] = this.httpSessionId;
-    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(timeoutMs)]);
-    const res = await fetch(this.spec.url, { method: "POST", headers, body: JSON.stringify(frame), signal });
-    const session = res.headers.get("mcp-session-id");
-    if (session) this.httpSessionId = session;
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`MCP ${this.spec.name}: HTTP ${res.status} ${body.slice(0, 200)}`);
+    const text = await this.postRaw(new URL(url), headers, JSON.stringify(frame), timeoutMs);
+    if (!text) return [];
+    return parseHttpMessages(text);
+  }
+
+  /** One agent per connection: a fresh one per call would leak keep-alive sockets. */
+  private insecureAgent(): Agent {
+    this.agent ??= new Agent({ rejectUnauthorized: false, keepAlive: true });
+    return this.agent;
+  }
+
+  /**
+   * `fetch` cannot skip certificate verification, and a self-signed internal
+   * endpoint is exactly what `insecureTls` exists for — so speak HTTP directly
+   * and hand the request an https agent that trusts everything when asked.
+   */
+  private async postRaw(
+    url: URL,
+    headers: Record<string, string>,
+    body: string,
+    timeoutMs: number,
+  ): Promise<string> {
+    const attempt = new AbortController();
+    const timer = setTimeout(() => attempt.abort(), timeoutMs);
+    const onClose = () => attempt.abort();
+    this.lifetime.signal.addEventListener("abort", onClose, { once: true });
+    const secure = url.protocol === "https:";
+    const req = (secure ? httpsRequest : httpRequest)(url, {
+      method: "POST",
+      headers,
+      signal: attempt.signal,
+      ...(secure && this.spec.insecureTls ? { agent: this.insecureAgent() } : {}),
+    });
+    // `once` already turns an early "error" into a rejection; this keeps a late
+    // one (after the response arrived) from crashing the process.
+    req.on("error", () => undefined);
+    try {
+      req.end(body);
+      const [res] = (await once(req, "response")) as [IncomingMessage];
+      const session = res.headers["mcp-session-id"];
+      if (typeof session === "string") this.httpSessionId = session;
+      const chunks: Buffer[] = [];
+      for await (const chunk of res) chunks.push(chunk as Buffer);
+      const text = Buffer.concat(chunks).toString("utf8");
+      const status = res.statusCode ?? 0;
+      if (status >= 400) {
+        throw new Error(`MCP ${this.spec.name}: HTTP ${status} ${text.slice(0, 200)}`);
+      }
+      if (status === 202 || status === 204) return "";
+      return text;
+    } finally {
+      clearTimeout(timer);
+      this.lifetime.signal.removeEventListener("abort", onClose);
     }
-    if (res.status === 202 || res.status === 204) return [];
-    return parseHttpMessages(await res.text());
   }
 }
 

@@ -164,6 +164,9 @@ endpoint it can reach.
   `bash` runs on the host. Every mutating call asks for permission through the chat's
   permission card. Plan and Ask modes get `read`, `glob` and `grep` only — plus the
   read-only MCP tools — so a "look, don't touch" chat cannot edit anything.
+- **Settings → MCP** servers attach to the session and are exposed as `mcp__<server>_<tool>`
+  tools (stdio commands and streamable HTTP, including `insecureTls` endpoints); a server
+  that fails to start is reported in the server log and the chat keeps its other tools.
 - Long chats stay coherent: past ~80% of the model's context window the oldest turns are
   replaced by a model-written digest of the task so far, and the recent turns stay verbatim
   — the stored conversation itself is never trimmed.

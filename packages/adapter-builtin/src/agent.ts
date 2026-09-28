@@ -207,7 +207,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
         if (requested && !isValidSessionId(requested)) {
           throw new Error(`Некорректный id сессии: ${requested}`);
         }
-        return this.openSession(requested || randomUUID(), String(params.cwd ?? this.opts.cwd), true);
+        return this.openSession(
+          requested || randomUUID(),
+          String(params.cwd ?? this.opts.cwd),
+          true,
+          params.mcpServers,
+        );
       }
       case "session/prompt":
         return this.prompt(params);
