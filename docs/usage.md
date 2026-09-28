@@ -139,7 +139,8 @@ folder chip — right under the thumb while you type — and **Settings → Inte
 Advanced** turns it off or moves it. The way back keeps the reading position: the lanes and the
 folder rail open where you left them, and the card you left through stays in view. The tree
 lights up the board the task belongs to as well, so its row is another way back — the task
-itself never appears there.
+itself never appears there. A page reload lands back in that same chat: the task opened from
+the board stays open instead of being swapped for the newest chat in the tree.
 
 ## Built-in agent (no install)
 
@@ -161,9 +162,16 @@ endpoint it can reach.
   workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
   a file as one batched call and refuses an ambiguous or overlapping anchor instead of
   guessing, writes land through the same three-way merge the other harnesses use, and
-  `bash` runs on the host. Every mutating call asks for permission through the chat's
-  permission card. Plan and Ask modes get `read`, `glob` and `grep` only — plus the
-  read-only MCP tools — so a "look, don't touch" chat cannot edit anything.
+  `bash` runs on the host — through Git Bash when it is installed (`C:\Program Files\Git\bin\bash.exe`
+  or `bash.exe`/`sh.exe` on PATH; `ACPIO_SHELL` overrides the path), and through `cmd.exe`
+  only when no POSIX shell exists, matching what pi does on Windows. Every mutating call
+  asks for permission through the chat's permission card. Plan and Ask modes get `read`,
+  `glob` and `grep` only — plus the read-only MCP tools — so a "look, don't touch" chat
+  cannot edit anything.
+- Token accounting comes from the endpoint's own `usage`, including prompt-cache hits: the
+  context chip shows what the model had to read, and its tooltip reports how much of the
+  input was served from the provider's cache (endpoints that never report usage leave the
+  chip empty rather than showing an estimate).
 - **Settings → MCP** servers attach to the session and are exposed as `mcp__<server>_<tool>`
   tools (stdio commands and streamable HTTP, including `insecureTls` endpoints); a server
   that fails to start is reported in the server log and the chat keeps its other tools.

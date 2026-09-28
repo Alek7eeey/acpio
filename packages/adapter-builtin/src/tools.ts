@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { AgentMode } from "@acpio/shared";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
@@ -25,17 +26,83 @@ const MAX_BASH_TIMEOUT_MS = 300_000;
 const TERMINAL_BYTE_LIMIT = 64 * 1024;
 const MAX_SEARCH_RESULTS = 200;
 const MAX_GLOB_RESULTS = 500;
+/** Read contract, pi's numbers: whichever cap is hit first ends the window. */
+const READ_MAX_LINES = 2_000;
+const READ_MAX_CHARS = 50_000;
+
+/**
+ * Bound what a single `read` hands the model and say how to continue. Without
+ * this a big file lands whole in the context, and the model has no idea it
+ * could page - pi's read discloses exactly this window and the way to walk it.
+ * Slicing is byte-faithful (no line-ending normalization).
+ */
+export function windowRead(content: string, path: string, fromLine: number): string {
+  const totalLines = content.split("\n").length;
+  let end = content.length;
+  let linesShown = totalLines;
+  if (totalLines > READ_MAX_LINES) {
+    let idx = -1;
+    for (let i = 0; i < READ_MAX_LINES; i++) {
+      idx = content.indexOf("\n", idx + 1);
+      if (idx < 0) break;
+    }
+    end = idx < 0 ? content.length : idx + 1;
+    linesShown = READ_MAX_LINES;
+  }
+  if (end > READ_MAX_CHARS) {
+    end = READ_MAX_CHARS;
+    linesShown = content.slice(0, end).split("\n").length;
+  }
+  if (end >= content.length) return content;
+  const nextLine = fromLine + linesShown;
+  return (
+    `${content.slice(0, end)}\n...[truncated at ${linesShown} lines / ${READ_MAX_CHARS} chars: ` +
+    `${path} has ${totalLines} lines; continue with read({ path, line: ${nextLine} })]...`
+  );
+}
 
 function clip(text: string): string {
   if (text.length <= CLIP_HEAD + CLIP_TAIL) return text;
   return `${text.slice(0, CLIP_HEAD)}\n...[truncated]...\n${text.slice(-CLIP_TAIL)}`;
 }
 
+/**
+ * Git Bash path candidates on Windows, in pi's resolution order
+ * (`docs/windows.md`): env override, Program Files, then PATH. Models write
+ * POSIX quoting (`node -e "…"`), and cmd.exe mangles it into syntax errors that
+ * cost whole steps - pi avoids this by running Git Bash, and so do we.
+ */
+let cachedShell: string | null | undefined;
+
+function posixShell(): string | null {
+  if (cachedShell !== undefined) return cachedShell;
+  const override = process.env.ACPIO_SHELL;
+  if (override) {
+    cachedShell = existsSync(override) ? override : null;
+    return cachedShell;
+  }
+  if (process.platform === "win32") {
+    const candidates = [
+      "C:\\Program Files\\Git\\bin\\bash.exe",
+      "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+      ...String(process.env.PATH ?? "")
+        .split(";")
+        .flatMap((dir) => (dir ? [`${dir}\\bash.exe`, `${dir}\\sh.exe`] : [])),
+    ];
+    cachedShell = candidates.find((p) => existsSync(p)) ?? null;
+  } else {
+    cachedShell = existsSync("/bin/sh") ? "/bin/sh" : "/bin/bash";
+  }
+  return cachedShell;
+}
+
 /** The agent talks to a shell, not to cmd.exe/sh directly — pipes, `&&`, globs work. */
-function shellCommand(command: string): { command: string; args: string[] } {
-  return process.platform === "win32"
-    ? { command: "cmd.exe", args: ["/d", "/s", "/c", command] }
-    : { command: "/bin/sh", args: ["-c", command] };
+export function shellCommand(command: string): { command: string; args: string[] } {
+  const shell = posixShell();
+  if (shell) return { command: shell, args: ["-c", command] };
+  // No POSIX shell on this machine (rare on Windows): fall back to cmd.exe and
+  // let the tool description tell the model to quote differently.
+  return { command: "cmd.exe", args: ["/d", "/s", "/c", command] };
 }
 
 /** One `edit` entry as the model sends it. */
@@ -114,8 +181,10 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const read = tool({
     description:
-      "Read a UTF-8 text file. Pass line/limit (1-based) to window a large file; " +
-      "omit both to get the whole file. Directories and missing files are rejected by the host.",
+      "Read a UTF-8 text file. Output is windowed to the first 2000 lines or 50KB, " +
+      "whichever comes first; pass line/limit (1-based) to move through a larger file, " +
+      "and continue from the reported line instead of re-reading the whole file. " +
+      "Directories and missing files are rejected by the host.",
     inputSchema: z.object({
       path: z.string().describe("Absolute path, or a path relative to the working directory."),
       line: z.number().int().positive().optional().describe("1-based first line to read."),
@@ -127,7 +196,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         ...(line ? { line } : {}),
         ...(limit ? { limit } : {}),
       });
-      return res?.content || "(empty file)";
+      const content = res?.content || "";
+      if (!content) return "(empty file)";
+      return windowRead(content, path, line ?? 1);
     },
   });
 
@@ -236,9 +307,15 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   const bash = tool({
     description:
       "Run a shell command in the working directory and wait for it to exit. " +
-      "Returns the exit code and the captured output (clipped).",
+      "Returns the exit code and the captured output; long output is clipped to its first " +
+      "and last 8000 characters, so narrow the command (pipe through `head`, `tail` or `grep`) " +
+      "when the middle matters instead of re-running it unchanged. " +
+      (posixShell()
+        ? "The shell is POSIX (bash/sh) on every platform - pipes, &&, globs and single/double " +
+          "quotes work as in bash, and paths use '/' (including on Windows)."
+        : "On Windows the command runs through cmd.exe, so quote for cmd.exe."),
     inputSchema: z.object({
-      command: z.string().describe("Command line for cmd.exe on Windows, sh -c elsewhere."),
+      command: z.string().describe("Shell command line (POSIX syntax when the shell is bash/sh)."),
       timeout_ms: z
         .number()
         .int()

@@ -78,10 +78,22 @@ function systemPrompt(
     "",
     "Rules:",
     "- Read a file before changing it; make the smallest change that fully solves the task.",
+    "- When the task asks for a new file, write it — the workspace is usually empty, " +
+      "so do not survey it first; a listing tells you nothing you need.",
     "- Never invent paths, flags or APIs — read the directory or the file first.",
+    "- Use `read` to examine a file, not `cat`/`sed`/`tail` through `bash`; use `glob`/`grep` " +
+      "to find things, not `find`/`grep` through `bash`.",
+    "- Use `edit` for changes to an existing file and `write` only for a new file or a complete " +
+      "rewrite. Put every change to one file in a single `edit` call: each `old_string` is matched " +
+      "against the file as it is now, so entries must not overlap or nest.",
     "- Batch independent calls in one step (several reads, searches or unrelated commands); " +
       "run a command only after the call it depends on has finished.",
     "- After running a command, check its exit code before believing the output.",
+    "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
+      "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked.",
+    "- `bash` is a POSIX shell on every platform (Git Bash on Windows): pipes, `&&` and " +
+      "single/double quotes behave like bash, and paths may use `/`. Prefer a script file " +
+      "over a long inline `node -e` one-liner.",
     `- ${scope}`,
     ...(mcp.tools.length
       ? [

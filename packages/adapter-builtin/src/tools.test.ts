@@ -1,6 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi, type Mock } from "vitest";
 import type { AgentMode } from "@acpio/shared";
-import { createBuiltinTools } from "./tools.js";
+import { createBuiltinTools, shellCommand, windowRead } from "./tools.js";
 
 /** Tool execution options the SDK passes; only abortSignal is used here. */
 const CTX = { abortSignal: new AbortController().signal };
@@ -196,5 +197,62 @@ describe("createBuiltinTools", () => {
     const { tools, host } = setup("agent", undefined, ask);
     await expect(exec(tools, "bash", { command: "echo hi" })).rejects.toThrow(/отклонена/);
     expect(host.request).not.toHaveBeenCalled();
+  });
+});
+
+describe("read windowing", () => {
+  it("returns small files untouched", () => {
+    const content = "a\r\nb\r\nc";
+    expect(windowRead(content, "f.mjs", 1)).toBe(content);
+  });
+
+  it("caps a long file at 2000 lines and names the line to continue from", () => {
+    const content = Array.from({ length: 5_000 }, (_, i) => `line ${i + 1}`).join("\n");
+    const out = windowRead(content, "big.mjs", 1);
+    expect(out).toContain("truncated at 2000 lines");
+    expect(out).toContain("big.mjs has 5000 lines");
+    expect(out).toContain("line: 2001");
+    expect(out.split("\n").length).toBeLessThan(2_100);
+  });
+
+  it("continues from the requested window, not from the top", () => {
+    const content = Array.from({ length: 5_000 }, (_, i) => `line ${i + 1}`).join("\n");
+    const out = windowRead(content, "big.mjs", 2_001);
+    expect(out).toContain("line: 4001");
+  });
+
+  it("counts the continuation in the caller's line numbering", () => {
+    // 3000 CRLF lines: the kept text must stay byte-faithful (no LF rewriting).
+    const content = Array.from({ length: 3_000 }, () => "x").join("\r\n");
+    const out = windowRead(content, "crlf.txt", 1);
+    expect(out.slice(0, 4)).toBe("x\r\nx");
+    expect(out).toContain("line: 2001");
+  });
+
+  it("also caps a windowed read that is still too large", () => {
+    const content = Array.from({ length: 3_000 }, (_, i) => `line ${i + 1}`).join("\n");
+    const out = windowRead(content, "big.mjs", 1_001);
+    expect(out).toContain("truncated at 2000 lines");
+    expect(out).toContain("line: 3001");
+  });
+});
+
+describe("bash shell selection", () => {
+  // The regression this guards: running these commands through cmd.exe on
+  // Windows mangles nested quotes into "Unterminated string constant", which
+  // costs the agent whole steps (it writes a script file and retries instead).
+  const QUOTED = "node -e \"console.log('a b'.split(' ').join('-'))\"";
+
+  it("parses POSIX quoting wherever a POSIX shell exists", () => {
+    const { command, args } = shellCommand(QUOTED);
+    if (process.platform === "win32" && command === "cmd.exe") {
+      // No Git Bash / sh on this machine: cmd.exe is the documented fallback.
+      return;
+    }
+    const res = spawnSync(command, args, { encoding: "utf8" });
+    const output = `${res.stdout ?? ""}${res.stderr ?? ""}`;
+    expect(output).not.toMatch(/Unterminated string|Invalid or unexpected token/i);
+    expect(res.status).toBe(0);
+    expect(res.stdout.trim()).toBe("a-b");
   });
 });
