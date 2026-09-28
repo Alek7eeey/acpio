@@ -161,6 +161,9 @@ endpoint it can reach.
   three-way merge the other harnesses use, `bash` runs on the host, and both ask for
   permission through the chat's permission card; **Settings → MCP** servers attach as
   `mcp__*` tools.
+- Long chats stay coherent: past ~80% of the model's context window the oldest turns are
+  replaced by a model-written digest of the task so far, and the recent turns stay verbatim
+  — the stored conversation itself is never trimmed.
 - **Attached images reach the model itself.** A raster image you attach (PNG, JPEG, GIF,
   WebP, BMP, AVIF — up to 8 MB) is sent as an inline image part alongside your text, so a
   screenshot works on any vision-capable model the endpoint serves; anything else stays a

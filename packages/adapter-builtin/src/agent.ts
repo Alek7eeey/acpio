@@ -5,7 +5,7 @@ import type {
   InProcessAgentOptions,
   InProcessAgentTransport,
 } from "@acpio/shared";
-import type { ModelMessage } from "ai";
+import { generateText, type ModelMessage } from "ai";
 import {
   builtinModelOptions,
   hasBuiltinEndpoint,
@@ -13,7 +13,7 @@ import {
   resolveBuiltinModel,
 } from "./config.js";
 import { createHostRpc } from "./host.js";
-import { pruneMessages, runTurn } from "./loop.js";
+import { compactMessages, renderTranscript, runTurn } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
