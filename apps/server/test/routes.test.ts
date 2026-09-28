@@ -98,6 +98,21 @@ async function waitForAcpSessionId(sessionId: string, timeoutMs = 5000) {
   throw new Error(`acpSessionId not set within ${timeoutMs}ms`);
 }
 
+/** Poll GET /api/sessions/:id/turn until the agent turn finishes. The prompt
+ *  route is fire-and-forget and exposes no turn-end promise, so a real-time
+ *  poll is the only probe (same reason as waitForAcpSessionId above). */
+async function waitForTurnEnd(sessionId: string, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}/turn` });
+    if (res.statusCode === 200 && !(res.json() as { running?: boolean }).running) return;
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 25);
+    await promise;
+  }
+  throw new Error(`turn did not finish within ${timeoutMs}ms`);
+}
+
 beforeEach(async () => {
   app = await buildApp();
 });
@@ -2108,6 +2123,140 @@ describe("built-in agent image attachments", () => {
       await stub.close();
     }
   }, 15_000);
+});
+
+describe("built-in agent workspace search", () => {
+  /**
+   * Drives one tool per model step: the stub answers `calls[n]` while n tool
+   * results are in the request, then finishes. This is what proves `glob` and
+   * `grep` are really served by the harness, not just by the unit mocks.
+   */
+  async function startSequenceStub(calls: Array<{ name: string; args: Record<string, unknown> }>) {
+    const bodies: Array<{ messages?: Array<{ role?: string; content?: unknown }> }> = [];
+    const finished = Promise.withResolvers<void>();
+    const server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed = JSON.parse(body) as {
+          messages?: Array<{ role?: string; content?: unknown }>;
+        };
+        bodies.push(parsed);
+        const toolResults = (parsed.messages ?? []).filter((m) => m.role === "tool").length;
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const frame = (delta: Record<string, unknown>, finish: string | null) =>
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta, finish_reason: finish }],
+          });
+        const next = calls[toolResults];
+        if (next) {
+          res.write(
+            frame(
+              {
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `call_${toolResults}`,
+                    type: "function",
+                    function: { name: next.name, arguments: JSON.stringify(next.args) },
+                  },
+                ],
+              },
+              null,
+            ),
+          );
+          res.write(frame({}, "tool_calls"));
+        } else {
+          res.write(frame({ role: "assistant", content: "готово" }, null));
+          res.write(frame({}, "stop"));
+          finished.resolve();
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    const listening = Promise.withResolvers<void>();
+    server.listen(0, "127.0.0.1", listening.resolve);
+    await listening.promise;
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    return {
+      url: `http://127.0.0.1:${address.port}/v1`,
+      bodies,
+      finished: finished.promise,
+      close: () => {
+        const closed = Promise.withResolvers<void>();
+        server.close(closed.resolve);
+        return closed.promise;
+      },
+    };
+  }
+
+  it("serves glob and grep to the agent over the session", async () => {
+    const stub = await startSequenceStub([
+      { name: "glob", args: { pattern: "**/*.ts" } },
+      { name: "grep", args: { pattern: "calcTotal" } },
+    ]);
+    const cwd = await newTempDir("acpio-fsagent-");
+    await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
+    await fsp.writeFile(path.join(cwd, "src", "a.ts"), "export const calcTotal = 1;\n");
+    await fsp.writeFile(path.join(cwd, "notes.md"), "nothing here\n");
+    setAgentAvailable("builtin", true);
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        connectedProvider: "builtin",
+        defaultProvider: "builtin",
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      },
+    });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        payload: { provider: "builtin", cwd },
+      });
+      expect(created.statusCode).toBe(200);
+      const session = created.json() as { id: string };
+      runtimeSessionIds.push(session.id);
+
+      const sent = await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "find calcTotal" },
+      });
+      expect(sent.statusCode).toBe(200);
+
+      // Last request = both tool results in context: the glob hit and the grep
+      // line the harness produced for them.
+      await stub.finished;
+      const last = JSON.stringify(stub.bodies[stub.bodies.length - 1]);
+      expect(last).toContain("src/a.ts");
+      expect(last).toContain("1: export const calcTotal = 1;");
+      expect(last).not.toContain("notes.md");
+      await waitForTurnEnd(session.id);
+    } finally {
+      await stub.close();
+    }
+  }, 20_000);
 });
 
 describe("git routes", () => {

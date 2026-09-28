@@ -36,6 +36,7 @@ import {
   type DeepLogContext,
 } from "../services/deepLogging.js";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
+import { globFiles, searchFiles } from "./agentFs.js";
 import { DATA_DIR } from "../db/client.js";
 
 const execFileAsync = promisify(execFile);
@@ -1257,6 +1258,28 @@ export class AcpClient extends EventEmitter {
     return {};
   }
 
+  /** Agent-side `glob`: paths relative to the session cwd, never escaping it. */
+  private async handleFsGlob(params: Record<string, unknown>) {
+    return globFiles({
+      root: this.rootCwd(),
+      pattern: String(params.pattern ?? params.glob ?? ""),
+      maxResults: params.max_results == null ? undefined : Number(params.max_results),
+    });
+  }
+
+  /** Agent-side `grep`: a JavaScript regex over the workspace, line by line. */
+  private async handleFsSearch(params: Record<string, unknown>) {
+    const scope = String(params.path ?? "").trim();
+    return searchFiles({
+      root: this.rootCwd(),
+      ...(scope ? { dir: this.assertInsideCwd(scope) } : {}),
+      pattern: String(params.pattern ?? ""),
+      ...(params.glob == null ? {} : { glob: String(params.glob) }),
+      ignoreCase: params.ignore_case === true,
+      maxResults: params.max_results == null ? undefined : Number(params.max_results),
+    });
+  }
+
   private handleTerminalCreate(params: Record<string, unknown>) {
     const command = String(params.command ?? "");
     const args = Array.isArray(params.args) ? params.args.map(String) : [];
@@ -1376,6 +1399,10 @@ export class AcpClient extends EventEmitter {
         return this.handleFsRead(params);
       case "fs/write_text_file":
         return this.handleFsWrite(params);
+      case "fs/glob":
+        return this.handleFsGlob(params);
+      case "fs/search":
+        return this.handleFsSearch(params);
       case "terminal/create":
         return this.handleTerminalCreate(params);
       case "terminal/output":

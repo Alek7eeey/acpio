@@ -157,10 +157,13 @@ endpoint it can reach.
   (an offline server keeps the assumed 128k); a window you type yourself is an override
   that later refreshes do not replace. Only ticked models are offered in pickers; the agent
   picks the change up on save, and every model runs on the provider that owns it.
-- The agent gets `read`, `write`, `edit` and `bash` tools. Edits land through the same
-  three-way merge the other harnesses use, `bash` runs on the host, and both ask for
-  permission through the chat's permission card; **Settings → MCP** servers attach as
-  `mcp__*` tools.
+- Tools: `read`, `glob`, `grep`, `write`, `edit` and `bash`. `glob`/`grep` search the
+  workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
+  a file as one batched call and refuses an ambiguous or overlapping anchor instead of
+  guessing, writes land through the same three-way merge the other harnesses use, and
+  `bash` runs on the host. Every mutating call asks for permission through the chat's
+  permission card. Plan and Ask modes get `read`, `glob` and `grep` only — plus the
+  read-only MCP tools — so a "look, don't touch" chat cannot edit anything.
 - Long chats stay coherent: past ~80% of the model's context window the oldest turns are
   replaced by a model-written digest of the task so far, and the recent turns stay verbatim
   — the stored conversation itself is never trimmed.
