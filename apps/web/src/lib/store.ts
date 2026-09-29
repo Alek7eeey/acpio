@@ -3205,11 +3205,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       // createMessage (and similar) used to broadcast idle while the client had
       // already painted optimistic running — that hid/reshowed the Steps header.
       const listedBefore = state.sessions.find((s) => s.id === event.sessionId);
+      // Only a row this tab marked running (or a server-confirmed turn) is a
+      // witness that the turn outlived the frame: the pane status is our own
+      // optimistic guess. For a board task there is no row at all, so the pane
+      // stood in for one and its stale `running` made every terminal frame look
+      // like the createMessage echo — the status stayed running and the next
+      // Start queued behind a turn that had already ended. When the frame itself
+      // looks terminal, that guess is what has to yield.
       const clientBusy =
         listedBefore?.status === "running" ||
         listedBefore?.status === "waiting" ||
-        (state.activeSession?.id === event.sessionId &&
-          (state.activeSession.status === "running" || state.activeSession.status === "waiting"));
+        (listedBefore === undefined && serverConfirmedBusy.has(event.sessionId));
       const turnStillOpen =
         state.activeSession?.id === event.sessionId &&
         state.promptEpoch !== state.cancelledPromptEpoch;
@@ -3222,9 +3228,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ) {
         session = {
           ...session,
-          status: (listedBefore?.status === "waiting" || state.activeSession?.status === "waiting"
-            ? "waiting"
-            : "running") as typeof session.status,
+          status: (listedBefore?.status === "waiting" ? "waiting" : "running") as typeof session.status,
         };
       }
       const liveMessages =
