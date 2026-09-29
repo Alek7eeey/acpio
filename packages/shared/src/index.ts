@@ -1827,7 +1827,8 @@ export interface SessionDto {
   taskDescription: string | null;
   /** Server-set when the board task's first turn starts (Todo ⇄ Wait split). */
   startedAt: string | null;
-  /** Set while the user considers the task finished (Wait ⇄ Done). */
+  /** Set while the user considers the task finished (Wait ⇄ Done). Board Done
+   *  lanes read newest-first off this, so `sortOrder` is a Todo-lane thing. */
   doneAt: string | null;
   /** MCP server ids disabled for THIS chat only (global list still applies to others). */
   mcpDisabledIds: string[];

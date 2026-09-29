@@ -129,6 +129,45 @@ describe("BoardPage card click", () => {
   });
 });
 
+describe("Board Done lane order", () => {
+  // Done is read as a completion log: the task finished a minute ago belongs
+  // above the one finished last week, whatever order they were dragged into.
+  it("lists finished tasks newest-first, ignoring the manual order", async () => {
+    const finished = (id: string, text: string, doneAt: string, sortOrder: number): SessionDto => ({
+      ...task,
+      id,
+      title: id,
+      taskDescription: text,
+      startedAt: "2026-09-20T11:00:00.000Z",
+      doneAt,
+      sortOrder,
+      createdAt: "2026-09-20T10:00:00.000Z",
+    });
+    const older = finished("t-old", "Shipped last week", "2026-09-21T10:00:00.000Z", 0);
+    const newest = finished("t-new", "Shipped a minute ago", "2026-09-27T10:00:00.000Z", 5);
+    const middle = finished("t-mid", "Shipped yesterday", "2026-09-26T10:00:00.000Z", 2);
+    useAppStore.setState({ boardSessions: [older, newest, middle] });
+
+    const { container } = render(
+      <MemoryRouter initialEntries={["/board/b1"]}>
+        <I18nProvider>
+          <Routes>
+            <Route path="/board/:boardId" element={<BoardPage />} />
+          </Routes>
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Shipped a minute ago");
+    const lane = container.querySelector('[data-column="done"] .columnBody, [data-column="done"]');
+
+    const order = Array.from(lane!.querySelectorAll("[data-task-id]")).map((el) =>
+      el.getAttribute("data-task-id"),
+    );
+    expect(order).toEqual(["t-new", "t-mid", "t-old"]);
+  });
+});
+
 /** The chat a board task opened, with a way back like the browser's. */
 function ChatStub() {
   const navigate = useNavigate();

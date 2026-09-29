@@ -218,8 +218,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     };
     for (const task of tasks) byColumn[boardColumn(task)].push(task);
     for (const column of COLUMN_ORDER) {
+      // Done is a log, not a list to arrange: most recently finished on top.
+      // The manual order stays where it means something — Todo.
       byColumn[column].sort(
-        (a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt),
+        column === "done"
+          ? (a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "")
+          : (a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt),
       );
     }
     return byColumn;
