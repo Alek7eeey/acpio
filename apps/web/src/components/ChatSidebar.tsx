@@ -409,6 +409,20 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     [folderMenu?.cwd, sessions],
   );
 
+  /**
+   * The tree shows one context menu at a time. Every opener must close the
+   * others: a chat row right-clicked over an open folder or board menu left
+   * both on screen, stacked at the same spot.
+   */
+  const closeTreeMenus = () => {
+    setMenu(null);
+    setFolderMenu(null);
+    setBoardMenu(null);
+    setConfirmDeleteId(null);
+    setConfirmDeleteFolderCwd(null);
+    setConfirmDeleteBoardId(null);
+  };
+
   const openFolderMenuAt = (
     cwd: string,
     x: number,
@@ -416,9 +430,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     anchorTop: number,
     anchorBottom: number,
   ) => {
-    setMenu(null);
-    setConfirmDeleteId(null);
-    setConfirmDeleteFolderCwd(null);
+    closeTreeMenus();
     setFolderMenuPos(null);
     setFolderMenu({ cwd, x, y, anchorTop, anchorBottom });
   };
@@ -692,7 +704,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     e.preventDefault();
     e.stopPropagation();
     setFolderPicker(null);
-    setConfirmDeleteId(null);
+    closeTreeMenus();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const x =
       e.type === "contextmenu"
@@ -1241,10 +1253,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const openBoardMenu = (e: ReactMouseEvent, board: BoardDto) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenu(null);
-    setConfirmDeleteId(null);
-    setFolderMenu(null);
-    setConfirmDeleteFolderCwd(null);
+    closeTreeMenus();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setBoardMenu({
       board,

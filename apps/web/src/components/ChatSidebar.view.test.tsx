@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
@@ -151,5 +151,27 @@ describe("folder menu tree commands", () => {
     expect(
       screen.getByRole("menuitem", { name: "Свернуть все папки" }).getAttribute("disabled"),
     ).toBeNull();
+  });
+
+  // Regression: a chat menu opened over an open folder menu left both on
+  // screen, stacked at the same spot — the second opener only cleared its own.
+  it("keeps one menu open for the whole tree", async () => {
+    const { container } = renderTree("/chat");
+    await openFolderMenu(container);
+
+    const row = container.querySelector<HTMLElement>("[data-session-id]")!;
+    fireEvent.contextMenu(row, { clientX: 120, clientY: 320 });
+
+    expect(screen.getAllByRole("menu").length).toBe(1);
+    expect(screen.getByRole("menuitem", { name: "Переименовать" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Архивировать все чаты" })).toBeNull();
+
+    // And back: the folder menu replaces the chat one.
+    fireEvent.contextMenu(container.querySelector('[data-folder-cwd="E:/proj"]')!, {
+      clientX: 60,
+      clientY: 140,
+    });
+    expect(screen.getAllByRole("menu").length).toBe(1);
+    expect(screen.getByRole("menuitem", { name: "Архивировать все чаты" })).toBeTruthy();
   });
 });
