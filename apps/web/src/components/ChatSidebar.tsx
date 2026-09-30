@@ -215,7 +215,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
    * being read in the chat — that task's own board, so the row that leads back
    * is the one lit up.
    */
-  const activeBoardId = location.pathname.startsWith("/board/")
+  const boardRouteOpen = location.pathname.startsWith("/board/");
+  const activeBoardId = boardRouteOpen
     ? location.pathname.slice("/board/".length)
     : location.pathname === "/" || location.pathname.startsWith("/chat")
       ? activeSessionBoardId
@@ -539,6 +540,34 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     }
     prevLikedCount.current = liked.length;
   }, [liked.length]);
+
+  /** Real folder groups of the tree; the unfiled bucket is not a folder. */
+  const folderKeys = useMemo(
+    () => folders.map((folder) => folder.cwd).filter((cwd) => !!cwd),
+    [folders],
+  );
+  const anyFolderCollapsed = folderKeys.some((key) => collapsedFolders.has(key));
+  const anyFolderExpanded = folderKeys.some((key) => !collapsedFolders.has(key));
+
+  /**
+   * Fold or unfold every folder group at once — the tree-wide counterpart of
+   * clicking one folder head. Persisted like a single toggle, so the tree opens
+   * the same way on the next visit.
+   */
+  const setEveryFolderCollapsed = (collapsed: boolean) => {
+    setFolderMenu(null);
+    const next = new Set(collapsedFolders);
+    for (const key of folderKeys) {
+      if (collapsed) next.add(key);
+      else next.delete(key);
+    }
+    try {
+      localStorage.setItem("acpio.collapsedFolders.v1", JSON.stringify([...next]));
+    } catch {
+      // ignore
+    }
+    setCollapsedFolders(next);
+  };
 
   const closeMobile = () => {
     if (window.innerWidth < 900) setSidebarOpen(false);
@@ -911,8 +940,10 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   });
 
   const renderSessionRow = (s: SessionDto, showActivity: boolean, inArchive = false) => {
-    const isActive = s.id === activeSessionId;
-    const away = s.id !== activeSessionId;
+    // On a board page the board row is the selection; the chat the reader came
+    // from must not stay lit up.
+    const isActive = !boardRouteOpen && s.id === activeSessionId;
+    const away = !isActive;
     // `waiting` means parked on the user (open question / permission prompt):
     // the row must not claim the agent is working (see sessionRowMark).
     const mark = sessionRowMark(s.status, away, Boolean(unseenFinishedTurns[s.id]));
@@ -1462,16 +1493,19 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   };
 
   const activeFolderKey = useMemo(() => {
+    // A board page is not a chat: no folder (and no chat row) is the selection.
+    if (boardRouteOpen) return null;
     const active = sessions.find((s) => s.id === activeSessionId);
     if (!active || active.archived) return null;
     return canonicalCwd(active.cwd) || NO_FOLDER_KEY;
-  }, [sessions, activeSessionId]);
+  }, [sessions, activeSessionId, boardRouteOpen]);
 
   /**
    * Mobile chat tree: the sheet opens at the top of the list, so the chat the
    * user is actually in (usually far down) had to be hunted for by scrolling.
    * Scroll the active row into view whenever the tree opens on a phone — once
    * per open, not on every row re-render (a running turn re-sorts the list).
+   * A board page makes its own row the target.
    */
   const autoScrolledForOpen = useRef(false);
   useLayoutEffect(() => {
@@ -1479,11 +1513,14 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       autoScrolledForOpen.current = false;
       return;
     }
-    if (autoScrolledForOpen.current || !activeSessionId) return;
-    const index = treeRows.findIndex(
-      (row) => row.kind === "session" && row.session.id === activeSessionId,
+    const target = boardRouteOpen ? activeBoardId : activeSessionId;
+    if (autoScrolledForOpen.current || !target) return;
+    const index = treeRows.findIndex((row) =>
+      boardRouteOpen
+        ? row.kind === "board" && row.board.id === target
+        : row.kind === "session" && row.session.id === target,
     );
-    // Active chat not in the tree yet (still loading, archived, or its folder
+    // Active row not in the tree yet (still loading, archived, or its folder
     // is collapsed) — leave the flag unset so a later render can retry.
     if (index === -1) return;
     autoScrolledForOpen.current = true;
@@ -1493,11 +1530,15 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       return;
     }
     sessionListRef.current
-      ?.querySelector<HTMLElement>(`[data-session-id="${activeSessionId}"]`)
+      ?.querySelector<HTMLElement>(
+        boardRouteOpen ? `[data-board-id="${target}"]` : `[data-session-id="${target}"]`,
+      )
       ?.scrollIntoView({ block: "center" });
   }, [
     sidebarOpen,
     activeSessionId,
+    activeBoardId,
+    boardRouteOpen,
     treeRows,
     treeVirtual,
     treeVirtualizer,
@@ -2460,6 +2501,42 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               </MenuIcon>
               {t("chat.archiveAllInFolder")}
             </button>
+            <div className={styles.contextMenuDivider} aria-hidden />
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!anyFolderCollapsed}
+              onClick={() => setEveryFolderCollapsed(false)}
+            >
+              <MenuIcon>
+                <path
+                  d="M8 10.5 12 6.5l4 4M8 13.5l4 4 4-4"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.expandAllFolders")}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!anyFolderExpanded}
+              onClick={() => setEveryFolderCollapsed(true)}
+            >
+              <MenuIcon>
+                <path
+                  d="M8 7.5l4 4 4-4M8 16.5l4-4 4 4"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </MenuIcon>
+              {t("chat.collapseAllFolders")}
+            </button>
+            <div className={styles.contextMenuDivider} aria-hidden />
             <button
               type="button"
               role="menuitem"

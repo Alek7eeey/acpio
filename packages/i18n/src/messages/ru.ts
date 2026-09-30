@@ -293,6 +293,8 @@ export const ru = {
     archiveAllInFolder: "Архивировать все чаты",
     collapseFolder: "Свернуть папку",
     expandFolder: "Развернуть папку",
+    expandAllFolders: "Развернуть все папки",
+    collapseAllFolders: "Свернуть все папки",
     multitask: "Мультизадача",
     multitaskHint: "Агент берёт следующий запрос, как только закончит предыдущий",
     deleteThemeTitle: "Удалить тему?",

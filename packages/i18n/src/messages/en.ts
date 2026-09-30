@@ -273,6 +273,8 @@ export const en = {
     archiveAllInFolder: "Archive all chats",
     collapseFolder: "Collapse folder",
     expandFolder: "Expand folder",
+    expandAllFolders: "Expand all folders",
+    collapseAllFolders: "Collapse all folders",
     multitask: "Multitask",
     multitaskHint: "The agent takes the next request as soon as it finishes the previous one",
     deleteThemeTitle: "Delete theme?",

@@ -939,8 +939,10 @@
   box-sizing: border-box;
 }
 
-/* Only the active header sticks — older phase headers stay in normal flow so
-   they don't pin to the bottom of their phase while you scroll past.
+/* Every open phase header sticks: whichever phase is under the top edge of the
+   scrollport keeps its header (and its collapse control) pinned there, so an
+   older "Работал" block can be folded without scrolling back up. A phase's own
+   box bounds the header — it scrolls away with the phase it heads.
    Negative top cancels .thread padding so the bar sits flush under the chat header. */
 .stepsToggleSticky {
   position: sticky;

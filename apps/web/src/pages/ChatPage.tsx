@@ -2280,6 +2280,7 @@ function ActivityRunBlock({
   durations,
   stepsGlobalTick,
   sticky = true,
+  stickyCollapse = sticky,
 }: {
   parts: MessagePartDto[];
   streaming: boolean;
@@ -2291,7 +2292,11 @@ function ActivityRunBlock({
   durationMs: number;
   durations: Map<string, number>;
   stepsGlobalTick: number;
+  /** Pin this run's header while it is on screen (see AgentTimelineItems). */
   sticky?: boolean;
+  /** Pin the floating bottom button too — live run only, or two of them would
+   *  land on top of each other while their bodies are both on screen. */
+  stickyCollapse?: boolean;
 }) {
   const t = useT();
   const locale = useLocale();
@@ -2349,7 +2354,7 @@ function ActivityRunBlock({
               </Fragment>
             );
           })}
-          <StepsCollapseButton sticky={sticky} onClick={collapseBlock} />
+          <StepsCollapseButton sticky={stickyCollapse} onClick={collapseBlock} />
         </div>
       ) : null}
     </div>
@@ -2380,7 +2385,10 @@ function AgentTimelineItems({
   stepsGlobalTick: number;
   /** Pinned phase headers belong to the block the reader is inside. As the body
    *  of an open spoiler that block is the spoiler itself — a run header pinned
-   *  at the same offset would sit exactly on top of it and take the tap. */
+   *  at the same offset would sit exactly on top of it and take the tap.
+   *  Live turns pin every run: whichever block is under the top edge of the
+   *  scrollport keeps its header (and its collapse control) reachable without
+   *  scrolling back up. */
   stickyRuns?: boolean;
 }) {
   return (
@@ -2404,7 +2412,8 @@ function AgentTimelineItems({
               durationMs={sumDurations(item.parts, durations)}
               durations={durations}
               stepsGlobalTick={stepsGlobalTick}
-              sticky={stickyRuns && isLast}
+              sticky={stickyRuns}
+              stickyCollapse={stickyRuns && isLast}
             />
           );
         }
