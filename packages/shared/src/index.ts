@@ -950,6 +950,54 @@ export function normalizeBuiltinModelRows(rows: unknown): BuiltinModelConfig[] {
 }
 
 /**
+ * One extra HTTP header the built-in agent sends with every request to a
+ * provider (Settings → Built-in agent). A value may carry the `{{sessionId}}`
+ * placeholder — replaced with the ACP session id at request time.
+ */
+export interface BuiltinHeaderConfig {
+  name: string;
+  value: string;
+}
+
+/** Cap on header rows kept per provider (protects settings size). */
+const BUILTIN_MAX_HEADERS = 50;
+
+/**
+ * Heal one provider's header rows: nameless rows dropped, lengths capped. A
+ * row with a name but an empty value is kept — some endpoints key on presence.
+ */
+export function normalizeBuiltinHeaderRows(rows: unknown): BuiltinHeaderConfig[] {
+  const out: BuiltinHeaderConfig[] = [];
+  if (!Array.isArray(rows)) return out;
+  for (const row of rows.slice(0, BUILTIN_MAX_HEADERS)) {
+    if (!row || typeof row !== "object") continue;
+    const r = row as Record<string, unknown>;
+    const name = String(r.name ?? "").trim().slice(0, 200);
+    if (!name) continue;
+    out.push({ name, value: String(r.value ?? "").slice(0, 2000) });
+  }
+  return out;
+}
+
+/**
+ * A provider's extra headers as a flat map ready for `fetch` and the OpenAI
+ * SDK. `{{sessionId}}` in a value becomes the given session id; called without
+ * one (the /models probe, where no session exists), rows carrying the
+ * placeholder are dropped — half a session id helps no endpoint.
+ */
+export function builtinProviderHeaders(
+  headers: readonly BuiltinHeaderConfig[] | undefined,
+  sessionId?: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const row of headers ?? []) {
+    if (sessionId === undefined && row.value.includes("{{sessionId}}")) continue;
+    out[row.name] = row.value.replaceAll("{{sessionId}}", sessionId ?? "");
+  }
+  return out;
+}
+
+/**
  * One OpenAI-compatible endpoint the built-in agent may talk to (Settings →
  * Built-in agent): its own URL, key and model list. Several providers may
  * coexist — a model is addressed as `<provider id>::<model id>` so the same
@@ -966,6 +1014,8 @@ export interface BuiltinProviderConfig {
   apiKey: string;
   /** Models this provider exposes in the agent's picker. */
   models: BuiltinModelConfig[];
+  /** Extra HTTP headers sent with every request to this provider. */
+  headers?: BuiltinHeaderConfig[];
 }
 
 /** Separator inside a composite built-in model value: `<provider>::<model>`. */
@@ -1056,12 +1106,15 @@ export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
     seen.add(id);
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 120) : "";
     const url = typeof r.url === "string" ? r.url.trim().slice(0, 500) : "";
+    const headers = normalizeBuiltinHeaderRows(r.headers);
     out.push({
       id,
       name: name || url || id,
       url,
       apiKey: typeof r.apiKey === "string" ? r.apiKey.trim().slice(0, 500) : "",
       models: normalizeBuiltinModelRows(r.models),
+      // Conditional: settings written before headers existed keep their shape.
+      ...(headers.length ? { headers } : {}),
     });
   }
   return out;

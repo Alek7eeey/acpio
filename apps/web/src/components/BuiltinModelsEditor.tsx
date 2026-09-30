@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BuiltinModelConfig, DiscoveredBuiltinModel } from "@acpio/shared";
+import type { BuiltinHeaderConfig, BuiltinModelConfig, DiscoveredBuiltinModel } from "@acpio/shared";
 import { api } from "../lib/api";
 import { useT } from "../lib/i18n";
 import styles from "./BuiltinModelsEditor.module.css";
@@ -41,11 +41,13 @@ function effectiveWindow(
 export function BuiltinModelsEditor({
   endpointUrl,
   apiKey,
+  headers,
   value,
   onChange,
 }: {
   endpointUrl: string;
   apiKey: string;
+  headers?: BuiltinHeaderConfig[];
   value: BuiltinModelConfig[];
   onChange: (next: BuiltinModelConfig[]) => void;
 }) {
@@ -69,7 +71,7 @@ export function BuiltinModelsEditor({
     setLoading(true);
     setError(null);
     try {
-      const res = await api.builtinModels({ url: endpointUrl, apiKey });
+      const res = await api.builtinModels({ url: endpointUrl, apiKey, headers });
       if (res.ok) {
         setCatalog(res.models);
         setFetched(true);

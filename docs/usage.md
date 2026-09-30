@@ -157,7 +157,12 @@ endpoint it can reach.
   [models.dev](https://models.dev) registry by that endpoint's base URL and model id
   (an offline server keeps the assumed 128k); a window you type yourself is an override
   that later refreshes do not replace. Only ticked models are offered in pickers; the agent
-  picks the change up on save, and every model runs on the provider that owns it.
+  picks the change up on save, and every model runs on the provider that owns it. Each
+  provider also takes extra HTTP headers (Settings → Built-in agent → Extra HTTP headers)
+  that are sent with every request to it — for endpoints that require their own headers,
+  e.g. `x-opencode-session`; write `{{sessionId}}` in a value and it is replaced with the
+  chat's session id at request time (rows with that placeholder are skipped when the
+  settings page probes `/models`, where no session exists).
 - Tools: `read`, `glob`, `grep`, `write`, `edit` and `bash`. `glob`/`grep` search the
   workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
   a file as one batched call and refuses an ambiguous or overlapping anchor instead of

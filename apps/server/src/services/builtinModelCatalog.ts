@@ -1,4 +1,5 @@
-import type { DiscoveredBuiltinModel } from "@acpio/shared";
+import type { BuiltinHeaderConfig, DiscoveredBuiltinModel } from "@acpio/shared";
+import { builtinProviderHeaders } from "@acpio/shared";
 import { loadModelRegistry } from "./modelRegistry.js";
 
 /** Give up on a slow endpoint so the Settings button cannot hang forever. */
@@ -25,6 +26,8 @@ export type BuiltinCatalogResult =
 export interface BuiltinCatalogOptions {
   /** Model registry URL for windows the endpoint does not report (tests/mirrors). */
   registryUrl?: string;
+  /** Extra headers from the provider row; override Accept/Authorization. */
+  headers?: BuiltinHeaderConfig[];
 }
 
 /** `GET {endpoint}/models` against an OpenAI-compatible endpoint. */
@@ -49,6 +52,9 @@ export async function fetchBuiltinModelCatalog(
   const headers: Record<string, string> = { Accept: "application/json" };
   const key = apiKey.trim();
   if (key) headers.Authorization = `Bearer ${key}`;
+  // No session exists during a probe, so placeholder rows are dropped, not
+  // sent half-resolved.
+  Object.assign(headers, builtinProviderHeaders(opts.headers));
 
   let res: Response;
   try {

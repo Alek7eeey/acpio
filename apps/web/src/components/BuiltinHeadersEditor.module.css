@@ -1,0 +1,67 @@
+/* Settings → Built-in agent → Headers: name/value rows plus the add button. */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+.name,
+.value {
+  min-width: 0;
+  width: 100%;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+}
+
+.remove {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.add {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.add:hover {
+  background: var(--bg-tertiary);
+}
+
+@media (max-width: 700px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .name {
+    grid-column: 1 / -1;
+  }
+}

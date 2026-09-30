@@ -38,6 +38,7 @@ import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSe
 import { useT } from "../lib/i18n";
 import { cachedModelsFor, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
+import { BuiltinHeadersEditor } from "../components/BuiltinHeadersEditor";
 import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
@@ -2391,6 +2392,17 @@ export function SettingsPage() {
                     </SettingRow>
                     <SettingRow
                       layout="stack"
+                      label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
+                      hint={t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" })}
+                      terms={[provider.name]}
+                    >
+                      <BuiltinHeadersEditor
+                        value={provider.headers ?? []}
+                        onChange={(headers) => update({ headers })}
+                      />
+                    </SettingRow>
+                    <SettingRow
+                      layout="stack"
                       label={modelsLabel}
                       hint={t("settings.builtinModelsHint")}
                       terms={[provider.name]}
@@ -2398,6 +2410,7 @@ export function SettingsPage() {
                       <BuiltinModelsEditor
                         endpointUrl={provider.url}
                         apiKey={provider.apiKey}
+                        headers={provider.headers}
                         value={provider.models}
                         onChange={(models) => update({ models })}
                       />

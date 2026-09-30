@@ -154,6 +154,8 @@ export function settingsSearchIndex(
       t("settings.builtinUrlHint"),
       t("settings.builtinKeyTitle"),
       t("settings.builtinKeyHint"),
+      t("settings.builtinHeadersTitle"),
+      t("settings.builtinHeadersHint"),
       t("settings.builtinModelsTitle"),
       t("settings.builtinModelsHint"),
       t("settings.builtinModelsFetch"),
@@ -162,6 +164,7 @@ export function settingsSearchIndex(
       "api",
       "provider",
       "провайдер",
+      "заголовки",
     ],
     advanced: [
       t("settings.advanced"),
@@ -300,6 +303,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
     builtin: [
       t("settings.builtinUrlHint"),
       t("settings.builtinKeyHint"),
+      t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" }),
       t("settings.builtinModelsHint"),
       t("settings.builtinProvidersHint"),
       t("settings.builtinProvidersEmpty"),

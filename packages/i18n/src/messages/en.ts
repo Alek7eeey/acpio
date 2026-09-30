@@ -402,6 +402,13 @@ export const en = {
       "Base URL of an OpenAI-compatible API, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty switches this provider off.",
     builtinKeyTitle: "API key",
     builtinKeyHint: "Sent as a Bearer token. Leave empty for local endpoints that need no key.",
+    builtinHeadersTitle: "Extra HTTP headers",
+    builtinHeadersHint:
+      "Sent with every agent request to this provider. {{sessionId}} in a value is replaced with the chat's session id; rows carrying it are skipped for the model-list probe.",
+    builtinHeadersName: "Header",
+    builtinHeadersValue: "Value",
+    builtinHeadersAdd: "Add header",
+    builtinHeadersRemove: "Remove header",
     builtinModelsTitle: "Models",
     builtinModelsHint:
       "Models come from the endpoint's /models list. Tick the ones the agent may use, rename them or set their context window; add whatever is missing by hand.",

@@ -39,10 +39,15 @@ function redactSettings(settings: AppSettings): Record<string, unknown> {
     anthropicApiKey: anthropicApiKey ? "[set]" : "",
     openaiApiKey: openaiApiKey ? "[set]" : "",
     // Every provider keeps its row (id/name/models matter for support) but
-    // never its key.
+    // never its key; a header value is a credential as often as not.
     builtinProviders: builtinProviders.map((p) => ({
       ...p,
       apiKey: p.apiKey ? "[set]" : "",
+      ...(p.headers?.length
+        ? {
+            headers: p.headers.map((h) => ({ name: h.name, value: h.value ? "[set]" : "" })),
+          }
+        : {}),
     })),
   };
 }

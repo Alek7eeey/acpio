@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, normalizeBuiltinProviders } from "./index.js";
+import {
+  DEFAULT_SETTINGS,
+  builtinProviderHeaders,
+  normalizeBuiltinProviders,
+} from "./index.js";
 import {
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
@@ -287,6 +291,70 @@ describe("normalizeBuiltinProviders", () => {
     expect(normalizeBuiltinProviders({})).toEqual([]);
     expect(normalizeBuiltinProviders({ builtinProviders: [] })).toEqual([]);
     expect(normalizeBuiltinProviders(null)).toEqual([]);
+  });
+
+  it("heals header rows: nameless rows drop, rows without headers stay absent", () => {
+    const raw = {
+      builtinProviders: [
+        {
+          id: "p1",
+          name: "OpenCode",
+          url: "https://opencode.ai/v1",
+          apiKey: "",
+          models: [],
+          headers: [
+            { name: " x-opencode-session ", value: "{{sessionId}}" },
+            { name: "   ", value: "dropped" },
+            "junk",
+          ],
+        },
+        { id: "p2", name: "Bare", url: "http://a/v1", apiKey: "", models: [] },
+      ],
+    };
+    expect(normalizeBuiltinProviders(raw)).toEqual([
+      {
+        id: "p1",
+        name: "OpenCode",
+        url: "https://opencode.ai/v1",
+        apiKey: "",
+        models: [],
+        headers: [{ name: "x-opencode-session", value: "{{sessionId}}" }],
+      },
+      { id: "p2", name: "Bare", url: "http://a/v1", apiKey: "", models: [] },
+    ]);
+  });
+});
+
+describe("builtinProviderHeaders", () => {
+  it("substitutes {{sessionId}} with the session id", () => {
+    expect(
+      builtinProviderHeaders(
+        [
+          { name: "x-opencode-session", value: "{{sessionId}}" },
+          { name: "x-static", value: "fixed" },
+          { name: "x-mixed", value: "chat-{{sessionId}}-tag" },
+        ],
+        "abc-123",
+      ),
+    ).toEqual({
+      "x-opencode-session": "abc-123",
+      "x-static": "fixed",
+      "x-mixed": "chat-abc-123-tag",
+    });
+  });
+
+  it("drops placeholder rows when no session exists (the /models probe)", () => {
+    expect(
+      builtinProviderHeaders([
+        { name: "x-opencode-session", value: "{{sessionId}}" },
+        { name: "x-static", value: "fixed" },
+      ]),
+    ).toEqual({ "x-static": "fixed" });
+  });
+
+  it("returns an empty map when the provider has no headers", () => {
+    expect(builtinProviderHeaders(undefined)).toEqual({});
+    expect(builtinProviderHeaders([])).toEqual({});
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   AgentProbeResult,
   AgentProvider,
   AppSettings,
+  BuiltinHeaderConfig,
   BoardDto,
   ChatThemeDto,
   DiagnosticsDumpDto,
@@ -106,7 +107,7 @@ export const api = {
       message?: string;
     }>(`/api/agent/models${qs ? `?${qs}` : ""}`);
   },
-  builtinModels: (body: { url: string; apiKey: string }) =>
+  builtinModels: (body: { url: string; apiKey: string; headers?: BuiltinHeaderConfig[] }) =>
     request<BuiltinModelCatalogResult>("/api/agent/builtin/models", {
       method: "POST",
       body: JSON.stringify(body),

@@ -1927,6 +1927,7 @@ describe("built-in model catalog", () => {
     expect(missing.json()).toMatchObject({ ok: false, models: [] });
     expect(String(missing.json().error)).toMatch(/endpoint/i);
 
+    const seenHeaders: Record<string, string> = {};
     const endpoint = http.createServer((req, res) => {
       res.setHeader("content-type", "application/json");
       if (req.url === "/registry.json") {
@@ -1939,6 +1940,9 @@ describe("built-in model catalog", () => {
           }),
         );
         return;
+      }
+      for (const [name, value] of Object.entries(req.headers)) {
+        if (typeof value === "string") seenHeaders[name] = value;
       }
       res.end(
         JSON.stringify({
@@ -1964,7 +1968,13 @@ describe("built-in model catalog", () => {
       const ok = await app.inject({
         method: "POST",
         url: "/api/agent/builtin/models",
-        payload: { url: `${base}/v1` },
+        payload: {
+          url: `${base}/v1`,
+          headers: [
+            { name: "x-opencode-session", value: "{{sessionId}}" },
+            { name: "x-trace", value: "on" },
+          ],
+        },
       });
       expect(ok.json()).toEqual({
         ok: true,
@@ -1973,6 +1983,10 @@ describe("built-in model catalog", () => {
           { id: "m2", contextWindow: 64_000 },
         ],
       });
+      // Extra headers reach the endpoint; the session placeholder has nothing
+      // to resolve against during a probe, so its row is not sent half-baked.
+      expect(seenHeaders["x-trace"]).toBe("on");
+      expect(seenHeaders["x-opencode-session"]).toBeUndefined();
     } finally {
       if (savedRegistry === undefined) delete process.env.ACP_MODELS_REGISTRY_URL;
       else process.env.ACP_MODELS_REGISTRY_URL = savedRegistry;

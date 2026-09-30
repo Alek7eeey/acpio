@@ -422,6 +422,13 @@ export const ru = {
       "Базовый URL API, совместимого с OpenAI: https://api.openai.com/v1 или http://localhost:11434/v1. Пусто — провайдер выключен.",
     builtinKeyTitle: "API-ключ",
     builtinKeyHint: "Отправляется в заголовке Authorization. Пусто для локальных endpoint без ключа.",
+    builtinHeadersTitle: "Доп. заголовки HTTP",
+    builtinHeadersHint:
+      "Отправляются с каждым запросом агента к этому провайдеру. {{sessionId}} в значении заменяется на id сессии чата; строки с этим плейсхолдером не уходят в проверку списка моделей.",
+    builtinHeadersName: "Заголовок",
+    builtinHeadersValue: "Значение",
+    builtinHeadersAdd: "Добавить заголовок",
+    builtinHeadersRemove: "Убрать заголовок",
     builtinModelsTitle: "Модели",
     builtinModelsHint:
       "Модели берутся из списка /models endpoint. Отметьте те, которыми агент может пользоваться, переименуйте их или задайте окно контекста; недостающие добавьте вручную.",

@@ -211,6 +211,15 @@ const settingsSchema = z.object({
           )
           .max(1000)
           .optional(),
+        headers: z
+          .array(
+            z.object({
+              name: z.string().max(200),
+              value: z.string().max(2000),
+            }),
+          )
+          .max(50)
+          .optional(),
       }),
     )
     .max(50)
@@ -497,13 +506,26 @@ export async function registerRoutes(app: FastifyInstance) {
    */
   app.post("/api/agent/builtin/models", async (req) => {
     const body = z
-      .object({ url: z.string().max(500).optional(), apiKey: z.string().max(500).optional() })
+      .object({
+        url: z.string().max(500).optional(),
+        apiKey: z.string().max(500).optional(),
+        headers: z
+          .array(
+            z.object({
+              name: z.string().max(200),
+              value: z.string().max(2000),
+            }),
+          )
+          .max(50)
+          .optional(),
+      })
       .parse(req.body ?? {});
     const settings = await getSettings();
     const fallback = settings.builtinProviders[0];
     const url = body.url !== undefined ? body.url : (fallback?.url ?? "");
     const apiKey = body.apiKey !== undefined ? body.apiKey : (fallback?.apiKey ?? "");
-    const result = await fetchBuiltinModelCatalog(url, apiKey);
+    const headers = body.headers !== undefined ? body.headers : fallback?.headers;
+    const result = await fetchBuiltinModelCatalog(url, apiKey, { headers });
     if (result.ok) return result;
     const t = serverT(await resolveLocale(req));
     return {

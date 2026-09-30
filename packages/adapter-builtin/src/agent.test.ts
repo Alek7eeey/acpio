@@ -241,13 +241,12 @@ describe("BuiltinAgent ACP surface", () => {
 
 describe("builtin provider routing", () => {
   /** One recorded request against a stub OpenAI-compatible endpoint. */
-  type Hit = { auth: string; model: string };
+  type Hit = { auth: string; model: string; sessionHeader: string };
 
   /** Minimal `/chat/completions` stub that streams one assistant sentence. */
   async function startStub(): Promise<{
     url: string;
     hits: Hit[];
-    /** `content` of the user message of each request, in arrival order. */
     userContents: unknown[];
     close(): Promise<void>;
   }> {
@@ -265,6 +264,7 @@ describe("builtin provider routing", () => {
         hits.push({
           auth: String(req.headers.authorization ?? ""),
           model: String(model ?? ""),
+          sessionHeader: String(req.headers["x-opencode-session"] ?? ""),
         });
         const rawMessages =
           parsed && typeof parsed === "object" && "messages" in parsed ? parsed.messages : undefined;
@@ -338,10 +338,38 @@ describe("builtin provider routing", () => {
       });
       expect(res.stopReason).toBe("end_turn");
       expect(one.hits).toEqual([]);
-      expect(two.hits).toEqual([{ auth: "Bearer sk-two", model: "m2" }]);
+      expect(two.hits).toEqual([{ auth: "Bearer sk-two", model: "m2", sessionHeader: "" }]);
     } finally {
       await one.close();
       await two.close();
+    }
+  });
+
+  it("resolves {{sessionId}} in the provider's extra headers to the session id", async () => {
+    const stub = await startStub();
+    try {
+      const { call } = boot({
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "OpenCode",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            headers: [
+              { name: "x-opencode-session", value: "{{sessionId}}" },
+              { name: "x-static", value: "fixed" },
+            ],
+          },
+        ],
+      });
+      const { sessionId } = await call<SessionResult>("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits).toEqual([
+        { auth: "", model: "m1", sessionHeader: sessionId },
+      ]);
+    } finally {
+      await stub.close();
     }
   });
 

@@ -5,6 +5,7 @@ import type {
   InProcessAgentOptions,
   InProcessAgentTransport,
 } from "@acpio/shared";
+import { builtinProviderHeaders } from "@acpio/shared";
 import { generateText, type ModelMessage } from "ai";
 import {
   builtinModelOptions,
@@ -364,6 +365,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         apiKey: selection.provider.apiKey || undefined,
         // Most OpenAI-compatible servers only report usage when asked to.
         includeUsage: true,
+        // The endpoint is rebuilt per turn, so `{{sessionId}}` resolves to
+        // the session this turn belongs to.
+        headers: builtinProviderHeaders(selection.provider.headers, this.sessionId),
       });
       const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
       const outcome = await runTurn({
