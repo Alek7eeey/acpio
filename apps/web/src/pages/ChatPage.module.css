@@ -950,6 +950,14 @@
   z-index: 10;
 }
 
+/* A run header inside an open spoiler pins under the spoiler's own header —
+   the turn's collapse control — never exactly over it, so both stay reachable
+   while the transcript is read. The spoiler root publishes its header height
+   as `--steps-head-h`; without a header (single-item turn) the offset is zero. */
+.stepsBody .stepsToggleSticky {
+  top: calc(-1 * var(--thread-pad-top, 20px) + var(--steps-head-h, 0px));
+}
+
 /* A stuck header gains an opaque surface (transcript scrolls underneath) plus a
    hairline instead of extra padding: the old padding bump changed its height as
    it crossed the threshold, which read as a jump while the thread was streaming

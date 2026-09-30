@@ -2050,6 +2050,28 @@ function StepsSpoiler({
   const blockRef = useRef<HTMLDivElement>(null);
   const collapseBlock = useReasoningCollapseScroll(blockRef, open, setOpen);
   const [holdEmptyLive, setHoldEmptyLive] = useState(streaming);
+
+  /**
+   * Height of this spoiler's own header, published as `--steps-head-h`: the run
+   * headers inside the open body pin just below it (see `.stepsToggleSticky`)
+   * instead of exactly over it, so the turn's collapse control and the run's
+   * own stay reachable at the same time.
+   */
+  useEffect(() => {
+    const root = blockRef.current;
+    const head = root?.firstElementChild;
+    if (!root || !(head instanceof HTMLElement)) return;
+    if (!head.classList.contains(styles.stepsToggle)) return;
+    const publish = () => root.style.setProperty("--steps-head-h", `${head.offsetHeight}px`);
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(head);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--steps-head-h");
+    };
+  }, [open, skipOuter, body]);
   useEffect(() => {
     if (streaming) {
       setHoldEmptyLive(true);
@@ -2383,12 +2405,12 @@ function AgentTimelineItems({
   sessionId: string;
   durations: Map<string, number>;
   stepsGlobalTick: number;
-  /** Pinned phase headers belong to the block the reader is inside. As the body
-   *  of an open spoiler that block is the spoiler itself — a run header pinned
-   *  at the same offset would sit exactly on top of it and take the tap.
-   *  Live turns pin every run: whichever block is under the top edge of the
-   *  scrollport keeps its header (and its collapse control) reachable without
-   *  scrolling back up. */
+  /** Pinned phase headers belong to the block the reader is inside: whichever
+   *  run sits under the top edge of the scrollport keeps its header (and its
+   *  collapse control) reachable without scrolling back up — live turns and the
+   *  open body of a finished one alike. Inside a spoiler the run header pins
+   *  under the spoiler's own header, never over it, so both stay tappable
+   *  (`.stepsBody .stepsToggleSticky`). */
   stickyRuns?: boolean;
 }) {
   return (
@@ -3559,7 +3581,6 @@ function AssistantParts({
               sessionId={message.sessionId}
               durations={durations}
               stepsGlobalTick={stepsGlobalTick}
-              stickyRuns={false}
             />
           }
         />
