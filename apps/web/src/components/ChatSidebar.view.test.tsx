@@ -175,3 +175,45 @@ describe("folder menu tree commands", () => {
     expect(screen.getByRole("menuitem", { name: "Архивировать все чаты" })).toBeTruthy();
   });
 });
+
+describe("board row menu", () => {
+  /** Right-click the board row and return its open context menu. */
+  function openBoardMenu(container: HTMLElement) {
+    fireEvent.contextMenu(container.querySelector<HTMLElement>('[data-board-id="b1"]')!, {
+      clientX: 60,
+      clientY: 140,
+    });
+    return screen.getByRole("menu");
+  }
+
+  // Regression: the board row's menu was the one tree menu that ignored the
+  // press that closes the others, so it stayed on screen over the page.
+  it("closes when the reader presses anywhere else", () => {
+    const { container } = renderTree("/board/b1");
+    expect(openBoardMenu(container).textContent).toContain("Переименовать");
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // Regression: the new-chat picker opened over an open row menu, stacking two
+  // popovers at the same spot — the picker cleared only the chat menus.
+  it("closes when the new-chat picker opens", () => {
+    const { container } = renderTree("/board/b1");
+    expect(openBoardMenu(container)).toBeTruthy();
+
+    fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Новый чат в папке"]')!);
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("closes on Escape", () => {
+    const { container } = renderTree("/board/b1");
+    expect(openBoardMenu(container)).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+});

@@ -98,6 +98,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  /** The new-task form as a whole — a press inside it must not dismiss it. */
+  const composerBoxRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
   const railListRef = useRef<HTMLDivElement>(null);
@@ -181,6 +183,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   useEffect(() => {
     if (!addingCwd) return;
     composerRef.current?.focus();
+  }, [addingCwd]);
+
+  /**
+   * The new-task form belongs to its group, not to the screen: a press anywhere
+   * else dismisses it exactly like its own Cancel button, so an accidental "+"
+   * (or a change of mind) does not leave a form sitting in the lane. The lane's
+   * placeholder opens the same form again with one click.
+   */
+  useEffect(() => {
+    if (!addingCwd) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (composerBoxRef.current?.contains(target)) return;
+      // A dialog the board opened on top (the agent picker behind "+") owns the
+      // press: choosing there closes the form through its own handler.
+      if (target instanceof Element && target.closest('[role="dialog"]')) return;
+      setAddingCwd(null);
+      setDraft("");
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, [addingCwd]);
 
   useEffect(() => {
@@ -727,7 +750,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                             </span>
                           </div>
                           {addingCwd === group.cwd ? (
-                            <div className={styles.composer}>
+                            <div ref={composerBoxRef} className={styles.composer}>
                               <textarea
                                 ref={composerRef}
                                 className={styles.composerInput}
@@ -782,7 +805,19 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                 </button>
                               </div>
                             </div>
-                          ) : null}
+                          ) : (
+                            <button
+                              type="button"
+                              className={styles.addCard}
+                              title={t("chat.boardAddTaskCard")}
+                              onClick={() => {
+                                setAddingCwd(group.cwd);
+                                setDraft("");
+                              }}
+                            >
+                              {t("chat.boardAddTaskCard")}
+                            </button>
+                          )}
                           {group.tasks.map((task) => renderCard(task, group))}
                         </div>
                       ))

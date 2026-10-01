@@ -339,6 +339,8 @@
     "colProgress": "In Progress",
     "colDone": "Done",
     "boardAddTask": "Новая задача",
+    "boardAddTaskCard": "Добавить задачу",
+    "boardRename": "Переименовать доску",
     "boardAddTaskHint": "Новая задача — правый клик открывает выбор агента для пустого чата",
     "boardTaskPlaceholder": "Опишите задачу…",
     "boardStart": "Начать работу",

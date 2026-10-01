@@ -271,3 +271,65 @@ describe("BoardPage right-click new task", () => {
     expect(await screen.findByText("chat opened")).toBeTruthy();
   });
 });
+
+function renderBoard() {
+  return render(
+    <MemoryRouter initialEntries={["/board/b1"]}>
+      <I18nProvider>
+        <Routes>
+          <Route path="/board/:boardId" element={<BoardPage />} />
+        </Routes>
+      </I18nProvider>
+    </MemoryRouter>,
+  );
+}
+
+describe("BoardPage new task form", () => {
+  // The lane's own placeholder is the same door as the group's "+": a project
+  // group without tasks shows a card-shaped "Add task" instead of bare space.
+  it("opens the form from the Todo lane placeholder", async () => {
+    useAppStore.setState({ boardSessions: [] });
+    renderBoard();
+    await screen.findByText("Add task");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+
+    expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
+    // The form takes the placeholder's place rather than stacking on it.
+    expect(within(group).queryByRole("button", { name: "Add task" })).toBeNull();
+  });
+
+  // Regression: the form ignored every press outside it, so an accidental "+"
+  // left it in the lane until Cancel was found.
+  it("dismisses the form on a press outside it", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const textarea = within(group).getByPlaceholderText("Describe the task…");
+    await userEvent.type(textarea, "Half-typed");
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByPlaceholderText("Describe the task…")).toBeNull();
+    // Back to the placeholder, and the abandoned draft is gone with the form.
+    expect(within(group).getByRole("button", { name: "Add task" })).toBeTruthy();
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    expect((within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("keeps the form for a press inside it", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    const textarea = within(group).getByPlaceholderText("Describe the task…");
+
+    fireEvent.mouseDown(textarea);
+
+    expect(screen.getByPlaceholderText("Describe the task…")).toBeTruthy();
+  });
+});

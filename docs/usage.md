@@ -104,7 +104,9 @@ board page shows four columns — **Todo**, **In Progress**, **Wait**, **Done** 
 the folders the board works in.
 
 The board's name sits in the top bar above, in the pill a chat's title would carry — one bar
-for the whole view instead of a second title row of its own. A board's folders are its
+for the whole view instead of a second title row of its own. Clicking that name renames the
+board in place (Enter keeps the new name, Escape drops it), so a board can be renamed while
+you are inside it. A board's folders are its
 projects: **Board folders** in that bar adds and removes them, and the rail lists each one
 with its task count. Clicking a folder filters the whole board down to it, **All projects**
 clears the filter, and the **+** on a rail row starts a task in that folder. **Todo** groups
@@ -112,9 +114,11 @@ its cards by project, and both the groups and the cards inside them move up and 
 order is saved on the server, so it survives a reload.
 
 Every task is a chat session of its own. **+** on a group writes a card carrying the project
-chip; **right-clicking** that **+** (on a group or a rail row) opens the standard new-chat picker
-with the folder locked, and confirming it creates the task empty — no description form — then
-opens its chat, so the first message is what names and forms it. That is the shape a chat has
+chip, and the **Add task** rectangle in the group opens the same form — clicking away from the
+form dismisses it the way **Cancel** does. **Right-clicking** that **+** (on a group or a rail
+row) opens the standard new-chat picker with the folder locked, and confirming it creates the
+task empty — no description form — then opens its chat, so the first message is what names and
+forms it. That is the shape a chat has
 when it comes from the folder tree, and the fresh card rests in **Todo** until that turn runs.
 The **Start immediately** switch in the creation form starts the task the moment it is
 created — the default agent gets the description as the first message while you stay on the

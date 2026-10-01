@@ -337,6 +337,40 @@
   box-shadow: var(--shadow-soft);
 }
 
+/**
+ * Todo lane placeholder: a card-shaped rectangle that opens the task form. An
+ * empty project group then reads as a list you add to instead of a blank box —
+ * the group's "+" opens the same form.
+ */
+.addCard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition:
+    transform 0.08s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.addCard:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: color-mix(in srgb, var(--surface) 46%, transparent);
+}
+
+.addCard:active {
+  transform: scale(0.98);
+}
+
 .composerInput {
   width: 100%;
   min-height: 56px;

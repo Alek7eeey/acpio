@@ -617,8 +617,9 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     dialogStartPath?: string;
     lockedCwd?: string;
   }) => {
-    setMenu(null);
-    setConfirmDeleteId(null);
+    // The picker is the tree's other popover: a row menu left open under it
+    // stacks two menus at the same spot.
+    closeTreeMenus();
     setFolderPicker({
       x: opts.x,
       y: opts.y,
@@ -635,7 +636,15 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   }, [renamingId]);
 
   useEffect(() => {
-    if (!menu && !confirmDeleteId && !folderMenu && !confirmDeleteFolderCwd && !boardMenu && !confirmDeleteBoardId) return;
+    if (
+      !menu &&
+      !confirmDeleteId &&
+      !folderMenu &&
+      !confirmDeleteFolderCwd &&
+      !boardMenu &&
+      !confirmDeleteBoardId
+    )
+      return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (
@@ -647,20 +656,12 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         boardConfirmRef.current?.contains(target)
       )
         return;
-      setMenu(null);
-      setConfirmDeleteId(null);
-      setFolderMenu(null);
-      setConfirmDeleteFolderCwd(null);
+      // Every tree menu answers the same gesture — a click anywhere else closes
+      // it. A board menu skipped this and stayed on screen over the page.
+      closeTreeMenus();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setMenu(null);
-        setConfirmDeleteId(null);
-        setFolderMenu(null);
-        setConfirmDeleteFolderCwd(null);
-        setBoardMenu(null);
-        setConfirmDeleteBoardId(null);
-      }
+      if (e.key === "Escape") closeTreeMenus();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -686,8 +687,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   }, [confirmDeleteBoardId]);
 
   const startRenameSession = (s: SessionDto) => {
-    setMenu(null);
-    setConfirmDeleteId(null);
+    closeTreeMenus();
     setRenamingId(s.id);
     setDraft(s.title);
   };
@@ -1821,7 +1821,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         onDoubleClick={(e) => {
           if (suppressRowClickRef.current) return;
           e.preventDefault();
-          setBoardMenu(null);
+          closeTreeMenus();
           setBoardDraft(board.name);
           setRenamingBoardId(board.id);
         }}

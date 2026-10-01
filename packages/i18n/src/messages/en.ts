@@ -291,6 +291,8 @@ export const en = {
     colProgress: "In Progress",
     colDone: "Done",
     boardAddTask: "New task",
+    boardAddTaskCard: "Add task",
+    boardRename: "Rename board",
     boardAddTaskHint: "New task — right-click to pick an agent for an empty chat",
     boardTaskPlaceholder: "Describe the task…",
     boardStart: "Start work",

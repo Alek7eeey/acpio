@@ -109,6 +109,7 @@ export function AppShell() {
   const selectSession = useAppStore((s) => s.selectSession);
   const createSession = useAppStore((s) => s.createSession);
   const createBoard = useAppStore((s) => s.createBoard);
+  const renameBoard = useAppStore((s) => s.renameBoard);
   const setBoardFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
   const importHarnessSession = useAppStore((s) => s.importHarnessSession);
   const adapters = useAppStore((s) => s.adapters);
@@ -324,6 +325,26 @@ export function AppShell() {
   const railRecentsRef = useRef<HTMLDivElement>(null);
   const railBoardsRef = useRef<HTMLDivElement>(null);
   const railSettingsRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Board whose name is being edited in the header pill (null = none). The
+   * board page draws no title row of its own, so the pill carrying the open
+   * board's name is the only place the name can be changed while inside it.
+   */
+  const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
+  const [boardNameDraft, setBoardNameDraft] = useState("");
+  const boardNameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!renamingBoardId) return;
+    boardNameRef.current?.focus();
+    boardNameRef.current?.select();
+  }, [renamingBoardId]);
+  const commitBoardRename = () => {
+    const id = renamingBoardId;
+    setRenamingBoardId(null);
+    const name = boardNameDraft.trim();
+    if (id && name) void renameBoard(id, name);
+  };
 
   const railMode = showSidebar && !sidebarOpen && settings.sidebarCollapse === "rail";
   // Bounce the app title whenever the tree (sidebar) collapses or expands.
@@ -1626,12 +1647,40 @@ export function AppShell() {
           </span>
           {openBoard ? (
             // The board's title row: one top bar for the whole view, so the
-            // board's name sits where a chat's context would.
+            // board's name sits where a chat's context would. The name is also
+            // the board's rename control — the page itself draws no title row
+            // to hang one on.
             <div
               className={`${styles.headerChatCtx} ${styles.headerCtxBoard}`}
               title={openBoard.name}
             >
-              <span className={styles.headerChatTitle}>{openBoard.name}</span>
+              {renamingBoardId === openBoard.id ? (
+                <input
+                  ref={boardNameRef}
+                  className={styles.renameInputInline}
+                  value={boardNameDraft}
+                  aria-label={t("chat.boardRename")}
+                  onChange={(e) => setBoardNameDraft(e.target.value)}
+                  onBlur={commitBoardRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commitBoardRename();
+                    if (e.key === "Escape") setRenamingBoardId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={styles.headerBoardTitle}
+                  title={t("chat.boardRename")}
+                  aria-label={t("chat.boardRename")}
+                  onClick={() => {
+                    setBoardNameDraft(openBoard.name);
+                    setRenamingBoardId(openBoard.id);
+                  }}
+                >
+                  <span className={styles.headerChatTitle}>{openBoard.name}</span>
+                </button>
+              )}
             </div>
           ) : !isSettings && headerSession ? (
             <>

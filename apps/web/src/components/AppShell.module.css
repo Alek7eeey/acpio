@@ -366,6 +366,33 @@
   color: color-mix(in srgb, var(--text) 68%, var(--text-secondary));
 }
 
+/**
+ * The open board's name in the header pill doubles as its rename control: a
+ * board draws no title row of its own, so the pill is the only place the name
+ * is changed from inside the board. Chrome-free on purpose — it has to read as
+ * the board's title, not as another header button.
+ */
+.headerBoardTitle {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.headerBoardTitle .headerChatTitle {
+  display: block;
+}
+
+.headerBoardTitle:hover .headerChatTitle {
+  color: var(--text);
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
