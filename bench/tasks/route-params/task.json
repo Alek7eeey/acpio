@@ -1,0 +1,7 @@
+{
+  "id": "route-params",
+  "title": "Router matches paths that only prefix-match a segment",
+  "prompt": "Our HTTP router started dispatching /users-list to the /users/list route after a performance patch. Reproduce with a couple of lines against lib/router.mjs, fix the matching so every literal segment must match exactly (params still capture a whole segment), and make sure /users/42 still hits the /users/:id route. Verify before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

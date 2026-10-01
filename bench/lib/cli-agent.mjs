@@ -28,9 +28,11 @@ export const ompProfile = () => process.env.OMP_PROFILE || "omp-bench";
 /**
  * omp only knows custom providers from its profile's `models.yml`. Write the
  * bench provider there once — never touch the user's default profile.
+ * `baseDir` relocates the profiles root (the SWE runner stages configs for
+ * docker cp instead of using the host home).
  */
-export function ensureOmpModel(profile, { provider, baseUrl, apiKey, modelId, contextWindow }) {
-  const dir = path.join(os.homedir(), ".omp", "profiles", profile, "agent");
+export function ensureOmpModel(profile, { provider, baseUrl, apiKey, modelId, contextWindow }, baseDir = path.join(os.homedir(), ".omp", "profiles")) {
+  const dir = path.join(baseDir, profile, "agent");
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, "models.yml");
   writeFileSync(

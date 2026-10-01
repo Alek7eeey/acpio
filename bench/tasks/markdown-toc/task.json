@@ -1,0 +1,7 @@
+{
+  "id": "markdown-toc",
+  "title": "TOC lists headings that live inside code fences",
+  "prompt": "The docs site's table of contents shows entries like 'this is NOT a heading' — they are inside ``` code examples. lib/md-parse.mjs used to skip fenced blocks (``` and ~~~) when scanning for headings; a parser rewrite dropped that. lib/toc.mjs builds the list on top of parseHeadings. Fix the parser so fenced content is ignored again (TOC building, slug dedupe with -2/-3 and indenting must keep working) and verify with content/sample.md plus your own cases before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

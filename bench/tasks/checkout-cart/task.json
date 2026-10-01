@@ -1,0 +1,7 @@
+{
+  "id": "checkout-cart",
+  "title": "Receipts book a cent short on some prices",
+  "prompt": "Support reports checkout receipts a cent short, but only on some prices: a 925-cent notebook with a 15% coupon must book a 139-cent discount, and the pipeline books 138; the same drift shows in tax on an 8% rate for a 4995-cent chair (must be 400). The money module documents the rounding policy — find where it is lost on the way to discounts and tax, and fix it there so every percent application follows the documented rule. Do not change the public interface of any module. Verify with your own script before answering.",
+  "timeoutMs": 300000,
+  "difficulty": "hard"
+}

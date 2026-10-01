@@ -1,0 +1,7 @@
+{
+  "id": "csv-quotes",
+  "title": "CSV parser breaks on quoted fields with commas and doubled quotes",
+  "prompt": "Run `node check.mjs`. The parser falls over on quoted fields that contain commas or escaped double-quotes, which breaks the import pipeline. Fix lib/csv.mjs — do not edit check.mjs or sample.csv; re-run the check to confirm before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "big-file-normalize",
+  "title": "Normalize scattered violations in a file too big to read whole",
+  "prompt": "users.ndjson (3500 lines) violates SPEC.md: some emails contain uppercase letters. Bring every email in line with the spec — ids, names and the line count must not change. The file is too big to read in one window; work by search, not by paging through it. Verify your result before answering.",
+  "timeoutMs": 240000
+}

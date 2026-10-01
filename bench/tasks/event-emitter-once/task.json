@@ -1,0 +1,7 @@
+{
+  "id": "event-emitter-once",
+  "title": "once() listeners keep firing and cannot be removed",
+  "prompt": "The telemetry bus leaks handlers: a listener registered with once('ping', fn) runs on EVERY later emit, and off('ping', fn) with the original function does not remove it either. The header of lib/emitter.mjs states the contract: once must fire exactly once and be removable both via its unsubscribe function and via plain off(event, fn) with the ORIGINAL function. Fix lib/emitter.mjs and verify with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

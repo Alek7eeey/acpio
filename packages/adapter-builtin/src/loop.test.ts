@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ModelMessage } from "ai";
-import { compactMessages, pruneMessages, renderTranscript } from "./loop.js";
+import { NoOutputGeneratedError, streamText, type ModelMessage } from "ai";
+import { compactMessages, pruneMessages, renderTranscript, runTurn } from "./loop.js";
+
+vi.mock("ai", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("ai")>()),
+  streamText: vi.fn(),
+}));
 
 /** One user turn + its assistant reply, padded to `size` characters each. */
 function turn(marker: string, size: number): ModelMessage[] {
@@ -140,3 +145,144 @@ describe("compactMessages", () => {
     expect(transcript).toContain("1 failed");
   });
 });
+
+describe("runTurn failure handling", () => {
+  /** APICallError shape: an Error plus the provider response fields. */
+  function apiError(overrides: Record<string, unknown> = {}): Error {
+    return Object.assign(new Error("Invalid API key"), {
+      name: "AI_APICallError",
+      statusCode: 401,
+      url: "http://127.0.0.1:4096/api/chat",
+      responseBody: '{"error":"Unauthorized"}',
+      ...overrides,
+    });
+  }
+
+  async function* streamOf(parts: unknown[]): AsyncGenerator<unknown> {
+    for (const part of parts) yield part;
+  }
+
+  /** The SDK rejects every result promise with this when no step completed. */
+  const noOutput = () => ({
+    responseMessages: Promise.reject(new NoOutputGeneratedError()),
+    finishReason: Promise.reject(new NoOutputGeneratedError()),
+    totalUsage: Promise.reject(new NoOutputGeneratedError()),
+    usage: Promise.reject(new NoOutputGeneratedError()),
+  });
+
+  function turnOpts(opts: Partial<Parameters<typeof runTurn>[0]> = {}): Parameters<typeof runTurn>[0] {
+    return {
+      model: {} as Parameters<typeof runTurn>[0]["model"],
+      system: "test",
+      messages: [],
+      tools: {},
+      abortSignal: new AbortController().signal,
+      contextWindow: 100_000,
+      emit: () => {},
+      ...opts,
+    };
+  }
+
+  function mockStream(result: Record<string, unknown>): void {
+    vi.mocked(streamText).mockReturnValue(result as never);
+  }
+
+  async function caughtRun(opts: Partial<Parameters<typeof runTurn>[0]>): Promise<Error> {
+    try {
+      await runTurn(turnOpts(opts));
+      throw new Error("runTurn resolved, expected a rejection");
+    } catch (err) {
+      return err as Error;
+    }
+  }
+
+  it("reports the provider error, not the SDK's generic no-output one", async () => {
+    mockStream({
+      fullStream: streamOf([{ type: "error", error: apiError() }]),
+      ...noOutput(),
+    });
+    const err = await caughtRun({});
+    expect(err.message).toContain("HTTP 401");
+    expect(err.message).toContain("Invalid API key");
+    expect(err.message).not.toContain("No output generated");
+  });
+
+  it("names the endpoint so the misconfigured provider is identifiable", async () => {
+    mockStream({
+      fullStream: streamOf([{ type: "error", error: apiError() }]),
+      ...noOutput(),
+    });
+    const err = await caughtRun({});
+    expect(err.message).toContain("http://127.0.0.1:4096/api/chat");
+  });
+
+  it("appends the response body when it says more than the provider text", async () => {
+    mockStream({
+      fullStream: streamOf([
+        { type: "error", error: apiError({ message: "Unauthorized", responseBody: '{"error":"bad x-header"}' }) },
+      ]),
+      ...noOutput(),
+    });
+    const err = await caughtRun({});
+    expect(err.message).toContain("bad x-header");
+  });
+
+  it("keeps the original error as the cause", async () => {
+    const error = apiError();
+    mockStream({ fullStream: streamOf([{ type: "error", error }]), ...noOutput() });
+    const err = await caughtRun({});
+    expect((err as { cause?: unknown }).cause).toBe(error);
+  });
+
+  it("takes status and body from the last retried provider error", async () => {
+    mockStream({
+      fullStream: streamOf([
+        {
+          type: "error",
+          error: Object.assign(new Error("Failed after 3 attempts. Last error: rate limited"), {
+            errors: [
+              apiError({ statusCode: 429, message: "rate limited", responseBody: "too many requests" }),
+            ],
+          }),
+        },
+      ]),
+      ...noOutput(),
+    });
+    const err = await caughtRun({});
+    expect(err.message).toContain("HTTP 429");
+    expect(err.message).toContain("rate limited");
+    expect(err.message).toContain("too many requests");
+  });
+
+  it("returns a mid-turn failure in the outcome while keeping the streamed text", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    mockStream({
+      fullStream: streamOf([
+        { type: "text-delta", text: "partial answer" },
+        { type: "error", error: apiError({ statusCode: 502, message: "bad gateway", responseBody: "" }) },
+      ]),
+      responseMessages: Promise.resolve([]),
+      finishReason: Promise.resolve("stop"),
+      totalUsage: Promise.resolve({ totalTokens: 0 }),
+      usage: Promise.resolve({ totalTokens: 0 }),
+    });
+
+    const outcome = await runTurn(turnOpts({ emit: (update) => updates.push(update) }));
+    expect(outcome.failure?.message).toContain("HTTP 502");
+    expect(updates.some((u) => u.sessionUpdate === "agent_message_chunk")).toBe(true);
+  });
+
+  it("stays quiet when the turn was cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    mockStream({
+      fullStream: streamOf([{ type: "error", error: apiError() }]),
+      ...noOutput(),
+    });
+
+    const outcome = await runTurn(turnOpts({ abortSignal: controller.signal }));
+    expect(outcome.failure).toBeUndefined();
+    expect(outcome.stopReason).toBe("end_turn");
+  });
+});
+

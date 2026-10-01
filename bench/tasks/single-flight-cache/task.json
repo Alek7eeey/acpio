@@ -1,0 +1,7 @@
+{
+  "id": "single-flight-cache",
+  "title": "One dashboard load fires dozens of identical fetches",
+  "prompt": "Opening the dashboard fires one fetch per widget instead of one shared fetch per key: a burst of concurrent get(key) calls must collapse into a single underlying load while it is in flight. lib/singleflight.mjs documents the full contract: share the in-flight promise, cache successful values, never cache rejections, drop the in-flight entry once it settles so the next get starts fresh, and keep distinct keys independent. Fix lib/singleflight.mjs and verify with your own script using deferred promises and a load counter (concurrent collapse, post-settle reload, rejection not cached, distinct keys).",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

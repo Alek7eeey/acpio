@@ -15,7 +15,8 @@
 // dropped so captured bodies are readable without decompression.
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { request as httpsRequest } from "node:https";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** Per-response capture ceiling: keep counting past it, stop storing text. */
@@ -112,9 +113,12 @@ export function summarizeSse(text) {
 }
 
 export class LlmProxy {
-  constructor({ upstream, outDir, stamp, dump = false, verbose = false }) {
+  constructor({ upstream, outDir, stamp, dump = false, verbose = false, sessionHeader = null }) {
     const url = new URL(upstream);
     this.origin = url.origin;
+    // http.request cannot speak TLS: an https upstream throws
+    // ERR_INVALID_PROTOCOL synchronously and every call 502s.
+    this.transport = url.protocol === "https:" ? httpsRequest : httpRequest;
     // The client-facing base keeps the provider's path (`/v1`), so requests
     // arrive as `/v1/chat/completions` and forward unchanged.
     this.prefix = url.pathname.replace(/\/+$/, "");
@@ -122,8 +126,16 @@ export class LlmProxy {
     this.stamp = stamp;
     this.dump = dump;
     this.verbose = verbose;
+    // Some gateways (opencode zen) refuse requests without a session header.
+    // Injected per agent/task/repeat: every run gets a stable routing key and
+    // one agent's cache slot is never thrashed by another's.
+    this.sessionHeader = sessionHeader;
     this.port = 0;
     this.calls = [];
+    // Incremental capture: every completed call is appended as it finishes, so
+    // a killed runner (timeout, Ctrl-C, crash) keeps the wire it already saw —
+    // write() at the end is then just an ordered rewrite of the same data.
+    this.callsFile = path.join(this.outDir, `${this.stamp}.calls.jsonl`);
     this.label = { agent: null, task: null, repeat: 0 };
     this.t0 = Date.now();
     this.server = createServer((req, res) => {
@@ -158,49 +170,71 @@ export class LlmProxy {
 
   write() {
     mkdirSync(this.outDir, { recursive: true });
-    const file = path.join(this.outDir, `${this.stamp}.calls.jsonl`);
-    writeFileSync(file, this.calls.map((c) => JSON.stringify(c)).join("\n") + "\n");
-    return file;
+    writeFileSync(this.callsFile, this.calls.map((c) => JSON.stringify(c)).join("\n") + "\n");
+    return this.callsFile;
   }
 
-  /** Roll the raw calls up per agent/task for the report and the console. */
+  /** Roll the raw calls up per agent/task/repeat for the report and the console. */
   summary() {
     const groups = new Map();
     for (const call of this.calls) {
-      const key = `${call.label.agent}\u0000${call.label.task}`;
+      const key = `${call.label.agent}\u0000${call.label.task}\u0000${call.label.repeat}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(call);
     }
     return [...groups.entries()].map(([key, calls]) => {
-      const [agent, task] = key.split("\u0000");
+      const [agent, task, repeat] = key.split("\u0000");
       const prompts = calls.map((c) => c.response.usage?.prompt).filter((v) => typeof v === "number");
+      const completions = calls
+        .map((c) => c.response.usage?.completion)
+        .filter((v) => typeof v === "number");
       const cached = calls
         .map((c) => c.response.usage?.cached)
         .filter((v) => typeof v === "number");
       const first = calls[0];
       const last = calls[calls.length - 1];
+      // A call with an unparseable body (e.g. a 404 on an auxiliary GET)
+      // carries request: null — those are wire events, not crash material.
+      const req = (c) => c.request ?? { chars: {}, tools: 0, toolsChars: 0, params: {} };
+      const sum = (arr) => (arr.length ? arr.reduce((n, v) => n + v, 0) : null);
       return {
         agent,
         task,
-        repeats: new Set(calls.map((c) => c.label.repeat)).size,
+        repeat: Number(repeat),
         calls: calls.length,
         errors: calls.filter((c) => c.status >= 400).length,
         usageCalls: prompts.length,
+        promptTokens: sum(prompts),
+        completionTokens: sum(completions),
         promptTokensFirst: prompts.length ? prompts[0] : null,
         promptTokensLast: prompts.length ? prompts[prompts.length - 1] : null,
-        cachedTokens: cached.length ? cached.reduce((n, v) => n + v, 0) : null,
+        cachedTokens: sum(cached),
         cachedTokensLast: cached.length ? cached[cached.length - 1] : null,
-        systemChars: first?.request.chars.system ?? 0,
-        tools: first?.request.tools ?? 0,
-        toolsChars: first?.request.toolsChars ?? 0,
-        params: first?.request.params ?? {},
-        grownChars: last && first ? (last.request.chars.assistant ?? 0) - (first.request.chars.assistant ?? 0) : 0,
+        systemChars: req(first).chars.system ?? 0,
+        tools: req(first).tools ?? 0,
+        toolsChars: req(first).toolsChars ?? 0,
+        params: req(first).params ?? {},
+        grownChars: last && first ? (req(last).chars.assistant ?? 0) - (req(first).chars.assistant ?? 0) : 0,
       };
     });
   }
 
   async #handle(req, res) {
-    const target = this.origin + req.url;
+    // Per-request labeling: the caller may encode the label in the path
+    // (`/_lbl/<agent>/<task>/<repeat>/…`) — with concurrent rollouts a shared
+    // mutable `this.label` would attribute calls to whichever rollout set it
+    // last. The prefix is stripped before forwarding; the session header (if
+    // enabled) is derived from the same per-request label.
+    let label = this.label;
+    let url = req.url;
+    // The label segment sits after the client-facing prefix (the base URL
+    // already carries the upstream path, e.g. /zen/go/v1/_lbl/<agent>/…).
+    const m = /\/_lbl\/([^/]+)\/([^/]+)\/([^/]+)(?=\/)/.exec(req.url);
+    if (m) {
+      label = { agent: decodeURIComponent(m[1]), task: decodeURIComponent(m[2]), repeat: Number(m[3]) || 0 };
+      url = req.url.replace(m[0], "");
+    }
+    const target = this.origin + url;
     const chunks = [];
     let requestBytes = 0;
     for await (const chunk of req) {
@@ -216,9 +250,9 @@ export class LlmProxy {
     const call = {
       n: this.calls.length + 1,
       tMs: Date.now() - this.t0,
-      label: { ...this.label },
+      label: { ...label },
       method: req.method,
-      url: req.url,
+      url,
       requestBytes,
       request: body ? describeRequest(body) : null,
       status: 0,
@@ -231,11 +265,20 @@ export class LlmProxy {
     delete headers.host;
     delete headers["content-length"];
     delete headers["accept-encoding"]; // keep bodies readable for capture
+    // Session identity is the agent's job, not the proxy's: who started the
+    // conversation decides what "a conversation" is. We only record which
+    // requests carry the gateway's session header and where it came from.
+    call.sessionHeaderSource =
+      headers[this.sessionHeader ?? ""] === undefined
+        ? null
+        : String(headers[this.sessionHeader]).startsWith("acpio-bench-")
+          ? "proxy"
+          : "client";
     headers["content-length"] = String(rawBody.length);
 
     const started = Date.now();
     await new Promise((resolve) => {
-      const upstreamReq = httpRequest(target, { method: req.method, headers }, (upstreamRes) => {
+      const upstreamReq = this.transport(target, { method: req.method, headers }, (upstreamRes) => {
         call.status = upstreamRes.statusCode ?? 0;
         res.writeHead(call.status, upstreamRes.headers);
         // The client may vanish mid-stream (timeout kill, Ctrl-C). Writing to a
@@ -304,6 +347,7 @@ export class LlmProxy {
           call.response.error = "upstream stream error";
           call.ms = Date.now() - started;
           res.end();
+          this.#log(call, rawBody);
           resolve();
         });
       });
@@ -313,6 +357,10 @@ export class LlmProxy {
         call.ms = Date.now() - started;
         if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" });
         res.end(`proxy: ${err.message}`);
+        // A request that died before the upstream answered is still a wire
+        // event: the client retries it and otherwise it is invisible, making
+        // the call count (and every per-call stat) silently wrong.
+        this.#log(call, rawBody);
         resolve();
       });
       req.on("aborted", () => upstreamReq.destroy());
@@ -321,6 +369,11 @@ export class LlmProxy {
   }
 
   #log(call, rawBody) {
+    // Persist first: the caller may be killed the moment this resolves.
+    try {
+      mkdirSync(this.outDir, { recursive: true });
+      appendFileSync(this.callsFile, JSON.stringify(call) + "\n");
+    } catch {}
     if (this.dump) {
       const dir = path.join(this.outDir, `${this.stamp}.calls`);
       mkdirSync(dir, { recursive: true });

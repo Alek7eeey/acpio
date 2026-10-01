@@ -22,3 +22,5 @@ dist-app/
 /tmp/
 /bench/.work/
 /bench/results/
+/bench/.cache/
+/bench/swe/data/

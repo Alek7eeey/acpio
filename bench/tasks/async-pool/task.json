@@ -1,0 +1,7 @@
+{
+  "id": "async-pool",
+  "title": "Pool runs one task more than the concurrency limit",
+  "prompt": "Run `node check.mjs`. The pool is configured with limit 3 but a concurrency probe observes 4 tasks in flight, which the downstream API rate-limits. Fix lib/pool.mjs so at most `limit` tasks ever run at the same time, results keep their input order, and every task still runs. Do not edit check.mjs; re-run it before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

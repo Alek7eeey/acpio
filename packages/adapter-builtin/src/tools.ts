@@ -19,14 +19,19 @@ export interface BuiltinToolOptions {
 }
 
 /** Terminal output the model gets: enough to act on, bounded for the context. */
-const CLIP_HEAD = 8_000;
-const CLIP_TAIL = 8_000;
+const CLIP_HEAD = 4_000;
+const CLIP_TAIL = 2_000;
 const DEFAULT_BASH_TIMEOUT_MS = 120_000;
 const MAX_BASH_TIMEOUT_MS = 300_000;
 const TERMINAL_BYTE_LIMIT = 64 * 1024;
 const MAX_SEARCH_RESULTS = 200;
 const MAX_GLOB_RESULTS = 500;
-/** Read contract, pi's numbers: whichever cap is hit first ends the window. */
+/**
+ * Read contract, pi's numbers: whichever cap is hit first ends the window.
+ * Line endings are normalized to `\n`: repos check out CRLF on Windows, and a
+ * model copying `old_string` from a `\r\n` read hands `edit` a needle that
+ * matches nothing — four failed edits on one task is what that costs.
+ */
 const READ_MAX_LINES = 2_000;
 const READ_MAX_CHARS = 50_000;
 
@@ -181,14 +186,11 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const read = tool({
     description:
-      "Read a UTF-8 text file. Output is windowed to the first 2000 lines or 50KB, " +
-      "whichever comes first; pass line/limit (1-based) to move through a larger file, " +
-      "and continue from the reported line instead of re-reading the whole file. " +
-      "Directories and missing files are rejected by the host.",
+      "Read a UTF-8 text file. Windowed to the first 2000 lines / 50KB; continue from the reported line.",
     inputSchema: z.object({
-      path: z.string().describe("Absolute path, or a path relative to the working directory."),
+      path: z.string().describe("File path."),
       line: z.number().int().positive().optional().describe("1-based first line to read."),
-      limit: z.number().int().positive().optional().describe("Maximum number of lines to return."),
+      limit: z.number().int().positive().optional().describe("Max lines to return."),
     }),
     execute: async ({ path, line, limit }) => {
       const res = await host.request<{ content?: string }>("fs/read_text_file", {
@@ -196,7 +198,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         ...(line ? { line } : {}),
         ...(limit ? { limit } : {}),
       });
-      const content = res?.content || "";
+      const content = (res?.content || "").replace(/\r\n/g, "\n");
       if (!content) return "(empty file)";
       return windowRead(content, path, line ?? 1);
     },
@@ -204,10 +206,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const glob = tool({
     description:
-      "List workspace files whose path matches a glob (`*`, `?`, `**`; e.g. `src/**/*.ts`). " +
-      "Use this instead of shelling out to find or ls — .git and node_modules are skipped.",
+      "List files matching a glob like `src/**/*.ts`. Skips .git and node_modules.",
     inputSchema: z.object({
-      pattern: z.string().describe("Glob matched against the path relative to the working directory."),
+      pattern: z.string().describe("Glob pattern."),
       max_results: z.number().int().positive().max(MAX_GLOB_RESULTS).optional(),
     }),
     execute: async ({ pattern, max_results }) => {
@@ -223,15 +224,12 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const grep = tool({
     description:
-      "Search file contents with a JavaScript regular expression and return `path:line: text` hits. " +
-      "Prefer this over shelling out to grep/findstr. .git, node_modules, binaries and huge files are skipped.",
+      "Search file contents with a JS regex, returns `path:line: text`. " +
+      "Skips .git, node_modules, binaries and huge files.",
     inputSchema: z.object({
-      pattern: z.string().describe("JavaScript regular expression, e.g. `calcTotal\\s*\\(`."),
-      path: z
-        .string()
-        .optional()
-        .describe("Subdirectory to narrow the search, relative to the working directory."),
-      glob: z.string().optional().describe("Only search files matching this glob, e.g. `**/*.mjs`."),
+      pattern: z.string().describe("JS regex, e.g. `calcTotal\\s*\\(`."),
+      path: z.string().optional().describe("Subdirectory."),
+      glob: z.string().optional().describe("Only search files matching this glob."),
       ignore_case: z.boolean().optional(),
       max_results: z.number().int().positive().max(MAX_SEARCH_RESULTS).optional(),
     }),
@@ -260,10 +258,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const write = tool({
     description:
-      "Create or overwrite a file with exactly this content. The parent directory is created when missing. " +
-      "Prefer edit for changes to an existing file.",
+      "Create or overwrite a file; parents are created. Prefer `edit` for an existing file.",
     inputSchema: z.object({
-      path: z.string().describe("Absolute path, or a path relative to the working directory."),
+      path: z.string().describe("File path."),
       content: z.string().describe("Full new file content."),
     }),
     execute: async ({ path, content }) => {
@@ -275,54 +272,57 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const edit = tool({
     description:
-      "Replace exact text in a file. Send every change as one entry in `edits` — do not call this " +
-      "once per line. Each `old_string` must match exactly once unless `replace_all` is set, no two " +
-      "edits may overlap, and all of them apply to the file as it is now: read the file first and " +
-      "copy the text verbatim, including indentation.",
+      "Replace exact text in a file; each `old_string` must match the file's current text exactly " +
+      "once unless `replace_all` — read the file first and copy verbatim, including indentation.",
     inputSchema: z.object({
-      path: z.string().describe("Absolute path, or a path relative to the working directory."),
+      path: z.string().describe("File path."),
       edits: z
         .array(
           z.object({
-            old_string: z.string().describe("Exact text to replace; include enough context to be unique."),
+            old_string: z.string().describe("Exact text to replace, unique unless replace_all."),
             new_string: z.string().describe("Replacement text."),
-            replace_all: z
-              .boolean()
-              .optional()
-              .describe("Replace every occurrence instead of requiring exactly one."),
+            replace_all: z.boolean().optional().describe("Replace every occurrence."),
           }),
         )
-        .min(1)
-        .describe("One or more non-overlapping replacements, applied to the file as it is now."),
+        .min(1),
     }),
     execute: async ({ path, edits }) => {
       const { content } = await host.request<{ content: string }>("fs/read_text_file", { path });
-      const plan = planEdits(content, edits);
+      // Match in `\n`-land (what read shows), write back in the file's own EOL
+      // style: the needle comes from read output, the file may be CRLF.
+      const eol = content.includes("\r\n") ? "\r\n" : "\n";
+      const flat = content.replace(/\r\n/g, "\n");
+      const normalized = edits.map((e) => ({
+        old_string: e.old_string.replace(/\r\n/g, "\n"),
+        new_string: e.new_string.replace(/\r\n/g, "\n"),
+        ...(e.replace_all ? { replace_all: e.replace_all } : {}),
+      }));
+      const plan = planEdits(flat, normalized);
       await ask({ title: `edit ${path}`, kind: "edit", input: { path } });
-      await host.request("fs/write_text_file", { path, content: applyEdits(content, plan) });
+      const next = applyEdits(flat, plan);
+      await host.request("fs/write_text_file", {
+        path,
+        content: eol === "\r\n" ? next.replace(/\n/g, "\r\n") : next,
+      });
       return `Replaced ${plan.length} occurrence(s) in ${path}`;
     },
   });
 
   const bash = tool({
     description:
-      "Run a shell command in the working directory and wait for it to exit. " +
-      "Returns the exit code and the captured output; long output is clipped to its first " +
-      "and last 8000 characters, so narrow the command (pipe through `head`, `tail` or `grep`) " +
-      "when the middle matters instead of re-running it unchanged. " +
-      (posixShell()
-        ? "The shell is POSIX (bash/sh) on every platform - pipes, &&, globs and single/double " +
-          "quotes work as in bash, and paths use '/' (including on Windows)."
-        : "On Windows the command runs through cmd.exe, so quote for cmd.exe."),
+      "Run a shell command in the working directory and wait for exit. Returns the exit code and output, " +
+      "clipped to the first 4000 and last 2000 chars — pipe through `head`/`tail`/`grep` when the middle matters " +
+      "instead of re-running it unchanged." +
+      (posixShell() ? "" : " On Windows the command runs through cmd.exe, so quote for cmd.exe."),
     inputSchema: z.object({
-      command: z.string().describe("Shell command line (POSIX syntax when the shell is bash/sh)."),
+      command: z.string().describe("Shell command."),
       timeout_ms: z
         .number()
         .int()
         .positive()
         .max(MAX_BASH_TIMEOUT_MS)
         .optional()
-        .describe("Kill the command after this long (default 120s, max 300s)."),
+        .describe("Kill after this long (default 120s, max 300s)."),
     }),
     execute: async ({ command, timeout_ms }, ctx) => {
       await ask({ title: `bash ${command}`, kind: "execute", input: { command } });

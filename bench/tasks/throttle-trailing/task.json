@@ -1,0 +1,7 @@
+{
+  "id": "throttle-trailing",
+  "title": "Throttle drops the final resize call, leaving the layout stale",
+  "prompt": "The editor throttles relayout on resize, but after a resize burst the panel keeps the pre-burst size: the call that arrived while the window was closed never runs. Fix lib/throttle.mjs: the first call of a window runs immediately (leading), and the last call that arrived during a closed window must run when it reopens (trailing). Do not change the public interface. Verify with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

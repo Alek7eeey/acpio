@@ -1,0 +1,7 @@
+{
+  "id": "topo-sort-cycle",
+  "title": "Build planner silently emits a partial order on dependency cycles",
+  "prompt": "The task planner hangs or skips jobs when two tasks depend on each other: lib/topo.mjs returns a partial order instead of failing, and the runner happily executes the truncated plan. The documented contract: a cycle is a hard Error mentioning the stuck nodes — a partial order must never be returned silently. Fix lib/topo.mjs and verify with your own script (valid DAG order, diamond, empty graph, 3-cycle, self-edge, unknown node) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

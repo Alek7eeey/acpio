@@ -1,0 +1,7 @@
+{
+  "id": "log-ingest",
+  "title": "Key=value log lines vanished from per-service reports",
+  "prompt": "Run `node check.mjs`. After the log shipper migration a third of our lines stopped reaching the per-service reports: the ones the new producer writes as key=value fields. The parser used to understand both shapes; a cleanup likely dropped one. Fix lib/ingest.mjs so bracket-shaped and key=value lines both ingest, non-log lines stay dropped, and the report numbers add up again. Do not edit check.mjs or data/service.log; re-run the check before answering.",
+  "timeoutMs": 300000,
+  "difficulty": "hard"
+}

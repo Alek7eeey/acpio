@@ -1,0 +1,7 @@
+{
+  "id": "txn-ledger-ordering",
+  "title": "End-of-day balances drift when the file arrives out of order",
+  "prompt": "Accounting flagged two days whose end-of-day balances don't match the sum of that day's transactions. data/transactions.jsonl arrived in a strange order, and src/ledger.mjs documents the rule that must hold regardless: transactions apply strictly in NUMERIC seq order — the running balances and the per-day snapshots in the result both depend on it. Reproduce by feeding applyTxns a shuffled array, find where the ordering rule is lost, fix it, and verify with your own script (applied order, final balances, end-of-day snapshots for every day, negative-balance and malformed-input guards).",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

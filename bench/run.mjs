@@ -5,7 +5,8 @@
 //   node bench/run.mjs --agents builtin --repeats 3 --keep
 //
 // Results land as one row per run in bench/results/<stamp>.jsonl.
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BenchServer, runBuiltinAgent } from "./lib/builtin-agent.mjs";
@@ -16,20 +17,37 @@ import { changedFiles, makeWorkspace, verifyWorkspace } from "./lib/util.mjs";
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TASK_ROOT = path.join(REPO, "bench", "tasks");
 
+/** Shared bench defaults: one model across all benchmarks (gitignored config,
+ * env and CLI flags override). Same file the SWE runner reads. */
+function providerDefaults() {
+  try {
+    const p = JSON.parse(readFileSync(path.join(REPO, "bench", ".cache", "swe-provider.json"), "utf8"));
+    return { url: p.url, key: p.key, model: p.model };
+  } catch {
+    return { url: process.env.BENCH_BASE_URL || "http://api.ai.dev.imdomain/v1", key: process.env.BENCH_API_KEY || "no", model: "im/im-llm" };
+  }
+}
+
+/** Each CLI turns its native provider session header on by provider name. */
+const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen" };
+
 function parseArgs(argv) {
+  const defaults = providerDefaults();
   const out = {
     agents: ["pi", "omp", "builtin"],
     tasks: null,
     repeats: 1,
-    model: "im/im-llm",
-    builtinUrl: process.env.BENCH_BASE_URL || "http://api.ai.dev.imdomain/v1",
-    builtinKey: process.env.BENCH_API_KEY || "no",
+    model: process.env.BENCH_MODEL || defaults.model,
+    builtinUrl: process.env.BENCH_BASE_URL || defaults.url,
+    builtinKey: process.env.BENCH_API_KEY || defaults.key,
     contextWindow: Number(process.env.BENCH_CONTEXT_WINDOW || 64000),
     timeoutMs: 300_000,
+    concurrency: 4,
     keep: false,
     proxy: true,
     proxyDump: false,
     proxyVerbose: false,
+    sessionHeader: process.env.BENCH_SESSION_HEADER || null,
     out: path.join(REPO, "bench", "results"),
   };
   for (let i = 0; i < argv.length; i++) {
@@ -48,12 +66,14 @@ function parseArgs(argv) {
       case "--builtin-key": out.builtinKey = take(); break;
       case "--context-window": out.contextWindow = Number(take()); break;
       case "--timeout": out.timeoutMs = Number(take()); break;
+      case "--concurrency": out.concurrency = Math.max(1, Number(take())); break;
       case "--out": out.out = path.resolve(take()); break;
       case "--keep": out.keep = true; break;
       case "--proxy": out.proxy = true; break;
       case "--no-proxy": out.proxy = false; break;
       case "--proxy-dump": out.proxyDump = true; break;
       case "--proxy-verbose": out.proxyVerbose = true; break;
+      case "--session-header": out.sessionHeader = take(); break;
       case "--help": out.help = true; break;
       default: throw new Error(`unknown flag: ${flag}`);
     }
@@ -73,6 +93,14 @@ function loadTasks(only) {
 const fmt = (n, digits = 0) => (typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "-");
 const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 
+function logRow(row, done, total) {
+  const label = `${row.agent}-${row.task}-r${row.repeat}`;
+  console.log(
+    `[${done}/${total}] ${row.ok ? "PASS" : "FAIL"}  ${pad(label, 26)} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${String(row.toolCalls).padStart(2)}  in=${String(row.tokensIn).padStart(6)}  out=${String(row.tokensOut).padStart(5)}  ${row.timedOut ? "TIMEOUT" : ""}${row.crashed ? `exit=${row.exitCode}` : ""}`,
+  );
+  if (!row.ok) console.log(`      ↳ ${row.verifyOutput.split("\n").slice(0, 4).join(" | ").slice(0, 300)}`);
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
@@ -82,9 +110,14 @@ async function main() {
         "",
         "  node bench/run.mjs [--agents pi,omp,builtin] [--tasks fix-sum,fizzbuzz]",
         "                     [--repeats N] [--model <provider>/<id>] [--timeout ms]",
-        "                     [--builtin-url <url>] [--builtin-key <key>]",
+        "                     [--concurrency N] [--builtin-url <url>] [--builtin-key <key>]",
         "                     [--context-window N] [--out <dir>] [--keep]",
         "                     [--no-proxy] [--proxy-dump] [--proxy-verbose]",
+        "",
+        "Pairs (agent × task × repeat) run on N parallel slots; every pair's",
+        "provider URL carries its own wire label. Default model/provider comes",
+        "from bench/.cache/swe-provider.json (space-bunny-free), same as the SWE",
+        "runner.",
         "",
         "Results: bench/results/<stamp>.jsonl and <stamp>.md",
         "         <stamp>.calls.jsonl - every model call as seen by the proxy",
@@ -106,7 +139,7 @@ async function main() {
   mkdirSync(workRoot, { recursive: true });
   mkdirSync(opts.out, { recursive: true });
 
-  console.log(`model: ${provider}/${modelId}   agents: ${opts.agents.join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}\n`);
+  console.log(`model: ${provider}/${modelId}   agents: ${opts.agents.join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}   concurrency: ${opts.concurrency}\n`);
 
   // Every agent talks to the proxy, so the wire is captured regardless of what
   // each harness reports about itself. `--no-proxy` restores a direct call.
@@ -118,103 +151,123 @@ async function main() {
       stamp,
       dump: opts.proxyDump,
       verbose: opts.proxyVerbose,
+      sessionHeader: "x-opencode-session",
     });
     await proxy.start();
-    console.log(`proxy: ${proxy.base} -> ${opts.builtinUrl}${opts.proxyDump ? " (dumping requests)" : ""}`);
+    console.log(`proxy: ${proxy.base} -> ${opts.builtinUrl}${opts.proxyDump ? " (dumping requests)" : ""}\n`);
   }
-  const modelUrl = proxy ? proxy.base : opts.builtinUrl;
-  // The bench never reads the user's `~/.pi/agent/models.json`: pi gets its own
-  // config dir, so provider drift in daily use cannot leak into a run.
-  const piConfigDir = opts.agents.includes("pi") ? path.join(workRoot, "pi-agent") : null;
+  // Per-pair wire attribution: each pair's provider URL carries its label; the
+  // proxy reads it from the path (shared mutable labels scramble concurrent
+  // runs). The prefix is stripped before forwarding.
+  const labeledUrl = (agent, taskId, rep) =>
+    `${proxy ? proxy.base : opts.builtinUrl}/_lbl/${encodeURIComponent(agent)}/${encodeURIComponent(taskId)}/${rep}`;
 
-  if (opts.agents.includes("pi")) {
-    const file = ensurePiModel(piConfigDir, {
-      provider,
-      baseUrl: modelUrl,
-      apiKey: opts.builtinKey,
-      modelId,
-      contextWindow: opts.contextWindow,
-    });
-    console.log(`pi config: ${file}`);
-  }
+  const piConfigDirs = new Map(); // slot -> dir
 
-  if (opts.agents.includes("omp")) {
-    const file = ensureOmpModel(ompProfile(), {
-      provider,
-      baseUrl: modelUrl,
-      apiKey: opts.builtinKey,
-      modelId,
-      contextWindow: opts.contextWindow,
-    });
-    console.log(`omp provider profile: ${file}`);
-  }
-
-  let server = null;
-  if (opts.agents.includes("builtin")) {
-    server = new BenchServer({
-      repo: REPO,
-      stateDir: workRoot,
-      provider: {
-        provider,
-        baseUrl: modelUrl,
-        apiKey: opts.builtinKey,
-        modelId,
-        contextWindow: opts.contextWindow,
-      },
-    });
-    await server.start();
-    console.log(`builtin server up on ${server.base}\n`);
-  }
-
-  const rows = [];
-  try {
-    for (const agent of opts.agents) {
-      for (const task of tasks) {
-        for (let rep = 1; rep <= opts.repeats; rep++) {
-          const label = `${agent}-${task.id}-r${rep}`;
-          const ws = makeWorkspace(task.dir, workRoot, label);
-          const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
-          proxy?.setLabel({ agent, task: task.id, repeat: rep });
-          let result;
-          try {
-            result =
-              agent === "builtin"
-                ? await runBuiltinAgent(server, { task, ws, timeoutMs })
-                : await runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir });
-          } catch (err) {
-            result = {
-              toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
-              tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "", stopReason: "",
-              wallMs: 0, exitCode: null, timedOut: false, stderrTail: String(err),
-            };
-          }
-          const verify = await verifyWorkspace(task.dir, task, ws);
-          const row = {
-            agent,
-            task: task.id,
-            repeat: rep,
-            ok: verify.ok,
-            verifyOutput: verify.output.slice(0, 600),
-            files: changedFiles(ws),
-            ...result,
-            crashed: result.exitCode !== 0 && result.exitCode !== null,
-          };
-          rows.push(row);
-          console.log(
-            `${verify.ok ? "PASS" : "FAIL"}  ${pad(label, 26)} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${String(row.toolCalls).padStart(2)}  in=${String(row.tokensIn).padStart(6)}  out=${String(row.tokensOut).padStart(5)}  ${row.timedOut ? "TIMEOUT" : ""}${row.crashed ? `exit=${row.exitCode}` : ""}`,
-          );
-          if (!verify.ok) console.log(`      ↳ ${verify.output.split("\n").slice(0, 4).join(" | ").slice(0, 300)}`);
-          if (!opts.keep) rmSync(ws, { recursive: true, force: true });
+  /** One (agent, task, repeat) pair, run on the given slot. */
+  const runPair = async (pair, slot) => {
+    const { agent, task, rep } = pair;
+    const label = `${agent}-${task.id}-r${rep}`;
+    const ws = makeWorkspace(task.dir, workRoot, label);
+    const url = labeledUrl(agent, task.id, rep);
+    const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
+    let result;
+    try {
+      if (agent === "builtin") {
+        if (!slot.server) {
+          slot.server = new BenchServer({
+            repo: REPO,
+            stateDir: path.join(workRoot, `server-s${slot.idx}`),
+            provider: { provider: AGENT_PROVIDER_ALIAS[agent] ?? provider, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow },
+            headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
+          });
+          await slot.server.start();
+          console.log(`builtin server (slot ${slot.idx}) up on ${slot.server.base}`);
+        } else {
+          // Same server, next pair: relabel so the wire attribution follows.
+          await slot.server.configure(url);
         }
+        result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs });
+      } else {
+        let piConfigDir;
+        let providerSlug = AGENT_PROVIDER_ALIAS[agent] ?? provider;
+        if (agent === "pi") {
+          if (!piConfigDirs.has(slot.idx)) piConfigDirs.set(slot.idx, path.join(workRoot, `pi-s${slot.idx}`));
+          piConfigDir = piConfigDirs.get(slot.idx);
+          ensurePiModel(piConfigDir, { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
+        }
+        if (agent === "omp") {
+          ensureOmpModel(ompProfile(), { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
+        }
+        result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir });
+      }
+    } catch (err) {
+      result = {
+        toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
+        tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "", stopReason: "",
+        wallMs: 0, exitCode: null, timedOut: false, stderrTail: String(err),
+      };
+    }
+    const verify = await verifyWorkspace(task.dir, task, ws);
+    const row = {
+      agent,
+      task: task.id,
+      repeat: rep,
+      ok: verify.ok,
+      verifyOutput: verify.output.slice(0, 600),
+      files: changedFiles(ws),
+      ...result,
+      crashed: result.exitCode !== 0 && result.exitCode !== null,
+    };
+    if (!opts.keep) rmSync(ws, { recursive: true, force: true });
+    return row;
+  };
+
+  // All (agent, task, repeat) pairs; builtin+pi run on N parallel slots, omp
+  // runs on a single chain (its profile file is global — one config at a time).
+  const rows = [];
+  let done = 0;
+  const total = opts.agents.length * tasks.length * opts.repeats;
+  const ompPairs = [];
+  const freePairs = [];
+  for (const agent of opts.agents) {
+    for (const task of tasks) {
+      for (let rep = 1; rep <= opts.repeats; rep++) {
+        (agent === "omp" ? ompPairs : freePairs).push({ agent, task, rep });
       }
     }
-  } finally {
-    server?.stop();
   }
+  const C = Math.min(opts.concurrency, Math.max(1, freePairs.length));
+  const slots = Array.from({ length: C }, (_, idx) => ({ idx, server: null }));
+  const pairWorkers = slots.map((slot) =>
+    (async () => {
+      for (;;) {
+        const pair = freePairs.shift();
+        if (!pair) break;
+        const row = await runPair(pair, slot);
+        rows.push(row);
+        done += 1;
+        logRow(row, done, total);
+      }
+    })(),
+  );
+  const ompWorker = (async () => {
+    for (;;) {
+      const pair = ompPairs.shift();
+      if (!pair) break;
+      const row = await runPair(pair, slots[0]);
+      rows.push(row);
+      done += 1;
+      logRow(row, done, total);
+    }
+  })();
+  await Promise.all([...pairWorkers, ompWorker]);
+  for (const slot of slots) slot.server?.stop();
 
   const file = path.join(opts.out, `${stamp}.jsonl`);
   writeFileSync(file, rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
   const diagnostics = proxy ? proxy.summary() : [];
+  writeLedgerAppendix(opts, stamp, rows, diagnostics);
   const summary = path.join(opts.out, `${stamp}.md`);
   writeFileSync(summary, renderSummary(rows, opts, diagnostics));
   console.log(`\n${file}\n${summary}`);
@@ -236,17 +289,18 @@ async function main() {
 
   if (diagnostics.length) {
     console.log("\nwire (seen by the proxy, not self-reported):");
-    console.log("agent      calls  usage  sysChars  tools  schemaChars  cached  personality");
+    console.log("agent      calls  usage  sysChars  tools  schemaChars  prompt  cached  uncached  personality");
     for (const agent of opts.agents) {
       const ds = diagnostics.filter((d) => d.agent === agent);
       if (!ds.length) continue;
       const first = ds[0];
       const calls = ds.reduce((n, d) => n + d.calls, 0);
       const usage = ds.reduce((n, d) => n + d.usageCalls, 0);
+      const prompt = ds.reduce((n, d) => n + (d.promptTokens ?? 0), 0);
       const cached = ds.reduce((n, d) => n + (d.cachedTokens ?? 0), 0);
       const traits = describeParams(first.params);
       console.log(
-        `${pad(agent, 11)}${String(calls).padStart(5)}  ${String(usage).padStart(5)}  ${String(first.systemChars).padStart(8)}  ${String(first.tools).padStart(5)}  ${String(first.toolsChars).padStart(11)}  ${String(cached).padStart(6)}  ${traits}`,
+        `${pad(agent, 11)}${String(calls).padStart(5)}  ${String(usage).padStart(5)}  ${String(first.systemChars).padStart(8)}  ${String(first.tools).padStart(5)}  ${String(first.toolsChars).padStart(11)}  ${String(prompt).padStart(6)}  ${String(cached).padStart(6)}  ${String(prompt - cached).padStart(8)}  ${traits}`,
       );
     }
   }
@@ -263,35 +317,101 @@ function describeParams(params = {}) {
   return traits.join(" ");
 }
 
+/**
+ * Append every run to the cross-stamp ledger (`all-runs.jsonl`): one line per
+ * run, wire numbers when the proxy saw them and harness self-reports when it
+ * did not. Per-stamp files are the raw record; this file is the statistic —
+ * a single append-only log every future analysis reads first, so no run is
+ * ever only discoverable by knowing its stamp.
+ */
+function writeLedgerAppendix(opts, stamp, rows, diagnostics) {
+  let git = "";
+  try {
+    git = execSync("git rev-parse --short HEAD", { cwd: REPO, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  } catch {}
+  const byRun = new Map(diagnostics.map((d) => [`${d.agent}\u0000${d.task}\u0000${d.repeat}`, d]));
+  const lines = rows.map((r) => {
+    const d = byRun.get(`${r.agent}\u0000${r.task}\u0000${r.repeat}`);
+    const promptTok = d?.promptTokens ?? r.tokensIn ?? null;
+    const cachedTok = d?.cachedTokens ?? r.tokensCached ?? 0;
+    return JSON.stringify({
+      ts: new Date().toISOString(),
+      stamp,
+      git,
+      model: opts.model,
+      agent: r.agent,
+      task: r.task,
+      repeat: r.repeat,
+      ok: r.ok,
+      wallMs: r.wallMs,
+      tools: r.toolCalls,
+      toolErrors: r.toolErrors ?? 0,
+      modelCalls: d?.calls ?? null,
+      promptTok,
+      cachedTok,
+      uncachedTok: promptTok == null ? null : promptTok - cachedTok,
+      outTok: d?.completionTokens ?? r.tokensOut ?? null,
+    });
+  });
+  appendFileSync(path.join(opts.out, "all-runs.jsonl"), lines.join("\n") + "\n");
+}
+
 function renderSummary(rows, opts, diagnostics = []) {
+  // Proxy numbers are the wire truth; self-reported tokens fill in only where
+  // the proxy saw nothing (crashed run, --no-proxy).
+  const byRun = new Map(diagnostics.map((d) => [`${d.agent}\u0000${d.task}\u0000${d.repeat}`, d]));
   const lines = [
     `# Agent benchmark — ${new Date().toISOString()}`,
     "",
     `Model: \`${opts.model}\` on \`${opts.builtinUrl}\`${opts.proxy ? " (through the capturing proxy)" : " (direct)"}. ` +
       `Fresh workspace per run; verification is a hidden \`verify.mjs\` copied in after the agent stops.`,
     "",
-    "| task | agent | pass | wall s | tools | tool kinds | tok in | tok cached | tok out | note |",
-    "|---|---|---|---|---|---|---|---|---|---|",
+    "tok in/cached/uncached come from the proxy when it ran (the wire), falling back to harness self-reports; " +
+    "uncached is what the provider actually had to read.",
+    "",
+    "| task | agent | pass | wall s | tools | toolErr | tool kinds | tok in | tok cached | tok uncached | tok out | note |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const r of rows) {
     const kinds = Object.entries(r.toolNames ?? {}).map(([k, v]) => `${k}×${v}`).join(" ") || "—";
     const note = r.timedOut ? "timeout" : r.crashed ? `exit ${r.exitCode}` : r.ok ? "" : "verify failed";
+    const d = byRun.get(`${r.agent}\u0000${r.task}\u0000${r.repeat}`);
+    const tokIn = d?.promptTokens ?? r.tokensIn ?? null;
+    const tokCached = d?.cachedTokens ?? r.tokensCached ?? 0;
+    const tokOut = d?.completionTokens ?? r.tokensOut ?? null;
+    const uncached = tokIn == null ? null : tokIn - tokCached;
     lines.push(
-      `| ${r.task} | ${r.agent} | ${r.ok ? "✅" : "❌"} | ${(r.wallMs / 1000).toFixed(1)} | ${r.toolCalls} | ${kinds} | ${r.tokensIn} | ${r.tokensCached ?? 0} | ${r.tokensOut} | ${note} |`,
+      `| ${r.task} | ${r.agent} | ${r.ok ? "✅" : "❌"} | ${(r.wallMs / 1000).toFixed(1)} | ${r.toolCalls} | ${r.toolErrors ?? 0} | ${kinds} | ${fmt(tokIn)} | ${fmt(tokCached)} | ${fmt(uncached)} | ${fmt(tokOut)} | ${note} |`,
     );
   }
 
   if (diagnostics.length) {
+    // One row per agent+task: repeats merge so the table stays comparable.
+    const merged = new Map();
+    for (const d of diagnostics) {
+      const key = `${d.agent}\u0000${d.task}`;
+      const m = merged.get(key);
+      if (!m) merged.set(key, { ...d });
+      else {
+        m.calls += d.calls;
+        m.usageCalls += d.usageCalls;
+        m.errors += d.errors;
+        m.promptTokens = (m.promptTokens ?? 0) + (d.promptTokens ?? 0);
+        m.completionTokens = (m.completionTokens ?? 0) + (d.completionTokens ?? 0);
+        m.cachedTokens = (m.cachedTokens ?? 0) + (d.cachedTokens ?? 0);
+      }
+    }
     lines.push("", "## Wire diagnostics", "");
     lines.push(
       "_Seen by the proxy: what each harness actually sent and what the server actually returned._",
       "",
-      "| agent | task | model calls | calls w/ usage | prompt tok first | prompt tok last | cached tok (sum) | system chars | tools | tool schema chars | params |",
-      "|---|---|---|---|---|---|---|---|---|---|---|",
+      "| agent | task | model calls | prompt tok (sum) | cached tok (sum) | uncached tok | prompt tok first | prompt tok last | system chars | tools | tool schema chars | params |",
+      "|---|---|---|---|---|---|---|---|---|---|---|---|",
     );
-    for (const d of diagnostics) {
+    for (const d of merged.values()) {
+      const uncached = d.promptTokens != null ? d.promptTokens - (d.cachedTokens ?? 0) : null;
       lines.push(
-        `| ${d.agent} | ${d.task} | ${d.calls} | ${d.usageCalls} | ${d.promptTokensFirst ?? "—"} | ${d.promptTokensLast ?? "—"} | ${d.cachedTokens ?? "—"} | ${d.systemChars} | ${d.tools} | ${d.toolsChars} | \`${describeParams(d.params)}\` |`,
+        `| ${d.agent} | ${d.task} | ${d.calls} | ${fmt(d.promptTokens)} | ${fmt(d.cachedTokens)} | ${fmt(uncached)} | ${d.promptTokensFirst ?? "—"} | ${d.promptTokensLast ?? "—"} | ${d.systemChars} | ${d.tools} | ${d.toolsChars} | \`${describeParams(d.params)}\` |`,
       );
     }
     const withUsage = diagnostics.reduce((n, d) => n + d.usageCalls, 0);

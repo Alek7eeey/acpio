@@ -1,0 +1,7 @@
+{
+  "id": "config-schema-validate",
+  "title": "Fresh deployments fail validation: defaults are never applied",
+  "prompt": "Deploying with an empty config file fails validation with 'port: required' although the schema gives port a default of 8080. The pipeline in lib/validate.mjs is supposed to apply defaults from lib/schema.mjs BEFORE checking fields — the header of schema.mjs states that order. Find where the order is lost, fix it without changing any interface, and verify with your own script (defaults satisfy required, type errors, enum errors, dot paths, input not mutated, multiple sorted errors) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

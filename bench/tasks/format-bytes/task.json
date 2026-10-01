@@ -1,0 +1,7 @@
+{
+  "id": "format-bytes",
+  "title": "Upload dialog shows a 50 MB file as 52.4 MB",
+  "prompt": "The storage page switched to showing decimal-looking numbers: a 50 MiB upload renders as 52.4 MB and a 3 GiB archive as 3.2 GB. Our formatter is specified in IEC binary units (1 KB = 1024 B) — see the header of lib/bytes.mjs. Somewhere on the way to that output the divisor is wrong. Fix lib/bytes.mjs and verify with your own script (sub-KB values, exact 1024, MB/GB/TB, invalid inputs throw) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

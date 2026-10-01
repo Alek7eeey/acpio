@@ -1,0 +1,7 @@
+{
+  "id": "env-precedence",
+  "title": "Environment variables no longer override file config",
+  "prompt": "Run `node check.mjs`. After a refactor, values from the environment lose to values from the file, which is backwards: precedence must be defaults < file < env. ENV keys map with __ as the nesting separator (DB__HOST → db.host). Fix lib/config.mjs without changing the interface; do not edit check.mjs; re-run it before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

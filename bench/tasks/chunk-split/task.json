@@ -1,0 +1,7 @@
+{
+  "id": "chunk-split",
+  "title": "Chunker drops the last element of uneven arrays",
+  "prompt": "Callers of chunk(items, size) lose the final element whenever the array length is not a multiple of size, and pageCounts under-reports by one on uneven totals. Fix lib/chunk.mjs, keep the RangeError for non-positive sizes, and verify with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

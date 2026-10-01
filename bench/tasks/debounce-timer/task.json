@@ -1,0 +1,7 @@
+{
+  "id": "debounce-timer",
+  "title": "Search-as-you-type fires the backend once per keystroke",
+  "prompt": "Run a few lines against lib/debounce.mjs: typing \"abc\" (three calls in quick succession) hits the backend three times instead of once. Debounce must collapse a burst into a single invocation `wait` ms after the LAST call, with the last call's arguments. Fix lib/debounce.mjs without changing its interface and verify with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

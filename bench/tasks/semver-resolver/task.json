@@ -1,0 +1,7 @@
+{
+  "id": "semver-resolver",
+  "title": "Resolver installs a beta for a caret range",
+  "prompt": "Run `node check.mjs`. CI resolved ^1.2.0 to 1.9.0-beta.2 and shipped a prerelease to staging. The registry keeps betas around, so the rule is the one documented in lib/semver.mjs: a prerelease binds LOWER than the version it belongs to (1.0.0-rc.1 < 1.0.0), and ranges resolve to the highest RELEASE unless the range itself names a prerelease. The symptom shows in lib/resolve.mjs, but the corruption is in the comparator it sorts with. Fix the cause, keep every interface, and verify with your own script (comparator directions, ^/~/>=/<=/exact/*, prerelease gating, unsatisfied range throws) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

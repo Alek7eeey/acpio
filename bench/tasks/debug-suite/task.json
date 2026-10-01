@@ -1,0 +1,6 @@
+{
+  "id": "debug-suite",
+  "title": "One test fails in a passing suite — fix the library, not the tests",
+  "prompt": "Run `npm test`. One test fails while the rest pass — fix the code in lib/ so the whole suite passes. Do not edit anything under test/. Re-run `npm test` and show it green before answering.",
+  "timeoutMs": 240000
+}

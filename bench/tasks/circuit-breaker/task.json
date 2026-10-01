@@ -1,0 +1,7 @@
+{
+  "id": "circuit-breaker",
+  "title": "Half-open state lets a whole retry storm through",
+  "prompt": "After a backend outage recovered, the circuit breaker let a burst of client calls hit the recovering service at once instead of sending a single probe — the retry storm tripped it again. lib/breaker.mjs documents the state machine: closed (threshold consecutive failures open it), open (everything rejects with Error('circuit open') without touching the delegate until cooldownMs elapses), half-open (exactly ONE probe runs; success closes, failure reopens with a fresh cooldown; every other call still rejects). The clock is injectable. Fix lib/breaker.mjs and verify the full state machine with your own script: counting delegate, calls during open, calls during an in-flight probe, cooldown restarts, success/failure probe paths.",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

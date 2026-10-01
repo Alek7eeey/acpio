@@ -1,0 +1,7 @@
+{
+  "id": "csv-serialize",
+  "title": "Export breaks on the second quote inside a field",
+  "prompt": "The CSV export is importable again after one fix, except for values with MORE than one quote: a field like 'say \"hi\" now' comes back mangled on re-import. Per the RFC 4180 note in lib/csvw.mjs, EVERY quote inside a quoted field must be doubled. Fix lib/csvw.mjs and verify with your own script (quotes, commas, newlines, CR, null/undefined, numbers, multi-row, empty rows/fields) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

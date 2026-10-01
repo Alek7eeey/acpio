@@ -1,0 +1,12 @@
+// app entry
+import { template } from "./template.mjs"
+import { config } from "./config.mjs"
+
+function main() {
+  const users = load()
+  for (const user of users) {
+    console.log(render(user))
+  }
+}
+
+main()

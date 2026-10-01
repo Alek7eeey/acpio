@@ -1,0 +1,9 @@
+@@ -2,1 +2,3 @@
+ import { template } from "./template.mjs"
++import { validate } from "./validate.mjs"
++import { cache } from "./cache.mjs"
+@@ -6,3 +8,3 @@
+   const users = load()
+-  for (const user of users) {
++  for (const user of cache.warm(users)) {
+     console.log(render(user))

@@ -20,8 +20,10 @@ export function killTree(child) {
 /**
  * Run a command to completion with a wall-clock ceiling. Output is captured,
  * not streamed; a timed-out process is killed as a tree and reported as such.
+ * `maxStdout` caps the captured head (CLI agents in --mode json can stream
+ * megabytes of events; truncation would silently drop their usage reports).
  */
-export function runProcess(cmd, args, { cwd, env, timeoutMs = 240_000 } = {}) {
+export function runProcess(cmd, args, { cwd, env, timeoutMs = 240_000, maxStdout = 2_000_000 } = {}) {
   return new Promise((resolve) => {
     const t0 = Date.now();
     let child;
@@ -36,7 +38,7 @@ export function runProcess(cmd, args, { cwd, env, timeoutMs = 240_000 } = {}) {
       resolve({ code: null, signal: null, stdout: "", stderr: String(err), timedOut: false, spawnError: true, wallMs: 0 });
       return;
     }
-    const limit = 2_000_000;
+    const limit = maxStdout;
     let stdout = "";
     let stderr = "";
     let timedOut = false;

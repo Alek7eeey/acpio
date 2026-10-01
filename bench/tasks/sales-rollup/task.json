@@ -1,0 +1,7 @@
+{
+  "id": "sales-rollup",
+  "title": "July report shows refund revenue that belongs to earlier months",
+  "prompt": "Run `node check.mjs`. Finance says the July report books hundreds of refunds that actually belong to Jan-Jun orders, and the monthly cells for those months are inflated. The policy is documented in src/rollup.mjs: orders book in their own month; a refund nets against the ORIGINAL order's month and region (join by refund_of), never against the refund's own date. The data is src/orders.jsonl (thousands of lines — aggregate it, do not eyeball it). Find where the policy is lost, fix it, re-run the check, and verify with your own script against an independent recomputation.",
+  "timeoutMs": 300000,
+  "difficulty": "hard"
+}

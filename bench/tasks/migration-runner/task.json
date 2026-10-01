@@ -1,0 +1,7 @@
+{
+  "id": "migration-runner",
+  "title": "Fresh environments diverge: migrations apply in lexicographic order",
+  "prompt": "Run `node check.mjs`. A fresh staging environment crashed mid-migration, while prod (migrated incrementally) is fine. The runner's contract is in lib/runner.mjs: migrations apply in strict NUMERIC id order — lexicographic would run 10 before 2 — and several steps in migrations.mjs depend on tables created by earlier steps. Fix the runner, keep every other guarantee (checksum freeze on edited applied migrations, idempotent re-runs against a full journal, duplicate-id rejection), re-run the check, and verify the rest with your own script.",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

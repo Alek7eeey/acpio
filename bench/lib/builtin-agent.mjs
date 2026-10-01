@@ -17,10 +17,11 @@ async function freePort() {
 }
 
 export class BenchServer {
-  constructor({ repo, stateDir, provider }) {
+  constructor({ repo, stateDir, provider, headers }) {
     this.repo = repo;
     this.stateDir = stateDir;
     this.provider = provider;
+    this.headers = headers ?? [];
     this.port = 0;
     this.log = "";
     this.child = null;
@@ -69,6 +70,18 @@ export class BenchServer {
       }
     }
 
+    await this.configure();
+    const probe = await this.api("POST", "/api/agent/probe", { provider: "builtin" });
+    if (!probe?.ok) throw new Error(`builtin probe failed: ${probe?.message ?? "unknown"}`);
+  }
+
+  /**
+   * Point the running server at `url`. A slot server is reused across pairs,
+   * and the pair's wire label lives in the provider URL — without a re-PUT
+   * every later pair on the slot rides the first pair's label on the wire.
+   */
+  async configure(url = this.provider.baseUrl) {
+    this.provider.baseUrl = url;
     await this.api("PUT", "/api/settings", {
       locale: "en",
       defaultProvider: "builtin",
@@ -80,6 +93,7 @@ export class BenchServer {
           name: this.provider.provider,
           url: this.provider.baseUrl,
           apiKey: this.provider.apiKey,
+          headers: this.headers,
           models: [
             {
               id: this.provider.modelId,
@@ -91,8 +105,6 @@ export class BenchServer {
         },
       ],
     });
-    const probe = await this.api("POST", "/api/agent/probe", { provider: "builtin" });
-    if (!probe?.ok) throw new Error(`builtin probe failed: ${probe?.message ?? "unknown"}`);
   }
 
   stop() {
@@ -103,7 +115,7 @@ export class BenchServer {
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-/** One builtin turn: create a chat on the workspace, prompt, wait it out. */
+/** One in-process-agent turn: create a chat on the workspace, prompt, wait it out. */
 export async function runBuiltinAgent(server, { task, ws, timeoutMs }) {
   const t0 = Date.now();
   const session = await server.api("POST", "/api/sessions", {
@@ -122,6 +134,26 @@ export async function runBuiltinAgent(server, { task, ws, timeoutMs }) {
     else if (sawRunning || Date.now() - t0 > 5000) break;
     if (Date.now() > deadline) break;
     await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // A turn the poller gave up on is still live server-side: without a cancel it
+  // keeps calling the model under the NEXT task's proxy label and poisons that
+  // row (this happened once: a timed-out run leaked 9 calls across three
+  // later tasks). Cancel and wait, bounded, until the session is really idle.
+  if (detail?.status === "running") {
+    try {
+      await server.api("POST", `/api/sessions/${session.id}/cancel`);
+    } catch {}
+    const idleBy = Date.now() + 60_000;
+    while (Date.now() < idleBy) {
+      try {
+        detail = await server.api("GET", `/api/sessions/${session.id}`);
+      } catch {
+        break;
+      }
+      if (detail.status !== "running") break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
   }
 
   const parts = detail?.messages?.flatMap((m) => m.parts ?? []) ?? [];

@@ -373,6 +373,38 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("reports the provider's rejection when an extra header is wrong", async () => {
+    const server = createServer((req, res) => {
+      void req;
+      res.setHeader("content-type", "application/json");
+      res.statusCode = 401;
+      res.end(JSON.stringify({ error: { message: "unexpected x-opencode-session header" } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    try {
+      const { call } = boot({
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "OpenCode",
+            url: `http://127.0.0.1:${address.port}/v1`,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            headers: [{ name: "x-opencode-session", value: "wrong" }],
+          },
+        ],
+      });
+      await call("session/new", { cwd: "/w" });
+      await expect(
+        call("session/prompt", { prompt: [{ type: "text", text: "hi" }] }),
+      ).rejects.toThrow(/HTTP 401.*unexpected x-opencode-session header/s);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("reports the endpoint's token split in usage_update", async () => {
     const stub = await startStub();
     try {
