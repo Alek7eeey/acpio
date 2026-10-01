@@ -4414,7 +4414,12 @@ function ChatThread() {
     (files: File[], resolveName: (file: File, index: number) => string) => {
       const sessionId = activeSession?.id;
       if (!sessionId || files.length === 0) return;
-      if (editingMessageId || composerLocked || turnBusy) return;
+      // A running turn does not block staging: the bytes land in the session
+      // folder and ride the *next* prompt, while the composer shows Stop
+      // instead of Send, so nothing can go out by accident. Blocking it here
+      // (and on the paperclip and paste) meant a screenshot taken while the
+      // agent worked could not be queued at all.
+      if (editingMessageId || composerLocked) return;
 
       const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
       if (oversized) {
@@ -4482,7 +4487,6 @@ function ChatThread() {
       editingMessageId,
       pendingFiles.length,
       t,
-      turnBusy,
     ],
   );
 
@@ -6254,7 +6258,7 @@ function ChatThread() {
                 setCursorPos(e.currentTarget.selectionStart);
               }}
               onPaste={(e) => {
-                if (composerLocked || editingMessageId || turnBusy) return;
+                if (composerLocked || editingMessageId) return;
                 const images = collectClipboardImages(e.clipboardData);
                 if (images.length === 0) return;
                 e.preventDefault();
@@ -6364,7 +6368,7 @@ function ChatThread() {
                 title={`${attachSourceLabels[attachDefaultSource]} · ${t("chat.attachSwapHint", {
                   other: attachSourceLabels[attachOtherSource],
                 })}`}
-                disabled={composerLocked || editingMessageId !== null || turnBusy}
+                disabled={composerLocked || editingMessageId !== null}
                 onClick={() => openAttachSource(attachDefaultSource)}
                 onContextMenu={(e) => {
                   e.preventDefault();
