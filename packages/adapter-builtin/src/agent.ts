@@ -79,6 +79,9 @@ function systemPrompt(
     "",
     "Rules:",
     "- Read a file before changing it; make the smallest change that fully solves the task.",
+    "- A bug report is also a spec: every behavior it states must hold after the fix the way it " +
+      "held before. Where the wording is ambiguous, mirror what the unfixed code already did on " +
+      "that path — only the reported defect changes.",
     "- When the task asks for a new file, write it — the workspace is usually empty, " +
       "so do not survey it first; a listing tells you nothing you need.",
     "- Never invent paths, flags or APIs — read the directory or the file first.",
@@ -90,11 +93,18 @@ function systemPrompt(
     "- Batch independent calls in one step (several reads, searches or unrelated commands); " +
       "run a command only after the call it depends on has finished.",
     "- After running a command, check its exit code before believing the output.",
+    "- If a failing check encodes the old behavior the task asks to change, do not guess the " +
+      "replacement from the task wording: implement through the canonical mechanism the " +
+      "environment already provides (an installed library, a platform standard) instead of " +
+      "hand-rolling a path or format. When that means importing a third-party library the " +
+      "project does not depend on yet, add it to the dependency manifest (setup.cfg / " +
+      "pyproject.toml / package.json) — a clean install must keep working.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked.",
     "- `bash` is a POSIX shell on every platform (Git Bash on Windows): pipes, `&&` and " +
-      "single/double quotes behave like bash, and paths may use `/`. Prefer a script file " +
-      "over a long inline `node -e` one-liner.",
+      "single/double quotes behave like bash, and paths may use `/`. Prefer one direct command " +
+      "(`sed`, `perl -pi`, a short `node -e` rewrite) over writing a helper script and debugging " +
+      "it — every debug round is a wasted step.",
     `- ${scope}`,
     ...(mcp.tools.length
       ? [

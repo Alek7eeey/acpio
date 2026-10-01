@@ -164,6 +164,43 @@ function toError(value: unknown): Error {
   }
 }
 
+/**
+ * The streamed `error` part is the only carrier of the real cause: when no
+ * step completed, the SDK rejects every result promise with its generic
+ * "No output generated" error. Shape a message the user can act on — provider
+ * text, HTTP status, endpoint and a response-body excerpt, since a bad header
+ * or key often shows only in one of them. Retried calls hand us a RetryError
+ * whose `errors` array holds the actual provider error.
+ */
+function describeStreamError(value: unknown): Error {
+  const error = toError(value);
+  const source = value as {
+    statusCode?: unknown;
+    url?: unknown;
+    responseBody?: unknown;
+    errors?: unknown[];
+  };
+  const detail = (source.errors?.length
+    ? source.errors[source.errors.length - 1]
+    : value) as typeof source;
+
+  const status = Number(detail?.statusCode);
+  const url = typeof detail?.url === "string" ? detail.url : "";
+  const body = typeof detail?.responseBody === "string" ? detail.responseBody.trim() : "";
+
+  const head: string[] = [];
+  if (Number.isFinite(status) && status > 0) head.push(`HTTP ${status}`);
+  if (url) head.push(url);
+  const prefix = head.length
+    ? `Модель ответила ошибкой (${head.join(", ")})`
+    : "Модель ответила ошибкой";
+  let message = `${prefix}: ${error.message || "без описания"}`;
+  if (body && !message.includes(body)) {
+    message += `\nОтвет сервера: ${body.length > 500 ? `${body.slice(0, 500)}…` : body}`;
+  }
+  return new Error(message, { cause: error });
+}
+
 function toStopReason(finishReason: string): TurnStopReason {
   if (finishReason === "length") return "max_tokens";
   if (finishReason === "content-filter" || finishReason === "tool-approval-required") return "stop_sequence";
@@ -176,7 +213,19 @@ function toStopReason(finishReason: string): TurnStopReason {
  * that keeps calling tools would run until the user kills the chat. Natural
  * termination (a step with no tool calls) still wins well below this.
  */
-const MAX_TOOL_STEPS = 50;
+// A turn ends when the model stops calling tools. The ceiling below is not a
+// working limit — it only catches a runaway loop; the user-facing bound is the
+// Stop button / session cancel, and the token cost is bounded by the context
+// window plus the provider bill.
+const MAX_TOOL_STEPS = 10_000;
+
+/**
+ * Output cap, pi's and omp's number: a step that writes a 60KB file still fits,
+ * but a runaway completion (or a reasoning stream that never lands) stops here
+ * instead of burning the window. Uncapped output is the one token leak the
+ * model itself cannot cause without the harness signing off on it.
+ */
+const MAX_OUTPUT_TOKENS = 16_384;
 
 /** One assistant turn: stream text/thinking into ACP updates and run tools. */
 export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
@@ -187,6 +236,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     tools: opts.tools,
     abortSignal: opts.abortSignal,
     stopWhen: isStepCount(MAX_TOOL_STEPS),
+    maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxRetries: 2,
   });
 
@@ -223,7 +273,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
         opts.emit({ sessionUpdate: "tool_call_update", toolCallId: part.toolCallId, status: "failed" });
         break;
       case "error":
-        failure ??= toError(part.error);
+        failure ??= describeStreamError(part.error);
         break;
       default:
         break;
@@ -257,7 +307,9 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     contextTokens = Number(lastStepUsage?.totalTokens ?? 0) || 0;
   } catch (err) {
     // A cancelled turn resolves nothing — the client already knows it cancelled.
-    if (!opts.abortSignal.aborted) throw err;
+    // Otherwise the SDK's generic "No output generated" rejection hides the
+    // real cause: the streamed error part captured above reaches the user.
+    if (!opts.abortSignal.aborted) throw failure ?? err;
   }
 
   if (totalTokens > 0 && opts.contextWindow > 0) {
