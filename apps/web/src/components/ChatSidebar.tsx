@@ -1,5 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { AgentProvider, BoardDto, SessionDto } from "@acpio/shared";
@@ -29,14 +29,24 @@ import styles from "./AppShell.module.css";
 /** Tree section key for chats that live outside any folder. */
 const NO_FOLDER_KEY = "__no_folder__";
 
-type MenuState = {
-  id: string;
+/**
+ * Where a tree menu was invoked: the pointer spot for a right-click, or the
+ * control's own corner for a button. `anchorTop`/`anchorBottom` are the row's
+ * edges, so a menu that would run off the bottom flips above the row it belongs
+ * to instead of covering it; `anchorRight` makes the menu hang off a control's
+ * right edge (the row's "⋯").
+ */
+type TreeMenuAnchor = {
   x: number;
   y: number;
   anchorTop: number;
   anchorBottom: number;
   anchorRight?: number;
-} | null;
+};
+
+type MenuState =
+  | ({ id: string } & TreeMenuAnchor)
+  | null;
 
 type FolderPickerState = {
   x: number;
@@ -201,6 +211,64 @@ function MenuIcon({ children }: { children: ReactNode }) {
         {children}
       </svg>
     </span>
+  );
+}
+
+/** Breathing room kept between a tree menu and the viewport edge. */
+const MENU_MARGIN = 12;
+
+/**
+ * The tree's one floating menu, shared by chat, folder and board rows: a
+ * `position: fixed` list at the spot it was invoked, clamped into the viewport
+ * and flipped above its row when the pointer spot sits near the bottom. It
+ * measures itself after every render and re-places before paint, so a menu
+ * whose items change with the settings never flashes at the wrong spot.
+ */
+function TreeContextMenu({
+  anchor,
+  menuRef,
+  children,
+}: {
+  /** Null while closed; the payload rides along in the caller's own state. */
+  anchor: TreeMenuAnchor | null;
+  menuRef: RefObject<HTMLDivElement | null>;
+  children: ReactNode;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!anchor || !el) {
+      setPos(null);
+      return;
+    }
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let x = anchor.anchorRight != null ? anchor.anchorRight - width : anchor.x;
+    x = Math.min(Math.max(MENU_MARGIN, x), Math.max(MENU_MARGIN, window.innerWidth - width - MENU_MARGIN));
+    let y = anchor.y;
+    if (y + height > window.innerHeight - MENU_MARGIN) {
+      y = anchor.anchorTop - height - 6;
+    }
+    y = Math.min(Math.max(MENU_MARGIN, y), Math.max(MENU_MARGIN, window.innerHeight - height - MENU_MARGIN));
+    setPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
+  });
+
+  if (!anchor) return null;
+  return createPortal(
+    <div
+      ref={menuRef}
+      className={styles.contextMenu}
+      style={{
+        left: pos?.x ?? anchor.x,
+        top: pos?.y ?? anchor.y,
+        visibility: pos ? "visible" : "hidden",
+      }}
+      role="menu"
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 
@@ -371,28 +439,18 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const prevLikedCount = useRef(0);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
 
   // Deleting a folder removes it and every chat inside, confirmed through the
   // same inline confirm component chat deletion uses.
   const [confirmDeleteFolderCwd, setConfirmDeleteFolderCwd] = useState<string | null>(null);
   const folderConfirmRef = useRef<HTMLDivElement>(null);
-  const [folderMenu, setFolderMenu] = useState<{
-    cwd: string;
-    x: number;
-    y: number;
-    anchorTop: number;
-    anchorBottom: number;
-  } | null>(null);
-  const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [folderMenu, setFolderMenu] = useState<({ cwd: string } & TreeMenuAnchor) | null>(null);
   /** Folder whose per-folder MCP override dialog is open (null = closed). */
   const [mcpFolderCwd, setMcpFolderCwd] = useState<string | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
   /** Board row context menu + inline rename/delete confirm. */
-  const [boardMenu, setBoardMenu] = useState<{ board: BoardDto; x: number; y: number } | null>(
-    null,
-  );
+  const [boardMenu, setBoardMenu] = useState<({ board: BoardDto } & TreeMenuAnchor) | null>(null);
   const boardMenuRef = useRef<HTMLDivElement>(null);
   const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
   const [boardDraft, setBoardDraft] = useState("");
@@ -431,7 +489,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     anchorBottom: number,
   ) => {
     closeTreeMenus();
-    setFolderMenuPos(null);
     setFolderMenu({ cwd, x, y, anchorTop, anchorBottom });
   };
 
@@ -714,7 +771,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       e.type === "contextmenu"
         ? e.clientY
         : rect.bottom + 6;
-    setMenuPos(null);
     setMenu({
       id,
       x,
@@ -724,44 +780,6 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       ...(e.type === "contextmenu" ? {} : { anchorRight: rect.right }),
     });
   };
-
-  useLayoutEffect(() => {
-    if (!menu || !menuRef.current) {
-      setMenuPos(null);
-      return;
-    }
-    const el = menuRef.current;
-    const margin = 12;
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
-    let x =
-      menu.anchorRight != null ? menu.anchorRight - width : menu.x;
-    x = Math.min(Math.max(margin, x), window.innerWidth - width - margin);
-    let y = menu.y;
-    if (y + height > window.innerHeight - margin) {
-      y = menu.anchorTop - height - 6;
-    }
-    y = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
-    setMenuPos({ x, y });
-  }, [menu, settings.chatTreeMenu, isTouch]);
-
-  useLayoutEffect(() => {
-    if (!folderMenu || !folderMenuRef.current) {
-      setFolderMenuPos(null);
-      return;
-    }
-    const el = folderMenuRef.current;
-    const margin = 12;
-    const width = el.offsetWidth;
-    const height = el.offsetHeight;
-    let x = Math.min(Math.max(margin, folderMenu.x), window.innerWidth - width - margin);
-    let y = folderMenu.y;
-    if (y + height > window.innerHeight - margin) {
-      y = folderMenu.anchorTop - height - 6;
-    }
-    y = Math.min(Math.max(margin, y), window.innerHeight - height - margin);
-    setFolderMenuPos({ x, y });
-  }, [folderMenu]);
 
   const showFolderHeaders = folders.length > 1 || (folders.length === 1 && !!folders[0]?.cwd);
   const menuSession = menu ? sessions.find((s) => s.id === menu.id) : null;
@@ -1250,6 +1268,12 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     return to >= 0 && to < list.length;
   };
 
+  /**
+   * Board rows open their menu where the press landed, exactly like a folder
+   * row does. The old spot was a fixed corner off the row's right edge, so the
+   * menu of a board at the bottom of a long tree opened off-screen while the
+   * folder next to it stayed under the pointer.
+   */
   const openBoardMenu = (e: ReactMouseEvent, board: BoardDto) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1257,8 +1281,10 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setBoardMenu({
       board,
-      x: Math.max(12, Math.min(rect.right - 8, window.innerWidth - 215)),
-      y: Math.min(rect.bottom + 6, window.innerHeight - 185),
+      x: e.clientX,
+      y: e.clientY,
+      anchorTop: rect.top,
+      anchorBottom: rect.bottom,
     });
   };
 
@@ -2254,18 +2280,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
       </div>
 
       {menu &&
-        menuSession &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className={styles.contextMenu}
-            style={{
-              left: menuPos?.x ?? menu.x,
-              top: menuPos?.y ?? menu.y,
-              visibility: menuPos ? "visible" : "hidden",
-            }}
-            role="menu"
-          >
+        menuSession && (
+          <TreeContextMenu anchor={menu} menuRef={menuRef}>
             {(settings.chatTreeMenu ?? []).includes("rename") && (
             <button type="button" role="menuitem" onClick={() => startRenameSession(menuSession)}>
               <MenuIcon>
@@ -2407,23 +2423,12 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
             </button>
             </>
             )}
-          </div>,
-          document.body,
+          </TreeContextMenu>
         )}
 
       {folderMenu &&
-        folderMenu.cwd &&
-        createPortal(
-          <div
-            ref={folderMenuRef}
-            className={styles.contextMenu}
-            style={{
-              left: folderMenuPos?.x ?? folderMenu.x,
-              top: folderMenuPos?.y ?? folderMenu.y,
-              visibility: folderMenuPos ? "visible" : "hidden",
-            }}
-            role="menu"
-          >
+        folderMenu.cwd && (
+          <TreeContextMenu anchor={folderMenu} menuRef={folderMenuRef}>
             <button
               type="button"
               role="menuitem"
@@ -2588,8 +2593,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               </MenuIcon>
               {t("common.delete")}
             </button>
-          </div>,
-          document.body,
+          </TreeContextMenu>
         )}
 
       {folderPicker && (
@@ -2643,103 +2647,96 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         />
       )}
 
-      {boardMenu &&
-        createPortal(
-          <div
-            ref={boardMenuRef}
-            className={styles.contextMenu}
-            style={{ left: boardMenu.x, top: boardMenu.y }}
-            role="menu"
+      {boardMenu && (
+        <TreeContextMenu anchor={boardMenu} menuRef={boardMenuRef}>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setBoardDraft(boardMenu.board.name);
+              setRenamingBoardId(boardMenu.board.id);
+              setBoardMenu(null);
+            }}
           >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setBoardDraft(boardMenu.board.name);
-                setRenamingBoardId(boardMenu.board.id);
-                setBoardMenu(null);
-              }}
-            >
-              <MenuIcon>
-                <path
-                  d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinejoin="round"
-                />
-                <path
-                  d="M12.8 6.8 17.2 11.2"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                />
-              </MenuIcon>
-              {t("chat.renameSession")}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!canMoveBoard(boardMenu.board.id, -1)}
-              onClick={() => {
-                moveBoard(boardMenu.board.id, -1);
-                setBoardMenu(null);
-              }}
-            >
-              <MenuIcon>
-                <path
-                  d="M12 19V5m0 0-6 6m6-6 6 6"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </MenuIcon>
-              {t("chat.moveFolderUp")}
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              disabled={!canMoveBoard(boardMenu.board.id, 1)}
-              onClick={() => {
-                moveBoard(boardMenu.board.id, 1);
-                setBoardMenu(null);
-              }}
-            >
-              <MenuIcon>
-                <path
-                  d="M12 5v14m0 0-6-6m6 6 6-6"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </MenuIcon>
-              {t("chat.moveFolderDown")}
-            </button>
-            <div className={styles.contextMenuDivider} aria-hidden />
-            <button
-              type="button"
-              role="menuitem"
-              className={styles.menuDanger}
-              onClick={() => {
-                setConfirmDeleteBoardId(boardMenu.board.id);
-                setBoardMenu(null);
-              }}
-            >
-              <MenuIcon>
-                <path
-                  d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </MenuIcon>
-              {t("common.delete")}
-            </button>
-          </div>,
-          document.body,
-        )}
+            <MenuIcon>
+              <path
+                d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M12.8 6.8 17.2 11.2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              />
+            </MenuIcon>
+            {t("chat.renameSession")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canMoveBoard(boardMenu.board.id, -1)}
+            onClick={() => {
+              moveBoard(boardMenu.board.id, -1);
+              setBoardMenu(null);
+            }}
+          >
+            <MenuIcon>
+              <path
+                d="M12 19V5m0 0-6 6m6-6 6 6"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </MenuIcon>
+            {t("chat.moveFolderUp")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={!canMoveBoard(boardMenu.board.id, 1)}
+            onClick={() => {
+              moveBoard(boardMenu.board.id, 1);
+              setBoardMenu(null);
+            }}
+          >
+            <MenuIcon>
+              <path
+                d="M12 5v14m0 0-6-6m6 6 6-6"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </MenuIcon>
+            {t("chat.moveFolderDown")}
+          </button>
+          <div className={styles.contextMenuDivider} aria-hidden />
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.menuDanger}
+            onClick={() => {
+              setConfirmDeleteBoardId(boardMenu.board.id);
+              setBoardMenu(null);
+            }}
+          >
+            <MenuIcon>
+              <path
+                d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </MenuIcon>
+            {t("common.delete")}
+          </button>
+        </TreeContextMenu>
+      )}
 
       {mcpFolderCwd &&
         createPortal(

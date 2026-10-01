@@ -216,4 +216,31 @@ describe("board row menu", () => {
 
     expect(screen.queryByRole("menu")).toBeNull();
   });
+
+  // The board row's menu opened off the row's right edge wherever the press
+  // landed, while the folder row next to it opened under the pointer: one tree,
+  // two answers to the same press. Both menus are now the same component.
+  it("opens at the press, exactly like a folder row", () => {
+    const { container } = renderTree("/board/b1");
+
+    fireEvent.contextMenu(container.querySelector<HTMLElement>('[data-board-id="b1"]')!, {
+      clientX: 200,
+      clientY: 300,
+    });
+    expect([screen.getByRole("menu").style.left, screen.getByRole("menu").style.top]).toEqual([
+      "200px",
+      "300px",
+    ]);
+
+    fireEvent.mouseDown(document.body);
+
+    fireEvent.contextMenu(container.querySelector<HTMLElement>('[data-folder-cwd="E:/proj"]')!, {
+      clientX: 200,
+      clientY: 300,
+    });
+    expect([screen.getByRole("menu").style.left, screen.getByRole("menu").style.top]).toEqual([
+      "200px",
+      "300px",
+    ]);
+  });
 });
