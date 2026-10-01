@@ -19,6 +19,8 @@ dist-app/
 /.tmp-perf/
 /.acpio-attachments/
 /.tmp-check/
+/.oldcheck/
+.zcode/
 /tmp/
 /bench/.work/
 /bench/results/
