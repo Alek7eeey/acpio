@@ -11,7 +11,7 @@
 // container because better-sqlite3 / node-pty are native and must match the
 // containers' linux/glibc, not the Windows host.
 import { execSync, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, createWriteStream } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, createWriteStream } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Readable } from "node:stream";
@@ -177,8 +177,13 @@ function prepInDocker(nodeTarball, versions, bunVersion) {
       ],
       { timeoutMs: 1_800_000 },
     );
+    // Write aside and rename: a rollout that starts mid-build must see either
+    // the old bundle or the new one, never a half-written tar.
+    const tmp = `${TARBALL}.building`;
+    rmSync(tmp, { force: true });
+    docker(["cp", `${PREP_CONTAINER}:/bundle.tgz`, tmp]);
     rmSync(TARBALL, { force: true });
-    docker(["cp", `${PREP_CONTAINER}:/bundle.tgz`, TARBALL]);
+    renameSync(tmp, TARBALL);
   } finally {
     try {
       docker(["rm", "-f", PREP_CONTAINER], { timeoutMs: 60_000 });
