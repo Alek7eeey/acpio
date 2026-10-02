@@ -30,12 +30,17 @@ const SKIP_STAMPS = new Set(["2026-09-30T13-58-25-770Z"]);
 const byRef = new Map(); // `<model>/<agent>/<instance>` -> runs[]
 // The run index is the stamp -> model map: the wire's `request.model` is what
 // the harness happened to send (builtin labels it differently from pi/omp).
+// It also carries the stamp's gold flag: --gold self-tests grade the reference
+// patch (recorded as agent=builtin resolved rows, no per-row gold field), so
+// they must never feed a baseline.
 const stampModel = new Map();
+const GOLD_STAMPS = new Set();
 const runsIndex = path.join(RESULTS, "swe-runs.jsonl");
 if (existsSync(runsIndex)) {
   for (const l of readFileSync(runsIndex, "utf8").trim().split("\n").filter(Boolean)) {
     const r = JSON.parse(l);
     stampModel.set(r.stamp, r.model);
+    if (r.gold) GOLD_STAMPS.add(r.stamp);
   }
 }
 // Stamps older than the run index: the per-instance ledger carries the model too.
@@ -44,18 +49,19 @@ if (existsSync(ledger)) {
   for (const l of readFileSync(ledger, "utf8").trim().split("\n").filter(Boolean)) {
     const r = JSON.parse(l);
     if (r.model && !stampModel.has(r.stamp)) stampModel.set(r.stamp, r.model);
+    if (r.gold && r.stamp) GOLD_STAMPS.add(r.stamp);
   }
 }
 for (const f of readdirSync(RESULTS).sort()) {
   if (!f.startsWith("swe-") || !f.endsWith(".jsonl") || f.endsWith(".calls.jsonl")) continue;
   if (["swe-all-runs.jsonl", "swe-runs.jsonl"].includes(f)) continue; // ledgers, not stamps
   const stamp = f.slice("swe-".length, -".jsonl".length);
-  if (SKIP_STAMPS.has(stamp)) continue;
+  if (SKIP_STAMPS.has(stamp) || GOLD_STAMPS.has(stamp)) continue;
   const callsFile = path.join(RESULTS, `${f.slice(0, -".jsonl".length)}.calls.jsonl`);
   if (!existsSync(callsFile)) continue; // no wire numbers -> not a baseline row
   const runs = readFileSync(path.join(RESULTS, f), "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  const model = stampModel.get(stamp) ?? "unknown";
   if (!runs.length) continue;
+  const model = stampModel.get(stamp) ?? "unknown";
   const calls = readFileSync(callsFile, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l));
   const wire = new Map();
   for (const c of calls) {
