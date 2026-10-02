@@ -482,6 +482,9 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
       { timeoutMs: 120_000 },
     );
     cleanup = async () => {
+      // The server writes its own log inside the container — the only place
+      // an in-turn session error leaves a stack. Keep it before the rm.
+      await docker(["cp", `${container}:/tmp/acpio-server.log`, path.join(runDir, "logs", `${tag}.server.log`)], { timeoutMs: 60_000 }).catch(() => {});
       if (opts.keep) return;
       await docker(["rm", "-f", container], { timeoutMs: 120_000 }).catch(() => {});
     };

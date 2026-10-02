@@ -157,6 +157,26 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, full-corpus single pass on the retry+rule bundle: 92/100** —
+  all 100 instances × builtin, concurrency 3, fresh pulls for ~60 images
+  (5h45m total; pulls, not agents, ate the wall time — the image tar cache on
+  the data drive exists so this doesn't repeat): **92 RESOLVED** single-pass,
+  rollout med 232s / max 2618s, 3.79M uncached wire, cache hit 97%, 3970 model
+  calls. Best-of standings unchanged (100/100) and got **cheaper: 23k
+  uncached per solve, median rollout 181s** — this run's resolved records
+  beat the old ones on most instances. The 8 misses: astropy-14182,
+  matplotlib-20676 (45-min rollout ceiling with a patch in the tree — the
+  target case for a step-budget wrap-up), scikit-learn-25102 (**0-byte patch,
+  session status error with every wire call 200 and the stream-retry never
+  firing** — same death signature as the corpus-batch sphinx-8551, so the
+  killer is not the provider stream; the in-container server log died with
+  the container, so the runner now copies `/tmp/acpio-server.log` out before
+  cleanup and the next occurrence comes with a stack), scikit-learn-14629,
+  sphinx-10614, sphinx-11510 (resolved twice yesterday, missed today — that
+  instance swings), sphinx-8269 (91s — the shortest rollout of the run, a
+  hasty bad patch), sphinx-9258. Floor confirmed at 2629 prompt chars
+  corpus-wide. Stamp `2026-10-02T19-39-23-003Z`.
+
 - **2026-10-02, iteration: root-cause rule — both stuck misses convert;
   builtin 100/100** — the two remaining fails re-run together with the three
   fresh conversions as regression controls, on a bundle with one prompt
