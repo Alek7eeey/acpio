@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { NoOutputGeneratedError, streamText, type ModelMessage } from "ai";
-import { compactMessages, pruneMessages, renderTranscript, runTurn } from "./loop.js";
+import { compactMessages, pruneMessages, renderTranscript, runTurn, runTurnWithRetry } from "./loop.js";
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -283,6 +283,48 @@ describe("runTurn failure handling", () => {
     const outcome = await runTurn(turnOpts({ abortSignal: controller.signal }));
     expect(outcome.failure).toBeUndefined();
     expect(outcome.stopReason).toBe("end_turn");
+  });
+});
+
+describe("runTurnWithRetry", () => {
+  const outcome = { response: [], stopReason: "end_turn" as const };
+  const opts = (overrides: Partial<Parameters<typeof runTurnWithRetry>[1]> = {}) => ({
+    signal: new AbortController().signal,
+    attempts: 3,
+    note: () => {},
+    ...overrides,
+  });
+
+  it("returns the first success untouched", async () => {
+    const run = vi.fn().mockResolvedValue(outcome);
+    const res = await runTurnWithRetry(run, opts());
+    expect(res.stopReason).toBe("end_turn");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("reruns the turn after a dead stream and succeeds", async () => {
+    const run = vi.fn().mockRejectedValueOnce(new Error("socket hang up")).mockResolvedValue(outcome);
+    const notes: string[] = [];
+    const res = await runTurnWithRetry(run, opts({ note: (m) => notes.push(m) }));
+    expect(res.stopReason).toBe("end_turn");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(notes).toEqual([expect.stringContaining("повторяю ход (2 из 3)")]);
+  });
+
+  it("gives up after the last attempt with the original error", async () => {
+    const run = vi.fn().mockRejectedValue(new Error("endpoint down"));
+    await expect(runTurnWithRetry(run, opts())).rejects.toThrow("endpoint down");
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry a turn the user cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const run = vi.fn().mockRejectedValue(new Error("endpoint down"));
+    await expect(runTurnWithRetry(run, opts({ signal: controller.signal }))).rejects.toThrow(
+      "endpoint down",
+    );
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
 

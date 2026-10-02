@@ -14,7 +14,7 @@ import {
   resolveBuiltinModel,
 } from "./config.js";
 import { createHostRpc } from "./host.js";
-import { compactMessages, renderTranscript, runTurn } from "./loop.js";
+import { compactMessages, MAX_TURN_ATTEMPTS, renderTranscript, runTurn, runTurnWithRetry } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
@@ -380,37 +380,51 @@ export class BuiltinAgent implements InProcessAgentTransport {
         headers: builtinProviderHeaders(selection.provider.headers, this.sessionId),
       });
       const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
-      const outcome = await runTurn({
-        model: endpoint.chatModel(selection.modelId),
-        system: systemPrompt(this.opts.settings.locale, this.cwd, this.mode, {
-          servers: [...new Set(offered.map((entry) => entry.server))],
-          tools: offered.map((entry) => entry.qualifiedName),
-        }),
-        messages: await compactMessages({
-          messages: this.messages,
-          contextWindow,
-          summarize: async (dropped) => {
-            const { text } = await generateText({
-              model: endpoint.chatModel(selection.modelId),
-              system:
-                "Ты сжимаешь раннюю часть диалога программиста с агентом. Сохрани: исходную задачу и её " +
-                "ограничения, принятые решения, изменённые файлы с сутью правок, выполненные команды и " +
-                "их результат, нерешённые проблемы. Пиши на языке диалога, только конспект, без вступлений.",
-              prompt: renderTranscript(dropped),
-              abortSignal: abort.signal,
-              maxRetries: 1,
-            });
-            console.warn(`[builtin] compacted ${dropped.length} messages into a summary`);
-            return text;
+      const turn = async () =>
+        runTurn({
+          model: endpoint.chatModel(selection.modelId),
+          system: systemPrompt(this.opts.settings.locale, this.cwd, this.mode, {
+            servers: [...new Set(offered.map((entry) => entry.server))],
+            tools: offered.map((entry) => entry.qualifiedName),
+          }),
+          messages: await compactMessages({
+            messages: this.messages,
+            contextWindow,
+            summarize: async (dropped) => {
+              const { text } = await generateText({
+                model: endpoint.chatModel(selection.modelId),
+                system:
+                  "Ты сжимаешь раннюю часть диалога программиста с агентом. Сохрани: исходную задачу и её " +
+                  "ограничения, принятые решения, изменённые файлы с сутью правок, выполненные команды и " +
+                  "их результат, нерешённые проблемы. Пиши на языке диалога, только конспект, без вступлений.",
+                prompt: renderTranscript(dropped),
+                abortSignal: abort.signal,
+                maxRetries: 1,
+              });
+              console.warn(`[builtin] compacted ${dropped.length} messages into a summary`);
+              return text;
+            },
+          }),
+          tools: {
+            ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask }),
+            ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
           },
-        }),
-        tools: {
-          ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask }),
-          ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
-        },
-        abortSignal: abort.signal,
-        contextWindow,
-        emit: (update) => this.emitUpdate(update),
+          abortSignal: abort.signal,
+          contextWindow,
+          emit: (update) => this.emitUpdate(update),
+        });
+      // A stream that dies mid-flight throws before any response message
+      // exists, so the stored history is still exact and the same turn can
+      // simply run again. A failure that comes back with a resolved response
+      // is not retried: those messages are already part of the history.
+      const outcome = await runTurnWithRetry(turn, {
+        signal: abort.signal,
+        attempts: MAX_TURN_ATTEMPTS,
+        note: (message) =>
+          this.emitUpdate({
+            sessionUpdate: "agent_thought_chunk",
+            content: { type: "text", text: message },
+          }),
       });
       this.messages = [...this.messages, ...outcome.response];
       this.persist();

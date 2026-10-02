@@ -434,6 +434,85 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("reruns the turn when the provider stream dies mid-flight", async () => {
+    // First request: response head + one delta, then the socket is cut — the
+    // failure shape a flaky gateway produces. The SDK does not retry a stream
+    // that already started, so this exercises the adapter's own turn retry.
+    let hits = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        hits += 1;
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "partial" }, finish_reason: null },
+            ],
+          }),
+        );
+        if (hits === 1) {
+          setTimeout(() => res.destroy(), 50);
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    try {
+      const { call, frames } = boot({
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Flaky",
+            url: `http://127.0.0.1:${address.port}/v1`,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      });
+      await call("session/new", { cwd: "/w" });
+      const res = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(res.stopReason).toBe("end_turn");
+      expect(hits).toBe(2);
+      const updates = frames
+        .map((frame) => frame.params as { update?: Record<string, unknown> } | undefined)
+        .map((params) => params?.update);
+      expect(
+        updates.some(
+          (update) =>
+            update?.sessionUpdate === "agent_thought_chunk" &&
+            JSON.stringify(update).includes("повторяю ход"),
+        ),
+      ).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("refuses to prompt when the selected model's provider lost its endpoint", async () => {
     const { call } = boot({
       builtinProviders: [

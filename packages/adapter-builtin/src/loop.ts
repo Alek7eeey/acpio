@@ -329,3 +329,51 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     ...(failure && !opts.abortSignal.aborted ? { failure } : {}),
   };
 }
+
+/** Attempts per turn: the original plus reruns after a dead stream. */
+export const MAX_TURN_ATTEMPTS = 3;
+
+/** Backoff between turn retries — enough for a gateway blip to pass. */
+const RETRY_PAUSE_MS = [2_000, 6_000];
+
+/**
+ * Rerun a turn whose stream died mid-flight. `runTurn` throws before any
+ * response message exists, so the caller's history is still exact and the same
+ * turn can simply run again. Without this, one dropped stream from a flaky
+ * endpoint ends the whole session on a harness error with the work lost —
+ * a real SWE-bench rollout died 64 seconds in with an empty patch.
+ */
+export async function runTurnWithRetry(
+  run: () => Promise<TurnOutcome>,
+  opts: { signal: AbortSignal; attempts: number; note: (message: string) => void },
+): Promise<TurnOutcome> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run();
+    } catch (err) {
+      if (attempt >= opts.attempts || opts.signal.aborted) throw err;
+      opts.note(
+        `Ход прерван ошибкой провайдера (${firstLineError(err)}); повторяю ход ` +
+          `(${attempt + 1} из ${opts.attempts}).`,
+      );
+      await pause(RETRY_PAUSE_MS[Math.min(attempt - 1, RETRY_PAUSE_MS.length - 1)], opts.signal);
+      if (opts.signal.aborted) throw err;
+    }
+  }
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    }, { once: true });
+  });
+}
+
+/** One line, for the retry note — a stream error can carry a response body. */
+function firstLineError(err: unknown): string {
+  const message = (err instanceof Error ? err.message : String(err)).split("\n", 1)[0] ?? "";
+  return message.length > 160 ? `${message.slice(0, 160)}…` : message;
+}
