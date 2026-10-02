@@ -365,6 +365,9 @@ async function stageCliAgentConfig(container, agent, runDir, modelUrl, opts, ins
     ensurePiModel(dir, cfg);
     await dockerOk(["exec", container, "mkdir", "-p", "/opt/pi-agent"], { timeoutMs: 30_000 });
     await dockerOk(["cp", path.join(dir, "models.json"), `${container}:/opt/pi-agent/models.json`], { timeoutMs: 60_000 });
+    // ensurePiModel also wrote extensions/bash-timeout.js (default per-command
+    // bash ceiling); pi discovers extensions in <agentDir>/extensions.
+    await dockerOk(["cp", path.join(dir, "extensions"), `${container}:/opt/pi-agent/extensions`], { timeoutMs: 60_000 });
     return ["-e", "PI_CODING_AGENT_DIR=/opt/pi-agent", "-e", "PI_OFFLINE=1"];
   }
   if (agent === "omp") {

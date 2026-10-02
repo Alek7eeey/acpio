@@ -80,6 +80,27 @@ export function ensurePiModel(configDir, { provider, baseUrl, apiKey, modelId, c
       2,
     ) + "\n",
   );
+  // pi's bash tool has no default per-command timeout ("timeout in seconds,
+  // optional"), so one hung command used to burn the whole rollout budget
+  // (sphinx-10673: `git log -S --all`, 45 minutes). The extension gives every
+  // bash call the same 120s ceiling the builtin agent enforces; the model can
+  // still pass a larger explicit timeout when a command legitimately needs it.
+  const extensionsDir = path.join(configDir, "extensions");
+  mkdirSync(extensionsDir, { recursive: true });
+  writeFileSync(
+    path.join(extensionsDir, "bash-timeout.js"),
+    `// Default per-command ceiling for the bash tool, injected by the bench.
+const DEFAULT_BASH_TIMEOUT_SECONDS = 120;
+
+export default function (pi) {
+  pi.on("tool_call", (event) => {
+    if (event.toolName === "bash" && event.input.timeout == null) {
+      event.input.timeout = DEFAULT_BASH_TIMEOUT_SECONDS;
+    }
+  });
+}
+`,
+  );
   return file;
 }
 

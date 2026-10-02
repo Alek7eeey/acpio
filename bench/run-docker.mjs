@@ -281,6 +281,9 @@ async function runCliAgentInContainer(container, agent, { prompt, taskDir, timeo
     ensurePiModel(dir, { provider, baseUrl: url, apiKey: opts.builtinKey, modelId: opts.modelId, contextWindow: opts.contextWindow });
     await dockerOk(["exec", container, "mkdir", "-p", "/opt/pi-agent"], { timeoutMs: 30_000 });
     await dockerOk(["cp", path.join(dir, "models.json").replace(/\\/g, "/"), `${container}:/opt/pi-agent/models.json`], { timeoutMs: 60_000 });
+    // ensurePiModel also wrote extensions/bash-timeout.js (default per-command
+    // bash ceiling); pi discovers extensions in <agentDir>/extensions.
+    await dockerOk(["cp", path.join(dir, "extensions").replace(/\\/g, "/"), `${container}:/opt/pi-agent/extensions`], { timeoutMs: 60_000 });
     envFlags.push("-e", "PI_CODING_AGENT_DIR=/opt/pi-agent", "-e", "PI_OFFLINE=1");
   } else if (agent === "omp") {
     const home = path.join(CACHE, `daily-omp-home-s${slotIdx}`);
