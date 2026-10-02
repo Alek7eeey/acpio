@@ -7,6 +7,34 @@ opinions. Task families, iteration methodology and the official-benchmarks
 landscape (SWE-bench, Terminal-Bench, polyglot, …) live in
 [`ITERATIONS.md`](ITERATIONS.md) and [`BENCHMARKS.md`](BENCHMARKS.md).
 
+## Goals
+
+Why the bench exists, in the order that decides arguments:
+
+1. **Develop the builtin agent on numbers, not impressions.** Every agent
+   change is one iteration, measured against the frozen baseline
+   (`bench/swe/baseline.mjs`, `bench/results/`); tokens come from the wire
+   (`*.calls.jsonl`), verification is hidden, self-reports don't count.
+2. **Beat pi/omp on all three axes — pass rate, wall time, and cost per
+   solved task.** Same corpus, same containers, same model and endpoint, so
+   the delta is pure agent engineering; `baseline.mjs` compares against every
+   agent's BEST recorded run, not its average. Accuracy is the primary metric;
+   time and tokens are its price — efficiency is uncached tokens per RESOLVED
+   task, never raw totals (a hung rollout burns wall time but no tokens).
+3. **Keep every corpus discriminative.** Pass rate means nothing once agents
+   saturate it; expansions (20 → 40 → 60 synthetic, 26 → 100 Verified
+   instances) are driven by saturation, and failed-instance gold self-tests
+   keep the corpus honest before an agent miss is believed.
+4. **External validity: our runner, their tasks.** Official corpora serve as
+   the source of tasks and hidden verification (official docker images,
+   official eval scripts, FAIL_TO_PASS/PASS_TO_PASS grading); synthetic tasks
+   are the fast internal discriminator and are never presented as SWE-bench
+   results.
+5. **Two measurement loops.** The fast synthetic family (minutes per task,
+   no network) drives daily iterations; the official anchor (SWE-bench
+   Verified) confirms the inner loop maps to real-world work. Terminal-Bench
+   is the planned third leg for the terminal-task class.
+
 ## Run
 
 **By default benchmarks run in Docker** (decision 2026-10-01). `bench/run-docker.mjs`

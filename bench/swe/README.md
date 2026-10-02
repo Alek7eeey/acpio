@@ -80,12 +80,156 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp \
   --concurrency 2 --keep-images
 ```
 
-Iterations of the builtin agent re-run exactly this set and compare against
-`node bench/swe/baseline.mjs` — the best RESOLVED run per agent/instance across
-all recorded runs, tokens from the wire. django/sympy stay out of iterations.
+Iterations of the builtin agent re-run the full corpus (`select-corpus.mjs`,
+100 instances; the six-instance pilot stays as the fast smoke gate) and compare
+against `node bench/swe/baseline.mjs` — the best RESOLVED run per
+agent/instance across all recorded runs, tokens from the wire, gold stamps
+excluded. django/sympy stay out of iterations. Per-agent corpus totals:
+`node bench/swe/corpus-summary.mjs`.
+
+### Corpus expansion, +20 real instances (2026-10-01)
+
+The working corpus grows by twenty more instances from the same official
+Verified dataset — every one graded by its official docker image and eval
+script, same as the pilot. Selection rule (deterministic, from
+`bench/swe/data/swe-bench-verified.jsonl`): not run before, `FAIL_TO_PASS` is
+exactly one test, `PASS_TO_PASS` at most 30 tests (the eval script only runs
+the listed tests, so this keeps eval in minutes), django/sympy excluded, then
+spread across repos and sorted by PASS_TO_PASS size. Chosen:
+
+```
+astropy__astropy-7671      astropy__astropy-7166      astropy__astropy-14365
+astropy__astropy-13453     astropy__astropy-14182     matplotlib__matplotlib-24637
+pylint-dev__pylint-6903    pydata__xarray-3677        scikit-learn__scikit-learn-14141
+scikit-learn__scikit-learn-14053  scikit-learn__scikit-learn-13328
+scikit-learn__scikit-learn-25747  scikit-learn__scikit-learn-10844
+sphinx-doc__sphinx-8595    sphinx-doc__sphinx-9711    sphinx-doc__sphinx-8035
+sphinx-doc__sphinx-8721    sphinx-doc__sphinx-10614   sphinx-doc__sphinx-7889
+sphinx-doc__sphinx-10466
+```
+
+20 FAIL_TO_PASS and 160 PASS_TO_PASS tests across the whole expansion; official
+difficulty labels: 8 × "<15 min fix", 12 × "15 min - 1 hour". Five repos are
+new to this harness (astropy, matplotlib, xarray, scikit-learn, sphinx) —
+validate one image per new repo with `--gold` before spending agent tokens:
+
+```bash
+node bench/swe/run-swe.mjs --gold --instances astropy__astropy-7671,sphinx-doc__sphinx-8595,scikit-learn__scikit-learn-14141,pydata__xarray-3677,matplotlib__matplotlib-24637
+node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --keep-images \
+  --instances astropy__astropy-7671,astropy__astropy-7166,astropy__astropy-14365,astropy__astropy-13453,astropy__astropy-14182,matplotlib__matplotlib-24637,pylint-dev__pylint-6903,pydata__xarray-3677,scikit-learn__scikit-learn-14141,scikit-learn__scikit-learn-14053,scikit-learn__scikit-learn-13328,scikit-learn__scikit-learn-25747,scikit-learn__scikit-learn-10844,sphinx-doc__sphinx-8595,sphinx-doc__sphinx-9711,sphinx-doc__sphinx-8035,sphinx-doc__sphinx-8721,sphinx-doc__sphinx-10614,sphinx-doc__sphinx-7889,sphinx-doc__sphinx-10466
+```
+
+### The corpus at 100 (2026-10-01)
+
+The corpus grows to 100 instances and moves under a deterministic selector:
+`node bench/swe/select-corpus.mjs` prints it (`--write` saves
+`bench/swe/corpus.txt`), and re-running it must always yield the same 100 —
+iterations compare the same tasks. The 2026-09-30 twenty and the +20 expansion
+above are frozen inside the script (`EVER_RUN` / `WAVE2`); the remaining 60 are
+picked by cost tier — the official eval only runs the listed FAIL_TO_PASS /
+PASS_TO_PASS tests, so those counts bound eval time:
+
+- `T1 FTP=1, PTP<=30` — 23 instances
+- `T2 FTP=1, PTP<=60` — 24
+- `T3 FTP<=2, PTP<=60` — 13 (the pool never needed a looser tier)
+
+The 60 new spread sphinx 34, scikit-learn 15, astropy 5, matplotlib 3, pytest 2,
+xarray 1, and carry 73 FAIL_TO_PASS plus 1764 PASS_TO_PASS tests. Corpus-wide:
+122 FAIL_TO_PASS, 2839 PASS_TO_PASS, official difficulty labels 43 / 48 / 8 / 1
+across "<15 min fix" / "15 min - 1 hour" / "1-4 hours" / ">4 hours" — the labels
+measure human dev time; eval runs only the listed tests and stays in minutes.
+django/sympy remain excluded.
+
+Disk reality check before running: each instance image is 3–4 GB and the
+machine has ~26 GB free — run in batches of 5–6, prefer `--keep-images` per
+batch and `docker image prune -f` between batches:
+
+```bash
+node bench/swe/select-corpus.mjs --line        # the full --instances value
+node bench/swe/run-swe.mjs --gold --instances <batch>        # first, no tokens
+node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <batch>
+```
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-02, iteration: root-cause rule — both stuck misses convert;
+  builtin 100/100** — the two remaining fails re-run together with the three
+  fresh conversions as regression controls, on a bundle with one prompt
+  addition (system 2376 → 2629 chars, +253 ≈ 63 tokens of first-call floor):
+  fix the cause, not the site where the symptom shows; issue wording that
+  settles the expected behavior ("instead of") is a replacement, not an
+  addition; exercise the changed function itself on the issue's exact case.
+  **5/5 RESOLVED**: sklearn-25747 (30k uncached; 0/2 before the rule) and
+  sphinx-9229 (164k; 0/2 before, the previous fail had burned 188k over 37
+  minutes) — both targets; the controls held (8551 67k, 11510 30k, 9281 27k).
+  Best-of standings: **builtin 100/100** — 3058k uncached total, 31k per
+  solve, median rollout 229s. Honest framing: the three controls converted
+  without the rule the day before, so the rule's marginal evidence is the two
+  targets going 0/4 combined → 2/2 with it; n is small, and the corpus-wide
+  floor/token cost gets its real measurement at the next full-corpus run.
+  Stamp `2026-10-02T14-53-13-448Z`.
+
+- **2026-10-02, iteration: builtin turn retry — 3 of the 5 misses convert** —
+  the five builtin misses re-run on a bundle rebuilt from the working tree:
+  **sphinx-8551, sphinx-9281, sphinx-11510 now RESOLVED** → standings
+  **builtin 98/100** (fails left: sklearn-25747, sphinx-9229), uncached still
+  29k per solve, median rollout 218s. Honest caveat: not one stream dropped
+  during this run (n=5), so the new retry path itself was never exercised —
+  its value is the insurance against the one observed harness death
+  (sphinx-8551 in the corpus batch: stream cut at 64s, session errored, empty
+  patch). The conversions are model variance on re-roll: they show those three
+  tasks are within the model's reach, and the best-of baseline now carries
+  their cheapest resolved runs (8551 45k, 9281 24k, 11510 38k uncached). The
+  two misses left are pure model-reasoning cases: sphinx-9229 burned 188k
+  uncached / 143 calls / 37 min and still kept the weaker interpretation;
+  sklearn-25747 again chose the conditional `len==len` guard over dropping
+  the index assignment. Harness changes riding along: `runTurnWithRetry`
+  (3 attempts, 2s/6s backoff, transcript note, respects Stop) and pi's
+  per-command bash ceiling (a 120s default injected via a staged extension —
+  the first pi run to carry it is the next one). Stamp
+  `2026-10-02T12-44-07-837Z`.
+- **2026-10-02, coverage aligned: pi and omp at 100/100** — the equalizing
+  run from the pending item above (the same 14 instances × pi+omp,
+  concurrency 3, `--keep-images`; none of the images were cached, all 14
+  pulled): **26/28 RESOLVED** (pi 13/14, omp 13/14), 94m38s total, eval avg 7s.
+  The two misses join the fail lists: pi/pylint-4551 (rollout hit the 45-min
+  budget at 2748s with an 8.4KB patch — the long-command stall mode again)
+  and omp/pylint-4970 (510s, graded NOT_RESOLVED). Standings now
+  (**93/95/90** of 100, best RESOLVED per agent/instance): builtin 95, 29k
+  uncached per solve, median rollout 214s; pi 93, 40k, 302s; omp 90, 38k,
+  187s — comparison now runs at equal coverage. pi's 4551 miss is the direct
+  argument for the per-command bash ceiling staged after this run
+  (`ensurePiModel` now writes an extension injecting a 120s default timeout —
+  the builtin agent's own ceiling; explicit larger `timeout` still wins).
+  Stamp `2026-10-02T11-05-25-807Z`.
+- **2026-10-02, corpus complete: all 100 instances agent-run** — batches 2–3
+  (25+25 instances × builtin/pi/omp, zen free endpoint): **71/75** and
+  **71/75** RESOLVED. Full-corpus standings (best RESOLVED per agent/instance,
+  gold rows excluded): **builtin 95/100**, uncached 29k per solve, median
+  rollout 214s; pi 80 of 86 covered, 39k per solve, median 289s; omp 77 of 86
+  covered, 39k per solve, median 184s. pi/omp cover 86, not 100 — the
+  2026-09-30 corpus ran them only on the pilot/iteration subset; an
+  equalizing run (14 instances × 2 agents) is pending. All 15 unique
+  agent-miss instances gold-tested back **RESOLVED 15/15** across four gold
+  stamps — the corpus is valid, every miss is agent-side. Harness hardening:
+  `baseline.mjs` now excludes `--gold` stamps by the ledger's gold flag —
+  per-row records carry no gold field, so the old row-level filter was a
+  no-op and gold rows could silently feed BEST. Aggregation helper:
+  `bench/swe/corpus-summary.mjs`. Stamps: batch2 `2026-10-02T01-41-42-149Z`,
+  batch3 `2026-10-02T04-38-01-381Z`, gold `…04-38-01-431Z` / `…08-18-58-739Z`.
+- **2026-10-01, corpus at 100: first batch on the new 60** — the first 10
+  instances of the new-60 tier list × builtin/pi/omp (zen free endpoint),
+  concurrency 3: **25/30** (builtin 10/10, omp 8/10, pi 7/10), 98m total, eval
+  avg 9s, wire uncached 314k/270k/453k, cache hit 96–98%. All 5 failed
+  instances gold-tested back **RESOLVED 5/5** (0 model calls) — the instances
+  are clean, every miss is agent-side. pi/sphinx-10673 was a rollout-timeout
+  stall (12 calls in 45m, 410-byte patch), not a task signal. Batch stamp
+  `2026-10-01T20-47-44-033Z`, gold stamp `2026-10-01T22-27-18-610Z`.
+- **2026-10-01, corpus +20 gold self-test** — one `--gold` rollout per repo new
+  to the harness (astropy-7671, matplotlib-24637, xarray-3677, sphinx-8595,
+  scikit-learn-14141): **5/5 RESOLVED**, 0 model calls, 6m12s total including
+  image pulls, eval avg 14s. Images kept (`--keep-images`), so the first agent
+  run over the expansion skips the pulls. Stamp `2026-10-01T20-10-08-178Z`.
 - **2026-09-30, iter 1** — change: a system-prompt rule in
   `packages/adapter-builtin/src/agent.ts`: when a failing check encodes the old
   behavior the task asks to change, implement through the canonical mechanism
