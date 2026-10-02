@@ -1,0 +1,7 @@
+{
+  "id": "dedent-block",
+  "title": "Generated snippets ship with their template indentation",
+  "prompt": "Email templates built with lib/dedent.mjs come out indented by four spaces since a refactor: the common indent is no longer stripped. The header documents the rule — the indent is the shortest run of leading spaces over lines that contain any non-whitespace; blank lines never take part in that minimum and are left as they are. Fix lib/dedent.mjs and verify with your own script (uniform indent, blank lines mid-text, mixed depths, no indent at all, all-blank input, tabs stay) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

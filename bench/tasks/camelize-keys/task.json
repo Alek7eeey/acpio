@@ -1,0 +1,7 @@
+{
+  "id": "camelize-keys",
+  "title": "Nested keys stay snake_case after the API response mapping",
+  "prompt": "The API client maps response keys to camelCase, but since a cleanup only the TOP-LEVEL keys are converted: payload.profile.display_name and objects inside arrays keep their underscores, and the UI reads undefined. The header of lib/camelize.mjs promises the conversion runs RECURSIVELY — nested objects and arrays of objects included. Fix lib/camelize.mjs and verify with your own script (deep nesting, arrays of objects, kebab-case keys, digit keys, scalars, input not mutated) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

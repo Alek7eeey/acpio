@@ -922,4 +922,799 @@ for (const [rows, expected] of cases) {
 console.log("PASS: every quote inside a quoted field is doubled");
 `,
   ),
+
+  def(
+    "medium",
+    "min-heap",
+    "Priority queue pops mid-range jobs before the urgent ones",
+    "Run `node check.mjs`. The job runner orders work with lib/heap.mjs, and since a cleanup some pops come out of order: after pushing [5, 3, 8, 1, 9, 2] the queue handed back 8 while 5 was still queued. The header pins the contract — every pop returns the SMALLEST remaining value, so any full drain is ascending, whatever the push order. The likely culprit is the sift-down child selection. Fix lib/heap.mjs, re-run the check, and verify the rest with your own script (40-element drain in a scrambled push order, interleaved push/pop, duplicates, peek/size, pop on empty) before answering.",
+    {
+      "lib/heap.mjs": `/**
+ * Binary min-heap of numbers. push/pop/peek/size; pop on an empty heap
+ * returns undefined. Every pop returns the SMALLEST remaining value, so a
+ * full drain is always ascending. Duplicates are fine.
+ */
+export class MinHeap {
+  constructor() {
+    this.items = [];
+  }
+
+  get size() {
+    return this.items.length;
+  }
+
+  peek() {
+    return this.items[0];
+  }
+
+  push(value) {
+    this.items.push(value);
+    this.siftUp(this.items.length - 1);
+  }
+
+  pop() {
+    const top = this.items[0];
+    const last = this.items.pop();
+    if (this.items.length > 0) {
+      this.items[0] = last;
+      this.siftDown(0);
+    }
+    return top;
+  }
+
+  siftUp(i) {
+    while (i > 0) {
+      const parent = (i - 1) >> 1;
+      if (this.items[parent] <= this.items[i]) break;
+      [this.items[parent], this.items[i]] = [this.items[i], this.items[parent]];
+      i = parent;
+    }
+  }
+
+  siftDown(i) {
+    const n = this.items.length;
+    for (;;) {
+      const left = 2 * i + 1;
+      const right = 2 * i + 2;
+      let smallest = i;
+      if (left < n && this.items[left] < this.items[smallest]) smallest = left;
+      if (right < n && this.items[right] < this.items[smallest]) smallest = right;
+      if (smallest === i) break;
+      [this.items[i], this.items[smallest]] = [this.items[smallest], this.items[i]];
+      i = smallest;
+    }
+  }
+}
+`,
+      "check.mjs": `import { MinHeap } from "./lib/heap.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const heap = new MinHeap();
+for (const n of [5, 3, 8, 1, 9, 2]) heap.push(n);
+const drained = [];
+while (heap.size > 0) drained.push(heap.pop());
+if (drained.join(",") !== "1,2,3,5,8,9") fail("drain must be ascending, got " + drained.join(","));
+
+console.log("PASS: the queue drains ascending");
+`,
+    },
+    {
+      "lib/heap.mjs": [
+        [
+          "      if (left < n && this.items[left] < this.items[smallest]) smallest = left;",
+          "      if (right < n && this.items[right] < this.items[smallest]) smallest = right;",
+        ].join("\n"),
+        "      if (left < n && this.items[left] < this.items[smallest]) smallest = left;\n      // the left child is the smaller one after a clean push phase (PROD-4459)",
+      ],
+    },
+    `import { MinHeap } from "./lib/heap.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+let seed = 42;
+const next = () => (seed = (seed * 1103515245 + 12345) % 2147483648);
+
+const heap = new MinHeap();
+const values = Array.from({ length: 40 }, () => next() % 100);
+for (const v of values) heap.push(v);
+const drained = [];
+while (heap.size > 0) drained.push(heap.pop());
+const expected = [...values].sort((a, b) => a - b);
+if (drained.join(",") !== expected.join(",")) fail("full drain must be ascending: " + drained.join(","));
+
+const h2 = new MinHeap();
+h2.push(10);
+h2.push(4);
+if (h2.pop() !== 4) fail("interleaved pop 1");
+h2.push(7);
+h2.push(1);
+if (h2.peek() !== 1 || h2.size !== 3) fail("peek/size after pushes");
+if (h2.pop() !== 1) fail("interleaved pop 2");
+if (h2.pop() !== 7) fail("interleaved pop 3");
+if (h2.pop() !== 10) fail("interleaved pop 4");
+if (h2.pop() !== undefined || h2.size !== 0) fail("pop on empty must be undefined");
+
+const h3 = new MinHeap();
+for (const v of [2, 2, 2]) h3.push(v);
+if (h3.pop() !== 2 || h3.pop() !== 2 || h3.pop() !== 2) fail("duplicates must drain");
+
+const h4 = new MinHeap();
+h4.push(9);
+if (h4.peek() !== 9 || h4.pop() !== 9) fail("single element");
+
+console.log("PASS: pops always return the smallest remaining value");
+`,
+  ),
+
+  def(
+    "medium",
+    "token-bucket",
+    "Idle API clients burst far past their bucket capacity",
+    "After a quiet night the first client burst hammers the API with hundreds of requests although the bucket capacity is 5: the refill accumulator grew all night and nothing capped it. Per the header of lib/bucket.mjs, refill NEVER tops the bucket above capacity — idle time buys one full bucket, not an endless reserve. The clock is injectable. Fix lib/bucket.mjs and verify with your own script using a fake clock (drain to empty, idle refill capped at capacity, partial refill with an honest retryAfterMs, constructor and take() validation) before answering.",
+    {
+      "lib/bucket.mjs": `/**
+ * Token bucket: at most \`capacity\` tokens, refilled continuously at
+ * \`refillPerSec\`. take(n) removes n tokens or reports retryAfterMs. The
+ * refill NEVER tops the bucket above capacity — idle time buys one full
+ * bucket, not an endless reserve. The clock is injectable (ms).
+ */
+export function createTokenBucket({ capacity, refillPerSec, now = Date.now.bind(Date) } = {}) {
+  if (!Number.isInteger(capacity) || capacity < 1) throw new RangeError("capacity must be a positive integer");
+  if (!Number.isFinite(refillPerSec) || refillPerSec <= 0) throw new RangeError("refillPerSec must be positive");
+  let tokens = capacity;
+  let last = now();
+
+  const refill = (t) => {
+    tokens = Math.min(capacity, tokens + ((t - last) / 1000) * refillPerSec);
+    last = t;
+  };
+
+  return {
+    get tokens() {
+      return Math.min(capacity, tokens + ((now() - last) / 1000) * refillPerSec);
+    },
+    take(n = 1) {
+      if (!Number.isInteger(n) || n < 1) throw new RangeError("n must be a positive integer");
+      refill(now());
+      if (tokens >= n) {
+        tokens -= n;
+        return { allowed: true, tokens };
+      }
+      const missing = n - tokens;
+      return { allowed: false, retryAfterMs: Math.ceil((missing / refillPerSec) * 1000) };
+    },
+  };
+}
+`,
+    },
+    {
+      "lib/bucket.mjs": [
+        "    tokens = Math.min(capacity, tokens + ((t - last) / 1000) * refillPerSec);",
+        "    tokens = tokens + ((t - last) / 1000) * refillPerSec; // the bucket keeps every token it earns (PROD-4461)",
+      ],
+    },
+    `import { createTokenBucket } from "./lib/bucket.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+let t = 0;
+const bucket = createTokenBucket({ capacity: 5, refillPerSec: 1, now: () => t });
+
+for (let i = 0; i < 5; i++) {
+  if (!bucket.take().allowed) fail("a fresh bucket must allow 5 takes, failed at " + i);
+}
+if (bucket.take().allowed) fail("an empty bucket must block");
+const blocked = bucket.take(2);
+if (blocked.allowed || blocked.retryAfterMs !== 2000) fail("retryAfterMs must cover 2 missing tokens: " + JSON.stringify(blocked));
+
+t = 600_000; // ten idle minutes
+if (bucket.tokens !== 5) fail("idle time must refill to capacity, not past it: " + bucket.tokens);
+let granted = 0;
+while (bucket.take().allowed) granted++;
+if (granted !== 5) fail("after idle the bucket must grant exactly capacity tokens, granted " + granted);
+
+t += 2500; // 2.5 tokens back
+if (!bucket.take(2).allowed) fail("2 tokens must be available after 2.5s of refill");
+const tight = bucket.take(2);
+if (tight.allowed || tight.retryAfterMs !== 1500) fail("a half-refilled bucket must report the missing half second: " + JSON.stringify(tight));
+
+for (const bad of [0, -1, 1.5]) {
+  let threw = false;
+  try { bucket.take(bad); } catch { threw = true; }
+  if (!threw) fail("take(" + bad + ") must throw");
+}
+let threw = false;
+try { createTokenBucket({ capacity: 0, refillPerSec: 1 }); } catch { threw = true; }
+if (!threw) fail("capacity must be a positive integer");
+threw = false;
+try { createTokenBucket({ capacity: 5, refillPerSec: -1 }); } catch { threw = true; }
+if (!threw) fail("refillPerSec must be positive");
+
+console.log("PASS: refill caps at capacity; take reports honest retries");
+`,
+  ),
+
+  def(
+    "medium",
+    "json-patch",
+    "Moving a list item forward drops it one slot too far",
+    "Run `node check.mjs`. In the board UI, dragging a card to slot N lands it one past the slot whenever it moves from an earlier to a later position — the reorder ops produced by the client use indexes that refer to the array BEFORE the move, and lib/patch.mjs must honor exactly that (its header says so). The move op removes the item first and then inserts; somewhere the removal adjustment is lost. Fix lib/patch.mjs, keep the other ops (add inserts into arrays, remove/replace throw on missing paths, move works across containers, the input doc is never mutated), re-run the check, and verify the rest with your own script.",
+    {
+      "lib/patch.mjs": `/**
+ * Tiny JSON patch: applyPatch(doc, ops) with ops
+ *   { op: "add", path, value }     — set on objects, INSERT on arrays
+ *                                    ("-" or the length appends),
+ *   { op: "remove", path }        — delete a key / splice an array index,
+ *   { op: "replace", path, value } — overwrite; a missing path is an Error,
+ *   { op: "move", from, path }     — remove + insert; BOTH indexes refer to
+ *                                    the array BEFORE the move.
+ * Paths are dot separated ("a.list.0"). The input doc is never mutated;
+ * remove/replace/move on a missing path and unknown ops throw.
+ */
+export function applyPatch(doc, ops) {
+  const out = deepClone(doc);
+  for (const op of ops) applyOp(out, op);
+  return out;
+}
+
+function applyOp(root, op) {
+  if (op.op === "add") {
+    const { parent, key } = resolve(root, op.path, true);
+    if (Array.isArray(parent)) {
+      const index = key === "-" ? parent.length : Number(key);
+      if (!Number.isInteger(index) || index < 0 || index > parent.length) throw new Error("bad array index: " + op.path);
+      parent.splice(index, 0, deepClone(op.value));
+      return;
+    }
+    parent[key] = deepClone(op.value);
+    return;
+  }
+
+  if (op.op === "remove") {
+    const { parent, key } = resolve(root, op.path, false);
+    if (Array.isArray(parent)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= parent.length) throw new Error("bad array index: " + op.path);
+      parent.splice(index, 1);
+      return;
+    }
+    if (!(key in parent)) throw new Error("no such path: " + op.path);
+    delete parent[key];
+    return;
+  }
+
+  if (op.op === "replace") {
+    const { parent, key } = resolve(root, op.path, false);
+    if (Array.isArray(parent)) {
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= parent.length) throw new Error("bad array index: " + op.path);
+      parent[index] = deepClone(op.value);
+      return;
+    }
+    if (!(key in parent)) throw new Error("no such path: " + op.path);
+    parent[key] = deepClone(op.value);
+    return;
+  }
+
+  if (op.op === "move") {
+    const from = resolve(root, op.from, false);
+    const fromIsArray = Array.isArray(from.parent);
+    const fromIndex = fromIsArray ? Number(from.key) : -1;
+    if (fromIsArray && (!Number.isInteger(fromIndex) || fromIndex < 0 || fromIndex >= from.parent.length)) {
+      throw new Error("bad array index: " + op.from);
+    }
+    if (!fromIsArray && !(from.key in from.parent)) throw new Error("no such path: " + op.from);
+    const value = fromIsArray ? from.parent[fromIndex] : from.parent[from.key];
+
+    const to = resolve(root, op.path, true);
+    const toArray = Array.isArray(to.parent);
+    const sameArray = fromIsArray && toArray && to.parent === from.parent;
+    const toLength = toArray ? to.parent.length : -1; // length BEFORE the removal
+
+    if (fromIsArray) from.parent.splice(fromIndex, 1);
+    else delete from.parent[from.key];
+
+    if (toArray) {
+      const raw = to.key === "-" ? toLength : Number(to.key);
+      if (!Number.isInteger(raw) || raw < 0 || raw > toLength) throw new Error("bad array index: " + op.path);
+      const target = sameArray && fromIndex < raw ? raw - 1 : raw;
+      to.parent.splice(target, 0, value);
+      return;
+    }
+    to.parent[to.key] = value;
+    return;
+  }
+
+  throw new Error("unknown op: " + op.op);
+}
+
+function resolve(root, path, create) {
+  if (typeof path !== "string" || path === "") throw new Error("bad path: " + path);
+  const segments = path.split(".");
+  let parent = root;
+  for (let i = 0; i < segments.length - 1; i++) {
+    let next = parent[segments[i]];
+    if (next === null || typeof next !== "object") {
+      if (!create) throw new Error("no such path: " + path);
+      next = /^\\d+$/.test(segments[i + 1]) ? [] : {};
+      parent[segments[i]] = next;
+    }
+    parent = next;
+  }
+  return { parent, key: segments[segments.length - 1] };
+}
+
+function deepClone(value) {
+  if (Array.isArray(value)) return value.map(deepClone);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, deepClone(v)]));
+  }
+  return value;
+}
+`,
+      "check.mjs": `import { applyPatch } from "./lib/patch.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const board = applyPatch({ cards: ["one", "two", "three"] }, [{ op: "move", from: "cards.0", path: "cards.2" }]);
+if (board.cards.join(",") !== "two,one,three") {
+  fail("dragging card one onto slot three lost a card: " + board.cards.join(","));
+}
+
+console.log("PASS: a forward move lands on the requested slot");
+`,
+    },
+    {
+      "lib/patch.mjs": [
+        "      const target = sameArray && fromIndex < raw ? raw - 1 : raw;",
+        "      const target = raw; // the index already accounts for the removal (PROD-4468)",
+      ],
+    },
+    `import { applyPatch } from "./lib/patch.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const doc = { user: { name: "Ada", tags: ["x", "y", "z"] }, list: ["a", "b", "c", "d"], keep: true };
+
+if (!eq(applyPatch(doc, [{ op: "add", path: "user.email", value: "a@b.c" }]).user.email, "a@b.c")) fail("add object key");
+if (!eq(applyPatch(doc, [{ op: "add", path: "list.0", value: "z" }]).list, ["z", "a", "b", "c", "d"])) fail("add must INSERT into arrays");
+if (!eq(applyPatch(doc, [{ op: "add", path: "list.-", value: "end" }]).list, ["a", "b", "c", "d", "end"])) fail("add '-' must append");
+if (!eq(applyPatch(doc, [{ op: "remove", path: "user.name" }]).user, { tags: ["x", "y", "z"] })) fail("remove object key");
+if (!eq(applyPatch(doc, [{ op: "remove", path: "list.1" }]).list, ["a", "c", "d"])) fail("remove must splice arrays");
+if (!eq(applyPatch(doc, [{ op: "replace", path: "list.2", value: "C" }]).list, ["a", "b", "C", "d"])) fail("replace array element");
+if (!eq(applyPatch(doc, [{ op: "move", from: "list.0", path: "list.2" }]).list, ["b", "a", "c", "d"])) {
+  fail("a forward move must land at the index the original array named: " + JSON.stringify(applyPatch(doc, [{ op: "move", from: "list.0", path: "list.2" }]).list));
+}
+if (!eq(applyPatch(doc, [{ op: "move", from: "list.3", path: "list.0" }]).list, ["d", "a", "b", "c"])) fail("move backward broken");
+if (!eq(applyPatch(doc, [{ op: "move", from: "list.0", path: "list.-" }]).list, ["b", "c", "d", "a"])) fail("move to '-' must append");
+if (!eq(applyPatch(doc, [{ op: "move", from: "user.tags.2", path: "user.tags.0" }]).user.tags, ["z", "x", "y"])) fail("nested move broken");
+if (!eq(applyPatch({ a: 1, b: 2 }, [{ op: "move", from: "a", path: "c" }]), { b: 2, c: 1 })) fail("object move broken");
+const cross = applyPatch({ src: [1, 2], dst: [] }, [{ op: "move", from: "src.0", path: "dst.-" }]);
+if (!eq(cross.src, [2]) || !eq(cross.dst, [1])) fail("cross-container move broken");
+if (!eq(applyPatch(doc, [
+  { op: "replace", path: "user.name", value: "A." },
+  { op: "add", path: "list.-", value: "e" },
+]), { user: { name: "A.", tags: ["x", "y", "z"] }, list: ["a", "b", "c", "d", "e"], keep: true })) fail("multi-op sequence broken");
+
+if (!eq(doc, { user: { name: "Ada", tags: ["x", "y", "z"] }, list: ["a", "b", "c", "d"], keep: true })) fail("input doc was mutated");
+
+let threw = false;
+try { applyPatch(doc, [{ op: "nope", path: "list.0" }]); } catch { threw = true; }
+if (!threw) fail("unknown op must throw");
+threw = false;
+try { applyPatch(doc, [{ op: "replace", path: "ghost.path", value: 1 }]); } catch { threw = true; }
+if (!threw) fail("replace on a missing path must throw");
+threw = false;
+try { applyPatch(doc, [{ op: "remove", path: "list.9" }]); } catch { threw = true; }
+if (!threw) fail("remove past the end must throw");
+threw = false;
+try { applyPatch(doc, [{ op: "move", from: "list.0", path: "list.9" }]); } catch { threw = true; }
+if (!threw) fail("move past the end must throw");
+
+console.log("PASS: add/remove/replace/move behave, moves keep pre-move indexes");
+`,
+  ),
+
+  def(
+    "medium",
+    "template-interpolate",
+    "Two placeholders on one line break the notification renderer",
+    "Notifications like Hi {{first}} {{last}}! started failing with 'missing key' although both keys exist. The placeholder regex in lib/interp.mjs was loosened and now spans from the first opening braces to the LAST closing ones, swallowing everything between two placeholders. The header documents each {{ }} pair as its own placeholder carrying an optional dot path; a missing key must throw an Error that NAMES the key. Fix lib/interp.mjs and verify with your own script (two placeholders on a line, the same placeholder twice, dot paths, numbers and false render, empty-string values, missing keys throw with the key name, braces that name no valid path stay literal) before answering.",
+    {
+      "lib/interp.mjs": `/**
+ * Render "{{ path }}" placeholders from a dot path into the scope. Every
+ * {{ }} pair is its own placeholder — one placeholder never swallows
+ * another. Missing keys (undefined or null at any path step) throw an
+ * Error naming the key. Values are stringified with String().
+ */
+const PLACEHOLDER = /\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*\\}\\}/g;
+
+export function render(template, scope) {
+  if (scope === null || typeof scope !== "object") throw new TypeError("scope must be an object");
+  return String(template).replace(PLACEHOLDER, (_, path) => {
+    let value = scope;
+    for (const segment of path.split(".")) {
+      if (value === null || value === undefined) break;
+      value = value[segment];
+    }
+    if (value === null || value === undefined) throw new Error("missing key: " + path);
+    return String(value);
+  });
+}
+`,
+    },
+    {
+      "lib/interp.mjs": [
+        "const PLACEHOLDER = /\\{\\{\\s*([a-zA-Z0-9_.]+)\\s*\\}\\}/g;",
+        "const PLACEHOLDER = /\\{\\{(.*)\\}\\}/g; // placeholders are rare, greedy is fine (PROD-4470)",
+      ],
+    },
+    `import { render } from "./lib/interp.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (render("Hi {{name}}!", { name: "Ada" }) !== "Hi Ada!") fail("single placeholder broken");
+let out;
+try {
+  out = render("Hi {{first}} {{last}}!", { first: "Grace", last: "Hopper" });
+} catch (err) {
+  fail("two placeholders on a line must both resolve, threw: " + err.message);
+}
+if (out !== "Hi Grace Hopper!") fail("two placeholders broken: " + JSON.stringify(out));
+if (render("{{a}} and {{a}}", { a: "x" }) !== "x and x") fail("a repeated placeholder must resolve twice");
+if (render("{{user.name}} from {{user.city}}", { user: { name: "Bo", city: "Oslo" } }) !== "Bo from Oslo") fail("dot paths broken");
+if (render("n={{count}} ok={{ok}}", { count: 0, ok: false }) !== "n=0 ok=false") fail("numbers and false must render");
+if (render("{{tag}}", { tag: "" }) !== "") fail("empty-string values must render as empty");
+if (render("no placeholders here", {}) !== "no placeholders here") fail("plain text broken");
+if (render("code: {{a_b.c1}}", { a_b: { c1: 7 } }) !== "code: 7") fail("underscores and digits in paths broken");
+if (render("{{ spaced }}", { spaced: 1 }) !== "1") fail("inner whitespace must be tolerated");
+
+let threw = false;
+try { render("{{missing.key}}", { missing: {} }); } catch (err) { threw = /missing\\.key/.test(err.message); }
+if (!threw) fail("a missing key must throw naming the key");
+threw = false;
+try { render("{{nope}}", {}); } catch { threw = true; }
+if (!threw) fail("an unknown key must throw");
+threw = false;
+try { render("x", null); } catch { threw = true; }
+if (!threw) fail("scope must be an object");
+if (render("{{a b}}", { a: 1 }) !== "{{a b}}") fail("braces that name no valid path must stay literal");
+
+console.log("PASS: each {{ }} pair resolves on its own");
+`,
+  ),
+
+  def(
+    "medium",
+    "playlist-remove",
+    "Skipping backward after removing a track jumps to the void",
+    "In the media player, removing a track and then pressing 'previous' stops playback: the backward chain is severed at every removal. lib/playlist.mjs is a doubly linked list and its header is explicit — removal must reconnect BOTH directions, and toArrayReversed() must always mirror toArray(). Fix lib/playlist.mjs and verify with your own script (remove head/middle/tail, forward and backward walks after each removal, removing the current track selects the next one, remove unknown returns false, drain to empty and reuse) before answering.",
+    {
+      "lib/playlist.mjs": `/**
+ * Doubly linked playlist. next/prev walk in O(1). Removing a track must
+ * reconnect BOTH directions — the neighbors' forward AND backward links —
+ * so toArrayReversed() always mirrors toArray(). current is the selected
+ * track; removing it selects the NEXT track (or the last one if it was the
+ * tail, null when the list empties).
+ */
+export function createPlaylist() {
+  let head = null;
+  let tail = null;
+  let current = null;
+  let count = 0;
+
+  function makeNode(track) {
+    return { track, prev: null, next: null };
+  }
+
+  return {
+    get size() { return count; },
+    get current() { return current ? current.track : null; },
+
+    append(track) {
+      const node = makeNode(track);
+      if (tail) {
+        tail.next = node;
+        node.prev = tail;
+        tail = node;
+      } else {
+        head = tail = node;
+      }
+      if (!current) current = node;
+      count++;
+      return this;
+    },
+
+    next() {
+      if (current && current.next) current = current.next;
+      return this.current;
+    },
+
+    prev() {
+      if (current && current.prev) current = current.prev;
+      return this.current;
+    },
+
+    remove(track) {
+      for (let node = head; node; node = node.next) {
+        if (node.track !== track) continue;
+        if (node.prev) node.prev.next = node.next;
+        else head = node.next;
+        if (node.next) node.next.prev = node.prev;
+        else tail = node.prev;
+        if (current === node) current = node.next ?? node.prev;
+        count--;
+        return true;
+      }
+      return false;
+    },
+
+    toArray() {
+      const out = [];
+      for (let node = head; node; node = node.next) out.push(node.track);
+      return out;
+    },
+
+    toArrayReversed() {
+      const out = [];
+      for (let node = tail; node; node = node.prev) out.push(node.track);
+      return out;
+    },
+  };
+}
+`,
+    },
+    {
+      "lib/playlist.mjs": [
+        [
+          "        if (node.next) node.next.prev = node.prev;",
+          "        else tail = node.prev;",
+        ].join("\n"),
+        "        // backward links get rebuilt on demand (PROD-4473)\n        if (node.next) node.next.prev = null;\n        else tail = node.prev;",
+      ],
+    },
+    `import { createPlaylist } from "./lib/playlist.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const pl = createPlaylist();
+pl.append("a").append("b").append("c").append("d");
+if (pl.size !== 4 || pl.current !== "a") fail("append/current broken");
+if (!eq(pl.toArray(), ["a", "b", "c", "d"]) || !eq(pl.toArrayReversed(), ["d", "c", "b", "a"])) fail("walks broken before any removal");
+if (pl.next() !== "b" || pl.next() !== "c") fail("next walk broken");
+if (pl.prev() !== "b" || pl.prev() !== "a") fail("prev walk broken");
+
+if (!pl.remove("b")) fail("remove must find the track");
+if (!eq(pl.toArray(), ["a", "c", "d"])) fail("forward chain broken after middle removal");
+if (!eq(pl.toArrayReversed(), ["d", "c", "a"])) fail("backward chain severed by middle removal: " + JSON.stringify(pl.toArrayReversed()));
+if (pl.next() !== "c") fail("next over the gap broken");
+if (pl.prev() !== "a") fail("prev over the gap broken, got " + pl.prev());
+
+if (!pl.remove("a")) fail("remove head");
+if (!eq(pl.toArray(), ["c", "d"]) || !eq(pl.toArrayReversed(), ["d", "c"])) fail("head removal broken");
+if (!pl.remove("d")) fail("remove tail");
+if (!eq(pl.toArray(), ["c"]) || !eq(pl.toArrayReversed(), ["c"])) fail("tail removal broken");
+
+if (pl.remove("ghost") !== false) fail("removing an unknown track must return false");
+if (!pl.remove("c")) fail("remove last");
+if (pl.size !== 0 || pl.current !== null || !eq(pl.toArray(), [])) fail("drain to empty broken");
+pl.append("new");
+if (pl.current !== "new" || !eq(pl.toArray(), ["new"])) fail("reuse after empty broken");
+
+const sel = createPlaylist();
+sel.append("1").append("2").append("3");
+sel.next();
+if (sel.current !== "2") fail("select second track");
+if (!sel.remove("2")) fail("remove current");
+if (sel.current !== "3") fail("removing the current track must select the next one");
+
+console.log("PASS: removal reconnects both directions");
+`,
+  ),
+
+  def(
+    "medium",
+    "next-business-day",
+    "Deadline planner promises Saturday deliveries",
+    "The order planner adds N business days to the promised date, but since a simplify-the-calendar change orders placed on Friday are promised for Saturday and support is drowning. lib/business.mjs documents the rule: Saturday and Sunday are not business days, addBusinessDays steps FORWARD one day at a time and counts only business days, so Friday + 1 lands on Monday; the input date itself is never returned. Fix lib/business.mjs and verify with your own script (Friday starts, starts already on a weekend, spans of several weeks, month and year rollovers, isBusinessDay, invalid input throws) before answering.",
+    {
+      "lib/business.mjs": `/**
+ * Business-day math over UTC dates ("YYYY-MM-DD"). Saturday and Sunday are
+ * not business days. addBusinessDays steps FORWARD one day at a time and
+ * counts only business days, so Friday + 1 business day lands on Monday.
+ * n must be a positive integer; the input date itself is never returned
+ * (even when it is a business day).
+ */
+export function isBusinessDay(iso) {
+  const day = new Date(iso + "T00:00:00Z").getUTCDay();
+  if (Number.isNaN(day)) throw new TypeError("bad date: " + iso);
+  return day !== 0 && day !== 6;
+}
+
+export function addBusinessDays(iso, n) {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) throw new TypeError("bad date: " + iso);
+  if (!Number.isInteger(n) || n < 1) throw new RangeError("n must be a positive integer");
+  const d = new Date(iso + "T00:00:00Z");
+  let left = n;
+  while (left > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) left--;
+  }
+  return d.toISOString().slice(0, 10);
+}
+`,
+    },
+    {
+      "lib/business.mjs": [
+        "    if (day !== 0 && day !== 6) left--;",
+        "    left--; // weekends count too, every day is a working day now (PROD-4475)",
+      ],
+    },
+    `import { addBusinessDays, isBusinessDay } from "./lib/business.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (addBusinessDays("2026-01-02", 1) !== "2026-01-05") fail("Friday + 1 must be Monday, got " + addBusinessDays("2026-01-02", 1));
+if (addBusinessDays("2026-01-02", 3) !== "2026-01-07") fail("Friday + 3 must be Wednesday");
+if (addBusinessDays("2026-01-05", 5) !== "2026-01-12") fail("Monday + 5 must skip the weekend");
+if (addBusinessDays("2026-01-03", 1) !== "2026-01-05") fail("a Saturday start must move to Monday");
+if (addBusinessDays("2026-01-04", 1) !== "2026-01-05") fail("a Sunday start must move to Monday");
+if (addBusinessDays("2026-01-01", 10) !== "2026-01-15") fail("ten business days broken: " + addBusinessDays("2026-01-01", 10));
+if (addBusinessDays("2026-01-30", 1) !== "2026-02-02") fail("month rollover broken");
+if (addBusinessDays("2026-12-31", 1) !== "2027-01-01") fail("year rollover broken");
+if (addBusinessDays("2026-12-31", 2) !== "2027-01-04") fail("year rollover + 2 broken");
+
+if (isBusinessDay("2026-01-02") !== true) fail("Friday is a business day");
+if (isBusinessDay("2026-01-05") !== true) fail("Monday is a business day");
+if (isBusinessDay("2026-01-03") !== false) fail("Saturday is not");
+if (isBusinessDay("2026-01-04") !== false) fail("Sunday is not");
+
+let threw = false;
+try { isBusinessDay("2026-13-40"); } catch { threw = true; }
+if (!threw) fail("an impossible date must throw");
+threw = false;
+try { addBusinessDays("01/02/2026", 1); } catch { threw = true; }
+if (!threw) fail("a malformed date must throw");
+threw = false;
+try { addBusinessDays("2026-01-02", 0); } catch { threw = true; }
+if (!threw) fail("n must be a positive integer");
+
+console.log("PASS: business-day math skips weekends across rollovers");
+`,
+  ),
+
+  def(
+    "medium",
+    "ini-parser",
+    "Settings values are cut at the second equals sign",
+    "Run `node check.mjs`. After the deploy-config migration, integration URLs and tokens that contain '=' load truncated: 'callback = https://hooks/x?top=1' arrives as 'https://hooks/x?top'. The parser spec in lib/ini.mjs says the value is everything after the FIRST '=' on the line. Fix lib/ini.mjs — sections, namespacing, comments and blank-line handling must keep working — re-run the check, and verify the rest with your own script (values with '=', CRLF files, comments with leading spaces, keys before any section, section names with spaces, lines without '=' throw).",
+    {
+      "lib/ini.mjs": `/**
+ * INI-ish settings parser: "key = value" lines inside "[section]" blocks.
+ * Keys are lowercased and namespaced "section.key"; keys before any section
+ * land under "core.". The value is everything after the FIRST '=' (values
+ * may contain '='), trimmed. Full-line comments ('#' or ';' at the start,
+ * after optional spaces) and blank lines are skipped.
+ */
+export function parseIni(text) {
+  const settings = {};
+  let section = "core";
+  for (const rawLine of String(text).split(/\\r?\\n/)) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#") || line.startsWith(";")) continue;
+    const sectionMatch = /^\\[(.+)\\]$/.exec(line);
+    if (sectionMatch) {
+      section = sectionMatch[1].trim().toLowerCase();
+      continue;
+    }
+    const eq = line.indexOf("=");
+    if (eq === -1) throw new Error("not an ini line: " + rawLine);
+    const key = section + "." + line.slice(0, eq).trim().toLowerCase();
+    settings[key] = line.slice(eq + 1).trim();
+  }
+  return settings;
+}
+`,
+      "check.mjs": `import { readFileSync } from "node:fs";
+import { parseIni } from "./lib/ini.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const settings = parseIni(readFileSync("deploy.ini", "utf8"));
+if (settings["auth.token"] !== "abc=def") fail("token truncated: " + JSON.stringify(settings["auth.token"]));
+if (settings["db.url"] !== "postgres://u:p@h/db?ssl=true&app=svc") fail("url truncated: " + JSON.stringify(settings["db.url"]));
+
+console.log("PASS: values survive every '=' after the first");
+`,
+      "deploy.ini": [
+        "# deploy settings",
+        "name = demo",
+        "",
+        "[db]",
+        "host = localhost",
+        "port = 5432",
+        "url = postgres://u:p@h/db?ssl=true&app=svc",
+        "",
+        "[ Auth ]",
+        "; service credentials",
+        "TOKEN = abc=def",
+        "retries = 3",
+        "",
+      ].join("\n"),
+    },
+    {
+      "lib/ini.mjs": [
+        [
+          "    const eq = line.indexOf(\"=\");",
+          "    if (eq === -1) throw new Error(\"not an ini line: \" + rawLine);",
+          "    const key = section + \".\" + line.slice(0, eq).trim().toLowerCase();",
+          "    settings[key] = line.slice(eq + 1).trim();",
+        ].join("\n"),
+        [
+          "    const parts = line.split(\"=\"); // '=' is a separator, everywhere in the line (PROD-4478)",
+          "    if (parts.length < 2) throw new Error(\"not an ini line: \" + rawLine);",
+          "    const key = section + \".\" + parts[0].trim().toLowerCase();",
+          "    settings[key] = parts[1].trim();",
+        ].join("\n"),
+      ],
+    },
+    `import { readFileSync } from "node:fs";
+import { parseIni } from "./lib/ini.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const settings = parseIni(readFileSync("deploy.ini", "utf8"));
+if (settings["core.name"] !== "demo") fail("core section broken: " + JSON.stringify(settings["core.name"]));
+if (settings["db.host"] !== "localhost" || settings["db.port"] !== "5432") fail("db section broken: " + JSON.stringify(settings));
+if (settings["db.url"] !== "postgres://u:p@h/db?ssl=true&app=svc") fail("value with '=' truncated: " + JSON.stringify(settings["db.url"]));
+if (settings["auth.token"] !== "abc=def") fail("token with '=' truncated: " + JSON.stringify(settings["auth.token"]));
+if (settings["auth.retries"] !== "3") fail("plain value in the same section broken");
+
+const crlf = parseIni("a = 1\\r\\n[sec]\\r\\nb = 2\\r\\n");
+if (crlf["core.a"] !== "1" || crlf["sec.b"] !== "2") fail("CRLF files broken");
+
+const inline = parseIni("  # note\\n\\t; also note\\n   key   =   spaced value  \\n");
+if (inline["core.key"] !== "spaced value") fail("trimming broken: " + JSON.stringify(inline));
+
+let threw = false;
+try { parseIni("justtext"); } catch { threw = true; }
+if (!threw) fail("a line without '=' must throw");
+
+console.log("PASS: sections, comments and '='-carrying values all parse");
+`,
+  ),
 ];

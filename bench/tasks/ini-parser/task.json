@@ -1,0 +1,7 @@
+{
+  "id": "ini-parser",
+  "title": "Settings values are cut at the second equals sign",
+  "prompt": "Run `node check.mjs`. After the deploy-config migration, integration URLs and tokens that contain '=' load truncated: 'callback = https://hooks/x?top=1' arrives as 'https://hooks/x?top'. The parser spec in lib/ini.mjs says the value is everything after the FIRST '=' on the line. Fix lib/ini.mjs — sections, namespacing, comments and blank-line handling must keep working — re-run the check, and verify the rest with your own script (values with '=', CRLF files, comments with leading spaces, keys before any section, section names with spaces, lines without '=' throw).",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

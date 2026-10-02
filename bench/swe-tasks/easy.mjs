@@ -519,4 +519,421 @@ if (stableStringify({}) !== "{}" || stableStringify([]) !== "[]") fail("empty co
 console.log("PASS: stringify is stable under key order at every depth");
 `,
   ),
+
+  def(
+    "easy",
+    "parse-duration",
+    "Scheduler treats 1m30s as 31 seconds",
+    "The retry planner reads human durations like 1m30s, and since last week every timeout that mixes units collapses: 1m30s parses to 31 seconds instead of 90. The unit table in lib/duration.mjs is the single source of truth for what a unit is worth — check it against its own header. Fix lib/duration.mjs and verify with your own script (single units, mixed units, bare milliseconds, whitespace between chunks, invalid input throws) before answering.",
+    {
+      "lib/duration.mjs": `/**
+ * Parse human durations ("1h30m", "90s", "500ms", "2d") into milliseconds.
+ * Units: ms, s, m, h, d. Whitespace between chunks is fine; a bare number
+ * counts as milliseconds; anything else is a TypeError.
+ */
+const UNITS = {
+  ms: 1,
+  s: 1000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+};
+
+export function parseDuration(input) {
+  const text = String(input).trim();
+  if (text === "") throw new TypeError("empty duration");
+  if (/^\\d+$/.test(text)) return Number(text);
+  if (!/^(?:\\d+\\s*(?:ms|s|m|h|d)\\s*)+$/.test(text)) throw new TypeError("not a duration: " + input);
+  let total = 0;
+  for (const [, num, unit] of text.matchAll(/(\\d+)\\s*(ms|s|m|h|d)/g)) {
+    total += Number(num) * UNITS[unit];
+  }
+  return total;
+}
+`,
+    },
+    {
+      "lib/duration.mjs": [
+        "  m: 60_000,",
+        '  m: 1000, // "small minutes", matches the old 1.0 config format (PROD-4455)',
+      ],
+    },
+    `import { parseDuration } from "./lib/duration.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const cases = [
+  ["90s", 90000],
+  ["500ms", 500],
+  ["1m", 60000],
+  ["1m30s", 90000],
+  ["1h30m", 5400000],
+  ["2d", 172800000],
+  ["1h 30m", 5400000],
+  ["0ms", 0],
+  ["1500", 1500],
+];
+for (const [input, expected] of cases) {
+  const got = parseDuration(input);
+  if (got !== expected) fail("parseDuration(" + JSON.stringify(input) + ") -> " + got + ", expected " + expected);
+}
+for (const bad of ["", "abc", "1x", "1h30", "-5s", "m"]) {
+  let threw = false;
+  try { parseDuration(bad); } catch { threw = true; }
+  if (!threw) fail("parseDuration(" + JSON.stringify(bad) + ") must throw");
+}
+
+console.log("PASS: durations parse with the documented unit table");
+`,
+  ),
+
+  def(
+    "easy",
+    "camelize-keys",
+    "Nested keys stay snake_case after the API response mapping",
+    "The API client maps response keys to camelCase, but since a cleanup only the TOP-LEVEL keys are converted: payload.profile.display_name and objects inside arrays keep their underscores, and the UI reads undefined. The header of lib/camelize.mjs promises the conversion runs RECURSIVELY — nested objects and arrays of objects included. Fix lib/camelize.mjs and verify with your own script (deep nesting, arrays of objects, kebab-case keys, digit keys, scalars, input not mutated) before answering.",
+    {
+      "lib/camelize.mjs": `/**
+ * Convert object keys from snake_case / kebab-case to camelCase,
+ * RECURSIVELY: nested objects and arrays of objects are converted too.
+ * Every '_' or '-' followed by a letter or digit uppercases that character.
+ * The input is never mutated.
+ */
+function camelizeKey(key) {
+  return key.replace(/[_-]([a-zA-Z0-9])/g, (_, ch) => ch.toUpperCase());
+}
+
+export function camelize(value) {
+  if (Array.isArray(value)) return value.map(camelize);
+  if (value !== null && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) {
+      out[camelizeKey(key)] = camelize(item);
+    }
+    return out;
+  }
+  return value;
+}
+`,
+    },
+    {
+      "lib/camelize.mjs": [
+        "      out[camelizeKey(key)] = camelize(item);",
+        "      out[camelizeKey(key)] = item; // leaves are flat, nothing to descend into (PROD-4463)",
+      ],
+    },
+    `import { camelize } from "./lib/camelize.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const payload = { user_id: 7, profile: { display_name: "Ada", contact: { home_town: "Lyn" } }, tags: [{ tag_id: 3 }] };
+const mapped = camelize(payload);
+if (!eq(mapped, { userId: 7, profile: { displayName: "Ada", contact: { homeTown: "Lyn" } }, tags: [{ tagId: 3 }] })) {
+  fail("deep conversion broken: " + JSON.stringify(mapped));
+}
+if (!eq(camelize([{ first_name: "a" }, { first_name: "b" }]), [{ firstName: "a" }, { firstName: "b" }])) fail("arrays of objects broken");
+if (!eq(camelize({ "created-at": "x", sha256_hash: "y" }), { createdAt: "x", sha256Hash: "y" })) fail("kebab and digit keys broken");
+if (camelize("plain") !== "plain" || camelize(5) !== 5 || camelize(null) !== null) fail("scalars must pass through");
+if (camelize({ alreadyCamel: 1 }).alreadyCamel !== 1) fail("camel keys must stay");
+if (!eq(payload, { user_id: 7, profile: { display_name: "Ada", contact: { home_town: "Lyn" } }, tags: [{ tag_id: 3 }] })) fail("input was mutated");
+if (!eq(camelize({}), {}) || !eq(camelize([]), [])) fail("empty containers broken");
+
+console.log("PASS: keys camelize recursively, input stays intact");
+`,
+  ),
+
+  def(
+    "easy",
+    "clean-params",
+    "page=0 and enabled=false vanish from API requests",
+    "Clients report that requesting page 0 or sending enabled=false drops the parameter entirely, so the backend falls back to its defaults. lib/params.mjs is specified to drop ONLY null, undefined and empty-string values — a real 0 or false is a meaningful value and must survive. Fix lib/params.mjs and verify with your own script (zero, false, empty string, null, undefined, lone values, input not mutated) before answering.",
+    {
+      "lib/params.mjs": `/**
+ * Query params for the API client: drop keys whose value is null,
+ * undefined or "" — a real 0 or false is meaningful and MUST stay. The
+ * input object is never mutated.
+ */
+export function cleanParams(params) {
+  const out = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    out[key] = value;
+  }
+  return out;
+}
+`,
+    },
+    {
+      "lib/params.mjs": [
+        '    if (value === null || value === undefined || value === "") continue;',
+        '    if (!value) continue; // falsy values are "not set" anyway (PROD-4438)',
+      ],
+    },
+    `import { cleanParams } from "./lib/params.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const input = { page: 0, enabled: false, q: "", label: null, extra: undefined, name: "x", size: 5 };
+const cleaned = cleanParams(input);
+if (!eq(cleaned, { page: 0, enabled: false, name: "x", size: 5 })) {
+  fail("0 and false must survive, empty/null/undefined must go: " + JSON.stringify(cleaned));
+}
+if (!eq(input, { page: 0, enabled: false, q: "", label: null, extra: undefined, name: "x", size: 5 })) fail("input was mutated");
+if (!eq(cleanParams({}), {})) fail("empty input");
+if (!eq(cleanParams({ a: null, b: "" }), {})) fail("all-dropped input");
+if (!eq(cleanParams({ n: 0 }), { n: 0 })) fail("lone zero must survive");
+if (!eq(cleanParams({ ok: false }), { ok: false })) fail("lone false must survive");
+
+console.log("PASS: only null/undefined/empty-string are dropped");
+`,
+  ),
+
+  def(
+    "easy",
+    "dedent-block",
+    "Generated snippets ship with their template indentation",
+    "Email templates built with lib/dedent.mjs come out indented by four spaces since a refactor: the common indent is no longer stripped. The header documents the rule — the indent is the shortest run of leading spaces over lines that contain any non-whitespace; blank lines never take part in that minimum and are left as they are. Fix lib/dedent.mjs and verify with your own script (uniform indent, blank lines mid-text, mixed depths, no indent at all, all-blank input, tabs stay) before answering.",
+    {
+      "lib/dedent.mjs": `/**
+ * Remove the COMMON leading indentation from every line. The indent is the
+ * shortest run of leading spaces over lines that contain any non-whitespace
+ * — blank lines never count toward that minimum and are left untouched.
+ * Tabs are not indentation.
+ */
+export function dedent(text) {
+  const lines = String(text).split("\\n");
+  let indent = Infinity;
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const spaces = /^ */.exec(line)[0].length;
+    if (spaces < indent) indent = spaces;
+  }
+  if (indent === Infinity) indent = 0;
+  return lines.map((line) => (line.trim() === "" ? line : line.slice(indent))).join("\\n");
+}
+`,
+    },
+    {
+      "lib/dedent.mjs": [
+        '    if (line.trim() === "") continue;',
+        "    // blank lines are just lines with zero indent (PROD-4441)",
+      ],
+    },
+    `import { dedent } from "./lib/dedent.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+if (!eq(dedent("    hello\\n    world"), "hello\\nworld")) fail("uniform indent broken: " + JSON.stringify(dedent("    hello\\n    world")));
+if (!eq(dedent("  a\\n\\n  b"), "a\\n\\nb")) fail("blank lines must not pin the indent to zero: " + JSON.stringify(dedent("  a\\n\\n  b")));
+if (!eq(dedent("    x\\n  y"), "  x\\ny")) fail("the shallowest line sets the indent");
+if (!eq(dedent("noindent\\n  deep"), "noindent\\n  deep")) fail("zero indent must be a no-op");
+if (!eq(dedent("  only"), "only")) fail("single line");
+if (!eq(dedent(""), "")) fail("empty input");
+if (!eq(dedent("\\n\\n"), "\\n\\n")) fail("all-blank input must pass through");
+if (!eq(dedent("\\ttabbed"), "\\ttabbed")) fail("tabs are not indentation");
+
+console.log("PASS: the common indent goes, blank lines do not pin it");
+`,
+  ),
+
+  def(
+    "easy",
+    "group-by",
+    "Grouped buckets keep only the last item per key",
+    "The billing page groups invoices by account and shows ONE invoice per account — the earlier ones are gone. lib/group.mjs is documented to map every key to ALL items that produced it, in input order; somewhere that collect-then-append was reduced to a plain overwrite. Fix lib/group.mjs and verify with your own script (repeated keys, single hits, numeric keys via String(), empty input, bucket order) before answering.",
+    {
+      "lib/group.mjs": `/**
+ * Group items by a string key: the result maps each key to ALL items that
+ * produced it, in input order. Keys are stringified with String(key).
+ */
+export function groupBy(items, keyOf) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = String(keyOf(item));
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(item);
+    else groups.set(key, [item]);
+  }
+  return groups;
+}
+`,
+    },
+    {
+      "lib/group.mjs": [
+        [
+          "    const bucket = groups.get(key);",
+          "    if (bucket) bucket.push(item);",
+          "    else groups.set(key, [item]);",
+        ].join("\n"),
+        "    groups.set(key, [item]); // one item per key is all the UI shows anyway (PROD-4447)",
+      ],
+    },
+    `import { groupBy } from "./lib/group.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const items = [
+  { account: "acme", id: 1 },
+  { account: "glob", id: 2 },
+  { account: "acme", id: 3 },
+  { account: "acme", id: 4 },
+  { account: "glob", id: 5 },
+];
+const groups = groupBy(items, (item) => item.account);
+if (groups.size !== 2) fail("expected 2 buckets, got " + groups.size);
+if (!eq(groups.get("acme"), [{ account: "acme", id: 1 }, { account: "acme", id: 3 }, { account: "acme", id: 4 }])) {
+  fail("acme must collect all three invoices in input order: " + JSON.stringify(groups.get("acme")));
+}
+if (!eq(groups.get("glob"), [{ account: "glob", id: 2 }, { account: "glob", id: 5 }])) fail("glob bucket broken");
+
+const numeric = groupBy([1, "1", 2], (x) => x);
+if (numeric.size !== 2 || !eq(numeric.get("1"), [1, "1"])) fail("keys must be stringified: " + JSON.stringify([...numeric]));
+if (groupBy([], (x) => x).size !== 0) fail("empty input");
+if (groupBy([9], (x) => x).get("9")[0] !== 9) fail("single item");
+
+console.log("PASS: every key maps to all of its items, in order");
+`,
+  ),
+
+  def(
+    "easy",
+    "mask-secret",
+    "Error logs print the first half of API tokens",
+    "A customer pasted a support bundle and the first characters of their API key were right there in the log line. lib/mask.mjs is the redaction helper for log fields; its header states the policy: everything but the LAST 4 characters becomes '*', secrets of 4 chars or fewer are masked completely. After a make-support-easier change the helper keeps the FIRST characters instead — a leak. Fix lib/mask.mjs and verify with your own script (long tokens, 5-char secret, 4-char and shorter, empty string, non-string input throws) before answering.",
+    {
+      "lib/mask.mjs": `/**
+ * Mask a secret for logs: everything but the LAST 4 characters becomes '*'.
+ * Secrets of 4 chars or fewer are masked completely — never reveal a whole
+ * secret, no matter how short. Non-string input is a TypeError.
+ */
+export function maskSecret(secret) {
+  if (typeof secret !== "string") throw new TypeError("secret must be a string");
+  if (secret.length <= 4) return "*".repeat(secret.length);
+  return "*".repeat(secret.length - 4) + secret.slice(-4);
+}
+`,
+    },
+    {
+      "lib/mask.mjs": [
+        '  return "*".repeat(secret.length - 4) + secret.slice(-4);',
+        '  return secret.slice(0, 4) + "*".repeat(secret.length - 4); // keep the prefix so support can spot the key (PROD-4452)',
+      ],
+    },
+    `import { maskSecret } from "./lib/mask.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (maskSecret("sk-live-12345678") !== "************5678") fail("long token broken: " + maskSecret("sk-live-12345678"));
+if (maskSecret("abcde") !== "*bcde") fail("5-char secret broken: " + maskSecret("abcde"));
+if (maskSecret("abcd") !== "****") fail("4-char secret must be masked completely");
+if (maskSecret("abc") !== "***") fail("3-char secret");
+if (maskSecret("a") !== "*") fail("1-char secret");
+if (maskSecret("") !== "") fail("empty string");
+for (const bad of [5, null, undefined, { length: 8 }]) {
+  let threw = false;
+  try { maskSecret(bad); } catch { threw = true; }
+  if (!threw) fail("maskSecret(" + String(bad) + ") must throw");
+}
+
+console.log("PASS: only the last four characters stay visible");
+`,
+  ),
+
+  def(
+    "easy",
+    "series-waterfall",
+    "Pipeline steps run simultaneously and each gets the initial input",
+    "The import pipeline is a waterfall: step 2 must see step 1's output. Since a speed-things-up change all steps start at once and each receives the ORIGINAL input, so the importer never sees the loader's normalized rows. lib/waterfall.mjs documents the contract: run tasks one at a time in order, pass each task the previous task's return value (the first task gets initial), resolve with all results in order, and never start a task after one failed. Fix lib/waterfall.mjs and verify with your own script (start order, result chaining, abort on failure, empty input) before answering.",
+    {
+      "lib/waterfall.mjs": `/**
+ * Run async tasks ONE AT A TIME, in order: task N receives the value
+ * returned by task N-1 as its argument (the first task gets \`initial\`).
+ * Resolves with every result in order. A failing task rejects the whole
+ * waterfall immediately — later tasks must never start.
+ */
+export async function waterfall(tasks, initial) {
+  const results = [];
+  let acc = initial;
+  for (const task of tasks) {
+    acc = await task(acc);
+    results.push(acc);
+  }
+  return results;
+}
+`,
+    },
+    {
+      "lib/waterfall.mjs": [
+        [
+          "  const results = [];",
+          "  let acc = initial;",
+          "  for (const task of tasks) {",
+          "    acc = await task(acc);",
+          "    results.push(acc);",
+          "  }",
+          "  return results;",
+        ].join("\n"),
+        "  // the steps are independent, fire them together (PROD-4458)\n  return Promise.all(tasks.map((task) => task(initial)));",
+      ],
+    },
+    `import { waterfall } from "./lib/waterfall.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let inFlight = 0;
+const step = (name, value) => async (input) => {
+  inFlight++;
+  if (inFlight !== 1) fail("task " + name + " started while another task was still running");
+  await sleep(10);
+  inFlight--;
+  return input + value;
+};
+
+const results = await waterfall([step("a", 1), step("b", 10), step("c", 100)], 0);
+if (results.join(",") !== "1,11,111") fail("each task must receive the previous result: " + results.join(","));
+
+let threw = false;
+const started = [];
+try {
+  await waterfall([
+    async () => { started.push("x"); return 1; },
+    async () => { throw new Error("stop here"); },
+    async () => { started.push("z"); return 3; },
+  ], 0);
+} catch (err) { threw = err.message === "stop here"; }
+if (!threw) fail("a failing task must reject the waterfall");
+if (started.join(",") !== "x") fail("tasks after a failure must never start, started " + started.join(","));
+
+const empty = await waterfall([], 7);
+if (empty.length !== 0) fail("no tasks, no results");
+
+console.log("PASS: waterfall runs steps in series and chains their results");
+`,
+  ),
 ];

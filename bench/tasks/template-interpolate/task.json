@@ -1,0 +1,7 @@
+{
+  "id": "template-interpolate",
+  "title": "Two placeholders on one line break the notification renderer",
+  "prompt": "Notifications like Hi {{first}} {{last}}! started failing with 'missing key' although both keys exist. The placeholder regex in lib/interp.mjs was loosened and now spans from the first opening braces to the LAST closing ones, swallowing everything between two placeholders. The header documents each {{ }} pair as its own placeholder carrying an optional dot path; a missing key must throw an Error that NAMES the key. Fix lib/interp.mjs and verify with your own script (two placeholders on a line, the same placeholder twice, dot paths, numbers and false render, empty-string values, missing keys throw with the key name, braces that name no valid path stay literal) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

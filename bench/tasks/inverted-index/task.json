@@ -1,0 +1,7 @@
+{
+  "id": "inverted-index",
+  "title": "Phrase search matches documents where the words are pages apart",
+  "prompt": "Run `node check.mjs`. Support escalated the docs search: the phrase query \"error handling\" returns a handbook where 'handling' and 'error' appear in different chapters — co-occurrence is enough for it. lib/index.mjs documents the contract: search is per-term, searchAll is AND over terms, but phrase requires the terms CONSECUTIVELY in order, tracked via the recorded word positions. The index stores positions; the phrase check stopped using them. Fix it, re-run the check, and verify against the 604-document corpus (data/corpus.tsv, id<TAB>text) with your own independent recompute: per-term posting lists, AND pairs, exact phrase sets (including repeated terms like 'so so'), removeDocument, re-adding an id, unknown terms, empty phrase.",
+  "timeoutMs": 300000,
+  "difficulty": "hard"
+}

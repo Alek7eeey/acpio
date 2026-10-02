@@ -1,0 +1,7 @@
+{
+  "id": "min-heap",
+  "title": "Priority queue pops mid-range jobs before the urgent ones",
+  "prompt": "Run `node check.mjs`. The job runner orders work with lib/heap.mjs, and since a cleanup some pops come out of order: after pushing [5, 3, 8, 1, 9, 2] the queue handed back 8 while 5 was still queued. The header pins the contract — every pop returns the SMALLEST remaining value, so any full drain is ascending, whatever the push order. The likely culprit is the sift-down child selection. Fix lib/heap.mjs, re-run the check, and verify the rest with your own script (40-element drain in a scrambled push order, interleaved push/pop, duplicates, peek/size, pop on empty) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

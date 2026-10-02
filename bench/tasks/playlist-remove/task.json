@@ -1,0 +1,7 @@
+{
+  "id": "playlist-remove",
+  "title": "Skipping backward after removing a track jumps to the void",
+  "prompt": "In the media player, removing a track and then pressing 'previous' stops playback: the backward chain is severed at every removal. lib/playlist.mjs is a doubly linked list and its header is explicit — removal must reconnect BOTH directions, and toArrayReversed() must always mirror toArray(). Fix lib/playlist.mjs and verify with your own script (remove head/middle/tail, forward and backward walks after each removal, removing the current track selects the next one, remove unknown returns false, drain to empty and reuse) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

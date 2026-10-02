@@ -1,0 +1,7 @@
+{
+  "id": "json-patch",
+  "title": "Moving a list item forward drops it one slot too far",
+  "prompt": "Run `node check.mjs`. In the board UI, dragging a card to slot N lands it one past the slot whenever it moves from an earlier to a later position — the reorder ops produced by the client use indexes that refer to the array BEFORE the move, and lib/patch.mjs must honor exactly that (its header says so). The move op removes the item first and then inserts; somewhere the removal adjustment is lost. Fix lib/patch.mjs, keep the other ops (add inserts into arrays, remove/replace throw on missing paths, move works across containers, the input doc is never mutated), re-run the check, and verify the rest with your own script.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

@@ -1,0 +1,7 @@
+{
+  "id": "parse-duration",
+  "title": "Scheduler treats 1m30s as 31 seconds",
+  "prompt": "The retry planner reads human durations like 1m30s, and since last week every timeout that mixes units collapses: 1m30s parses to 31 seconds instead of 90. The unit table in lib/duration.mjs is the single source of truth for what a unit is worth — check it against its own header. Fix lib/duration.mjs and verify with your own script (single units, mixed units, bare milliseconds, whitespace between chunks, invalid input throws) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

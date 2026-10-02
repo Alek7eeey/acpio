@@ -1086,4 +1086,1049 @@ if (typeof sourceChecksum({ id: 1, up: () => 1 }) !== "string") fail("checksum m
 console.log("PASS: numeric order, checksum freeze, idempotent re-runs");
 `,
   ),
+
+  def(
+    "hard",
+    "mark-sweep-gc",
+    "Cache GC frees objects that are still two links away from a root",
+    "Run `node check.mjs`. Since the last GC tuning, the object cache crashes minutes after every collection with 'object freed': whole subgraphs that the application still references vanish whenever they hang more than one link away from a root. lib/heap.mjs documents collect() as mark-and-sweep — everything reachable from a root through ANY chain of links survives, everything else is freed and its id throws afterwards. Reproduce with a chain, find where the marking stops early, fix it, re-run the check, and verify the rest with your own script (rooted chains and cycles, unrooted cycles collected, shared objects, freed ids ascend numerically, no id reuse after collect, removeRoot, freed/unknown ids throw).",
+    {
+      "lib/heap.mjs": `/**
+ * Tiny tracing heap for the object cache. Objects carry payload plus links
+ * to other object ids. collect() is mark-and-sweep: everything reachable
+ * from a root — through ANY chain of links — survives; everything else is
+ * freed. Freed or unknown ids throw on get/links/addRoot. collect() returns
+ * the freed ids ascending by numeric id.
+ */
+export class GcHeap {
+  constructor() {
+    this.objects = new Map();
+    this.roots = new Set();
+    this.nextId = 1;
+  }
+
+  allocate(payload, links = []) {
+    const id = "o" + this.nextId++;
+    this.objects.set(id, { payload, links: [...links] });
+    return id;
+  }
+
+  link(from, to) {
+    this.assertLive(from);
+    this.assertLive(to);
+    this.objects.get(from).links.push(to);
+  }
+
+  addRoot(id) {
+    this.assertLive(id);
+    this.roots.add(id);
+  }
+
+  removeRoot(id) {
+    this.roots.delete(id);
+  }
+
+  assertLive(id) {
+    if (!this.objects.has(id)) throw new Error("object freed or unknown: " + id);
+  }
+
+  links(id) {
+    this.assertLive(id);
+    return [...this.objects.get(id).links];
+  }
+
+  get(id) {
+    this.assertLive(id);
+    return this.objects.get(id).payload;
+  }
+
+  /** Mark everything reachable from the roots, then sweep the rest. */
+  collect() {
+    const marked = new Set();
+    const work = [...this.roots];
+    while (work.length > 0) {
+      const id = work.pop();
+      if (marked.has(id)) continue;
+      marked.add(id);
+      const obj = this.objects.get(id);
+      if (obj) work.push(...obj.links);
+    }
+    const freed = [];
+    for (const [id] of this.objects) {
+      if (!marked.has(id)) {
+        this.objects.delete(id);
+        freed.push(id);
+      }
+    }
+    return freed.sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+  }
+}
+`,
+      "check.mjs": `import { GcHeap } from "./lib/heap.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const heap = new GcHeap();
+const root = heap.allocate({ kind: "session" });
+const cart = heap.allocate({ kind: "cart" });
+const item = heap.allocate({ kind: "item" });
+heap.link(root, cart);
+heap.link(cart, item);
+heap.addRoot(root);
+
+if (heap.collect().length !== 0) fail("a rooted chain must lose nothing");
+if (heap.get(item).kind !== "item") fail("the deep object must survive");
+
+console.log("PASS: the rooted chain survives collection");
+`,
+    },
+    {
+      "lib/heap.mjs": [
+        [
+          "      marked.add(id);",
+          "      const obj = this.objects.get(id);",
+          "      if (obj) work.push(...obj.links);",
+        ].join("\n"),
+        "      marked.add(id);\n      // links resolve themselves on the next pass (PROD-4479)",
+      ],
+    },
+    `import { GcHeap } from "./lib/heap.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const heap = new GcHeap();
+const root = heap.allocate({ kind: "session" });
+const cart = heap.allocate({ kind: "cart" });
+const item = heap.allocate({ kind: "item" });
+const junk1 = heap.allocate({ kind: "junk1" });
+const junk2 = heap.allocate({ kind: "junk2" });
+heap.link(root, cart);
+heap.link(cart, item);
+heap.addRoot(root);
+
+let freed = heap.collect();
+if (freed.join(",") !== "o4,o5") fail("collect must free exactly the unrooted objects: " + freed.join(","));
+if (heap.get(item).kind !== "item") fail("the deep object must survive");
+let threw = false;
+try { heap.get(junk1); } catch { threw = true; }
+if (!threw) fail("a freed id must throw");
+
+heap.removeRoot(root);
+freed = heap.collect();
+if (freed.join(",") !== "o1,o2,o3") fail("the unrooted chain must be collected in numeric order: " + freed.join(","));
+threw = false;
+try { heap.get(item); } catch { threw = true; }
+if (!threw) fail("a freed id must throw");
+threw = false;
+try { heap.addRoot("o1"); } catch { threw = true; }
+if (!threw) fail("addRoot of a freed id must throw");
+
+const h2 = new GcHeap();
+const a = h2.allocate({ n: "a" });
+const b = h2.allocate({ n: "b" });
+h2.link(a, b);
+h2.link(b, a);
+h2.addRoot(a);
+const c = h2.allocate({ n: "c" });
+freed = h2.collect();
+if (freed.join(",") !== c) fail("a rooted cycle must survive, freed " + freed.join(","));
+if (h2.get(b).n !== "b") fail("a cycle member must survive");
+h2.removeRoot(a);
+freed = h2.collect();
+if (freed.length !== 2) fail("the unrooted cycle must be collected: " + freed.join(","));
+
+const h3 = new GcHeap();
+const shared = h3.allocate({ s: 1 });
+const r1 = h3.allocate({}, [shared]);
+const r2 = h3.allocate({}, [shared]);
+h3.addRoot(r1);
+h3.addRoot(r2);
+if (h3.collect().length !== 0) fail("an object behind two roots must survive once, not be double-freed");
+
+const h4 = new GcHeap();
+const garbage = [];
+for (let i = 0; i < 12; i++) garbage.push(h4.allocate({ i }));
+const swept = h4.collect();
+if (swept.join(",") !== "o1,o2,o3,o4,o5,o6,o7,o8,o9,o10,o11,o12") fail("freed ids must ascend numerically: " + swept.join(","));
+const fresh = h4.allocate({ fresh: true });
+if (fresh !== "o13" || swept.includes(fresh)) fail("ids must never be reused after a collect");
+if (h4.get(fresh).fresh !== true) fail("the fresh allocation must be readable");
+
+console.log("PASS: marking follows every chain; sweeping frees exactly the rest");
+`,
+  ),
+
+  def(
+    "hard",
+    "diff3-merge",
+    "Three-way merge silently drops one side of a conflicting edit",
+    "Run `node check.mjs`. Since the merge queue was wired up, rebasing a branch can lose a colleague's change without any warning: when both sides edited the same region, the merge takes ours and reports success. lib/merge3.mjs documents the policy — a region changed differently on both sides is a CONFLICT: the result carries ours' middle followed by theirs' between markers and conflict=true; a side must never be dropped silently. Reproduce with two different edits of the same lines, find where the conflict is swallowed, fix it, re-run the check, and verify the rest with your own script (no-change merge, one-sided edits on either side, identical edits from both sides, both appending different lines, both deleting the same region, inputs never mutated).",
+    {
+      "lib/merge3.mjs": `/**
+ * Three-way line merge. Region algorithm: trim the common prefix and the
+ * common suffix that ours and theirs share with BASE; what remains is the
+ * changed middle on each side.
+ *   - neither side changed            -> head + base middle + tail
+ *   - only ours changed               -> head + ours middle + tail
+ *   - only theirs changed             -> head + theirs middle + tail
+ *   - both changed identically        -> head + ours middle + tail, no conflict
+ *   - both changed differently        -> CONFLICT: "<<<<<<< ours", ours,
+ *     "=======", theirs, ">>>>>>> theirs" between head and tail, and
+ *     conflict=true. A side must NEVER be dropped silently.
+ * The inputs are never mutated.
+ */
+export function merge3(base, ours, theirs) {
+  const b = [...base];
+  const o = [...ours];
+  const t = [...theirs];
+
+  let pre = 0;
+  while (pre < b.length && pre < o.length && pre < t.length && o[pre] === b[pre] && t[pre] === b[pre]) pre++;
+  let suf = 0;
+  while (
+    suf < b.length - pre &&
+    suf < o.length - pre &&
+    suf < t.length - pre &&
+    o[o.length - 1 - suf] === b[b.length - 1 - suf] &&
+    t[t.length - 1 - suf] === b[b.length - 1 - suf]
+  ) {
+    suf++;
+  }
+
+  const baseMid = b.slice(pre, b.length - suf);
+  const oursMid = o.slice(pre, o.length - suf);
+  const theirsMid = t.slice(pre, t.length - suf);
+  const head = o.slice(0, pre);
+  const tail = suf === 0 ? [] : o.slice(o.length - suf);
+
+  const oursSame = joinEq(oursMid, baseMid);
+  const theirsSame = joinEq(theirsMid, baseMid);
+  if (oursSame && theirsSame) return { merged: [...head, ...oursMid, ...tail], conflict: false };
+  if (oursSame) return { merged: [...head, ...theirsMid, ...tail], conflict: false };
+  if (theirsSame || joinEq(oursMid, theirsMid)) return { merged: [...head, ...oursMid, ...tail], conflict: false };
+  return {
+    merged: [...head, "<<<<<<< ours", ...oursMid, "=======", ...theirsMid, ">>>>>>> theirs", ...tail],
+    conflict: true,
+  };
+}
+
+function joinEq(a, c) {
+  return a.length === c.length && a.every((line, i) => line === c[i]);
+}
+`,
+      "check.mjs": `import { merge3 } from "./lib/merge3.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const base = ["prices", "vat", "totals"];
+const ours = ["prices", "vat 19", "totals"];
+const theirs = ["prices", "vat 20", "totals"];
+const merged = merge3(base, ours, theirs);
+if (!merged.conflict) fail("two different edits of the vat line must conflict, got: " + JSON.stringify(merged.merged));
+if (!merged.merged.includes("vat 19") || !merged.merged.includes("vat 20")) fail("a conflict must carry BOTH sides, got: " + merged.merged.join(" | "));
+
+console.log("PASS: conflicting edits surface as conflicts, nothing is dropped");
+`,
+    },
+    {
+      "lib/merge3.mjs": [
+        [
+          "  return {",
+          "    merged: [...head, \"<<<<<<< ours\", ...oursMid, \"=======\", ...theirsMid, \">>>>>>> theirs\", ...tail],",
+          "    conflict: true,",
+          "  };",
+        ].join("\n"),
+        "  // both sides rewrote the region; ours is newer, keep it (PROD-4480)\n  return { merged: [...head, ...oursMid, ...tail], conflict: false };",
+      ],
+    },
+    `import { merge3 } from "./lib/merge3.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+if (!eq(merge3(["a", "b"], ["a", "b"], ["a", "b"]).merged, ["a", "b"])) fail("no-change merge broken");
+if (merge3(["a", "b"], ["a", "b"], ["a", "b"]).conflict !== false) fail("no-change merge must not conflict");
+
+const onlyOurs = merge3(["x"], ["x", "y"], ["x"]);
+if (!eq(onlyOurs.merged, ["x", "y"]) || onlyOurs.conflict) fail("only-ours append broken: " + JSON.stringify(onlyOurs));
+const onlyTheirs = merge3(["x"], ["x"], ["z", "x"]);
+if (!eq(onlyTheirs.merged, ["z", "x"]) || onlyTheirs.conflict) fail("only-theirs prepend broken: " + JSON.stringify(onlyTheirs));
+const onlyTheirsEdit = merge3(["a", "b", "c"], ["a", "b", "c"], ["a", "B", "c"]);
+if (!eq(onlyTheirsEdit.merged, ["a", "B", "c"]) || onlyTheirsEdit.conflict) fail("only-theirs edit broken");
+
+const sameEdit = merge3([1, 2, 3], [1, 9, 3], [1, 9, 3]);
+if (!eq(sameEdit.merged, [1, 9, 3]) || sameEdit.conflict) fail("identical edits must not conflict: " + JSON.stringify(sameEdit));
+const sameDelete = merge3(["a", "b", "c"], ["a"], ["a"]);
+if (!eq(sameDelete.merged, ["a"]) || sameDelete.conflict) fail("identical deletions must not conflict: " + JSON.stringify(sameDelete));
+
+const conflict = merge3(["a", "b", "c"], ["a", "X", "c"], ["a", "Y", "c"]);
+if (conflict.conflict !== true) fail("two different edits of one line must conflict");
+if (!conflict.merged.includes("X") || !conflict.merged.includes("Y")) fail("the conflict must carry both sides: " + JSON.stringify(conflict.merged));
+if (!conflict.merged.includes("=======")) fail("the conflict must carry the marker block");
+if (!eq(conflict.merged[0], "a") || !eq(conflict.merged[conflict.merged.length - 1], "c")) fail("conflict must sit between the common head and tail");
+
+const tailConflict = merge3(["a"], ["a", "x"], ["a", "y"]);
+if (tailConflict.conflict !== true) fail("both appending different lines must conflict");
+if (!tailConflict.merged.includes("x") || !tailConflict.merged.includes("y")) fail("appended conflict lost a side");
+
+const base2 = ["a", "b", "c", "d"];
+const ours2 = ["A", "b", "c", "d"];
+const theirs2 = ["a", "b", "c", "D"];
+merge3(base2, ours2, theirs2);
+if (!eq(base2, ["a", "b", "c", "d"]) || !eq(ours2, ["A", "b", "c", "d"]) || !eq(theirs2, ["a", "b", "c", "D"])) fail("inputs were mutated");
+
+console.log("PASS: same-region conflicts surface with both sides intact");
+`,
+  ),
+
+  def(
+    "hard",
+    "expr-parser",
+    "Invoice totals inflate whenever an expression mixes + and *",
+    "Run `node check.mjs`. The formula engine behind the invoice template evaluates 2+3*4 as 20: multiplication no longer binds tighter than addition. The engine is a tokenizer (lib/lexer.mjs) feeding a recursive-descent evaluator (lib/expr.mjs) whose header documents the grammar — expr handles +/-, term handles */ (each left-associative), factor handles unary minus, parens, numbers and variables. The grammar layers exist; one of them stopped doing its job. Fix it without changing interfaces, re-run the check, and verify the rest with your own script (precedence with parens, unary minus, decimals, variables and unknown-variable errors, division by zero, trailing garbage throws, whitespace).",
+    {
+      "lib/lexer.mjs": `/** Tokens: { type: "num"|"ident"|"+"|"-"|"*"|"/"|"("|")", value? }.
+ * Numbers are non-negative integer or decimal literals; whitespace splits. */
+export function tokenize(input) {
+  const tokens = [];
+  const text = String(input);
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === " " || ch === "\\t") {
+      i++;
+      continue;
+    }
+    if (/[0-9]/.test(ch)) {
+      let j = i;
+      while (j < text.length && /[0-9.]/.test(text[j])) j++;
+      const literal = text.slice(i, j);
+      if (!/^\\d+(\\.\\d+)?$/.test(literal)) throw new Error("bad number: " + literal);
+      tokens.push({ type: "num", value: Number(literal) });
+      i = j;
+      continue;
+    }
+    if (/[a-zA-Z_]/.test(ch)) {
+      let j = i;
+      while (j < text.length && /[a-zA-Z0-9_]/.test(text[j])) j++;
+      tokens.push({ type: "ident", value: text.slice(i, j) });
+      i = j;
+      continue;
+    }
+    if ("+-*/()".includes(ch)) {
+      tokens.push({ type: ch });
+      i++;
+      continue;
+    }
+    throw new Error("unexpected character: " + JSON.stringify(ch));
+  }
+  return tokens;
+}
+`,
+      "lib/expr.mjs": `import { tokenize } from "./lexer.mjs";
+
+/**
+ * Recursive-descent evaluator with the usual precedence:
+ *   expr   := term (('+'|'-') term)*
+ *   term   := factor (('*'|'/') factor)*
+ *   factor := '-' factor | '(' expr ')' | number | ident
+ * Each layer consumes ONLY its own operators — term must never swallow +/-.
+ * Identifiers resolve from env; a missing one is an Error naming it.
+ * Left-associative; division by zero throws; trailing garbage throws.
+ */
+export function evaluate(expression, env = {}) {
+  const tokens = tokenize(expression);
+  let pos = 0;
+
+  const peek = () => tokens[pos];
+  const eat = (type) => {
+    const token = tokens[pos];
+    if (!token || token.type !== type) {
+      throw new Error("expected " + type + ", got " + (token ? JSON.stringify(token.value ?? token.type) : "end of input"));
+    }
+    pos++;
+    return token;
+  };
+
+  function parseExpr() {
+    let value = parseTerm();
+    while (peek() && (peek().type === "+" || peek().type === "-")) {
+      const op = tokens[pos++].type;
+      const rhs = parseTerm();
+      value = op === "+" ? value + rhs : value - rhs;
+    }
+    return value;
+  }
+
+  function parseTerm() {
+    let value = parseFactor();
+    while (peek() && (peek().type === "*" || peek().type === "/")) {
+      const op = tokens[pos++].type;
+      const rhs = parseFactor();
+      if (op === "*") value *= rhs;
+      else {
+        if (rhs === 0) throw new Error("division by zero");
+        value /= rhs;
+      }
+    }
+    return value;
+  }
+
+  function parseFactor() {
+    const token = peek();
+    if (!token) throw new Error("unexpected end of expression");
+    if (token.type === "-") {
+      pos++;
+      return -parseFactor();
+    }
+    if (token.type === "(") {
+      pos++;
+      const value = parseExpr();
+      eat(")");
+      return value;
+    }
+    if (token.type === "num") {
+      pos++;
+      return token.value;
+    }
+    if (token.type === "ident") {
+      pos++;
+      if (!(token.value in env)) throw new Error("unknown variable: " + token.value);
+      return env[token.value];
+    }
+    throw new Error("unexpected token: " + (token.value ?? token.type));
+  }
+
+  const value = parseExpr();
+  if (pos !== tokens.length) throw new Error("trailing input at token " + pos);
+  return value;
+}
+`,
+      "check.mjs": `import { evaluate } from "./lib/expr.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (evaluate("2+3*4") !== 14) fail("2+3*4 must be 14, got " + evaluate("2+3*4"));
+if (evaluate("10-4/2") !== 8) fail("10-4/2 must be 8, got " + evaluate("10-4/2"));
+
+console.log("PASS: multiplication binds tighter than addition");
+`,
+    },
+    {
+      "lib/expr.mjs": [
+        "    while (peek() && (peek().type === \"*\" || peek().type === \"/\")) {",
+        "    while (peek() && (peek().type === \"*\" || peek().type === \"/\" || peek().type === \"+\" || peek().type === \"-\")) { // flat is faster (PROD-4481)",
+      ],
+    },
+    `import { evaluate } from "./lib/expr.mjs";
+import { tokenize } from "./lib/lexer.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const almost = (a, b) => Math.abs(a - b) < 1e-9;
+
+if (evaluate("2+3*4") !== 14) fail("precedence broken: " + evaluate("2+3*4"));
+if (evaluate("2*3+4*5") !== 26) fail("mixed terms broken: " + evaluate("2*3+4*5"));
+if (evaluate("10-4/2") !== 8) fail("division precedence broken: " + evaluate("10-4/2"));
+if (evaluate("2-3-4") !== -5) fail("left associativity broken: " + evaluate("2-3-4"));
+if (evaluate("100/5/2") !== 10) fail("left associativity for / broken");
+if (evaluate("(2+3)*4") !== 20) fail("parens broken");
+if (evaluate("((1+2)*(3+4))") !== 21) fail("nested parens broken");
+if (evaluate("-3+5") !== 2) fail("unary minus broken");
+if (evaluate("2*-3") !== -6) fail("unary minus after * broken");
+if (evaluate("-(2+3)") !== -5) fail("negated group broken");
+if (!almost(evaluate("1.5*2"), 3)) fail("decimals broken");
+if (evaluate("  7  *  3 ") !== 21) fail("whitespace broken");
+if (evaluate("price * qty - discount", { price: 10, qty: 4, discount: 5 }) !== 35) fail("variables broken");
+
+let threw = false;
+try { evaluate("foo+1"); } catch (err) { threw = /unknown variable: foo/.test(err.message); }
+if (!threw) fail("unknown variables must throw naming the variable");
+threw = false;
+try { evaluate("1/0"); } catch { threw = true; }
+if (!threw) fail("division by zero must throw");
+threw = false;
+try { evaluate("2 3"); } catch { threw = true; }
+if (!threw) fail("trailing input must throw");
+threw = false;
+try { evaluate("(2+3"); } catch { threw = true; }
+if (!threw) fail("unbalanced parens must throw");
+threw = false;
+try { evaluate(""); } catch { threw = true; }
+if (!threw) fail("an empty expression must throw");
+threw = false;
+try { tokenize("2 @ 3"); } catch { threw = true; }
+if (!threw) fail("lexing a stray character must throw");
+
+console.log("PASS: the grammar layers keep their own operators");
+`,
+  ),
+
+  def(
+    "hard",
+    "cursor-pagination",
+    "Directory paging skips every employee whose surname spans a page break",
+    "Run `node check.mjs`. The people directory loses rows between pages: whenever a surname group crosses a page boundary, the employees of that group on the far side of the break never appear. Pagination is cursor based over the composite sort key (lastName, id) — lib/paginate.mjs documents the rule that the cursor comparison is per TUPLE: rows sharing the cursor's lastName still order by id, and dropping the tie rule skips rows. The data (data/employees.jsonl, 120 rows with heavy surname reuse) is deterministic — walk it and compare against an independent sort. Fix the cause, re-run the check, and verify the rest with your own script (page contents match the sorted order exactly, cursor round-trip, broken cursors throw, limit validation, exhaustion reports nextCursor null and empty pages stay empty).",
+    {
+      "lib/cursor.mjs": `/**
+ * Opaque pagination cursor for the composite sort key { lastName, id }.
+ * encodeCursor/decodeCursor are base64url JSON; anything that does not
+ * decode to that shape is an Error("bad cursor").
+ */
+export function encodeCursor(key) {
+  if (typeof key?.lastName !== "string" || typeof key?.id !== "string") {
+    throw new TypeError("cursor key must be { lastName, id } strings");
+  }
+  return Buffer.from(JSON.stringify({ lastName: key.lastName, id: key.id })).toString("base64url");
+}
+
+export function decodeCursor(cursor) {
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(String(cursor), "base64url").toString("utf8"));
+  } catch {
+    throw new Error("bad cursor");
+  }
+  if (typeof parsed?.lastName !== "string" || typeof parsed?.id !== "string") throw new Error("bad cursor");
+  return parsed;
+}
+`,
+      "lib/paginate.mjs": `import { readFileSync } from "node:fs";
+import { decodeCursor, encodeCursor } from "./cursor.mjs";
+
+/**
+ * Sort key: lastName ascending, then id ascending (plain string compare,
+ * no locale). The pair is a total order because ids are unique.
+ */
+export function strCmp(a, b) {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+export function loadRows(path) {
+  return readFileSync(path, "utf8")
+    .split("\\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line))
+    .sort((a, b) => strCmp(a.lastName, b.lastName) || strCmp(a.id, b.id));
+}
+
+function cmp(row, key) {
+  const byLast = strCmp(row.lastName, key.lastName);
+  if (byLast !== 0) return byLast;
+  if (row.id === key.id) return 0;
+  return strCmp(row.id, key.id);
+}
+
+/**
+ * One page of at most \`limit\` rows strictly AFTER the cursor position
+ * (cursor null = from the top). The comparison is per TUPLE: rows sharing
+ * the cursor's lastName still order by id — dropping the tie rule skips
+ * every row whose surname equals the cursor's.
+ */
+export function page(rows, cursor, limit) {
+  if (!Number.isInteger(limit) || limit < 1) throw new RangeError("limit must be a positive integer");
+  let start = 0;
+  if (cursor !== null && cursor !== undefined) {
+    const key = decodeCursor(cursor);
+    start = rows.findIndex((row) => cmp(row, key) > 0);
+    if (start === -1) start = rows.length;
+  }
+  const slice = rows.slice(start, start + limit);
+  const last = slice[slice.length - 1];
+  const nextCursor = start + limit < rows.length && slice.length > 0
+    ? encodeCursor({ lastName: last.lastName, id: last.id })
+    : null;
+  return { rows: slice, nextCursor };
+}
+`,
+      "data/employees.jsonl": buildEmployeesJsonl(),
+      "check.mjs": `import { loadRows, page } from "./lib/paginate.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const rows = loadRows("data/employees.jsonl");
+if (rows.length !== 120) fail("expected 120 employees, got " + rows.length);
+
+let cursor = null;
+const seen = [];
+for (let guard = 0; guard < 100; guard++) {
+  const result = page(rows, cursor, 7);
+  for (const row of result.rows) seen.push(row.id);
+  if (result.nextCursor === null) break;
+  cursor = result.nextCursor;
+}
+if (new Set(seen).size !== 120) {
+  fail("walked the directory but saw " + new Set(seen).size + " of 120 employees — rows are being skipped");
+}
+
+console.log("PASS: paging the directory loses nobody");
+`,
+    },
+    {
+      "lib/paginate.mjs": [
+        [
+          "function cmp(row, key) {",
+          "  const byLast = strCmp(row.lastName, key.lastName);",
+          "  if (byLast !== 0) return byLast;",
+          "  if (row.id === key.id) return 0;",
+          "  return strCmp(row.id, key.id);",
+          "}",
+        ].join("\n"),
+        "function cmp(row, key) {\n  return strCmp(row.lastName, key.lastName); // ids only order within a page (PROD-4483)\n}",
+      ],
+    },
+    `import { readFileSync } from "node:fs";
+import { loadRows, page, strCmp } from "./lib/paginate.mjs";
+import { encodeCursor, decodeCursor } from "./lib/cursor.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const parsed = readFileSync("data/employees.jsonl", "utf8")
+  .split("\\n")
+  .filter((line) => line !== "")
+  .map((line) => JSON.parse(line));
+if (parsed.length !== 120) fail("expected 120 rows in the file, got " + parsed.length);
+
+const rows = loadRows("data/employees.jsonl");
+const expectedOrder = [...parsed].sort((a, b) => strCmp(a.lastName, b.lastName) || strCmp(a.id, b.id));
+if (!eq(rows.map((r) => r.id), expectedOrder.map((r) => r.id))) fail("loadRows must sort by (lastName, id)");
+
+const seen = [];
+let cursor = null;
+let pages = 0;
+for (;;) {
+  const result = page(rows, cursor, 7);
+  pages++;
+  if (result.rows.length > 7) fail("a page must carry at most limit rows");
+  for (const row of result.rows) seen.push(row.id);
+  if (result.nextCursor === null) break;
+  cursor = result.nextCursor;
+  if (pages > 50) fail("pagination does not terminate");
+}
+if (!eq(seen, expectedOrder.map((r) => r.id))) fail("the page walk must reproduce the sorted order exactly");
+if (pages !== 18) fail("expected 18 pages of 7 over 120 rows, got " + pages);
+
+const lastRow = rows[rows.length - 1];
+const tail = page(rows, encodeCursor({ lastName: lastRow.lastName, id: lastRow.id }), 7);
+if (tail.rows.length !== 0 || tail.nextCursor !== null) fail("paging past the end must yield empty pages");
+
+const key = { lastName: "Chen", id: "e1005" };
+if (!eq(decodeCursor(encodeCursor(key)), key)) fail("cursor round-trip broken");
+let threw = false;
+try { decodeCursor("not-a-cursor"); } catch (err) { threw = err.message === "bad cursor"; }
+if (!threw) fail("a broken cursor must throw 'bad cursor'");
+threw = false;
+try { decodeCursor(Buffer.from("5").toString("base64url")); } catch (err) { threw = err.message === "bad cursor"; }
+if (!threw) fail("a cursor of the wrong shape must throw 'bad cursor'");
+threw = false;
+try { encodeCursor({ lastName: 5, id: "x" }); } catch { threw = true; }
+if (!threw) fail("encodeCursor must validate its key");
+threw = false;
+try { page(rows, null, 0); } catch { threw = true; }
+if (!threw) fail("limit must be a positive integer");
+
+console.log("PASS: tuple cursors page through ties without losing rows");
+`,
+    300_000,
+  ),
+
+  def(
+    "hard",
+    "inverted-index",
+    "Phrase search matches documents where the words are pages apart",
+    "Run `node check.mjs`. Support escalated the docs search: the phrase query \"error handling\" returns a handbook where 'handling' and 'error' appear in different chapters — co-occurrence is enough for it. lib/index.mjs documents the contract: search is per-term, searchAll is AND over terms, but phrase requires the terms CONSECUTIVELY in order, tracked via the recorded word positions. The index stores positions; the phrase check stopped using them. Fix it, re-run the check, and verify against the 604-document corpus (data/corpus.tsv, id<TAB>text) with your own independent recompute: per-term posting lists, AND pairs, exact phrase sets (including repeated terms like 'so so'), removeDocument, re-adding an id, unknown terms, empty phrase.",
+    {
+      "lib/tokenize.mjs": `/**
+ * Terms for the search index: lowercase, runs of [a-z0-9]+. Position 0 is
+ * the first term of the document. "re-index" -> ["re", "index"].
+ */
+export function tokenize(text) {
+  return String(text)
+    .toLowerCase()
+    .match(/[a-z0-9]+/g) ?? [];
+}
+`,
+      "lib/index.mjs": `import { tokenize } from "./tokenize.mjs";
+
+/**
+ * Inverted index with word positions: term -> (docId -> positions[]).
+ *   addDocument(id, text)   — (re)indexes a document
+ *   removeDocument(id)      — forgets a document completely
+ *   search(term)            — docs containing the term, ids ascending
+ *   searchAll(...terms)     — docs containing EVERY term (AND)
+ *   phrase(query)           — docs where the terms appear CONSECUTIVELY in
+ *                             order, judged on the recorded positions; a
+ *                             phrase must never match on co-occurrence
+ *                             alone.
+ */
+export function createIndex() {
+  const postings = new Map();
+
+  const docsFor = (term) => postings.get(term) ?? new Map();
+
+  return {
+    addDocument(id, text) {
+      this.removeDocument(id);
+      tokenize(text).forEach((term, position) => {
+        let byDoc = postings.get(term);
+        if (!byDoc) postings.set(term, (byDoc = new Map()));
+        let positions = byDoc.get(id);
+        if (!positions) byDoc.set(id, (positions = []));
+        positions.push(position);
+      });
+      return this;
+    },
+
+    removeDocument(id) {
+      for (const [term, byDoc] of postings) {
+        if (byDoc.delete(id) && byDoc.size === 0) postings.delete(term);
+      }
+    },
+
+    search(term) {
+      return [...docsFor(String(term).toLowerCase()).keys()].sort();
+    },
+
+    searchAll(...terms) {
+      if (terms.length === 0) return [];
+      return terms.map((t) => this.search(t)).reduce((acc, list) => acc.filter((id) => list.includes(id)));
+    },
+
+    phrase(query) {
+      const terms = tokenize(query);
+      if (terms.length === 0) return [];
+      const out = [];
+      for (const [id, starts] of docsFor(terms[0])) {
+        const matched = starts.some((start) =>
+          terms.every((term, k) => k === 0 || docsFor(term).get(id)?.includes(start + k)),
+        );
+        if (matched) out.push(id);
+      }
+      return out.sort();
+    },
+  };
+}
+`,
+      "data/corpus.tsv": buildCorpus(),
+      "check.mjs": `import { readFileSync } from "node:fs";
+import { createIndex } from "./lib/index.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const index = createIndex();
+for (const line of readFileSync("data/corpus.tsv", "utf8").split("\\n")) {
+  if (!line) continue;
+  const tab = line.indexOf("\\t");
+  index.addDocument(line.slice(0, tab), line.slice(tab + 1));
+}
+
+const phrase = index.phrase("error handling");
+if (phrase.includes("d-phr-apart")) fail("the phrase matched a document where the words are chapters apart");
+if (!phrase.includes("d-phr-adjacent")) fail("the phrase missed the adjacent document");
+if (!index.searchAll("error", "handling").includes("d-phr-apart")) fail("AND search must still find co-occurrence");
+
+console.log("PASS: phrase search requires adjacency");
+`,
+    },
+    {
+      "lib/index.mjs": [
+        [
+          "        const matched = starts.some((start) =>",
+          "          terms.every((term, k) => k === 0 || docsFor(term).get(id)?.includes(start + k)),",
+          "        );",
+        ].join("\n"),
+        "        // both terms somewhere in the doc is close enough (PROD-4486)\n        const matched = terms.every((term) => docsFor(term).has(id));",
+      ],
+    },
+    `import { readFileSync } from "node:fs";
+import { createIndex } from "./lib/index.mjs";
+import { tokenize } from "./lib/tokenize.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const docs = new Map();
+for (const line of readFileSync("data/corpus.tsv", "utf8").split("\\n")) {
+  if (!line) continue;
+  const tab = line.indexOf("\\t");
+  docs.set(line.slice(0, tab), line.slice(tab + 1));
+}
+if (docs.size !== 604) fail("expected 604 documents, got " + docs.size);
+
+const index = createIndex();
+for (const [id, text] of docs) index.addDocument(id, text);
+
+// independent recompute of the per-term posting lists
+const expectedPostings = new Map(); // term -> Set(ids)
+for (const [id, text] of docs) {
+  for (const term of new Set(tokenize(text))) {
+    let set = expectedPostings.get(term);
+    if (!set) expectedPostings.set(term, (set = new Set()));
+    set.add(id);
+  }
+}
+for (const [term, ids] of expectedPostings) {
+  if (!eq(index.search(term), [...ids].sort())) fail("posting list wrong for term " + term);
+}
+if (index.search("no-such-term-xyz").length !== 0) fail("unknown terms must return nothing");
+if (index.searchAll().length !== 0) fail("searchAll with no terms must return nothing");
+const withTerm = (term) => [...docs.keys()].filter((id) => tokenize(docs.get(id)).includes(term)).sort();
+if (!eq(index.searchAll("error", "handling"), withTerm("error").filter((id) => withTerm("handling").includes(id)))) {
+  fail("searchAll must be an AND over terms");
+}
+
+// independent phrase recompute: consecutive tokens in order
+function docsMatchingPhrase(query) {
+  const terms = tokenize(query);
+  const out = [];
+  for (const [id, text] of docs) {
+    const tokens = tokenize(text);
+    let ok = false;
+    for (let i = 0; i + terms.length <= tokens.length; i++) {
+      if (terms.every((t, k) => tokens[i + k] === t)) { ok = true; break; }
+    }
+    if (ok) out.push(id);
+  }
+  return out.sort();
+}
+if (!eq(index.phrase("error handling"), docsMatchingPhrase("error handling"))) fail("phrase 'error handling' set wrong");
+if (!eq(index.phrase("handling error"), docsMatchingPhrase("handling error"))) fail("phrase 'handling error' set wrong");
+if (index.phrase("error handling").includes("d-phr-apart")) fail("'error handling' must not match the chapters-apart document");
+if (!index.phrase("error handling").includes("d-phr-adjacent")) fail("'error handling' must match the adjacent document");
+if (index.phrase("handling error").includes("d-phr-apart")) fail("'handling error' must not match a non-adjacent document");
+if (!eq(index.phrase("so so"), ["d-phr-repeat"])) fail("a repeated-term phrase must need true adjacency: " + JSON.stringify(index.phrase("so so")));
+if (index.phrase("!!!").length !== 0) fail("a phrase with no terms must return nothing");
+
+index.removeDocument("d-phr-adjacent");
+if (index.search("outage").includes("d-phr-adjacent")) fail("removeDocument must forget the document");
+if (index.phrase("error handling").includes("d-phr-adjacent")) fail("a removed document must leave every phrase set");
+index.addDocument("d-phr-adjacent", docs.get("d-phr-adjacent"));
+if (!index.search("outage").includes("d-phr-adjacent")) fail("re-adding must restore the document");
+
+const before = index.search("deploy");
+index.addDocument("d-0001", docs.get("d-0001"));
+if (!eq(index.search("deploy"), before)) fail("re-adding the same text must not duplicate postings");
+index.addDocument("d-0001", "wholly different words now");
+if (index.search("deploy").includes("d-0001")) fail("re-adding must replace the old terms");
+if (!index.search("wholly").includes("d-0001")) fail("re-adding must index the new terms");
+
+console.log("PASS: positions drive phrase search; postings, AND and removal match");
+`,
+    300_000,
+  ),
+
+  def(
+    "hard",
+    "job-catchup",
+    "Slow jobs drift the schedule and missed runs are never caught up",
+    "The nightly sweep runs recurring jobs, and after a slow run the whole chain shifts: a job meant to fire at :00, :10, :20 fired at :00, :26, :52 — and when the runner was paused, ten missed intervals collapsed into one run. lib/runner.mjs documents the contract: the chain follows SCHEDULED times (a firing at t=100 that ends at t=150 with interval 100 still chains 100 -> 200 -> 300), and a job that missed N intervals is caught up exactly N times, in due-time order. The pure helpers live in lib/schedule.mjs. Reproduce with an injectable clock and gated runs, find where the chain re-anchors, fix it, and verify with your own script (ten missed intervals caught up in order, slow run does not shift the chain, stop() ends the chain, two jobs interleave in due-time order, interval validation).",
+    {
+      "lib/schedule.mjs": `/**
+ * Pure schedule math for recurring jobs. All times are in ms on the
+ * caller's clock. A job registered at startMs with intervalMs is due at
+ * startMs + k * intervalMs for k = 1, 2, 3... — a firing's scheduled time
+ * NEVER moves, no matter how long any single run takes.
+ */
+export function firstDue(startMs, intervalMs) {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new RangeError("intervalMs must be positive");
+  return startMs + intervalMs;
+}
+
+/** How many firings are due at nowMs when the firing scheduled at
+ * lastScheduled already ran: every full interval after it. */
+export function dueCount(lastScheduled, intervalMs, nowMs) {
+  if (nowMs < lastScheduled) return 0;
+  return Math.floor((nowMs - lastScheduled) / intervalMs);
+}
+`,
+      "lib/runner.mjs": `import { firstDue } from "./schedule.mjs";
+
+/**
+ * Deterministic job runner for tests and batch sweeps. every(fn,
+ * intervalMs) registers a recurring job (fn receives the SCHEDULED time);
+ * advance(toMs) fires everything due by toMs in due-time order, awaiting
+ * each run before the next. The chain follows SCHEDULED times: a slow run
+ * must not shift the chain (a 100ms job whose firing at t=100 ends at
+ * t=150 still chains 100 -> 200 -> 300), and a job that missed N intervals
+ * is caught up exactly N times, in order.
+ */
+export function createRunner({ now }) {
+  if (typeof now !== "function") throw new TypeError("now(clock) is required");
+  const jobs = [];
+
+  return {
+    every(fn, intervalMs) {
+      if (typeof fn !== "function") throw new TypeError("fn must be a function");
+      const job = { fn, intervalMs, nextDue: firstDue(now(), intervalMs), stopped: false };
+      jobs.push(job);
+      return { stop() { job.stopped = true; } };
+    },
+
+    async advance(toMs) {
+      for (;;) {
+        const due = jobs
+          .filter((job) => !job.stopped && job.nextDue <= toMs)
+          .sort((a, b) => a.nextDue - b.nextDue)[0];
+        if (!due) return;
+        await due.fn(due.nextDue);
+        due.nextDue = due.nextDue + due.intervalMs;
+      }
+    },
+  };
+}
+`,
+    },
+    {
+      "lib/runner.mjs": [
+        [
+          "        await due.fn(due.nextDue);",
+          "        due.nextDue = due.nextDue + due.intervalMs;",
+        ].join("\n"),
+        "        await due.fn(due.nextDue);\n        due.nextDue = now() + due.intervalMs; // resume from when the run actually finished (PROD-4488)",
+      ],
+    },
+    `import { createRunner } from "./lib/runner.mjs";
+import { dueCount, firstDue } from "./lib/schedule.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+if (firstDue(0, 100) !== 100) fail("firstDue broken");
+if (dueCount(0, 100, 99) !== 0 || dueCount(0, 100, 100) !== 1 || dueCount(0, 100, 999) !== 9 || dueCount(0, 100, 1000) !== 10) {
+  fail("dueCount broken");
+}
+
+// a job that missed ten intervals is caught up exactly ten times, in order
+let t = 0;
+const runner = createRunner({ now: () => t });
+const fired = [];
+const handle = runner.every((at) => {
+  fired.push(at);
+  t = at + 1;
+}, 100);
+await runner.advance(1000);
+if (fired.join(",") !== "100,200,300,400,500,600,700,800,900,1000") {
+  fail("expected 10 catch-up firings at the scheduled times, got [" + fired.join(",") + "]");
+}
+
+handle.stop();
+await runner.advance(2000);
+if (fired.length !== 10) fail("a stopped job must not fire again");
+
+// a slow run does not shift the chain
+let t2 = 0;
+const r2 = createRunner({ now: () => t2 });
+const times = [];
+let release;
+r2.every((at) => {
+  times.push(at);
+  if (at === 100) return new Promise((resolve) => { release = resolve; });
+  if (at !== 200 && at !== 300) throw new Error("firing at unexpected time " + at);
+  t2 = at + 1;
+  return undefined;
+}, 100);
+const sweeping = r2.advance(300);
+while (!release) await sleep(1);
+t2 = 150; // the gated firing ends at t=150
+release();
+try {
+  await sweeping;
+} catch (err) {
+  fail("the schedule drifted: " + err.message);
+}
+if (times.join(",") !== "100,200,300") {
+  fail("a slow run must not shift the schedule, got [" + times.join(",") + "]");
+}
+
+// two jobs interleave in due-time order
+let t3 = 0;
+const r3 = createRunner({ now: () => t3 });
+const order = [];
+r3.every((at) => { order.push("fast@" + at); t3 = at + 1; }, 100);
+r3.every((at) => { order.push("slow@" + at); t3 = at + 1; }, 150);
+await r3.advance(400);
+if (order.join(" ") !== "fast@100 slow@150 fast@200 fast@300 slow@300 fast@400") {
+  fail("jobs must fire in due-time order, got " + order.join(" "));
+}
+
+let threw = false;
+try { createRunner({ now: 5 }); } catch { threw = true; }
+if (!threw) fail("now(clock) is required");
+threw = false;
+try { createRunner({ now: () => 0 }).every(() => {}, 0); } catch { threw = true; }
+if (!threw) fail("intervalMs must be positive");
+threw = false;
+try { createRunner({ now: () => 0 }).every("nope", 100); } catch { threw = true; }
+if (!threw) fail("fn must be a function");
+
+console.log("PASS: the chain follows scheduled times and catches up in order");
+`,
+  ),
 ];
+
+/** Deterministic directory: 120 employees, 12 surnames with 10 each,
+ * ids unsorted in the file so surname groups straddle 7-row pages. */
+function buildEmployeesJsonl() {
+  const first = ["Ada", "Bo", "Cy", "Dee", "Eli", "Fay", "Gus", "Hal", "Ida", "Jo", "Kim", "Lou"];
+  const last = ["Alvarez", "Bauer", "Chen", "Duval", "Eriksen", "Fang", "Garcia", "Hoff", "Ito", "Jansen", "Keller", "Lind"];
+  const lines = [];
+  for (let i = 0; i < 120; i++) {
+    lines.push(JSON.stringify({
+      id: "e" + (1000 + i),
+      firstName: first[i % first.length],
+      lastName: last[(i * 5 + Math.floor(i / 12)) % last.length],
+      title: "role-" + (i % 7),
+    }));
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** Deterministic corpus: 600 generated docs + 4 planted phrase documents. */
+function buildCorpus() {
+  const subjects = ["deploy", "invoice", "cache", "session", "webhook", "migration"];
+  const verbs = ["fails", "retries", "times out", "hangs", "recovers", "logs"];
+  const extras = ["error handling", "handling error", "rate limit", "disk space", "backoff", "queue depth"];
+  const lines = [];
+  for (let i = 0; i < 600; i++) {
+    const text = "The " + subjects[i % subjects.length] + " job " + verbs[(i * 3) % verbs.length] + " while " + extras[(i * 5 + 1) % extras.length] + " is reviewed. ticket=" + (7000 + i);
+    lines.push("d-" + String(i + 1).padStart(4, "0") + "\t" + text);
+  }
+  lines.push("d-phr-adjacent\tTotal outage: error handling kicked in and the pit closed.");
+  lines.push("d-phr-apart\thandling was reviewed; much later the error surfaced.");
+  lines.push("d-phr-single\tonly handling is mentioned in this report");
+  lines.push("d-phr-repeat\tso so much depends on the retry so");
+  return lines.join("\n") + "\n";
+}
