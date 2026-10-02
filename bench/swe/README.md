@@ -140,9 +140,14 @@ across "<15 min fix" / "15 min - 1 hour" / "1-4 hours" / ">4 hours" — the labe
 measure human dev time; eval runs only the listed tests and stays in minutes.
 django/sympy remain excluded.
 
-Disk reality check before running: each instance image is 3–4 GB and the
-machine has ~26 GB free — run in batches of 5–6, prefer `--keep-images` per
-batch and `docker image prune -f` between batches:
+Disk reality check before running: each instance image is 3–4 GB, far more
+than the C: drive can hold for the whole corpus. The runner keeps a tar cache
+on the data drive (`SWE_IMAGE_CACHE`, default `D:/swe-image-cache`, `off` to
+disable): a missing image is loaded from the cache tar when it exists and
+saved there after a pull — best-effort, a full or missing cache drive never
+breaks a run. A cache hit still unpacks into docker's own disk (~1–2 min),
+but that beats re-downloading gigabytes from Docker Hub, which is what made
+full-corpus runs spend more wall time on pulls than on agents.
 
 ```bash
 node bench/swe/select-corpus.mjs --line        # the full --instances value

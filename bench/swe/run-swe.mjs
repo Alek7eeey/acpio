@@ -17,6 +17,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentArgs, ensureOmpModel, ensurePiModel, ompProfile } from "../lib/cli-agent.mjs";
 import { summarizeAgentStream } from "../lib/jsonl.mjs";
+import { loadFromCache, saveToCache } from "./image-cache.mjs";
 import { LlmProxy } from "../lib/proxy.mjs";
 import { runProcess } from "../lib/util.mjs";
 
@@ -177,9 +178,13 @@ const imageFor = (row) => row.image || `swebench/sweb.eval.x86_64.${row.instance
 async function ensureImage(image) {
   const have = await docker(["image", "inspect", image], { timeoutMs: 30_000 });
   if (have.code === 0) return { pulled: false };
+  if (await loadFromCache(docker, image)) return { pulled: false };
   console.log(`  pulling ${image}…`);
   const res = await docker(["pull", image], { timeoutMs: 1_800_000 });
   if (res.code !== 0) throw new Error(`docker pull failed: ${(res.stderr || res.stdout || "").slice(-300)}`);
+  // Fill the cache in the background of the rollout: the image is here now,
+  // and the next run wants it without the download.
+  await saveToCache(docker, image);
   return { pulled: true };
 }
 
