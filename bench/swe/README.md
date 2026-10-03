@@ -182,10 +182,12 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
   `2026-10-03T18-28-50-225Z`, 100 instances × builtin, concurrency 6, zen free
   model, bundle `a7e02fc`. **99 RESOLVED** — the best single pass on record
   (previous 92/100, 2026-10-02T19-39). Rollout median **184s** (was 232s),
-  max 1461s; wire per solve avg **29.3k uncached** (was ~41k), median 25.2k;
+  max 1461s; wire per rollout avg **31.7k uncached** (was 37.9k), per solve
+  32.0k (was 41.2k);
   3513 model calls (was 3970); run wall 2h10m at 6 slots (was 3h52m at 3).
   The accumulated floor (+218 tokens of system prompt since 2026-10-02, plus
-  the write-tool description) did not inflate cost — per-solve spend fell ~29%
+  the write-tool description) did not inflate cost — per-solve spend fell
+  ~22%
   while pass rate rose 7 points; single-pass caveat applies (a healthier
   endpoint day overlaps with the agent changes). The one miss:
   **scikit-learn__scikit-learn-14629** — the agent patched the call site
