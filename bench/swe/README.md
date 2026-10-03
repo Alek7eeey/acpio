@@ -157,6 +157,50 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, iteration: name the stash in the verify-once rule** — the
+  stash variant of the over-check pattern hit its 4th real-corpus sighting in
+  the 99/100 pass (sklearn-14629 ran `git stash -q && pytest … ; git stash pop`
+  mid-rollout and corrupted a concurrent verification with it; requests-1142,
+  requests-5414, pytest-10051 before it). "No baseline proof" in the rule did
+  not map to `git stash` for the model — the sentence now says it outright
+  ("no `git stash` baseline comparisons"). Validation
+  (`2026-10-03T20-45-42-130Z`, targets + out-of-family controls + one
+  variance re-roll): **6/6 RESOLVED**; all three stash-prone instances ran
+  **zero** stash commands (pytest-10051 also dropped to 143s from 181s), the
+  flask-5014 control reasoned "confirm with a `git stash`-free approach" —
+  the rule visibly steering — but the sphinx-9281 control executed one stash
+  proof anyway: the rule suppresses the habit, it does not extinguish it
+  (same shape as the parent rule's "2 of 6 still re-ran the suite").
+  sklearn-14629, re-rolled as a variance control, **RESOLVED** (179s) by
+  touching `multioutput.py` this time — best-of returns to **100/100**; its
+  single-pass miss stays a one-observation candidate (mis-scoped recalled
+  fix), too thin for a rule under the qualification bar.
+
+- **2026-10-03, full-corpus single pass after seven iterations: 99/100** —
+  the pricing run the open candidates called for (cost of the six rules added
+  since 2026-10-02) doubling as the first single pass of the current agent:
+  `2026-10-03T18-28-50-225Z`, 100 instances × builtin, concurrency 6, zen free
+  model, bundle `a7e02fc`. **99 RESOLVED** — the best single pass on record
+  (previous 92/100, 2026-10-02T19-39). Rollout median **184s** (was 232s),
+  max 1461s; wire per solve avg **29.3k uncached** (was ~41k), median 25.2k;
+  3513 model calls (was 3970); run wall 2h10m at 6 slots (was 3h52m at 3).
+  The accumulated floor (+218 tokens of system prompt since 2026-10-02, plus
+  the write-tool description) did not inflate cost — per-solve spend fell ~29%
+  while pass rate rose 7 points; single-pass caveat applies (a healthier
+  endpoint day overlaps with the agent changes). The one miss:
+  **scikit-learn__scikit-learn-14629** — the agent patched the call site
+  (`_fit_and_predict` in `_validation.py`, fallback to `estimators_[i].classes_`)
+  instead of adding the canonical `classes_` property to `MultiOutputClassifier`;
+  the hidden FAIL_TO_PASS asserts `isinstance(mo_clf.classes_, list)` directly
+  and still throws. It recalled the upstream fix from memory, mis-scoped it
+  ("the fix here is only the cross_val_predict one"), and its own green
+  `test_multioutput.py` run predated the test patch — the classic "verify
+  through the exact operation the grader names" gap. Also observed in the
+  transcript: a mid-run `git stash` baseline check corrupted a concurrent
+  verification (self-diagnosed, re-run) — the stash variant of the over-check
+  pattern again, 4th real-corpus sighting (requests-1142, requests-5414,
+  pytest-10051 before it).
+
 - **2026-10-03, iteration: verification discipline — the over-check pattern
   qualified on the real corpus and one rule sentence targets it** — the
   candidate (oldest, §9/ITERATIONS) was plugin/synthetic observations; the
