@@ -2097,6 +2097,844 @@ if (!threw) fail("fn must be a function");
 console.log("PASS: the chain follows scheduled times and catches up in order");
 `,
   ),
+
+  def(
+    "hard",
+    "build-critical-path",
+    "The build leaves a worker idle while the long chain runs alone",
+    "CI builds with 2 workers finish visibly later than they should: one worker sits idle mid-build, then the long compile chain runs alone at the end. Two modules document the policy: lib/dag.mjs validates the graph and computes each task's longest remaining chain; lib/schedule.mjs runs the greedy simulation — a task starts the moment its deps are done and a slot is free, and when several tasks compete for one slot the LONGEST remaining chain goes first (input order breaks ties). A cleanup replaced the priority with plain input order. Fix the broken module and verify with your own script (exact start times and makespan for the graph below, never more slots than workers, unknown dep throws, cycle throws, bad duration throws) before answering. Graph: setup(10) deps []; b1(5), c1(5), a1(30) all deps [setup]; final(10) deps [a1, b1, c1] — given in that input order, 2 slots.",
+    {
+      "lib/dag.mjs": `/**
+ * Build task graph: id -> { id, duration, deps }. Durations are positive
+ * integers; deps reference existing ids; the graph must be acyclic.
+ */
+export function validateGraph(tasks) {
+  for (const t of tasks) {
+    if (!Number.isInteger(t.duration) || t.duration <= 0) {
+      throw new RangeError("duration must be a positive integer: " + t.id);
+    }
+    for (const dep of t.deps) {
+      if (!tasks.some((x) => x.id === dep)) throw new Error("unknown dep " + dep + " on " + t.id);
+    }
+  }
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const state = new Map();
+  const visit = (id) => {
+    const s = state.get(id);
+    if (s === 1) throw new Error("cycle at " + id);
+    if (s === 2) return;
+    state.set(id, 1);
+    for (const dep of byId.get(id).deps) visit(dep);
+    state.set(id, 2);
+  };
+  for (const t of tasks) visit(t.id);
+}
+
+/** Longest chain ENDING at each task, itself included — the critical-path
+ * priority: a task that drags the tail must start as soon as a slot opens. */
+export function longestChains(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const memo = new Map();
+  const chain = (id) => {
+    if (memo.has(id)) return memo.get(id);
+    const t = byId.get(id);
+    const best = t.deps.length ? Math.max(...t.deps.map(chain)) : 0;
+    memo.set(id, best + t.duration);
+    return memo.get(id);
+  };
+  for (const t of tasks) chain(t.id);
+  return memo;
+}
+`,
+      "lib/schedule.mjs": `import { validateGraph, longestChains } from "./dag.mjs";
+
+/**
+ * Greedy build simulation on a fixed pool of 'slots' workers. A task starts
+ * the moment its deps are done AND a slot is free; when several tasks are
+ * ready for one slot, the LONGEST remaining chain goes first (input order
+ * breaks ties). Tasks run without preemption, times are integers.
+ * Returns { makespan, start: Map id -> startTime }.
+ */
+export function scheduleBuild(tasks, slots) {
+  validateGraph(tasks);
+  if (!Number.isInteger(slots) || slots <= 0) throw new RangeError("slots must be a positive integer");
+  const chains = longestChains(tasks);
+  const inputOrder = new Map(tasks.map((t, i) => [t.id, i]));
+  const start = new Map();
+  const done = new Set();
+  let running = []; // { id, endsAt }
+  let now = 0;
+  while (done.size < tasks.length) {
+    const ready = tasks
+      .filter((t) => !done.has(t.id) && !running.some((r) => r.id === t.id) && t.deps.every((d) => done.has(d)))
+      .sort((a, b) => (chains.get(b.id) - chains.get(a.id)) || (inputOrder.get(a.id) - inputOrder.get(b.id)));
+    while (running.length < slots && ready.length) {
+      const t = ready.shift();
+      start.set(t.id, now);
+      running.push({ id: t.id, endsAt: now + t.duration });
+    }
+    if (!running.length) throw new Error("stuck: work remains but nothing can run");
+    now = Math.min(...running.map((r) => r.endsAt));
+    for (const r of running.filter((r) => r.endsAt === now)) {
+      running = running.filter((x) => x !== r);
+      done.add(r.id);
+    }
+  }
+  return { makespan: now, start };
+}
+`,
+    },
+    {
+      "lib/schedule.mjs": [
+        "      .sort((a, b) => (chains.get(b.id) - chains.get(a.id)) || (inputOrder.get(a.id) - inputOrder.get(b.id)));",
+        "      .sort((a, b) => inputOrder.get(a.id) - inputOrder.get(b.id)); // the input file is already priority-ordered (PROD-4524)",
+      ],
+    },
+    `import { scheduleBuild } from "./lib/schedule.mjs";
+import { validateGraph, longestChains } from "./lib/dag.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const tasks = [
+  { id: "setup", duration: 10, deps: [] },
+  { id: "b1", duration: 5, deps: ["setup"] },
+  { id: "c1", duration: 5, deps: ["setup"] },
+  { id: "a1", duration: 30, deps: ["setup"] },
+  { id: "final", duration: 10, deps: ["a1", "b1", "c1"] },
+];
+
+const chains = longestChains(tasks);
+if (chains.get("a1") !== 40 || chains.get("final") !== 50 || chains.get("b1") !== 15) fail("longest chains broken");
+
+const plan = scheduleBuild(tasks, 2);
+const start = Object.fromEntries(plan.start);
+if (start.setup !== 0) fail("setup starts at 0");
+if (start.a1 !== 10) fail("the long chain must claim a slot first, got start " + start.a1);
+if (start.b1 !== 10) fail("b1 starts with the second worker");
+if (start.c1 !== 15) fail("c1 takes the freed slot at 15");
+if (start.final !== 40) fail("final waits only for a1, got start " + start.final);
+if (plan.makespan !== 50) fail("critical-path-first makespan is 50, got " + plan.makespan);
+
+// never more than 2 tasks at once
+const spans = tasks.map((t) => [start[t.id], start[t.id] + t.duration]);
+for (let ms = 0; ms <= plan.makespan; ms++) {
+  const busy = spans.filter(([s, e]) => s <= ms && ms < e).length;
+  if (busy > 2) fail("more than 2 workers busy at t=" + ms);
+}
+
+throws(() => scheduleBuild([{ id: "x", duration: 5, deps: ["ghost"] }], 1), "unknown dep");
+throws(() => scheduleBuild([
+  { id: "p", duration: 5, deps: ["q"] },
+  { id: "q", duration: 5, deps: ["p"] },
+], 1), "cycle");
+throws(() => scheduleBuild([{ id: "x", duration: 0, deps: [] }], 1), "bad duration");
+
+console.log("PASS: the critical path claims slots first, the build ends at 50");
+`,
+  ),
+
+  def(
+    "hard",
+    "cache-evict-two-policy",
+    "The cache evicts just-used keys while stale ones linger",
+    "Users report fresh cache entries disappearing while everybody knows stale entries are still inside — the TTL cleanup never seems to reclaim anything on the write path. lib/cache.mjs documents the eviction policy: on insert at capacity the cache FIRST purges expired entries (any of them) and only then, if still full, evicts the least recently used. A live entry must never be dropped while a stale one could go instead. Fix lib/cache.mjs and verify with your own script (insert into a full cache with one expired entry, LRU eviction when everything is fresh, get of an expired key returns undefined and purges, has is a pure membership check that does not bump recency, size counts fresh only, constructor validation) before answering.",
+    {
+      "lib/cache.mjs": `/**
+ * TTL + LRU cache with an injectable clock. get() bumps recency; has() is
+ * a pure membership check. Expired entries are invisible and purged
+ * lazily. On insert at capacity the cache FIRST purges expired entries and
+ * only then, if still full, evicts the least recently used — a live entry
+ * must never be dropped while a stale one could go instead.
+ */
+export class TtlLruCache {
+  constructor({ capacity, ttlMs, now }) {
+    if (!Number.isInteger(capacity) || capacity <= 0) throw new RangeError("capacity must be a positive integer");
+    if (!Number.isInteger(ttlMs) || ttlMs <= 0) throw new RangeError("ttlMs must be a positive integer");
+    if (typeof now !== "function") throw new TypeError("now(clock) is required");
+    this.capacity = capacity;
+    this.ttlMs = ttlMs;
+    this.now = now;
+    this.map = new Map(); // insertion order = recency order, oldest first
+  }
+
+  purgeExpired() {
+    const t = this.now();
+    for (const [key, entry] of this.map) {
+      if (entry.expires <= t) this.map.delete(key);
+    }
+  }
+
+  set(key, value) {
+    const t = this.now();
+    this.map.delete(key);
+    if (this.map.size >= this.capacity) {
+      this.purgeExpired();
+      if (this.map.size >= this.capacity) {
+        const lru = this.map.keys().next().value;
+        this.map.delete(lru);
+      }
+    }
+    this.map.set(key, { value, expires: t + this.ttlMs });
+    return this;
+  }
+
+  get(key) {
+    const entry = this.map.get(key);
+    if (!entry) return undefined;
+    if (entry.expires <= this.now()) {
+      this.map.delete(key);
+      return undefined;
+    }
+    this.map.delete(key);
+    this.map.set(key, entry); // bump to most recently used
+    return entry.value;
+  }
+
+  has(key) {
+    const entry = this.map.get(key);
+    return entry !== undefined && entry.expires > this.now();
+  }
+
+  /** Number of entries that are still fresh (expired ones don't count). */
+  get size() {
+    const t = this.now();
+    let n = 0;
+    for (const entry of this.map.values()) if (entry.expires > t) n++;
+    return n;
+  }
+}
+`,
+    },
+    {
+      "lib/cache.mjs": [
+        "    if (this.map.size >= this.capacity) {\n      this.purgeExpired();\n      if (this.map.size >= this.capacity) {\n        const lru = this.map.keys().next().value;\n        this.map.delete(lru);\n      }\n    }",
+        "    if (this.map.size >= this.capacity) {\n      const lru = this.map.keys().next().value;\n      this.map.delete(lru); // expiry is lazy anyway, no scans on the write path (PROD-4525)\n    }",
+      ],
+    },
+    `import { TtlLruCache } from "./lib/cache.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+// expired entry must be purged before a live one is evicted
+let t = 0;
+const cache = new TtlLruCache({ capacity: 2, ttlMs: 100, now: () => t });
+cache.set("k1", 1); // t=0, expires at 100
+t = 10;
+cache.set("k2", 2); // expires at 110
+t = 20;
+if (cache.get("k1") !== 1) fail("k1 is fresh and must be readable");
+// recency order is now k2 (oldest), k1 (just used)
+t = 105; // k1 expired (100 <= 105), k2 still fresh (110 > 105)
+cache.set("k3", 3);
+if (!cache.has("k2")) fail("live k2 was evicted while expired k1 could go: has(k2)=" + cache.has("k2"));
+if (cache.get("k1") !== undefined) fail("expired k1 must be invisible");
+if (cache.get("k3") !== 3) fail("k3 must be readable");
+if (cache.size !== 2) fail("two fresh entries after the dust settles: " + cache.size);
+
+// everything fresh -> plain LRU
+t = 0;
+const lru = new TtlLruCache({ capacity: 2, ttlMs: 1000, now: () => t });
+lru.set("a", 1);
+lru.set("b", 2);
+t = 1;
+lru.get("a"); // bump a; b is now LRU
+lru.set("c", 3);
+if (lru.has("b")) fail("b was LRU and had to go");
+if (lru.get("a") !== 1 || lru.get("c") !== 3) fail("a and c survive");
+
+// has() does not bump recency
+t = 0;
+const h = new TtlLruCache({ capacity: 2, ttlMs: 1000, now: () => t });
+h.set("a", 1);
+h.set("b", 2);
+t = 3;
+h.has("a"); // must NOT bump
+h.set("c", 3);
+if (h.has("a")) fail("a is LRU (has() must not bump recency)");
+if (h.get("b") !== 2) fail("b must survive");
+
+// expired get() purges
+t = 0;
+const p = new TtlLruCache({ capacity: 2, ttlMs: 10, now: () => t });
+p.set("x", 1);
+t = 11;
+if (p.get("x") !== undefined) fail("expired entry invisible");
+if (p.size !== 0) fail("expired entry purged on read: " + p.size);
+
+throws(() => new TtlLruCache({ capacity: 0, ttlMs: 10, now: () => 0 }), "bad capacity");
+throws(() => new TtlLruCache({ capacity: 2, ttlMs: 0, now: () => 0 }), "bad ttl");
+throws(() => new TtlLruCache({ capacity: 2, ttlMs: 10, now: 5 }), "clock required");
+
+console.log("PASS: stale entries go first, live entries are never evicted past them");
+`,
+  ),
+
+  def(
+    "hard",
+    "order-state-machine",
+    "A refunded order can be shipped, and the report believes it",
+    "The nightly report shows orders that were refunded and then delivered — support found a way to re-ship refunded orders and the ledger double-counts. Two modules: lib/states.mjs holds the transition table and documents that anything not listed MUST throw (no silent moves: every unlisted move corrupts the ledger); lib/service.mjs folds events through it. A support hotfix softened the guard. Fix it and verify with your own script (happy path with ledger, refund ledger, refunded->ship throws and leaves the order untouched, repeat event throws, draft->pay throws, delivered->anything throws, cancel path, unknown event throws) before answering.",
+    {
+      "lib/states.mjs": `/**
+ * Legal order transitions. Anything not listed here MUST throw — a
+ * silently allowed move corrupts both the ledger and the nightly report.
+ * Even a repeat of the current state is not in the table: every real
+ * change is an event, and re-firing one is a bug, not a no-op.
+ */
+export const TRANSITIONS = {
+  "draft:placed": true,
+  "placed:paid": true,
+  "placed:cancelled": true,
+  "paid:shipped": true,
+  "paid:refunded": true,
+  "shipped:delivered": true,
+};
+
+export function assertTransition(from, to) {
+  if (!TRANSITIONS[from + ":" + to]) throw new Error("illegal transition " + from + " -> " + to);
+}
+`,
+      "lib/service.mjs": `import { assertTransition } from "./states.mjs";
+
+/**
+ * Fold order events onto an order record. applyEvent(order, event) checks
+ * the transition, then moves the order; a refund adds order.total to
+ * order.refunded. Illegal moves throw BEFORE any mutation — the order is
+ * left exactly as it was.
+ */
+export function applyEvent(order, event) {
+  const target = {
+    place: "placed",
+    pay: "paid",
+    ship: "shipped",
+    deliver: "delivered",
+    refund: "refunded",
+    cancel: "cancelled",
+  }[event.type];
+  if (!target) throw new TypeError("unknown event " + event.type);
+  assertTransition(order.state, target);
+  order.state = target;
+  if (event.type === "refund") order.refunded = (order.refunded ?? 0) + order.total;
+  return order;
+}
+
+/** Fold a whole event list; returns the order. */
+export function applyAll(order, events) {
+  for (const event of events) applyEvent(order, event);
+  return order;
+}
+`,
+    },
+    {
+      "lib/states.mjs": [
+        'export function assertTransition(from, to) {\n  if (!TRANSITIONS[from + ":" + to]) throw new Error("illegal transition " + from + " -> " + to);\n}',
+        'export function assertTransition(from, to) {\n  if (from === to) return; // re-entering a state is idempotent\n  if (!TRANSITIONS[from + ":" + to]) console.warn("unusual transition " + from + " -> " + to); // support needs refunds to re-ship without a hotfix (PROD-4526)\n}',
+      ],
+    },
+    `import { assertTransition } from "./lib/states.mjs";
+import { applyEvent, applyAll } from "./lib/service.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const happy = applyAll({ state: "draft", total: 100 }, [
+  { type: "place" },
+  { type: "pay" },
+  { type: "ship" },
+  { type: "deliver" },
+]);
+if (happy.state !== "delivered") fail("happy path ends delivered");
+if (happy.refunded !== undefined) fail("no refund on the happy path");
+
+const refunded = applyAll({ state: "draft", total: 250 }, [{ type: "place" }, { type: "pay" }, { type: "refund" }]);
+if (refunded.state !== "refunded" || refunded.refunded !== 250) fail("refund ledger");
+
+throws(() => applyEvent(refunded, { type: "ship" }), "refunded -> shipped must throw");
+if (refunded.state !== "refunded" || refunded.refunded !== 250) fail("a thrown move leaves the order untouched");
+
+const placed = { state: "placed", total: 10 };
+throws(() => applyEvent(placed, { type: "place" }), "repeat of the current state is not in the table");
+throws(() => applyEvent({ state: "draft", total: 1 }, { type: "pay" }), "draft -> pay");
+throws(() => applyEvent({ state: "delivered", total: 1 }, { type: "cancel" }), "delivered is terminal");
+throws(() => applyEvent({ state: "paid", total: 1 }, { type: "explode" }), "unknown event");
+assertTransition("paid", "shipped"); // legal pair must not throw
+
+const cancelled = applyEvent({ state: "placed", total: 5 }, { type: "cancel" });
+if (cancelled.state !== "cancelled") fail("cancel path works");
+
+console.log("PASS: unlisted transitions throw, the ledger stays truthful");
+`,
+  ),
+
+  def(
+    "hard",
+    "pricing-marginal-tiers",
+    "Quantity discounts apply to the whole order instead of the margin",
+    "An order of 150 units is priced as if ALL 150 units had the discounted rate — finance says the tier tables are marginal: only the units that fall into a tier are billed at that tier's price. lib/tiers.mjs documents it with a worked example (tiers 10@100/20@60: 15 units cost 10*100 + 5*60, never 15*60); lib/invoice.mjs composes lines and totals in cents. A simplification broke the marginal math. Fix it and verify with your own script (boundaries 0/10/11/20, mid-tier 15, third tier, huge order, negative and fractional throw, invoice line and total compose) before answering.",
+    {
+      "lib/tiers.mjs": `/**
+ * Marginal (tiered) pricing. Tiers are [{ upTo, price }] in ascending
+ * order; upTo is the INCLUSIVE unit ceiling of that tier, the last tier's
+ * upTo is Infinity. Only the units that fall into a tier are billed at
+ * that tier's price: with tiers 10@100 and 20@60, 15 units cost
+ * 10*100 + 5*60 — never 15*60.
+ */
+export function marginalCost(units, tiers) {
+  if (!Number.isInteger(units) || units < 0) throw new RangeError("units must be a non-negative integer");
+  let cost = 0;
+  let prev = 0;
+  for (const tier of tiers) {
+    if (units <= prev) break;
+    const inTier = Math.min(units, tier.upTo) - prev;
+    cost += inTier * tier.price;
+    prev = tier.upTo;
+  }
+  return cost;
+}
+`,
+      "lib/invoice.mjs": `import { marginalCost } from "./tiers.mjs";
+
+/**
+ * An invoice line prices a quantity by the account's marginal tiers,
+ * in cents. total() sums the lines.
+ */
+export function line(label, units, tiers) {
+  return { label, units, cents: marginalCost(units, tiers) };
+}
+
+export function total(lines) {
+  return lines.reduce((sum, l) => sum + l.cents, 0);
+}
+`,
+    },
+    {
+      "lib/tiers.mjs": [
+        "    const inTier = Math.min(units, tier.upTo) - prev;\n    cost += inTier * tier.price;\n    prev = tier.upTo;",
+        "    if (units > prev) {\n      cost = units * tier.price; // once a tier is reached it covers the whole order (PROD-4527)\n    }\n    prev = tier.upTo;",
+      ],
+    },
+    `import { marginalCost } from "./lib/tiers.mjs";
+import { line, total } from "./lib/invoice.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const tiers = [
+  { upTo: 10, price: 100 },
+  { upTo: 20, price: 60 },
+  { upTo: Infinity, price: 40 },
+];
+
+if (marginalCost(0, tiers) !== 0) fail("zero units cost nothing");
+if (marginalCost(5, tiers) !== 500) fail("first tier only");
+if (marginalCost(10, tiers) !== 1000) fail("the tier ceiling belongs to the tier");
+if (marginalCost(11, tiers) !== 1060) fail("one unit into tier two");
+if (marginalCost(15, tiers) !== 1300) fail("15 units = 10*100 + 5*60, got " + marginalCost(15, tiers));
+if (marginalCost(20, tiers) !== 1600) fail("second ceiling");
+if (marginalCost(25, tiers) !== 1800) fail("one unit into tier three");
+if (marginalCost(1000, tiers) !== 40_800) fail("980 units at the flat rate");
+throws(() => marginalCost(-1, tiers), "negative units");
+throws(() => marginalCost(1.5, tiers), "fractional units");
+
+const l = line("widget", 15, tiers);
+if (l.cents !== 1300 || l.units !== 15) fail("invoice line prices marginally");
+if (total([l, line("widget", 10, tiers)]) !== 2300) fail("invoice total sums lines");
+
+console.log("PASS: only the units inside a tier pay that tier's price");
+`,
+  ),
+
+  def(
+    "hard",
+    "stream-batch-tail",
+    "Every export loses its last rows",
+    "The export pipeline drops the tail: a 237-row export produces two full batches and the last 37 rows never reach the sink. lib/batcher.mjs documents the contract — batches of exactly 'size' go to the sink as they complete, and close-of-source MUST flush the remainder as one final (possibly smaller) batch; those are the last rows of every export. A schema-alignment change dropped the tail. Fix lib/batcher.mjs and verify with your own script (237 items with size 100, exact multiple leaves no empty tail batch, empty source, order preserved across and within batches, non-positive size throws) before answering.",
+    {
+      "lib/batcher.mjs": `/**
+ * Batching stage of the export pipeline. Items come from an async source;
+ * batches of exactly 'size' are handed to the sink as they complete; when
+ * the source ends, the remainder MUST go to the sink as one final
+ * (possibly smaller) batch — those are the last rows of every export.
+ * Resolves with the total number of items pushed to the sink. Order is
+ * preserved across and within batches.
+ */
+export async function runBatch(source, sink, size) {
+  if (!Number.isInteger(size) || size <= 0) throw new RangeError("size must be a positive integer");
+  let pushed = 0;
+  let batch = [];
+  for await (const item of source) {
+    batch.push(item);
+    if (batch.length === size) {
+      await sink(batch);
+      pushed += batch.length;
+      batch = [];
+    }
+  }
+  if (batch.length) {
+    await sink(batch);
+    pushed += batch.length;
+  }
+  return pushed;
+}
+`,
+    },
+    {
+      "lib/batcher.mjs": [
+        "  if (batch.length) {\n    await sink(batch);\n    pushed += batch.length;\n  }\n  return pushed;",
+        "  // partial batches break the downstream schema, drop the remainder (PROD-4528)\n  return pushed;",
+      ],
+    },
+    `import { runBatch } from "./lib/batcher.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+async function* src(n) {
+  for (let i = 0; i < n; i++) yield i;
+}
+
+const batches = [];
+const pushed = await runBatch(src(237), async (b) => batches.push(b), 100);
+if (pushed !== 237) fail("all 237 items must reach the sink, got " + pushed);
+if (batches.length !== 3) fail("three batches: 100, 100, 37 — got " + batches.length);
+if (batches[0].length !== 100 || batches[1].length !== 100) fail("full batches are exactly 100");
+if (batches[2].length !== 37) fail("the tail arrives as one final batch of 37: " + batches[2].length);
+if (batches[2][0] !== 200 || batches[2][36] !== 236) fail("tail holds rows 200..236 in order");
+const flat = batches.flat();
+for (let i = 0; i < 237; i++) {
+  if (flat[i] !== i) fail("order preserved across batches, broke at " + i);
+}
+
+const exact = [];
+const pushedExact = await runBatch(src(4), async (b) => exact.push(b), 2);
+if (pushedExact !== 4 || exact.length !== 2 || exact[1].length !== 2) fail("exact multiple leaves no empty tail");
+
+const none = [];
+const pushedNone = await runBatch(src(0), async (b) => none.push(b), 5);
+if (pushedNone !== 0 || none.length !== 0) fail("empty source pushes nothing");
+
+let threw = false;
+try {
+  await runBatch(src(1), async () => {}, 0);
+} catch {
+  threw = true;
+}
+if (!threw) fail("non-positive size must throw");
+
+console.log("PASS: the tail always reaches the sink, nothing is dropped");
+`,
+  ),
+
+  def(
+    "hard",
+    "path-tie-stability",
+    "Equal-cost routes come back with an extra layover",
+    "The route planner returns equal-cost paths with MORE stops than needed: A->D costs 10 either way (A-B1-B2-D, 3 legs, or A-C-D, 2 legs) and we hand users the 3-leg one. lib/paths.mjs documents the tie rule: among equal-cost paths the FEWEST hops win — at the same price users get the direct route. The costs are all correct; only the tie choice is wrong. Fix lib/paths.mjs and verify with your own script (the A/B1/B2/C/D graph picks A-C-D, a graph where the fewer-hop path is found first stays put, unreachable is null, from === to, unknown node throws, zero weights) before answering.",
+    {
+      "lib/paths.mjs": `/**
+ * Cheapest path by total weight. TIE RULE: among equal-cost paths the one
+ * with the FEWEST hops wins — at the same price users get the direct
+ * route. Weights are non-negative integers. graph is an adjacency map
+ * node -> [{ to, w }]. No path -> null; from === to -> [from]; an unknown
+ * start node throws.
+ */
+export function shortestPath(graph, from, to) {
+  if (!(from in graph)) throw new Error("unknown node " + from);
+  const dist = new Map([[from, 0]]);
+  const hops = new Map([[from, 0]]);
+  const prev = new Map();
+  const done = new Set();
+  for (;;) {
+    let u = null;
+    for (const [node, d] of dist) {
+      if (done.has(node)) continue;
+      if (u === null) {
+        u = node;
+        continue;
+      }
+      const byCost = d - dist.get(u);
+      const byHops = hops.get(node) - hops.get(u);
+      if (byCost < 0 || (byCost === 0 && byHops < 0)) u = node;
+    }
+    if (u === null || u === to) break;
+    done.add(u);
+    for (const { to: v, w } of graph[u] ?? []) {
+      const alt = dist.get(u) + w;
+      const altHops = hops.get(u) + 1;
+      if (!dist.has(v) || alt < dist.get(v) || (alt === dist.get(v) && altHops < hops.get(v))) {
+        dist.set(v, alt);
+        hops.set(v, altHops);
+        prev.set(v, u);
+      }
+    }
+  }
+  if (!dist.has(to)) return null;
+  const path = [to];
+  for (let at = to; at !== from; at = prev.get(at)) path.push(prev.get(at));
+  return path.reverse();
+}
+`,
+    },
+    {
+      "lib/paths.mjs": [
+        "      if (!dist.has(v) || alt < dist.get(v) || (alt === dist.get(v) && altHops < hops.get(v))) {",
+        "      if (!dist.has(v) || alt < dist.get(v)) { // first label wins, fewer relabels (PROD-4529)",
+      ],
+    },
+    `import { shortestPath } from "./lib/paths.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const g = {
+  A: [{ to: "B1", w: 1 }, { to: "C", w: 5 }],
+  B1: [{ to: "B2", w: 1 }],
+  B2: [{ to: "D", w: 8 }],
+  C: [{ to: "D", w: 5 }],
+  D: [],
+};
+const p = shortestPath(g, "A", "D");
+if (!eq(p, ["A", "C", "D"])) fail("equal cost 10 must pick the 2-leg route: " + JSON.stringify(p));
+
+const direct = {
+  A: [{ to: "D", w: 10 }, { to: "B", w: 1 }],
+  B: [{ to: "D", w: 9 }],
+  D: [],
+};
+if (!eq(shortestPath(direct, "A", "D"), ["A", "D"])) fail("the fewer-hop path found first stays put");
+
+const isolated = { A: [{ to: "B", w: 1 }], B: [], C: [] };
+if (shortestPath(isolated, "A", "C") !== null) fail("no path is null");
+if (!eq(shortestPath(g, "A", "A"), ["A"])) fail("from === to");
+if (!eq(shortestPath({ A: [{ to: "B", w: 0 }], B: [{ to: "C", w: 0 }], C: [] }, "A", "C"), ["A", "B", "C"])) {
+  fail("zero weights chain");
+}
+throws(() => shortestPath(g, "Q", "A"), "unknown start node");
+
+console.log("PASS: at equal cost the fewest-hop route wins");
+`,
+  ),
+
+  def(
+    "hard",
+    "cache-key-normalize",
+    "Documents saved under equivalent paths 404 on read",
+    "Users save a draft under './Docs/A' and sometimes get 'not found' on read via 'docs/a/' — writes and reads disagree about the key. Two modules: lib/normalize.mjs is the documented key normalizer (trim, lowercase, collapse duplicate slashes, drop one trailing slash; the root '/' stays itself); lib/draftcache.mjs must send BOTH put and get through it. Reads skip the normalizer. Fix the broken module and verify with your own script (round-trip across equivalent spellings, distinct keys stay distinct, size counts normalized keys, root path, has agrees with get, normalizer unit cases) before answering.",
+    {
+      "lib/normalize.mjs": `/**
+ * Cache keys are normalized so equivalent paths share one entry: trim,
+ * lowercase, collapse duplicate slashes, drop a leading "./" and one
+ * trailing slash. " ./Docs//A/ " -> "docs/a". The root "/" is its own key
+ * and stays itself. Pure and total: any string (including the empty one)
+ * is a key.
+ */
+export function normalizeKey(raw) {
+  let key = String(raw)
+    .trim()
+    .toLowerCase()
+    .replace(/\\/{2,}/g, "/")
+    .replace(/^\\.\\//, "");
+  if (key.length > 1 && key.endsWith("/")) key = key.slice(0, -1);
+  return key;
+}
+`,
+      "lib/draftcache.mjs": `import { normalizeKey } from "./normalize.mjs";
+
+/**
+ * Draft store keyed by normalized path. put AND get MUST go through the
+ * same normalization — a document saved under "./Docs/A" is the same
+ * document as "docs/a/".
+ */
+export class DraftCache {
+  constructor() {
+    this.map = new Map();
+  }
+
+  put(path, doc) {
+    this.map.set(normalizeKey(path), doc);
+    return this;
+  }
+
+  get(path) {
+    return this.map.get(normalizeKey(path));
+  }
+
+  has(path) {
+    return this.map.has(normalizeKey(path));
+  }
+
+  get size() {
+    return this.map.size;
+  }
+}
+`,
+    },
+    {
+      "lib/draftcache.mjs": [
+        "  get(path) {\n    return this.map.get(normalizeKey(path));\n  }",
+        "  get(path) {\n    return this.map.get(path); // writes are normalized, reads can trust the caller (PROD-4530)",
+      ],
+    },
+    `import { normalizeKey } from "./lib/normalize.mjs";
+import { DraftCache } from "./lib/draftcache.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (normalizeKey(" ./Docs//A/ ") !== "docs/a") fail("trim+case+slashes+trailing: " + JSON.stringify(normalizeKey(" ./Docs//A/ ")));
+if (normalizeKey("/") !== "/") fail("the root stays itself");
+if (normalizeKey("//") !== "/") fail("double root collapses to the root");
+if (normalizeKey("") !== "") fail("empty string is a key");
+
+const cache = new DraftCache();
+cache.put("./Docs/A", { rev: 1 });
+if (cache.get("docs/a/")?.rev !== 1) fail("read across equivalent spellings: " + JSON.stringify(cache.get("docs/a/")));
+if (cache.get("./Docs/A")?.rev !== 1) fail("read with the original spelling");
+if (!cache.has("DOCS//a")) fail("has agrees with get");
+if (cache.size !== 1) fail("equivalent keys collapse: " + cache.size);
+
+cache.put("docs/b", { rev: 2 });
+if (cache.size !== 2) fail("distinct keys stay distinct");
+if (cache.get("docs/b")?.rev !== 2) fail("plain spelling round-trips");
+if (cache.get("docs/missing") !== undefined) fail("unknown key is undefined");
+
+const root = new DraftCache();
+root.put("/", "root-doc");
+if (root.get("/") !== "root-doc") fail("the root path round-trips");
+
+console.log("PASS: put and read share one normalized key");
+`,
+  ),
+
+  def(
+    "hard",
+    "event-idempotency",
+    "A retried event re-applies once the ingest gets busy",
+    "Under load the ingest re-applies events it has already applied: the same webhook lands twice and the downstream charges twice. lib/processor.mjs documents the exactly-once window: an event whose id was applied within windowMs (by EVENT timestamp) is dropped, and the window never depends on how many OTHER events arrived in between. A memory-bound cleanup added an eviction that forgets ids early. Fix lib/processor.mjs and verify with your own script (duplicate within window dropped, re-applied after the window fully passes, out-of-order older duplicate dropped, independent ids, a flood of other events must not forget an id inside its window, validation) before answering.",
+    {
+      "lib/processor.mjs": `/**
+ * Exactly-once window over event ids. An event whose id was already
+ * APPLIED within windowMs (judged by EVENT timestamp, never by arrival
+ * order or count) is a duplicate and is dropped; after the window has
+ * fully passed the id may be applied again. The window never depends on
+ * how many other events arrived in between. process(ev) returns true
+ * when the event was applied, false when dropped.
+ */
+export function createProcessor({ windowMs }) {
+  if (!Number.isInteger(windowMs) || windowMs <= 0) throw new RangeError("windowMs must be a positive integer");
+  const applied = new Map(); // id -> event ts of the last applied occurrence
+  return {
+    process(ev) {
+      const prevTs = applied.get(ev.id);
+      if (prevTs !== undefined && ev.ts - prevTs < windowMs) return false;
+      applied.set(ev.id, ev.ts);
+      return true;
+    },
+  };
+}
+`,
+    },
+    {
+      "lib/processor.mjs": [
+        "    process(ev) {\n      const prevTs = applied.get(ev.id);\n      if (prevTs !== undefined && ev.ts - prevTs < windowMs) return false;\n      applied.set(ev.id, ev.ts);\n      return true;\n    },",
+        "    process(ev) {\n      const prevTs = applied.get(ev.id);\n      if (prevTs !== undefined && ev.ts - prevTs < windowMs) return false;\n      if (applied.size >= 100) applied.delete(applied.keys().next().value); // bound memory: drop the oldest insert (PROD-4531)\n      applied.set(ev.id, ev.ts);\n      return true;\n    },",
+      ],
+    },
+    `import { createProcessor } from "./lib/processor.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const p = createProcessor({ windowMs: 10_000 });
+if (p.process({ id: "x", ts: 1000 }) !== true) fail("first occurrence applies");
+if (p.process({ id: "x", ts: 10_999 }) !== false) fail("duplicate within the window is dropped");
+if (p.process({ id: "x", ts: 11_000 }) !== true) fail("re-applies after the window fully passes");
+if (p.process({ id: "y", ts: 5000 }) !== true) fail("independent ids apply");
+if (p.process({ id: "y", ts: 4999 }) !== false) fail("an older duplicate inside the window is dropped");
+
+// a flood of other events must not forget an id inside its window
+const busy = createProcessor({ windowMs: 10_000 });
+busy.process({ id: "charge-1", ts: 0 });
+for (let i = 0; i < 150; i++) {
+  busy.process({ id: "noise-" + i, ts: 1 + i });
+}
+if (busy.process({ id: "charge-1", ts: 5 }) !== false) {
+  fail("a busy ingest must not re-apply an event inside its window");
+}
+
+throws(() => createProcessor({ windowMs: 0 }), "zero window");
+throws(() => createProcessor({ windowMs: -5 }), "negative window");
+throws(() => createProcessor({ windowMs: 1.5 }), "fractional window");
+
+console.log("PASS: the window is by event time and survives any burst");
+`,
+  ),
 ];
 
 /** Deterministic directory: 120 employees, 12 surnames with 10 each,

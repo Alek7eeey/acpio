@@ -1,0 +1,7 @@
+{
+  "id": "ring-buffer",
+  "title": "After wrap-around the sensor buffer returns the newest sample as the oldest",
+  "prompt": "The sensor history endpoint shows garbage after the buffer wraps: the newest reading shows up as the OLDEST entry in the timeline. lib/ring.mjs is a fixed-capacity FIFO ring with O(1) push documented to evict the OLDEST entry when full; contents() lists oldest -> newest. Fix lib/ring.mjs and verify with your own script (fill exactly, single wrap, several wraps, capacity one, size, contents returns a copy, constructor validation) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

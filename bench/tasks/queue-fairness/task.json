@@ -1,0 +1,7 @@
+{
+  "id": "queue-fairness",
+  "title": "A burst on one queue starves the other",
+  "prompt": "The background queue waits behind entire interactive bursts: users watch exports start only after the last click finished. lib/scheduler.mjs documents the contract: with both queues non-empty the drain INTERLEAVES — one task from each in turn, oldest first within a queue; when one side empties, the rest of the other drains in order. Fix lib/scheduler.mjs and verify with your own script (strict alternation, tail drain, only-A, only-B, alternating then one side empties, both empty) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

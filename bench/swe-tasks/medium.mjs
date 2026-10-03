@@ -1717,4 +1717,484 @@ if (!threw) fail("a line without '=' must throw");
 console.log("PASS: sections, comments and '='-carrying values all parse");
 `,
   ),
+
+  def(
+    "medium",
+    "booking-conflicts",
+    "Back-to-back bookings are rejected as double-booked",
+    "Since the cleanup change the room UI refuses a 11:00-12:00 booking right after a 10:00-11:00 one — it says the room is already taken. lib/conflicts.mjs documents bookings as half-open [startMin, endMin): a booking ending at 11:00 and one starting at 11:00 do NOT overlap. Fix lib/conflicts.mjs and verify with your own script (touching intervals both orders, real overlap, containment, identical bookings, firstConflict hit and miss, free slot) before answering.",
+    {
+      "lib/conflicts.mjs": `/**
+ * Room bookings are half-open: [startMin, endMin). A booking ending at
+ * 11:00 and a booking starting at 11:00 do NOT overlap — the room has a
+ * zero-minute gap and can be turned around. Two bookings conflict iff each
+ * starts strictly before the other ends. Minutes are integers from the
+ * day start; inside one booking start < end.
+ */
+export function conflicts(a, b) {
+  return a.start < b.end && b.start < a.end;
+}
+
+/** Index of the first booking in 'bookings' conflicting with 'candidate',
+ * or -1 when the slot is free. */
+export function firstConflict(bookings, candidate) {
+  return bookings.findIndex((b) => conflicts(b, candidate));
+}
+`,
+    },
+    {
+      "lib/conflicts.mjs": [
+        "  return a.start < b.end && b.start < a.end;",
+        "  return a.start <= b.end && b.start < a.end; // back-to-back bookings left cleaning gaps (PROD-4517)",
+      ],
+    },
+    `import { conflicts, firstConflict } from "./lib/conflicts.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const morning = { start: 600, end: 660 }; // 10:00-11:00
+const noon = { start: 660, end: 720 }; // 11:00-12:00
+if (conflicts(morning, noon)) fail("touching bookings do not conflict (a,b)");
+if (conflicts(noon, morning)) fail("touching bookings do not conflict (b,a)");
+if (!conflicts(morning, { start: 650, end: 700 })) fail("real overlap must conflict");
+if (!conflicts(morning, { start: 645, end: 655 })) fail("containment must conflict");
+if (!conflicts(morning, { start: 600, end: 660 })) fail("identical bookings conflict");
+if (firstConflict([noon], morning) !== -1) fail("free slot reports -1");
+if (firstConflict([noon, morning], { start: 620, end: 650 }) !== 1) fail("first conflicting index");
+if (firstConflict([], morning) !== -1) fail("empty list is free");
+
+console.log("PASS: half-open bookings touch without conflicting");
+`,
+  ),
+
+  def(
+    "medium",
+    "utc-day-boundary",
+    "Late-night events land in the wrong daily bucket",
+    "Since the pipeline change, an event that happened at 23:59 UTC but was processed after midnight shows up in the NEW day's report, and replays rewrite history: the same event moves between buckets depending on when the worker got to it. lib/daykey.mjs documents the rule — bucket by the EVENT's own timestamp, in UTC, never by arrival. Fix lib/daykey.mjs and verify with your own script (late event lands on its event day, day boundary 23:59:59.999 vs 00:00:00, sums per day accumulate, empty input, receivedAt after midnight) before answering.",
+    {
+      "lib/daykey.mjs": `/**
+ * Daily rollups bucket by the EVENT's own timestamp, in UTC — never by
+ * when the event arrived. dayKey returns the "YYYY-MM-DD" UTC calendar day
+ * of a millisecond timestamp; rollupByDay sums event.value per day.
+ * A late event from 23:59 belongs to yesterday even if it is processed
+ * after midnight, and replays never move it.
+ */
+export function dayKey(tsMs) {
+  return new Date(tsMs).toISOString().slice(0, 10);
+}
+
+export function rollupByDay(events) {
+  const days = new Map();
+  for (const ev of events) {
+    const key = dayKey(ev.ts);
+    days.set(key, (days.get(key) ?? 0) + ev.value);
+  }
+  return days;
+}
+`,
+    },
+    {
+      "lib/daykey.mjs": [
+        "    const key = dayKey(ev.ts);",
+        "    const key = dayKey(ev.receivedAt); // bucket by when we actually saw it (PROD-4518)",
+      ],
+    },
+    `import { dayKey, rollupByDay } from "./lib/daykey.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const DAY = 86_400_000;
+
+const lateNight = 1_790_000_000_000; // some 23:59:59.990 UTC
+const justBeforeMidnight = Math.floor(lateNight / DAY) * DAY + DAY - 10;
+const afterMidnight = Math.floor(lateNight / DAY) * DAY + DAY + 10;
+if (dayKey(justBeforeMidnight) !== dayKey(justBeforeMidnight)) fail("sanity");
+if (dayKey(justBeforeMidnight) === dayKey(afterMidnight)) fail("the day must turn at the UTC boundary");
+if (dayKey(86_399_999) !== "1970-01-01") fail("last ms of day one");
+if (dayKey(86_400_000) !== "1970-01-02") fail("first ms of day two");
+
+const events = [
+  { ts: justBeforeMidnight, receivedAt: afterMidnight, value: 5 },
+  { ts: afterMidnight, receivedAt: afterMidnight + 5, value: 7 },
+  { ts: justBeforeMidnight - 1, receivedAt: afterMidnight + 6, value: 3 },
+];
+const days = rollupByDay(events);
+const yesterday = dayKey(justBeforeMidnight);
+const today = dayKey(afterMidnight);
+if (days.get(yesterday) !== 8) fail("both late-night events stay on their event day: " + days.get(yesterday));
+if (days.get(today) !== 7) fail("the after-midnight event sums into its own day");
+if (days.size !== 2) fail("exactly two buckets");
+if (rollupByDay([]).size !== 0) fail("empty input");
+
+console.log("PASS: buckets follow the event timestamp, arrival time is irrelevant");
+`,
+  ),
+
+  def(
+    "medium",
+    "ring-buffer",
+    "After wrap-around the sensor buffer returns the newest sample as the oldest",
+    "The sensor history endpoint shows garbage after the buffer wraps: the newest reading shows up as the OLDEST entry in the timeline. lib/ring.mjs is a fixed-capacity FIFO ring with O(1) push documented to evict the OLDEST entry when full; contents() lists oldest -> newest. Fix lib/ring.mjs and verify with your own script (fill exactly, single wrap, several wraps, capacity one, size, contents returns a copy, constructor validation) before answering.",
+    {
+      "lib/ring.mjs": `/**
+ * Fixed-capacity FIFO ring buffer with O(1) push. When full, a push
+ * evicts the OLDEST entry; contents() lists oldest -> newest and returns
+ * a fresh array every call.
+ */
+export class RingBuffer {
+  constructor(capacity) {
+    if (!Number.isInteger(capacity) || capacity <= 0) throw new RangeError("capacity must be a positive integer");
+    this.capacity = capacity;
+    this.slots = new Array(capacity);
+    this.head = 0; // index of the oldest entry
+    this.count = 0;
+  }
+
+  push(value) {
+    if (this.count < this.capacity) {
+      this.slots[(this.head + this.count) % this.capacity] = value;
+      this.count++;
+    } else {
+      this.slots[this.head] = value;
+      this.head = (this.head + 1) % this.capacity;
+    }
+    return this;
+  }
+
+  contents() {
+    const out = [];
+    for (let i = 0; i < this.count; i++) out.push(this.slots[(this.head + i) % this.capacity]);
+    return out;
+  }
+
+  get size() {
+    return this.count;
+  }
+}
+`,
+    },
+    {
+      "lib/ring.mjs": [
+        "      this.slots[this.head] = value;\n      this.head = (this.head + 1) % this.capacity;",
+        "      this.slots[(this.head + this.count) % this.capacity] = value; // reuse the tail slot in place, indices never move (PROD-4519)",
+      ],
+    },
+    `import { RingBuffer } from "./lib/ring.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+const rb = new RingBuffer(3);
+rb.push("a").push("b").push("c");
+if (!eq(rb.contents(), ["a", "b", "c"])) fail("fill order: " + JSON.stringify(rb.contents()));
+rb.push("d");
+if (!eq(rb.contents(), ["b", "c", "d"])) fail("one wrap evicts the oldest: " + JSON.stringify(rb.contents()));
+rb.push("e").push("f");
+if (!eq(rb.contents(), ["d", "e", "f"])) fail("two wraps: " + JSON.stringify(rb.contents()));
+if (rb.size !== 3) fail("size stays at capacity");
+
+const one = new RingBuffer(1);
+one.push("x").push("y");
+if (!eq(one.contents(), ["y"])) fail("capacity one keeps the newest");
+
+const snap = rb.contents();
+snap.push("junk");
+if (rb.contents().length !== 3) fail("contents returns a copy");
+
+throws(() => new RingBuffer(0), "zero capacity");
+throws(() => new RingBuffer(2.5), "fractional capacity");
+
+console.log("PASS: wrap-around evicts the oldest, the timeline stays in order");
+`,
+  ),
+
+  def(
+    "medium",
+    "matrix-rotate",
+    "Sprite atlases come out of the rotator flipped",
+    "The image tool's 90-degree rotation produces a mirrored result — the sprites land counter-clockwise. It slipped through review because the test atlas was symmetric. lib/rotate.mjs documents a CLOCKWISE rotation into a new matrix, correct for non-square inputs, input never mutated. Fix lib/rotate.mjs and verify with your own script (2x3 rectangle, non-symmetric square, single row, single column, 1x1, input not mutated) before answering.",
+    {
+      "lib/rotate.mjs": `/**
+ * Rotate a matrix 90 degrees CLOCKWISE into a new matrix. A rows x cols
+ * input becomes cols x rows — never assume a square. The input matrix is
+ * not mutated. The first column of the result is the last row of the
+ * input read bottom-up.
+ */
+export function rotate90(matrix) {
+  const rows = matrix.length;
+  const cols = matrix[0].length;
+  const out = [];
+  for (let c = 0; c < cols; c++) {
+    const row = [];
+    for (let r = rows - 1; r >= 0; r--) row.push(matrix[r][c]);
+    out.push(row);
+  }
+  return out;
+}
+`,
+    },
+    {
+      "lib/rotate.mjs": [
+        "    for (let r = rows - 1; r >= 0; r--) row.push(matrix[r][c]);",
+        "    for (let r = 0; r < rows; r++) row.push(matrix[r][c]); // storage order, fewer cache misses (PROD-4520)",
+      ],
+    },
+    `import { rotate90 } from "./lib/rotate.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const wide = [
+  [1, 2, 3],
+  [4, 5, 6],
+];
+const wideRotated = rotate90(wide);
+if (!eq(wideRotated, [[4, 1], [5, 2], [6, 3]])) fail("2x3 rotates to 3x2: " + JSON.stringify(wideRotated));
+if (!eq(wide, [[1, 2, 3], [4, 5, 6]])) fail("the input must not be mutated");
+
+if (!eq(rotate90([[1, 2], [3, 4]]), [[3, 1], [4, 2]])) fail("non-symmetric square");
+if (!eq(rotate90([[7]]), [[7]])) fail("1x1");
+if (!eq(rotate90([[1, 2, 3]]), [[1], [2], [3]])) fail("single row becomes a column");
+if (!eq(rotate90([[1], [2], [3]]), [[3, 2, 1]])) fail("single column becomes a row");
+
+console.log("PASS: clockwise rotation, rectangles included, input untouched");
+`,
+  ),
+
+  def(
+    "medium",
+    "event-time-buckets",
+    "Events from the first half of every bucket land in the previous one",
+    "Since the metrics cleanup, dashboards show events at :35 landing in the :30 bucket of the PREVIOUS hour window — an event at 10:35 with 10-minute buckets must be in the 10:30 bucket but shows in 11:00's... in short, half the events drift one bucket to the right. lib/buckets.mjs documents tumbling buckets: an event belongs to the bucket CONTAINING its own timestamp, bucketStart = floor(ts / bucketMs) * bucketMs, end exclusive. Fix lib/buckets.mjs and verify with your own script (event just inside a bucket, at the boundary, exact midpoint, sums with out-of-order events, empty input) before answering.",
+    {
+      "lib/buckets.mjs": `/**
+ * Tumbling time buckets. An event belongs to the bucket CONTAINING its
+ * own timestamp: bucketStart = floor(ts / bucketMs) * bucketMs. Arrival
+ * order and arrival time are irrelevant — a late event lands in its own
+ * bucket. The bucket end is exclusive: [start, start + bucketMs).
+ */
+export function bucketStart(tsMs, bucketMs) {
+  return Math.floor(tsMs / bucketMs) * bucketMs;
+}
+
+/** Map bucketStart -> sum of event.value for events in that bucket. */
+export function sumByBucket(events, bucketMs) {
+  const sums = new Map();
+  for (const ev of events) {
+    const start = bucketStart(ev.ts, bucketMs);
+    sums.set(start, (sums.get(start) ?? 0) + ev.value);
+  }
+  return sums;
+}
+`,
+    },
+    {
+      "lib/buckets.mjs": [
+        "  return Math.floor(tsMs / bucketMs) * bucketMs;",
+        "  return Math.round(tsMs / bucketMs) * bucketMs; // round to the nearest bucket, sparse streams look fuller (PROD-4521)",
+      ],
+    },
+    `import { bucketStart, sumByBucket } from "./lib/buckets.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const MIN = 60_000;
+
+if (bucketStart(35_000, MIN) !== 0) fail("35s belongs to the bucket that contains it");
+if (bucketStart(59_999, MIN) !== 0) fail("59.999s is still bucket zero");
+if (bucketStart(60_000, MIN) !== MIN) fail("the next bucket starts exactly at the boundary");
+if (bucketStart(30_000, MIN) !== 0) fail("the exact midpoint is inside bucket zero");
+if (bucketStart(0, MIN) !== 0) fail("epoch");
+
+const sums = sumByBucket(
+  [
+    { ts: 35_000, value: 1 },
+    { ts: 95_000, value: 2 },
+    { ts: 20_000, value: 4 }, // out of arrival order
+    { ts: 59_999, value: 8 },
+  ],
+  MIN,
+);
+if (!eq([...sums.entries()], [[0, 13], [MIN, 2]])) fail("sums per bucket: " + JSON.stringify([...sums.entries()]));
+if (sumByBucket([], MIN).size !== 0) fail("empty input");
+
+console.log("PASS: tumbling buckets contain their own events, floor not round");
+`,
+  ),
+
+  def(
+    "medium",
+    "queue-fairness",
+    "A burst on one queue starves the other",
+    "The background queue waits behind entire interactive bursts: users watch exports start only after the last click finished. lib/scheduler.mjs documents the contract: with both queues non-empty the drain INTERLEAVES — one task from each in turn, oldest first within a queue; when one side empties, the rest of the other drains in order. Fix lib/scheduler.mjs and verify with your own script (strict alternation, tail drain, only-A, only-B, alternating then one side empties, both empty) before answering.",
+    {
+      "lib/scheduler.mjs": `/**
+ * Two-queue work scheduler. drain(fn) walks both queues, calling fn(task,
+ * side) per task and collecting the results in drain order. With both
+ * queues non-empty it INTERLEAVES: one task from each in turn, starting
+ * with A, oldest first within a queue — a burst on one side may not
+ * starve the other. Once one queue runs dry the rest of the other drains
+ * in order.
+ */
+export class TwoQueueScheduler {
+  constructor() {
+    this.a = [];
+    this.b = [];
+  }
+
+  pushA(task) {
+    this.a.push(task);
+    return this;
+  }
+
+  pushB(task) {
+    this.b.push(task);
+    return this;
+  }
+
+  drain(fn) {
+    const out = [];
+    let ia = 0;
+    let ib = 0;
+    let turn = 0; // even -> A's turn, odd -> B's
+    while (ia < this.a.length || ib < this.b.length) {
+      let fromA;
+      if (ia >= this.a.length) fromA = false;
+      else if (ib >= this.b.length) fromA = true;
+      else fromA = turn % 2 === 0;
+      const task = fromA ? this.a[ia++] : this.b[ib++];
+      out.push(fn(task, fromA ? "A" : "B"));
+      turn++;
+    }
+    return out;
+  }
+}
+`,
+    },
+    {
+      "lib/scheduler.mjs": [
+        "      let fromA;\n      if (ia >= this.a.length) fromA = false;\n      else if (ib >= this.b.length) fromA = true;\n      else fromA = turn % 2 === 0;",
+        "      const fromA = ia < this.a.length; // drain one side fully, fewer switches, better locality (PROD-4522)",
+      ],
+    },
+    `import { TwoQueueScheduler } from "./lib/scheduler.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const s = new TwoQueueScheduler();
+s.pushA("a1").pushA("a2").pushA("a3").pushB("b1").pushB("b2");
+const order = s.drain((task, side) => side + ":" + task);
+if (!eq(order, ["A:a1", "B:b1", "A:a2", "B:b2", "A:a3"])) {
+  fail("both queues must interleave: " + JSON.stringify(order));
+}
+
+const onlyA = new TwoQueueScheduler().pushA("x").pushA("y");
+if (!eq(onlyA.drain((t) => t), ["x", "y"])) fail("single side drains in order");
+
+const tail = new TwoQueueScheduler().pushA("a").pushB("b1").pushB("b2").pushB("b3");
+if (!eq(tail.drain((t) => t), ["a", "b1", "b2", "b3"])) fail("after A runs dry B drains in order");
+
+const empty = new TwoQueueScheduler();
+if (!eq(empty.drain(() => 1), [])) fail("both empty drains nothing");
+
+console.log("PASS: the scheduler alternates between queues, no starvation");
+`,
+  ),
+
+  def(
+    "medium",
+    "flag-defaults",
+    "The five-percent rollout is serving everyone",
+    "After the flag-platform cleanup, a flag with a rollout-rule default is ON for every user, not the intended five percent. Two modules: lib/store.mjs keeps definitions whose 'default' may be a plain value or a ROLLOUT RULE — a function called with the user context that returns the value for that user; lib/evaluate.mjs resolves user > env > default and documents that a function default must be CALLED with the context. Fix the broken module and verify with your own script (plain default, rollout rule true and false across users, user override beats rollout, env beats default, unknown flag false) before answering.",
+    {
+      "lib/store.mjs": `/**
+ * Flag definitions: id -> { id, default, description }. 'default' is
+ * either a plain value or a ROLLOUT RULE: a function called with the user
+ * context that returns the flag value for that user (e.g. a gate on a
+ * percentage of users).
+ */
+export function flagStore(defs) {
+  const byId = new Map(defs.map((d) => [d.id, Object.freeze({ ...d })]));
+  return {
+    has: (id) => byId.has(id),
+    definition: (id) => byId.get(id),
+  };
+}
+`,
+      "lib/evaluate.mjs": `/**
+ * Resolve one flag for one user: the user's override wins, then the
+ * environment override, then the definition's default; an unknown flag is
+ * false. A function default is a rollout rule — CALL it with the context
+ * and use its return value, never the function itself.
+ */
+export function evaluate(store, id, ctx = {}) {
+  const { user = {}, env = {} } = ctx;
+  if (id in user) return user[id];
+  if (id in env) return env[id];
+  if (!store.has(id)) return false;
+  const value = store.definition(id).default;
+  return typeof value === "function" ? value(ctx) : value;
+}
+`,
+    },
+    {
+      "lib/evaluate.mjs": [
+        '  return typeof value === "function" ? value(ctx) : value;',
+        '  return typeof value === "function" ? true : value; // a rollout gate means the flag is on, keep the wiring simple (PROD-4523)',
+      ],
+    },
+    `import { flagStore } from "./lib/store.mjs";
+import { evaluate } from "./lib/evaluate.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+const rollout = (ctx) => (ctx.user.id % 4 === 0 ? true : false); // every fourth user
+const store = flagStore([
+  { id: "static-on", default: true },
+  { id: "static-off", default: false },
+  { id: "beta", default: rollout },
+]);
+
+if (evaluate(store, "static-on", { user: { id: 1 } }) !== true) fail("plain true default");
+if (evaluate(store, "static-off", { user: { id: 1 } }) !== false) fail("plain false default");
+if (evaluate(store, "beta", { user: { id: 4 } }) !== true) fail("rollout admits user 4");
+if (evaluate(store, "beta", { user: { id: 5 } }) !== false) fail("rollout keeps user 5 out: got " + evaluate(store, "beta", { user: { id: 5 } }));
+if (evaluate(store, "beta", { user: { id: 5, beta: true } }) !== true) fail("user override beats the rollout");
+if (evaluate(store, "static-off", { user: { id: 1 }, env: { "static-off": true } }) !== true) fail("env beats the default");
+if (evaluate(store, "nope", { user: { id: 1 } }) !== false) fail("unknown flag is false");
+
+console.log("PASS: rollout rules are called with the context, overrides win");
+`,
+  ),
 ];

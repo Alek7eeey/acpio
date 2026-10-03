@@ -1,0 +1,7 @@
+{
+  "id": "cache-key-normalize",
+  "title": "Documents saved under equivalent paths 404 on read",
+  "prompt": "Users save a draft under './Docs/A' and sometimes get 'not found' on read via 'docs/a/' — writes and reads disagree about the key. Two modules: lib/normalize.mjs is the documented key normalizer (trim, lowercase, collapse duplicate slashes, drop one trailing slash; the root '/' stays itself); lib/draftcache.mjs must send BOTH put and get through it. Reads skip the normalizer. Fix the broken module and verify with your own script (round-trip across equivalent spellings, distinct keys stay distinct, size counts normalized keys, root path, has agrees with get, normalizer unit cases) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "hard"
+}

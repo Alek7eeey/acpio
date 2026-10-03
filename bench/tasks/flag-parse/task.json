@@ -1,0 +1,7 @@
+{
+  "id": "flag-parse",
+  "title": "A CLI flag set to false still turns the feature on",
+  "prompt": "Deploy runs with --dry-run=false executed for real. lib/flags.mjs documents the coercion: the exact strings 'true'/'false' become booleans, comma values become arrays, finite numbers become numbers, anything else stays a string. After a cleanup the boolean case is gone. Fix lib/flags.mjs and verify with your own script (--dry-run=false, --verbose=true, bare --verbose, --tags=a,b,c, --retries=3, --label=live, --flag=, non-flag args ignored) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

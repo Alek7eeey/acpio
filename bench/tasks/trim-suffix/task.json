@@ -1,0 +1,7 @@
+{
+  "id": "trim-suffix",
+  "title": "Path cleaner strips more separators than it should",
+  "prompt": "Our path sanitizer eats ALL trailing separators: a user path 'a///' comes back as 'a' and the tests that pin 'a//' now fail. lib/trim.mjs documents the contract: remove AT MOST ONE trailing occurrence of the suffix; a text that is exactly the suffix becomes the empty string. Fix lib/trim.mjs and verify with your own script (triple slash, single slash, text equal to the suffix, no match, empty text, multi-char suffix, overlapping suffix) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "easy"
+}

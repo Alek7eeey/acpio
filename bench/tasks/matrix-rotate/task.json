@@ -1,0 +1,7 @@
+{
+  "id": "matrix-rotate",
+  "title": "Sprite atlases come out of the rotator flipped",
+  "prompt": "The image tool's 90-degree rotation produces a mirrored result — the sprites land counter-clockwise. It slipped through review because the test atlas was symmetric. lib/rotate.mjs documents a CLOCKWISE rotation into a new matrix, correct for non-square inputs, input never mutated. Fix lib/rotate.mjs and verify with your own script (2x3 rectangle, non-symmetric square, single row, single column, 1x1, input not mutated) before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium"
+}

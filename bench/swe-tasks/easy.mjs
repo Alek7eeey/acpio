@@ -936,4 +936,275 @@ if (empty.length !== 0) fail("no tasks, no results");
 console.log("PASS: waterfall runs steps in series and chains their results");
 `,
   ),
+
+  def(
+    "easy",
+    "rank-ties",
+    "Tied scores get different ranks",
+    "The leaderboard shows tied players with different ranks — two players with 150 points show as #2 and #3. lib/rank.mjs documents competition ranking ('1,2,2,4'): equals share a rank and the next distinct score lands one past the whole tie group. A cleanup pass lost the sharing. Fix lib/rank.mjs and verify with your own script (tie in the middle, three-way tie at the top, no ties, single entry, empty input, input order preserved) before answering.",
+    {
+      "lib/rank.mjs": `/**
+ * Competition ranking ("1,2,2,4"): entries with equal scores share a rank,
+ * and the next distinct score ranks one past the whole tie group (its
+ * position in the descending order + 1). Equals keep their input order.
+ * Returns the rank of every input item, in input order.
+ */
+export function rankBy(items, scoreOf) {
+  const order = [...items].sort((a, b) => scoreOf(b) - scoreOf(a));
+  const rankOf = new Map();
+  for (let i = 0; i < order.length; i++) {
+    if (i > 0 && scoreOf(order[i]) === scoreOf(order[i - 1])) {
+      rankOf.set(order[i], rankOf.get(order[i - 1])); // equals share the rank of their group
+      continue;
+    }
+    rankOf.set(order[i], i + 1);
+  }
+  return items.map((item) => rankOf.get(item));
+}
+`,
+    },
+    {
+      "lib/rank.mjs": [
+        "    if (i > 0 && scoreOf(order[i]) === scoreOf(order[i - 1])) {\n      rankOf.set(order[i], rankOf.get(order[i - 1])); // equals share the rank of their group\n      continue;\n    }\n    rankOf.set(order[i], i + 1);",
+        "    rankOf.set(order[i], i + 1); // every entry is ranked by its own position (PROD-4512)",
+      ],
+    },
+    `import { rankBy } from "./lib/rank.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const score = (p) => p.points;
+
+const board = [
+  { name: "ada", points: 150 },
+  { name: "bo", points: 210 },
+  { name: "cy", points: 150 },
+  { name: "dee", points: 90 },
+];
+if (!eq(rankBy(board, score), [2, 1, 2, 4])) {
+  fail("150/210/150/90 must rank 2,1,2,4: " + JSON.stringify(rankBy(board, score)));
+}
+
+const top = [{ name: "a", points: 5 }, { name: "b", points: 5 }, { name: "c", points: 5 }];
+if (!eq(rankBy(top, score), [1, 1, 1])) fail("three-way tie at the top shares rank 1");
+if (!eq(rankBy([{ name: "x", points: 3 }], score), [1])) fail("single entry ranks 1");
+if (!eq(rankBy([], score), [])) fail("empty input");
+if (!eq(rankBy([{ v: 1 }, { v: 2 }], (p) => p.v), [2, 1])) fail("no ties ranks by score");
+
+console.log("PASS: equals share a rank, the next distinct score skips past them");
+`,
+  ),
+
+  def(
+    "easy",
+    "rental-days",
+    "Weekend rentals are billed one day short",
+    "Customer complaints: a Friday-to-Sunday rental is billed for 2 days, and same-day rentals come out free. lib/days.mjs documents billing as INCLUSIVE of both the pickup and the return day. Fix lib/days.mjs and verify with your own script (same-day, weekend, full month, cross-month, return before pickup throws, garbage input throws) before answering.",
+    {
+      "lib/days.mjs": `/**
+ * Billing days for a rental, INCLUSIVE of both the pickup and the return
+ * day: the same day picked up and returned is 1 day, Fri -> Sun is 3.
+ * Dates are ISO "YYYY-MM-DD" (no time component). A return before the
+ * pickup is a RangeError; a non-ISO date is a TypeError.
+ */
+export function billingDays(startISO, endISO) {
+  const start = Date.parse(startISO + "T00:00:00Z");
+  const end = Date.parse(endISO + "T00:00:00Z");
+  if (Number.isNaN(start) || Number.isNaN(end)) throw new TypeError("dates must be ISO YYYY-MM-DD");
+  if (end < start) throw new RangeError("return before pickup");
+  return Math.round((end - start) / 86_400_000) + 1;
+}
+`,
+    },
+    {
+      "lib/days.mjs": [
+        "  return Math.round((end - start) / 86_400_000) + 1;",
+        "  return Math.round((end - start) / 86_400_000); // count the nights, not the calendar days (PROD-4513)",
+      ],
+    },
+    `import { billingDays } from "./lib/days.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+if (billingDays("2026-10-02", "2026-10-04") !== 3) fail("Fri -> Sun is 3 billing days");
+if (billingDays("2026-10-02", "2026-10-02") !== 1) fail("same-day rental is 1 day");
+if (billingDays("2026-01-01", "2026-01-31") !== 31) fail("January is 31 billing days");
+if (billingDays("2026-01-30", "2026-02-02") !== 4) fail("cross-month span is inclusive");
+throws(() => billingDays("2026-02-10", "2026-02-09"), "return before pickup");
+throws(() => billingDays("not-a-date", "2026-02-09"), "garbage start");
+
+console.log("PASS: billing days are inclusive of both ends");
+`,
+  ),
+
+  def(
+    "easy",
+    "flag-parse",
+    "A CLI flag set to false still turns the feature on",
+    "Deploy runs with --dry-run=false executed for real. lib/flags.mjs documents the coercion: the exact strings 'true'/'false' become booleans, comma values become arrays, finite numbers become numbers, anything else stays a string. After a cleanup the boolean case is gone. Fix lib/flags.mjs and verify with your own script (--dry-run=false, --verbose=true, bare --verbose, --tags=a,b,c, --retries=3, --label=live, --flag=, non-flag args ignored) before answering.",
+    {
+      "lib/flags.mjs": `/**
+ * argv flag parser: only "--name=value" and bare "--name" forms. Coercion
+ * of the value: the exact strings "true"/"false" become booleans (whole
+ * match, case-sensitive — "False" stays a string), a comma-containing
+ * value becomes an array of strings, a finite number becomes a number,
+ * anything else stays a string. "--flag=" is the empty string.
+ */
+export function parseFlags(argv) {
+  const flags = {};
+  for (const arg of argv) {
+    if (!arg.startsWith("--")) continue;
+    const eq = arg.indexOf("=");
+    if (eq === -1) {
+      flags[arg.slice(2)] = true;
+      continue;
+    }
+    const name = arg.slice(2, eq);
+    const raw = arg.slice(eq + 1);
+    if (raw === "true") flags[name] = true;
+    else if (raw === "false") flags[name] = false;
+    else if (raw.includes(",")) flags[name] = raw.split(",");
+    else if (raw !== "" && Number.isFinite(Number(raw))) flags[name] = Number(raw);
+    else flags[name] = raw;
+  }
+  return flags;
+}
+`,
+    },
+    {
+      "lib/flags.mjs": [
+        '    if (raw === "true") flags[name] = true;\n    else if (raw === "false") flags[name] = false;\n    else if (raw.includes(",")) flags[name] = raw.split(",");\n    else if (raw !== "" && Number.isFinite(Number(raw))) flags[name] = Number(raw);\n    else flags[name] = raw;',
+        '    flags[name] = raw !== "" && raw !== "0"; // a set flag is on; only empty and "0" are off (PROD-4514)',
+      ],
+    },
+    `import { parseFlags } from "./lib/flags.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const f = parseFlags(["deploy", "--dry-run=false", "--verbose=true", "--quiet", "--tags=a,b,c", "--retries=3", "--label=live", "--flag=", "positional"]);
+if (f["dry-run"] !== false) fail("dry-run=false must be the boolean false: " + JSON.stringify(f["dry-run"]));
+if (f.verbose !== true) fail("verbose=true must be the boolean true");
+if (f.quiet !== true) fail("bare --name must be the boolean true");
+if (!eq(f.tags, ["a", "b", "c"])) fail("comma value must become an array");
+if (f.retries !== 3) fail("numeric value must become a number: " + JSON.stringify(f.retries));
+if (f.label !== "live") fail("plain value must stay a string: " + JSON.stringify(f.label));
+if (f.flag !== "") fail("empty value is the empty string");
+if (f.deploy !== undefined || f.positional !== undefined) fail("non-flag args are ignored");
+
+console.log("PASS: booleans, arrays, numbers and strings coerce per the contract");
+`,
+  ),
+
+  def(
+    "easy",
+    "trim-suffix",
+    "Path cleaner strips more separators than it should",
+    "Our path sanitizer eats ALL trailing separators: a user path 'a///' comes back as 'a' and the tests that pin 'a//' now fail. lib/trim.mjs documents the contract: remove AT MOST ONE trailing occurrence of the suffix; a text that is exactly the suffix becomes the empty string. Fix lib/trim.mjs and verify with your own script (triple slash, single slash, text equal to the suffix, no match, empty text, multi-char suffix, overlapping suffix) before answering.",
+    {
+      "lib/trim.mjs": `/**
+ * Remove AT MOST ONE trailing occurrence of 'suffix' from 'text':
+ * strip("a///", "/") is "a//", never "a". A text that IS the suffix
+ * becomes the empty string. A text not ending with the suffix is
+ * returned unchanged. An empty suffix changes nothing.
+ */
+export function stripSuffix(text, suffix) {
+  if (suffix === "") return text;
+  if (!text.endsWith(suffix)) return text;
+  return text.slice(0, text.length - suffix.length);
+}
+`,
+    },
+    {
+      "lib/trim.mjs": [
+        "  if (!text.endsWith(suffix)) return text;\n  return text.slice(0, text.length - suffix.length);",
+        "  while (text.endsWith(suffix)) text = text.slice(0, text.length - suffix.length); // users paste doubled separators (PROD-4515)\n  return text;",
+      ],
+    },
+    `import { stripSuffix } from "./lib/trim.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+
+if (stripSuffix("a///", "/") !== "a//") fail("only one separator goes away: " + JSON.stringify(stripSuffix("a///", "/")));
+if (stripSuffix("path/", "/") !== "path") fail("single trailing slash");
+if (stripSuffix("/", "/") !== "") fail("text equal to the suffix becomes empty");
+if (stripSuffix("abc", "x") !== "abc") fail("no match returns the input");
+if (stripSuffix("", "/") !== "") fail("empty text stays empty");
+if (stripSuffix("report.tar.gz", ".gz") !== "report.tar") fail("multi-char suffix");
+if (stripSuffix("aaa", "aa") !== "a") fail("overlapping suffix strips once");
+
+console.log("PASS: at most one trailing occurrence is removed");
+`,
+  ),
+
+  def(
+    "easy",
+    "pad-id",
+    "Orders beyond a million collide on the printed label",
+    "Order 1000000 prints as ORD-000000 — the same label as order 0. lib/id.mjs documents the width as a FLOOR: sequences above six digits keep every digit, truncation would collide two orders. Fix lib/id.mjs and verify with your own script (small ids, exactly six digits, seven digits, eight digits, zero, negative throws, fractional throws) before answering.",
+    {
+      "lib/id.mjs": `/**
+ * Human-facing order id: "ORD-" + the sequence zero-padded to AT LEAST six
+ * digits. Six is a floor, not a cap — sequences above 999999 keep every
+ * digit (truncating would make two orders share an id). seq must be a
+ * non-negative integer.
+ */
+export function formatOrderId(seq) {
+  if (!Number.isInteger(seq) || seq < 0) throw new TypeError("seq must be a non-negative integer");
+  return "ORD-" + String(seq).padStart(6, "0");
+}
+`,
+    },
+    {
+      "lib/id.mjs": [
+        '  return "ORD-" + String(seq).padStart(6, "0");',
+        '  return "ORD-" + String(seq).padStart(6, "0").slice(-6); // the label printer wants exactly six (PROD-4516)',
+      ],
+    },
+    `import { formatOrderId } from "./lib/id.mjs";
+
+function fail(msg) {
+  console.error("FAIL: " + msg);
+  process.exit(1);
+}
+const throws = (fn, what) => {
+  try {
+    fn();
+  } catch {
+    return;
+  }
+  fail("must throw: " + what);
+};
+
+if (formatOrderId(42) !== "ORD-000042") fail("small ids pad to six");
+if (formatOrderId(0) !== "ORD-000000") fail("zero pads to six");
+if (formatOrderId(999999) !== "ORD-999999") fail("exactly six digits stay six");
+if (formatOrderId(1000000) !== "ORD-1000000") fail("a million keeps all seven digits: " + formatOrderId(1000000));
+if (formatOrderId(12345678) !== "ORD-12345678") fail("eight digits keep all eight");
+throws(() => formatOrderId(-1), "negative seq");
+throws(() => formatOrderId(4.2), "fractional seq");
+
+console.log("PASS: six digits is a floor, ids never collide by truncation");
+`,
+  ),
 ];
