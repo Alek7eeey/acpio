@@ -157,6 +157,21 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, iteration: upstream-history rule — the memory family holds at
+  a third of the cost** — one prompt addition (system 2629 → 2913 chars,
+  +284 ≈ 71 tokens of floor): when the project is public, check its actual
+  history for the canonical fix (`git log -S`, a released version from the
+  registry) instead of reconstructing it from memory — "a couple of targeted
+  lookups, not a survey". Rerun of the four memory-family instances:
+  **4/4 RESOLVED**, and the lookups are visibly real — 8551 downloaded the
+  upstream v3.4.0 tag tarball, **9229 fetched the exact fix commit
+  `4ceedc102d` from the GitHub API** (the same commit pi's winning run used),
+  9281 pip-downloaded, 11510 leaned on pip more than one would like (19
+  calls). Uncached per instance vs the previous best-of records: 8551 37.7k
+  (was 45.4k), 9229 **68.0k (was 163.8k, −58%)**, 9281 23.3k (was 23.7k),
+  11510 41.4k (was 29.8k) — 3 of 4 records beaten, the family total −35%.
+  Stamp `2026-10-02T23-41-58-645Z`.
+
 - **2026-10-03, full-corpus single pass on the retry+rule bundle: 92/100** —
   all 100 instances × builtin, concurrency 3, fresh pulls for ~60 images
   (5h45m total; pulls, not agents, ate the wall time — the image tar cache on

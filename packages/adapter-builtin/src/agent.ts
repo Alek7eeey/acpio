@@ -102,6 +102,10 @@ function systemPrompt(
       "hand-rolling a path or format. When that means importing a third-party library the " +
       "project does not depend on yet, add it to the dependency manifest (setup.cfg / " +
       "pyproject.toml / package.json) — a clean install must keep working.",
+    "- When the project is a public repository, check its actual history for the canonical fix " +
+      "(`git log -S` in the checkout, a released version from the registry) instead of " +
+      "reconstructing it from memory; adapt what you find to this checkout — a couple of " +
+      "targeted lookups, not a survey.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked.",
     "- `bash` is a POSIX shell on every platform (Git Bash on Windows): pipes, `&&` and " +
