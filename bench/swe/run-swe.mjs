@@ -347,6 +347,28 @@ async function extractPatch(container, baseCommit) {
 
 const patchFiles = (patch) => [...new Set([...patch.matchAll(/^diff --git a\/(\S+) b\//gm)].map((m) => m[1]))];
 
+/** The grader's test patch must apply onto a tree that agrees with base for
+ * the files it touches. The eval script resets those paths itself, but only
+ * for files that exist at base: an agent fixture created at a test-patch path
+ * survives the reset and kills `git apply` — the run then fails invisibly,
+ * with a green rollout and the new tests never installed (sphinx-8269, twice).
+ * Force every test-patch path back to base here, before patch extraction and
+ * eval. Files added by the agent elsewhere are left alone: only grader-owned
+ * paths are reset, never the fix itself. */
+async function resetTestPatchPaths(container, row) {
+  const files = patchFiles(row.test_patch);
+  if (!files.length) return;
+  const list = files.map((f) => `'${f}'`).join(" ");
+  const script =
+    `cd /testbed || exit 1; for f in ${list}; do ` +
+    `if git cat-file -e ${row.base_commit}:"$f" 2>/dev/null; then ` +
+    `git diff --quiet ${row.base_commit} -- "$f" || { git checkout ${row.base_commit} -- "$f" && echo "reset(base): $f"; }; ` +
+    `elif [ -e "$f" ]; then git rm -f --cached -q "$f" >/dev/null 2>&1; rm -f "$f" && echo "reset(new): $f"; fi; done`;
+  const res = await dockerExec(container, script, 60_000);
+  const lines = (res.stdout || "").trim();
+  if (lines) console.log(`  ${row.instance_id}: test-patch paths reset to base\n${lines.split("\n").map((l) => `    ${l}`).join("\n")}`);
+}
+
 /** Where each CLI agent lives inside the container (see prepare-agent-bundle.mjs). */
 const CONTAINER_AGENT = {
   pi: { cmd: "/bundle/node/bin/node", entry: "/bundle/agents/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" },
@@ -543,6 +565,7 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
       throw new Error(`unknown agent: ${agent}`);
     }
 
+    await resetTestPatchPaths(container, row);
     rec.patch = await extractPatch(container, row.base_commit);
     rec.patchBytes = rec.patch.length;
     rec.patchFiles = patchFiles(rec.patch);

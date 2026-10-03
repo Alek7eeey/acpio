@@ -157,6 +157,28 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, harness fix: grader test-patch paths are reset to base
+  before extraction and eval** — the audit's clean-diff failure is a grading
+  hole, not a prompt problem: the eval script's own reset
+  (`git checkout <base> -- <test files>`) only covers files that exist at
+  base, so an agent fixture created at a test-patch path survives it and
+  kills the test-patch apply — green rollout, new tests never installed,
+  NOT_RESOLVED regardless of the fix. `resetTestPatchPaths` (run-swe.mjs)
+  now forces every test-patch path back to base semantics before extraction
+  and eval: checkout for tracked files, unstage+rm for base-absent ones —
+  grader-owned paths only, never the fix; runs for every agent (the call
+  site is common), no bundle rebuild needed (host-side change). Verified
+  three ways: a deterministic replay of the audit's exact dirty tree (the
+  failing 8269 patch applied into a fresh container) now grades
+  **RESOLVED_FULL** with 6/6 tests — the only delta vs the audit's
+  NOT_RESOLVED is the reset; live runs 8269 + control 9281 **2/2** with the
+  reset a silent no-op on clean trees (no dirty rollout drawn this time —
+  the dirty branch is covered by the replay); clean-path semantics
+  unchanged (agent files outside grader paths are untouched). The
+  clean-diff prompt rule stays as the first line of defense; this closes
+  the hole it couldn't. Stamps: live `2026-10-03T07-53-34-712Z`; replay
+  graded with the runner's own CLI from the audit's row + eval script.
+
 - **2026-10-03, audit: the four prompt rules re-run against their own
   motivating cases (per the qualification bar, `bench/ITERATIONS.md` §3)** —
   every rule's direct cases re-rolled on the current bundle in one sweep
@@ -401,6 +423,14 @@ Containers are removed after each rollout; images are removed too unless
 
 ## Caveats
 
+- **Agent fixtures at grader test-patch paths silently void the run**: the
+  eval's reset only covers files that exist at base, so an agent-created
+  file where the test patch adds one kills the apply — the rollout looks
+  green and the new tests never run (sphinx-8269 failed twice this way,
+  once with a fix byte-identical to gold). The runner now resets
+  test-patch paths before extraction and eval. Symptom to recognize in old
+  logs: pytest passes N tests where the eval commands imply a new F2P test
+  that is absent from the summary.
 - **Suite weight is real**: django/sympy instances run test suites that take
   tens of minutes and images of 2–3 GB. Iterate on the small repos (flask,
   requests, astroid, pytest); sweep django only in bulk runs.
