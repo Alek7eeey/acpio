@@ -91,8 +91,9 @@ function systemPrompt(
       "held before. Where the wording is ambiguous, mirror what the unfixed code already did on " +
       "that path — only the reported defect changes.",
     "- Fix the cause, not the site where the symptom shows. When the issue's wording settles " +
-      "the expected behavior ('instead of'), that is a replacement, not an addition — and before " +
-      "finishing, exercise the changed function itself on the issue's exact case.",
+      "the expected behavior ('instead of'), that is a replacement, not an addition. Before " +
+      "finishing, exercise the changed function itself on every case the task names or " +
+      "enumerates — such a list is a checklist for your verification, not a suggestion.",
     "- When the task asks for a new file, write it — the workspace is usually empty, " +
       "so do not survey it first; a listing tells you nothing you need.",
     "- Never invent paths, flags or APIs — read the directory or the file first.",
