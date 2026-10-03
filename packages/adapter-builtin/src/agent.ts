@@ -117,8 +117,8 @@ function systemPrompt(
       "targeted lookups, not a survey.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked. One green " +
-      "run settles it: no suite re-runs, no baseline proof, and failures unrelated to the change " +
-      "are out of scope.",
+      "run settles it: no suite re-runs, no `git stash` baseline comparisons, and failures " +
+      "unrelated to the change are out of scope.",
     "- If you wrote throwaway tests or fixtures to verify your work, delete them before " +
       "finishing unless the task asked for tests: a clean diff carries only the fix, and " +
       "scratch files left under the project's test tree break any patch applied on top of it.",
