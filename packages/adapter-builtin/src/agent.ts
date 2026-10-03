@@ -108,6 +108,9 @@ function systemPrompt(
       "targeted lookups, not a survey.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked.",
+    "- If you wrote throwaway tests or fixtures to verify your work, delete them before " +
+      "finishing unless the task asked for tests: a clean diff carries only the fix, and " +
+      "scratch files left under the project's test tree break any patch applied on top of it.",
     "- `bash` is a POSIX shell on every platform (Git Bash on Windows): pipes, `&&` and " +
       "single/double quotes behave like bash, and paths may use `/`. Prefer one direct command " +
       "(`sed`, `perl -pi`, a short `node -e` rewrite) over writing a helper script and debugging " +
