@@ -736,3 +736,44 @@ describe("applyModelSelection against an enumerated model list", () => {
     expect(sent).toEqual(["builtin:bigmodel/GLM-5.3"]);
   });
 });
+describe("path guards", () => {
+  function guardClient(cwd: string) {
+    return new AcpClient(
+      customAgentAdapter({ id: "my-agent", label: "My Agent", command: "agent.exe", args: [] }),
+      DEFAULT_SETTINGS,
+      cwd,
+      "agent" as AgentMode,
+    ) as unknown as {
+      assertInsideCwd: (p: string) => string;
+      assertReadablePath: (p: string) => string;
+      allowReadFile: (p: string) => void;
+    };
+  }
+
+  it("resolves relative paths against the session cwd", () => {
+    const acp = guardClient(path.join("workspaces", "demo"));
+    expect(acp.assertInsideCwd("lib/a.mjs")).toBe(path.resolve("workspaces", "demo", "lib", "a.mjs"));
+    expect(acp.assertReadablePath("lib/a.mjs")).toBe(path.resolve("workspaces", "demo", "lib", "a.mjs"));
+  });
+
+  it("rejects paths outside the cwd and names the cwd in the error", () => {
+    const cwd = path.resolve("workspaces", "demo");
+    const acp = guardClient(cwd);
+    const outside = path.resolve("elsewhere", "x.mjs");
+    for (const call of [
+      () => acp.assertInsideCwd(outside),
+      () => acp.assertReadablePath(outside),
+      () => acp.assertReadablePath("/tmp/verify.mjs"),
+    ]) {
+      expect(call).toThrow(/^Path outside session cwd:/);
+      expect(call).toThrow(cwd);
+    }
+  });
+
+  it("still allows a user-attached exact read path", () => {
+    const acp = guardClient(path.resolve("workspaces", "demo"));
+    const attached = path.resolve("elsewhere", "attached.pdf");
+    acp.allowReadFile(attached);
+    expect(acp.assertReadablePath(attached)).toBe(attached);
+  });
+});

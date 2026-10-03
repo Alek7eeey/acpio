@@ -258,7 +258,8 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
 
   const write = tool({
     description:
-      "Create or overwrite a file; parents are created. Prefer `edit` for an existing file.",
+      "Create or overwrite a file; parents are created. Prefer `edit` for an existing file. " +
+      "Scratch and verification scripts go in the working directory too — a path outside it is rejected.",
     inputSchema: z.object({
       path: z.string().describe("File path."),
       content: z.string().describe("Full new file content."),

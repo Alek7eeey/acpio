@@ -1195,7 +1195,11 @@ export class AcpClient extends EventEmitter {
     const resolved = path.resolve(root, targetPath);
     const rel = path.relative(root, resolved);
     if (rel.startsWith("..") || path.isAbsolute(rel)) {
-      throw new Error(`Path outside session cwd: ${resolved}`);
+      // The cwd in the message is the recovery path: a model aiming at a temp
+      // dir retries once, inside the workspace, instead of guessing again.
+      throw new Error(
+        `Path outside session cwd: ${resolved}. The session cwd is ${root} — keep files, including scratch scripts, inside it.`,
+      );
     }
     return resolved;
   }
@@ -1210,7 +1214,9 @@ export class AcpClient extends EventEmitter {
     if ([...this.extraReadFiles].some((f) => norm(f) === norm(resolved))) {
       return resolved;
     }
-    throw new Error(`Path outside session cwd: ${resolved}`);
+    throw new Error(
+      `Path outside session cwd: ${resolved}. The session cwd is ${this.rootCwd()} — keep files, including scratch scripts, inside it.`,
+    );
   }
 
   private killTerminalEntry(entry: TerminalEntry) {
