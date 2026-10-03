@@ -157,6 +157,26 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, iteration: clean-diff rule — 5 of 6 full-run misses convert;
+  synthetic sweep saturates at 69/69** — the eight single-pass misses of the
+  full corpus run decomposed into: two killed by their own scratch fixtures
+  under the test tree (the grader's test patch collided — 8269's fix was
+  byte-identical to gold and still failed!), two outright upstream
+  hallucinations (a found-correct fix rejected on a false "(I think)" about
+  what upstream did), one workaround instead of the cause, one swing, one
+  empty-patch session death. One prompt rule covers the first pair — delete
+  throwaway tests before finishing (system 2913 → 3149 chars). Rerun of the
+  six patch-carrying misses: **5/6 RESOLVED** (14629 32k, 14182 40k — flipped
+  by the upstream rule, 8269 16k — the rule's direct case, 9258 25k, 11510
+  41k; total 157k). sphinx-10614 now fails honestly: the collision is gone
+  (its tests RAN this time — the "pathspec did not match" lines are normal in
+  eval logs, present in resolved ones too), the fix itself is wrong (the SVG
+  link assertion expects the gold URL semantics). Same run: builtin swept the
+  synthetic bench **69/69** (wave 2 included, first wave-2 numbers: 719
+  calls, 499k uncached, ~7.2k per task) — that corpus no longer discriminates
+  for this agent; wave-3 tasks are the way to restore signal. Stamps:
+  verified rerun `2026-10-03T00-32-44-382Z`, synthetic `2026-10-03T00-01-46-406Z`.
+
 - **2026-10-03, iteration: upstream-history rule — the memory family holds at
   a third of the cost** — one prompt addition (system 2629 → 2913 chars,
   +284 ≈ 71 tokens of floor): when the project is public, check its actual
