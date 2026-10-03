@@ -49,24 +49,52 @@ export class BenchServer {
   }
 
   async start(timeoutMs = 30_000) {
-    this.port = await freePort();
-    this.child = spawn(process.execPath, [path.join(this.repo, "apps/server/dist/index.js")], {
-      cwd: this.repo,
-      env: { ...process.env, PORT: String(this.port), DATABASE_PATH: path.join(this.stateDir, "acpio.db") },
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    this.child.stdout.on("data", (d) => (this.log = (this.log + d).slice(-8000)));
-    this.child.stderr.on("data", (d) => (this.log = (this.log + d).slice(-8000)));
+    // The server may ignore the handed-out port: `ACPIO_PORT` beats `PORT`, and
+    // an inherited value survives the env spread (one sweep lost four pairs to
+    // a server that sat on 18741 while the runner health-checked a dead port).
+    // So ACPIO_PORT is set explicitly, the banner is parsed for the port the
+    // server actually took, and one respawn covers a spawn that died at boot.
+    for (let attempt = 1; ; attempt++) {
+      this.port = await freePort();
+      this.log = "";
+      this.child = spawn(process.execPath, [path.join(this.repo, "apps/server/dist/index.js")], {
+        cwd: this.repo,
+        env: {
+          ...process.env,
+          PORT: String(this.port),
+          ACPIO_PORT: String(this.port),
+          DATABASE_PATH: path.join(this.stateDir, "acpio.db"),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      });
+      this.child.stdout.on("data", (d) => (this.log = (this.log + d).slice(-8000)));
+      this.child.stderr.on("data", (d) => (this.log = (this.log + d).slice(-8000)));
 
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-      try {
-        await this.api("GET", "/api/health");
-        break;
-      } catch (err) {
-        if (Date.now() > deadline) throw new Error(`bench server did not start: ${err.message}\n${this.log.slice(-2000)}`);
-        await new Promise((r) => setTimeout(r, 300));
+      const deadline = Date.now() + timeoutMs;
+      let healthy = false;
+      let lastErr = "";
+      while (Date.now() <= deadline) {
+        try {
+          await this.api("GET", "/api/health");
+          healthy = true;
+          break;
+        } catch (err) {
+          lastErr = String(err?.message ?? err);
+          // Alive but on a different port than handed out — adopt the banner's.
+          const banner = this.log.match(/Acpio server on http:\/\/[^/]+:(\d+)/);
+          if (banner && Number(banner[1]) !== this.port) {
+            this.port = Number(banner[1]);
+            continue;
+          }
+          if (this.child.exitCode !== null) break; // died at boot — respawn below
+          await new Promise((r) => setTimeout(r, 300));
+        }
+      }
+      if (healthy) break;
+      this.child?.kill();
+      if (attempt >= 2) {
+        throw new Error(`bench server did not start: ${lastErr}\n${this.log.slice(-2000)}`);
       }
     }
 
