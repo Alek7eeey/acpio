@@ -16,6 +16,9 @@ export interface TurnOptions {
   emit: (update: Record<string, unknown>) => void;
   /** Context window of the active model, for the usage chip. */
   contextWindow: number;
+  /** Step ceiling for this turn, for the caller's wrap-up flow — see
+   * {@link runTurn}'s `stepBudgetHit`. Defaults to {@link MAX_TOOL_STEPS}. */
+  maxSteps?: number;
 }
 
 export interface TurnOutcome {
@@ -24,6 +27,9 @@ export interface TurnOutcome {
   stopReason: TurnStopReason;
   /** Model-call failure: output is already produced and must be persisted. */
   failure?: Error;
+  /** The turn ended on the caller's step ceiling, not the model stopping —
+   * the work is still in flight. See {@link WRAP_UP_STEPS}. */
+  stepBudgetHit?: boolean;
 }
 
 /**
@@ -220,6 +226,19 @@ function toStopReason(finishReason: string): TurnStopReason {
 const MAX_TOOL_STEPS = 10_000;
 
 /**
+ * Soft step budget for callers that hand the turn a wrap-up continuation: at
+ * this many steps the turn ends with `stepBudgetHit`, the caller tells the
+ * model to finish, and one short continuation turn completes the work. A
+ * real rollout dies at an external wall-clock kill with the work unfinished —
+ * this converts that death into a final answer. Calibrated against that
+ * death: the observed kill case made 98 calls in 44 minutes, so 120 would
+ * fire too late; 80 lands ~30 minutes in. Median tasks run 30–60 steps.
+ */
+export const WRAP_UP_STEPS = 80;
+/** Steps the wrap-up continuation itself gets. */
+export const WRAP_UP_EXTRA_STEPS = 40;
+
+/**
  * Output cap, pi's and omp's number: a step that writes a 60KB file still fits,
  * but a runaway completion (or a reasoning stream that never lands) stops here
  * instead of burning the window. Uncapped output is the one token leak the
@@ -229,13 +248,14 @@ const MAX_OUTPUT_TOKENS = 16_384;
 
 /** One assistant turn: stream text/thinking into ACP updates and run tools. */
 export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
+  const maxSteps = opts.maxSteps ?? MAX_TOOL_STEPS;
   const result = streamText({
     model: opts.model,
     system: opts.system,
     messages: opts.messages,
     tools: opts.tools,
     abortSignal: opts.abortSignal,
-    stopWhen: isStepCount(MAX_TOOL_STEPS),
+    stopWhen: isStepCount(maxSteps),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxRetries: 2,
   });
@@ -282,20 +302,24 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
 
   let response: ModelMessage[] = [];
   let finishReason = "stop";
+  let stepCount = 0;
   let totalTokens = 0;
   let inputTokens = 0;
   let outputTokens = 0;
   let cachedInputTokens = 0;
   let contextTokens = 0;
   try {
-    const [produced, reason, usage, lastStepUsage] = await Promise.all([
+    const [produced, reason, usage, lastStepUsage, steps] = await Promise.all([
       result.responseMessages,
       result.finishReason,
       result.totalUsage,
       result.usage,
+      result.steps,
     ]);
     response = produced;
     finishReason = String(reason ?? "stop");
+    // Older SDK shapes (and mocks) may not carry the steps array.
+    stepCount = Array.isArray(steps) ? steps.length : 0;
     totalTokens = Number(usage?.totalTokens ?? 0) || 0;
     inputTokens = Number(usage?.inputTokens ?? 0) || 0;
     outputTokens = Number(usage?.outputTokens ?? 0) || 0;
@@ -326,6 +350,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   return {
     response,
     stopReason: toStopReason(finishReason),
+    ...(stepCount >= maxSteps && !opts.abortSignal.aborted ? { stepBudgetHit: true } : {}),
     ...(failure && !opts.abortSignal.aborted ? { failure } : {}),
   };
 }

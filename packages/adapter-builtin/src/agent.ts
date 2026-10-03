@@ -14,7 +14,15 @@ import {
   resolveBuiltinModel,
 } from "./config.js";
 import { createHostRpc } from "./host.js";
-import { compactMessages, MAX_TURN_ATTEMPTS, renderTranscript, runTurn, runTurnWithRetry } from "./loop.js";
+import {
+  compactMessages,
+  MAX_TURN_ATTEMPTS,
+  renderTranscript,
+  runTurn,
+  runTurnWithRetry,
+  WRAP_UP_EXTRA_STEPS,
+  WRAP_UP_STEPS,
+} from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
@@ -390,39 +398,60 @@ export class BuiltinAgent implements InProcessAgentTransport {
         headers: builtinProviderHeaders(selection.provider.headers, this.sessionId),
       });
       const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
-      const turn = async () =>
-        runTurn({
-          model: endpoint.chatModel(selection.modelId),
-          system: systemPrompt(this.opts.settings.locale, this.cwd, this.mode, {
-            servers: [...new Set(offered.map((entry) => entry.server))],
-            tools: offered.map((entry) => entry.qualifiedName),
-          }),
-          messages: await compactMessages({
-            messages: this.messages,
-            contextWindow,
-            summarize: async (dropped) => {
-              const { text } = await generateText({
-                model: endpoint.chatModel(selection.modelId),
-                system:
-                  "Ты сжимаешь раннюю часть диалога программиста с агентом. Сохрани: исходную задачу и её " +
-                  "ограничения, принятые решения, изменённые файлы с сутью правок, выполненные команды и " +
-                  "их результат, нерешённые проблемы. Пиши на языке диалога, только конспект, без вступлений.",
-                prompt: renderTranscript(dropped),
-                abortSignal: abort.signal,
-                maxRetries: 1,
-              });
-              console.warn(`[builtin] compacted ${dropped.length} messages into a summary`);
-              return text;
-            },
-          }),
-          tools: {
-            ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask }),
-            ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
-          },
-          abortSignal: abort.signal,
+      const WRAP_UP_NOTE =
+        "Ход превысил бюджет шагов. Завершай работу: проверь сделанное и дай итоговый ответ.";
+      let wrapUpSent = false;
+      const turnOptions = async (maxSteps: number) => ({
+        model: endpoint.chatModel(selection.modelId),
+        system: systemPrompt(this.opts.settings.locale, this.cwd, this.mode, {
+          servers: [...new Set(offered.map((entry) => entry.server))],
+          tools: offered.map((entry) => entry.qualifiedName),
+        }),
+        messages: await compactMessages({
+          messages: this.messages,
           contextWindow,
-          emit: (update) => this.emitUpdate(update),
+          summarize: async (dropped) => {
+            const { text } = await generateText({
+              model: endpoint.chatModel(selection.modelId),
+              system:
+                "Ты сжимаешь раннюю часть диалога программиста с агентом. Сохрани: исходную задачу и её " +
+                "ограничения, принятые решения, изменённые файлы с сутью правок, выполненные команды и " +
+                "их результат, нерешённые проблемы. Пиши на языке диалога, только конспект, без вступлений.",
+              prompt: renderTranscript(dropped),
+              abortSignal: abort.signal,
+              maxRetries: 1,
+            });
+            console.warn(`[builtin] compacted ${dropped.length} messages into a summary`);
+            return text;
+          },
+        }),
+        tools: {
+          ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask }),
+          ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
+        },
+        abortSignal: abort.signal,
+        contextWindow,
+        emit: (update: Record<string, unknown>) => this.emitUpdate(update),
+        maxSteps,
+      });
+      const turn = async () => {
+        const outcome = await runTurn(
+          await turnOptions(wrapUpSent ? WRAP_UP_EXTRA_STEPS : WRAP_UP_STEPS),
+        );
+        if (!outcome.stepBudgetHit || wrapUpSent || abort.signal.aborted) return outcome;
+        // The turn ran out of steps with work in flight. Tell the model to
+        // finish — visibly, and as a message it actually reads — and give it
+        // one short continuation instead of letting an external kill decide
+        // how the work ends.
+        wrapUpSent = true;
+        this.emitUpdate({
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: `[harness] ${WRAP_UP_NOTE}` },
         });
+        this.messages = [...this.messages, ...outcome.response, userContent([{ type: "text", text: WRAP_UP_NOTE }])];
+        this.persist();
+        return runTurn(await turnOptions(WRAP_UP_EXTRA_STEPS));
+      };
       // A stream that dies mid-flight throws before any response message
       // exists, so the stored history is still exact and the same turn can
       // simply run again. A failure that comes back with a resolved response

@@ -157,6 +157,20 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, iteration: step-budget wrap-up — mechanism verified, no
+  resolve win** — a hard turn now ends at 80 steps (calibrated to the
+  observed death: matplotlib-20676 made 98 calls in 44 minutes, so 120 would
+  fire after the wall kill) with a visible note telling the model to finish,
+  plus one 40-step continuation; median tasks run 30–60 steps and never see
+  it. On the target instance the wrap-up fired on schedule (transcript
+  contains the note) and the turn completed in 663s instead of the 2618s
+  kill — but the model wrapped up thin (1.7KB patch) and the instance failed
+  exactly as it did under the kill. Same grade, 4× cheaper wall. The control
+  (11510, 63 calls) was untouched and swung to a fail on its own — that
+  instance is noisy, not a regression of this change. Kept: a runaway turn
+  now ends gracefully instead of dying by an external kill. Stamps:
+  `2026-10-03T00-56-57-713Z` (rerun), death case `…19-39-23-003Z`.
+
 - **2026-10-03, iteration: clean-diff rule — 5 of 6 full-run misses convert;
   synthetic sweep saturates at 69/69** — the eight single-pass misses of the
   full corpus run decomposed into: two killed by their own scratch fixtures

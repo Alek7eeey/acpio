@@ -284,6 +284,34 @@ describe("runTurn failure handling", () => {
     expect(outcome.failure).toBeUndefined();
     expect(outcome.stopReason).toBe("end_turn");
   });
+
+  it("flags a turn that ended on the step ceiling", async () => {
+    mockStream({
+      fullStream: streamOf([{ type: "text-delta", text: "kept going" }]),
+      responseMessages: Promise.resolve([]),
+      finishReason: Promise.resolve("tool-calls"),
+      totalUsage: Promise.resolve({ totalTokens: 0 }),
+      usage: Promise.resolve({ totalTokens: 0 }),
+      steps: Promise.resolve(Array.from({ length: 120 }, () => ({}))),
+    });
+
+    const outcome = await runTurn(turnOpts({ maxSteps: 120 }));
+    expect(outcome.stepBudgetHit).toBe(true);
+  });
+
+  it("does not flag a turn that stopped on its own", async () => {
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([]),
+      finishReason: Promise.resolve("stop"),
+      totalUsage: Promise.resolve({ totalTokens: 0 }),
+      usage: Promise.resolve({ totalTokens: 0 }),
+      steps: Promise.resolve(Array.from({ length: 5 }, () => ({}))),
+    });
+
+    const outcome = await runTurn(turnOpts({ maxSteps: 120 }));
+    expect(outcome.stepBudgetHit).toBeUndefined();
+  });
 });
 
 describe("runTurnWithRetry", () => {
