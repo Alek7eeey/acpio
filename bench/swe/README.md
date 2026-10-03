@@ -157,6 +157,33 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, iteration: verification discipline — the over-check pattern
+  qualified on the real corpus and one rule sentence targets it** — the
+  candidate (oldest, §9/ITERATIONS) was plugin/synthetic observations; the
+  qualification bar demanded the pattern on Verified. Fresh rollouts of six
+  fast instances with full wire dumps (`2026-10-03T15-46-27-096Z`, 6/6)
+  showed **3/6 re-running the full suite after a green check** despite the
+  existing "verify … once" rule: requests-1142 and requests-5414 each ran
+  the suite twice (fix + a `git stash` baseline proof), pytest-10051 ran the
+  whole `testing/` four-to-five times with a growing ignore list, chasing
+  pre-existing failures the change never touched. One prompt sentence added
+  to that rule (system ~3246 → ~3366 chars, ≈ +30 tokens of floor): "One
+  green run settles it: no suite re-runs, no baseline proof, and failures
+  unrelated to the change are out of scope." Validation on the same six +
+  two out-of-family controls (`2026-10-03T16-19-02-239Z`): **8/8 RESOLVED**;
+  pytest-10051 dropped to targeted-only checks and halved (524s → 257s),
+  requests-1142 went 2 full suites → 1, family wall 2582s → 1653s (−36%,
+  single repeats). Honest framing: the rule is a guard, not a hard stop —
+  requests-2931 and flask-5014 still re-ran suites (flask even ran a
+  before/after grep-FAILED double pass), the controls' walls swung up
+  (astropy +178s, sphinx-9281 +198s) on cross-run noise, and n is 1 repeat
+  everywhere; the real price/win reading lands on the next full-corpus
+  pass. Incidentally, the morning's test-patch-path reset fired live twice
+  in these runs (pytest-10051, astropy-14182) — both agents had touched a
+  tracked test file; the reset silently kept their patches gradeable.
+  Stamps: baseline `2026-10-03T15-46-27-096Z`, validation
+  `2026-10-03T16-19-02-239Z`.
+
 - **2026-10-03, harness fix: grader test-patch paths are reset to base
   before extraction and eval** — the audit's clean-diff failure is a grading
   hole, not a prompt problem: the eval script's own reset
