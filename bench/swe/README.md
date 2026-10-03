@@ -157,6 +157,32 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-03, audit: the four prompt rules re-run against their own
+  motivating cases (per the qualification bar, `bench/ITERATIONS.md` §3)** —
+  every rule's direct cases re-rolled on the current bundle in one sweep
+  (9 instances + deep-merge, 29m, 8/9). **Root-cause: holds** — 9229 67.7k
+  and 25747 21.4k (records were 68.0k / 30k), second consecutive pass for
+  each. **Upstream: holds** — the direct conversions 14182 43.8k and
+  14629 27.2k plus the family 8551 59.2k, 9281 14.9k, 11510 29.5k: 5/5
+  resolved. **Clean-diff: does not determinately hold** — 8269 failed again
+  exactly like the pre-rule death: the patch carried its own
+  `tests/roots/test-linkcheck-localserver/{conf.py,index.rst}` (new files at
+  the grader test patch's paths, no trailing newlines — a guaranteed apply
+  conflict), the test patch never landed and the F2P test never ran (pytest
+  shows 5 passed; a clean-patch probe shows 6, including
+  `test_raises_for_invalid_status`). A second probe resolved on a clean
+  4-file patch, so the with-rule record on its own direct case is 2/3 — the
+  prompt rule is a partial guard, and the failure stays invisible to the
+  agent (the rollout looks green while the grader's tests were never
+  installed). Candidate for the list: strip agent-created test files from
+  the extracted patch mechanically (a harness fix, not a prompt one).
+  10614 — resolved this time (137k): the clean-diff run's "honest fail"
+  there was model variance after all. **Bug-report-as-spec: passes but
+  unfalsifiable** — deep-merge swept everywhere since; kept until wave-3
+  gives it a live target. Stamps: audit `2026-10-03T05-54-31-673Z`,
+  8269 probe `2026-10-03T06-26-53-448Z`, deep-merge
+  `2026-10-03T05-53-12-972Z`.
+
 - **2026-10-03, iteration: step-budget wrap-up — mechanism verified, no
   resolve win** — a hard turn now ends at 80 steps (calibrated to the
   observed death: matplotlib-20676 made 98 calls in 44 minutes, so 120 would
