@@ -270,8 +270,14 @@ async function main() {
       verify = await verifyWorkspace(task.dir, task, ws);
       const stall = result.timedOut && result.toolCalls <= 5;
       const instantFinish = !result.timedOut && result.toolCalls === 0;
+      // A session the server ended with status error is never an honest
+      // completion (job-catchup, 2026-10-04 sweep: exit 1 after 3 calls with
+      // 9/10 firings already on disk). Same call ceiling as the stall wall;
+      // verify-first keeps a green pair from being re-rolled.
+      const sessionError =
+        !result.timedOut && agent === "builtin" && result.exitCode === 1 && result.toolCalls <= 5;
       let corrupted = false;
-      if (agent === "builtin" && !verify.ok && !stall && !instantFinish && !retried) {
+      if (agent === "builtin" && !verify.ok && !stall && !instantFinish && !sessionError && !retried) {
         for (const delay of [0, 500, 1500]) {
           if (delay) await new Promise((r) => setTimeout(r, delay));
           if (await sessionTranscriptHasNul(slot.server, ws)) {
@@ -280,13 +286,15 @@ async function main() {
           }
         }
       }
-      if (!(stall || instantFinish || corrupted) || retried || verify.ok) break;
+      if (!(stall || instantFinish || sessionError || corrupted) || retried || verify.ok) break;
       retried = true;
       retryReason = stall
         ? `timeout wall with ${result.toolCalls} calls`
         : instantFinish
           ? "finished with 0 tool calls"
-          : "NUL-corrupted tool arguments";
+          : sessionError
+            ? `session errored with ${result.toolCalls} calls`
+            : "NUL-corrupted tool arguments";
       console.warn(`artifact signature on ${label} (${retryReason}) — retrying once`);
     }
     const row = {
