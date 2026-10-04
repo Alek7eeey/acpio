@@ -187,46 +187,59 @@ async function main() {
   const runPair = async (pair, slot) => {
     const { agent, task, rep } = pair;
     const label = `${agent}-${task.id}-r${rep}`;
-    const ws = makeWorkspace(task.dir, workRoot, label);
-    const faults = await applyFaults(task.dir, ws, opts.faults);
     const url = labeledUrl(agent, task.id, rep);
     const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
     let result;
-    try {
-      if (agent === "builtin") {
-        if (!slot.server) {
-          slot.server = new BenchServer({
-            repo: REPO,
-            stateDir: path.join(workRoot, `server-s${slot.idx}`),
-            provider: { provider: AGENT_PROVIDER_ALIAS[agent] ?? provider, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow },
-            headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
-          });
-          await slot.server.start();
-          console.log(`builtin server (slot ${slot.idx}) up on ${slot.server.base}`);
+    let ws;
+    let faults = [];
+    let retried = false;
+    for (;;) {
+      ws = makeWorkspace(task.dir, workRoot, label);
+      // Faults are strictly additive mutations of the workspace before the
+      // agent starts; a retry gets a fresh workspace and the same faults.
+      faults = await applyFaults(task.dir, ws, opts.faults);
+      let piConfigDir;
+      try {
+        if (agent === "builtin") {
+          if (!slot.server) {
+            slot.server = new BenchServer({
+              repo: REPO,
+              stateDir: path.join(workRoot, `server-s${slot.idx}`),
+              provider: { provider: AGENT_PROVIDER_ALIAS[agent] ?? provider, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow },
+              headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
+            });
+            await slot.server.start();
+            console.log(`builtin server (slot ${slot.idx}) up on ${slot.server.base}`);
+          } else {
+            // Same server, next pair: relabel so the wire attribution follows.
+            await slot.server.configure(url);
+          }
+          result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs });
         } else {
-          // Same server, next pair: relabel so the wire attribution follows.
-          await slot.server.configure(url);
+          const providerSlug = AGENT_PROVIDER_ALIAS[agent] ?? provider;
+          if (agent === "pi") {
+            if (!piConfigDirs.has(slot.idx)) piConfigDirs.set(slot.idx, path.join(workRoot, `pi-s${slot.idx}`));
+            piConfigDir = piConfigDirs.get(slot.idx);
+            ensurePiModel(piConfigDir, { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
+          }
+          if (agent === "omp") {
+            ensureOmpModel(ompProfile(), { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
+          }
+          result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir });
         }
-        result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs });
-      } else {
-        let piConfigDir;
-        let providerSlug = AGENT_PROVIDER_ALIAS[agent] ?? provider;
-        if (agent === "pi") {
-          if (!piConfigDirs.has(slot.idx)) piConfigDirs.set(slot.idx, path.join(workRoot, `pi-s${slot.idx}`));
-          piConfigDir = piConfigDirs.get(slot.idx);
-          ensurePiModel(piConfigDir, { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
-        }
-        if (agent === "omp") {
-          ensureOmpModel(ompProfile(), { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
-        }
-        result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir });
+      } catch (err) {
+        result = {
+          toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
+          tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "", stopReason: "",
+          wallMs: 0, exitCode: null, timedOut: false, stderrTail: String(err),
+        };
       }
-    } catch (err) {
-      result = {
-        toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
-        tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "", stopReason: "",
-        wallMs: 0, exitCode: null, timedOut: false, stderrTail: String(err),
-      };
+      // Stall signature (§7): the wall expired with almost no wire activity —
+      // an endpoint/start artifact, not an agent answer. One fresh-workspace
+      // retry instead of a lost pair.
+      if (!(result.timedOut && result.toolCalls <= 2) || retried) break;
+      retried = true;
+      console.warn(`stall signature on ${label} (${result.toolCalls} calls in ${Math.round(timeoutMs / 1000)}s) — retrying once`);
     }
     const verify = await verifyWorkspace(task.dir, task, ws);
     const row = {
@@ -237,6 +250,7 @@ async function main() {
       verifyOutput: verify.output.slice(0, 600),
       files: changedFiles(ws),
       ...(faults.length ? { faults } : {}),
+      ...(retried ? { retried } : {}),
       ...result,
       crashed: result.exitCode !== 0 && result.exitCode !== null,
     };
@@ -422,7 +436,11 @@ function renderSummary(rows, opts, diagnostics = []) {
   ];
   for (const r of rows) {
     const kinds = Object.entries(r.toolNames ?? {}).map(([k, v]) => `${k}×${v}`).join(" ") || "—";
-    const note = r.timedOut ? "timeout" : r.crashed ? `exit ${r.exitCode}` : r.ok ? "" : "verify failed";
+    const notes = [
+      r.retried ? "retried" : null,
+      r.timedOut ? "timeout" : r.crashed ? `exit ${r.exitCode}` : r.ok ? "" : "verify failed",
+    ].filter(Boolean);
+    const note = notes.join("; ");
     const d = byRun.get(`${r.agent}\u0000${r.task}\u0000${r.repeat}`);
     const tokIn = d?.promptTokens ?? r.tokensIn ?? null;
     const tokCached = d?.cachedTokens ?? r.tokensCached ?? 0;
