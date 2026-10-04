@@ -309,10 +309,9 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   let cachedInputTokens = 0;
   let contextTokens = 0;
   try {
-    const [produced, reason, usage, lastStepUsage, steps] = await Promise.all([
+    const [produced, reason, usage, steps] = await Promise.all([
       result.responseMessages,
       result.finishReason,
-      result.totalUsage,
       result.usage,
       result.steps,
     ]);
@@ -320,15 +319,19 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     finishReason = String(reason ?? "stop");
     // Older SDK shapes (and mocks) may not carry the steps array.
     stepCount = Array.isArray(steps) ? steps.length : 0;
+    // Since ai@7 `usage` is the sum over every step of the turn (`totalUsage`
+    // is its deprecated alias) — the right shape for the billing fields.
     totalTokens = Number(usage?.totalTokens ?? 0) || 0;
     inputTokens = Number(usage?.inputTokens ?? 0) || 0;
     outputTokens = Number(usage?.outputTokens ?? 0) || 0;
     // Prompt-cache hits are the cheap part of the input: reported separately so
     // the chip and the bench can show what the provider actually had to read.
     cachedInputTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? 0) || 0;
-    // The context chip is about the live window, so it takes the last step's
-    // prompt + output, not the sum over every step of the turn.
-    contextTokens = Number(lastStepUsage?.totalTokens ?? 0) || 0;
+    // The context chip is about the live window, so it takes the last call's
+    // prompt + output — the sum in `usage` would grow by a whole context
+    // re-read with every tool step of the turn.
+    const lastStep = Array.isArray(steps) ? steps[steps.length - 1] : undefined;
+    contextTokens = Number(lastStep?.usage?.totalTokens ?? 0) || 0;
   } catch (err) {
     // A cancelled turn resolves nothing — the client already knows it cancelled.
     // Otherwise the SDK's generic "No output generated" rejection hides the

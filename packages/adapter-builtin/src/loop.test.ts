@@ -166,7 +166,6 @@ describe("runTurn failure handling", () => {
   const noOutput = () => ({
     responseMessages: Promise.reject(new NoOutputGeneratedError()),
     finishReason: Promise.reject(new NoOutputGeneratedError()),
-    totalUsage: Promise.reject(new NoOutputGeneratedError()),
     usage: Promise.reject(new NoOutputGeneratedError()),
   });
 
@@ -252,6 +251,28 @@ describe("runTurn failure handling", () => {
     expect(err.message).toContain("HTTP 429");
     expect(err.message).toContain("rate limited");
     expect(err.message).toContain("too many requests");
+  });
+
+  it("reports the last call's tokens as the context, not the sum over steps", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([]),
+      finishReason: Promise.resolve("stop"),
+      // ai@7: `usage` is the sum over all steps — three tool steps that each
+      // re-read the growing window add up to 3600, but the live window only
+      // ever held the last call's 1500.
+      usage: Promise.resolve({ totalTokens: 3600, inputTokens: 3300, outputTokens: 300 }),
+      steps: Promise.resolve([
+        { usage: { totalTokens: 900, inputTokens: 800, outputTokens: 100 } },
+        { usage: { totalTokens: 1200, inputTokens: 1100, outputTokens: 100 } },
+        { usage: { totalTokens: 1500, inputTokens: 1400, outputTokens: 100 } },
+      ]),
+    });
+
+    await runTurn(turnOpts({ emit: (update) => updates.push(update) }));
+    const usage = updates.find((u) => u.sessionUpdate === "usage_update");
+    expect(usage).toMatchObject({ used: 1500, inputTokens: 3300, outputTokens: 300 });
   });
 
   it("returns a mid-turn failure in the outcome while keeping the streamed text", async () => {
