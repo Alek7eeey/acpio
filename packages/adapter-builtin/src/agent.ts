@@ -116,7 +116,10 @@ function systemPrompt(
       "reconstructing it from memory; adapt what you find to this checkout — a couple of " +
       "targeted lookups, not a survey. Port the canonical fix's whole change set, not just the " +
       "hunk nearest the symptom: when the fix moves work between sites (a helper stops " +
-      "converting, a caller must), update every site that consumed the old behavior.",
+      "converting, a caller must), update every site that consumed the old behavior. Its " +
+      "breadth is the upstream's to define too: when the canonical change is broader than the " +
+      "symptom suggests (a global flag, a looser grammar), keep that breadth and adapt the " +
+      "neighboring code it affects — do not narrow the fix to look safe.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked. One green " +
       "run settles it: no suite re-runs, no `git stash` baseline comparisons, and failures " +
