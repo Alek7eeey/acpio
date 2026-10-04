@@ -240,7 +240,16 @@ async function main() {
       ...result,
       crashed: result.exitCode !== 0 && result.exitCode !== null,
     };
-    if (!opts.keep) rmSync(ws, { recursive: true, force: true });
+    if (!opts.keep) {
+      // The slot server may still hold the workspace as its cwd and Windows
+      // answers EPERM. A failed cleanup must not kill the run: leave the
+      // workspace behind (as --keep would) and move on.
+      try {
+        rmSync(ws, { recursive: true, force: true });
+      } catch {
+        console.warn(`cleanup failed, workspace left: ${ws}`);
+      }
+    }
     return row;
   };
 
@@ -260,12 +269,29 @@ async function main() {
   }
   const C = Math.min(opts.concurrency, Math.max(1, freePairs.length));
   const slots = Array.from({ length: C }, (_, idx) => ({ idx, server: null }));
+  // One pair's accident degrades to a failed row; results are written at the
+  // end, so a thrown pair must never take the whole run with it.
+  const safeRunPair = async (pair, slot) => {
+    try {
+      return await runPair(pair, slot);
+    } catch (err) {
+      console.warn(`pair failed: ${pair.agent}/${pair.task.id}: ${String(err).split("\n")[0]}`);
+      return {
+        agent: pair.agent, task: pair.task.id, repeat: pair.rep, ok: false,
+        verifyOutput: `pair failed: ${String(err).slice(0, 400)}`, files: [],
+        toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
+        tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "",
+        stopReason: "", wallMs: 0, exitCode: null, timedOut: false, stderrTail: "",
+        crashed: true,
+      };
+    }
+  };
   const pairWorkers = slots.map((slot) =>
     (async () => {
       for (;;) {
         const pair = freePairs.shift();
         if (!pair) break;
-        const row = await runPair(pair, slot);
+        const row = await safeRunPair(pair, slot);
         rows.push(row);
         done += 1;
         logRow(row, done, total);
@@ -276,7 +302,7 @@ async function main() {
     for (;;) {
       const pair = ompPairs.shift();
       if (!pair) break;
-      const row = await runPair(pair, slots[0]);
+      const row = await safeRunPair(pair, slots[0]);
       rows.push(row);
       done += 1;
       logRow(row, done, total);
