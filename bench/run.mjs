@@ -13,7 +13,7 @@ import { BenchServer, runBuiltinAgent, sessionTranscriptHasNul } from "./lib/bui
 import { ensureOmpModel, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
 import { applyFaults } from "./lib/faults.mjs";
-import { changedFiles, makeWorkspace, verifyWorkspace } from "./lib/util.mjs";
+import { changedFiles, makeWorkspace, splitPrompt, verifyWorkspace } from "./lib/util.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const TASK_ROOT = path.join(REPO, "bench", "tasks");
@@ -41,6 +41,7 @@ function parseArgs(argv) {
     family: null,
     faults: [],
     repeats: 1,
+    turns: 1,
     model: process.env.BENCH_MODEL || defaults.model,
     builtinUrl: process.env.BENCH_BASE_URL || defaults.url,
     builtinKey: process.env.BENCH_API_KEY || defaults.key,
@@ -68,6 +69,7 @@ function parseArgs(argv) {
       case "--family": out.family = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--faults": out.faults = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--repeats": out.repeats = Math.max(1, Number(take())); break;
+      case "--turns": out.turns = Math.max(1, Math.min(8, Number(take()) || 1)); break;
       case "--model": out.model = take(); break;
       case "--builtin-url": out.builtinUrl = take(); break;
       case "--builtin-key": out.builtinKey = take(); break;
@@ -128,7 +130,7 @@ async function main() {
         "",
         "  node bench/run.mjs [--agents pi,omp,builtin] [--tasks fix-sum,fizzbuzz]",
         "                     [--tasks-root <dir,...>] [--family long,...] [--faults a,b]",
-        "                     [--repeats N] [--model <provider>/<id>] [--timeout ms]",
+        "                     [--repeats N] [--turns N] [--model <provider>/<id>] [--timeout ms]",
         "                     [--concurrency N] [--builtin-url <url>] [--builtin-key <key>]",
         "                     [--context-window N] [--out <dir>] [--keep]",
         "                     [--no-proxy] [--proxy-dump] [--proxy-verbose]",
@@ -137,6 +139,11 @@ async function main() {
         "provider URL carries its own wire label. Default model/provider comes",
         "from bench/.cache/swe-provider.json (space-bunny-free), same as the SWE",
         "runner.",
+        "",
+        "--turns N sends the task prompt to the builtin agent as N user turns",
+        "(split at sentence boundaries; a task.json \"prompts\" array wins) in",
+        "one session — multi-prompt mode, the only shape where server-side",
+        "compaction has a turn boundary to engage. Applies to builtin only.",
         "",
         "Results: bench/results/<stamp>.jsonl and <stamp>.md",
         "         <stamp>.calls.jsonl - every model call as seen by the proxy",
@@ -158,7 +165,10 @@ async function main() {
   mkdirSync(workRoot, { recursive: true });
   mkdirSync(opts.out, { recursive: true });
 
-  console.log(`model: ${provider}/${modelId}   agents: ${opts.agents.join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}   concurrency: ${opts.concurrency}\n`);
+  console.log(`model: ${provider}/${modelId}   agents: ${opts.agents.join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}   concurrency: ${opts.concurrency}${opts.turns > 1 ? `   turns: ${opts.turns}` : ""}\n`);
+  if (opts.turns > 1 && opts.agents.some((a) => a !== "builtin")) {
+    console.warn("note: --turns applies to the builtin agent only; CLI agents still get one prompt.\n");
+  }
 
   // Every agent talks to the proxy, so the wire is captured regardless of what
   // each harness reports about itself. `--no-proxy` restores a direct call.
@@ -195,6 +205,15 @@ async function main() {
     let retried = false;
     let retryReason = "";
     let verify = null;
+    // Multi-prompt mode (builtin only): a declared "prompts" array in
+    // task.json wins, otherwise --turns splits the single prompt at sentence
+    // boundaries. Default is one prompt — the plain single-turn session.
+    const prompts =
+      agent === "builtin" && (task.prompts?.length || opts.turns > 1)
+        ? task.prompts?.length
+          ? task.prompts
+          : splitPrompt(task.prompt, opts.turns)
+        : null;
     for (;;) {
       ws = makeWorkspace(task.dir, workRoot, label);
       // Faults are strictly additive mutations of the workspace before the
@@ -219,7 +238,7 @@ async function main() {
             // Same server, next pair: relabel so the wire attribution follows.
             await slot.server.configure(url);
           }
-          result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs });
+          result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs, prompts });
         } else {
           const providerSlug = AGENT_PROVIDER_ALIAS[agent] ?? provider;
           if (agent === "pi") {
@@ -278,6 +297,7 @@ async function main() {
       verifyOutput: verify.output.slice(0, 600),
       files: changedFiles(ws),
       ...(faults.length ? { faults } : {}),
+      ...(prompts?.length > 1 ? { turns: prompts.length } : {}),
       ...(retried ? { retried, retryReason } : {}),
       ...result,
       crashed: result.exitCode !== 0 && result.exitCode !== null,
@@ -433,6 +453,7 @@ function writeLedgerAppendix(opts, stamp, rows, diagnostics) {
       repeat: r.repeat,
       ok: r.ok,
       ...(r.faults?.length ? { faults: r.faults } : {}),
+      ...(r.turns ? { turns: r.turns } : {}),
       wallMs: r.wallMs,
       tools: r.toolCalls,
       toolErrors: r.toolErrors ?? 0,
@@ -466,6 +487,7 @@ function renderSummary(rows, opts, diagnostics = []) {
     const kinds = Object.entries(r.toolNames ?? {}).map(([k, v]) => `${k}×${v}`).join(" ") || "—";
     const notes = [
       r.retried ? "retried" : null,
+      r.turns ? `${r.turns} turns` : null,
       r.timedOut ? "timeout" : r.crashed ? `exit ${r.exitCode}` : r.ok ? "" : "verify failed",
     ].filter(Boolean);
     const note = notes.join("; ");

@@ -70,6 +70,35 @@ export function runProcess(cmd, args, { cwd, env, timeoutMs = 240_000, maxStdout
   });
 }
 
+/**
+ * Split a task prompt into n user turns at sentence boundaries (multi-prompt
+ * mode, --turns): a bench session is otherwise a single prompt, and the
+ * server's compaction only cuts at user-turn boundaries, so it has nothing
+ * to engage on. Deterministic (same text + n => same turns), balanced by
+ * length, setup sentences first and the closing instruction last.
+ */
+export function splitPrompt(text, n) {
+  const t = String(text ?? "").trim();
+  if (!Number.isFinite(n) || n <= 1 || !t) return [t];
+  // Split at whitespace only when a sentence ender precedes it, so identifiers
+  // ("lib/id.mjs") and abbreviations stay whole; every character is preserved.
+  const sentences = t.split(/(?<=[.!?!])\s+/);
+  if (sentences.length <= 1) return [t];
+  const count = Math.min(n, sentences.length);
+  const target = t.length / count;
+  const parts = [];
+  let cur = "";
+  for (const s of sentences) {
+    if (cur && cur.length + s.length > target && parts.length < count - 1) {
+      parts.push(cur.trim());
+      cur = "";
+    }
+    cur += (cur ? " " : "") + s;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts;
+}
+
 /** Materialize a task's `fixture/` into a fresh workspace directory. */
 export function makeWorkspace(taskDir, workRoot, label) {
   const ws = path.join(workRoot, label);

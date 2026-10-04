@@ -172,25 +172,40 @@ export class BenchServer {
 
 const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
-/** One in-process-agent turn: create a chat on the workspace, prompt, wait it out. */
-export async function runBuiltinAgent(server, { task, ws, timeoutMs }) {
+/**
+ * One in-process-agent session: create a chat on the workspace, prompt, wait
+ * it out. `prompts` (multi-prompt mode) sends several user turns into the
+ * SAME session — a turn boundary is what the server's compaction cuts at, so
+ * with a single prompt per session it can never engage. The overall budget
+ * is still the one `timeoutMs`; if it runs out mid-way, the remaining turns
+ * are simply unsent and the cancel logic below reaps the live turn.
+ */
+export async function runBuiltinAgent(server, { task, ws, timeoutMs, prompts }) {
+  const turns = prompts?.length ? prompts : [task.prompt];
   const t0 = Date.now();
   const session = await server.api("POST", "/api/sessions", {
     provider: "builtin",
     cwd: ws,
     mode: "agent",
   });
-  await server.api("POST", `/api/sessions/${session.id}/prompt`, { text: task.prompt });
 
-  const deadline = Date.now() + timeoutMs;
+  const deadline = t0 + timeoutMs;
   let detail = null;
   let sawRunning = false;
-  for (;;) {
-    detail = await server.api("GET", `/api/sessions/${session.id}`);
-    if (detail.status === "running") sawRunning = true;
-    else if (sawRunning || Date.now() - t0 > 5000) break;
+  let turnsSent = 0;
+  for (const text of turns) {
     if (Date.now() > deadline) break;
-    await new Promise((r) => setTimeout(r, 500));
+    const turnT0 = Date.now();
+    await server.api("POST", `/api/sessions/${session.id}/prompt`, { text });
+    turnsSent += 1;
+    for (;;) {
+      detail = await server.api("GET", `/api/sessions/${session.id}`);
+      if (detail.status === "running") sawRunning = true;
+      else if (sawRunning || Date.now() - turnT0 > 5000) break;
+      if (Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    sawRunning = false;
   }
 
   // A turn the poller gave up on is still live server-side: without a cancel it
@@ -249,6 +264,8 @@ export async function runBuiltinAgent(server, { task, ws, timeoutMs }) {
     wallMs: Date.now() - t0,
     exitCode: detail?.status === "error" ? 1 : 0,
     timedOut: Date.now() > deadline,
+    turns: turns.length,
+    turnsSent,
     sessionId: session.id,
     stderrTail: server.log.slice(-1500),
   };

@@ -50,6 +50,7 @@ node bench/run-docker.mjs                           # default: all agents × all
 node bench/run-docker.mjs --agents builtin --concurrency 8
 node bench/run.mjs                                  # host fast loop (dev only)
 node bench/run.mjs --agents builtin --repeats 3     # one agent, averaged
+node bench/run.mjs --tasks fix-sum --turns 2        # multi-prompt: prompt as 2 user turns
 node bench/run.mjs --agents pi,omp --tasks fix-sum  # a subset
 node bench/run.mjs --family long                    # the long-horizon family (20 min/task)
 node bench/run.mjs --tasks fix-sum --faults junk-context  # A/B: same task, obstructed
