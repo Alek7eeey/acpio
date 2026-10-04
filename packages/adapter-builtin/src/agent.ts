@@ -24,11 +24,28 @@ import {
   WRAP_UP_STEPS,
 } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
+import {
+  discoverSkills,
+  expandSkillInvocation,
+  renderSkillsSection,
+  type BuiltinSkill,
+} from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
 
 const AGENT_INFO = { name: "acpio-builtin", title: "Built-in agent", version: "0.1.0" };
 const MODES: readonly string[] = ["agent", "plan", "ask"];
+
+/** First text part of a prompt's content blocks — what `/skill` matching sees. */
+function promptText(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+  for (const part of parts) {
+    if (part && typeof part === "object" && (part as { type?: unknown }).type === "text") {
+      return String((part as { text?: unknown }).text ?? "");
+    }
+  }
+  return "";
+}
 
 /**
  * The user message: text parts plus image attachments. Harness-side attachments
@@ -73,6 +90,7 @@ function systemPrompt(
   cwd: string,
   mode: AgentMode,
   mcp: { servers: string[]; tools: string[] },
+  skills: readonly BuiltinSkill[],
 ): string {
   const scope =
     mode === "agent"
@@ -144,6 +162,7 @@ function systemPrompt(
           mcp.tools.join(", "),
         ]
       : []),
+    renderSkillsSection(skills),
   ].join("\n");
 }
 
@@ -298,7 +317,12 @@ export class BuiltinAgent implements InProcessAgentTransport {
 
   // ── Session state ─────────────────────────────────────────────────────────
 
-  private openSession(sessionId: string, cwd: string, restore = false, mcpServers?: unknown) {
+  private async openSession(
+    sessionId: string,
+    cwd: string,
+    restore = false,
+    mcpServers?: unknown,
+  ) {
     const stored = restore ? loadBuiltinSession(this.opts.stateDir, sessionId) : undefined;
     this.mcp.close();
     this.mcp = new McpManager(parseMcpServers(mcpServers), (toolCall) => this.askPermission(toolCall));
@@ -311,6 +335,19 @@ export class BuiltinAgent implements InProcessAgentTransport {
       this.modelId = resolveBuiltinModel(this.opts.settings, storedModel)?.value ?? storedModel;
     }
     this.messages = stored?.messages ?? [];
+    // Announce discovered skills before the boot reply: the harness merges them
+    // into the composer's slash menu, exactly like a CLI agent's own list.
+    const skills = await discoverSkills(this.opts.settings.builtinSkillPaths, this.cwd);
+    if (skills.length) {
+      this.emitUpdate({
+        sessionUpdate: "available_commands_update",
+        commands: skills.map((s) => ({
+          name: s.name,
+          description: s.description || s.name,
+          kind: "skill",
+        })),
+      });
+    }
     return { sessionId, configOptions: this.configOptions() };
   }
 
@@ -386,7 +423,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
         `Модель "${this.modelId}" не найдена в настройках встроенного агента — Настройки → Встроенный агент.`,
       );
     }
-    this.messages.push(userContent(params.prompt));
+    const skills = await discoverSkills(this.opts.settings.builtinSkillPaths, this.cwd);
+    // An explicit `/name` message is rewritten into the skill's body plus the
+    // request before it is recorded, so the stored history carries what the
+    // model actually saw and a re-run expands identically.
+    const promptParts = params.prompt;
+    const expanded = await expandSkillInvocation(promptText(promptParts), skills);
+    this.messages.push(userContent(expanded ? [{ type: "text", text: expanded }] : promptParts));
     this.persist();
 
     const { contextWindow } = selection;
@@ -416,10 +459,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
       let wrapUpSent = false;
       const turnOptions = async (maxSteps: number) => ({
         model: endpoint.chatModel(selection.modelId),
-        system: systemPrompt(this.opts.settings.locale, this.cwd, this.mode, {
-          servers: [...new Set(offered.map((entry) => entry.server))],
-          tools: offered.map((entry) => entry.qualifiedName),
-        }),
+        system: systemPrompt(
+          this.opts.settings.locale,
+          this.cwd,
+          this.mode,
+          {
+            servers: [...new Set(offered.map((entry) => entry.server))],
+            tools: offered.map((entry) => entry.qualifiedName),
+          },
+          skills,
+        ),
         messages: await compactMessages({
           messages: this.messages,
           contextWindow,

@@ -298,6 +298,7 @@ const settingsSchema = z.object({
     )
     .optional(),
   mcpProjectFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
+  builtinSkillPaths: z.array(z.string().min(1).max(512)).max(50).optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only
@@ -640,6 +641,14 @@ export async function registerRoutes(app: FastifyInstance) {
       // The transport reads providers per turn, but a live chat may be pinned
       // to a model the edit removed — restart live built-in chats so the new
       // endpoints/model list apply immediately.
+      void restartSessionsForBuiltinChange();
+    }
+    if (
+      patch.builtinSkillPaths !== undefined &&
+      JSON.stringify(patch.builtinSkillPaths) !== JSON.stringify(current.builtinSkillPaths)
+    ) {
+      // Skills are discovered from the settings snapshot the transport holds,
+      // so a path edit needs the same restart as an endpoint edit.
       void restartSessionsForBuiltinChange();
     }
     if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {

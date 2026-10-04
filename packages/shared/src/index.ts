@@ -577,6 +577,39 @@ export function normalizeMcpProjectFiles(files: unknown): string[] {
   return out;
 }
 
+/**
+ * Folders the built-in agent scans for skills (a skill is a subfolder with a
+ * `SKILL.md`), relative to the chat's own cwd; `~` names the server user's
+ * home and absolute paths name other global collections. Configurable in
+ * Settings → Built-in agent; an empty list turns skill discovery off.
+ */
+export const DEFAULT_BUILTIN_SKILL_PATHS: readonly string[] = [".agents/skills"];
+
+/**
+ * Configured skill folders: trimmed, forward-slashed, de-duplicated. `~`- and
+ * absolute paths are kept — the list exists precisely to point at a global
+ * collection such as `~/.agents/skills`. Relative paths may not escape the
+ * chat's cwd; a non-array (absent setting) means the default.
+ */
+export function normalizeSkillPaths(paths: unknown): string[] {
+  if (!Array.isArray(paths)) return [...DEFAULT_BUILTIN_SKILL_PATHS];
+  const out: string[] = [];
+  for (const raw of paths) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/{2,}/g, "/")
+      .replace(/\/+$/, "");
+    if (!trimmed) continue;
+    const global = trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("/") || /^[a-z]:/i.test(trimmed);
+    if (!global && trimmed.split("/").some((seg) => seg === "..")) continue;
+    if (!out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
 const MCP_VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
 /**
@@ -1348,6 +1381,13 @@ export interface AppSettings {
    */
   mcpProjectFiles: string[];
   /**
+   * Folders the built-in agent scans for skills (`DEFAULT_BUILTIN_SKILL_PATHS`
+   * unless changed): each subfolder carrying a `SKILL.md` becomes a skill the
+   * agent announces and follows. Relative paths resolve per chat cwd, absolute
+   * ones are global; an empty list disables skills.
+   */
+  builtinSkillPaths: string[];
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent.
@@ -1424,6 +1464,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpServers: [],
   mcpFolderConfigs: {},
   mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
+  builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
   composerDrafts: {},
 };
 

@@ -28,6 +28,7 @@ import {
   type ModelOption,
   type ModelParamDto,
   DEFAULT_MCP_PROJECT_FILES,
+  DEFAULT_BUILTIN_SKILL_PATHS,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -2449,6 +2450,46 @@ export function SettingsPage() {
                   }
                 >
                   + {t("settings.builtinProviderAdd")}
+                </button>
+              </SettingRow>
+            </SettingTable>
+
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinSkillPathsTitle")}
+                hint={t("settings.builtinSkillPathsHint")}
+                terms={[
+                  t("settings.builtinSkillPathsTitle"),
+                  t("settings.builtinSkillPathsHint"),
+                  "SKILL.md",
+                  ".agents/skills",
+                  "~/.agents/skills",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={3}
+                  spellCheck={false}
+                  value={(form.builtinSkillPaths ?? []).join("\n")}
+                  onChange={(e) =>
+                    patch(
+                      "builtinSkillPaths",
+                      e.target.value
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter(Boolean),
+                    )
+                  }
+                  aria-label={t("settings.builtinSkillPathsTitle")}
+                  placeholder={DEFAULT_BUILTIN_SKILL_PATHS.join("\n")}
+                />
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("builtinSkillPaths", [...DEFAULT_BUILTIN_SKILL_PATHS])}
+                >
+                  {t("settings.builtinSkillPathsReset")}
                 </button>
               </SettingRow>
             </SettingTable>

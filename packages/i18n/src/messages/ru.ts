@@ -457,6 +457,10 @@ export const ru = {
     builtinModelsNoneEnabled: "Ни одна модель не включена — агенту нечего будет предлагать.",
     builtinModelsCustomTag: "вручную",
     builtinModelsRemove: "Убрать из списка",
+    builtinSkillPathsTitle: "Папки скиллов",
+    builtinSkillPathsHint:
+      "Папки, где агент ищет скиллы (скилл — подпапка с файлом SKILL.md), по одному пути в строке. Относительные пути берутся от папки чата; `~` — домашняя папка пользователя сервера (например, ~/.agents/skills); абсолютные тоже глобальные. Пустой список — скиллы отключены. Сообщение `/имя` вызывает скилл.",
+    builtinSkillPathsReset: "Вернуть значения по умолчанию",
     agentAdvancedTitle: "Дополнительно",
     profileTitle: "Профиль",
     agentConnectDesc: "Доступность агентов проверяется автоматически при входе",

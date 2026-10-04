@@ -12,6 +12,7 @@ import {
   normalizeCustomAgents,
   canonicalCwd,
   normalizeMcpProjectFiles,
+  normalizeSkillPaths,
   readSettingsSchema,
 } from "@acpio/shared";
 import { db, REPO_ROOT } from "../db/client.js";
@@ -348,6 +349,8 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   // Folder MCP files: relative paths inside the chat's own cwd only.
   merged.mcpProjectFiles = normalizeMcpProjectFiles(merged.mcpProjectFiles);
+  // Built-in skill folders: relative to the chat cwd, absolute = global.
+  merged.builtinSkillPaths = normalizeSkillPaths(merged.builtinSkillPaths);
   // Composer drafts persist so typed text survives a reload. Heal the map:
   // only string keys with non-empty trimmed string values survive, and the
   // whole blob is capped so it cannot grow without bound.

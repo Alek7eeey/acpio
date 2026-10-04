@@ -771,7 +771,10 @@
     "subsection": "Subsection",
     "searchBackToResults": "Back to results",
     "mcpInsecureTls": "Skip TLS certificate verification",
-    "mcpInsecureTlsHint": "for self-signed and internal certificates"
+    "mcpInsecureTlsHint": "for self-signed and internal certificates",
+    "builtinSkillPathsTitle": "Skill folders",
+    "builtinSkillPathsHint": "Folders the agent scans for skills — a skill is a subfolder with a SKILL.md — one path per line. Relative paths resolve against each chat's folder; `~` is the server user's home (e.g. ~/.agents/skills); absolute paths are global too. Clear the list to turn skills off. A `/name` message invokes a skill.",
+    "builtinSkillPathsReset": "Reset to defaults"
   },
   "permission": {
     "title": "Permission needed",

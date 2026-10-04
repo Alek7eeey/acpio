@@ -438,6 +438,10 @@ export const en = {
       "No model is enabled — the built-in agent will have nothing to offer.",
     builtinModelsCustomTag: "custom",
     builtinModelsRemove: "Remove from list",
+    builtinSkillPathsTitle: "Skill folders",
+    builtinSkillPathsHint:
+      "Folders the agent scans for skills — a skill is a subfolder with a SKILL.md — one path per line. Relative paths resolve against each chat's folder; `~` is the server user's home (e.g. ~/.agents/skills); absolute paths are global too. Clear the list to turn skills off. A `/name` message invokes a skill.",
+    builtinSkillPathsReset: "Reset to defaults",
     agentAdvancedTitle: "Advanced",
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",

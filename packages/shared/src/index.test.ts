@@ -20,6 +20,7 @@ import {
   effectiveMcpServers,
   expandMcpVars,
   normalizeMcpProjectFiles,
+  normalizeSkillPaths,
   parseMcpProjectFile,
   isMcpServerAttached,
   mcpFolderConfig,
@@ -499,6 +500,7 @@ describe("DEFAULT_SETTINGS", () => {
     mcpServers: [],
     mcpFolderConfigs: {},
     mcpProjectFiles: [".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"],
+    builtinSkillPaths: [".agents/skills"],
     composerDrafts: {},
   };
 
@@ -856,6 +858,43 @@ describe("normalizeMcpProjectFiles", () => {
     expect(normalizeMcpProjectFiles(["../outside/mcp.json"])).toEqual([]);
     expect(normalizeMcpProjectFiles([".config/../mcp.json"])).toEqual([]);
     expect(normalizeMcpProjectFiles(["", "   ", 7])).toEqual([]);
+  });
+});
+
+describe("normalizeSkillPaths", () => {
+  it("falls back to the default folder for a missing setting", () => {
+    expect(normalizeSkillPaths(undefined)).toEqual([".agents/skills"]);
+    expect(normalizeSkillPaths("nope")).toEqual([".agents/skills"]);
+  });
+
+  it("keeps an explicitly empty list empty", () => {
+    expect(normalizeSkillPaths([])).toEqual([]);
+  });
+
+  it("trims, slashes and de-duplicates entries", () => {
+    expect(normalizeSkillPaths([" .agents\\skills ", "./.agents/skills"])).toEqual([
+      ".agents/skills",
+    ]);
+    expect(normalizeSkillPaths([".agents//skills/"])).toEqual([".agents/skills"]);
+  });
+
+  it("keeps absolute paths — they name global collections", () => {
+    expect(normalizeSkillPaths(["C:/Users/me/.agents/skills"])).toEqual([
+      "C:/Users/me/.agents/skills",
+    ]);
+    expect(normalizeSkillPaths(["/etc/skills"])).toEqual(["/etc/skills"]);
+  });
+
+  it("keeps home-relative ~ paths", () => {
+    expect(normalizeSkillPaths(["~/.agents/skills"])).toEqual(["~/.agents/skills"]);
+    expect(normalizeSkillPaths([" ~\\skills "])).toEqual(["~/skills"]);
+    expect(normalizeSkillPaths(["~"])).toEqual(["~"]);
+  });
+
+  it("drops relative paths escaping the folder and junk entries", () => {
+    expect(normalizeSkillPaths(["../outside/skills"])).toEqual([]);
+    expect(normalizeSkillPaths([".config/../skills"])).toEqual([]);
+    expect(normalizeSkillPaths(["", "   ", 7])).toEqual([]);
   });
 });
 
