@@ -5,5 +5,8 @@
   "timeoutMs": 240000,
   "difficulty": "medium",
   "horizon": "s",
-  "family": "ambiguity"
+  "family": "ambiguity",
+  "faults": [
+    "stale-handover"
+  ]
 }
