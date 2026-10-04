@@ -114,7 +114,9 @@ function systemPrompt(
     "- When the project is a public repository, check its actual history for the canonical fix " +
       "(`git log -S` in the checkout, a released version from the registry) instead of " +
       "reconstructing it from memory; adapt what you find to this checkout — a couple of " +
-      "targeted lookups, not a survey.",
+      "targeted lookups, not a survey. Port the canonical fix's whole change set, not just the " +
+      "hunk nearest the symptom: when the fix moves work between sites (a helper stops " +
+      "converting, a caller must), update every site that consumed the old behavior.",
     "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked. One green " +
       "run settles it: no suite re-runs, no `git stash` baseline comparisons, and failures " +

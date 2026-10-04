@@ -157,6 +157,46 @@ node bench/swe/run-swe.mjs --agents builtin,pi,omp --concurrency 2 --instances <
 
 ## Iteration log (one change per run, compared against the baseline)
 
+- **2026-10-04, iteration: port the canonical fix's whole change set** — the
+  incomplete-adoption family got its second real-corpus sighting and one rule
+  sentence targets it. Full-corpus single pass `2026-10-04T01-21-15-046Z`
+  (100 × builtin, 6 slots, bundle `4c3bbd9`-era agent): **97/100** — rollout
+  median 186s, 3440 model calls, wall 1h57m. The one honest agent miss:
+  **psf__requests-2931** — the root cause and first hunk of the upstream fix
+  were found via actual history (`git show edc68a0`), but only the
+  `_encode_params` hunk was ported; the sibling `prepare_url` hunk (bytes
+  query params must go through `to_native_string` once the helper stops
+  converting) was missed, and the suite run the agent believed green
+  ("84 passed, 1 xfailed" quoted from a "1 failed, 84 passed, 81 errors"
+  summary — the `| tail` pipe masks pytest's exit code) did not catch it:
+  P2P `test_params_bytes_are_encoded` regressed. Reproduced in a probe
+  container from the kept patch: the test fails standalone too. Same
+  mechanics as sklearn-14629's mis-scoped recalled fix (one observation
+  until now). The upstream rule now says it: port the whole change set, not
+  the hunk nearest the symptom; when the fix moves work between sites,
+  update every site that consumed the old behavior. Validation
+  (`2026-10-04T03-21-53-587Z`): target requests-2931 **RESOLVED** (189s)
+  with the patch byte-equivalent to gold (both hunks), artifact re-roll
+  sphinx-10323 RESOLVED, out-of-family controls flask-5014 / astropy-13453 /
+  sklearn-13496 3/3 RESOLVED. The other two misses of the pass are not
+  agent misses: pytest-8399 (empty patch, the known passive server-layer
+  category) and sphinx-10323 (eval-container artifact — a clean replay of
+  base + model patch + test patch runs the exact tox command green, 41
+  passed; did not reproduce on re-roll). sklearn-14629 RESOLVED this pass
+  (192s): the mis-scoped-recall candidate stays at one observation.
+
+- **2026-10-04, runner: patch extraction against the container's HEAD** —
+  the sphinx-10323 diagnosis surfaced that extracted patches carry phantom
+  hunks: `git diff <base_commit>` also reports the tree differences between
+  the dataset base and the image HEAD's swebench build commit (its tox.ini
+  already carries `-rA`), so every patch of such an instance replayed
+  elsewhere would fail `git apply`. Extraction now diffs `--cached HEAD`
+  with grader-owned test-patch paths excluded; A/B on the same day: the
+  old extraction's sphinx-10323 patch again contained the tox.ini hunk the
+  agent never touched, the new extraction's flask-5014 patch carries only
+  the two files the agent wrote. Grading is unaffected either way (the eval
+  resets test files and reads the suite result).
+
 - **2026-10-03, iteration: name the stash in the verify-once rule** — the
   stash variant of the over-check pattern hit its 4th real-corpus sighting in
   the 99/100 pass (sklearn-14629 ran `git stash -q && pytest … ; git stash pop`

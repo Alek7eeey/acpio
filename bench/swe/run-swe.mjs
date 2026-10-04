@@ -330,15 +330,24 @@ const stripModeOnlyBlocks = (patch) =>
     .map((block) => "diff --git " + block)
     .join("");
 
-async function extractPatch(container, baseCommit) {
+async function extractPatch(container, row) {
   // Build junk (pip install -e . creates build/, setuptools drops egg-info)
   // is excluded from the reported patch: grading resets test files and reads
   // only the suite result, so the noise would only poison patch-size metrics.
+  // The diff runs against the container's HEAD, not the dataset base commit:
+  // image HEADs carry a swebench build commit whose tree may already differ
+  // from base (sphinx-10323's tox.ini), and diffing against base drags those
+  // tree differences into every patch as phantom hunks. Grader-owned
+  // test-patch paths are excluded outright: the runner resets them to base
+  // below, and the eval overwrites them anyway.
+  const testExcludes = patchFiles(row.test_patch)
+    .map((f) => `':(exclude)${f}'`)
+    .join(" ");
   const res = await dockerExec(
     container,
     `git config --global --add safe.directory /testbed && cd /testbed && git add -A && ` +
-      `git -c core.fileMode=false diff --cached ${baseCommit} -- . ':(exclude)build' ':(exclude)**/__pycache__' ` +
-      `':(exclude)**/*.egg-info' ':(exclude).pytest_cache' ':(exclude)**/.pytest_cache'`,
+      `git -c core.fileMode=false diff --cached HEAD -- . ':(exclude)build' ':(exclude)**/__pycache__' ` +
+      `':(exclude)**/*.egg-info' ':(exclude).pytest_cache' ':(exclude)**/.pytest_cache' ${testExcludes}`,
     120_000,
   );
   if (res.code !== 0) throw new Error(`patch extraction failed: ${(res.stderr || "").slice(-300)}`);
@@ -566,7 +575,7 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
     }
 
     await resetTestPatchPaths(container, row);
-    rec.patch = await extractPatch(container, row.base_commit);
+    rec.patch = await extractPatch(container, row);
     rec.patchBytes = rec.patch.length;
     rec.patchFiles = patchFiles(rec.patch);
     const patchesDir = path.join(runDir, "patches");
