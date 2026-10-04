@@ -1,9 +1,38 @@
 // Drives the in-process builtin agent the way a user does: the real acpio
 // server, its HTTP API, `permissionPolicy=always`, a per-run temp database.
 import { spawn } from "node:child_process";
+import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:net";
 import path from "node:path";
 import { killTree, runProcess } from "./util.mjs";
+
+/**
+ * Degenerate-session fingerprint: a 200 response that silently lost its
+ * tool-call chunks or carries NUL bytes inside tool arguments (free-endpoint
+ * stream corruption, 2026-10-04 sweep: read/edit args arrived as
+ * "lib/duration.mjs\0") ends the session while nothing honest happened.
+ * The corruption is only visible in the disk transcript — the API detail
+ * carries no tool-result bodies, and a failed call is not always marked
+ * failed. The runner scans failed pairs with this and retries them once.
+ * The store files are named by the ADAPTER's session id, not the API one,
+ * so transcripts are matched by the workspace cwd they record. JSON escapes
+ * NUL as the literal six characters \u0000.
+ */
+export async function sessionTranscriptHasNul(server, ws) {
+  try {
+    const dir = path.join(server.stateDir, "agent-sessions");
+    // The store records cwd with forward slashes even on Windows.
+    const marker = ws.replace(/\\/g, "/");
+    for (const f of await readdir(dir)) {
+      const text = await readFile(path.join(dir, f), "utf8");
+      if (!text.includes(marker)) continue;
+      if (text.includes("\\u0000") || text.includes("without null bytes")) return true;
+    }
+  } catch {
+    // no transcripts (or no dir) — nothing corrupted on record
+  }
+  return false;
+}
 
 async function freePort() {
   for (let p = 4100 + Math.floor(Math.random() * 1500); ; p++) {

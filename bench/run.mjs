@@ -9,7 +9,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { BenchServer, runBuiltinAgent } from "./lib/builtin-agent.mjs";
+import { BenchServer, runBuiltinAgent, sessionTranscriptHasNul } from "./lib/builtin-agent.mjs";
 import { ensureOmpModel, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
 import { applyFaults } from "./lib/faults.mjs";
@@ -193,6 +193,8 @@ async function main() {
     let ws;
     let faults = [];
     let retried = false;
+    let retryReason = "";
+    let verify = null;
     for (;;) {
       ws = makeWorkspace(task.dir, workRoot, label);
       // Faults are strictly additive mutations of the workspace before the
@@ -234,14 +236,37 @@ async function main() {
           wallMs: 0, exitCode: null, timedOut: false, stderrTail: String(err),
         };
       }
-      // Stall signature (§7): the wall expired with almost no wire activity —
-      // an endpoint/start artifact, not an agent answer. One fresh-workspace
-      // retry instead of a lost pair.
-      if (!(result.timedOut && result.toolCalls <= 2) || retried) break;
+      // Artifact signatures (§7): the endpoint occasionally ends a session
+      // looking honest while nothing honest happened — a timeout wall with a
+      // handful of calls (start or mid-session stall), an instant finish with
+      // no tool use at all, or NUL bytes inside tool arguments (silent stream
+      // corruption in 200 responses). Verify first, then retry such a pair
+      // once on a fresh workspace — a green pair is never re-rolled, only a
+      // red suspicious one gets its second chance. The NUL fingerprint lives
+      // in the disk transcript, which the store flushes lazily after the
+      // session goes idle, hence the rescan delays.
+      verify = await verifyWorkspace(task.dir, task, ws);
+      const stall = result.timedOut && result.toolCalls <= 5;
+      const instantFinish = !result.timedOut && result.toolCalls === 0;
+      let corrupted = false;
+      if (agent === "builtin" && !verify.ok && !stall && !instantFinish && !retried) {
+        for (const delay of [0, 500, 1500]) {
+          if (delay) await new Promise((r) => setTimeout(r, delay));
+          if (await sessionTranscriptHasNul(slot.server, ws)) {
+            corrupted = true;
+            break;
+          }
+        }
+      }
+      if (!(stall || instantFinish || corrupted) || retried || verify.ok) break;
       retried = true;
-      console.warn(`stall signature on ${label} (${result.toolCalls} calls in ${Math.round(timeoutMs / 1000)}s) — retrying once`);
+      retryReason = stall
+        ? `timeout wall with ${result.toolCalls} calls`
+        : instantFinish
+          ? "finished with 0 tool calls"
+          : "NUL-corrupted tool arguments";
+      console.warn(`artifact signature on ${label} (${retryReason}) — retrying once`);
     }
-    const verify = await verifyWorkspace(task.dir, task, ws);
     const row = {
       agent,
       task: task.id,
@@ -250,7 +275,7 @@ async function main() {
       verifyOutput: verify.output.slice(0, 600),
       files: changedFiles(ws),
       ...(faults.length ? { faults } : {}),
-      ...(retried ? { retried } : {}),
+      ...(retried ? { retried, retryReason } : {}),
       ...result,
       crashed: result.exitCode !== 0 && result.exitCode !== null,
     };
