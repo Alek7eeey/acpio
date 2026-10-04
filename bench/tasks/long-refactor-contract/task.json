@@ -5,5 +5,8 @@
   "timeoutMs": 1200000,
   "difficulty": "hard",
   "horizon": "m",
-  "family": "long"
+  "family": "long",
+  "faults": [
+    "review-notes"
+  ]
 }
