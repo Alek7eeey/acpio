@@ -1,8 +1,11 @@
 /**
  * Render "{{ path }}" placeholders from a dot path into the scope. Every
  * {{ }} pair is its own placeholder — one placeholder never swallows
- * another. Missing keys (undefined or null at any path step) throw an
- * Error naming the key. Values are stringified with String().
+ * another. Whitespace around the path inside a pair is tolerated
+ * ("{{ spaced }}" names the key `spaced`). A path is a dot-separated
+ * chain of identifiers: letters, digits, underscores. Missing keys
+ * (undefined or null at any path step) throw an Error naming the key.
+ * Values are stringified with String().
  */
 const PLACEHOLDER = /\{\{(.*)\}\}/g; // placeholders are rare, greedy is fine (PROD-4470)
 
