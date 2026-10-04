@@ -489,6 +489,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatAgentTurnTimeline: false,
     chatSplit: true,
     chatToolbarStyle: "classic",
+    boardAddCardStyle: "card",
     chatGitBranchPosition: "below",
     chatChipOptions: {
       folder: { compress: true, truncate: "middle" },

@@ -232,6 +232,7 @@ const settingsSchema = z.object({
   resumeAgentContext: z.boolean().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
+  boardAddCardStyle: z.enum(["card", "compact", "hidden"]).optional(),
   showBootSplash: z.boolean().optional(),
   fontFamily: z.string().optional(),
   fontSize: z.string().optional(),

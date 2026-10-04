@@ -371,6 +371,27 @@
   transform: scale(0.98);
 }
 
+/* Compact variant: a quiet text row instead of a card-shaped block —
+   the same door, a fraction of the visual weight. */
+.addCardCompact {
+  min-height: 0;
+  justify-content: flex-start;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  opacity: 0.72;
+}
+
+.addCardCompact:hover {
+  opacity: 1;
+  border-color: transparent;
+}
+
+.addCardCompact:active {
+  transform: none;
+}
+
 .composerInput {
   width: 100%;
   min-height: 56px;

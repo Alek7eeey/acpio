@@ -93,6 +93,12 @@ export function normalizeChatToolbarStyle(value: unknown): ChatToolbarStyle {
   return value === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
 }
 
+export function normalizeBoardAddCardStyle(value: unknown): AppSettings["boardAddCardStyle"] {
+  return value === "compact" || value === "hidden"
+    ? value
+    : DEFAULT_SETTINGS.boardAddCardStyle;
+}
+
 export function normalizeChatGitBranchPosition(value: unknown): "below" | "above" {
   return value === "above" ? "above" : "below";
 }
@@ -166,6 +172,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   normalizeBuiltinProviders(merged);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
+  merged.boardAddCardStyle = normalizeBoardAddCardStyle(partial.boardAddCardStyle);
   // Anything but an explicit "server" falls back to the device default.
   merged.attachDefaultSource = partial.attachDefaultSource === "server" ? "server" : "device";
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);

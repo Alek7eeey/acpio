@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared"
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { BoardPage } from "./BoardPage";
+import styles from "./BoardPage.module.css";
 
 const apiMock = vi.hoisted(() => {
   /** A promise that never settles — the pending network round-trip. */
@@ -363,5 +364,35 @@ describe("BoardPage card context menu", () => {
 
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+});
+
+describe("BoardPage add-task placeholder style", () => {
+  // The placeholder is a settings-driven look: the card-shaped block stays the
+  // default, a slim row and "off" are the opt-outs for people who read six
+  // empty groups as six big dashed buttons.
+  it("shows the card-shaped placeholder by default", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    useAppStore.setState({ boardSessions: [] });
+    expect(await screen.findByText("Add task")).toBeTruthy();
+  });
+
+  it("keeps the compact row out of the card shape", async () => {
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, boardAddCardStyle: "compact" } });
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    useAppStore.setState({ boardSessions: [] });
+
+    const button = (await screen.findByText("Add task")) as HTMLElement;
+    expect(button.className).toContain(styles.addCardCompact);
+  });
+
+  it("renders no placeholder when the style is hidden", async () => {
+    useAppStore.setState({ settings: { ...DEFAULT_SETTINGS, boardAddCardStyle: "hidden" } });
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    useAppStore.setState({ boardSessions: [] });
+    expect(screen.queryByText("Add task")).toBeNull();
   });
 });

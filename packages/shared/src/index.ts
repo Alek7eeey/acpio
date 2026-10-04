@@ -808,6 +808,10 @@ export type ChatMetaChipId =
  *  are always visible and cannot be hidden. */
 export type ChatToolbarStyle = "classic" | "minimal";
 
+/** How an empty board group invites a new task: a card-shaped placeholder,
+ *  a quiet slim row, or nothing (the group's "+" still adds). */
+export type BoardAddCardStyle = "card" | "compact" | "hidden";
+
 /** Folder chip: how an over-long path shortens once the chip is compressed. */
 export type ChatCwdTruncate = "middle" | "end";
 
@@ -1354,6 +1358,8 @@ export interface AppSettings {
   chatSplit: boolean;
   /** New chat + search controls in the tree sidebar. */
   chatToolbarStyle: ChatToolbarStyle;
+  /** Look of the "Add task" placeholder in empty board groups. */
+  boardAddCardStyle: BoardAddCardStyle;
   /** Position of the Git branch bar: "below" the input or "above" as a chip. */
   chatGitBranchPosition?: "below" | "above";
   /** Per-chip composer options: shrink behaviour and what each chip shows. */
@@ -1458,6 +1464,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatAgentTurnTimeline: false,
   chatSplit: true,
   chatToolbarStyle: "classic",
+  boardAddCardStyle: "card",
   chatGitBranchPosition: "below",
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",

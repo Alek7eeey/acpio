@@ -9,7 +9,7 @@ export type SettingsAgentLeaf =
   | "remote"
   | "diagnostics"
   | "mcp";
-export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice" | "chat";
+export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice" | "chat" | "board";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsInterfaceLeaf;
 
 type TreeBranch =
@@ -49,6 +49,7 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
         { id: "colors", label: t("settings.colors") },
         { id: "voice", label: t("settings.voice") },
         { id: "chat", label: t("settings.chat") },
+        { id: "board", label: t("settings.board") },
       ],
     },
   ];
@@ -63,7 +64,15 @@ export function parseSettingsSearch(search: string): {
   if (rawSection === "interface") {
     const rawLeaf = params.get("leaf");
     const leaf: SettingsInterfaceLeaf =
-      rawLeaf === "colors" ? "colors" : rawLeaf === "voice" ? "voice" : rawLeaf === "chat" ? "chat" : "appearance";
+      rawLeaf === "colors"
+        ? "colors"
+        : rawLeaf === "voice"
+          ? "voice"
+          : rawLeaf === "chat"
+            ? "chat"
+            : rawLeaf === "board"
+              ? "board"
+              : "appearance";
     return { section: "interface", leaf };
   }
   if (rawSection === "account" || rawSection === "appearance") {

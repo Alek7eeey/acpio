@@ -191,6 +191,22 @@ describe("health & settings", () => {
     expect(get.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
   });
 
+  // Regression: the field was missing from the PUT schema, so zod stripped it
+  // and the board placeholder picker snapped back after every save.
+  it("PUT /api/settings persists the board add-task placeholder style", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { boardAddCardStyle: "compact" },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().boardAddCardStyle).toBe("compact");
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.statusCode).toBe(200);
+    expect(get.json().boardAddCardStyle).toBe("compact");
+  });
+
   it("PUT /api/settings keeps the other chips when patching one", async () => {
     await app.inject({
       method: "PUT",

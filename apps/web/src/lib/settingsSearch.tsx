@@ -242,6 +242,16 @@ export function settingsSearchIndex(
       t("settings.fontSystem"),
       t("settings.showBootSplash"),
     ],
+    board: [
+      t("settings.board"),
+      t("settings.boardTitle"),
+      t("settings.boardDesc"),
+      t("settings.boardAddCardStyle"),
+      t("settings.boardAddCardStyleHint"),
+      t("settings.boardAddCardStyleCard"),
+      t("settings.boardAddCardStyleCompact"),
+      t("settings.boardAddCardStyleHidden"),
+    ],
     colors: [
       t("settings.colors"),
       t("settings.colorsDesc"),
@@ -346,6 +356,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.fontSizeHint"),
       t("settings.showBootSplashHint"),
     ],
+    board: [t("settings.boardAddCardStyleHint")],
     colors: [t("settings.lightSchemeHint"), t("settings.darkSchemeHint")],
     voice: [t("settings.ttsVoiceGenderHint"), t("settings.ttsNaturalHint"), t("settings.ttsOpenWindowsSpeech")],
     chat: [

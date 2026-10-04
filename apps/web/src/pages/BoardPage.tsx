@@ -55,6 +55,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const tasks = useAppStore((s) => s.boardSessions);
   const defaultCwd = useAppStore((s) => s.settings.defaultCwd ?? "");
   const preferredProvider = useAppStore((s) => s.settings.defaultProvider ?? null);
+  /** Look of the "Add task" placeholder an empty group offers (settings). */
+  const boardAddCardStyle = useAppStore((s) => s.settings.boardAddCardStyle ?? "card");
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
@@ -858,10 +860,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                 </button>
                               </div>
                             </div>
-                          ) : (
+                          ) : boardAddCardStyle !== "hidden" ? (
                             <button
                               type="button"
-                              className={styles.addCard}
+                              className={
+                                boardAddCardStyle === "compact"
+                                  ? `${styles.addCard} ${styles.addCardCompact}`
+                                  : styles.addCard
+                              }
                               title={t("chat.boardAddTaskCard")}
                               onClick={() => {
                                 setAddingCwd(group.cwd);
@@ -870,7 +876,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                             >
                               {t("chat.boardAddTaskCard")}
                             </button>
-                          )}
+                          ) : null}
                           {group.tasks.map((task) => renderCard(task, group))}
                         </div>
                       ))

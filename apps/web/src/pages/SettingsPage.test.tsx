@@ -199,3 +199,32 @@ describe("Built-in providers", () => {
     expect(rows[1]).toMatchObject({ id: expect.any(String), name: "", url: "" });
   });
 });
+
+describe("SettingsPage board leaf", () => {
+  // The board options live on their own "Доска"/"Board" leaf, not squeezed
+  // into Appearance: the deep link must render the picker, ready to change.
+  it("renders the add-task placeholder picker under section=interface&leaf=board", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=interface&leaf=board"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Board settings")).toBeTruthy();
+    expect(screen.getByText("Board “Add task” placeholder")).toBeTruthy();
+  });
+
+  it("keeps the placeholder row off the Appearance leaf", async () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=interface&leaf=appearance"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText("Board “Add task” placeholder")).toBeNull();
+  });
+});

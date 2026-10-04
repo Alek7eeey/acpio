@@ -120,6 +120,13 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatToolbarStyle: "weird" }).chatToolbarStyle).toBe("classic");
   });
 
+  it("defaults the board add-task placeholder to the card shape", () => {
+    expect(mergeClientAppSettings({}).boardAddCardStyle).toBe("card");
+    expect(mergeClientAppSettings({ boardAddCardStyle: "compact" }).boardAddCardStyle).toBe("compact");
+    expect(mergeClientAppSettings({ boardAddCardStyle: "hidden" }).boardAddCardStyle).toBe("hidden");
+    expect(mergeClientAppSettings({ boardAddCardStyle: "weird" }).boardAddCardStyle).toBe("card");
+  });
+
   it("defaults git branch position to below", () => {
     expect(mergeClientAppSettings({}).chatGitBranchPosition).toBe("below");
     expect(mergeClientAppSettings({ chatGitBranchPosition: "above" }).chatGitBranchPosition).toBe("above");

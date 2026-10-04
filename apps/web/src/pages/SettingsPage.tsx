@@ -1456,7 +1456,9 @@ export function SettingsPage() {
           ? t("settings.voiceTitle")
           : leaf === "chat"
             ? t("settings.chatTitle")
-            : t("settings.appearance")
+            : leaf === "board"
+              ? t("settings.boardTitle")
+              : t("settings.appearance")
       : section === "agent"
         ? leaf === "connect"
           ? t("settings.agentConnectTitle")
@@ -1481,7 +1483,9 @@ export function SettingsPage() {
           ? t("settings.voiceDesc")
           : leaf === "chat"
             ? t("settings.chatDesc")
-            : t("settings.sidebarCollapseHint")
+            : leaf === "board"
+              ? t("settings.boardDesc")
+              : t("settings.sidebarCollapseHint")
       : section === "agent" && leaf === "mcp"
         ? t("settings.mcpHint")
     : section === "agent" && leaf === "advanced"
@@ -1899,6 +1903,25 @@ export function SettingsPage() {
                 checked={Boolean(form.showBootSplash)}
                 onChange={(v) => patch("showBootSplash", v)}
                 label={t("settings.showBootSplash")}
+              />
+            </SettingRow>
+          </SettingTable>
+        )}
+
+        {section === "interface" && leaf === "board" && (
+          <SettingTable>
+            <SettingRow label={t("settings.boardAddCardStyle")} hint={t("settings.boardAddCardStyleHint")}>
+              <OptionPicker
+                variant="block"
+                placement="down"
+                menuTitle={t("settings.boardAddCardStyle")}
+                value={form.boardAddCardStyle ?? "card"}
+                onChange={(v) => patch("boardAddCardStyle", v as AppSettings["boardAddCardStyle"])}
+                options={[
+                  { value: "card", label: t("settings.boardAddCardStyleCard") },
+                  { value: "compact", label: t("settings.boardAddCardStyleCompact") },
+                  { value: "hidden", label: t("settings.boardAddCardStyleHidden") },
+                ]}
               />
             </SettingRow>
           </SettingTable>
