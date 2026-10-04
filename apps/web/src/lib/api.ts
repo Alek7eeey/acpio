@@ -424,6 +424,48 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ format, ...(dir ? { dir } : {}) }),
     }),
+  /**
+   * Download the whole chat history of one provider (default: the built-in
+   * agent) as a single JSON bundle, ready to attach to a report.
+   */
+  downloadChatsExport: async (provider = "builtin") => {
+    const res = await fetch(`/api/export/chats?provider=${encodeURIComponent(provider)}`, {
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || res.statusText;
+      try {
+        const json = JSON.parse(text) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const content = await res.text();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const fileName = match
+      ? decodeURIComponent(match[1])
+      : `acpio-${provider}-chats.json`;
+    const blob = new Blob([content], {
+      type: res.headers.get("Content-Type") ?? "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+  saveChatsExportToServer: (provider = "builtin", dir?: string) =>
+    request<{ ok: boolean; path: string; fileName: string; count: number }>("/api/export/chats", {
+      method: "POST",
+      body: JSON.stringify({ provider, ...(dir ? { dir } : {}) }),
+    }),
   listThemes: () => request<ChatThemeDto[]>("/api/themes"),
   createTheme: (input?: { name?: string }) =>
     request<ChatThemeDto>("/api/themes", {

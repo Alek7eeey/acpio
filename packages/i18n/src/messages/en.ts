@@ -946,9 +946,9 @@ export const en = {
     metaProvider: "Provider",
     metaMode: "Mode",
     metaFolder: "Working folder",
+    metaModel: "Model",
     metaMessages: "Messages",
     metaExported: "Exported",
-    outputTruncated: "… output truncated",
     emptyMessage: "(empty)",
   },
 };

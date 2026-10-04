@@ -920,6 +920,8 @@ export function SettingsPage() {
     () => useAppStore.getState().activeSessionId,
   );
   const [diagCopyId, setDiagCopyId] = useState<string | null>(null);
+  const [chatsExportBusy, setChatsExportBusy] = useState(false);
+  const [chatsExportMessage, setChatsExportMessage] = useState<string | null>(null);
   const paramsCacheRef = useRef(new Map<string, ModelParamDto[]>());
   /** Blocks catalog ingest from clobbering an in-flight default-model save. */
   const pendingModelPickRef = useRef<Partial<Record<AgentProvider, string>>>({});
@@ -973,6 +975,18 @@ export function SettingsPage() {
   useEffect(() => {
     if (leaf !== "diagnostics") return;
     void refreshDiagnostics();
+    let cancelled = false;
+    api
+      .getExportDefaultDir()
+      .then((res) => {
+        if (!cancelled) setExportDirDefault(res.path);
+      })
+      .catch(() => {
+        // hint just stays hidden
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [leaf]);
 
@@ -3107,6 +3121,70 @@ export function SettingsPage() {
                 </li>
               ))}
             </ul>
+            </SearchGate>
+            </div>
+
+            <div className={styles.sectionBlock}>
+            <SearchGate terms={[t("diagnostics.exportChatsTitle"), t("diagnostics.exportChatsHint"), t("diagnostics.exportChatsDownload"), t("diagnostics.exportChatsSave"), t("diagnostics.exportChatsSavedTo")]}>
+              <h2 className={styles.sectionHeading}>{highlightText(t("diagnostics.exportChatsTitle"), settingsQuery)}</h2>
+              <p className={styles.fieldHint}>{t("diagnostics.exportChatsHint")}</p>
+              <div className={styles.diagActions}>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={chatsExportBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setChatsExportBusy(true);
+                      setChatsExportMessage(null);
+                      try {
+                        await api.downloadChatsExport("builtin");
+                        setChatsExportMessage(t("diagnostics.exportChatsDownloaded"));
+                      } catch (err) {
+                        setChatsExportMessage(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setChatsExportBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {chatsExportBusy
+                    ? t("diagnostics.exportChatsSaving")
+                    : t("diagnostics.exportChatsDownload")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  disabled={chatsExportBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setChatsExportBusy(true);
+                      setChatsExportMessage(null);
+                      try {
+                        const res = await api.saveChatsExportToServer("builtin");
+                        setChatsExportMessage(
+                          t("diagnostics.exportChatsSavedTo", { count: res.count, path: res.path }),
+                        );
+                      } catch (err) {
+                        setChatsExportMessage(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setChatsExportBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {chatsExportBusy
+                    ? t("diagnostics.exportChatsSaving")
+                    : t("diagnostics.exportChatsSave")}
+                </button>
+              </div>
+              {chatsExportMessage ? (
+                <p className={styles.hint}>{chatsExportMessage}</p>
+              ) : exportDirDefault ? (
+                <p className={styles.hint}>
+                  {t("diagnostics.exportChatsServerHint", { path: exportDirDefault })}
+                </p>
+              ) : null}
             </SearchGate>
             </div>
           </>

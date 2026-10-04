@@ -1037,6 +1037,87 @@ describe("export", () => {
   });
 });
 
+describe("bulk export", () => {
+  /** Chat of one provider with a user message carrying one text part. */
+  async function seedChat(provider: string, title: string, text?: string) {
+    const [row] = await db
+      .insert(sessionsTable)
+      .values({ title, provider, cwd: "", mode: "agent" })
+      .returning();
+    if (text !== undefined) {
+      const message = await createMessage(row.id, "user");
+      await appendPart(row.id, message.id, "text", { text });
+    }
+    return row;
+  }
+
+  it("GET /api/export/chats bundles every builtin chat and skips other providers", async () => {
+    const mine = await seedChat("builtin", "Агентский чат", "привет");
+    await seedChat("builtin", "Пустой");
+    await seedChat("omp", "Чужой", "не builtin");
+
+    const res = await app.inject({ method: "GET", url: "/api/export/chats" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/json; charset=utf-8");
+    const cd = res.headers["content-disposition"] as string;
+    expect(decodeURIComponent(cd.split("''")[1] as string)).toMatch(/^acpio-builtin-chats-\d{4}-\d{2}-\d{2}\.json$/);
+
+    const body = res.json();
+    expect(body.format).toBe("acpio-chats");
+    expect(body.chatCount).toBe(2);
+    expect(body.messageCount).toBe(1);
+    const titles = (body.chats as Array<{ session: { title: string } }>).map((c) => c.session.title);
+    expect(titles).toContain("Агентский чат");
+    expect(titles).toContain("Пустой");
+    expect(titles).not.toContain("Чужой");
+    expect((body.chats as Array<{ session: { id: string } }>)[0].session.id).toBeTruthy();
+    expect(mine.id).toBeTruthy();
+  });
+
+  it("GET /api/export/chats?provider=omp switches the population", async () => {
+    await seedChat("builtin", "Агентский чат");
+    await seedChat("omp", "Чужой");
+
+    const res = await app.inject({ method: "GET", url: "/api/export/chats?provider=omp" });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.chatCount).toBe(1);
+    expect(body.chats[0].session.title).toBe("Чужой");
+  });
+
+  it("GET on an empty population → 200 with chatCount 0", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/export/chats" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ format: "acpio-chats", chatCount: 0, chats: [] });
+  });
+
+  it("POST /api/export/chats saves the bundle and reports the chat count", async () => {
+    await seedChat("builtin", "Агентский чат", "привет");
+    const dir = await newTempDir("acp-bulk-export-");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/export/chats",
+      payload: { dir },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.count).toBe(1);
+    expect(body.fileName).toMatch(/^acpio-builtin-chats-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(body.path).toBe(path.join(path.resolve(dir), body.fileName));
+    const saved = JSON.parse(await fsp.readFile(body.path, "utf8"));
+    expect(saved.chatCount).toBe(1);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/export/chats",
+      payload: { dir },
+    });
+    expect(second.json().fileName).toMatch(/-2\.json$/);
+  });
+});
+
 describe("attachment upload", () => {
   const ONE_PIXEL_PNG = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",

@@ -3,9 +3,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AppSettings, MessageDto, MessagePartDto, SessionDetailDto } from "@acpio/shared";
 import type { ExportFormat } from "./chatExport.js";
 import {
+  chatsExportFileName,
   defaultExportDir,
   exportFileName,
   fenceFor,
+  renderChatsBundle,
   renderJson,
   renderMarkdown,
   resolveExportDir,
@@ -169,6 +171,14 @@ describe("renderMarkdown", () => {
     expect(md).toContain("---");
   });
 
+  it("shows the chat's pinned model in the header, and omits the line for legacy rows", () => {
+    const withModel = renderMarkdown(makeDetail({ model: "GLM-5" }), "ru");
+    expect(withModel).toContain("> Модель: `GLM-5`");
+
+    const withoutModel = renderMarkdown(makeDetail({ model: "" }), "ru");
+    expect(withoutModel).not.toContain("Модель:");
+  });
+
   it.each([
     ["agent", "Агент"],
     ["plan", "План"],
@@ -325,16 +335,16 @@ describe("renderMarkdown", () => {
     expect(md).toContain("```````text\n" + output + "\n```````");
   });
 
-  it("truncates tool output over 20000 chars with the marker", () => {
-    const long = "a".repeat(20001);
+  it("keeps tool output of any length verbatim — exports feed agent-side analysis", () => {
+    const long = "a".repeat(25000);
     const md = renderMarkdown(
       makeDetail({
         messages: [makeMessage("assistant", [makePart("tool_call", { title: "run", raw: { content: long } })])],
       }),
       "ru",
     );
-    expect(md).toContain("a".repeat(20000) + "\n… вывод обрезан");
-    expect(md).not.toContain("a".repeat(20001));
+    expect(md).toContain(long);
+    expect(md).not.toContain("обрезан");
   });
 
   it("keeps tool output intact at exactly 20000 chars", () => {
@@ -534,13 +544,13 @@ describe("renderMarkdown", () => {
     expect(md).toContain("**Subagent**\n\n" + expected);
   });
 
-  it("truncates long subagent bodies with the marker", () => {
-    const long = "z".repeat(20001);
+  it("keeps long subagent bodies verbatim", () => {
+    const long = "z".repeat(25000);
     const md = renderMarkdown(
       makeDetail({ messages: [makeMessage("assistant", [makePart("subagent", { result: long })])] }),
       "ru",
     );
-    expect(md).toContain("z".repeat(20000) + "\n… вывод обрезан");
+    expect(md).toContain(long);
   });
 
   it("renders unknown part types via generic text extraction", () => {
@@ -601,12 +611,40 @@ describe("renderJson", () => {
       title: "Тест",
       provider: "omp",
       mode: "plan",
+      status: "idle",
       cwd: "C:\\proj",
+      acpSessionId: null,
+      pinned: false,
+      archived: false,
+      themeId: null,
       createdAt: "2026-08-16T08:00:00.000Z",
       updatedAt: "2026-08-16T09:00:00.000Z",
       lastMessageAt: "2026-08-16T10:00:00.000Z",
     });
     expect(parsed.messages).toEqual([]);
+  });
+
+  it("copies the full session meta — model, usage, board and task fields", () => {
+    const parsed = JSON.parse(renderJson(makeChatDetail({
+      model: "GLM-5",
+      boardId: "b1",
+      taskDescription: "сделать фичу",
+      startedAt: "2026-08-16T08:30:00.000Z",
+      doneAt: "2026-08-16T09:30:00.000Z",
+      mcpDisabledIds: ["mcp-1"],
+      modelParams: { reasoning: "high" },
+    }))) as { session: Record<string, unknown> };
+    expect(parsed.session).toMatchObject({
+      provider: "builtin",
+      model: "GLM-5",
+      boardId: "b1",
+      taskDescription: "сделать фичу",
+      startedAt: "2026-08-16T08:30:00.000Z",
+      doneAt: "2026-08-16T09:30:00.000Z",
+      mcpDisabledIds: ["mcp-1"],
+      modelParams: { reasoning: "high" },
+      usage: { inputTokens: 120, outputTokens: 45 },
+    });
   });
 
   it("keeps messages in order with role and createdAt", () => {
@@ -662,5 +700,111 @@ describe("renderJson", () => {
     expect(out.endsWith("\n")).toBe(true);
     expect(() => JSON.parse(out)).not.toThrow();
     expect(out).toContain("\n  \"session\": {");
+  });
+});
+
+// ---------- bulk export (chats bundle) ----------
+
+/** A chat detail with the full SessionDto population the bundle copies. */
+function makeChatDetail(overrides: Partial<SessionDetailDto> = {}): SessionDetailDto {
+  return makeDetail({
+    provider: "builtin",
+    model: "GLM-5",
+    boardId: null,
+    taskDescription: null,
+    startedAt: null,
+    doneAt: null,
+    mcpDisabledIds: [],
+    usage: { inputTokens: 120, outputTokens: 45 } as SessionDetailDto["usage"],
+    ...overrides,
+  });
+}
+
+describe("chatsExportFileName", () => {
+  it("stamps the provider and export date into the name", () => {
+    expect(chatsExportFileName("builtin", "2026-10-04T12:00:00.000Z")).toBe(
+      "acpio-builtin-chats-2026-10-04.json",
+    );
+  });
+
+  it("normalizes a multi-word provider", () => {
+    expect(chatsExportFileName("My Agent", "2026-10-04T12:00:00.000Z")).toBe(
+      "acpio-my-agent-chats-2026-10-04.json",
+    );
+  });
+});
+
+describe("renderChatsBundle", () => {
+  it("writes format/appVersion/counts and every chat's meta", () => {
+    const details = [
+      makeChatDetail({
+        title: "Чат 1",
+        archived: true,
+        boardId: "b1",
+        taskDescription: "сделать фичу",
+        messages: [makeMessage("user", [makePart("text", { text: "привет" })])],
+      }),
+      makeChatDetail({ title: "Чат 2", messages: [] }),
+    ];
+    const parsed = JSON.parse(renderChatsBundle(details, { exportedAt: "2026-10-04T09:00:00.000Z" })) as {
+      format: string;
+      version: number;
+      appVersion: string;
+      exportedAt: string;
+      chatCount: number;
+      messageCount: number;
+      chats: Array<{
+        session: Record<string, unknown>;
+        messages: Array<{ role: string; parts: Array<{ type: string }> }>;
+      }>;
+    };
+    expect(parsed.format).toBe("acpio-chats");
+    expect(parsed.version).toBe(1);
+    expect(typeof parsed.appVersion).toBe("string");
+    expect(parsed.exportedAt).toBe("2026-10-04T09:00:00.000Z");
+    expect(parsed.chatCount).toBe(2);
+    expect(parsed.messageCount).toBe(1);
+    expect(parsed.chats[0].session).toMatchObject({
+      title: "Чат 1",
+      provider: "builtin",
+      model: "GLM-5",
+      archived: true,
+      boardId: "b1",
+      taskDescription: "сделать фичу",
+      acpSessionId: null,
+      startedAt: null,
+      doneAt: null,
+    });
+    expect(parsed.chats[0].messages[0].parts[0]).toMatchObject({ type: "text" });
+    expect(parsed.chats[1].messages).toEqual([]);
+  });
+
+  it("keeps part payloads verbatim, however long they are", () => {
+    const blob = "iVBORw0KGgo==".repeat(80);
+    const dump = "x".repeat(25_000);
+    const detail = makeChatDetail({
+      messages: [
+        makeMessage("assistant", [makePart("tool_call", { raw: { output: blob, dump } })]),
+      ],
+    });
+    const parsed = JSON.parse(renderChatsBundle([detail])) as {
+      chats: Array<{
+        messages: Array<{ parts: Array<{ payload: { raw: { output: string; dump: string } } }> }>;
+      }>;
+    };
+    expect(parsed.chats[0].messages[0].parts[0].payload.raw.output).toBe(blob);
+    expect(parsed.chats[0].messages[0].parts[0].payload.raw.dump).toBe(dump);
+  });
+
+  it("renders an empty population as a valid empty bundle", () => {
+    const parsed = JSON.parse(renderChatsBundle([])) as { chatCount: number; chats: unknown[] };
+    expect(parsed.chatCount).toBe(0);
+    expect(parsed.chats).toEqual([]);
+  });
+
+  it("pretty-prints and ends with a newline", () => {
+    const out = renderChatsBundle([makeChatDetail()]);
+    expect(out.endsWith("\n")).toBe(true);
+    expect(out).toContain("\n  \"chats\": [");
   });
 });

@@ -199,6 +199,61 @@ describe("saveSessionExportToServer", () => {
   });
 });
 
+describe("downloadChatsExport", () => {
+  it("GETs the bundle for the builtin provider by default and downloads the file", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse("{}", {
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Disposition": "attachment; filename*=UTF-8''acpio-builtin-chats-2026-10-04.json",
+        },
+      }),
+    );
+
+    await api.downloadChatsExport();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/export/chats?provider=builtin",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    const clicked = anchorClickSpy.mock.instances[0] as HTMLAnchorElement;
+    expect(clicked.download).toBe("acpio-builtin-chats-2026-10-04.json");
+    expect(clicked.href).toBe("blob:mock");
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+  });
+
+  it("encodes a custom provider into the query", async () => {
+    fetchMock.mockResolvedValue(jsonResponse("{}", { headers: { "Content-Type": "application/json" } }));
+    await api.downloadChatsExport("my agent");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/export/chats?provider=my%20agent",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    const clicked = anchorClickSpy.mock.instances[0] as HTMLAnchorElement;
+    expect(clicked.download).toBe("acpio-my agent-chats.json");
+  });
+});
+
+describe("saveChatsExportToServer", () => {
+  it("POSTs {provider} for the builtin default", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse({ ok: true, path: "/tmp/a.json", fileName: "a.json", count: 3 }),
+    );
+    await expect(api.saveChatsExportToServer()).resolves.toMatchObject({ count: 3 });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/export/chats");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ provider: "builtin" });
+  });
+
+  it("POSTs {provider, dir} when a directory is given", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, path: "/tmp/a.json", fileName: "a.json", count: 0 }));
+    await api.saveChatsExportToServer("omp", "/tmp/exports");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({ provider: "omp", dir: "/tmp/exports" });
+  });
+});
+
 describe("getExportDefaultDir", () => {
   it("GETs /api/export/default-dir and resolves {path}", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ path: "E:\\exports" }));

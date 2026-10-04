@@ -33,6 +33,8 @@ const apiMock = vi.hoisted(() => {
       ...DEFAULT_SETTINGS,
       ...patch,
     })),
+    // The export dialog probes the server export dir when it opens.
+    getExportDefaultDir: vi.fn(async () => ({ path: "/srv/exports" })),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -331,5 +333,35 @@ describe("BoardPage new task form", () => {
     fireEvent.mouseDown(textarea);
 
     expect(screen.getByPlaceholderText("Describe the task…")).toBeTruthy();
+  });
+});
+
+describe("BoardPage card context menu", () => {
+  // Board tasks live outside the chat tree, so the tree row menu never
+  // reaches them: the card carries its own context menu, and exporting the
+  // task's chat is the entry it opens with.
+  it("exports a task's chat from the card's context menu", async () => {
+    renderBoard();
+    const card = await screen.findByText("Fix the login bug");
+
+    fireEvent.contextMenu(card);
+
+    const menu = screen.getByRole("menu");
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Export chat" }));
+
+    // The dialog took over — same title key, so the format radio disambiguates.
+    expect(await screen.findByRole("radio", { name: "Markdown (.md)" })).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("dismisses the card menu on a press outside it", async () => {
+    renderBoard();
+    const card = await screen.findByText("Fix the login bug");
+
+    fireEvent.contextMenu(card);
+    expect(screen.getByRole("menu")).toBeTruthy();
+
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

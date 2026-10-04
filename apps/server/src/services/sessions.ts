@@ -122,6 +122,12 @@ export async function listSessions(): Promise<SessionDto[]> {
   return mapSessionRows(await db.select().from(sessions).where(isNull(sessions.boardId)));
 }
 
+/** Every session of one provider across every partition (chat tree, boards,
+ *  archive) — the bulk chat export reads the whole population at once. */
+export async function listSessionsByProvider(provider: string): Promise<SessionDto[]> {
+  return mapSessionRows(await db.select().from(sessions).where(eq(sessions.provider, provider)));
+}
+
 /** Sessions by id across every partition (chat tree and boards) — for sweeps
  *  over live agent runtimes, which are not partitioned. */
 export async function listSessionsByIds(ids: string[]): Promise<SessionDto[]> {

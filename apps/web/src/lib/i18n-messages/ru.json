@@ -1100,7 +1100,15 @@
     "copied": "Скопировано",
     "copying": "Копирование…",
     "deepLogging": "Глубокое логирование",
-    "deepLoggingHint": "Пишет JSONL в папку дампов: промпты, скиллы, модель, MCP и весь ACP-трафик (acpio-deep-ГГГГ-ММ-ДД.jsonl)."
+    "deepLoggingHint": "Пишет JSONL в папку дампов: промпты, скиллы, модель, MCP и весь ACP-трафик (acpio-deep-ГГГГ-ММ-ДД.jsonl).",
+    "exportChatsTitle": "Экспорт всех чатов",
+    "exportChatsHint": "Скачайте все чаты встроенного агента одним JSON-файлом — артефакт для сообщения об ошибке агента.",
+    "exportChatsDownload": "Скачать файл",
+    "exportChatsSave": "Сохранить на сервере",
+    "exportChatsSaving": "Экспорт…",
+    "exportChatsDownloaded": "Файл скачан",
+    "exportChatsSavedTo": "Сохранено чатов: {{count}} — {{path}}",
+    "exportChatsServerHint": "На сервере экспорты сохраняются в {{path}}"
   },
   "export": {
     "user": "Пользователь",

@@ -968,9 +968,9 @@ export const ru = {
     metaProvider: "Провайдер",
     metaMode: "Режим",
     metaFolder: "Рабочая папка",
+    metaModel: "Модель",
     metaMessages: "Сообщений",
     metaExported: "Экспортировано",
-    outputTruncated: "… вывод обрезан",
     emptyMessage: "(пусто)",
   },
 };

@@ -111,7 +111,7 @@ import {
   stashGit,
   syncGit,
 } from "./services/git.js";
-import { buildExport, defaultExportDir, saveExportToDisk } from "./services/chatExport.js";
+import { buildChatsExport, buildExport, defaultExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
 import { adapters } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
@@ -968,6 +968,41 @@ export async function registerRoutes(app: FastifyInstance) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(err instanceof Error && err.message === "Session not found" ? 404 : 500).send({ error: message });
+    }
+  });
+
+  /**
+   * Download every chat of one provider (?provider=builtin, the default) as a
+   * single JSON bundle — the artifact users attach when reporting on an agent.
+   */
+  app.get("/api/export/chats", async (req, reply) => {
+    const q = req.query as { provider?: string };
+    const provider = (q.provider ?? "builtin").trim() || "builtin";
+    const built = await buildChatsExport(provider);
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(built.fileName)}`,
+    );
+    return reply
+      .type("application/json; charset=utf-8")
+      .header("Cache-Control", "no-store")
+      .send(built.content);
+  });
+
+  /** Save the bundle on the server machine (same dir as single-chat exports). */
+  app.post("/api/export/chats", async (req, reply) => {
+    const body = z
+      .object({
+        provider: z.string().max(64).default("builtin"),
+        dir: z.string().max(4096).optional(),
+      })
+      .parse(req.body ?? {});
+    try {
+      const saved = await saveChatsExportToDisk(body.provider, body.dir);
+      return { ok: true, ...saved };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(500).send({ error: message });
     }
   });
 

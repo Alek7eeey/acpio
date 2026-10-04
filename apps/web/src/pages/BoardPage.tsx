@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import { boardColumn, type AgentProvider, type BoardColumn, type SessionDto } from "@acpio/shared";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
+import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
@@ -92,11 +93,18 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [agentMenu, setAgentMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
     null,
   );
+  /** The task card's own context menu (right-click anywhere on the card). */
+  const [taskMenu, setTaskMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
+    null,
+  );
+  const [taskMenuPos, setTaskMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [exportTaskId, setExportTaskId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
+  const taskMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** The new-task form as a whole — a press inside it must not dismiss it. */
   const composerBoxRef = useRef<HTMLDivElement>(null);
@@ -231,6 +239,23 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       document.removeEventListener("keydown", onKey);
     };
   }, [agentMenu]);
+
+  useEffect(() => {
+    if (!taskMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (taskMenuRef.current?.contains(e.target as Node)) return;
+      setTaskMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTaskMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [taskMenu]);
 
   const columns = useMemo(() => {
     const byColumn: Record<BoardColumn, SessionDto[]> = {
@@ -410,6 +435,33 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     });
   };
 
+  /** Open the card menu where the press landed; place it after measuring. */
+  const openTaskMenu = (e: React.MouseEvent, task: SessionDto) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTaskMenu({ task, x: e.clientX, y: e.clientY });
+  };
+
+  /** Measure → clamp into the viewport, before paint (no wrong-spot flash). */
+  useLayoutEffect(() => {
+    const el = taskMenuRef.current;
+    if (!taskMenu || !el) {
+      setTaskMenuPos(null);
+      return;
+    }
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const x = Math.min(
+      Math.max(12, taskMenu.x),
+      Math.max(12, window.innerWidth - width - 12),
+    );
+    const y = Math.min(
+      Math.max(12, taskMenu.y),
+      Math.max(12, window.innerHeight - height - 12),
+    );
+    setTaskMenuPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
+  });
+
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = boardColumn(task);
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
@@ -420,6 +472,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         data-task-id={task.id}
         className={`${styles.card} ${column === "progress" ? styles.cardLive : ""}`}
         onClick={() => void openTask(task)}
+        onContextMenu={(e) => openTaskMenu(e, task)}
       >
         <div className={styles.cardTop}>
           <span className={styles.chip} title={task.cwd}>
@@ -933,6 +986,43 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           document.body,
         )}
 
+      {taskMenu &&
+        createPortal(
+          <div
+            ref={taskMenuRef}
+            className={styles.menu}
+            style={{
+              left: taskMenuPos?.x ?? taskMenu.x,
+              top: taskMenuPos?.y ?? taskMenu.y,
+              visibility: taskMenuPos ? "visible" : "hidden",
+            }}
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                const task = taskMenu.task;
+                setTaskMenu(null);
+                setExportTaskId(task.id);
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 3v12m0 0 5-5m-5 5-5-5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("chat.exportChat")}
+            </button>
+          </div>,
+          document.body,
+        )}
+
       {foldersOpen &&
         createPortal(
           <div className={styles.backdrop} onClick={() => setFoldersOpen(false)}>
@@ -1099,6 +1189,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           }}
         />
       )}
+
+      {exportTaskId &&
+        createPortal(
+          <ExportDialog open sessionId={exportTaskId} onClose={() => setExportTaskId(null)} />,
+          document.body,
+        )}
     </div>
   );
 }

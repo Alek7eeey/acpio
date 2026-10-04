@@ -1080,7 +1080,15 @@
     "copied": "Copied",
     "copying": "Copying…",
     "deepLogging": "Deep logging",
-    "deepLoggingHint": "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl)."
+    "deepLoggingHint": "Append JSONL traces to the dump folder: prompts, skills, model, MCP, and all ACP traffic (acpio-deep-YYYY-MM-DD.jsonl).",
+    "exportChatsTitle": "Export all chats",
+    "exportChatsHint": "Download every chat of the built-in agent as one JSON bundle — the artifact to attach when reporting on the agent.",
+    "exportChatsDownload": "Download bundle",
+    "exportChatsSave": "Save on server",
+    "exportChatsSaving": "Exporting…",
+    "exportChatsDownloaded": "Bundle downloaded",
+    "exportChatsSavedTo": "Saved {{count}} chats to {{path}}",
+    "exportChatsServerHint": "The server saves exports to {{path}}"
   },
   "export": {
     "user": "User",

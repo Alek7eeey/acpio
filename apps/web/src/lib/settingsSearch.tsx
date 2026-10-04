@@ -211,6 +211,10 @@ export function settingsSearchIndex(
       t("diagnostics.dumpsHint"),
       t("diagnostics.createNow"),
       t("diagnostics.copyJson"),
+      t("diagnostics.exportChatsTitle"),
+      t("diagnostics.exportChatsHint"),
+      t("diagnostics.exportChatsDownload"),
+      t("diagnostics.exportChatsSave"),
     ],
     remote: [
       t("settings.remoteAccess"),

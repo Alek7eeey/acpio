@@ -1,10 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { toolDisplayTitle, type AppLocale, type AppSettings, type MessageDto, type SessionDetailDto } from "@acpio/shared";
+import {
+  BUILD_INFO,
+  toolDisplayTitle,
+  type AppLocale,
+  type AppSettings,
+  type MessageDto,
+  type SessionDetailDto,
+} from "@acpio/shared";
 import { t } from "@acpio/i18n";
 import { REPO_ROOT } from "../db/client.js";
 import { getSettings } from "./settings.js";
-import { getSessionDetail } from "./sessions.js";
+import { getSessionDetail, listSessionsByProvider } from "./sessions.js";
 
 export type ExportFormat = "md" | "json";
 
@@ -150,13 +157,6 @@ export function fenceFor(text: string): string {
   return "`".repeat(Math.max(longest + 1, 3));
 }
 
-const TOOL_OUTPUT_CAP = 20000;
-
-function truncate(text: string, locale: AppLocale): string {
-  if (text.length <= TOOL_OUTPUT_CAP) return text;
-  return `${text.slice(0, TOOL_OUTPUT_CAP)}\n${t(locale, "export.outputTruncated")}`;
-}
-
 function roleLabel(role: MessageDto["role"], locale: AppLocale): string {
   if (role === "user") return t(locale, "export.user");
   if (role === "assistant") return t(locale, "export.assistant");
@@ -201,7 +201,8 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
             typeof raw.toolName === "string" ? raw.toolName : undefined,
             raw.rawInput ?? raw.input ?? raw.arguments,
           ) || t(locale, "export.tool");
-        const output = truncate(toolOutputText(part), locale);
+        // Exports feed agent-side analysis: output goes in full, never clipped.
+        const output = toolOutputText(part);
         lines.push(`**${t(locale, "export.tool")}: ${title}**`, "");
         if (output) {
           const fence = fenceFor(output);
@@ -211,7 +212,7 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
       }
       case "subagent": {
         const title = subagentTitle(part);
-        const body = truncate(subagentBody(part), locale);
+        const body = subagentBody(part);
         lines.push(`**${t(locale, "export.subagent")}${title ? `: ${title}` : ""}**`, "");
         if (body) {
           lines.push(body, "");
@@ -287,6 +288,9 @@ export function renderMarkdown(detail: SessionDetailDto, locale: AppLocale): str
   const out: string[] = [];
   out.push(`# ${detail.title}`, "");
   out.push(`> ${t(locale, "export.meta")}: ${detail.provider} · ${modeLabel(detail.mode, locale)}`, "");
+  if (detail.model?.trim()) {
+    out.push(`> ${t(locale, "export.metaModel")}: \`${detail.model}\``, "");
+  }
   if (detail.cwd?.trim()) {
     out.push(`> ${t(locale, "export.metaFolder")}: \`${detail.cwd}\``, "");
   }
@@ -315,7 +319,20 @@ export function renderJson(detail: SessionDetailDto): string {
       title: detail.title,
       provider: detail.provider,
       mode: detail.mode,
+      status: detail.status,
       cwd: detail.cwd,
+      model: detail.model,
+      acpSessionId: detail.acpSessionId,
+      usage: detail.usage,
+      taskDescription: detail.taskDescription,
+      pinned: detail.pinned,
+      archived: detail.archived,
+      boardId: detail.boardId,
+      themeId: detail.themeId,
+      startedAt: detail.startedAt,
+      doneAt: detail.doneAt,
+      mcpDisabledIds: detail.mcpDisabledIds,
+      modelParams: detail.modelParams,
       createdAt: detail.createdAt,
       updatedAt: detail.updatedAt,
       lastMessageAt: detail.lastMessageAt,
@@ -346,6 +363,20 @@ export async function buildExport(
   return { detail, content, fileName: exportFileName(detail, format) };
 }
 
+/** First non-taking path for base.ext, base-2.ext, base-3.ext, … in dir. */
+async function freeFilePath(targetDir: string, base: string, ext: string): Promise<string> {
+  let filePath = path.join(targetDir, `${base}.${ext}`);
+  for (let i = 2; i <= 999; i += 1) {
+    try {
+      await fs.access(filePath);
+    } catch {
+      return filePath; // free name
+    }
+    filePath = path.join(targetDir, `${base}-${i}.${ext}`);
+  }
+  return filePath;
+}
+
 /**
  * Write the export into the server export dir (settings.exportDir override,
  * default REPO_ROOT/exports). Never overwrites: appends -2, -3, … when the
@@ -361,21 +392,109 @@ export async function saveExportToDisk(
 
   const targetDir = dir?.trim() ? path.resolve(dir.trim()) : await resolveExportDir();
   await fs.mkdir(targetDir, { recursive: true });
-
-  const base = built.fileName.replace(/\.[^.]+$/, "");
-  const ext = format === "md" ? "md" : "json";
-  let fileName = `${base}.${ext}`;
-  let filePath = path.join(targetDir, fileName);
-  for (let i = 2; i <= 999; i += 1) {
-    try {
-      await fs.access(filePath);
-    } catch {
-      break; // free name
-    }
-    fileName = `${base}-${i}.${ext}`;
-    filePath = path.join(targetDir, fileName);
-  }
-
+  const filePath = await freeFilePath(
+    targetDir,
+    built.fileName.replace(/\.[^.]+$/, ""),
+    format === "md" ? "md" : "json",
+  );
   await fs.writeFile(filePath, built.content, "utf8");
-  return { path: filePath, fileName };
+  return { path: filePath, fileName: path.basename(filePath) };
+}
+
+// ---------- bulk export (one bundle per provider) ----------
+
+export function chatsExportFileName(provider: string, exportedAt: string): string {
+  const base = safeFileBase(provider).toLowerCase().replace(/\s+/g, "-");
+  return `acpio-${base}-chats-${exportedAt.slice(0, 10)}.json`;
+}
+
+/**
+ * Machine-readable bundle of every chat of one provider — the payload we ask
+ * users to attach when reporting on the built-in agent. Meta per chat plus
+ * every message with its parts (tool calls, thoughts, plans) stored verbatim:
+ * no truncation, no omission — the bundle is the full record.
+ */
+export function renderChatsBundle(
+  details: SessionDetailDto[],
+  opts?: { exportedAt?: string },
+): string {
+  const exportedAt = opts?.exportedAt ?? new Date().toISOString();
+  const data = {
+    format: "acpio-chats",
+    version: 1,
+    appVersion: BUILD_INFO.version,
+    exportedAt,
+    chatCount: details.length,
+    messageCount: details.reduce((sum, d) => sum + d.messages.length, 0),
+    chats: details.map((detail) => ({
+      session: {
+        id: detail.id,
+        title: detail.title,
+        provider: detail.provider,
+        mode: detail.mode,
+        status: detail.status,
+        cwd: detail.cwd,
+        model: detail.model,
+        modelParams: detail.modelParams,
+        acpSessionId: detail.acpSessionId,
+        usage: detail.usage,
+        taskDescription: detail.taskDescription,
+        pinned: detail.pinned,
+        archived: detail.archived,
+        boardId: detail.boardId,
+        themeId: detail.themeId,
+        startedAt: detail.startedAt,
+        doneAt: detail.doneAt,
+        mcpDisabledIds: detail.mcpDisabledIds,
+        createdAt: detail.createdAt,
+        updatedAt: detail.updatedAt,
+        lastMessageAt: detail.lastMessageAt,
+      },
+      messages: detail.messages.map((m) => ({
+        role: m.role,
+        createdAt: m.createdAt,
+        parts: m.parts.map((p) => ({
+          type: p.type,
+          order: p.order,
+          createdAt: p.createdAt,
+          payload: p.payload,
+        })),
+      })),
+    })),
+  };
+  return JSON.stringify(data, null, 2) + "\n";
+}
+
+/** Build the bundle for one provider across chat tree, boards and archive. */
+export async function buildChatsExport(
+  provider: string,
+): Promise<{ content: string; fileName: string; count: number }> {
+  const sessions = await listSessionsByProvider(provider);
+  const details: SessionDetailDto[] = [];
+  for (const session of sessions) {
+    const detail = await getSessionDetail(session.id);
+    if (detail) details.push(detail);
+  }
+  const exportedAt = new Date().toISOString();
+  return {
+    content: renderChatsBundle(details, { exportedAt }),
+    fileName: chatsExportFileName(provider, exportedAt),
+    count: details.length,
+  };
+}
+
+/**
+ * Write the bundle into the server export dir (same dir as single-chat
+ * exports). Never overwrites: appends -2, -3, … when the name is taken.
+ */
+export async function saveChatsExportToDisk(
+  provider: string,
+  dir?: string,
+): Promise<{ path: string; fileName: string; count: number }> {
+  const built = await buildChatsExport(provider);
+  const targetDir = dir?.trim() ? path.resolve(dir.trim()) : await resolveExportDir();
+  await fs.mkdir(targetDir, { recursive: true });
+  const filePath = await freeFilePath(targetDir, built.fileName.replace(/\.json$/, ""), "json");
+  await fs.writeFile(filePath, built.content, "utf8");
+  return { path: filePath, fileName: path.basename(filePath), count: built.count };
 }
