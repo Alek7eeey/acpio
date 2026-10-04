@@ -3,5 +3,6 @@
   "title": "Multi-hunk patches fail with context mismatch when an earlier hunk shifts lines",
   "prompt": "Our patch tooling started rejecting perfectly valid patches: any patch whose earlier hunk adds or removes lines makes the next hunk fail with 'context mismatch'. Applying hunks one at a time works, so the per-hunk matching is fine — the position tracking between hunks is not. Fix lib/apply.mjs so every hunk lands where its header says relative to the original file, whatever the earlier hunks did to the line count. Public API stays the same. Verify with your own script before answering.",
   "timeoutMs": 300000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

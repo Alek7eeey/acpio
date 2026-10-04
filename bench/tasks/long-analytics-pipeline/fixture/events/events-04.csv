@@ -1,0 +1,4 @@
+id,ts,user,action,minutes
+e8,2026-10-01T09:30:00Z,bob,ingest,18
+e9,not-a-date,carol,transform,10
+e10,,bob,review,5

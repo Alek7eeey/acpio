@@ -51,6 +51,11 @@ node bench/run-docker.mjs --agents builtin --concurrency 8
 node bench/run.mjs                                  # host fast loop (dev only)
 node bench/run.mjs --agents builtin --repeats 3     # one agent, averaged
 node bench/run.mjs --agents pi,omp --tasks fix-sum  # a subset
+node bench/run.mjs --family long                    # the long-horizon family (20 min/task)
+node bench/run.mjs --tasks fix-sum --faults junk-context  # A/B: same task, obstructed
+node bench/run.mjs --tasks-root bench/private/tasks --tasks priv-copy-overwrite
+node bench/horizon.mjs                              # pass rate by human-time bucket
+node bench/selftest.mjs                             # bug fails, golds pass, faults don't mask
 node bench/run.mjs --keep                           # leave workspaces on disk
 node bench/run.mjs --model openai/gpt-4o-mini       # another provider
 node bench/run.mjs --proxy-verbose                  # log every model call
@@ -58,30 +63,13 @@ node bench/run.mjs --proxy-dump                     # keep full request bodies
 node bench/run.mjs --no-proxy                       # direct calls, no capture
 ```
 
-Each run gets a fresh workspace copied from the task's `fixture/`, a wall-clock
-budget, and — after the agent stops — a hidden `verify.mjs` the agent never saw.
-`PASS` means the verifier exited 0. Results are written to
+The default sweep is the fast contour: tasks whose `horizon` is `xs`/`s`
+(`long` tasks opt in via `--family long` or an explicit `--tasks` list).
+Each run gets a fresh workspace copied from the task's `fixture/`, a
+wall-clock budget, and — after the agent stops — a hidden `verify.mjs` the
+agent never saw. `PASS` means the verifier exited 0. Results are written to
 `bench/results/<stamp>.jsonl` (machine rows), `<stamp>.md` (table), and
 `<stamp>.calls.jsonl` (one line per model call, from the proxy).
-
-## Layout
-
-```
-bench/
-  run.mjs                 orchestrator + report (host fast loop, dev only)
-  run-docker.mjs          same tasks in the SWE-style docker sandbox (default)
-  lib/util.mjs            process/workspace/verify helpers
-  lib/jsonl.mjs           pi/omp `--mode json` event parsing → metrics
-  lib/cli-agent.mjs       spawn drivers for pi and omp
-  lib/builtin-agent.mjs   boots the real acpio server and drives the builtin agent
-  lib/proxy.mjs           capturing OpenAI-compatible proxy (the wire, not self-reports)
-  swe/                    SWE-bench Verified (the real corpus) — see swe/README.md
-  swe-tasks/              swe task definitions (easy/medium/hard) for gen-swe-tasks.mjs
-  tasks/<id>/
-    task.json             prompt, timeout, difficulty (swe family)
-    fixture/              files the agent starts with
-    verify.mjs            hidden, copied in only for grading
-```
 
 ## How each agent is driven
 
@@ -180,7 +168,75 @@ token counts) — the append-only statistic future analysis reads first.
 ## Adding a task
 
 1. `bench/tasks/<id>/task.json` — `{ "id", "title", "prompt", "timeoutMs",
-   "difficulty" }` (the last one for the generated swe family: easy/medium/hard).
+   "difficulty", "horizon", "family" }`. `difficulty` is the generated swe
+   family's grade (easy/medium/hard); `horizon` is the estimated HUMAN time
+   bucket (`xs` <15 min, `s` 15–60 min, `m` 1–4 h, `l` >4 h — the
+   METR-style ladder `bench/horizon.mjs` reports by); `family` groups the
+   task (`long` multi-phase, `ambiguity` underspecified asks, `private`
+   internal incidents; unset = the base synthetic corpus).
 2. `fixture/` — the starting workspace (omit for a from-scratch task).
 3. `verify.mjs` — re-checks the requirement from scratch; never import the
    fixture's own tests, or a modified test passes the run.
+4. Optional `solution/` (and `solution-alt/` for tasks with several
+   defensible readings) — a full snapshot of the solved fixture. Required
+   input for `bench/selftest.mjs`.
+5. Optional `faults.mjs` — named, strictly additive workspace mutations
+   (misleading notes, planted noise) applied only on `--faults <name>`. A
+   fault must never touch the graded path, so clean and faulted runs stay
+   comparable A/B.
+6. `node bench/selftest.mjs --only <id>` must be green: pristine fixture
+   fails, every solution passes, faults obstruct without masking.
+
+## Everyday-capability layer
+
+The SWE-shaped corpora measure "fix someone else's bug from a good issue".
+The shapes below cover what everyday use actually stresses; each is opt-in
+and additive — the default sweep stays the fast xs/s contour.
+
+- **Time-horizon ladder** — `node bench/horizon.mjs [--model m]`: pass rate
+  by human-time bucket across the host and SWE ledgers (Verified instances
+  carry the dataset's own difficulty annotation). This is the headline
+  "everyday capability" number: a flat pass rate over uniformly short tasks
+  says nothing about multi-hour work.
+- **`long` family** (`--tasks long-*` or `--family long`, 20-minute agent
+  budget): green a red suite across four root causes, build a pipeline from
+  SPEC.md over dirty CSVs, migrate an app between routers behavior-preserving,
+  split a monolith by contract. Behavioral hidden verifiers, no diff oracles —
+  and the only tasks long enough to exercise compaction mid-run.
+- **`ambiguity` family**: one-paragraph asks that leave real choices open.
+  The hidden verifier accepts any defensible interpretation (multi-oracle)
+  and requires an ASSUMPTIONS.md; a `rubric.md` per task grades the handling
+  for a future LLM judge.
+- **Fault injection** — `--faults <name>` (repeatable list): applies the
+  task's `faults.mjs` mutation before the agent starts. Compare faulted vs
+  clean pass rates and uncached tokens for the same task; `faults` is
+  recorded in the result row and the ledger.
+- **`private` eval** — `bench/private/` (Russian README): tasks distilled
+  from this repo's own incidents, run only via
+  `--tasks-root bench/private/tasks`. `bench/private/extract.mjs <commit>
+  <task-id>` scaffolds a task from a real fix.
+
+## Layout
+
+```
+bench/
+  run.mjs                 orchestrator + report (host fast loop, dev only)
+  run-docker.mjs          same tasks in the SWE-style docker sandbox (default)
+  horizon.mjs             pass rate by human-time bucket (the ladder)
+  selftest.mjs            corpus honesty: bug fails, gold passes, faults don't mask
+  lib/util.mjs            process/workspace/verify helpers
+  lib/jsonl.mjs           pi/omp `--mode json` event parsing → metrics
+  lib/cli-agent.mjs       spawn drivers for pi and omp
+  lib/builtin-agent.mjs   boots the real acpio server and drives the builtin agent
+  lib/faults.mjs          --faults applier (strictly additive mutations)
+  lib/proxy.mjs           capturing OpenAI-compatible proxy (the wire, not self-reports)
+  private/                internal-incident tasks + scaffolder (see private/README.md)
+  swe/                    SWE-bench Verified (the real corpus) — see swe/README.md
+  swe-tasks/              swe task definitions (easy/medium/hard) for gen-swe-tasks.mjs
+  tasks/<id>/
+    task.json             prompt, timeout, difficulty, horizon, family
+    fixture/              files the agent starts with
+    verify.mjs            hidden, copied in only for grading
+    solution/             gold snapshot(s) for selftest (never shipped to the agent)
+    faults.mjs            optional named mutations for --faults
+```

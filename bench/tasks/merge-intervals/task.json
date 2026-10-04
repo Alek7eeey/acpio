@@ -3,5 +3,6 @@
   "title": "Booking calendar double-counts back-to-back ranges",
   "prompt": "The busy/free view double-counts time: adjacent bookings like 09:00-10:00 and 10:00-11:00 no longer merge, so totalCovered reports twice the occupied time across the touch point. Per the header of lib/intervals.mjs, touching ranges (end === next start) MUST merge — a zero-length gap is no gap. Fix lib/intervals.mjs and verify with your own script (touching, overlapping, contained, disjoint, empty, input not mutated, totalCovered) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

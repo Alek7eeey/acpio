@@ -3,5 +3,6 @@
   "title": "Tied scores get different ranks",
   "prompt": "The leaderboard shows tied players with different ranks — two players with 150 points show as #2 and #3. lib/rank.mjs documents competition ranking ('1,2,2,4'): equals share a rank and the next distinct score lands one past the whole tie group. A cleanup pass lost the sharing. Fix lib/rank.mjs and verify with your own script (tie in the middle, three-way tie at the top, no ties, single entry, empty input, input order preserved) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

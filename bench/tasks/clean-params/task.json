@@ -3,5 +3,6 @@
   "title": "page=0 and enabled=false vanish from API requests",
   "prompt": "Clients report that requesting page 0 or sending enabled=false drops the parameter entirely, so the backend falls back to its defaults. lib/params.mjs is specified to drop ONLY null, undefined and empty-string values — a real 0 or false is a meaningful value and must survive. Fix lib/params.mjs and verify with your own script (zero, false, empty string, null, undefined, lone values, input not mutated) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

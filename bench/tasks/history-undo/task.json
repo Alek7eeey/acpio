@@ -3,5 +3,6 @@
   "title": "Redo resurrects state that the user overwrote",
   "prompt": "Users of the editor: undo, type something new, press redo — the panel jumps back to the discarded pre-edit state. The rule is the classic one: committing a new value clears the redo branch, because after an edit there is nothing to redo. Fix lib/history.mjs and verify with your own script (commit/undo/commit/redo, walking to both ends, no-op undo/redo) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

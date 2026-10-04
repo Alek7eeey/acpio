@@ -3,5 +3,6 @@
   "title": "Events from the first half of every bucket land in the previous one",
   "prompt": "Since the metrics cleanup, dashboards show events at :35 landing in the :30 bucket of the PREVIOUS hour window — an event at 10:35 with 10-minute buckets must be in the 10:30 bucket but shows in 11:00's... in short, half the events drift one bucket to the right. lib/buckets.mjs documents tumbling buckets: an event belongs to the bucket CONTAINING its own timestamp, bucketStart = floor(ts / bucketMs) * bucketMs, end exclusive. Fix lib/buckets.mjs and verify with your own script (event just inside a bucket, at the boundary, exact midpoint, sums with out-of-order events, empty input) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

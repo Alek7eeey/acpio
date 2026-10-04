@@ -3,5 +3,6 @@
   "title": "Orders beyond a million collide on the printed label",
   "prompt": "Order 1000000 prints as ORD-000000 — the same label as order 0. lib/id.mjs documents the width as a FLOOR: sequences above six digits keep every digit, truncation would collide two orders. Fix lib/id.mjs and verify with your own script (small ids, exactly six digits, seven digits, eight digits, zero, negative throws, fractional throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

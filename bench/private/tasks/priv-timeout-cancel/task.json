@@ -1,0 +1,9 @@
+{
+  "id": "priv-timeout-cancel",
+  "title": "A timed-out job must be stopped, not orphaned",
+  "prompt": "lib/pool.mjs runs labeled jobs with a wall-clock ceiling. In production we saw a timed-out job keep running in the background and later land its result under the next job that reused the label — the \"zombie\" corrupted the run ledger. Reproduce the zombie with a scripted job (a deferred promise is enough), then fix the pool: when the ceiling fires, the job must be aborted via the AbortSignal it receives, its late result must never be recorded, and the pool's active count must return to zero while the zombie winds down.",
+  "timeoutMs": 240000,
+  "difficulty": "hard",
+  "horizon": "s",
+  "family": "private"
+}

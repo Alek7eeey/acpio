@@ -3,5 +3,6 @@
   "title": "Error logs print the first half of API tokens",
   "prompt": "A customer pasted a support bundle and the first characters of their API key were right there in the log line. lib/mask.mjs is the redaction helper for log fields; its header states the policy: everything but the LAST 4 characters becomes '*', secrets of 4 chars or fewer are masked completely. After a make-support-easier change the helper keeps the FIRST characters instead — a leak. Fix lib/mask.mjs and verify with your own script (long tokens, 5-char secret, 4-char and shorter, empty string, non-string input throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

@@ -1,0 +1,12 @@
+{
+  "id": "long-analytics-pipeline",
+  "title": "Build the ingest pipeline from SPEC.md (dirty CSVs in, report out)",
+  "prompt": "Implement the ingest pipeline described in SPEC.md: write pipeline/run.mjs (Node standard library only), run `node pipeline/run.mjs` from the repo root so that out/report.json and out/summary.md are produced, and check them against SPEC.md yourself. The CSVs in events/ deliberately contain every quirk the SPEC mentions.",
+  "timeoutMs": 1200000,
+  "difficulty": "hard",
+  "horizon": "m",
+  "family": "long",
+  "faults": [
+    "spec-conflict"
+  ]
+}

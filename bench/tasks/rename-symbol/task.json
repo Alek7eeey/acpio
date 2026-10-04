@@ -2,5 +2,6 @@
   "id": "rename-symbol",
   "title": "Rename a symbol across three files",
   "prompt": "Rename the function calcTotal to computeTotal everywhere in this workspace: its definition, every import, and every call site. Keep behaviour identical and leave no occurrence of the old name behind.",
-  "timeoutMs": 240000
+  "timeoutMs": 240000,
+  "horizon": "s"
 }

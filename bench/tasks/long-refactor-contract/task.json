@@ -1,0 +1,9 @@
+{
+  "id": "long-refactor-contract",
+  "title": "Split src/mega.mjs by concern without changing behavior",
+  "prompt": "Read STRUCTURE.md and CONTRACT.md, then refactor: split src/mega.mjs into the four concern modules behind the same public entry src/index.mjs, delete mega.mjs, keep every file under 80 lines, and leave test/ and consumer.mjs untouched. `node --test` must stay fully green — behavior and public API do not change.",
+  "timeoutMs": 1200000,
+  "difficulty": "hard",
+  "horizon": "m",
+  "family": "long"
+}

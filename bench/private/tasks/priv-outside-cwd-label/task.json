@@ -1,0 +1,9 @@
+{
+  "id": "priv-outside-cwd-label",
+  "title": "Paths outside the session cwd must say which session they belong to",
+  "prompt": "lib/pathlabel.mjs renders paths in the session transcript. When a path lies inside the session cwd we show it relative; when it lies outside, the bare \"../shared/lib.mjs\" is ambiguous — you cannot tell which session's neighborhood it came from. Per the contract at the top of the file, make outside paths self-identifying: they must name the session cwd so two sessions reading the same shared file never render identical labels. Inside-cwd rendering and all edge cases in the contract stay exactly as they are. Cover every contract example with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s",
+  "family": "private"
+}

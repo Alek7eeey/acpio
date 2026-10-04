@@ -3,5 +3,6 @@
   "title": "Generated URLs contain double dashes and stray dashes",
   "prompt": "CMS-generated links look like /blog/cafe--ubersicht---2026 and break routing matches. The slugger is supposed to fold diacritics (é → e), lowercase, collapse every run of non-alphanumerics into a single '-' and trim dashes at both ends. Fix lib/slug.mjs and verify with your own script (try multiple spaces, dashes, punctuation, accented input, empty string) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

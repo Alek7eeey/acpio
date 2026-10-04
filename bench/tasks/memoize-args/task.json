@@ -3,5 +3,6 @@
   "title": "Memoized function returns the same result for different arguments",
   "prompt": "Run `node check.mjs`. After memoizing, calc(1, 2) and calc(1, 3) return the same number — the cache key ignores everything after the first argument. Fix lib/memoize.mjs so every distinct argument tuple gets its own cache entry while repeated tuples still hit the cache. Do not edit check.mjs; re-run it before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

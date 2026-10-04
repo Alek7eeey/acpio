@@ -1,0 +1,9 @@
+{
+  "id": "long-router-migration",
+  "title": "Migrate app/ from the legacy callback router to tiny-http",
+  "prompt": "Read MIGRATION.md and migrate everything under app/ from lib/legacy/router.mjs to lib/tiny-http.mjs. Behavior must stay exactly as documented there (the table is the contract), lib/ must not be modified, app/server.mjs keeps exporting handle(req) -> {status, body}, the admin guard becomes one app.use middleware, and nothing under app/ may import lib/legacy afterwards. Exercise the endpoints yourself to confirm before answering.",
+  "timeoutMs": 1200000,
+  "difficulty": "hard",
+  "horizon": "m",
+  "family": "long"
+}

@@ -2,5 +2,6 @@
   "id": "multi-file-feature",
   "title": "Implement two exports used by two callers",
   "prompt": "In cart.mjs, fix cartTotal(cart) and implement applyDiscount(total, code) so that both callers, app.mjs's orderSummary and cli.mjs's quote, work end to end; read both callers for the expected interface and exercise them yourself before answering.",
-  "timeoutMs": 240000
+  "timeoutMs": 240000,
+  "horizon": "s"
 }

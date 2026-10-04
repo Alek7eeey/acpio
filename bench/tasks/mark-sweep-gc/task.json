@@ -3,5 +3,6 @@
   "title": "Cache GC frees objects that are still two links away from a root",
   "prompt": "Run `node check.mjs`. Since the last GC tuning, the object cache crashes minutes after every collection with 'object freed': whole subgraphs that the application still references vanish whenever they hang more than one link away from a root. lib/heap.mjs documents collect() as mark-and-sweep — everything reachable from a root through ANY chain of links survives, everything else is freed and its id throws afterwards. Reproduce with a chain, find where the marking stops early, fix it, re-run the check, and verify the rest with your own script (rooted chains and cycles, unrooted cycles collected, shared objects, freed ids ascend numerically, no id reuse after collect, removeRoot, freed/unknown ids throw).",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

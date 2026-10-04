@@ -3,5 +3,6 @@
   "title": "Latency percentiles collapsed: p95 of the big log reads like a median",
   "prompt": "Run `node check.mjs`. The on-call dashboard shows suspiciously good numbers: GET /api/items reports p95 near its median, and POST /api/orders looks faster than /api/health. The events are in data/events.log (thousands of lines — do not read it whole, parse it). lib/percentile.mjs implements nearest-rank over an ASCENDING array and is correct; the per-endpoint pipeline in lib/report.mjs lost that precondition somewhere between parsing and reporting. Fix the cause in lib/report.mjs and verify with node check.mjs plus your own script (unit anchors for percentile, exact per-endpoint stats recomputed independently).",
   "timeoutMs": 300000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

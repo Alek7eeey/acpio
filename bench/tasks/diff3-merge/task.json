@@ -3,5 +3,6 @@
   "title": "Three-way merge silently drops one side of a conflicting edit",
   "prompt": "Run `node check.mjs`. Since the merge queue was wired up, rebasing a branch can lose a colleague's change without any warning: when both sides edited the same region, the merge takes ours and reports success. lib/merge3.mjs documents the policy — a region changed differently on both sides is a CONFLICT: the result carries ours' middle followed by theirs' between markers and conflict=true; a side must never be dropped silently. Reproduce with two different edits of the same lines, find where the conflict is swallowed, fix it, re-run the check, and verify the rest with your own script (no-change merge, one-sided edits on either side, identical edits from both sides, both appending different lines, both deleting the same region, inputs never mutated).",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

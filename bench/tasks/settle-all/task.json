@@ -3,5 +3,6 @@
   "title": "Batch status endpoint dies on the first failing job",
   "prompt": "The batch runner resolves every job's outcome individually, but one rejected job now rejects the whole batch and the other results are lost. lib/settle.mjs documents the contract: run all tasks concurrently, NEVER reject, and resolve in input order with { ok: true, value } / { ok: false, reason }. Fix lib/settle.mjs and verify with your own script: mixed success/failure, resolutions landing in input order even when the last task settles first, empty input.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

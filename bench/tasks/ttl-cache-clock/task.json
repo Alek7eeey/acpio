@@ -3,5 +3,6 @@
   "title": "Hot keys never expire: reads extend the TTL",
   "prompt": "The session cache holds entries forever under read load: an entry set with ttl=100ms and read every 90ms is still alive a minute later. The contract in lib/ttl.mjs is that an entry lives ttl ms from its SET — reads must never extend it. The clock is injectable, so write a script with a fake clock and verify expiry, size, purge, has and overwrite-restarts-ttl before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

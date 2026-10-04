@@ -3,5 +3,6 @@
   "title": "Invoice totals inflate whenever an expression mixes + and *",
   "prompt": "Run `node check.mjs`. The formula engine behind the invoice template evaluates 2+3*4 as 20: multiplication no longer binds tighter than addition. The engine is a tokenizer (lib/lexer.mjs) feeding a recursive-descent evaluator (lib/expr.mjs) whose header documents the grammar — expr handles +/-, term handles */ (each left-associative), factor handles unary minus, parens, numbers and variables. The grammar layers exist; one of them stopped doing its job. Fix it without changing interfaces, re-run the check, and verify the rest with your own script (precedence with parens, unary minus, decimals, variables and unknown-variable errors, division by zero, trailing garbage throws, whitespace).",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

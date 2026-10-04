@@ -1,0 +1,32 @@
+{
+  "lines": [
+    {
+      "orderId": "o-101",
+      "sku": "chair-04",
+      "qty": 2,
+      "unitCents": 4995,
+      "lineCents": 9990
+    },
+    {
+      "orderId": "o-101",
+      "sku": "book-02",
+      "qty": 1,
+      "unitCents": 2750,
+      "lineCents": 2750
+    },
+    {
+      "orderId": "o-102",
+      "sku": "kbd-10",
+      "qty": 3,
+      "unitCents": 8900,
+      "lineCents": 26700
+    },
+    {
+      "orderId": "o-103",
+      "sku": "mouse-11",
+      "qty": 1,
+      "unitCents": 2500,
+      "lineCents": 2500
+    }
+  ]
+}

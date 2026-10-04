@@ -3,5 +3,6 @@
   "title": "Slow jobs drift the schedule and missed runs are never caught up",
   "prompt": "The nightly sweep runs recurring jobs, and after a slow run the whole chain shifts: a job meant to fire at :00, :10, :20 fired at :00, :26, :52 — and when the runner was paused, ten missed intervals collapsed into one run. lib/runner.mjs documents the contract: the chain follows SCHEDULED times (a firing at t=100 that ends at t=150 with interval 100 still chains 100 -> 200 -> 300), and a job that missed N intervals is caught up exactly N times, in due-time order. The pure helpers live in lib/schedule.mjs. Reproduce with an injectable clock and gated runs, find where the chain re-anchors, fix it, and verify with your own script (ten missed intervals caught up in order, slow run does not shift the chain, stop() ends the chain, two jobs interleave in due-time order, interval validation).",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

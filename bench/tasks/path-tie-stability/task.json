@@ -3,5 +3,6 @@
   "title": "Equal-cost routes come back with an extra layover",
   "prompt": "The route planner returns equal-cost paths with MORE stops than needed: A->D costs 10 either way (A-B1-B2-D, 3 legs, or A-C-D, 2 legs) and we hand users the 3-leg one. lib/paths.mjs documents the tie rule: among equal-cost paths the FEWEST hops win — at the same price users get the direct route. The costs are all correct; only the tie choice is wrong. Fix lib/paths.mjs and verify with your own script (the A/B1/B2/C/D graph picks A-C-D, a graph where the fewer-hop path is found first stays put, unreachable is null, from === to, unknown node throws, zero weights) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

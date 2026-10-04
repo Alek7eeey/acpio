@@ -3,5 +3,6 @@
   "title": "Retry helper re-runs validation failures that can never succeed",
   "prompt": "withRetry in lib/retry.mjs is meant to retry only transient (RetryableError) failures, but a service outage last week showed it happily re-running validation errors too, and callers count attempts in metrics. Fix the retry condition: a non-retryable error must surface on its first attempt, a retryable one must be attempted exactly 1 + retries times. Verify with your own script (count calls) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

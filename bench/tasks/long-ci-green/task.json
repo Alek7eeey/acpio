@@ -1,0 +1,9 @@
+{
+  "id": "long-ci-green",
+  "title": "Green a red suite: four root causes across four modules",
+  "prompt": "This package's test suite is red. Read README.md first. Make `node --test test/` fully green by fixing the root causes in src/ — do not touch anything under test/. Run the suite yourself to confirm before answering, and report which root causes you fixed.",
+  "timeoutMs": 1200000,
+  "difficulty": "hard",
+  "horizon": "m",
+  "family": "long"
+}

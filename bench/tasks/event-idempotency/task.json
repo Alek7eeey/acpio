@@ -3,5 +3,6 @@
   "title": "A retried event re-applies once the ingest gets busy",
   "prompt": "Under load the ingest re-applies events it has already applied: the same webhook lands twice and the downstream charges twice. lib/processor.mjs documents the exactly-once window: an event whose id was applied within windowMs (by EVENT timestamp) is dropped, and the window never depends on how many OTHER events arrived in between. A memory-bound cleanup added an eviction that forgets ids early. Fix lib/processor.mjs and verify with your own script (duplicate within window dropped, re-applied after the window fully passes, out-of-order older duplicate dropped, independent ids, a flood of other events must not forget an id inside its window, validation) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

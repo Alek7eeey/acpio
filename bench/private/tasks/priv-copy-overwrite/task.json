@@ -1,0 +1,9 @@
+{
+  "id": "priv-copy-overwrite",
+  "title": "Slot config must be replaced, not merged, between pairs",
+  "prompt": "Our slot runner gives every job a config directory seeded from the same template. On CI we noticed the second job on a slot keeps running with the first job's provider settings. lib/slot.mjs is the seeder — reproduce the failure yourself (a temp directory is fine), find why the second seed inherits the first job's files, and fix the seeder so every job starts from exactly the template's state: files updated where the template changed, stale files gone, no nesting.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s",
+  "family": "private"
+}

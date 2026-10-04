@@ -3,5 +3,6 @@
   "title": "The build leaves a worker idle while the long chain runs alone",
   "prompt": "CI builds with 2 workers finish visibly later than they should: one worker sits idle mid-build, then the long compile chain runs alone at the end. Two modules document the policy: lib/dag.mjs validates the graph and computes each task's longest remaining chain; lib/schedule.mjs runs the greedy simulation — a task starts the moment its deps are done and a slot is free, and when several tasks compete for one slot the LONGEST remaining chain goes first (input order breaks ties). A cleanup replaced the priority with plain input order. Fix the broken module and verify with your own script (exact start times and makespan for the graph below, never more slots than workers, unknown dep throws, cycle throws, bad duration throws) before answering. Graph: setup(10) deps []; b1(5), c1(5), a1(30) all deps [setup]; final(10) deps [a1, b1, c1] — given in that input order, 2 slots.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

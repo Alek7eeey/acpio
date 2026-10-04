@@ -3,5 +3,6 @@
   "title": "Idle API clients burst far past their bucket capacity",
   "prompt": "After a quiet night the first client burst hammers the API with hundreds of requests although the bucket capacity is 5: the refill accumulator grew all night and nothing capped it. Per the header of lib/bucket.mjs, refill NEVER tops the bucket above capacity — idle time buys one full bucket, not an endless reserve. The clock is injectable. Fix lib/bucket.mjs and verify with your own script using a fake clock (drain to empty, idle refill capped at capacity, partial refill with an honest retryAfterMs, constructor and take() validation) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

@@ -3,5 +3,6 @@
   "title": "Config cache misses because nested key order changes the hash",
   "prompt": "The config service hashes settings with lib/stable.mjs, but equal configs with different nested key order produce different hashes and evict each other from the cache. The header promises keys are sorted RECURSIVELY — top level works, nested objects do not. Fix lib/stable.mjs and verify with your own script (deep-equal objects in different key orders, arrays keep order, scalars, empty containers) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

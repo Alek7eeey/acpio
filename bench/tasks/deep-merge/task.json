@@ -3,5 +3,6 @@
   "title": "deepMerge silently mutates its base object",
   "prompt": "Consumers pass cached config objects into deepMerge(base, patch) and their caches change under them. The function must never mutate its inputs: base or patch, at any depth. Patch arrays replace the base array wholesale; a null patch value clears the key. Fix lib/merge.mjs and verify with your own script that both inputs stay untouched.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

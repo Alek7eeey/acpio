@@ -3,5 +3,6 @@
   "title": "Ignore patterns match files one directory too deep",
   "prompt": "After the matcher refactor, 'src/*.js' suddenly matches 'src/deep/a.js', so files are excluded from linting that should be checked. The contract in lib/glob.mjs: '?' matches one char except '/', '*' matches a run EXCEPT '/', only '**' crosses '/', everything else is literal, full-path match. Fix lib/glob.mjs and verify with your own script (single star, double star, question mark, literal dots, non-matches) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

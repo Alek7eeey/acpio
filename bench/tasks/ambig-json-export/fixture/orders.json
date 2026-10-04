@@ -1,0 +1,25 @@
+{
+  "orders": [
+    {
+      "id": "o-101",
+      "customer": { "id": "c-1", "name": "Acme" },
+      "placedAt": "2026-09-02T10:00:00Z",
+      "items": [
+        { "sku": "chair-04", "qty": 2, "unitCents": 4995 },
+        { "sku": "book-02", "qty": 1, "unitCents": 2750 }
+      ]
+    },
+    {
+      "id": "o-102",
+      "customer": { "id": "c-2", "name": "Globex" },
+      "placedAt": "2026-09-14T16:30:00Z",
+      "items": [{ "sku": "kbd-10", "qty": 3, "unitCents": 8900 }]
+    },
+    {
+      "id": "o-103",
+      "customer": { "id": "c-1", "name": "Acme" },
+      "placedAt": "2026-09-21T09:15:00Z",
+      "items": [{ "sku": "mouse-11", "qty": 1, "unitCents": 2500 }]
+    }
+  ]
+}

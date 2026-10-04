@@ -3,5 +3,6 @@
   "title": "Terminal help text wraps one word too early",
   "prompt": "CLI help built with lib/wrap.mjs breaks lines a column before the margin: with width 9, 'The quick brown fox' renders as three lines instead of two. A word that exactly fills the remaining width must stay on the current line. Fix the fit check in lib/wrap.mjs and verify with your own script (exact fit, long unbreakable word, hard newlines, width 1, empty string, width 0 throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

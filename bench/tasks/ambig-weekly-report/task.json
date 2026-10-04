@@ -1,0 +1,9 @@
+{
+  "id": "ambig-weekly-report",
+  "title": "Weekly activity report from a one-line ask",
+  "prompt": "The product team asked for a weekly activity report from activity.csv: \"group the activity by day of week for the week of the latest event, put it in week-report.json\". The ask leaves details open — make a reasonable call on each, write the assumptions you made into ASSUMPTIONS.md, and produce the report. Read the CSV before deciding anything.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s",
+  "family": "ambiguity"
+}

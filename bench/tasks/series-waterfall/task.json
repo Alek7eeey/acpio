@@ -3,5 +3,6 @@
   "title": "Pipeline steps run simultaneously and each gets the initial input",
   "prompt": "The import pipeline is a waterfall: step 2 must see step 1's output. Since a speed-things-up change all steps start at once and each receives the ORIGINAL input, so the importer never sees the loader's normalized rows. lib/waterfall.mjs documents the contract: run tasks one at a time in order, pass each task the previous task's return value (the first task gets initial), resolve with all results in order, and never start a task after one failed. Fix lib/waterfall.mjs and verify with your own script (start order, result chaining, abort on failure, empty input) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

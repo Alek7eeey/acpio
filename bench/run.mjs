@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { BenchServer, runBuiltinAgent } from "./lib/builtin-agent.mjs";
 import { ensureOmpModel, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
+import { applyFaults } from "./lib/faults.mjs";
 import { changedFiles, makeWorkspace, verifyWorkspace } from "./lib/util.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -36,6 +37,9 @@ function parseArgs(argv) {
   const out = {
     agents: ["pi", "omp", "builtin"],
     tasks: null,
+    tasksRoot: [path.join(REPO, "bench", "tasks")],
+    family: null,
+    faults: [],
     repeats: 1,
     model: process.env.BENCH_MODEL || defaults.model,
     builtinUrl: process.env.BENCH_BASE_URL || defaults.url,
@@ -60,6 +64,9 @@ function parseArgs(argv) {
     switch (flag) {
       case "--agents": out.agents = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--tasks": out.tasks = take().split(",").map((s) => s.trim()).filter(Boolean); break;
+      case "--tasks-root": out.tasksRoot = take().split(",").map((s) => path.resolve(s.trim())).filter(Boolean); break;
+      case "--family": out.family = take().split(",").map((s) => s.trim()).filter(Boolean); break;
+      case "--faults": out.faults = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--repeats": out.repeats = Math.max(1, Number(take())); break;
       case "--model": out.model = take(); break;
       case "--builtin-url": out.builtinUrl = take(); break;
@@ -81,13 +88,24 @@ function parseArgs(argv) {
   return out;
 }
 
-function loadTasks(only) {
-  const entries = readdirSync(TASK_ROOT, { withFileTypes: true }).filter((e) => e.isDirectory());
-  const tasks = entries.map((e) => ({
-    dir: path.join(TASK_ROOT, e.name),
-    ...JSON.parse(readFileSync(path.join(TASK_ROOT, e.name, "task.json"), "utf8")),
-  }));
-  return (only ? tasks.filter((t) => only.includes(t.id)) : tasks).sort((a, b) => a.id.localeCompare(b.id));
+function loadTasks(roots, only, families) {
+  const tasks = [];
+  const seen = new Set();
+  for (const root of roots) {
+    const entries = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory());
+    for (const e of entries) {
+      if (seen.has(e.name)) continue; // first root wins on id collisions
+      seen.add(e.name);
+      tasks.push({
+        dir: path.join(root, e.name),
+        ...JSON.parse(readFileSync(path.join(root, e.name, "task.json"), "utf8")),
+      });
+    }
+  }
+  let picked = only ? tasks.filter((t) => only.includes(t.id)) : tasks;
+  if (families) picked = picked.filter((t) => families.includes(t.family ?? "synthetic"));
+  else if (!only) picked = picked.filter((t) => !["m", "l"].includes(t.horizon)); // long tasks opt in (see README)
+  return picked.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 const fmt = (n, digits = 0) => (typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "-");
@@ -109,6 +127,7 @@ async function main() {
         "Agent benchmark — same task, same model, fresh workspace per run.",
         "",
         "  node bench/run.mjs [--agents pi,omp,builtin] [--tasks fix-sum,fizzbuzz]",
+        "                     [--tasks-root <dir,...>] [--family long,...] [--faults a,b]",
         "                     [--repeats N] [--model <provider>/<id>] [--timeout ms]",
         "                     [--concurrency N] [--builtin-url <url>] [--builtin-key <key>]",
         "                     [--context-window N] [--out <dir>] [--keep]",
@@ -126,7 +145,7 @@ async function main() {
     return;
   }
 
-  const tasks = loadTasks(opts.tasks);
+  const tasks = loadTasks(opts.tasksRoot, opts.tasks, opts.family);
   if (!tasks.length) throw new Error("no tasks selected");
 
   const slash = opts.model.indexOf("/");
@@ -169,6 +188,7 @@ async function main() {
     const { agent, task, rep } = pair;
     const label = `${agent}-${task.id}-r${rep}`;
     const ws = makeWorkspace(task.dir, workRoot, label);
+    const faults = await applyFaults(task.dir, ws, opts.faults);
     const url = labeledUrl(agent, task.id, rep);
     const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
     let result;
@@ -216,6 +236,7 @@ async function main() {
       ok: verify.ok,
       verifyOutput: verify.output.slice(0, 600),
       files: changedFiles(ws),
+      ...(faults.length ? { faults } : {}),
       ...result,
       crashed: result.exitCode !== 0 && result.exitCode !== null,
     };
@@ -343,6 +364,7 @@ function writeLedgerAppendix(opts, stamp, rows, diagnostics) {
       task: r.task,
       repeat: r.repeat,
       ok: r.ok,
+      ...(r.faults?.length ? { faults: r.faults } : {}),
       wallMs: r.wallMs,
       tools: r.toolCalls,
       toolErrors: r.toolErrors ?? 0,

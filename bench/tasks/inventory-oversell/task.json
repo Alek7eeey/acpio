@@ -3,5 +3,6 @@
   "title": "Orders oversell stock: the reserve guard checks the wrong thing",
   "prompt": "Run `node check.mjs`. Support escalated an oversell: an order for more units than are free went through and the ledger went negative. lib/stock.mjs documents the contract — reserve is atomic: either the full qty leaves the free pool, or nothing changes and it throws. A cleanup 'simplified' the guard and broke exactly that. Fix lib/stock.mjs, keep the interfaces, and verify with your own script that a failed reserve (single line or mid-order via placeOrder in src/orders.mjs) leaves every level and reservation list untouched.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

@@ -1,0 +1,9 @@
+{
+  "id": "ambig-json-export",
+  "title": "Billing export with the shape left open",
+  "prompt": "The billing team asked: \"we need orders.json as a JSON file we can ingest\" — see EXPORT-TASK.md. The shape is deliberately not pinned down; pick a reasonable one, write it down in ASSUMPTIONS.md, and produce billing-export.json. Check completeness yourself before answering: every order must be in the export exactly once.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s",
+  "family": "ambiguity"
+}

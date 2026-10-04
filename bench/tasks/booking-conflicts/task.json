@@ -3,5 +3,6 @@
   "title": "Back-to-back bookings are rejected as double-booked",
   "prompt": "Since the cleanup change the room UI refuses a 11:00-12:00 booking right after a 10:00-11:00 one — it says the room is already taken. lib/conflicts.mjs documents bookings as half-open [startMin, endMin): a booking ending at 11:00 and one starting at 11:00 do NOT overlap. Fix lib/conflicts.mjs and verify with your own script (touching intervals both orders, real overlap, containment, identical bookings, firstConflict hit and miss, free slot) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

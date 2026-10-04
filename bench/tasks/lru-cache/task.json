@@ -3,5 +3,6 @@
   "title": "Cache evicts the entries that were just used",
   "prompt": "Users of our LRUCache report that right after touching a key it disappears, while keys nobody reads survive. Find the bug in lib/lru.mjs and fix it. Do not change the public interface. Verify with your own quick script before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

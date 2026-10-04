@@ -1,0 +1,19 @@
+{
+  "orders": [
+    {
+      "id": "o-101",
+      "customerId": "c-1",
+      "totalCents": 12740
+    },
+    {
+      "id": "o-102",
+      "customerId": "c-2",
+      "totalCents": 26700
+    },
+    {
+      "id": "o-103",
+      "customerId": "c-1",
+      "totalCents": 2500
+    }
+  ]
+}

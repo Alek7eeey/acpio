@@ -3,5 +3,6 @@
   "title": "Deadline planner promises Saturday deliveries",
   "prompt": "The order planner adds N business days to the promised date, but since a simplify-the-calendar change orders placed on Friday are promised for Saturday and support is drowning. lib/business.mjs documents the rule: Saturday and Sunday are not business days, addBusinessDays steps FORWARD one day at a time and counts only business days, so Friday + 1 lands on Monday; the input date itself is never returned. Fix lib/business.mjs and verify with your own script (Friday starts, starts already on a weekend, spans of several weeks, month and year rollovers, isBusinessDay, invalid input throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

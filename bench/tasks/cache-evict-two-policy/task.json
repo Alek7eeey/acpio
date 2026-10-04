@@ -3,5 +3,6 @@
   "title": "The cache evicts just-used keys while stale ones linger",
   "prompt": "Users report fresh cache entries disappearing while everybody knows stale entries are still inside — the TTL cleanup never seems to reclaim anything on the write path. lib/cache.mjs documents the eviction policy: on insert at capacity the cache FIRST purges expired entries (any of them) and only then, if still full, evicts the least recently used. A live entry must never be dropped while a stale one could go instead. Fix lib/cache.mjs and verify with your own script (insert into a full cache with one expired entry, LRU eviction when everything is fresh, get of an expired key returns undefined and purges, has is a pure membership check that does not bump recency, size counts fresh only, constructor validation) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

@@ -1,0 +1,29 @@
+{
+  "weekStart": "2026-09-27",
+  "days": [
+    {
+      "day": "sun",
+      "minutes": 1
+    },
+    {
+      "day": "mon",
+      "minutes": 1
+    },
+    {
+      "day": "tue",
+      "minutes": 1
+    },
+    {
+      "day": "thu",
+      "minutes": 1
+    },
+    {
+      "day": "fri",
+      "minutes": 1
+    },
+    {
+      "day": "sat",
+      "minutes": 1
+    }
+  ]
+}

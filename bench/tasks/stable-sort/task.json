@@ -3,5 +3,6 @@
   "title": "Report table sorts 10 before 2 and reorders the caller's array",
   "prompt": "Two complaints about the reports table: rows with numeric values sort lexicographically (10 before 2), and after sorting, the caller's original array has been reordered. Fix lib/sortlib.mjs: numeric values compare numerically, everything else via localeCompare, desc flips the order, ties keep their input order, and the input array must never be mutated. Verify with your own script before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

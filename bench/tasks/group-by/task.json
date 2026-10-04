@@ -3,5 +3,6 @@
   "title": "Grouped buckets keep only the last item per key",
   "prompt": "The billing page groups invoices by account and shows ONE invoice per account — the earlier ones are gone. lib/group.mjs is documented to map every key to ALL items that produced it, in input order; somewhere that collect-then-append was reduced to a plain overwrite. Fix lib/group.mjs and verify with your own script (repeated keys, single hits, numeric keys via String(), empty input, bucket order) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

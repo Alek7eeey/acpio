@@ -3,5 +3,6 @@
   "title": "Late-night events land in the wrong daily bucket",
   "prompt": "Since the pipeline change, an event that happened at 23:59 UTC but was processed after midnight shows up in the NEW day's report, and replays rewrite history: the same event moves between buckets depending on when the worker got to it. lib/daykey.mjs documents the rule — bucket by the EVENT's own timestamp, in UTC, never by arrival. Fix lib/daykey.mjs and verify with your own script (late event lands on its event day, day boundary 23:59:59.999 vs 00:00:00, sums per day accumulate, empty input, receivedAt after midnight) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

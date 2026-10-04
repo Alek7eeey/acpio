@@ -1,0 +1,9 @@
+{
+  "id": "ambig-retry-budget",
+  "title": "Retry policy from a one-paragraph requirement",
+  "prompt": "Implement lib/sender.mjs per SPEC-BEHAVIOR.md. The requirement paragraph deliberately leaves the retry budget and pacing open — make a reasonable engineering call, note the choices you made in ASSUMPTIONS.md, and check your implementation against every scenario in the spec with your own script before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s",
+  "family": "ambiguity"
+}

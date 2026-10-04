@@ -3,5 +3,6 @@
   "title": "The five-percent rollout is serving everyone",
   "prompt": "After the flag-platform cleanup, a flag with a rollout-rule default is ON for every user, not the intended five percent. Two modules: lib/store.mjs keeps definitions whose 'default' may be a plain value or a ROLLOUT RULE — a function called with the user context that returns the value for that user; lib/evaluate.mjs resolves user > env > default and documents that a function default must be CALLED with the context. Fix the broken module and verify with your own script (plain default, rollout rule true and false across users, user override beats rollout, env beats default, unknown flag false) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

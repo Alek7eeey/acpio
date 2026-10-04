@@ -3,5 +3,6 @@
   "title": "Weekend rentals are billed one day short",
   "prompt": "Customer complaints: a Friday-to-Sunday rental is billed for 2 days, and same-day rentals come out free. lib/days.mjs documents billing as INCLUSIVE of both the pickup and the return day. Fix lib/days.mjs and verify with your own script (same-day, weekend, full month, cross-month, return before pickup throws, garbage input throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

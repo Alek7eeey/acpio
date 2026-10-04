@@ -3,5 +3,6 @@
   "title": "Every export loses its last rows",
   "prompt": "The export pipeline drops the tail: a 237-row export produces two full batches and the last 37 rows never reach the sink. lib/batcher.mjs documents the contract — batches of exactly 'size' go to the sink as they complete, and close-of-source MUST flush the remainder as one final (possibly smaller) batch; those are the last rows of every export. A schema-alignment change dropped the tail. Fix lib/batcher.mjs and verify with your own script (237 items with size 100, exact multiple leaves no empty tail batch, empty source, order preserved across and within batches, non-positive size throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

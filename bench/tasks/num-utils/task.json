@@ -3,5 +3,6 @@
   "title": "Volume slider and zoom extrapolate past their ends",
   "prompt": "Two reports from the shared math helpers: a volume slider at t=-0.2 renders negative gain, and a zoom control at t=1.4 overshoots max zoom. The contract of lerp in lib/num.mjs says t is clamped to [0, 1] — no extrapolation — but the clamping is gone. Fix it there without changing any interface, and verify with your own script (clamp, lerp at both ends and beyond, roundTo including halves below zero) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

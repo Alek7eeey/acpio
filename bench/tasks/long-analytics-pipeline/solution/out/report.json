@@ -1,0 +1,70 @@
+{
+  "files": [
+    "events-01.csv",
+    "events-02.csv",
+    "events-03.csv",
+    "events-04.csv",
+    "events-05.csv"
+  ],
+  "rowsRead": 13,
+  "rowsKept": 9,
+  "rowsSkipped": 4,
+  "byDay": {
+    "2026-09-28": {
+      "events": 2,
+      "minutes": 20
+    },
+    "2026-09-29": {
+      "events": 2,
+      "minutes": 55
+    },
+    "2026-01-01": {
+      "events": 1,
+      "minutes": 15
+    },
+    "2026-09-30": {
+      "events": 2,
+      "minutes": 62
+    },
+    "2026-10-01": {
+      "events": 1,
+      "minutes": 18
+    },
+    "2026-10-02": {
+      "events": 1,
+      "minutes": 33
+    }
+  },
+  "byUser": {
+    "alice": {
+      "events": 5,
+      "minutes": 105
+    },
+    "bob": {
+      "events": 2,
+      "minutes": 26
+    },
+    "cartwright, dee": {
+      "events": 1,
+      "minutes": 30
+    },
+    "carol": {
+      "events": 1,
+      "minutes": 42
+    }
+  },
+  "topUsers": [
+    {
+      "user": "alice",
+      "minutes": 105
+    },
+    {
+      "user": "carol",
+      "minutes": 42
+    },
+    {
+      "user": "cartwright, dee",
+      "minutes": 30
+    }
+  ]
+}

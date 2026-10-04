@@ -3,5 +3,6 @@
   "title": "Escaper double-escapes ampersand sequences",
   "prompt": "Run `node check.mjs`. The template escaper corrupts text that legitimately contains entities or angle brackets after escaping (users see &amp;lt; rendered). Fix lib/escape.mjs — a single pass must replace each special character exactly once. Do not edit check.mjs; re-run it before answering.",
   "timeoutMs": 240000,
-  "difficulty": "easy"
+  "difficulty": "easy",
+  "horizon": "xs"
 }

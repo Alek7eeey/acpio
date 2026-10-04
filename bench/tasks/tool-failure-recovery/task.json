@@ -2,5 +2,6 @@
   "id": "tool-failure-recovery",
   "title": "Read a failing check and fix the library, not the check",
   "prompt": "Run `node check.mjs`, read the failure it throws, then fix lib.mjs so the check passes — do not edit check.mjs; re-run the check to verify before answering.",
-  "timeoutMs": 240000
+  "timeoutMs": 240000,
+  "horizon": "s"
 }

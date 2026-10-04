@@ -3,5 +3,6 @@
   "title": "Rate limiter lets a burst through at every window boundary",
   "prompt": "Upstream 429s spike periodically: the limiter refills its whole quota the moment the oldest hit ages out of the window, so clients double their rate right at the boundary. lib/limiter.mjs specifies a SLIDING window (at most `limit` calls in any windowMs stretch) with an injectable clock. Fix it and verify with your own script using a fake clock: full window blocks with retryAfterMs, boundary frees exactly the slots whose hits left, constructor validation.",
   "timeoutMs": 240000,
-  "difficulty": "medium"
+  "difficulty": "medium",
+  "horizon": "s"
 }

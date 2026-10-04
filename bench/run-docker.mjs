@@ -8,12 +8,13 @@
 // A sandbox image (node:22-bookworm + the unpacked agent bundle) is built once;
 // each slot runs a pool container; each pair gets a clean /workspace, its own
 // server session (builtin) or exec (pi/omp), and the verifier exec'd inside.
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentArgs, ensureOmpModel, ensurePiModel, ompProfile } from "./lib/cli-agent.mjs";
 import { summarizeAgentStream } from "./lib/jsonl.mjs";
+import { applyFaults } from "./lib/faults.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
 import { runProcess } from "./lib/util.mjs";
 
@@ -46,6 +47,9 @@ function parseArgs(argv) {
   const out = {
     agents: ["builtin", "pi", "omp"],
     tasks: null,
+    tasksRoot: [path.join(REPO, "bench", "tasks")],
+    family: null,
+    faults: [],
     repeats: 1,
     model: process.env.BENCH_MODEL || defaults.model,
     builtinUrl: process.env.BENCH_BASE_URL || defaults.url,
@@ -70,6 +74,9 @@ function parseArgs(argv) {
     switch (flag) {
       case "--agents": out.agents = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--tasks": out.tasks = take().split(",").map((s) => s.trim()).filter(Boolean); break;
+      case "--tasks-root": out.tasksRoot = take().split(",").map((s) => path.resolve(s.trim())).filter(Boolean); break;
+      case "--family": out.family = take().split(",").map((s) => s.trim()).filter(Boolean); break;
+      case "--faults": out.faults = take().split(",").map((s) => s.trim()).filter(Boolean); break;
       case "--repeats": out.repeats = Math.max(1, Number(take())); break;
       case "--model": out.model = take(); break;
       case "--builtin-url": out.builtinUrl = take(); break;
@@ -361,9 +368,18 @@ async function main() {
   opts.provider = opts.model.slice(0, slash);
   opts.modelId = opts.model.slice(slash + 1);
 
-  const entries = readdirSync(TASK_ROOT, { withFileTypes: true }).filter((e) => e.isDirectory());
-  let tasks = entries.map((e) => ({ dir: path.join(TASK_ROOT, e.name), ...JSON.parse(readFileSync(path.join(TASK_ROOT, e.name, "task.json"), "utf8")) }));
+  let tasks = [];
+  const seen = new Set();
+  for (const root of opts.tasksRoot) {
+    for (const e of readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory())) {
+      if (seen.has(e.name)) continue; // first root wins on id collisions
+      seen.add(e.name);
+      tasks.push({ dir: path.join(root, e.name), ...JSON.parse(readFileSync(path.join(root, e.name, "task.json"), "utf8")) });
+    }
+  }
   if (opts.tasks) tasks = tasks.filter((t) => opts.tasks.includes(t.id));
+  if (opts.family) tasks = tasks.filter((t) => opts.family.includes(t.family ?? "synthetic"));
+  else if (!opts.tasks) tasks = tasks.filter((t) => !["m", "l"].includes(t.horizon)); // long tasks opt in (see README)
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   if (!tasks.length) throw new Error("no tasks selected");
 
@@ -421,14 +437,24 @@ async function main() {
     const base = `http://127.0.0.1:${slot.port}`;
     const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
     const t0 = Date.now();
-    const row = { agent, task: task.id, repeat: rep };
+    const row = { agent, task: task.id, repeat: rep, ...(opts.faults.length ? { faults: opts.faults } : {}) };
     try {
       await dockerOk(["exec", container, "/bin/bash", "-c", "rm -rf /workspace"], { timeoutMs: 30_000 });
       // Forward slashes: docker cp chokes on mixed Windows separators. Tasks
       // without a fixture start from an empty workspace (agent creates files).
+      // Faults are applied to a host staging copy so the task fixture itself
+      // stays pristine for the next pair.
       const fixture = path.join(task.dir, "fixture");
       if (exists(fixture)) {
-        await dockerOk(["cp", fixture.replace(/\\/g, "/"), `${container}:/workspace`], { timeoutMs: 60_000 });
+        let copyFrom = fixture;
+        if (opts.faults.length) {
+          const staging = path.join(CACHE, "fault-staging", `${task.id}-${agent}-r${rep}`);
+          rmSync(staging, { recursive: true, force: true });
+          cpSync(fixture, staging, { recursive: true });
+          await applyFaults(task.dir, staging, opts.faults);
+          copyFrom = staging;
+        }
+        await dockerOk(["cp", copyFrom.replace(/\\/g, "/"), `${container}:/workspace`], { timeoutMs: 60_000 });
       } else {
         await dockerOk(["exec", container, "/bin/bash", "-c", "mkdir -p /workspace"], { timeoutMs: 30_000 });
       }

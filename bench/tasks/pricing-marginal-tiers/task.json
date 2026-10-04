@@ -3,5 +3,6 @@
   "title": "Quantity discounts apply to the whole order instead of the margin",
   "prompt": "An order of 150 units is priced as if ALL 150 units had the discounted rate — finance says the tier tables are marginal: only the units that fall into a tier are billed at that tier's price. lib/tiers.mjs documents it with a worked example (tiers 10@100/20@60: 15 units cost 10*100 + 5*60, never 15*60); lib/invoice.mjs composes lines and totals in cents. A simplification broke the marginal math. Fix it and verify with your own script (boundaries 0/10/11/20, mid-tier 15, third tier, huge order, negative and fractional throw, invoice line and total compose) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

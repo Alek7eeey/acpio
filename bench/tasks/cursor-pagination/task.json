@@ -3,5 +3,6 @@
   "title": "Directory paging skips every employee whose surname spans a page break",
   "prompt": "Run `node check.mjs`. The people directory loses rows between pages: whenever a surname group crosses a page boundary, the employees of that group on the far side of the break never appear. Pagination is cursor based over the composite sort key (lastName, id) — lib/paginate.mjs documents the rule that the cursor comparison is per TUPLE: rows sharing the cursor's lastName still order by id, and dropping the tie rule skips rows. The data (data/employees.jsonl, 120 rows with heavy surname reuse) is deterministic — walk it and compare against an independent sort. Fix the cause, re-run the check, and verify the rest with your own script (page contents match the sorted order exactly, cursor round-trip, broken cursors throw, limit validation, exhaustion reports nextCursor null and empty pages stay empty).",
   "timeoutMs": 300000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

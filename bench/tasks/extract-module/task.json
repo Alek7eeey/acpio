@@ -2,5 +2,6 @@
   "id": "extract-module",
   "title": "Extract one function into a new module",
   "prompt": "Move the titleCase function out of app.mjs into a new utils.mjs, update app.mjs to import it from there while still exporting both titleCase and wordCount, keep behaviour identical, and run `node app.test.mjs` to verify before answering.",
-  "timeoutMs": 240000
+  "timeoutMs": 240000,
+  "horizon": "s"
 }

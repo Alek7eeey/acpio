@@ -3,5 +3,6 @@
   "title": "A refunded order can be shipped, and the report believes it",
   "prompt": "The nightly report shows orders that were refunded and then delivered — support found a way to re-ship refunded orders and the ledger double-counts. Two modules: lib/states.mjs holds the transition table and documents that anything not listed MUST throw (no silent moves: every unlisted move corrupts the ledger); lib/service.mjs folds events through it. A support hotfix softened the guard. Fix it and verify with your own script (happy path with ledger, refund ledger, refunded->ship throws and leaves the order untouched, repeat event throws, draft->pay throws, delivered->anything throws, cancel path, unknown event throws) before answering.",
   "timeoutMs": 240000,
-  "difficulty": "hard"
+  "difficulty": "hard",
+  "horizon": "s"
 }

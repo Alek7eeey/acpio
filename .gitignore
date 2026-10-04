@@ -26,3 +26,4 @@ dist-app/
 /bench/results/
 /bench/.cache/
 /bench/swe/data/
+/bench/results-weekly-debug/
