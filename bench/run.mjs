@@ -199,7 +199,10 @@ async function main() {
       ws = makeWorkspace(task.dir, workRoot, label);
       // Faults are strictly additive mutations of the workspace before the
       // agent starts; a retry gets a fresh workspace and the same faults.
-      faults = await applyFaults(task.dir, ws, opts.faults);
+      // `--faults all` picks up each task's own declared list (task.json
+      // "faults"), so a family-wide faulted run is one command; tasks without
+      // declared faults run clean instead of erroring the pair.
+      faults = await applyFaults(task.dir, ws, opts.faults.includes("all") ? (task.faults ?? []) : opts.faults);
       let piConfigDir;
       try {
         if (agent === "builtin") {
