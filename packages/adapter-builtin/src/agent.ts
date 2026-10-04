@@ -124,6 +124,11 @@ function systemPrompt(
       "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked. One green " +
       "run settles it: no suite re-runs, no `git stash` baseline comparisons, and failures " +
       "unrelated to the change are out of scope.",
+    "- Derive a self-written verification from the contract, not from the patch: every clause " +
+      "the task states becomes an assertion, including the edge case that separates fixed from " +
+      "unfixed (a read after expiry, an entry at a stale index). If your script and the code " +
+      "disagree, the contract decides which one lies — never relax the check to go green; a " +
+      "check your fix cannot fail proves nothing.",
     "- If you wrote throwaway tests or fixtures to verify your work, delete them before " +
       "finishing unless the task asked for tests: a clean diff carries only the fix, and " +
       "scratch files left under the project's test tree break any patch applied on top of it.",
