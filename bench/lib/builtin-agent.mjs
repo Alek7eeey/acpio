@@ -264,8 +264,9 @@ export async function runBuiltinAgent(server, { task, ws, timeoutMs, prompts }) 
     wallMs: Date.now() - t0,
     exitCode: detail?.status === "error" ? 1 : 0,
     timedOut: Date.now() > deadline,
-    turns: turns.length,
-    turnsSent,
+    // Multi-prompt sessions only: a plain one-prompt session must not leak a
+    // constant turns:1 into every row (it spread into the md note column).
+    ...(turns.length > 1 ? { turns: turns.length, turnsSent } : {}),
     sessionId: session.id,
     stderrTail: server.log.slice(-1500),
   };
