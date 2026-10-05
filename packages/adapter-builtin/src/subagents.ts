@@ -152,39 +152,33 @@ export interface TaskToolInput {
 }
 
 const taskInputSchema = z.object({
-  agent: z
-    .string()
-    .optional()
-    .describe("Name of a registered subagent from the roster above. Mutually exclusive with system_prompt."),
-  system_prompt: z
-    .string()
-    .optional()
-    .describe("Role of an ad-hoc subagent, composed for this one task. Mutually exclusive with agent."),
+  agent: z.string().optional().describe("Registered subagent name; exclusive with system_prompt."),
+  system_prompt: z.string().optional().describe("Ad-hoc subagent's role; exclusive with agent."),
   tools: z
     .array(z.enum(BUILTIN_TOOL_NAMES))
     .optional()
-    .describe("Ad-hoc subagent's tools; default read/glob/grep. Only used with system_prompt."),
+    .describe("Ad-hoc child's tools; default read/glob/grep."),
   prompt: z
     .string()
     .min(1)
-    .describe("Complete, self-sufficient task for the subagent — it sees nothing of this conversation."),
+    .describe("Full task for the child — it sees nothing of this conversation."),
 });
 
 /** The `task` tool: spawns a child run and returns its final report. */
 export function makeTaskTool(bridge: SubagentsBridge) {
   const roster = subagentRoster(bridge.settings);
-  const named = roster.map((a) => `- ${a.name}: ${a.description}`).join("\n");
+  // This description rides every model call of the session — the feature's
+  // whole standing cost is this string plus the schema, so it stays tight.
+  const named = roster.map((a) => `${a.name} — ${a.description}`).join("; ");
   const adhoc = bridge.settings.allowAdhoc
-    ? "Or pass `system_prompt` (plus optional `tools`, default read/glob/grep) to compose an ad-hoc subagent for a one-off role."
-    : "Only the named agents above exist — ad-hoc subagents are disabled.";
+    ? " Or system_prompt (+ optional tools, default read/glob/grep) spawns an ad-hoc child."
+    : " Ad-hoc children are disabled — use the named agents.";
   return tool({
     description:
-      "Run a subagent: an independent assistant with its own context that works in this repository " +
-      "and returns one final report. The report is the only thing added to this conversation — the " +
-      "child's transcript is not. Delegate when a task needs a broad multi-file survey, several " +
-      "independent investigations in parallel, or research whose listings would flood this " +
-      "conversation; do it yourself when two or three reads would do. The child cannot spawn " +
-      `subagents.\nNamed subagents:\n${named}\n${adhoc}`,
+      "Run a subagent with its own context; only its final report enters this conversation. " +
+      "Delegate broad surveys, parallel research or listing-heavy digging — do 2-3-read jobs " +
+      "yourself; children cannot spawn subagents. Named: " +
+      `${named}.${adhoc}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
       const report = await runSubagent(bridge, ctx.toolCallId, input);

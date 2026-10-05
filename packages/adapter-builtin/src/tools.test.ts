@@ -297,8 +297,8 @@ describe("createBuiltinTools with subagents", () => {
   it("describes the roster and the ad-hoc rules for the model", () => {
     const tools = createBuiltinTools({ host, mode: "agent", ask, subagents: bridge });
     const description = String((tools.task as { description: string }).description);
-    expect(description).toContain("- explore:");
-    expect(description).toContain("ad-hoc subagent");
+    expect(description).toContain("explore —");
+    expect(description).toContain("ad-hoc");
     expect(description).toContain("cannot spawn");
   });
 });

@@ -95,7 +95,6 @@ function systemPrompt(
   mode: AgentMode,
   mcp: { servers: string[]; tools: string[] },
   skills: readonly BuiltinSkill[],
-  subagents: { allowAdhoc: boolean } | null,
 ): string {
   const scope =
     mode === "agent"
@@ -164,18 +163,6 @@ function systemPrompt(
       "(`sed`, `perl -pi`, a short `node -e` rewrite) over writing a helper script and debugging " +
       "it — every debug round is a wasted step.",
     `- ${scope}`,
-    ...(subagents
-      ? [
-          "",
-          "Subagents: you can delegate work with the `task` tool — the subagent runs in this " +
-            "working directory with its own context window, and only its final report is added to " +
-            "this conversation. Spawn subagents for a broad multi-file survey, for several " +
-            "independent investigations in parallel, or when the exploration would flood this " +
-            "conversation with listings; do the work yourself when a couple of targeted reads " +
-            "would do. Write the child's prompt as a complete task: the child sees nothing of " +
-            "this conversation." + (subagents.allowAdhoc ? "" : " Only named subagents are available."),
-        ]
-      : []),
     ...(mcp.tools.length
       ? [
           "",
@@ -552,7 +539,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
             tools: offered.map((entry) => entry.qualifiedName),
           },
           skills,
-          subagents ? { allowAdhoc: this.opts.settings.builtinSubagents.allowAdhoc } : null,
         ),
         messages: await compactMessages({
           messages: this.messages,

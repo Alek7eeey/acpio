@@ -717,7 +717,7 @@ describe("builtin subagents wiring", () => {
     },
   ];
 
-  it("offers the task tool and the prompt section when the feature is on", async () => {
+  it("offers the task tool, and the system prompt stays lean, when the feature is on", async () => {
     const stub = await startRecordingStub();
     try {
       const { call } = boot({
@@ -728,15 +728,15 @@ describe("builtin subagents wiring", () => {
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(stub.hits).toHaveLength(1);
       expect(stub.hits[0]!.toolNames).toContain("task");
-      expect(stub.hits[0]!.system).toContain("Subagents:");
-      // allowAdhoc: false reaches the model as a stated restriction.
-      expect(stub.hits[0]!.system).toContain("Only named subagents are available");
+      // Subagents are advertised only through the tool description — the
+      // standing cost of the feature is the tool, not prompt prose.
+      expect(stub.hits[0]!.system).not.toContain("Subagents:");
     } finally {
       await stub.close();
     }
   });
 
-  it("offers neither the tool nor the section when the feature is off", async () => {
+  it("offers neither the tool nor any subagent wording when the feature is off", async () => {
     const stub = await startRecordingStub();
     try {
       const { call } = boot({ builtinProviders: provider(stub.url) });

@@ -282,8 +282,8 @@ describe("makeTaskTool", () => {
       },
     });
     const task = makeTaskTool(bridge);
-    expect(task.description).toContain("- explore:");
-    expect(task.description).toContain("- tester: Runs the tests.");
+    expect(task.description).toContain("explore —");
+    expect(task.description).toContain("tester — Runs the tests.");
     expect(task.description).toContain("ad-hoc");
 
     const execute = (task as { execute: (input: unknown, ctx: unknown) => Promise<string> })
