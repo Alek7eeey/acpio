@@ -176,9 +176,11 @@ export function makeTaskTool(bridge: SubagentsBridge) {
   return tool({
     description:
       "Run a subagent with its own context; only its final report enters this conversation. " +
-      "Delegate broad surveys, parallel research or listing-heavy digging — do 2-3-read jobs " +
-      "yourself; children cannot spawn subagents. Named: " +
-      `${named}.${adhoc}`,
+      "Prefer delegating investigation: when the cause of a bug, slowdown or misbehavior is not " +
+      "already localized, spawn `explore` first and implement the fix yourself against its report " +
+      "(findings with file:line references). Also delegate broad surveys, parallel research and " +
+      "listing-heavy digging. Skip it only for single-file edits you already understand; children " +
+      `cannot spawn subagents. Named: ${named}.${adhoc}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
       const report = await runSubagent(bridge, ctx.toolCallId, input);
