@@ -161,6 +161,11 @@ export class BenchServer {
           ],
         },
       ],
+      // A/B switch for the subagents feature: `BENCH_SUBAGENTS=on` arms the
+      // task tool with the default roster (ad-hoc allowed, empty user roster).
+      ...(process.env.BENCH_SUBAGENTS === "on"
+        ? { builtinSubagents: { enabled: true, allowAdhoc: true, agents: [] } }
+        : {}),
     });
   }
 
