@@ -22,6 +22,14 @@
   background: var(--bg-secondary);
 }
 
+.topActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
 /*
  * The notch inset belongs to whatever sits flush with the top of the viewport.
  * A stage docked under the shell header is not that — the header already holds
@@ -34,6 +42,7 @@
 .topTitle {
   flex: 1;
   min-width: 0;
+  padding: 4px 10px;
   font-size: 0.86rem;
   font-weight: 650;
   white-space: nowrap;
@@ -65,6 +74,32 @@
 
 .iconBtn:hover {
   background: var(--bg-tertiary);
+}
+
+.expandBtn {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+}
+
+.expandBtn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+  color: var(--text);
+}
+
+.expandBtn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+.bottomControls .expandBtn {
+  width: 36px;
+  height: 36px;
+}
+
+.bottomControls .expandBtn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .scroll {

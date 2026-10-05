@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { GitChangedFileDto, GitCommitDetailDto, GitCommitFileDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { joinRepoPath, normalizeGitPath, toRepoAbsolutePath } from "../lib/gitFileTree";
+import { joinRepoPath, normalizeGitPath, toRepoAbsolutePath, truncateMiddlePath } from "../lib/gitFileTree";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { api } from "../lib/api";
 import { GitDiffStats } from "./GitDiffStats";
@@ -105,7 +105,7 @@ function CommitFileRow({
       title={label}
     >
       <FileStatusIcon status={file.status} />
-      <span className={styles.filePath}>{label}</span>
+      <span className={styles.filePath}>{truncateMiddlePath(label)}</span>
       {(file.additions > 0 || file.deletions > 0) && (
         <GitDiffStats additions={file.additions} deletions={file.deletions} className={styles.fileStats} />
       )}
@@ -134,7 +134,7 @@ function WipFileRow({
       title={path}
     >
       <FileStatusIcon status={file.unstaged || !file.staged ? "modified" : "added"} />
-      <span className={styles.filePath}>{path}</span>
+      <span className={styles.filePath}>{truncateMiddlePath(path)}</span>
       {(file.additions > 0 || file.deletions > 0) && (
         <GitDiffStats additions={file.additions} deletions={file.deletions} className={styles.fileStats} />
       )}

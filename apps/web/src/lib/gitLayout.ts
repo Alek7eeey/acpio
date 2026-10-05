@@ -29,7 +29,9 @@ export const GIT_PANEL_WIDTH_DEFAULT_RATIO = 0.44;
  */
 export const GIT_PANEL_WIDTH_DEFAULT_MIN = GIT_SPLIT_MIN_WIDTH;
 export const GIT_PANEL_WIDTH_DEFAULT_MAX = 900;
-export const GIT_PANEL_WIDTH_MIN = 520;
+/** Never below the split layout: on desktop the navigator stays a column,
+ * the bottom sheet is reserved for narrow overlay (phone) viewports. */
+export const GIT_PANEL_WIDTH_MIN = GIT_SPLIT_MIN_WIDTH;
 export const GIT_PANEL_WIDTH_MAX = 1400;
 
 /** Dock width the panel opens at on a page this wide. */

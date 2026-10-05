@@ -54,9 +54,9 @@
 .plain,
 .diff,
 .diffSplit {
-  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  font-size: 0.72rem;
-  line-height: 1.45;
+  font-family: Consolas, "Cascadia Mono", ui-monospace, "Segoe UI Mono", monospace;
+  font-size: 13px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
   padding: 0 12px 12px;
@@ -84,42 +84,57 @@
 }
 
 .line {
-  padding: 0 2px;
+  padding: 0 4px;
 }
 
 .file {
   color: var(--text-secondary);
   font-weight: 600;
+  padding: 6px 4px 2px;
 }
 
 .hunk {
   color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  padding: 5px 4px 3px;
 }
 
 .add {
-  background: color-mix(in srgb, #22c55e 12%, transparent);
+  background: color-mix(in srgb, #3fb950 15%, transparent);
 }
 
 .ctx {
-  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+  color: var(--text);
 }
 
 .del {
-  background: color-mix(in srgb, #ef4444 10%, transparent);
+  background: color-mix(in srgb, #f85149 15%, transparent);
 }
 
 .wordAdd {
-  background: color-mix(in srgb, #22c55e 58%, transparent);
+  background: color-mix(in srgb, #3fb950 38%, transparent);
   border-radius: 2px;
 }
 
 .wordDel {
-  background: color-mix(in srgb, #ef4444 52%, transparent);
+  background: color-mix(in srgb, #f85149 35%, transparent);
   border-radius: 2px;
 }
 
 .fileBlock {
   min-width: 0;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+}
+
+.fileBlock:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.moreRows {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0;
 }
 
 .hunkBlock {
@@ -128,7 +143,7 @@
 
 .splitRow {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr) 48px minmax(0, 1fr);
   align-items: stretch;
 }
 
@@ -138,6 +153,15 @@
   color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
   user-select: none;
   border-right: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+}
+
+/* Changed rows tint their own line-number gutter, like VS Code. */
+.gutterDel {
+  background: color-mix(in srgb, #f85149 10%, transparent);
+}
+
+.gutterAdd {
+  background: color-mix(in srgb, #3fb950 10%, transparent);
 }
 
 .splitCell {
@@ -151,19 +175,40 @@
 }
 
 .splitCtx {
-  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+  color: var(--text);
 }
 
 .splitAdd {
-  background: color-mix(in srgb, #22c55e 12%, transparent);
+  background: color-mix(in srgb, #3fb950 15%, transparent);
 }
 
 .splitDel {
-  background: color-mix(in srgb, #ef4444 10%, transparent);
+  background: color-mix(in srgb, #f85149 15%, transparent);
 }
 
 .splitEmpty {
   background: color-mix(in srgb, var(--bg-secondary) 35%, transparent);
+}
+
+/* Empty counterpart of a changed line: the VS Code diagonal hatch. */
+.splitHatchRed {
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, #f85149 10%, transparent) 0 4px,
+      transparent 4px 9px
+    ),
+    color-mix(in srgb, #f85149 4%, transparent);
+}
+
+.splitHatchGreen {
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, #3fb950 10%, transparent) 0 4px,
+      transparent 4px 9px
+    ),
+    color-mix(in srgb, #3fb950 4%, transparent);
 }
 
 .expandRow {

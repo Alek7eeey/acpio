@@ -144,6 +144,50 @@
   user-select: none !important;
 }
 
+/* Vertical splitter between the stage (diff) and the navigator (changes list). */
+.navSplitter {
+  position: relative;
+  flex: 0 0 8px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.navSplitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border-soft);
+  transition:
+    background 0.15s ease,
+    width 0.15s ease;
+}
+
+.navSplitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 44px;
+  margin-top: -22px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  transition: background 0.15s ease;
+}
+
+.navSplitter:hover::before,
+.navSplitter:hover::after {
+  width: 4px;
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
 .stageHost {
   flex: 1 1 auto;
   min-width: 0;
@@ -180,8 +224,8 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 6px 10px;
   background: var(--surface);
   border-bottom: 1px solid var(--border-soft);
 }
@@ -189,7 +233,7 @@
 .navHeadTop {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
   min-width: 0;
 }
 
@@ -206,10 +250,21 @@
 
 .navLead {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: nowrap;
+  gap: 8px;
   min-width: 0;
   flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.navChangeCaption {
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 
 .navTitle {
@@ -245,7 +300,43 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
+}
+
+/* Toolbar under the header: file stepper left, path/tree toggle centred. */
+.navTools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.navStep {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.navToolsCenter {
+  display: flex;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.navToolsSpacer {
+  flex: 0 0 auto;
+  width: 46px;
+}
+
+.navToolsActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .actionDivider {
@@ -264,6 +355,57 @@
   padding: 2px;
   border-radius: 8px;
   background: var(--bg-tertiary);
+}
+
+.tabSwitch {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
+  background: var(--bg-tertiary);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.tabSwitchBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+.tabSwitchBtn svg {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+}
+
+.tabSwitchBtn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.tabSwitchBtnActive,
+.tabSwitchBtnActive:hover {
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .segBtn {
@@ -337,22 +479,27 @@
 .iconBtn {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-soft);
-  border-radius: 9px;
-  background: var(--surface-2);
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
   transition:
     color 0.15s ease,
-    border-color 0.15s ease,
     background 0.15s ease;
 }
 
 .iconBtn:hover:not(:disabled) {
   background: var(--bg-tertiary);
   color: var(--text);
+}
+
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .iconBtn:disabled {
@@ -392,6 +539,13 @@
  * screen — the background poll keeps the lists fresh anyway — still reads as an
  * update with a visible end.
  */
+/* The refresh glyph rides in a span (spinner or not): keep it on the same
+   grid as the sibling icons, or the inline box lifts it off centre. */
+.iconBtn > span {
+  display: grid;
+  place-items: center;
+}
+
 .iconSpin {
   display: grid;
   place-items: center;
@@ -468,6 +622,18 @@
   min-width: 0;
   overflow: hidden;
   border-bottom: 1px solid var(--border-soft);
+}
+
+/* Horizontal splitter between the commit list and the commit detail. */
+.historyListSplitter {
+  flex: 0 0 6px;
+  cursor: row-resize;
+  touch-action: none;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.historyListSplitter:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
 }
 
 .historyDetail {

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useT } from "../lib/i18n";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
 import { setDiffViewMode, useDiffViewMode, type DiffViewMode } from "../lib/diffViewMode";
@@ -14,11 +14,18 @@ import {
   isUnifiedDiff,
   parseUnifiedDiff,
   resolveDiffFilePath,
+  type ParsedDiffFile,
   type ParsedDiffLine,
+  type ParsedHunk,
 } from "../lib/gitDiffParse";
 import styles from "./DiffTextView.module.css";
 
 const EXPAND_CHUNK = 100;
+/* Rendering a very large diff in one pass freezes the tab: rows are built
+   synchronously and each changed pair runs a word-level LCS. Cap the first
+   paint and extend on demand. */
+const INITIAL_VISIBLE_ROWS = 1500;
+const MORE_VISIBLE_ROWS = 3000;
 
 export type DiffContextSource = {
   sessionId: string;
@@ -223,12 +230,40 @@ function SplitDiffRow({ row }: { row: SideBySideRow }) {
 
   return (
     <div className={styles.splitRow}>
-      <div className={styles.splitGutter}>{row.oldLineNo ?? ""}</div>
-      <div className={splitCellClass(row.kind, "old")}>
+      <div
+        className={`${styles.splitGutter}${
+          row.oldText !== null && row.kind !== "context" ? ` ${styles.gutterDel}` : ""
+        }`}
+      >
+        {row.oldLineNo ?? ""}
+      </div>
+      <div
+        className={
+          row.oldText === null
+            ? row.kind === "insert"
+              ? `${styles.splitCell} ${styles.splitHatchRed}`
+              : `${styles.splitCell} ${styles.splitEmpty}`
+            : splitCellClass(row.kind, "old")
+        }
+      >
         {row.oldText === null ? "\u00A0" : renderInlineSegments(oldSegments, "old", row.oldText)}
       </div>
-      <div className={styles.splitGutter}>{row.newLineNo ?? ""}</div>
-      <div className={splitCellClass(row.kind, "new")}>
+      <div
+        className={`${styles.splitGutter}${
+          row.newText !== null && row.kind !== "context" ? ` ${styles.gutterAdd}` : ""
+        }`}
+      >
+        {row.newLineNo ?? ""}
+      </div>
+      <div
+        className={
+          row.newText === null
+            ? row.kind === "delete"
+              ? `${styles.splitCell} ${styles.splitHatchGreen}`
+              : `${styles.splitCell} ${styles.splitEmpty}`
+            : splitCellClass(row.kind, "new")
+        }
+      >
         {row.newText === null ? "\u00A0" : renderInlineSegments(newSegments, "new", row.newText)}
       </div>
     </div>
@@ -290,17 +325,70 @@ export const DiffTextView = memo(function DiffTextView({
   toolbar?: boolean;
 }) {
   const trimmed = text.trim();
+  const t = useT();
   const wrap = useWrapLines();
   const viewMode = useDiffViewMode();
   const [expansions, setExpansions] = useState<Record<string, HunkExpansion>>({});
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [visibleRowsLimit, setVisibleRowsLimit] = useState(INITIAL_VISIBLE_ROWS);
+  const moreSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setExpansions({});
     setLoadingKey(null);
+    setVisibleRowsLimit(INITIAL_VISIBLE_ROWS);
   }, [trimmed, contextSource?.sessionId, contextSource?.mode, contextSource?.commitRev]);
 
   const parsed = useMemo(() => (trimmed && isUnifiedDiff(trimmed) ? parseUnifiedDiff(trimmed) : null), [trimmed]);
+
+  /* Walk files/hunks once, cut the render plan at the row budget so a huge
+     commit never produces its whole DOM tree in a single synchronous pass. */
+  const plan = useMemo(() => {
+    type PlannedHunk = { hunkIndex: number; hunk: ParsedHunk; visibleLines: ParsedDiffLine[] };
+    type PlannedFile = { fileIndex: number; file: ParsedDiffFile; hunks: PlannedHunk[] };
+    const blocks: PlannedFile[] = [];
+    let totalRows = 0;
+    let budget = visibleRowsLimit;
+    let truncated = false;
+
+    for (let fileIndex = 0; fileIndex < (parsed?.length ?? 0); fileIndex += 1) {
+      const file = parsed![fileIndex]!;
+      const plannedHunks: PlannedHunk[] = [];
+      for (let hunkIndex = 0; hunkIndex < file.hunks.length; hunkIndex += 1) {
+        const hunk = file.hunks[hunkIndex]!;
+        totalRows += hunk.lines.length;
+        if (budget <= 0) {
+          truncated = true;
+          break;
+        }
+        const partial = hunk.lines.length > budget;
+        const visibleLines = partial ? hunk.lines.slice(0, budget) : hunk.lines;
+        budget -= visibleLines.length;
+        if (partial) truncated = true;
+        plannedHunks.push({ hunkIndex, hunk, visibleLines });
+      }
+      blocks.push({ fileIndex, file, hunks: plannedHunks });
+      if (truncated) break;
+    }
+    return { blocks, totalRows, truncated };
+  }, [parsed, visibleRowsLimit]);
+
+  const hasMoreRows = plan.truncated;
+
+  useEffect(() => {
+    const el = moreSentinelRef.current;
+    if (!el || !hasMoreRows) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleRowsLimit((limit) => limit + MORE_VISIBLE_ROWS);
+        }
+      },
+      { rootMargin: "600px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMoreRows]);
 
   const fetchLines = useCallback(
     async (filePath: string, start: number, end: number) => {
@@ -396,7 +484,7 @@ export const DiffTextView = memo(function DiffTextView({
           viewMode === "split" ? styles.diffSplit : `${styles.diff}${wrap ? "" : ` ${styles.noWrap}`}`
         }
       >
-        {parsed.map((file, fileIndex) => {
+        {plan.blocks.map(({ fileIndex, file, hunks }) => {
           const filePath = resolveDiffFilePath(file);
 
           return (
@@ -405,13 +493,13 @@ export const DiffTextView = memo(function DiffTextView({
               className={styles.fileBlock}
               data-diff-path={filePath ?? undefined}
             >
-              {file.hunks.length === 0
+              {hunks.length === 0
                 ? file.headerLines.map((line, lineIndex) => (
                     <div key={`meta-${fileIndex}-${lineIndex}`} className={styles.line}>
                       {line.text === "" ? "\u00A0" : line.text}
                     </div>
                   ))
-                : file.hunks.map((hunk, hunkIndex) => {
+                : hunks.map(({ hunkIndex, hunk, visibleLines }) => {
                 const key = hunkKey(fileIndex, hunkIndex);
                 const expansion = expansions[key];
                 const aboveCount = expansion?.aboveLines.length ?? 0;
@@ -439,7 +527,7 @@ export const DiffTextView = memo(function DiffTextView({
                           />
                         ) : null}
                         <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
-                        {buildSideBySideRows(hunk).map((row, rowIndex) => (
+                        {buildSideBySideRows({ ...hunk, lines: visibleLines }).map((row, rowIndex) => (
                           <SplitDiffRow key={`split-${fileIndex}-${hunkIndex}-${rowIndex}`} row={row} />
                         ))}
                         {canExpandDown ? (
@@ -464,7 +552,7 @@ export const DiffTextView = memo(function DiffTextView({
                           />
                         ) : null}
                         <DiffLineRow line={{ kind: "hunk", text: hunk.header }} keyId={`hh-${fileIndex}-${hunkIndex}`} />
-                        {renderUnifiedHunkBody(hunk.lines, `hl-${fileIndex}-${hunkIndex}`)}
+                        {renderUnifiedHunkBody(visibleLines, `hl-${fileIndex}-${hunkIndex}`)}
                         {canExpandDown ? (
                           <ExpandDownRow
                             busy={busyDown}
@@ -472,7 +560,7 @@ export const DiffTextView = memo(function DiffTextView({
                           />
                         ) : null}
                         {expansion?.belowLines.length ? (
-                          <ContextLines lines={expansion.belowLines} prefix={`${key}-below`} />
+                          <SplitContextLines lines={expansion.belowLines} prefix={`${key}-below`} />
                         ) : null}
                       </>
                     )}
@@ -483,6 +571,17 @@ export const DiffTextView = memo(function DiffTextView({
           );
         })}
       </div>
+      {hasMoreRows ? (
+        <div className={styles.moreRows} ref={moreSentinelRef}>
+          <button
+            type="button"
+            className={styles.viewBtn}
+            onClick={() => setVisibleRowsLimit((limit) => limit + MORE_VISIBLE_ROWS)}
+          >
+            {t("git.diffShowMore", { count: Math.max(0, plan.totalRows - visibleRowsLimit) })}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 });

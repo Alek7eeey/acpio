@@ -19,6 +19,20 @@ export function toRepoAbsolutePath(root: string, rel: string) {
   return joined.replace(/\//g, "\\");
 }
 
+/** Collapse a long repo path to "start/of/path/…/file.txt" so the file name stays visible. */
+export function truncateMiddlePath(path: string, max = 48): string {
+  if (path.length <= max) return path;
+  const slash = path.lastIndexOf("/");
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dirs = slash >= 0 ? path.slice(0, slash + 1) : "";
+  const keep = max - name.length - 1;
+  if (keep <= 0) {
+    const tail = max > 1 ? name.slice(-(max - 1)) : "";
+    return "…" + tail;
+  }
+  return dirs.slice(0, keep) + "…/" + name;
+}
+
 export function sortGitFiles(files: GitChangedFileDto[]): GitChangedFileDto[] {
   return [...files].sort((a, b) =>
     normalizeGitPath(a.path).localeCompare(normalizeGitPath(b.path), undefined, { sensitivity: "base" }),

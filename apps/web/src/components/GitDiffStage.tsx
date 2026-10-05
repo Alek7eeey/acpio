@@ -201,6 +201,7 @@ export function GitStageHeader({
   counter,
   flushTop = false,
   onBack,
+  actions,
 }: {
   title: string;
   counter?: string;
@@ -208,6 +209,8 @@ export function GitStageHeader({
   flushTop?: boolean;
   /** Rendered as a back chevron; omit where the surrounding panel owns dismissal. */
   onBack?: () => void;
+  /** Extra controls pinned to the header's right edge (e.g. the expand toggle). */
+  actions?: ReactNode;
 }) {
   const t = useT();
   return (
@@ -233,6 +236,7 @@ export function GitStageHeader({
       ) : null}
       <span className={styles.topTitle}>{title}</span>
       {counter ? <span className={styles.topCounter}>{counter}</span> : null}
+      {actions ? <div className={styles.topActions}>{actions}</div> : null}
     </header>
   );
 }
@@ -679,6 +683,38 @@ export function GitDiffStage({
         }
         flushTop={flushTop}
         onBack={onClose}
+        actions={
+          onToggleExpand ? (
+            <button
+              type="button"
+              className={`${styles.iconBtn} ${styles.expandBtn}`}
+              onClick={onToggleExpand}
+              aria-pressed={expanded}
+              title={expanded ? t("git.diffFullscreenExit") : t("git.diffFullscreenOpen")}
+              aria-label={expanded ? t("git.diffFullscreenExit") : t("git.diffFullscreenOpen")}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                {expanded ? (
+                  <path
+                    d="M9 4v3.2A1.8 1.8 0 0 1 7.2 9H4M15 4v3.2A1.8 1.8 0 0 0 16.8 9H20M9 20v-3.2A1.8 1.8 0 0 0 7.2 15H4M15 20v-3.2a1.8 1.8 0 0 1 1.8-1.8H20"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ) : (
+                  <path
+                    d="M9 4H5.8A1.8 1.8 0 0 0 4 5.8V9M15 4h3.2A1.8 1.8 0 0 1 20 5.8V9M9 20H5.8A1.8 1.8 0 0 1 4 18.2V15M15 20h3.2a1.8 1.8 0 0 0 1.8-1.8V15"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+              </svg>
+            </button>
+          ) : null
+        }
       />
 
       {single ? (
@@ -882,36 +918,6 @@ export function GitDiffStage({
                 )}
               </svg>
             </button>
-            {onToggleExpand ? (
-              <button
-                type="button"
-                className={styles.iconBtn}
-                onClick={onToggleExpand}
-                aria-pressed={expanded}
-                title={expanded ? t("git.diffFullscreenExit") : t("git.diffFullscreenOpen")}
-                aria-label={expanded ? t("git.diffFullscreenExit") : t("git.diffFullscreenOpen")}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  {expanded ? (
-                    <path
-                      d="M9 4v3.2A1.8 1.8 0 0 1 7.2 9H4M15 4v3.2A1.8 1.8 0 0 0 16.8 9H20M9 20v-3.2A1.8 1.8 0 0 0 7.2 15H4M15 20v-3.2a1.8 1.8 0 0 1 1.8-1.8H20"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  ) : (
-                    <path
-                      d="M9 4H5.8A1.8 1.8 0 0 0 4 5.8V9M15 4h3.2A1.8 1.8 0 0 1 20 5.8V9M9 20H5.8A1.8 1.8 0 0 1 4 18.2V15M15 20h3.2a1.8 1.8 0 0 0 1.8-1.8V15"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  )}
-                </svg>
-              </button>
-            ) : null}
           </div>
         </nav>
       ) : null}

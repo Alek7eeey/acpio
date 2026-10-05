@@ -275,12 +275,15 @@ describe("GitDiffStage", () => {
       "Все файлы",
       "Один файл",
       "Перенос длинных строк",
-      "Diff на весь экран",
     ]) {
       const control = screen.getByRole("button", { name });
       expect(bottomBar?.contains(control)).toBe(true);
       expect(topBar?.contains(control)).toBe(false);
     }
+    // The expand toggle lives in the top bar on purpose, pinned to its right edge.
+    const expand = screen.getByRole("button", { name: "Diff на весь экран" });
+    expect(topBar?.contains(expand)).toBe(true);
+    expect(bottomBar?.contains(expand)).toBe(false);
   });
 
   it("switches the diff between unified and split", async () => {

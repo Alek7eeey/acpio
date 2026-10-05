@@ -34,9 +34,11 @@ import {
   usePhonePanelLayout,
 } from "../lib/panelLayout";
 import {
+  GIT_NAVIGATOR_MIN_WIDTH,
   GIT_PANEL_WIDTH_MAX,
   GIT_PANEL_WIDTH_MIN,
   GIT_SPLIT_MIN_WIDTH,
+  GIT_STAGE_MIN_WIDTH,
   clampGitPanelWidth,
   gitDefaultPanelWidth,
   gitNavigatorWidthFor,
@@ -77,6 +79,34 @@ const PANEL_WIDTH_KEY = "acpio.gitPanelWidth.v1";
 function readStoredPanelWidth(): number | null {
   try {
     const n = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reader-dragged navigator (changes column) width, remembered per browser. */
+const NAVIGATOR_WIDTH_KEY = "acpio.gitNavigatorWidth.v1";
+
+/** Height of the commit list inside the history tab, dragged by its splitter. */
+const HISTORY_LIST_HEIGHT_KEY = "acpio.gitHistoryListHeight.v1";
+const HISTORY_LIST_HEIGHT_MIN = 100;
+const HISTORY_LIST_HEIGHT_MAX = 900;
+
+function readStoredHistoryListHeight(): number | null {
+  try {
+    const n = Number(localStorage.getItem(HISTORY_LIST_HEIGHT_KEY));
+    return Number.isFinite(n) && n > 0
+      ? Math.min(HISTORY_LIST_HEIGHT_MAX, Math.max(HISTORY_LIST_HEIGHT_MIN, n))
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredNavigatorWidth(): number | null {
+  try {
+    const n = Number(localStorage.getItem(NAVIGATOR_WIDTH_KEY));
     return Number.isFinite(n) && n > 0 ? n : null;
   } catch {
     return null;
@@ -147,6 +177,14 @@ export function GitChangesSidePanel({
   const [draggedWidth, setDraggedWidth] = useState<number | null>(readStoredPanelWidth);
   const [resizing, setResizing] = useState(false);
   const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** Dragged width of the navigator column (the changes list) inside the dock. */
+  const [draggedNavigatorWidth, setDraggedNavigatorWidth] = useState<number | null>(readStoredNavigatorWidth);
+  const [navResizing, setNavResizing] = useState(false);
+  const navResizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  /** Dragged height of the commit list in the history tab. */
+  const [historyListHeight, setHistoryListHeight] = useState<number | null>(readStoredHistoryListHeight);
+  const [historyResizing, setHistoryResizing] = useState(false);
+  const historyResizeDragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
   useEffect(() => {
     if (draggedWidth === null) return;
@@ -156,6 +194,15 @@ export function GitChangesSidePanel({
       /* ignore */
     }
   }, [draggedWidth]);
+
+  useEffect(() => {
+    if (draggedNavigatorWidth === null) return;
+    try {
+      localStorage.setItem(NAVIGATOR_WIDTH_KEY, String(draggedNavigatorWidth));
+    } catch {
+      /* ignore */
+    }
+  }, [draggedNavigatorWidth]);
 
   /**
    * The dock takes a slice of the page and the navigator takes a slice of the
@@ -174,8 +221,15 @@ export function GitChangesSidePanel({
   const panelWidth = overlay
     ? pageWidth
     : clampGitPanelWidth(draggedWidth ?? gitDefaultPanelWidth(pageWidth), pageWidth);
-  const navigatorWidth = gitNavigatorWidthFor(panelWidth);
-  const sheetNavigator = panelWidth < GIT_SPLIT_MIN_WIDTH;
+  const navigatorWidth = draggedNavigatorWidth
+    ? Math.min(
+        Math.max(GIT_NAVIGATOR_MIN_WIDTH, panelWidth - GIT_STAGE_MIN_WIDTH),
+        Math.max(GIT_NAVIGATOR_MIN_WIDTH, draggedNavigatorWidth),
+      )
+    : gitNavigatorWidthFor(panelWidth);
+  /* The bottom sheet is for phone-width overlay only; a docked desktop panel
+     always keeps the split navigator column, however narrow the user drags it. */
+  const sheetNavigator = overlay && panelWidth < GIT_SPLIT_MIN_WIDTH;
 
   const onSplitterDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -220,6 +274,127 @@ export function GitChangesSidePanel({
       document.body.classList.remove(styles.resizingBody);
     };
   }, [resizing]);
+
+  const onNavigatorSplitterDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isSidePanelResizeAllowed()) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      navResizeDragRef.current = { startX: e.clientX, startWidth: navigatorWidth };
+      setNavResizing(true);
+    },
+    [navigatorWidth],
+  );
+
+  const resetNavigatorWidth = useCallback(() => {
+    setDraggedNavigatorWidth(null);
+    try {
+      localStorage.removeItem(NAVIGATOR_WIDTH_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const onHistorySplitterDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!isSidePanelResizeAllowed()) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      historyResizeDragRef.current = {
+        startY: e.clientY,
+        startHeight: historyListHeight ?? 300,
+      };
+      setHistoryResizing(true);
+    },
+    [historyListHeight],
+  );
+
+  const resetHistoryListHeight = useCallback(() => {
+    setHistoryListHeight(null);
+    try {
+      localStorage.removeItem(HISTORY_LIST_HEIGHT_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!historyResizing) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = historyResizeDragRef.current;
+      if (!drag) return;
+      // The commit list sits above the detail: dragging down grows it.
+      setHistoryListHeight(
+        Math.min(HISTORY_LIST_HEIGHT_MAX, Math.max(HISTORY_LIST_HEIGHT_MIN, drag.startHeight + (e.clientY - drag.startY))),
+      );
+    };
+    const onUp = () => {
+      historyResizeDragRef.current = null;
+      setHistoryResizing(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [historyResizing]);
+
+  useEffect(() => {
+    if (historyListHeight === null) return;
+    try {
+      localStorage.setItem(HISTORY_LIST_HEIGHT_KEY, String(historyListHeight));
+    } catch {
+      /* ignore */
+    }
+  }, [historyListHeight]);
+
+  useEffect(() => {
+    if (!historyResizing) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "row-resize";
+    return () => {
+      document.body.style.cursor = prev;
+    };
+  }, [historyResizing]);
+
+  useEffect(() => {
+    if (!navResizing) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = navResizeDragRef.current;
+      if (!drag) return;
+      // The navigator sits on the right of the stage: dragging left widens it.
+      const max = Math.max(GIT_NAVIGATOR_MIN_WIDTH, panelWidth - GIT_STAGE_MIN_WIDTH);
+      setDraggedNavigatorWidth(
+        Math.min(max, Math.max(GIT_NAVIGATOR_MIN_WIDTH, drag.startWidth - (e.clientX - drag.startX))),
+      );
+    };
+    const onUp = () => {
+      navResizeDragRef.current = null;
+      setNavResizing(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [navResizing, panelWidth]);
+
+  useEffect(() => {
+    if (!navResizing) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "col-resize";
+    document.body.classList.add(styles.resizingBody);
+    return () => {
+      document.body.style.cursor = prev;
+      document.body.classList.remove(styles.resizingBody);
+    };
+  }, [navResizing]);
 
   useEffect(() => {
     try {
@@ -430,6 +605,18 @@ export function GitChangesSidePanel({
       );
     },
     [selection, showFile],
+  );
+
+  /** Jump to the previous/next changed file, GitHub Desktop style. */
+  const stepFile = useCallback(
+    (delta: number) => {
+      const paths = (status?.files ?? []).map((f) => f.path);
+      if (paths.length === 0) return;
+      const current = selection.kind === "working" ? paths.indexOf(selection.path ?? "") : -1;
+      const next = current < 0 ? 0 : Math.min(paths.length - 1, Math.max(0, current + delta));
+      showFile({ kind: "working", path: paths[next]! });
+    },
+    [status, selection, showFile],
   );
 
   const toggleCommitFile = useCallback(
@@ -840,19 +1027,10 @@ export function GitChangesSidePanel({
     <div className={styles.navigator}>
       <header className={styles.navHead}>
         <div className={styles.navHeadTop}>
-          <span className={styles.navRepoIcon} aria-hidden>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <circle cx="6.5" cy="6.5" r="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <circle cx="17.5" cy="17.5" r="2.2" stroke="currentColor" strokeWidth="1.6" />
-              <path
-                d="M8.5 6.5h5.2a3 3 0 0 1 3 3v2.2M8.5 17.5V11a3 3 0 0 1 3-3h2.2"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-              />
-            </svg>
-          </span>
           <div className={styles.navLead}>
+            <span className={styles.navChangeCaption}>
+              {t("git.changedOn", { count: files.length })}
+            </span>
             {status?.repo ? (
               <GitBranchSwitcher
                 status={status}
@@ -875,50 +1053,254 @@ export function GitChangesSidePanel({
               )}
             </span>
           </div>
-          <div className={styles.navIcons}>
-            {sheetNavigator ? null : (
+          <div className={styles.tabSwitch} role="tablist" aria-label={t("git.title")}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "changes"}
+              className={`${styles.tabSwitchBtn}${tab === "changes" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
+              title={t("git.tabChanges")}
+              onClick={() => setTab("changes")}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("git.tabChanges")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === "history"}
+              className={`${styles.tabSwitchBtn}${tab === "history" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
+              title={t("git.tabHistory")}
+              onClick={() => setTab("history")}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              {t("git.tabHistory")}
+            </button>
+          </div>
+          {sheetNavigator ? null : (
+            <button
+              type="button"
+              className={styles.iconBtn}
+              onClick={onClose}
+              title={t("git.closeChanges")}
+              aria-label={t("git.closeChanges")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className={styles.navTools} role="toolbar" aria-label={t("git.title")}>
+        {tab === "changes" ? (
+          <>
+            <div className={styles.navStep}>
+            <button
+              type="button"
+              className={styles.segBtn}
+              disabled={files.length === 0}
+              title={t("git.diffStagePrev")}
+              aria-label={t("git.diffStagePrev")}
+              onClick={() => stepFile(-1)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 15l6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.segBtn}
+              disabled={files.length === 0}
+              title={t("git.diffStageNext")}
+              aria-label={t("git.diffStageNext")}
+              onClick={() => stepFile(1)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
+          <div className={styles.navToolsCenter}>
+            <div className={styles.segSwitch}>
               <button
                 type="button"
-                className={styles.iconBtn}
-                onClick={onClose}
-                title={t("git.closeChanges")}
-                aria-label={t("git.closeChanges")}
+                className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
+                aria-pressed={view === "list"}
+                aria-label={t("git.fileViewList")}
+                title={t("git.fileViewList")}
+                onClick={() => setView("list")}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                  <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                 </svg>
               </button>
-            )}
-          </div>
-        </div>
-
-        {status && (status.conflict || status.stagedCount > 0 || status.unstagedCount > 0) ? (
-          <div className={styles.navPills}>
-            {status.conflict ? (
-              <span className={`${styles.countPill} ${styles.countPillConflict}`}>
-                {t("git.conflictCount", { count: conflictFiles.length })}
-              </span>
-            ) : null}
-            {status.stagedCount > 0 ? (
-              <span className={`${styles.countPill} ${styles.countPillStaged}`}>
-                {t("git.stagedCount", { count: status.stagedCount })}
-              </span>
-            ) : null}
-            {status.unstagedCount > 0 ? (
-              <span className={`${styles.countPill} ${styles.countPillUnstaged}`}>
-                {t("git.unstagedCount", { count: status.unstagedCount })}
-              </span>
-            ) : null}
-          </div>
+              <button
+                type="button"
+                className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
+                aria-pressed={view === "tree"}
+                aria-label={t("git.fileViewTree")}
+                title={t("git.fileViewTree")}
+                onClick={() => setView("tree")}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            </div>
+          </>
         ) : null}
-      </header>
+        <div className={styles.navToolsActions}>
+          {/* sync actions live in the same toolbar row as the stepper */}
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy || refreshing}
+              aria-busy={refreshing}
+              onClick={() => void runManualRefresh()}
+              title={t("common.refresh")}
+              aria-label={t("common.refresh")}
+            >
+              <span className={refreshing ? styles.iconSpin : undefined}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy}
+              onClick={() => void runSync("pull")}
+              title={t("git.pull")}
+              aria-label={t("git.pull")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 4v11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path
+                  d="M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy}
+              onClick={() => void runSync("push")}
+              title={t("git.push")}
+              aria-label={t("git.push")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 20V9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path
+                  d="M7.5 13.5 12 9l4.5 4.5M5.5 4.5h13"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy}
+              onClick={() => void runSync("fetch")}
+              title={t("git.fetch")}
+              aria-label={t("git.fetch")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M20 11.5a8 8 0 0 0-14.6-4.2M4 12.5a8 8 0 0 0 14.6 4.2M20 3.5v4h-4M4 20.5v-4h4"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy || !status?.dirty}
+              onClick={() => void runStash("push")}
+              title={t("git.stash")}
+              aria-label={t("git.stash")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 3.5v7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path
+                  d="M8.5 7.5 12 11l3.5-3.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5M4 13h16"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
+              disabled={busy || !(status?.stashCount ?? 0)}
+              onClick={() => void runStash("pop")}
+              title={t("git.pop")}
+              aria-label={t("git.pop")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M12 20.5V13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                <path
+                  d="M8.5 16.5 12 13l3.5 3.5M5 11V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5M4 11h16"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+      </div>
 
       <div className={styles.navBody}>
         {tab === "changes" ? (
           <GitChangesCommitPane {...commitPaneProps} />
         ) : (
           <>
-            <div className={styles.historyList}>
+            <div
+              className={styles.historyList}
+              style={
+                historyListHeight !== null
+                  ? ({ flex: "0 0 auto", height: `${historyListHeight}px` } as CSSProperties)
+                  : undefined
+              }
+            >
               <GitCommitHistory
                 commits={commits}
                 status={status}
@@ -940,6 +1322,15 @@ export function GitChangesSidePanel({
                 onCheckoutCommit={(hash) => void checkoutCommit(hash)}
               />
             </div>
+            <div
+              className={styles.historyListSplitter}
+              onPointerDown={onHistorySplitterDown}
+              onDoubleClick={resetHistoryListHeight}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t("git.resizeHistoryDetail")}
+              title={t("git.resizeHistoryDetail")}
+            />
             <div className={styles.historyDetail}>
               <GitCommitDetail
                 loading={loadingCommitDetail}
@@ -960,206 +1351,6 @@ export function GitChangesSidePanel({
         )}
       </div>
 
-      <div className={styles.navFoot} role="toolbar" aria-label={t("git.title")}>
-        <div className={styles.segSwitch} role="tablist" aria-label={t("git.title")}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "changes"}
-            className={`${styles.segBtn}${tab === "changes" ? ` ${styles.segBtnActive}` : ""}`}
-            title={t("git.tabChanges")}
-            aria-label={t("git.tabChanges")}
-            onClick={() => setTab("changes")}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                stroke="currentColor"
-                strokeWidth="1.7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "history"}
-            className={`${styles.segBtn}${tab === "history" ? ` ${styles.segBtnActive}` : ""}`}
-            title={t("git.tabHistory")}
-            aria-label={t("git.tabHistory")}
-            onClick={() => setTab("history")}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
-              <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
-        {tab === "changes" ? (
-          <div className={styles.segSwitch} role="toolbar" aria-label={t("git.fileViewMode")}>
-            <button
-              type="button"
-              className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
-              aria-pressed={view === "list"}
-              aria-label={t("git.fileViewList")}
-              title={t("git.fileViewList")}
-              onClick={() => setView("list")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
-              aria-pressed={view === "tree"}
-              aria-label={t("git.fileViewTree")}
-              title={t("git.fileViewTree")}
-              onClick={() => setView("tree")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
-              </svg>
-            </button>
-          </div>
-        ) : null}
-        <span className={styles.actionDivider} aria-hidden />
-        <button
-          type="button"
-          className={styles.iconBtn}
-          disabled={busy || refreshing}
-          aria-busy={refreshing}
-          onClick={() => void runManualRefresh()}
-          title={t("common.refresh")}
-          aria-label={t("common.refresh")}
-        >
-          <span className={refreshing ? styles.iconSpin : undefined}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-              <path
-                d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-        </button>
-        <button
-          type="button"
-          className={styles.iconBtn}
-          disabled={busy}
-          onClick={() => void runSync("pull")}
-          title={t("git.pull")}
-          aria-label={t("git.pull")}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d="M12 5v10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            <path
-              d="M8 11l4 4 4-4M6 19h12"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className={styles.iconBtn}
-          disabled={busy}
-          onClick={() => void runSync("push")}
-          title={t("git.push")}
-          aria-label={t("git.push")}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path d="M12 19V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            <path
-              d="M8 13l4-4 4 4M6 5h12"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          ref={opsRef}
-          className={styles.iconBtn}
-          aria-haspopup="menu"
-          aria-expanded={Boolean(opsAnchor)}
-          aria-label={t("common.more")}
-          title={t("common.more")}
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            setOpsAnchor(
-              opsAnchor
-                ? null
-                : {
-                    left: Math.max(8, Math.min(rect.left, window.innerWidth - OPS_MENU_WIDTH - 8)),
-                    bottom: Math.max(8, window.innerHeight - rect.top + 6),
-                  },
-            );
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <circle cx="5" cy="12" r="1.7" fill="currentColor" />
-            <circle cx="12" cy="12" r="1.7" fill="currentColor" />
-            <circle cx="19" cy="12" r="1.7" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
-
-      {opsAnchor ? (
-        <div
-          ref={opsMenuRef}
-          className={styles.footMenu}
-          style={{ left: opsAnchor.left, bottom: opsAnchor.bottom }}
-          role="menu"
-          aria-label={t("common.actions")}
-        >
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy}
-            onClick={() => {
-              setOpsAnchor(null);
-              void runSync("fetch");
-            }}
-          >
-            {t("git.fetch")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy || !status?.dirty}
-            onClick={() => {
-              setOpsAnchor(null);
-              void runStash("push");
-            }}
-          >
-            {t("git.stash")}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            disabled={busy || !(status?.stashCount ?? 0)}
-            onClick={() => {
-              setOpsAnchor(null);
-              void runStash("pop");
-            }}
-          >
-            {t("git.pop")}
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 
@@ -1241,8 +1432,20 @@ export function GitChangesSidePanel({
       ) : (
         <>
           <div className={styles.stageHost}>{stageSlot}</div>
-          {fullscreen ? null : sheetNavigator ? (
-            <>
+          {fullscreen || sheetNavigator ? null : (
+            <div
+              className={styles.navSplitter}
+              onPointerDown={onNavigatorSplitterDown}
+              onDoubleClick={resetNavigatorWidth}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("common.resizeChanges")}
+              aria-valuenow={navigatorWidth}
+              aria-valuemin={GIT_NAVIGATOR_MIN_WIDTH}
+              title={t("common.resizeChangesHint")}
+            />
+          )}
+          {fullscreen ? null : sheetNavigator ? (            <>
               <button
                 type="button"
                 className={styles.puller}

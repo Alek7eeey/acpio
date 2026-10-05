@@ -33,6 +33,30 @@ const COMMIT_HEIGHT_MIN = 120;
 const COMMIT_HEIGHT_MAX = 360;
 export const CHANGES_VIEW_KEY = "acpio.gitChangesView.v1";
 const DND_MIME = "application/x-acpio-git-paths";
+const SECTION_SIZES_KEY = "acpio.gitSectionSizes.v1";
+const SECTION_SIZE_DEFAULT = 320;
+const SECTION_SIZE_DEFAULT_MAX = 480;
+const SECTION_SIZE_MIN = 96;
+const SECTION_SIZE_MAX = 1600;
+
+type SectionKey = "conflicts" | "unstaged" | "staged";
+const SECTION_KEYS: SectionKey[] = ["conflicts", "unstaged", "staged"];
+
+function readSectionSizes(): Partial<Record<SectionKey, number>> {
+  try {
+    const raw = localStorage.getItem(SECTION_SIZES_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Partial<Record<SectionKey, number>> = {};
+    for (const key of SECTION_KEYS) {
+      const n = Number(parsed[key]);
+      if (Number.isFinite(n)) out[key] = Math.min(SECTION_SIZE_MAX, Math.max(SECTION_SIZE_MIN, n));
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 type StageZone = "staged" | "unstaged";
 /** Changed files as one row per file (…/a/b.ts) or one per folder level (b → b/b.ts). */
@@ -106,6 +130,7 @@ function ChangesSection({
   onDropZone,
   children,
   enableDrop = true,
+  bodyStyle,
 }: {
   title: string;
   count: number;
@@ -119,6 +144,7 @@ function ChangesSection({
   onDropZone: (zone: StageZone, e: DragEvent) => void;
   children: ReactNode;
   enableDrop?: boolean;
+  bodyStyle?: CSSProperties;
 }) {
   return (
     <section className={styles.section}>
@@ -142,7 +168,9 @@ function ChangesSection({
       </div>
       {!collapsed ? (
         <div
+          data-section-body=""
           className={`${styles.sectionBody}${enableDrop && dropActive ? ` ${styles.sectionBodyDrop}` : ""}`}
+          style={bodyStyle}
           onDragOver={
             enableDrop
               ? (e) => {
@@ -238,7 +266,18 @@ function FileRow({
   onDragEnd: () => void;
   onContextMenu: (e: MouseEvent) => void;
 }) {
-  const displayPath = normalizeGitPath(file.path);
+  const fullPath = normalizeGitPath(file.path);
+  const nameSlash = fullPath.lastIndexOf("/");
+  const name = nameSlash >= 0 ? fullPath.slice(nameSlash + 1) : fullPath;
+  const dirs = nameSlash >= 0 ? fullPath.slice(0, nameSlash + 1) : "";
+  /* Keep the file name visible: collapse the directory part first, and keep
+     the dir tail short — the segments nearest to the file matter most. */
+  let dirShown = dirs;
+  if (fullPath.length > 48) {
+    const keep = Math.max(0, 48 - name.length - 1);
+    dirShown = keep === 0 ? "…/" : dirs.length > keep ? "…" + dirs.slice(-keep) : dirs;
+  }
+  if (dirShown.length > 26) dirShown = "…" + dirShown.slice(-25);
 
   const handleRowDragStart = (e: DragEvent) => {
     const target = e.target as HTMLElement;
@@ -283,11 +322,12 @@ function FileRow({
             onSelect(e as unknown as MouseEvent);
           }
         }}
-        title={displayPath}
+        title={normalizeGitPath(file.path)}
       >
         <FileIcon file={file} />
         <span className={styles.fileLabel}>
-          <span className={styles.fileName}>{displayPath}</span>
+          <span className={styles.fileDir}>{dirShown}</span>
+          <span className={styles.fileName}>{name}</span>
         </span>
         {(file.additions > 0 || file.deletions > 0) && (
           <GitDiffStats
@@ -544,6 +584,9 @@ export function GitChangesCommitPane({
   const [expandedOutgoing, setExpandedOutgoing] = useState<string | null>(null);
   const [commitHeight, setCommitHeight] = useState(readCommitHeight);
   const [resizing, setResizing] = useState(false);
+  const [sectionSizes, setSectionSizes] = useState<Partial<Record<SectionKey, number>>>(readSectionSizes);
+  const [sectionResizing, setSectionResizing] = useState(false);
+  const sectionResizeRef = useRef<{ key: SectionKey; startY: number; startSize: number } | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [dragPaths, setDragPaths] = useState<string[] | null>(null);
   const [dropZone, setDropZone] = useState<StageZone | null>(null);
@@ -737,6 +780,66 @@ export function GitChangesCommitPane({
       /* ignore */
     }
   }, [commitHeight]);
+
+  const onSectionResizeDown = useCallback(
+    (key: SectionKey) => (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      // First drag: start from the height the section currently has.
+      const fallback = sectionSizes[key] ?? SECTION_SIZE_DEFAULT;
+      const section = e.currentTarget.previousElementSibling as HTMLElement | null;
+      const body = section?.querySelector("[data-section-body]") as HTMLElement | null;
+      const measured = body ? Math.round(body.getBoundingClientRect().height) : fallback;
+      sectionResizeRef.current = {
+        key,
+        startY: e.clientY,
+        startSize: Math.max(SECTION_SIZE_MIN, Math.min(SECTION_SIZE_MAX, sectionSizes[key] ?? measured)),
+      };
+      setSectionResizing(true);
+    },
+    [sectionSizes],
+  );
+
+  const onSectionResizeDoubleClick = useCallback((key: SectionKey) => {
+    setSectionSizes((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!sectionResizing) return;
+    const onMove = (e: PointerEvent) => {
+      const drag = sectionResizeRef.current;
+      if (!drag) return;
+      const next = drag.startSize + (e.clientY - drag.startY);
+      setSectionSizes((prev) => ({
+        ...prev,
+        [drag.key]: Math.min(SECTION_SIZE_MAX, Math.max(SECTION_SIZE_MIN, next)),
+      }));
+    };
+    const onUp = () => {
+      sectionResizeRef.current = null;
+      setSectionResizing(false);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [sectionResizing]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SECTION_SIZES_KEY, JSON.stringify(sectionSizes));
+    } catch {
+      /* ignore */
+    }
+  }, [sectionSizes]);
 
   const pathsInZone = useCallback(
     (zone: StageZone, onlySelected = false) => {
@@ -998,6 +1101,7 @@ export function GitChangesCommitPane({
               onDragOverZone={() => undefined}
               onDragLeaveZone={() => undefined}
               onDropZone={() => undefined}
+              bodyStyle={sectionSizes.conflicts !== undefined ? { height: `${sectionSizes.conflicts}px`, overflow: "auto" } : { maxHeight: SECTION_SIZE_DEFAULT_MAX + "px", overflow: "auto" }}
             >
               <FileList
                 {...fileListProps}
@@ -1021,6 +1125,7 @@ export function GitChangesCommitPane({
             onDragOverZone={setDropZone}
             onDragLeaveZone={(zone) => setDropZone((cur) => (cur === zone ? null : cur))}
             onDropZone={handleDrop}
+            bodyStyle={sectionSizes.unstaged !== undefined ? { height: `${sectionSizes.unstaged}px`, overflow: "auto" } : { maxHeight: SECTION_SIZE_DEFAULT_MAX + "px", overflow: "auto" }}
             action={
               unstagedFiles.length > 0 ? (
                 <button
@@ -1055,6 +1160,18 @@ export function GitChangesCommitPane({
             )}
           </ChangesSection>
 
+          {unstagedOpen ? (
+            <div
+              className={styles.sectionResize}
+              onPointerDown={onSectionResizeDown("unstaged")}
+              onDoubleClick={() => onSectionResizeDoubleClick("unstaged")}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t("git.resizeSection")}
+              title={t("git.resizeSection")}
+            />
+          ) : null}
+
           <ChangesSection
             title={t("git.stagedFiles")}
             count={stagedFiles.length}
@@ -1065,6 +1182,7 @@ export function GitChangesCommitPane({
             onDragOverZone={setDropZone}
             onDragLeaveZone={(zone) => setDropZone((cur) => (cur === zone ? null : cur))}
             onDropZone={handleDrop}
+            bodyStyle={sectionSizes.staged !== undefined ? { height: `${sectionSizes.staged}px`, overflow: "auto" } : { maxHeight: SECTION_SIZE_DEFAULT_MAX + "px", overflow: "auto" }}
             action={
               stagedFiles.length > 0 ? (
                 <button

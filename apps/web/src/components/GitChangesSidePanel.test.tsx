@@ -133,52 +133,44 @@ async function withViewportWidth(width: number, run: () => Promise<void>) {
 }
 
 describe("GitChangesSidePanel", () => {
-  it("keeps the tab, list and sync controls in one row at the bottom of the navigator", async () => {
+  it("keeps the tab switch in the navigator header and sync actions in the tools row", async () => {
     renderPanel();
     const tabs = await screen.findByRole("tab", { name: "Изменения" });
     await waitFor(() => expect(screen.getByRole("tab", { name: "История" })).toBeTruthy());
 
-    // One row holds the changes/history switch, the list/tree switch and the sync
-    // buttons, so none of them claims a row of its own.
-    const row = tabs.closest("[role='toolbar']") as HTMLElement;
-    expect(row).toBeTruthy();
-    const siblings = [
-      screen.getByRole("tab", { name: "История" }),
-      screen.getByRole("button", { name: "Плоский список" }),
-      screen.getByRole("button", { name: "Дерево папок" }),
-      screen.getByRole("button", { name: "Pull" }),
-      screen.getByRole("button", { name: "Push" }),
-    ];
-    for (const control of siblings) {
-      expect(row.contains(control)).toBe(true);
-    }
+    // The tab switch lives in the header's top row, next to the close button.
+    const headTop = tabs.closest("header") as HTMLElement;
+    expect(headTop).toBeTruthy();
+    expect(headTop.contains(screen.getByRole("tab", { name: "История" }))).toBe(true);
 
-    // ...and it is the navigator's last row: the head carries branch and counts only.
-    const navigator = row.parentElement as HTMLElement;
-    expect(navigator.lastElementChild).toBe(row);
+    // The tools row under the header holds the list/tree switch and the sync
+    // buttons; the navigator has no bottom bar anymore.
+    const listBtn = screen.getByRole("button", { name: "Плоский список" });
+    const toolsRow = listBtn.closest("[role='toolbar']") as HTMLElement;
+    expect(toolsRow).toBeTruthy();
+    expect(toolsRow.contains(screen.getByRole("button", { name: "Дерево папок" }))).toBe(true);
+    expect(toolsRow.contains(screen.getByRole("button", { name: "Pull" }))).toBe(true);
+    expect(toolsRow.contains(screen.getByRole("button", { name: "Push" }))).toBe(true);
+    expect(toolsRow.contains(tabs)).toBe(false);
+
+    // ...and it is the navigator's last row: the head carries branch, tab switch and counts only.
+    const navigator = toolsRow.parentElement as HTMLElement;
     expect(navigator.firstElementChild?.tagName).toBe("HEADER");
-    expect(navigator.firstElementChild?.contains(row)).toBe(false);
-    expect(navigator.firstElementChild?.contains(tabs)).toBe(false);
+    expect(navigator.firstElementChild?.contains(toolsRow)).toBe(false);
   });
 
-  it("keeps fetch and the stash pair behind the overflow button", async () => {
+  it("shows fetch, stash and pop as direct toolbar buttons", async () => {
     const user = userEvent.setup();
     renderPanel({ status: { ...STATUS, dirty: true, stashCount: 0 } });
-    const more = await screen.findByRole("button", { name: "Ещё" });
-    expect(more.closest("[role='toolbar']")).toBeTruthy();
-
-    // Out of the row: three more buttons there are what would wrap the row in two.
-    expect(screen.queryByRole("menuitem", { name: "Fetch" })).toBeNull();
-
-    await user.click(more);
-    const fetch = screen.getByRole("menuitem", { name: "Fetch" });
-    expect(screen.getByRole("menuitem", { name: "Stash" })).toBeTruthy();
+    const stash = await screen.findByRole("button", { name: "Stash" });
+    // No overflow: every rare action is a plain button in the tools row.
+    expect(screen.queryByRole("button", { name: "Ещё" })).toBeNull();
     // An empty stash is nothing to pop.
-    expect((screen.getByRole("menuitem", { name: "Pop" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Pop" }) as HTMLButtonElement).disabled).toBe(true);
 
-    await user.click(fetch);
-    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    expect(apiMock.gitSync).toHaveBeenCalledWith("s1", "fetch");
+    await user.click(screen.getByRole("button", { name: "Fetch" }));
+    await waitFor(() => expect(apiMock.gitSync).toHaveBeenCalledWith("s1", "fetch"));
+    expect(stash).toBeTruthy();
   });
 
   it("fills the screen from the full view, and stays a dock otherwise", async () => {
