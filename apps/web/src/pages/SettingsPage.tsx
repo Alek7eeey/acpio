@@ -106,6 +106,14 @@ function toggleInOrder<T>(current: T[], id: T, order: T[]): T[] {
   return order.filter((v) => next.includes(v));
 }
 
+/** One path per line, trimmed, blanks dropped. */
+function parsePathLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 /**
  * Chat settings that affect the interactive preview (layout, chips, toolbar).
  * Shown inside the collapsible "Advanced" block on desktop and as the main
@@ -898,6 +906,12 @@ export function SettingsPage() {
     form.darkSurface,
   ]);
   const [mcpDraft, setMcpDraft] = useState<McpServerConfig | null>(null);
+  // Raw text of the one-path-per-line textareas while they hold focus. The
+  // normalized form (blank lines dropped) would swallow the empty line Enter
+  // just created and pin the caret, so typing continues against the draft and
+  // the canonical join returns once the field loses focus.
+  const [skillPathsDraft, setSkillPathsDraft] = useState<string | null>(null);
+  const [mcpFilesDraft, setMcpFilesDraft] = useState<string | null>(null);
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "browser">("idle");
@@ -2508,16 +2522,12 @@ export function SettingsPage() {
                   className={styles.mcpFilesInput}
                   rows={3}
                   spellCheck={false}
-                  value={(form.builtinSkillPaths ?? []).join("\n")}
-                  onChange={(e) =>
-                    patch(
-                      "builtinSkillPaths",
-                      e.target.value
-                        .split("\n")
-                        .map((line) => line.trim())
-                        .filter(Boolean),
-                    )
-                  }
+                  value={skillPathsDraft ?? (form.builtinSkillPaths ?? []).join("\n")}
+                  onChange={(e) => {
+                    setSkillPathsDraft(e.target.value);
+                    patch("builtinSkillPaths", parsePathLines(e.target.value));
+                  }}
+                  onBlur={() => setSkillPathsDraft(null)}
                   aria-label={t("settings.builtinSkillPathsTitle")}
                   placeholder={DEFAULT_BUILTIN_SKILL_PATHS.join("\n")}
                 />
@@ -2928,16 +2938,12 @@ export function SettingsPage() {
                   className={styles.mcpFilesInput}
                   rows={4}
                   spellCheck={false}
-                  value={(form.mcpProjectFiles ?? []).join("\n")}
-                  onChange={(e) =>
-                    patch(
-                      "mcpProjectFiles",
-                      e.target.value
-                        .split("\n")
-                        .map((line) => line.trim())
-                        .filter(Boolean),
-                    )
-                  }
+                  value={mcpFilesDraft ?? (form.mcpProjectFiles ?? []).join("\n")}
+                  onChange={(e) => {
+                    setMcpFilesDraft(e.target.value);
+                    patch("mcpProjectFiles", parsePathLines(e.target.value));
+                  }}
+                  onBlur={() => setMcpFilesDraft(null)}
                   aria-label={t("settings.mcpFolderFilesTitle")}
                   placeholder={DEFAULT_MCP_PROJECT_FILES.join("\n")}
                 />

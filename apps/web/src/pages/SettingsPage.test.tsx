@@ -139,6 +139,42 @@ describe("SettingsPage form state", () => {
 
     expect(field.value).toBe("12");
   });
+
+  // Regression: the path-list textareas normalized on every keystroke (split,
+  // trim, drop-blank, join), so the blank line Enter had just created vanished
+  // under the caret — a second path could not be typed on a new line at all.
+  it("keeps the line break Enter creates in the skill-folders textarea", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const field = screen.getByLabelText("Skill folders") as HTMLTextAreaElement;
+    expect(field.value).toBe(".agents/skills");
+
+    // Still focused: the draft must hold the fresh empty line.
+    await user.type(field, "{Enter}");
+    expect(field.value).toBe(".agents/skills\n");
+
+    await user.type(field, "~/x/skills");
+    expect(field.value).toBe(".agents/skills\n~/x/skills");
+
+    // Left the field: the canonical one-path-per-line form is back.
+    await user.tab();
+    expect(field.value).toBe(".agents/skills\n~/x/skills");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    const saved = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
+      builtinSkillPaths?: string[];
+    };
+    expect(saved.builtinSkillPaths).toEqual([".agents/skills", "~/x/skills"]);
+  });
 });
 
 describe("Built-in providers", () => {
