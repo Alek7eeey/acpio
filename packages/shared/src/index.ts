@@ -1610,7 +1610,12 @@ export function modelDisplayName(value: string, name?: string, defaultLabel = "D
     // still names its model: take the part that is not a provider marker.
     const parts = [...raw.matchAll(/"([^"]*)"/g)].map((m) => m[1] ?? "");
     const model = parts.find((p) => p !== "" && !p.includes(":"));
-    return model ? prettifyModelWireId(model, defaultLabel) : raw;
+    if (model) return prettifyModelWireId(model, defaultLabel);
+    // A built-in composite `<provider id>::<model id>` (no catalog row to supply
+    // the label yet): the provider id is internal, so show the model part.
+    const cut = raw.lastIndexOf(BUILTIN_MODEL_SEPARATOR);
+    const tail = cut > 0 ? raw.slice(cut + BUILTIN_MODEL_SEPARATOR.length).trim() : "";
+    return tail ? prettifyModelWireId(tail, defaultLabel) : raw;
   }
   // Prefer a clean agent-provided title (e.g. "Cursor Grok 4.5 Fast").
   if (provided && !hasModelParams(provided) && !isRawWireSlug(provided)) {

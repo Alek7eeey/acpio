@@ -114,6 +114,11 @@ describe("modelDisplayName", () => {
       undefined,
       "GLM 5.3 Flash",
     ],
+    // a built-in composite `<provider id>::<model id>` never shows the internal
+    // provider id: the catalog name wins, and without one the model part is used
+    ["pmuuvdc2xm3dz::deepseek-v4.1-flash", "Deepseek V4.1 Flash", undefined, "Deepseek V4.1 Flash"],
+    ["pmuuvdc2xm3dz::deepseek-v4.1-flash", undefined, undefined, "Deepseek V4.1 Flash"],
+    ["pmuuvdc2xm3dz::deepseek-v4.1-flash[fast=true]", undefined, undefined, "Deepseek V4.1 Flash · Fast"],
   ])("modelDisplayName(%j, %j, %j)", (value, name, defaultLabel, expected) => {
     expect(modelDisplayName(value, name, defaultLabel)).toBe(expected);
   });

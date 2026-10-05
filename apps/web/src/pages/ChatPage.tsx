@@ -4943,11 +4943,19 @@ function ChatThread() {
           commitParams(nextModel, committed);
           if (committed.length && nextModel === modelRef.current) {
             setStableParams(committed);
+            // Read the live catalog instead of closing over the render's arrays:
+            // `catalog?.models ?? []` is a fresh array whenever no catalog matches
+            // this chat's provider, so a dependency on it (and on `catalog?.modes`)
+            // recreated this callback every render. The effect below then re-ran
+            // forever — a params request per render, with the picker left unable
+            // to label the model because its catalog stayed out of sync.
+            const live = useAppStore.getState().modelsCatalog;
+            const liveMatches = live?.provider === agentProvider;
             rememberModelsCatalog({
               provider: agentProvider,
-              models,
+              models: liveMatches ? live.models : [],
               modelParams: committed,
-              modes: catalog?.modes ?? [],
+              modes: liveMatches ? (live.modes ?? []) : [],
               currentModel: nextModel,
               at: Date.now(),
             });
@@ -4964,7 +4972,7 @@ function ChatThread() {
         paramsInflightRef.current.delete(nextModel);
       }
     },
-    [activeSession?.id, agentProvider, catalog?.modes, commitParams, models],
+    [activeSession?.id, agentProvider, commitParams],
   );
 
   useEffect(() => {
