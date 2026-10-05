@@ -109,6 +109,16 @@ describe("compactMessages", () => {
     expect(compacted).toEqual(pruneMessages(messages, 1000));
   });
 
+  it("falls back to pruning when the summary fails to shrink the view", async () => {
+    // A summariser that retells instead of condensing leaves the view above
+    // the trigger line: nearly everything is re-read anyway, and the cached
+    // prefix is destroyed on top. Pruning is strictly better there.
+    const messages = [...turn("t0", 600), ...turn("t1", 600), ...turn("t2", 600)];
+    const summarize = vi.fn(async () => "retold: " + "x".repeat(20_000));
+    const compacted = await compactMessages({ messages, contextWindow: 1000, summarize });
+    expect(compacted).toEqual(pruneMessages(messages, 1000));
+  });
+
   it("falls back to pruning when the summary comes back empty", async () => {
     const messages = [...turn("t0", 600), ...turn("t1", 600), ...turn("t2", 600)];
     const compacted = await compactMessages({

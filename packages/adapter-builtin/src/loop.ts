@@ -139,10 +139,21 @@ export async function compactMessages(opts: CompactOptions): Promise<ModelMessag
   try {
     const summary = await summarize(dropped);
     if (!summary.trim()) return pruneMessages(messages, contextWindow);
-    return [
+    const compacted: ModelMessage[] = [
       { role: "user", content: `${COMPACT_MARKER}\n\n${summary.trim()}` },
       ...messages.slice(cut),
     ];
+    // A summary that leaves the view above the trigger line is not a
+    // summary: it re-reads nearly everything anyway while still destroying
+    // the cached prefix (observed on the 2026-10-05 long run: two
+    // compactions bought 25149 -> 24235 wire tokens each). With the tail
+    // capped at 60% of the window, a summary over the line means the
+    // summariser retold instead of condensed — pruning keeps more verbatim
+    // for the same size.
+    if (estimateTokens(compacted) > contextWindow * 0.8) {
+      return pruneMessages(messages, contextWindow);
+    }
+    return compacted;
   } catch {
     return pruneMessages(messages, contextWindow);
   }
