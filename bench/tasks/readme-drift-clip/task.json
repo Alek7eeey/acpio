@@ -1,0 +1,8 @@
+{
+  "id": "readme-drift-clip",
+  "title": "clip.js drifted from its README — the docs shipped, the code did not",
+  "prompt": "A teammate documented the planned CLI in README.md and merged, but clip.js only implements part of it — the README is the contract. Bring clip.js up to every documented behavior: --at word (whole words only, no trailing spaces, still within the width), a configurable --marker that counts toward the width, @file input, the default marker, and the usage error on missing input (stderr, exit 1). Text that fits the width passes through unchanged, marker-free. Verify each documented case with the CLI itself before answering.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s"
+}

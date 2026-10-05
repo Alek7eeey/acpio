@@ -1,0 +1,8 @@
+{
+  "id": "nightly-double-charge",
+  "title": "Three customers were charged twice last night",
+  "prompt": "Billing reports three double-charged customers from last night's reconciliation run — logs/provider-export.csv shows two distinct auth codes for orders 8871, 8874 and 8902, every other order has one. logs/night-42.log is the run log. Find the root cause in lib/reconcile.mjs and fix it. The contract: at most one charge per order, ever. An ack of 'timeout' is an UNKNOWN outcome — the provider may have applied the charge even though we never got the ok; after a timeout the order must never be blindly charged again (a stable idempotency key per order that the provider dedupes on, or routing the order to review — your choice). A real 'declined' applied nothing and must still be retried until ok. Keep the run-log line formats as they are. Verify the fixed behavior yourself: a timeout whose charge actually applied must never lead to a second applied charge, and a decline must still end in exactly one applied charge.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s"
+}

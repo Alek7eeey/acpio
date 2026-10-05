@@ -1,0 +1,8 @@
+{
+  "id": "changelog-from-history",
+  "title": "The release needs a CHANGELOG.md written from HISTORY.txt",
+  "prompt": "We are about to publish and the repo has no CHANGELOG.md. HISTORY.txt holds the commit history: two release tags and everything that landed between them. Write CHANGELOG.md following the rules below exactly — a release bot parses it. Title line: `# Changelog`. One `## ` header per version, newest first: `## Unreleased` (entries after the last tag), then the tagged versions, each with its tag date from HISTORY.txt on the same line (e.g. `## v1.4.0 - 2026-09-28`). Under each version group entries into `### ` sections by type: feat -> `Added`, fix -> `Fixed`, change -> `Changed`, perf -> `Performance`, docs -> `Docs`; omit a section when it has no entries. Every entry is one `- ` bullet keeping its `(#NNN)` reference, with the change description after it. The entry flagged BREAKING in HISTORY.txt must begin its bullet with `**BREAKING:**`. Do not invent, reword beyond the description, or drop entries.",
+  "timeoutMs": 180000,
+  "difficulty": "easy",
+  "horizon": "xs"
+}

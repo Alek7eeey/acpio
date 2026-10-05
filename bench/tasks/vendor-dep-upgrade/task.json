@@ -1,0 +1,8 @@
+{
+  "id": "vendor-dep-upgrade",
+  "title": "Move src/ off vendored stringcase v1 onto v2",
+  "prompt": "The vendored stringcase lib got v2 (vendor/stringcase-v2) and src/ must move onto it: point src's imports at the v2 module and port the call sites. v2's README lists the breaking changes — read it before porting. The contract is current behavior: every output of src/normalize.mjs stays exactly as it is today on the inputs it serves (acronym-heavy and camel-humped words included), so where a v2 change would alter an output, keep the old output by adapting the call site instead. Do not edit anything under vendor/.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s"
+}

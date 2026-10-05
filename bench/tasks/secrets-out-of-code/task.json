@@ -1,0 +1,8 @@
+{
+  "id": "secrets-out-of-code",
+  "title": "Release scan flagged hardcoded credentials in src/",
+  "prompt": "The release scanner flagged hardcoded credentials in src/. README.md states the secret policy — it is the contract. Move every secret out of the source: create .env with the real values, .env.example listing the same variables with placeholder values, make .gitignore cover .env, and make src read the secrets through the existing env loader instead of literals. Behavior must not change: reportLine() returns exactly the same string as before, and the same values reach it.",
+  "timeoutMs": 240000,
+  "difficulty": "medium",
+  "horizon": "s"
+}

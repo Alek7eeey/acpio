@@ -1,0 +1,12 @@
+2026-08-30  tag: v1.3.0 released
+2026-09-02  a1b2c3d  fix: retry storm when the provider answers 429 (#138)
+2026-09-04  e4f5a6b  feat: --format json for the export command (#140)
+2026-09-05  b7c8d9e  fix: export crashed on empty result sets (#141)
+2026-09-09  c0d1e2f  change: drop node 18, engines now require node >= 20 (BREAKING) (#144)
+2026-09-12  d3e4f5a  perf: batched inserts cut the nightly sync by 60% (#147)
+2026-09-15  e6f7a8b  fix: timezone drift in the nightly rollup (#149)
+2026-09-20  f9a0b1c  docs: rewrite the quickstart (#151)
+2026-09-28  tag: v1.4.0 released
+2026-10-01  1a2b3c4  feat: webhook signing with HMAC (#153)
+2026-10-02  5d6e7f8  fix: webhook retries used seconds instead of ms (#155)
+2026-10-03  9a8b7c6  fix: stale cursor after the first page (#156)
