@@ -3,6 +3,7 @@ import type { AgentMode } from "@acpio/shared";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { HostClient } from "./host.js";
+import { makeTaskTool, type SubagentsBridge } from "./subagents.js";
 
 /** Ask the harness permission dialog; throws when the user declines. */
 export type AskPermission = (toolCall: {
@@ -16,6 +17,11 @@ export interface BuiltinToolOptions {
   host: HostClient;
   mode: AgentMode;
   ask: AskPermission;
+  /**
+   * Present only when the subagents feature is on: adds the `task` tool. The
+   * child toolset is built without it, so subagents cannot nest.
+   */
+  subagents?: SubagentsBridge;
 }
 
 /** Terminal output the model gets: enough to act on, bounded for the context. */
@@ -183,6 +189,7 @@ interface SearchHit {
  */
 export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   const { host, ask, mode } = opts;
+  const taskTool: ToolSet = opts.subagents ? { task: makeTaskTool(opts.subagents) } : {};
 
   const read = tool({
     description:
@@ -254,7 +261,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
-  if (mode !== "agent") return { read, glob, grep };
+  if (mode !== "agent") return { read, glob, grep, ...taskTool };
 
   const write = tool({
     description:
@@ -356,5 +363,5 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
-  return { read, glob, grep, write, edit, bash };
+  return { read, glob, grep, write, edit, bash, ...taskTool };
 }

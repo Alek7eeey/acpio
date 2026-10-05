@@ -371,3 +371,77 @@ describe("readSettingsSchema", () => {
     expect(readSettingsSchema(null)).toBe(1);
   });
 });
+
+describe("normalizeBuiltinSubagents", () => {
+  it("defaults to the disabled feature with an empty roster", () => {
+    expect(mergeClientAppSettings({}).builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: true,
+      agents: [],
+    });
+    expect(DEFAULT_SETTINGS.builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: true,
+      agents: [],
+    });
+  });
+
+  it("keeps a valid user-defined agent and clamps maxTurns to the cap", () => {
+    const merged = mergeClientAppSettings({
+      builtinSubagents: {
+        enabled: true,
+        allowAdhoc: false,
+        agents: [
+          {
+            id: "s1",
+            name: "Test Runner",
+            description: "Runs the test suite.",
+            systemPrompt: "You run tests.",
+            tools: ["read", "bash", "nonsense"],
+            maxTurns: 999,
+          },
+        ],
+      },
+    }).builtinSubagents;
+    expect(merged.enabled).toBe(true);
+    expect(merged.allowAdhoc).toBe(false);
+    expect(merged.agents).toEqual([
+      {
+        id: "s1",
+        name: "test_runner",
+        description: "Runs the test suite.",
+        systemPrompt: "You run tests.",
+        tools: ["read", "bash"],
+        maxTurns: 60,
+      },
+    ]);
+  });
+
+  it("drops malformed rows and dedupes ids/names, reserving task and explore", () => {
+    const merged = mergeClientAppSettings({
+      builtinSubagents: {
+        agents: [
+          { id: "a", name: "explore", tools: ["read"] },
+          { id: "b", name: "task", tools: ["read"] },
+          { id: "c", name: "worker", tools: ["read"] },
+          { id: "c", name: "worker2", tools: ["read"] },
+          { id: "d", name: "worker", tools: ["read"] },
+          { name: "no-id", tools: [] },
+          null,
+          "junk",
+        ],
+      },
+    }).builtinSubagents;
+    expect(merged.agents.map((a) => a.id)).toEqual(["c"]);
+    expect(merged.agents[0]?.name).toBe("worker");
+  });
+
+  it("recovers the feature when the stored value is garbage", () => {
+    expect(mergeClientAppSettings({ builtinSubagents: "junk" }).builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: true,
+      agents: [],
+    });
+    expect(mergeClientAppSettings({ builtinSubagents: 42 }).builtinSubagents.enabled).toBe(false);
+  });
+});

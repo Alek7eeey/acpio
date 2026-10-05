@@ -256,3 +256,49 @@ describe("bash shell selection", () => {
     expect(res.stdout.trim()).toBe("a-b");
   });
 });
+
+describe("createBuiltinTools with subagents", () => {
+  const host = { request: vi.fn(async () => ({})) };
+  const ask = vi.fn(async () => undefined);
+  const bridge = {
+    mode: "agent",
+    ask,
+    model: {},
+    contextWindow: 1_000,
+    cwd: "/w",
+    signal: new AbortController().signal,
+    settings: { enabled: true, allowAdhoc: true, agents: [] },
+    emit: vi.fn(),
+    buildChildTools: vi.fn(() => ({ read: { description: "read" } })),
+    usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0 },
+    results: new Map(),
+    slots: { acquire: async () => () => {} },
+  } as unknown as Parameters<typeof createBuiltinTools>[0]["subagents"];
+
+  it("adds the `task` tool only when the bridge is present, in both modes", () => {
+    expect(Object.keys(createBuiltinTools({ host, mode: "agent", ask }))).not.toContain("task");
+    expect(Object.keys(createBuiltinTools({ host, mode: "plan", ask, subagents: bridge }))).toEqual([
+      "read",
+      "glob",
+      "grep",
+      "task",
+    ]);
+    expect(Object.keys(createBuiltinTools({ host, mode: "agent", ask, subagents: bridge }))).toEqual([
+      "read",
+      "glob",
+      "grep",
+      "write",
+      "edit",
+      "bash",
+      "task",
+    ]);
+  });
+
+  it("describes the roster and the ad-hoc rules for the model", () => {
+    const tools = createBuiltinTools({ host, mode: "agent", ask, subagents: bridge });
+    const description = String((tools.task as { description: string }).description);
+    expect(description).toContain("- explore:");
+    expect(description).toContain("ad-hoc subagent");
+    expect(description).toContain("cannot spawn");
+  });
+});

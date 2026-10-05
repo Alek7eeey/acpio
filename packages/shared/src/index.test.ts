@@ -508,6 +508,7 @@ describe("DEFAULT_SETTINGS", () => {
     mcpFolderConfigs: {},
     mcpProjectFiles: [".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"],
     builtinSkillPaths: [".agents/skills"],
+    builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
     composerDrafts: {},
   };
 

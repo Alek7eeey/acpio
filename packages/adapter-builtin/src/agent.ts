@@ -32,6 +32,10 @@ import {
 } from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
+import {
+  createSubagentsBridge,
+  type SubagentsBridge,
+} from "./subagents.js";
 
 const AGENT_INFO = { name: "acpio-builtin", title: "Built-in agent", version: "0.1.0" };
 const MODES: readonly string[] = ["agent", "plan", "ask"];
@@ -91,6 +95,7 @@ function systemPrompt(
   mode: AgentMode,
   mcp: { servers: string[]; tools: string[] },
   skills: readonly BuiltinSkill[],
+  subagents: { allowAdhoc: boolean } | null,
 ): string {
   const scope =
     mode === "agent"
@@ -159,6 +164,18 @@ function systemPrompt(
       "(`sed`, `perl -pi`, a short `node -e` rewrite) over writing a helper script and debugging " +
       "it — every debug round is a wasted step.",
     `- ${scope}`,
+    ...(subagents
+      ? [
+          "",
+          "Subagents: you can delegate work with the `task` tool — the subagent runs in this " +
+            "working directory with its own context window, and only its final report is added to " +
+            "this conversation. Spawn subagents for a broad multi-file survey, for several " +
+            "independent investigations in parallel, or when the exploration would flood this " +
+            "conversation with listings; do the work yourself when a couple of targeted reads " +
+            "would do. Write the child's prompt as a complete task: the child sees nothing of " +
+            "this conversation." + (subagents.allowAdhoc ? "" : " Only named subagents are available."),
+        ]
+      : []),
     ...(mcp.tools.length
       ? [
           "",
@@ -191,6 +208,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
   private modelId: string;
   private messages: ModelMessage[] = [];
   private abort: AbortController | null = null;
+  /** Set for the duration of one prompt: the subagent bridge, if enabled. */
+  private activeSubagents: SubagentsBridge | null = null;
   /** Rebuilt per session: `session/new` carries that session's `mcpServers`. */
   private mcp = new McpManager([], (toolCall) => this.askPermission(toolCall));
 
@@ -383,7 +402,50 @@ export class BuiltinAgent implements InProcessAgentTransport {
 
   private emitUpdate(update: Record<string, unknown>): void {
     if (this.stopping || !this.out) return;
+    this.decorateUpdate(update);
     this.send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: this.sessionId, update } });
+  }
+
+  /**
+   * Single funnel for every ACP update. Subagent additions ride here so the
+   * loop itself stays untouched: the `task` call gets a headline ("task:
+   * explore: …") for its card, the harness gets the child's report on the
+   * tool's terminal update, and the child spend is folded into the turn usage
+   * (the harness overwrites — never accumulates — usage per update).
+   */
+  private decorateUpdate(update: Record<string, unknown>): void {
+    const bridge = this.activeSubagents;
+    if (!bridge) return;
+    if (update.sessionUpdate === "usage_update" && bridge.usage.totalTokens > 0) {
+      update.inputTokens = (Number(update.inputTokens ?? 0) || 0) + bridge.usage.inputTokens;
+      update.outputTokens = (Number(update.outputTokens ?? 0) || 0) + bridge.usage.outputTokens;
+      update.cachedInputTokens =
+        (Number(update.cachedInputTokens ?? 0) || 0) + bridge.usage.cachedInputTokens;
+      return;
+    }
+    if (update.sessionUpdate === "tool_call" && update.toolName === "task") {
+      const input = (update.rawInput ?? {}) as {
+        agent?: unknown;
+        system_prompt?: unknown;
+        prompt?: unknown;
+      };
+      const label =
+        typeof input.agent === "string" && input.agent.trim()
+          ? input.agent.trim()
+          : typeof input.system_prompt === "string" && input.system_prompt.trim()
+            ? "ad-hoc"
+            : "task";
+      const brief = String(input.prompt ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+      update.title = `task: ${label}${brief ? `: ${brief}` : ""}`;
+      return;
+    }
+    if (update.sessionUpdate === "tool_call_update" && update.status === "completed") {
+      const report = bridge.results.get(String(update.toolCallId ?? ""));
+      if (report !== undefined) {
+        update.result = report;
+        bridge.results.delete(String(update.toolCallId ?? ""));
+      }
+    }
   }
 
   /** Delegates the call to the harness so `permissionPolicy` applies to us. */
@@ -458,11 +520,29 @@ export class BuiltinAgent implements InProcessAgentTransport {
         headers: builtinProviderHeaders(selection.provider.headers, this.sessionId),
       });
       const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
+      // One bridge per prompt: slots and the usage accumulator must span the
+      // turn and its wrap-up continuation.
+      const model = endpoint.chatModel(selection.modelId);
+      const subagents = this.opts.settings.builtinSubagents?.enabled
+        ? createSubagentsBridge({
+            mode: this.mode,
+            ask,
+            model,
+            contextWindow,
+            cwd: this.cwd,
+            signal: abort.signal,
+            settings: this.opts.settings.builtinSubagents,
+            emit: (update: Record<string, unknown>) => this.emitUpdate(update),
+            buildChildTools: (childAsk) =>
+              createBuiltinTools({ host: this.rpc, mode: this.mode, ask: childAsk }),
+          })
+        : null;
+      this.activeSubagents = subagents;
       const WRAP_UP_NOTE =
         "Ход превысил бюджет шагов. Завершай работу: проверь сделанное и дай итоговый ответ.";
       let wrapUpSent = false;
       const turnOptions = async (maxSteps: number) => ({
-        model: endpoint.chatModel(selection.modelId),
+        model,
         system: systemPrompt(
           this.opts.settings.locale,
           this.cwd,
@@ -472,13 +552,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
             tools: offered.map((entry) => entry.qualifiedName),
           },
           skills,
+          subagents ? { allowAdhoc: this.opts.settings.builtinSubagents.allowAdhoc } : null,
         ),
         messages: await compactMessages({
           messages: this.messages,
           contextWindow,
           summarize: async (dropped) => {
             const { text } = await generateText({
-              model: endpoint.chatModel(selection.modelId),
+              model,
               system:
                 "Ты сжимаешь раннюю часть диалога программиста с агентом. Сохрани: исходную задачу и её " +
                 "ограничения, принятые решения, изменённые файлы с сутью правок, выполненные команды и " +
@@ -492,7 +573,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           },
         }),
         tools: {
-          ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask }),
+          ...createBuiltinTools({ host: this.rpc, mode: this.mode, ask, subagents: subagents ?? undefined }),
           ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
         },
         abortSignal: abort.signal,
@@ -537,6 +618,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       return { stopReason: outcome.stopReason };
     } finally {
       this.abort = null;
+      this.activeSubagents = null;
     }
   }
 }

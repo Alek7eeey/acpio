@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, canonicalCwd, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   createSession,
@@ -313,6 +313,25 @@ const settingsSchema = z.object({
     .optional(),
   mcpProjectFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
   builtinSkillPaths: z.array(z.string().min(1).max(512)).max(50).optional(),
+  builtinSubagents: z
+    .object({
+      enabled: z.boolean().optional(),
+      allowAdhoc: z.boolean().optional(),
+      agents: z
+        .array(
+          z.object({
+            id: z.string().min(1).max(64),
+            name: z.string().min(1).max(80),
+            description: z.string().max(500).optional(),
+            systemPrompt: z.string().max(8000).optional(),
+            tools: z.array(z.enum(["read", "glob", "grep", "write", "edit", "bash"])).max(6).optional(),
+            maxTurns: z.number().int().optional(),
+          }),
+        )
+        .max(20)
+        .optional(),
+    })
+    .optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only
@@ -663,6 +682,18 @@ export async function registerRoutes(app: FastifyInstance) {
     ) {
       // Skills are discovered from the settings snapshot the transport holds,
       // so a path edit needs the same restart as an endpoint edit.
+      void restartSessionsForBuiltinChange();
+    }
+    if (
+      patch.builtinSubagents !== undefined &&
+      JSON.stringify(normalizeBuiltinSubagents(patch.builtinSubagents)) !==
+        JSON.stringify(current.builtinSubagents)
+    ) {
+      // The subagent roster and the feature flag are read from the settings
+      // snapshot the transport holds — restart live built-in chats so an
+      // edited roster (or a toggled feature) applies on the next turn.
+      // Both sides are compared normalized so client key order cannot force
+      // a spurious restart.
       void restartSessionsForBuiltinChange();
     }
     if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {

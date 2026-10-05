@@ -627,3 +627,125 @@ describe("builtin session store", () => {
     ]);
   });
 });
+
+describe("builtin subagents wiring", () => {
+  /** Like the routing stub, but records the system prompt and offered tools. */
+  async function startRecordingStub(): Promise<{
+    url: string;
+    hits: Array<{ system: string; toolNames: string[] }>;
+    close(): Promise<void>;
+  }> {
+    const hits: Array<{ system: string; toolNames: string[] }> = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        const parsed: unknown = JSON.parse(body);
+        const record = parsed && typeof parsed === "object" ? parsed : {};
+        const rawTools = (record as { tools?: unknown }).tools;
+        const messages = Array.isArray((record as { messages?: unknown }).messages)
+          ? ((record as { messages: Array<Record<string, unknown>> }).messages)
+          : [];
+        const systemMessage = messages.find((m) => m?.role === "system");
+        hits.push({
+          system: String(
+            systemMessage
+              ? String(
+                  (systemMessage.content as { text?: unknown } | undefined)?.text ??
+                    systemMessage.content ??
+                    "",
+                )
+              : "",
+          ),
+          // OpenAI wire format: [{ type: "function", function: { name } }].
+          toolNames: Array.isArray(rawTools)
+            ? rawTools.map((t) =>
+                String(
+                  (t as { function?: { name?: unknown } })?.function?.name ??
+                    (t as { name?: unknown })?.name ??
+                    "",
+                ),
+              )
+            : [],
+        });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    return {
+      url: `http://127.0.0.1:${address.port}/v1`,
+      hits,
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+
+  const provider = (url: string) => [
+    {
+      id: "p1",
+      name: "Test",
+      url,
+      apiKey: "",
+      models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+    },
+  ];
+
+  it("offers the task tool and the prompt section when the feature is on", async () => {
+    const stub = await startRecordingStub();
+    try {
+      const { call } = boot({
+        builtinProviders: provider(stub.url),
+        builtinSubagents: { enabled: true, allowAdhoc: false, agents: [] },
+      });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits).toHaveLength(1);
+      expect(stub.hits[0]!.toolNames).toContain("task");
+      expect(stub.hits[0]!.system).toContain("Subagents:");
+      // allowAdhoc: false reaches the model as a stated restriction.
+      expect(stub.hits[0]!.system).toContain("Only named subagents are available");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("offers neither the tool nor the section when the feature is off", async () => {
+    const stub = await startRecordingStub();
+    try {
+      const { call } = boot({ builtinProviders: provider(stub.url) });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits[0]!.toolNames).not.toContain("task");
+      expect(stub.hits[0]!.system).not.toContain("Subagents:");
+    } finally {
+      await stub.close();
+    }
+  });
+});

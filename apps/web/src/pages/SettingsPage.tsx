@@ -16,6 +16,7 @@ import {
   type AppSettings,
   type AttachSource,
   type BuiltinProviderConfig,
+  type BuiltinSubagentsSetting,
   type ChatActionId,
   type ChatComposerButtonId,
   type ChatHeaderIconId,
@@ -29,11 +30,13 @@ import {
   type ModelParamDto,
   DEFAULT_MCP_PROJECT_FILES,
   DEFAULT_BUILTIN_SKILL_PATHS,
+  DEFAULT_BUILTIN_SUBAGENTS,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
 import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
+import { SubagentsEditor } from "../components/SubagentsEditor";
 import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
 import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
 import { useT } from "../lib/i18n";
@@ -2580,6 +2583,62 @@ export function SettingsPage() {
                   {t("settings.builtinSkillPathsReset")}
                 </button>
               </SettingRow>
+            </SettingTable>
+
+            <SettingTable>
+              <SettingRow
+                label={t("settings.subagentsEnabled")}
+                hint={t("settings.subagentsEnabledHint")}
+                terms={[t("settings.subagentsEnabled"), t("settings.subagentsEnabledHint"), "task", "subagent"]}
+              >
+                <Toggle
+                  checked={Boolean(form.builtinSubagents?.enabled)}
+                  onChange={(v) =>
+                    patch(
+                      "builtinSubagents",
+                      (form.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS).enabled === v
+                        ? form.builtinSubagents
+                        : { ...(form.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS), enabled: v },
+                    )
+                  }
+                  label={t("settings.subagentsEnabled")}
+                />
+              </SettingRow>
+              {form.builtinSubagents?.enabled ? (
+                <>
+                  <SettingRow
+                    label={t("settings.subagentsAllowAdhoc")}
+                    hint={t("settings.subagentsAllowAdhocHint")}
+                    terms={[t("settings.subagentsAllowAdhoc"), t("settings.subagentsAllowAdhocHint")]}
+                  >
+                    <Toggle
+                      checked={form.builtinSubagents.allowAdhoc !== false}
+                      onChange={(v) =>
+                        patch("builtinSubagents", {
+                          ...(form.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS),
+                          allowAdhoc: v,
+                        } satisfies BuiltinSubagentsSetting)
+                      }
+                      label={t("settings.subagentsAllowAdhoc")}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    layout="stack"
+                    label={t("settings.subagentsRosterTitle")}
+                    hint={t("settings.subagentsRosterHint")}
+                    terms={[
+                      t("settings.subagentsRosterTitle"),
+                      t("settings.subagentsRosterHint"),
+                      "explore",
+                    ]}
+                  >
+                    <SubagentsEditor
+                      value={form.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS}
+                      onChange={(agents) => patch("builtinSubagents", agents)}
+                    />
+                  </SettingRow>
+                </>
+              ) : null}
             </SettingTable>
           </>
         )}

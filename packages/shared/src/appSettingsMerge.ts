@@ -2,6 +2,7 @@ import {
   DEFAULT_CHAT_CHIP_OPTIONS,
   DEFAULT_SETTINGS,
   normalizeBuiltinProviders,
+  normalizeBuiltinSubagents,
   normalizeMcpProjectFiles,
   normalizeSkillPaths,
   type AgentProvider,
@@ -186,6 +187,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
   merged.mcpProjectFiles = normalizeMcpProjectFiles(partial.mcpProjectFiles);
   merged.builtinSkillPaths = normalizeSkillPaths(partial.builtinSkillPaths);
+  merged.builtinSubagents = normalizeBuiltinSubagents(partial.builtinSubagents);
   if (typeof partial.diagnosticsDeepLogging !== "boolean") {
     merged.diagnosticsDeepLogging = DEFAULT_SETTINGS.diagnosticsDeepLogging;
   }

@@ -312,6 +312,83 @@ describe("health & settings", () => {
     );
   });
 
+  it("PUT /api/settings stores and heals builtin subagents", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinSubagents: {
+          enabled: true,
+          allowAdhoc: true,
+          agents: [
+            {
+              id: "s1",
+              name: "Test Runner",
+              description: "Runs the suite.",
+              systemPrompt: "You run tests.",
+              tools: ["read", "bash"],
+              maxTurns: 999,
+            },
+            { id: "s2", name: "explore", tools: [] },
+          ],
+        },
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.builtinSubagents).toEqual({
+      enabled: true,
+      allowAdhoc: true,
+      // The reserved `explore` name drops its row; the valid one heals.
+      agents: [
+        {
+          id: "s1",
+          name: "test_runner",
+          description: "Runs the suite.",
+          systemPrompt: "You run tests.",
+          tools: ["read", "bash"],
+          maxTurns: 60,
+        },
+      ],
+    });
+  });
+
+  it("heals stored builtin subagents saved before the row rules", async () => {
+    await db.insert(settingsTable).values({
+      key: "app",
+      value: {
+        builtinSubagents: {
+          enabled: "yes",
+          allowAdhoc: false,
+          agents: [
+            {
+              id: "legacy",
+              name: "Bad Name!",
+              description: 5,
+              tools: ["read", "nonsense", "grep"],
+              maxTurns: "x",
+            },
+          ],
+        },
+      },
+    });
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: false,
+      agents: [
+        {
+          id: "legacy",
+          name: "bad_name",
+          description: "",
+          systemPrompt: "",
+          tools: ["read", "grep"],
+          maxTurns: 30,
+        },
+      ],
+    });
+  });
+
   it("GET /api/mcp/project reads a folder's own MCP files", async () => {
     const cwd = await newTempDir("acpio-mcp-route-");
     await fsp.mkdir(path.join(cwd, ".omp"), { recursive: true });

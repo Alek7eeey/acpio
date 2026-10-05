@@ -1234,6 +1234,122 @@ function rewriteBuiltinModelValues(
   raw.modelParamsByProviderModel = paramsMap;
 }
 
+/** Tool names the built-in agent can grant to a subagent. */
+export const BUILTIN_TOOL_NAMES = ["read", "glob", "grep", "write", "edit", "bash"] as const;
+export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
+
+/** Default and hard cap for one subagent run's step budget. */
+export const BUILTIN_SUBAGENT_MAX_TURNS_DEFAULT = 30;
+export const BUILTIN_SUBAGENT_MAX_TURNS_CAP = 60;
+/** Hard cap on user-defined subagent rows. */
+export const BUILTIN_SUBAGENT_AGENTS_MAX = 20;
+
+/**
+ * One named subagent the built-in `task` tool can spawn. The built-in
+ * `explore` agent is code, not settings — only user-defined rows are stored.
+ */
+export interface BuiltinSubagentDef {
+  /** Stable machine id (never shown). */
+  id: string;
+  /** Name the model addresses the agent by (`task { agent: "<name>" }`). */
+  name: string;
+  /** When to use this agent — surfaced to the model in the roster. */
+  description: string;
+  /** Child run's system prompt; the report contract is appended to it. */
+  systemPrompt: string;
+  /** Tools the child may use — intersected with the parent's own toolset. */
+  tools: BuiltinToolName[];
+  /** Step ceiling for one child run (hard cap: BUILTIN_SUBAGENT_MAX_TURNS_CAP). */
+  maxTurns: number;
+}
+
+export interface BuiltinSubagentsSetting {
+  /** Master switch: exposes the `task` tool and the prompt section when on. */
+  enabled: boolean;
+  /** Let the model compose ad-hoc children (its own systemPrompt + tools). */
+  allowAdhoc: boolean;
+  /** User-defined agents; ids/names are deduped, `task`/`explore` reserved. */
+  agents: BuiltinSubagentDef[];
+}
+
+export const DEFAULT_BUILTIN_SUBAGENTS: BuiltinSubagentsSetting = {
+  enabled: false,
+  allowAdhoc: true,
+  agents: [],
+};
+
+const BUILTIN_SUBAGENT_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+/** Names the model cannot claim for a user-defined agent. */
+const BUILTIN_SUBAGENT_RESERVED_NAMES = ["task", "explore"];
+
+function healBuiltinSubagentRow(raw: unknown): BuiltinSubagentDef | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const id = typeof r.id === "string" ? r.id.trim().slice(0, 64) : "";
+  // Slugify what the user typed ("Test Runner" -> "test_runner"); a name that
+  // still fails the model-facing shape drops the row.
+  const name =
+    typeof r.name === "string"
+      ? r.name
+          .trim()
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .replace(/[^a-z0-9_-]/g, "")
+          .replace(/^_+|_+$/g, "")
+          .slice(0, 32)
+      : "";
+  if (!id || !BUILTIN_SUBAGENT_NAME_RE.test(name)) return null;
+  const tools = [
+    ...new Set(
+      Array.isArray(r.tools)
+        ? r.tools.filter(
+            (t): t is BuiltinToolName =>
+              typeof t === "string" && (BUILTIN_TOOL_NAMES as readonly string[]).includes(t),
+          )
+        : [],
+    ),
+  ];
+  const maxTurns =
+    typeof r.maxTurns === "number" && Number.isFinite(r.maxTurns)
+      ? Math.min(BUILTIN_SUBAGENT_MAX_TURNS_CAP, Math.max(1, Math.round(r.maxTurns)))
+      : BUILTIN_SUBAGENT_MAX_TURNS_DEFAULT;
+  return {
+    id,
+    name,
+    description: typeof r.description === "string" ? r.description.trim().slice(0, 500) : "",
+    systemPrompt: typeof r.systemPrompt === "string" ? r.systemPrompt.slice(0, 8000) : "",
+    tools,
+    maxTurns,
+  };
+}
+
+/**
+ * Heal the stored builtin-subagents setting, applied by both the server merge
+ * and the client merge: malformed rows drop, ids/names dedupe (the model-facing
+ * `task` and the built-in `explore` names are reserved), caps clamp.
+ */
+export function normalizeBuiltinSubagents(value: unknown): BuiltinSubagentsSetting {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const agents: BuiltinSubagentDef[] = [];
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>(BUILTIN_SUBAGENT_RESERVED_NAMES);
+  if (Array.isArray(raw.agents)) {
+    for (const row of raw.agents) {
+      if (agents.length >= BUILTIN_SUBAGENT_AGENTS_MAX) break;
+      const healed = healBuiltinSubagentRow(row);
+      if (!healed || seenIds.has(healed.id) || seenNames.has(healed.name)) continue;
+      seenIds.add(healed.id);
+      seenNames.add(healed.name);
+      agents.push(healed);
+    }
+  }
+  return {
+    enabled: raw.enabled === true,
+    allowAdhoc: raw.allowAdhoc !== false,
+    agents,
+  };
+}
+
 export interface AppSettings {
   theme: Theme;
   locale: AppLocale;
@@ -1408,6 +1524,11 @@ export interface AppSettings {
    */
   builtinSkillPaths: string[];
   /**
+   * Built-in agent subagents: the master switch plus user-defined named agents
+   * for the `task` tool (the built-in `explore` agent is not stored here).
+   */
+  builtinSubagents: BuiltinSubagentsSetting;
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent.
@@ -1487,6 +1608,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpFolderConfigs: {},
   mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
+  builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   composerDrafts: {},
 };
 
