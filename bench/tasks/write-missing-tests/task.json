@@ -2,7 +2,7 @@
   "id": "write-missing-tests",
   "title": "lib/roman.mjs ships with zero tests; SPEC.md is the contract",
   "prompt": "lib/roman.mjs went out untested and a regression slipped in unnoticed last month. SPEC.md is the contract. Write test/roman.test.mjs with node:test (import the lib as ../lib/roman.mjs) that covers every clause of the spec: the exact canonical strings for the subtractive pairs, the 1..3999 bounds with every documented throw (non-integer, 0, negative, over 3999, empty, lowercase, non-string input), the named parse values, and a round-trip sweep. Do not change lib/. A clause without an assert is a clause that can regress silently.",
-  "timeoutMs": 240000,
+  "timeoutMs": 300000,
   "difficulty": "medium",
   "horizon": "s"
 }
