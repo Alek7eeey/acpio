@@ -4,6 +4,6 @@ export const BUILD_INFO = {
   "baseVersion": "0.1.0",
   "versionEpoch": "2026-08-26",
   "uniqueDays": 29,
-  "commitsToday": 18,
-  "sha": "306d30a"
+  "commitsToday": 0,
+  "sha": "0c8d6d2"
 } as const;
