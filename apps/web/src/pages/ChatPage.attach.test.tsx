@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { DEFAULT_SETTINGS, type SessionDetailDto } from "@acpio/shared";
+import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
@@ -157,5 +157,72 @@ describe("composer attachments during a running turn", () => {
 
     expect(screen.queryByLabelText("Отправить")).toBeNull();
     expect(screen.getByLabelText("Остановить")).toBeTruthy();
+  });
+
+  // The staged file sits above the composer's meta chips (terminal, tokens,
+  // changed files, MCP, path), not squeezed between them and the input.
+  it("stacks staged attachments above the composer meta chips", async () => {
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+
+    pasteImage(textarea);
+    await screen.findByText("screenshot.png");
+
+    const pending = container.querySelector(`.${styles.pendingFiles}`);
+    const meta = container.querySelector(`.${styles.composerMetaShell}`);
+    expect(pending).toBeTruthy();
+    expect(meta).toBeTruthy();
+    expect(
+      pending!.compareDocumentPosition(meta!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
+describe("attached image in a landed user message", () => {
+  // Regression: once the server echoed the file part with its fileId, the chip
+  // was replaced by the preview alone, so the file name vanished. The image
+  // preview belongs above the chip, and the chip (with the name) stays.
+  it("keeps the file chip below the image preview", async () => {
+    const detail = runningSession();
+    detail.status = "idle";
+    detail.messages = [
+      {
+        id: "u1",
+        sessionId: "s1",
+        role: "user",
+        createdAt: "2026-10-01T09:00:00.000Z",
+        parts: [
+          {
+            id: "u1-text",
+            messageId: "u1",
+            type: "text",
+            order: 0,
+            payload: { text: "что тут" },
+            createdAt: "2026-10-01T09:00:00.000Z",
+          } satisfies MessagePartDto,
+          {
+            id: "u1-file-0",
+            messageId: "u1",
+            type: "file",
+            order: 1,
+            payload: { name: "shot.png", fileId: "shot.png", size: 1234, mime: "image/png" },
+            createdAt: "2026-10-01T09:00:00.000Z",
+          } satisfies MessagePartDto,
+        ],
+      },
+    ];
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    const item = container.querySelector(`.${styles.userFileItem}`);
+    expect(item).toBeTruthy();
+
+    const preview = item!.querySelector(`.${styles.userFilePreviewWrap}`);
+    const chip = item!.querySelector(`.${styles.userFileChip}`);
+    expect(preview).toBeTruthy();
+    expect(chip?.textContent).toContain("shot.png");
+    // Image first (above), chip second (below).
+    expect(item!.firstElementChild).toBe(preview);
   });
 });

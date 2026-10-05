@@ -591,7 +591,8 @@ function UserMessage({
                       loading="lazy"
                     />
                   </a>
-                ) : href ? (
+                ) : null}
+                {href ? (
                   <a
                     className={styles.userFileChip}
                     href={href}
@@ -6124,51 +6125,6 @@ function ChatThread() {
                 </div>
               )}
           </div>
-          <ComposerMetaChips
-            renderSkeleton={renderSkeleton}
-            settings={settings}
-            activeSession={activeSession}
-            autoExpandSteps={autoExpandSteps}
-            onToggleAutoExpandSteps={() => syncAutoExpandSteps(!autoExpandSteps)}
-            chatMcp={chatMcp}
-            availableMcpCount={
-              activeSession
-                ? effectiveMcpServers(settings, undefined, activeSession.cwd, projectServers)
-                    .length
-                : 0
-            }
-            contextDisplay={contextDisplay}
-            consoleOpen={activeRightPanel === "console"}
-            onToggleConsole={() => toggleConsolePanel()}
-            modeSwitcher={modeSwitcher}
-            sessionMode={sessionMode}
-            composerLocked={composerLocked}
-            onModeChange={onModeChange}
-            onOpenMcpDialog={() => setMcpDialogOpen(true)}
-            modeLabel={modeLabel}
-            planChip={{
-              visible: Boolean(activePlan) && activeRightPanel !== "plan",
-              open: activeRightPanel === "plan",
-              pending: planPending,
-              onClick: openPlanPanel,
-            }}
-            gitChip={
-              showGitComposer
-                ? {
-                    status: git.status,
-                    loading: git.loading,
-                    awaiting: git.awaiting,
-                    branchBusy: git.branchBusy,
-                    branchesLoading: git.branchesLoading,
-                    onCheckout: git.checkout,
-                    onDeleteBranch: git.deleteBranch,
-                    onLoadBranches: () => void git.loadBranches(),
-                    changesOpen: gitPanelOpen,
-                    onOpenChanges: openGitChangesPanel,
-                  }
-                : undefined
-            }
-          />
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
@@ -6220,6 +6176,51 @@ function ChatThread() {
               })}
             </div>
           )}
+          <ComposerMetaChips
+            renderSkeleton={renderSkeleton}
+            settings={settings}
+            activeSession={activeSession}
+            autoExpandSteps={autoExpandSteps}
+            onToggleAutoExpandSteps={() => syncAutoExpandSteps(!autoExpandSteps)}
+            chatMcp={chatMcp}
+            availableMcpCount={
+              activeSession
+                ? effectiveMcpServers(settings, undefined, activeSession.cwd, projectServers)
+                    .length
+                : 0
+            }
+            contextDisplay={contextDisplay}
+            consoleOpen={activeRightPanel === "console"}
+            onToggleConsole={() => toggleConsolePanel()}
+            modeSwitcher={modeSwitcher}
+            sessionMode={sessionMode}
+            composerLocked={composerLocked}
+            onModeChange={onModeChange}
+            onOpenMcpDialog={() => setMcpDialogOpen(true)}
+            modeLabel={modeLabel}
+            planChip={{
+              visible: Boolean(activePlan) && activeRightPanel !== "plan",
+              open: activeRightPanel === "plan",
+              pending: planPending,
+              onClick: openPlanPanel,
+            }}
+            gitChip={
+              showGitComposer
+                ? {
+                    status: git.status,
+                    loading: git.loading,
+                    awaiting: git.awaiting,
+                    branchBusy: git.branchBusy,
+                    branchesLoading: git.branchesLoading,
+                    onCheckout: git.checkout,
+                    onDeleteBranch: git.deleteBranch,
+                    onLoadBranches: () => void git.loadBranches(),
+                    changesOpen: gitPanelOpen,
+                    onOpenChanges: openGitChangesPanel,
+                  }
+                : undefined
+            }
+          />
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               showStop ? styles.pillBusy : ""
