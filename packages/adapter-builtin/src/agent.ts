@@ -144,9 +144,13 @@ function systemPrompt(
       "unrelated to the change are out of scope.",
     "- Derive a self-written verification from the contract, not from the patch: every clause " +
       "the task states becomes an assertion, including the edge case that separates fixed from " +
-      "unfixed (a read after expiry, an entry at a stale index). If your script and the code " +
-      "disagree, the contract decides which one lies — never relax the check to go green; a " +
-      "check your fix cannot fail proves nothing.",
+      "unfixed (a read after expiry, an entry at a stale index). Assert through the door the " +
+      "report used: the function the report shows misbehaving sits inside the assertions " +
+      "themselves, queried past the fixed-vs-unfixed boundary — before the fix and after it. " +
+      "An observer that already agreed before the fix (`has`, `size`, a log line) cannot see " +
+      "this defect and proves nothing. Give the check its negative control: run it against the " +
+      "unfixed code first and watch it fail. If your script and the code " +
+      "disagree, the contract decides which one lies — never relax the check to go green.",
     "- If you wrote throwaway tests or fixtures to verify your work, delete them before " +
       "finishing unless the task asked for tests: a clean diff carries only the fix, and " +
       "scratch files left under the project's test tree break any patch applied on top of it.",
