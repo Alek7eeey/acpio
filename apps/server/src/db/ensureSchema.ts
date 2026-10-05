@@ -136,6 +136,13 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
 
+  // Optional one-line note shown next to the folder name in the chat tree.
+  try {
+    db.run(sql`ALTER TABLE chat_folders ADD COLUMN tag TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS boards (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

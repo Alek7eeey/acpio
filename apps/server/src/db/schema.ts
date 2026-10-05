@@ -89,6 +89,8 @@ export const messageParts = sqliteTable("message_parts", {
 export const chatFolders = sqliteTable("chat_folders", {
   cwd: text("cwd").primaryKey(),
   sortOrder: integer("sort_order").notNull().default(0),
+  /** Optional one-line note shown next to the folder name in the tree. */
+  tag: text("tag"),
   createdAt: createdAt(),
 });
 

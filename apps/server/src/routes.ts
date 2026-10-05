@@ -58,7 +58,14 @@ import {
   MAX_ATTACH_UPLOAD_BYTES,
   stageSessionUpload,
 } from "./services/attachmentUpload.js";
-import { listFolders, rememberFolders, deleteFolder, reorderFolders } from "./services/folders.js";
+import {
+  listFolders,
+  listFolderTags,
+  rememberFolders,
+  setFolderTag,
+  deleteFolder,
+  reorderFolders,
+} from "./services/folders.js";
 import {
   boardAcceptsCwd,
   createBoard,
@@ -665,13 +672,26 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // Folders that have ever held chats (empty ones included) — survives
-  // deleting the last chat so folders persist across devices.
-  app.get("/api/folders", async () => ({ folders: await listFolders() }));
+  // deleting the last chat so folders persist across devices. `tags` holds
+  // each folder's optional one-line note, keyed by canonical cwd.
+  app.get("/api/folders", async () => ({
+    folders: await listFolders(),
+    tags: await listFolderTags(),
+  }));
 
   app.put("/api/folders", async (req) => {
     const body = z.object({ cwds: z.array(z.string().min(1)).max(200) }).parse(req.body);
     await rememberFolders(body.cwds);
     return { ok: true };
+  });
+
+  // Set (or clear with an empty string) a folder's one-line tag.
+  app.put("/api/folders/tag", async (req) => {
+    const body = z
+      .object({ cwd: z.string().min(1).max(4096), tag: z.string().max(80) })
+      .parse(req.body);
+    const tags = await setFolderTag(body.cwd, body.tag);
+    return { ok: true, tags };
   });
 
   app.put("/api/folders/reorder", async (req) => {

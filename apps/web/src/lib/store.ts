@@ -208,6 +208,10 @@ type AppState = {
   focusedPaneIndex: number;
   /** Folders that have ever held chats (server-backed, empty ones kept). */
   knownFolders: string[];
+  /** Folder one-line tags (notes), keyed by canonical cwd. */
+  folderTags: Record<string, string>;
+  /** Set (or clear with an empty string) a folder's tag; returns fresh tags. */
+  setFolderTag: (cwd: string, tag: string) => Promise<void>;
   refreshFolders: () => Promise<void>;
   deleteFolder: (cwd: string) => Promise<void>;
   /**
@@ -1495,6 +1499,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   consoleOpen: initialSidePanels.consoleOpen,
   gitPanelOpen: initialSidePanels.gitPanelOpen,
   knownFolders: [],
+  folderTags: {},
+  setFolderTag: async (cwd, tag) => {
+    try {
+      const tags = await api.setFolderTag(cwd, tag);
+      set({ folderTags: tags });
+      // A tag on a folder without a remembered row creates that row.
+      if (!get().knownFolders.includes(cwd)) void get().refreshFolders();
+    } catch {
+      // server offline — keep the current tags
+    }
+  },
   refreshFolders: async () => {
     try {
       const folders = await api.listFolders();
@@ -1525,6 +1540,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         // ignore malformed local data
       }
       set({ knownFolders: folders });
+      try {
+        set({ folderTags: await api.listFolderTags() });
+      } catch {
+        // tags are cosmetic — an old server without them is fine
+      }
       void get().refreshProjectMcp();
     } catch {
       // server offline — keep the current list
@@ -1542,7 +1562,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteFolder: async (cwd) => {
     try {
       await api.deleteFolder(cwd);
-      set((s) => ({ knownFolders: s.knownFolders.filter((f) => f !== cwd) }));
+      set((s) => ({
+        knownFolders: s.knownFolders.filter((f) => f !== cwd),
+        folderTags: Object.fromEntries(
+          Object.entries(s.folderTags).filter(([key]) => key !== cwd),
+        ),
+      }));
       void get().refreshSessions();
     } catch {
       // server offline — keep the folder

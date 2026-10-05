@@ -1255,6 +1255,43 @@
   color: var(--text);
 }
 
+/* One-line folder note in the tree: a quiet chip right of the folder name. */
+.folderTag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-secondary, rgba(127, 127, 127, 0.14));
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+/* Inline editor shown in place of the chip while the tag is being edited. */
+.folderTagEdit {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.folderTagEdit:focus {
+  outline: none;
+  box-shadow: var(--settings-focus-ring, 0 0 0 3px rgba(8, 102, 255, 0.18));
+}
+
 .folderAdd {
   flex: 0 0 auto;
   width: 22px;

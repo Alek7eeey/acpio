@@ -64,6 +64,34 @@ export async function rememberFolders(cwds: string[]): Promise<void> {
   }
 }
 
+/** Tags (short notes) of known folders, keyed by canonical cwd. */
+export async function listFolderTags(): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ cwd: chatFolders.cwd, tag: chatFolders.tag })
+    .from(chatFolders);
+  const tags: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.cwd && row.tag) tags[row.cwd] = row.tag;
+  }
+  return tags;
+}
+
+/**
+ * Set (or clear, with an empty tag) the one-line note of a folder. The folder
+ * row is created on demand so a tag on a chat-holding folder without a
+ * remembered row still persists.
+ */
+export async function setFolderTag(cwd: string, tag: string): Promise<Record<string, string>> {
+  const normalized = canonicalCwd(cwd);
+  if (!normalized) return listFolderTags();
+  const trimmed = tag.trim().slice(0, 80);
+  await db
+    .insert(chatFolders)
+    .values({ cwd: normalized, sortOrder: 0, tag: trimmed || null })
+    .onConflictDoUpdate({ target: chatFolders.cwd, set: { tag: trimmed || null } });
+  return listFolderTags();
+}
+
 /** Reorder folders by updating their sort_order. */
 export async function reorderFolders(
   items: Array<{ cwd: string; sortOrder: number }>,

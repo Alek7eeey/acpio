@@ -345,6 +345,11 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   const suppressRowClickRef = useRef(false);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  /** Folder whose tag is being edited inline in its head row (null = closed). */
+  const [tagEditCwd, setTagEditCwd] = useState<string | null>(null);
+  const tagEditRef = useRef<HTMLInputElement>(null);
+  const folderTags = useAppStore((s) => s.folderTags);
+  const setFolderTag = useAppStore((s) => s.setFolderTag);
 
   // Touch devices hide the inline pin/archive actions (no hover to reveal
   // them), so the ⋮ menu carries those items there. On desktop the hover
@@ -1581,6 +1586,14 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     recentLimit,
   ]);
 
+  /** Commit the inline folder-tag editor; an empty value clears the tag. */
+  const commitFolderTag = (cwd: string) => {
+    const input = tagEditRef.current;
+    setTagEditCwd(null);
+    if (!input || input.value.trim() === (folderTags[cwd] ?? "")) return;
+    void setFolderTag(cwd, input.value);
+  };
+
   const renderFolderHead = (folder: (typeof folders)[number]) => {
     const fkey = folder.cwd || NO_FOLDER_KEY;
     const isActiveFolder = activeFolderKey === fkey;
@@ -1648,6 +1661,35 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
         <span className={styles.folderLabel}>
           {folderLabel(folder.cwd, t("common.noFolder"))}
         </span>
+        {folder.cwd ? (
+          tagEditCwd === folder.cwd ? (
+            <input
+              ref={tagEditRef}
+              className={styles.folderTagEdit}
+              defaultValue={folderTags[folder.cwd] ?? ""}
+              maxLength={80}
+              placeholder={t("chat.folderTagPlaceholder")}
+              aria-label={t("chat.folderTagTitle")}
+              title={t("chat.folderTagTitle")}
+              autoFocus
+              onFocus={(e) => e.currentTarget.select()}
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitFolderTag(folder.cwd);
+                else if (e.key === "Escape") setTagEditCwd(null);
+              }}
+              onBlur={() => {
+                if (tagEditCwd === folder.cwd) commitFolderTag(folder.cwd);
+              }}
+            />
+          ) : folderTags[folder.cwd] ? (
+            <span className={styles.folderTag} title={folderTags[folder.cwd]}>
+              {folderTags[folder.cwd]}
+            </span>
+          ) : null
+        ) : null}
         {folder.cwd ? (
           <button
             type="button"
@@ -2551,6 +2593,33 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               {t("chat.collapseAllFolders")}
             </button>
             <div className={styles.contextMenuDivider} aria-hidden />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const cwd = folderMenu.cwd;
+                setFolderMenu(null);
+                setTagEditCwd(cwd);
+                // The editor renders on the next commit; place the caret there.
+                window.setTimeout(() => tagEditRef.current?.focus(), 0);
+              }}
+            >
+              <MenuIcon>
+                <path
+                  d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M7.5 11h9M7.5 14.5h5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </MenuIcon>
+              {t("chat.folderTagMenu")}
+            </button>
             <button
               type="button"
               role="menuitem"

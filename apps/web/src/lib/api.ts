@@ -181,6 +181,13 @@ export const api = {
   listSessions: () => request<SessionDto[]>("/api/sessions"),
   listFolders: () =>
     request<{ folders: string[] }>("/api/folders").then((r) => r.folders),
+  listFolderTags: () =>
+    request<{ tags: Record<string, string> }>("/api/folders").then((r) => r.tags),
+  setFolderTag: (cwd: string, tag: string) =>
+    request<{ ok: boolean; tags: Record<string, string> }>("/api/folders/tag", {
+      method: "PUT",
+      body: JSON.stringify({ cwd, tag }),
+    }).then((r) => r.tags),
   rememberFolders: (cwds: string[]) =>
     request<{ ok: boolean }>("/api/folders", {
       method: "PUT",
