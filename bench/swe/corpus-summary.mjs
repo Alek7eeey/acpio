@@ -8,6 +8,12 @@ import path from "node:path";
 const RESULTS = "bench/results";
 const corpus = new Set(readFileSync("bench/swe/corpus.txt", "utf8").trim().split("\n"));
 const SKIP = new Set(["2026-09-30T13-58-25-770Z"]); // scrambled wire labels, see baseline.mjs
+// Instances the eval environment itself makes unpassable (image defect, not an
+// agent miss) — counted separately so the honest score is not rotted by them.
+let ENV_BROKEN = {};
+try {
+  ENV_BROKEN = JSON.parse(readFileSync(path.join("bench", "swe", "env-broken.json"), "utf8"));
+} catch {}
 
 const stampModel = new Map();
 const GOLD = new Set();
@@ -53,12 +59,15 @@ for (const f of readdirSync(RESULTS).sort()) {
 console.log("100-instance Verified corpus — best RESOLVED per agent/instance, zen wire:");
 for (const agent of ["builtin", "pi", "omp"]) {
   const byInstance = per.get(agent) ?? new Map();
+  const broken = [...byInstance.keys()].filter((id) => ENV_BROKEN[id]);
+  for (const id of broken) byInstance.delete(id);
   const resolved = [...byInstance.entries()].filter(([, v]) => v.resolved);
   const unc = resolved.reduce((s, [, v]) => s + v.uncached, 0);
   const rolls = resolved.map(([, v]) => v.rollout).sort((a, b) => a - b);
   const med = rolls.length ? rolls[Math.floor(rolls.length / 2)] : 0;
   const fails = [...byInstance.entries()].filter(([, v]) => !v.resolved).map(([id]) => id);
-  console.log(`\n${agent}: covered ${byInstance.size}/100, RESOLVED ${resolved.length}`);
+  const denom = 100 - broken.length;
+  console.log(`\n${agent}: covered ${byInstance.size}/100, RESOLVED ${resolved.length}${broken.length ? `/${denom} passable (${broken.length} env-broken: ${broken.join(", ")})` : "/100"}`);
   console.log(`  uncached total ${Math.round(unc / 1000)}k, per resolved ${resolved.length ? Math.round(unc / resolved.length / 1000) + "k" : "-"}, median rollout ${med}s, total tools ${resolved.reduce((s, [, v]) => s + v.tools, 0)}`);
   console.log(fails.length ? `  fails (${fails.length}): ${fails.join(", ")}` : "  fails: none");
 }

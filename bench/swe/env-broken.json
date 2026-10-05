@@ -1,0 +1,6 @@
+{
+  "pylint-dev__pylint-4661": {
+    "reason": "golden test patch imports appdirs, the eval image does not ship it (platformdirs 4.3.6 present, appdirs absent): the test module dies at collection with ModuleNotFoundError before any agent patch can act — unpassable by construction",
+    "verified": "2026-10-05, run inside the eval image: golden test file fails to collect; agent patch behaviorally equivalent to gold (user_cache_dir(\"pylint\") identical on linux)"
+  }
+}
