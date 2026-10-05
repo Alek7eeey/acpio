@@ -27,3 +27,6 @@ dist-app/
 /bench/.cache/
 /bench/swe/data/
 /bench/results-weekly-debug/
+
+# omp session export dumps
+/omp-session-*.html
