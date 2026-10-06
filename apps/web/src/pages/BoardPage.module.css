@@ -712,8 +712,10 @@
   cursor: pointer;
 }
 
+/* --bg-secondary equals --surface in the dark theme, so a hover painted with
+   it is invisible against the menu; --bg-tertiary differs in both themes. */
 .menuItem:hover {
-  background: var(--bg-secondary);
+  background: var(--bg-tertiary);
 }
 
 /* Mode row above the agent entries: decides what picking one does. */

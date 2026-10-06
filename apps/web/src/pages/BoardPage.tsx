@@ -100,6 +100,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     null,
   );
   const [taskMenuPos, setTaskMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** A folder's context menu (rail row, board lane head, folders dialog row). */
+  const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(
+    null,
+  );
+  const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [exportTaskId, setExportTaskId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -107,6 +112,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** The new-task form as a whole — a press inside it must not dismiss it. */
   const composerBoxRef = useRef<HTMLDivElement>(null);
@@ -258,6 +264,23 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       document.removeEventListener("keydown", onKey);
     };
   }, [taskMenu]);
+
+  useEffect(() => {
+    if (!folderMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (folderMenuRef.current?.contains(e.target as Node)) return;
+      setFolderMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFolderMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [folderMenu]);
 
   const columns = useMemo(() => {
     const byColumn: Record<BoardColumn, SessionDto[]> = {
@@ -464,6 +487,43 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setTaskMenuPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
   });
 
+  /** Open a folder's context menu where the press landed; placed after measuring. */
+  const openFolderMenu = (e: React.MouseEvent, cwd: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderMenu({ cwd, x: e.clientX, y: e.clientY });
+  };
+
+  /** Measure → clamp into the viewport, before paint (no wrong-spot flash). */
+  useLayoutEffect(() => {
+    const el = folderMenuRef.current;
+    if (!folderMenu || !el) {
+      setFolderMenuPos(null);
+      return;
+    }
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    const x = Math.min(
+      Math.max(12, folderMenu.x),
+      Math.max(12, window.innerWidth - width - 12),
+    );
+    const y = Math.min(
+      Math.max(12, folderMenu.y),
+      Math.max(12, window.innerHeight - height - 12),
+    );
+    setFolderMenuPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
+  });
+
+  /** The menu's single command today: start the inline new-task form on the folder. */
+  const addTaskToFolder = (cwd: string) => {
+    setFolderMenu(null);
+    setFoldersOpen(false);
+    setRailOpen(false);
+    setFilterCwd(cwd);
+    setAddingCwd(cwd);
+    setDraft("");
+  };
+
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = boardColumn(task);
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
@@ -660,6 +720,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     setFilterCwd(filterCwd === group.cwd ? null : group.cwd);
                     setRailOpen(false);
                   }}
+                  onContextMenu={(e) => openFolderMenu(e, group.cwd)}
                 >
                   <span className={styles.railLabel}>{group.label}</span>
                   <span className={styles.railCount}>
@@ -717,7 +778,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   {column === "todo"
                     ? visibleGroups.map((group, groupIndex) => (
                         <div key={group.cwd} className={styles.group} data-group={group.cwd}>
-                          <div className={styles.groupHead}>
+                          <div
+                            className={styles.groupHead}
+                            onContextMenu={(e) => openFolderMenu(e, group.cwd)}
+                          >
                             <span className={styles.groupName} title={group.cwd}>
                               {group.label}
                             </span>
@@ -1029,6 +1093,38 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           document.body,
         )}
 
+      {folderMenu &&
+        createPortal(
+          <div
+            ref={folderMenuRef}
+            className={styles.menu}
+            style={{
+              left: folderMenuPos?.x ?? folderMenu.x,
+              top: folderMenuPos?.y ?? folderMenu.y,
+              visibility: folderMenuPos ? "visible" : "hidden",
+            }}
+            role="menu"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => addTaskToFolder(folderMenu.cwd)}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 5v14M5 12h14"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {t("chat.boardAddTask")}
+            </button>
+          </div>,
+          document.body,
+        )}
+
       {foldersOpen &&
         createPortal(
           <div className={styles.backdrop} onClick={() => setFoldersOpen(false)}>
@@ -1043,7 +1139,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               {board?.folders.length ? (
                 <div className={styles.folderList}>
                   {board.folders.map((cwd) => (
-                    <div key={cwd} className={styles.folderRow}>
+                    <div
+                      key={cwd}
+                      className={styles.folderRow}
+                      onContextMenu={(e) => openFolderMenu(e, cwd)}
+                    >
                       <span className={styles.folderPath} title={cwd}>
                         {cwd}
                       </span>
