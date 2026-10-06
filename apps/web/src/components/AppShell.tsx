@@ -832,11 +832,27 @@ export function AppShell() {
       });
   }, [agentTipOpen, enabledMcpServers]);
 
+  /**
+   * The last page that was not settings. Leaving settings ("back") returns
+   * there — a board opened before settings must not collapse into one of its
+   * chats just because /chat resolves to the active session.
+   */
+  const lastNonSettingsRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pathname.startsWith("/settings")) return;
+    lastNonSettingsRouteRef.current = pathname + search;
+  }, [pathname, search]);
+
   const goChat = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur();
     if (window.innerWidth < 900) dismissSheet();
-    navigate("/chat");
-  }, [navigate, dismissSheet]);
+    const fromSettings = pathname.startsWith("/settings");
+    navigate(
+      fromSettings && lastNonSettingsRouteRef.current
+        ? lastNonSettingsRouteRef.current
+        : "/chat",
+    );
+  }, [navigate, dismissSheet, pathname]);
 
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
