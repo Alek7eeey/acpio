@@ -257,6 +257,28 @@ export const WRAP_UP_EXTRA_STEPS = 40;
  */
 const MAX_OUTPUT_TOKENS = 16_384;
 
+/**
+ * Experiment switch for the "is thinking in the context worth its tokens" A/B.
+ * By default the assistant's reasoning parts stay in the history and in the
+ * step loop, and the provider gets them back as `reasoning_content` on every
+ * later call (plus they count against the context window). With
+ * `ACPIO_BUILTIN_STRIP_REASONING=1` reasoning is dropped before every request
+ * that follows it: the user still sees the thinking stream, the model never
+ * reads it again. Everything else — text, tool calls, results — is untouched,
+ * so the two arms differ in exactly one thing.
+ */
+export const STRIP_REASONING = /^(1|true|yes|on)$/i.test(process.env.ACPIO_BUILTIN_STRIP_REASONING ?? "");
+
+/** Reasoning parts removed, message list otherwise identical. */
+export function withoutReasoning(messages: ModelMessage[]): ModelMessage[] {
+  if (!STRIP_REASONING) return messages;
+  return messages.map((message) => {
+    if (message.role !== "assistant" || typeof message.content === "string") return message;
+    const content = message.content.filter((part) => part.type !== "reasoning");
+    return content.length === message.content.length ? message : { ...message, content };
+  });
+}
+
 /** One assistant turn: stream text/thinking into ACP updates and run tools. */
 export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
   const maxSteps = opts.maxSteps ?? MAX_TOOL_STEPS;
@@ -269,6 +291,17 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     stopWhen: isStepCount(maxSteps),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
     maxRetries: 2,
+    // The step loop carries its own history: step N re-sends what steps 1..N-1
+    // produced, reasoning included, whatever the stored history holds. Pruning
+    // at the turn boundary alone would leave the wire unchanged on the default
+    // single-prompt session, so the switch has to act here too.
+    ...(STRIP_REASONING
+      ? {
+          prepareStep: ({ messages }: { messages: ModelMessage[] }) => ({
+            messages: withoutReasoning(messages),
+          }),
+        }
+      : {}),
   });
 
   let failure: Error | undefined;

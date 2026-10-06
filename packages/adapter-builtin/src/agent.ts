@@ -20,6 +20,7 @@ import {
   renderTranscript,
   runTurn,
   runTurnWithRetry,
+  withoutReasoning,
   WRAP_UP_EXTRA_STEPS,
   WRAP_UP_STEPS,
 } from "./loop.js";
@@ -514,7 +515,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
           sessionUpdate: "agent_thought_chunk",
           content: { type: "text", text: `[harness] ${WRAP_UP_NOTE}` },
         });
-        this.messages = [...this.messages, ...outcome.response, userContent([{ type: "text", text: WRAP_UP_NOTE }])];
+        this.messages = [
+          ...this.messages,
+          ...withoutReasoning(outcome.response),
+          userContent([{ type: "text", text: WRAP_UP_NOTE }]),
+        ];
         this.persist();
         return runTurn(await turnOptions(WRAP_UP_EXTRA_STEPS));
       };
@@ -531,7 +536,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
             content: { type: "text", text: message },
           }),
       });
-      this.messages = [...this.messages, ...outcome.response];
+      this.messages = [...this.messages, ...withoutReasoning(outcome.response)];
       this.persist();
       if (outcome.failure) throw outcome.failure;
       return { stopReason: outcome.stopReason };
