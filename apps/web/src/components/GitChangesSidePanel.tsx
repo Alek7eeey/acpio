@@ -585,6 +585,19 @@ export function GitChangesSidePanel({
     };
   }, [opsAnchor]);
 
+  /** Hover intent for the "…" menu: leaving the button or menu closes after a grace. */
+  const cancelOpsHoverClose = useCallback(() => {
+    if (opsHoverTimerRef.current !== null) {
+      window.clearTimeout(opsHoverTimerRef.current);
+      opsHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleOpsHoverClose = useCallback(() => {
+    cancelOpsHoverClose();
+    opsHoverTimerRef.current = window.setTimeout(() => setOpsAnchor(null), 260);
+  }, [cancelOpsHoverClose]);
+
   /**
    * The toolbar keeps every action reachable: whatever the row cannot hold goes
    * behind the "…" button. The leading controls (stepper, list/tree switch) are
@@ -1224,20 +1237,6 @@ export function GitChangesSidePanel({
         : { top: Math.min(rect.bottom + 6, window.innerHeight - estimatedHeight - 8) }),
     });
   };
-
-  const cancelOpsHoverClose = useCallback(() => {
-    if (opsHoverTimerRef.current !== null) {
-      window.clearTimeout(opsHoverTimerRef.current);
-      opsHoverTimerRef.current = null;
-    }
-  }, []);
-
-  const scheduleOpsHoverClose = useCallback(() => {
-    cancelOpsHoverClose();
-    opsHoverTimerRef.current = window.setTimeout(() => setOpsAnchor(null), 260);
-  }, [cancelOpsHoverClose]);
-
-  useEffect(() => cancelOpsHoverClose, [cancelOpsHoverClose]);
 
   const navigatorInner = (
     <div className={styles.navigator}>
