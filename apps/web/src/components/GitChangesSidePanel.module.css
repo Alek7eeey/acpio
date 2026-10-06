@@ -235,6 +235,38 @@
   align-items: center;
   gap: 6px 8px;
   min-width: 0;
+  /* Extreme narrowness clips here rather than pushing the close button out. */
+  overflow: hidden;
+}
+
+/**
+ * The branch switcher gets its own flexible slot on the header's first row:
+ * it grows to the room left over, and it shrinks only after the caption has
+ * given everything up — never below a readable name stub, so the menu it opens
+ * keeps a sensible anchor instead of a three-dot sliver.
+ */
+.navBranch {
+  flex: 1 1 auto;
+  min-width: 110px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* The switcher's own class is a full-width block; inside this slot it is a
+   flex item that takes only what it needs and shrinks under pressure. */
+.navBranch > div {
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Second header row: the changes/history switch, on its own so the branch
+   row above never has to share space with it. */
+.navTabRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
 }
 
 .navRepoIcon {
@@ -248,19 +280,19 @@
   color: var(--text-secondary);
 }
 
-.navLead {
+.navToolsLead {
   display: flex;
   align-items: center;
-  justify-content: center;
-  flex-wrap: nowrap;
   gap: 8px;
+  flex: 0 0 auto;
   min-width: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
 }
 
 .navChangeCaption {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.72rem;
   font-weight: 650;
   color: var(--text-secondary);
@@ -302,7 +334,9 @@
   flex: 0 0 auto;
 }
 
-/* Toolbar under the header: file stepper left, path/tree toggle centred. */
+/* Toolbar under the tabs: file stepper + list/tree left, sync actions right.
+   The actions overflow into the "…" menu; this hidden edge is only a guard for
+   the first frame before the row has been measured. */
 .navTools {
   flex: 0 0 auto;
   display: flex;
@@ -311,19 +345,13 @@
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-soft);
   background: var(--surface);
+  overflow: hidden;
 }
 
 .navStep {
   display: flex;
   gap: 2px;
   flex: 0 0 auto;
-}
-
-.navToolsCenter {
-  display: flex;
-  justify-content: center;
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 .navToolsSpacer {
@@ -560,6 +588,9 @@
   flex-direction: column;
   gap: 2px;
   min-width: 180px;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 6px;
   border-radius: 14px;
   border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);

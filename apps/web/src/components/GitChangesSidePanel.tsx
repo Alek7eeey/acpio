@@ -1,11 +1,13 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import type { GitCommitDetailDto, GitCommitDto, GitCommitFileDto, GitStatusDto } from "@acpio/shared";
@@ -69,6 +71,23 @@ const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
 };
 /** Which list the navigator column is showing. */
 type PanelTab = "changes" | "history";
+
+/** One icon button of the navigator toolbar, hideable into the "…" menu. */
+type GitToolAction = {
+  id: string;
+  title: string;
+  disabled: boolean;
+  run: () => void;
+  icon: ReactNode;
+};
+
+/**
+ * Geometry of the toolbar's icon buttons, used to compute how many fit before
+ * the rest fold into the "…" menu: `.iconBtn` is 30px wide, the actions group
+ * gaps them by 2px, and the toolbar row gaps its groups by 8px.
+ */
+const TOOL_BUTTON_STEP = 32;
+const TOOL_ROW_GAP = 8;
 type Selection =
   | { kind: "working"; path: string | null }
   | { kind: "commit"; hash: string; filePath: string | null };
@@ -156,11 +175,23 @@ export function GitChangesSidePanel({
   const refreshingRef = useRef(false);
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   /** Fetch and the stash pair are rare next to pull/push: they live behind one button. */
-  const [opsAnchor, setOpsAnchor] = useState<{ left: number; bottom: number } | null>(null);
+  const [opsAnchor, setOpsAnchor] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const opsRef = useRef<HTMLButtonElement | null>(null);
   const opsMenuRef = useRef<HTMLDivElement | null>(null);
+  /** Hover intent: leaving the ⋯ button or its menu closes after a short grace. */
+  const opsHoverTimerRef = useRef<number | null>(null);
   /** List or tree: the commit pane's file rows, switched from the navigator header. */
   const [view, setView] = useState<ChangesView>(readChangesView);
+  /**
+   * How many of the toolbar's trailing action buttons fit the row's width; the
+   * rest fold into the "…" menu. Measured, not guessed from a breakpoint, so it
+   * follows both the dragged navigator width and the tab's leading controls.
+   */
+  const [visibleActions, setVisibleActions] = useState(6);
+  /* Callback refs: the toolbar mounts only once the repo status has loaded, so
+     a plain mount effect would measure nothing and never run again. */
+  const [toolsEl, setToolsEl] = useState<HTMLDivElement | null>(null);
+  const [toolsLeadEl, setToolsLeadEl] = useState<HTMLDivElement | null>(null);
   const [blame, setBlame] = useState<{ path: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [commitSummary, setCommitSummary] = useState("");
@@ -553,6 +584,43 @@ export function GitChangesSidePanel({
       window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [opsAnchor]);
+
+  /**
+   * The toolbar keeps every action reachable: whatever the row cannot hold goes
+   * behind the "…" button. The leading controls (stepper, list/tree switch) are
+   * measured as one block, and the buttons are counted against what is left —
+   * always reserving room for the "…" button itself unless all of them fit.
+   */
+  useLayoutEffect(() => {
+    const root = toolsEl;
+    const lead = toolsLeadEl;
+    if (!root || !lead) return;
+    const total = 6;
+    const measure = () => {
+      const cs = getComputedStyle(root);
+      // jsdom (and odd layouts) can return "" here: treat unparsable padding as 0.
+      const pad = (v: string) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : 0;
+      };
+      const inner = root.clientWidth - pad(cs.paddingLeft) - pad(cs.paddingRight);
+      // Zero width = the row is not laid out yet (or hidden): measuring against
+      // it would fold every button into the menu on a guess. The observer fires
+      // again once a real width exists.
+      if (inner <= 0) return;
+      const budget = inner - lead.offsetWidth - TOOL_ROW_GAP;
+      if (budget >= total * TOOL_BUTTON_STEP) {
+        setVisibleActions(total);
+        return;
+      }
+      const withMenu = Math.floor((budget - (TOOL_BUTTON_STEP + TOOL_ROW_GAP)) / TOOL_BUTTON_STEP);
+      setVisibleActions(Math.max(0, Math.min(total - 1, withMenu)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [toolsEl, toolsLeadEl, tab]);
 
   useEffect(() => {
     if (!navigatorOpen) return;
@@ -1023,15 +1091,173 @@ export function GitChangesSidePanel({
    * stage on a wide panel, the content of a bottom sheet on a phone. Only one of
    * the two is mounted at a time, so the tab and the lists need no syncing.
    */
+  const toolActions: GitToolAction[] = [
+    {
+      id: "refresh",
+      title: t("common.refresh"),
+      disabled: busy || refreshing,
+      run: () => void runManualRefresh(),
+      icon: (
+        <span className={refreshing ? styles.iconSpin : undefined}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      ),
+    },
+    {
+      id: "pull",
+      title: t("git.pull"),
+      disabled: busy,
+      run: () => void runSync("pull"),
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 4v11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path
+            d="M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "push",
+      title: t("git.push"),
+      disabled: busy,
+      run: () => void runSync("push"),
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 20V9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path
+            d="M7.5 13.5 12 9l4.5 4.5M5.5 4.5h13"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "fetch",
+      title: t("git.fetch"),
+      disabled: busy,
+      run: () => void runSync("fetch"),
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M20 11.5a8 8 0 0 0-14.6-4.2M4 12.5a8 8 0 0 0 14.6 4.2M20 3.5v4h-4M4 20.5v-4h4"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "stash",
+      title: t("git.stash"),
+      disabled: busy || !status?.dirty,
+      run: () => void runStash("push"),
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 3.5v7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path
+            d="M8.5 7.5 12 11l3.5-3.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5M4 13h16"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+    },
+    {
+      id: "pop",
+      title: t("git.pop"),
+      disabled: busy || !(status?.stashCount ?? 0),
+      run: () => void runStash("pop"),
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 20.5V13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+          <path
+            d="M8.5 16.5 12 13l3.5 3.5M5 11V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5M4 11h16"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ),
+    },
+  ];
+  const hiddenActions = toolActions.slice(Math.max(0, visibleActions));
+
+  const toggleOpsMenu = () => {
+    if (opsAnchor) {
+      setOpsAnchor(null);
+      return;
+    }
+    const btn = opsRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - OPS_MENU_WIDTH - 8));
+    // The toolbar sits near the top of the panel, so opening upward — the menu's
+    // natural direction — would clip it against the top edge. Flip below when
+    // the items do not fit above the button.
+    const estimatedHeight = hiddenActions.length * 38 + 12;
+    const fitsAbove = rect.top >= estimatedHeight + 12;
+    setOpsAnchor({
+      left,
+      ...(fitsAbove
+        ? { bottom: window.innerHeight - rect.top + 6 }
+        : { top: Math.min(rect.bottom + 6, window.innerHeight - estimatedHeight - 8) }),
+    });
+  };
+
+  const cancelOpsHoverClose = useCallback(() => {
+    if (opsHoverTimerRef.current !== null) {
+      window.clearTimeout(opsHoverTimerRef.current);
+      opsHoverTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleOpsHoverClose = useCallback(() => {
+    cancelOpsHoverClose();
+    opsHoverTimerRef.current = window.setTimeout(() => setOpsAnchor(null), 260);
+  }, [cancelOpsHoverClose]);
+
+  useEffect(() => cancelOpsHoverClose, [cancelOpsHoverClose]);
+
   const navigatorInner = (
     <div className={styles.navigator}>
       <header className={styles.navHead}>
         <div className={styles.navHeadTop}>
-          <div className={styles.navLead}>
-            <span className={styles.navChangeCaption}>
-              {t("git.changedOn", { count: files.length })}
-            </span>
-            {status?.repo ? (
+          <span className={styles.navChangeCaption}>
+            {t("git.changedOn", { count: files.length })}
+          </span>
+          <span className={styles.navStats}>
+            {status?.dirty ? (
+              <>
+                <span className={styles.statAdd}>+{status.additions}</span>
+                <span className={styles.statDel}>-{status.deletions}</span>
+              </>
+            ) : (
+              <span className={styles.navClean}>{t("git.noChanges")}</span>
+            )}
+          </span>
+          {status?.repo ? (
+            <div className={styles.navBranch}>
               <GitBranchSwitcher
                 status={status}
                 branchBusy={branchBusy}
@@ -1039,20 +1265,25 @@ export function GitChangesSidePanel({
                 onDeleteBranch={onDeleteBranch}
                 variant="panelHeader"
               />
-            ) : (
-              <span className={styles.navTitle}>{t("git.title")}</span>
-            )}
-            <span className={styles.navStats}>
-              {status?.dirty ? (
-                <>
-                  <span className={styles.statAdd}>+{status.additions}</span>
-                  <span className={styles.statDel}>-{status.deletions}</span>
-                </>
-              ) : (
-                <span className={styles.navClean}>{t("git.noChanges")}</span>
-              )}
-            </span>
-          </div>
+            </div>
+          ) : (
+            <span className={styles.navTitle}>{t("git.title")}</span>
+          )}
+          {sheetNavigator ? null : (
+            <button
+              type="button"
+              className={styles.iconBtn}
+              onClick={onClose}
+              title={t("git.closeChanges")}
+              aria-label={t("git.closeChanges")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
+        <div className={styles.navTabRow}>
           <div className={styles.tabSwitch} role="tablist" aria-label={t("git.title")}>
             <button
               type="button"
@@ -1088,205 +1319,144 @@ export function GitChangesSidePanel({
               {t("git.tabHistory")}
             </button>
           </div>
-          {sheetNavigator ? null : (
-            <button
-              type="button"
-              className={styles.iconBtn}
-              onClick={onClose}
-              title={t("git.closeChanges")}
-              aria-label={t("git.closeChanges")}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
-            </button>
-          )}
         </div>
       </header>
 
-      <div className={styles.navTools} role="toolbar" aria-label={t("git.title")}>
-        {tab === "changes" ? (
-          <>
-            <div className={styles.navStep}>
-            <button
-              type="button"
-              className={styles.segBtn}
-              disabled={files.length === 0}
-              title={t("git.diffStagePrev")}
-              aria-label={t("git.diffStagePrev")}
-              onClick={() => stepFile(-1)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M6 15l6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={styles.segBtn}
-              disabled={files.length === 0}
-              title={t("git.diffStageNext")}
-              aria-label={t("git.diffStageNext")}
-              onClick={() => stepFile(1)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
-          <div className={styles.navToolsCenter}>
-            <div className={styles.segSwitch}>
-              <button
-                type="button"
-                className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
-                aria-pressed={view === "list"}
-                aria-label={t("git.fileViewList")}
-                title={t("git.fileViewList")}
-                onClick={() => setView("list")}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
-                aria-pressed={view === "tree"}
-                aria-label={t("git.fileViewTree")}
-                title={t("git.fileViewTree")}
-                onClick={() => setView("tree")}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            </div>
-            </div>
-          </>
-        ) : null}
+      <div className={styles.navTools} role="toolbar" aria-label={t("git.title")} ref={setToolsEl}>
+        <div className={styles.navToolsLead} ref={setToolsLeadEl}>
+          {tab === "changes" ? (
+            <>
+              <div className={styles.navStep}>
+                <button
+                  type="button"
+                  className={styles.segBtn}
+                  disabled={files.length === 0}
+                  title={t("git.diffStagePrev")}
+                  aria-label={t("git.diffStagePrev")}
+                  onClick={() => stepFile(-1)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M6 15l6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={styles.segBtn}
+                  disabled={files.length === 0}
+                  title={t("git.diffStageNext")}
+                  aria-label={t("git.diffStageNext")}
+                  onClick={() => stepFile(1)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+              <div className={styles.segSwitch}>
+                <button
+                  type="button"
+                  className={`${styles.segBtn}${view === "list" ? ` ${styles.segBtnActive}` : ""}`}
+                  aria-pressed={view === "list"}
+                  aria-label={t("git.fileViewList")}
+                  title={t("git.fileViewList")}
+                  onClick={() => setView("list")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.segBtn}${view === "tree" ? ` ${styles.segBtnActive}` : ""}`}
+                  aria-pressed={view === "tree"}
+                  aria-label={t("git.fileViewTree")}
+                  title={t("git.fileViewTree")}
+                  onClick={() => setView("tree")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M4 6h6M4 12h6M4 18h6M14 6h6M14 12h6"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
         <div className={styles.navToolsActions}>
-          {/* sync actions live in the same toolbar row as the stepper */}
+          {toolActions.slice(0, Math.max(0, visibleActions)).map((action) => (
             <button
+              key={action.id}
               type="button"
               className={styles.iconBtn}
-              disabled={busy || refreshing}
-              aria-busy={refreshing}
-              onClick={() => void runManualRefresh()}
-              title={t("common.refresh")}
-              aria-label={t("common.refresh")}
+              disabled={action.disabled}
+              aria-busy={action.id === "refresh" ? refreshing : undefined}
+              onClick={action.run}
+              title={action.title}
+              aria-label={action.title}
             >
-              <span className={refreshing ? styles.iconSpin : undefined}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M20 12a8 8 0 1 1-2.4-5.7M20 4v5h-5"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </span>
+              {action.icon}
             </button>
+          ))}
+          {hiddenActions.length > 0 ? (
             <button
+              ref={opsRef}
               type="button"
               className={styles.iconBtn}
-              disabled={busy}
-              onClick={() => void runSync("pull")}
-              title={t("git.pull")}
-              aria-label={t("git.pull")}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 4v11" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path
-                  d="M7.5 10.5 12 15l4.5-4.5M5.5 19.5h13"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              disabled={busy}
-              onClick={() => void runSync("push")}
-              title={t("git.push")}
-              aria-label={t("git.push")}
+              aria-haspopup="menu"
+              aria-expanded={Boolean(opsAnchor)}
+              title={t("common.more")}
+              aria-label={t("common.more")}
+              onClick={toggleOpsMenu}
+              onMouseEnter={() => {
+                cancelOpsHoverClose();
+                if (!opsAnchor) toggleOpsMenu();
+              }}
+              onMouseLeave={scheduleOpsHoverClose}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 20V9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path
-                  d="M7.5 13.5 12 9l4.5 4.5M5.5 4.5h13"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+                <circle cx="5" cy="12" r="1.7" fill="currentColor" />
+                <circle cx="12" cy="12" r="1.7" fill="currentColor" />
+                <circle cx="19" cy="12" r="1.7" fill="currentColor" />
               </svg>
             </button>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              disabled={busy}
-              onClick={() => void runSync("fetch")}
-              title={t("git.fetch")}
-              aria-label={t("git.fetch")}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M20 11.5a8 8 0 0 0-14.6-4.2M4 12.5a8 8 0 0 0 14.6 4.2M20 3.5v4h-4M4 20.5v-4h4"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              disabled={busy || !status?.dirty}
-              onClick={() => void runStash("push")}
-              title={t("git.stash")}
-              aria-label={t("git.stash")}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 3.5v7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path
-                  d="M8.5 7.5 12 11l3.5-3.5M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5M4 13h16"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={styles.iconBtn}
-              disabled={busy || !(status?.stashCount ?? 0)}
-              onClick={() => void runStash("pop")}
-              title={t("git.pop")}
-              aria-label={t("git.pop")}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path d="M12 20.5V13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                <path
-                  d="M8.5 16.5 12 13l3.5 3.5M5 11V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5M4 11h16"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </div>
+          ) : null}
+        </div>
       </div>
+
+      {opsAnchor && hiddenActions.length > 0
+        ? createPortal(
+            /* Fixed positioning inside the phone sheet would be measured against
+               the sheet's own transform, not the viewport: portal it out. */
+            <div
+              ref={opsMenuRef}
+              className={styles.footMenu}
+              role="menu"
+              style={{ left: opsAnchor.left, top: opsAnchor.top, bottom: opsAnchor.bottom }}
+              onMouseEnter={cancelOpsHoverClose}
+              onMouseLeave={scheduleOpsHoverClose}
+            >
+              {hiddenActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  role="menuitem"
+                  disabled={action.disabled}
+                  onClick={() => {
+                    setOpsAnchor(null);
+                    action.run();
+                  }}
+                >
+                  {action.title}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div className={styles.navBody}>
         {tab === "changes" ? (

@@ -417,10 +417,16 @@ export function GitBranchSwitcher({
       const maxHeight = Math.max(140, Math.min(320, (openAbove ? spaceAbove : spaceBelow) - gap));
 
       if (useFixedMenu) {
+        // The menu is wider than a squeezed switcher button, so anchoring it to
+        // the button's left edge can push it past the viewport: clamp it inside,
+        // keeping its own readable width.
+        const width = Math.max(rect.width, 260);
+        const maxLeft = Math.max(8, window.innerWidth - width - 8);
+        const left = Math.min(Math.max(8, rect.left), maxLeft);
         setMenuStyle({
           position: "fixed",
-          left: rect.left,
-          width: Math.max(rect.width, 260),
+          left,
+          width,
           maxHeight,
           zIndex: 520,
           ...(openAbove
