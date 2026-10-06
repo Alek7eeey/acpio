@@ -143,4 +143,48 @@ describe("resyncAfterReconnect", () => {
     expect(messages.map((m) => m.id)).toEqual(["srv-user-1", "srv-assistant-1"]);
     expect(messages[1]?.parts.map((p) => p.payload.text)).toEqual(["Hello", " world"]);
   });
+
+  it("replaces the optimistic file part instead of duplicating the attachment chip", async () => {
+    // The optimistic user message carries a file part with a name only
+    // (size 0, no fileId); the persisted `part.appended` names the same file
+    // and must replace it, not stack a second chip under the bubble.
+    const local = detail([
+      message("local-user-1", "user", ["посмотри"]),
+    ]);
+    local.messages[0]!.parts.push({
+      id: "local-user-1-file-0",
+      messageId: "local-user-1",
+      type: "file",
+      order: 1,
+      payload: { name: "clipboard-2026-10-06T14-16-17.png", size: 0 },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    useAppStore.setState({ activeSession: local, sessionDetails: { s1: local } });
+
+    useAppStore.getState().handleWsEvent({
+      type: "part.appended",
+      sessionId: "s1",
+      messageId: "local-user-1",
+      part: {
+        id: "srv-user-1-p1",
+        messageId: "local-user-1",
+        type: "file",
+        order: 1,
+        payload: {
+          name: "clipboard-2026-10-06T14-16-17.png",
+          size: 1_363_148,
+          fileId: "f1",
+          mime: "image/png",
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
+    });
+    await flushFrames();
+
+    const parts = useAppStore.getState().activeSession?.messages[0]?.parts ?? [];
+    const fileParts = parts.filter((p) => p.type === "file");
+    expect(fileParts).toHaveLength(1);
+    expect(fileParts[0]?.payload.fileId).toBe("f1");
+    expect(fileParts[0]?.payload.size).toBe(1_363_148);
+  });
 });

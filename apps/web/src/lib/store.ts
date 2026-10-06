@@ -603,14 +603,20 @@ function upsertMessagePart(message: MessageDto, part: MessagePartDto): MessagePa
   // An optimistic user message already has its one text part. The persisted
   // `part.appended` event has a new server id, so replacing by part id alone
   // would render the same prompt twice in the one bubble.
-  if (isLocalUserId(message.id) && part.type === "text") {
-    const localTextIdx = message.parts.findIndex((item) => item.type === "text");
-    if (localTextIdx >= 0) {
+  const localSpecial =
+    isLocalUserId(message.id) && (part.type === "text" || part.type === "file");
+  if (localSpecial) {
+    // A file part keeps its name across optimistic and persisted copies, so
+    // match on it — matching on part id cannot work (see above).
+    const localIdx = message.parts.findIndex(
+      (item) => item.type === part.type && (part.type !== "file" || String(item.payload.name ?? "") === String(part.payload.name ?? "")),
+    );
+    if (localIdx >= 0) {
       const next = [...message.parts];
-      next[localTextIdx] = {
+      next[localIdx] = {
         ...part,
         // Keep the local key stable; the server part is only confirmation.
-        id: next[localTextIdx]!.id,
+        id: next[localIdx]!.id,
         messageId: message.id,
       };
       return next;
