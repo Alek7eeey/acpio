@@ -217,6 +217,191 @@
   color: var(--text-secondary);
 }
 
+/* Branch filter: one button that opens a searchable picker — a repo can carry
+   hundreds of branches, and a chip per branch is not a control then. */
+.filterBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+}
+
+.filterBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.filterBtn:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.filterBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filterBtnActive {
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.filterLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filterClear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.filterClear:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.filterMenu {
+  position: fixed;
+  z-index: 520;
+  display: flex;
+  flex-direction: column;
+  min-width: 240px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  overscroll-behavior: contain;
+}
+
+.filterSearch {
+  margin: 2px 2px 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.filterSearch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.filterList {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.filterOption {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.filterOption:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.filterOptionOn {
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+}
+
+.filterTick {
+  flex: 0 0 auto;
+  width: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.filterName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filterNoMatch {
+  padding: 8px 6px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+/* Older commits: the sentinel the scroll observer watches doubles as the button. */
+.more {
+  display: flex;
+  justify-content: center;
+  padding: 8px 8px 10px;
+}
+
+.more button {
+  padding: 5px 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.more button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.more button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .contextMenu {
   /* The menu scrolls itself when the viewport cannot fit every item. */
   overscroll-behavior: contain;

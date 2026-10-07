@@ -11,6 +11,7 @@ import type {
   DiscoveredBuiltinModel,
   GitStatusDto,
   GitCommitDto,
+  GitLogPageDto,
   GitCommitDetailDto,
   ModelOption,
   ModelParamDto,
@@ -279,9 +280,16 @@ export const api = {
     const q = filePath ? `?path=${encodeURIComponent(filePath)}` : "";
     return request<{ diff: string }>(`/api/sessions/${id}/git/diff${q}`);
   },
-  gitLog: (id: string, limit?: number) => {
-    const q = limit ? `?limit=${limit}` : "";
-    return request<{ commits: GitCommitDto[]; outgoing?: GitCommitDto[] }>(`/api/sessions/${id}/git/log${q}`);
+  gitLog: (
+    id: string,
+    opts: { limit?: number; skip?: number; branches?: string[] } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.skip) params.set("skip", String(opts.skip));
+    for (const branch of opts.branches ?? []) params.append("branch", branch);
+    const q = params.toString();
+    return request<GitLogPageDto>(`/api/sessions/${id}/git/log${q ? `?${q}` : ""}`);
   },
   gitShow: (id: string, rev: string, filePath?: string) => {
     const params = new URLSearchParams({ rev });

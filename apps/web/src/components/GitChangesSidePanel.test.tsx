@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
@@ -43,6 +43,28 @@ const STATUS = {
   aheadCount: 0,
   behindCount: 0,
   protectedBranches: ["main"],
+};
+
+const COMMIT = {
+  hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  shortHash: "aaaaaaa",
+  parents: [],
+  subject: "the newest commit",
+  author: "Tester",
+  date: "2026-01-02T12:00:00+03:00",
+  merge: false,
+  refs: ["main"],
+};
+
+const OLDER_COMMIT = {
+  hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  shortHash: "bbbbbbb",
+  parents: [COMMIT.hash],
+  subject: "an older commit",
+  author: "Tester",
+  date: "2026-01-01T12:00:00+03:00",
+  merge: false,
+  refs: [],
 };
 
 function fileDiff(path: string) {
@@ -138,7 +160,7 @@ describe("GitChangesSidePanel", () => {
     const tabs = await screen.findByRole("tab", { name: "Изменения" });
     await waitFor(() => expect(screen.getByRole("tab", { name: "История" })).toBeTruthy());
 
-    // The tab switch lives in the header's top row, next to the close button.
+    // The tab switch lives in the navigator header, its own row under the branch.
     const headTop = tabs.closest("header") as HTMLElement;
     expect(headTop).toBeTruthy();
     expect(headTop.contains(screen.getByRole("tab", { name: "История" }))).toBe(true);
@@ -240,5 +262,85 @@ describe("GitChangesSidePanel", () => {
       await user.click(await screen.findByRole("button", { name: "Назад" }));
       expect(onClose).toHaveBeenCalled();
     });
+  });
+
+  it("filters history by branch through the branch picker", async () => {
+    const user = userEvent.setup();
+    apiMock.gitLog.mockResolvedValue({
+      commits: [COMMIT],
+      outgoing: [],
+      hasMore: false,
+      branches: ["feature/x", "main", "origin/feature/x"],
+    });
+    renderPanel();
+
+    await user.click(await screen.findByRole("tab", { name: "История" }));
+    // The picker opens on the filter button and lists every branch with a search box.
+    await user.click(await screen.findByRole("button", { name: "Фильтр истории по веткам" }));
+    const list = await screen.findByRole("listbox", { name: "Фильтр истории по веткам" });
+    expect(within(list).getByPlaceholderText("Поиск ветки")).toBeTruthy();
+
+    await user.click(within(list).getByRole("option", { name: "feature/x" }));
+    await waitFor(() =>
+      expect(apiMock.gitLog).toHaveBeenLastCalledWith("s1", { limit: 60, branches: ["feature/x"] }),
+    );
+
+    // A second branch joins the filter; "all branches" clears it again.
+    await user.click(within(list).getByRole("option", { name: "main" }));
+    await waitFor(() =>
+      expect(apiMock.gitLog).toHaveBeenLastCalledWith("s1", {
+        limit: 60,
+        branches: ["feature/x", "main"],
+      }),
+    );
+    await user.click(within(list).getByRole("option", { name: "Все ветки" }));
+    await waitFor(() => expect(apiMock.gitLog).toHaveBeenLastCalledWith("s1", { limit: 60, branches: [] }));
+  });
+
+  it("searches the branch list instead of scrolling it", async () => {
+    const user = userEvent.setup();
+    apiMock.gitLog.mockResolvedValue({
+      commits: [COMMIT],
+      outgoing: [],
+      hasMore: false,
+      branches: ["feature/x", "main", "origin/feature/x"],
+    });
+    renderPanel();
+    await user.click(await screen.findByRole("tab", { name: "История" }));
+    await user.click(await screen.findByRole("button", { name: "Фильтр истории по веткам" }));
+    const list = await screen.findByRole("listbox", { name: "Фильтр истории по веткам" });
+
+    await user.type(within(list).getByPlaceholderText("Поиск ветки"), "feature");
+    await waitFor(() => expect(within(list).queryByRole("option", { name: "main" })).toBeNull());
+    expect(within(list).getByRole("option", { name: "feature/x" })).toBeTruthy();
+
+    await user.clear(within(list).getByPlaceholderText("Поиск ветки"));
+    await user.type(within(list).getByPlaceholderText("Поиск ветки"), "nope");
+    await waitFor(() => expect(within(list).getByText("Ветка не найдена")).toBeTruthy());
+  });
+
+  it("appends the next history page and stops asking once the log ends", async () => {
+    const user = userEvent.setup();
+    apiMock.gitLog.mockImplementation((_id: string, opts?: { skip?: number }) =>
+      Promise.resolve(
+        opts?.skip
+          ? { commits: [OLDER_COMMIT], outgoing: [], hasMore: false, branches: ["main"] }
+          : { commits: [COMMIT], outgoing: [], hasMore: true, branches: ["main"] },
+      ),
+    );
+    renderPanel();
+
+    await user.click(await screen.findByRole("tab", { name: "История" }));
+    await user.click(await screen.findByRole("button", { name: "Показать ещё" }));
+
+    // The next page starts after what the list already shows, filter included.
+    await waitFor(() =>
+      expect(apiMock.gitLog).toHaveBeenLastCalledWith("s1", { limit: 60, skip: 1, branches: [] }),
+    );
+    // Both pages are in the list now.
+    expect(screen.getByText(COMMIT.subject)).toBeTruthy();
+    expect(screen.getByText(OLDER_COMMIT.subject)).toBeTruthy();
+    // Nothing follows the last page, so the list stops offering more.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Показать ещё" })).toBeNull());
   });
 });

@@ -109,6 +109,8 @@ const NAVIGATOR_WIDTH_KEY = "acpio.gitNavigatorWidth.v1";
 
 /** Height of the commit list inside the history tab, dragged by its splitter. */
 const HISTORY_LIST_HEIGHT_KEY = "acpio.gitHistoryListHeight.v1";
+/** Commits per history page: the list loads the next one when it is scrolled out. */
+const HISTORY_PAGE = 60;
 const HISTORY_LIST_HEIGHT_MIN = 100;
 const HISTORY_LIST_HEIGHT_MAX = 900;
 
@@ -199,6 +201,20 @@ export function GitChangesSidePanel({
   const [commits, setCommits] = useState<GitCommitDto[]>([]);
   const [outgoing, setOutgoing] = useState<GitCommitDto[]>([]);
   const [loadingCommits, setLoadingCommits] = useState(false);
+  /** Older commits wait behind a scroll: `hasMore` says the next page exists. */
+  const [hasMoreCommits, setHasMoreCommits] = useState(false);
+  const [loadingMoreCommits, setLoadingMoreCommits] = useState(false);
+  /** Branches the history filter offers (local first, then remote). */
+  const [commitBranches, setCommitBranches] = useState<string[]>([]);
+  /** Picked branches; empty = every branch in the log. */
+  const [branchFilter, setBranchFilter] = useState<string[]>([]);
+  const branchFilterRef = useRef<string[]>([]);
+  branchFilterRef.current = branchFilter;
+  const commitCountRef = useRef(0);
+  commitCountRef.current = commits.length;
+  const hasMoreRef = useRef(false);
+  hasMoreRef.current = hasMoreCommits;
+  const loadingMoreRef = useRef(false);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailDto | null>(null);
   const [loadingCommitDetail, setLoadingCommitDetail] = useState(false);
   /** Width of the page this panel is docked into — the panel's own width follows from it. */
@@ -477,20 +493,71 @@ export function GitChangesSidePanel({
   }, [onStatusChange, sessionId]);
 
   const refreshCommits = useCallback(async () => {
+    const filter = branchFilterRef.current;
     setLoadingCommits(true);
     try {
-      const { commits: next, outgoing: nextOutgoing } = await api.gitLog(sessionId, 60);
-      setCommits(next);
-      setOutgoing(nextOutgoing ?? []);
-      return next;
+      const page = await api.gitLog(sessionId, { limit: HISTORY_PAGE, branches: filter });
+      setCommits(page.commits);
+      setHasMoreCommits(page.hasMore);
+      setCommitBranches(page.branches);
+      setOutgoing(page.outgoing ?? []);
+      return page.commits;
     } catch {
       setCommits([]);
       setOutgoing([]);
+      setHasMoreCommits(false);
       return [];
     } finally {
       setLoadingCommits(false);
     }
   }, [sessionId]);
+
+  /** The next page of history: older commits, appended to what the list shows. */
+  const loadMoreCommits = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMoreRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMoreCommits(true);
+    try {
+      const page = await api.gitLog(sessionId, {
+        limit: HISTORY_PAGE,
+        skip: commitCountRef.current,
+        branches: branchFilterRef.current,
+      });
+      setCommits((prev) => {
+        const seen = new Set(prev.map((commit) => commit.hash));
+        return [...prev, ...page.commits.filter((commit) => !seen.has(commit.hash))];
+      });
+      setHasMoreCommits(page.hasMore);
+    } catch {
+      setHasMoreCommits(false);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMoreCommits(false);
+    }
+  }, [sessionId]);
+
+  const toggleHistoryBranch = useCallback(
+    (branch: string) => {
+      const current = branchFilterRef.current;
+      const next = current.includes(branch)
+        ? current.filter((name) => name !== branch)
+        : [...current, branch];
+      // The ref moves first: the reload below reads it in the same tick.
+      branchFilterRef.current = next;
+      setBranchFilter(next);
+      setCommitDetail(null);
+      void refreshCommits();
+    },
+    [refreshCommits],
+  );
+
+  const clearHistoryBranchFilter = useCallback(() => {
+    if (branchFilterRef.current.length === 0) return;
+    branchFilterRef.current = [];
+    setBranchFilter([]);
+    setCommitDetail(null);
+    void refreshCommits();
+  }, [refreshCommits]);
 
   const selectCommit = useCallback(
     async (hash: string, opts?: { keepChangesTab?: boolean }) => {
@@ -546,6 +613,11 @@ export function GitChangesSidePanel({
     setLoadingCommitDetail(false);
     setNavigatorOpen(false);
     setOpsAnchor(null);
+    setHasMoreCommits(false);
+    setLoadingMoreCommits(false);
+    setCommitBranches([]);
+    branchFilterRef.current = [];
+    setBranchFilter([]);
   }, [sessionId]);
 
   useEffect(() => {
@@ -1242,18 +1314,16 @@ export function GitChangesSidePanel({
     <div className={styles.navigator}>
       <header className={styles.navHead}>
         <div className={styles.navHeadTop}>
-          <span className={styles.navChangeCaption}>
-            {t("git.changedOn", { count: files.length })}
-          </span>
-          <span className={styles.navStats}>
-            {status?.dirty ? (
-              <>
-                <span className={styles.statAdd}>+{status.additions}</span>
-                <span className={styles.statDel}>-{status.deletions}</span>
-              </>
-            ) : (
-              <span className={styles.navClean}>{t("git.noChanges")}</span>
-            )}
+          <span className={styles.navRepoIcon} aria-hidden>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M6 3.5v11.2M6 14.7a3.3 3.3 0 1 0 3.3 3.3M18 8.8a2.6 2.6 0 1 0-2.6 2.6H18a2.6 2.6 0 1 0 0-5.2h-2.6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+              <circle cx="6" cy="3.4" r="1.9" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
           </span>
           {status?.repo ? (
             <div className={styles.navBranch}>
@@ -1282,42 +1352,80 @@ export function GitChangesSidePanel({
             </button>
           )}
         </div>
-        <div className={styles.navTabRow}>
-          <div className={styles.tabSwitch} role="tablist" aria-label={t("git.title")}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "changes"}
-              className={`${styles.tabSwitchBtn}${tab === "changes" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
-              title={t("git.tabChanges")}
-              onClick={() => setTab("changes")}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <path
-                  d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              {t("git.tabChanges")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={tab === "history"}
-              className={`${styles.tabSwitchBtn}${tab === "history" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
-              title={t("git.tabHistory")}
-              onClick={() => setTab("history")}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
-                <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-              {t("git.tabHistory")}
-            </button>
-          </div>
+
+        <div className={styles.tabSwitch} role="tablist" aria-label={t("git.title")}>
+          <span
+            className={styles.tabSwitchGlider}
+            aria-hidden
+            style={{ transform: `translateX(${tab === "changes" ? "0%" : "calc(100% + 2px)"})` }}
+          />
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "changes"}
+            className={`${styles.tabSwitchBtn}${tab === "changes" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
+            title={t("git.tabChanges")}
+            onClick={() => setTab("changes")}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span className={styles.tabSwitchLabel}>{t("git.tabChanges")}</span>
+            {files.length > 0 ? <span className={styles.tabCount} aria-hidden>{files.length}</span> : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "history"}
+            className={`${styles.tabSwitchBtn}${tab === "history" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
+            title={t("git.tabHistory")}
+            onClick={() => setTab("history")}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M12 7v5l3 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </svg>
+            <span className={styles.tabSwitchLabel}>{t("git.tabHistory")}</span>
+            {commits.length > 0 ? (
+              <span className={styles.tabCount} aria-hidden>
+                {hasMoreCommits ? `${commits.length}+` : commits.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
+        <div className={styles.navMeta}>
+          {tab === "changes" ? (
+            <>
+              <span className={styles.navChangeCaption}>
+                {t("git.changesCount", { count: files.length })}
+              </span>
+              {/* The stage already says the copy is clean; the header only counts. */}
+              {status?.dirty ? (
+                <span className={styles.navStats}>
+                  <span className={styles.statAdd}>+{status.additions}</span>
+                  <span className={styles.statDel}>-{status.deletions}</span>
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <span className={styles.navChangeCaption}>
+                {branchFilter.length === 0
+                  ? t("git.historyAllBranches")
+                  : t("git.historyBranchCount", { count: branchFilter.length })}
+              </span>
+              <span className={styles.navClean}>
+                {t("git.historyShown", { count: commits.length })}
+              </span>
+            </>
+          )}
         </div>
       </header>
 
@@ -1477,6 +1585,13 @@ export function GitChangesSidePanel({
                 busy={busy}
                 selectedHash={commitSelected ? selection.hash : null}
                 wipSelected={workingSelected && Boolean(status?.dirty)}
+                branches={commitBranches}
+                branchFilter={branchFilter}
+                onToggleBranch={toggleHistoryBranch}
+                onClearBranchFilter={clearHistoryBranchFilter}
+                hasMore={hasMoreCommits}
+                loadingMore={loadingMoreCommits}
+                onLoadMore={() => void loadMoreCommits()}
                 onSelectCommit={(hash) => void selectCommit(hash)}
                 onSelectWip={() => {
                   setTab("history");

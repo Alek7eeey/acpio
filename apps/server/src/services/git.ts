@@ -166,7 +166,6 @@ function parsePrettyLog(output: string): GitCommitDto[] {
       subject: parts[2] ?? "",
       author: parts[3] ?? "",
       date: parts[4] ?? "",
-      depth: 0,
       merge: parents.length > 1,
       refs: [],
     });
@@ -986,49 +985,84 @@ function dedupeCommitRefs(refs: string[]): string[] {
   });
 }
 
-export async function getGitLog(
-  cwd: string,
-  limit = 60,
-): Promise<{ commits: GitCommitDto[]; outgoing: GitCommitDto[] }> {
+export type GitLogOptions = {
+  limit?: number;
+  /** Commits to skip — the list loads another page on scroll. */
+  skip?: number;
+  /** Branch filter: the refs to walk. Empty = every local and remote branch. */
+  branches?: string[];
+};
+
+/** One page of history plus what the list needs to keep paging and filter it. */
+export type GitLogPage = {
+  commits: GitCommitDto[];
+  /** Local commits of the checked-out branch (upstream..HEAD); first page only. */
+  outgoing: GitCommitDto[];
+  hasMore: boolean;
+  /** Every branch the filter can pick: local names first, then remote ones. */
+  branches: string[];
+};
+
+export async function getGitLog(cwd: string, opts: GitLogOptions = {}): Promise<GitLogPage> {
   const root = await resolveGitRoot(cwd);
-  if (!root) return { commits: [], outgoing: [] };
+  const empty: GitLogPage = { commits: [], outgoing: [], hasMore: false, branches: [] };
+  if (!root) return empty;
+
+  const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 60), 1), 200);
+  const skip = Math.max(Math.trunc(opts.skip ?? 0), 0);
+  const wanted = (opts.branches ?? []).map(validateRevision).filter((ref): ref is string => Boolean(ref));
 
   const head = await runGit(root, ["rev-parse", "HEAD"]);
-  if (!head.ok) return { commits: [], outgoing: [] };
-  // Three independent reads; the outgoing probe only needs the branch name.
+  if (!head.ok) return empty;
+  // The page needs one extra commit to know whether another one follows.
+  const revisions = wanted.length
+    ? wanted
+    : ["HEAD", "--branches", "--remotes"];
   const branchCall = runGit(root, ["branch", "--show-current"]);
   const [refsRaw, raw, outgoing] = await Promise.all([
     runGit(root, [
       "for-each-ref",
-      "--format=%(objectname)\t%(refname:short)",
+      "--format=%(objectname)\t%(refname)\t%(refname:short)",
       "refs/heads",
       "refs/remotes",
     ]),
     runGit(root, [
       "log",
-      `--max-count=${Math.min(Math.max(limit, 1), 200)}`,
+      ...revisions,
+      `--max-count=${limit + 1}`,
+      `--skip=${skip}`,
       "--date=iso-strict",
       "--pretty=format:%H%x09%P%x09%s%x09%an%x09%ai",
     ]),
-    branchCall.then((result) => getOutgoingCommits(root, result.ok ? result.out : "")),
+    // Only the first page carries the outgoing list: the changes tab shows it
+    // once, and every scroll step would pay for the upstream probe again.
+    skip === 0
+      ? branchCall.then((result) => getOutgoingCommits(root, result.ok ? result.out : ""))
+      : Promise.resolve([]),
   ]);
 
   const refsByHash = new Map<string, string[]>();
+  const localBranches: string[] = [];
+  const remoteBranches: string[] = [];
   if (refsRaw.out) {
     for (const line of refsRaw.out.split("\n")) {
       if (!line.trim()) continue;
-      const tab = line.indexOf("\t");
-      if (tab < 0) continue;
-      const hash = line.slice(0, tab);
-      const ref = line.slice(tab + 1).trim();
-      if (!hash || !ref) continue;
+      const [hash, fullRef, ref] = line.split("\t");
+      if (!hash || !fullRef || !ref) continue;
       const list = refsByHash.get(hash) ?? [];
       list.push(ref);
       refsByHash.set(hash, list);
+      if (fullRef.startsWith("refs/heads/")) localBranches.push(ref);
+      // origin/HEAD is a symbolic alias of a branch that is already listed.
+      else if (!ref.endsWith("/HEAD")) remoteBranches.push(ref);
     }
   }
+  const branches = [
+    ...[...new Set(localBranches)].sort((a, b) => a.localeCompare(b)),
+    ...[...new Set(remoteBranches)].sort((a, b) => a.localeCompare(b)),
+  ];
 
-  if (!raw.out) return { commits: [], outgoing };
+  if (!raw.out) return { commits: [], outgoing, hasMore: false, branches };
 
   type Node = {
     hash: string;
@@ -1061,22 +1095,11 @@ export async function getGitLog(
     order.push(hash);
   }
 
-  const depthByHash = new Map<string, number>();
-  const seen = new Set<string>();
+  // The page asked for one commit beyond the limit; its presence means more follow.
+  const hasMore = order.length > limit;
+  const pageOrder = order.slice(0, limit);
 
-  function walk(hash: string, depth: number) {
-    if (seen.has(hash) || !nodes.has(hash)) return;
-    seen.add(hash);
-    depthByHash.set(hash, Math.min(depthByHash.get(hash) ?? depth, depth));
-    const node = nodes.get(hash)!;
-    node.parents.forEach((parent, index) => {
-      walk(parent, index === 0 ? depth : depth + 1);
-    });
-  }
-
-  walk(head.out, 0);
-
-  const commits = order
+  const commits = pageOrder
     .filter((hash) => nodes.has(hash))
     .map((hash) => {
       const node = nodes.get(hash)!;
@@ -1087,14 +1110,14 @@ export async function getGitLog(
         subject: node.subject,
         author: node.author,
         date: node.date,
-        depth: depthByHash.get(hash) ?? 0,
         merge: node.merge,
         refs: dedupeCommitRefs(refsByHash.get(hash) ?? []),
       };
     });
 
-  return { commits, outgoing };
+  return { commits, outgoing, hasMore, branches };
 }
+
 
 export async function getGitShow(cwd: string, rev: string, filePath?: string): Promise<string> {
   const root = await resolveGitRoot(cwd);

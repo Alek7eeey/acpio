@@ -850,7 +850,6 @@
     "commitPlaceholder": "Commit message",
     "commitOk": "Committed",
     "commitFailed": "Commit failed",
-    "changedOn": "{{count}} file change on",
     "tabChanges": "Changes",
     "tabHistory": "History",
     "noCommits": "No commits yet",
@@ -975,7 +974,18 @@
     "fileViewList": "Flat list",
     "fileViewTree": "Folder tree",
     "diffFileEmpty": "No text changes",
-    "diffLoadFailed": "Could not load the diff"
+    "diffLoadFailed": "Could not load the diff",
+    "historyFilterLabel": "History branch filter",
+    "historyAllBranches": "All branches",
+    "historyLoadMore": "Show more",
+    "historyEmptyFilter": "No commits on the selected branches",
+    "historyShown": "{{count}} shown",
+    "historyBranchCount": "{{count}} branches selected",
+    "historyFilterSearch": "Search a branch",
+    "historyFilterNoMatch": "No branch matches",
+    "historyBranchesAll": "Branches: all",
+    "historyBranchesPicked": "Branches: {{count}}",
+    "changesCount": "Changes: {{count}}"
   },
   "planPanel": {
     "title": "Outline",

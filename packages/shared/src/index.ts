@@ -1994,11 +1994,29 @@ export interface GitCommitDto {
   subject: string;
   author: string;
   date: string;
-  /** 0 = main line, deeper = side branches / merges. */
-  depth: number;
+  /**
+   * Graph line the row is drawn on: 0 = a tip, deeper = a side line of a merge.
+   * Assigned where the list is drawn — the history list walks the commits it has
+   * loaded, so the graph stays continuous as older pages arrive.
+   */
+  depth?: number;
   merge: boolean;
   /** Branch and remote ref tips pointing at this commit. */
   refs: string[];
+}
+
+/**
+ * One page of git history: the commits themselves, the local commits of the
+ * checked-out branch, and the branches the history filter can pick from.
+ */
+export interface GitLogPageDto {
+  commits: GitCommitDto[];
+  /** Upstream..HEAD commits; only the first page carries them. */
+  outgoing?: GitCommitDto[];
+  /** Another page follows — the list asks for it when the reader scrolls. */
+  hasMore: boolean;
+  /** Local branch names first, then remote ones, each group alphabetical. */
+  branches: string[];
 }
 
 export type GitCommitFileStatus =

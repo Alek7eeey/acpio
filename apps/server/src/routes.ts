@@ -1088,10 +1088,18 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/sessions/:id/git/log", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const q = z.object({ limit: z.coerce.number().int().min(1).max(200).optional() }).parse(req.query ?? {});
+    const q = z
+      .object({
+        limit: z.coerce.number().int().min(1).max(200).optional(),
+        skip: z.coerce.number().int().min(0).max(100000).optional(),
+        /** Repeated: the history filter may keep several branches at once. */
+        branch: z.union([z.string().max(200), z.array(z.string().max(200))]).optional(),
+      })
+      .parse(req.query ?? {});
     const cwd = await getSessionCwd(id);
     if (cwd === null) return reply.code(404).send({ error: "Not found" });
-    return getGitLog(cwd, q.limit ?? 60);
+    const branches = q.branch === undefined ? [] : Array.isArray(q.branch) ? q.branch : [q.branch];
+    return getGitLog(cwd, { limit: q.limit, skip: q.skip, branches });
   });
 
   app.get("/api/sessions/:id/git/show", async (req, reply) => {

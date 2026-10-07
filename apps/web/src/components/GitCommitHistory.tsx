@@ -1,15 +1,18 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import type { GitCommitDto, GitStatusDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { showToast } from "../lib/toast";
-import { dedupeCommitRefs, gitLaneColor } from "../lib/gitCommitGraph";
+import { assignCommitDepths, dedupeCommitRefs, gitLaneColor } from "../lib/gitCommitGraph";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 import styles from "./GitCommitHistory.module.css";
 
@@ -103,6 +106,13 @@ export function GitCommitHistory({
   busy,
   selectedHash,
   wipSelected,
+  branches,
+  branchFilter,
+  onToggleBranch,
+  onClearBranchFilter,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   onSelectCommit,
   onSelectWip,
   onRevertCommit,
@@ -114,9 +124,18 @@ export function GitCommitHistory({
   commits: GitCommitDto[];
   status: GitStatusDto | null;
   loading: boolean;
-  busy?: boolean;
+  busy: boolean;
   selectedHash: string | null;
   wipSelected: boolean;
+  /** Branches the filter offers: local names first, then remote ones. */
+  branches: string[];
+  /** Picked branches; empty means every branch. */
+  branchFilter: string[];
+  onToggleBranch: (branch: string) => void;
+  onClearBranchFilter: () => void;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
   onSelectCommit: (hash: string) => void;
   onSelectWip: () => void;
   onRevertCommit: (hash: string) => void;
@@ -129,6 +148,74 @@ export function GitCommitHistory({
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [menu, setMenu] = useState<CommitMenuState | null>(null);
   const menuStyle = useFixedMenuPlacement(menu, menuRef);
+  /** The list draws its own graph over everything loaded, pages included. */
+  const rows = useMemo(() => assignCommitDepths(commits), [commits]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const moreRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef(onLoadMore);
+  loadMoreRef.current = onLoadMore;
+  const filterBtnRef = useRef<HTMLButtonElement | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterQuery, setFilterQuery] = useState("");
+  const [filterStyle, setFilterStyle] = useState<CSSProperties>({});
+
+  /** The branch list is long: the picker searches it instead of scrolling 250 chips. */
+  const filterMatches = useMemo(() => {
+    const query = filterQuery.trim().toLowerCase();
+    if (!query) return branches;
+    return branches.filter((branch) => branch.toLowerCase().includes(query));
+  }, [branches, filterQuery]);
+
+  useLayoutEffect(() => {
+    if (!filterOpen || !filterBtnRef.current) return;
+    const place = () => {
+      const button = filterBtnRef.current;
+      if (!button) return;
+      const rect = button.getBoundingClientRect();
+      const gap = 6;
+      const margin = 10;
+      const spaceBelow = window.innerHeight - rect.bottom - margin;
+      const spaceAbove = rect.top - margin;
+      const openAbove = spaceBelow < 240 && spaceAbove > spaceBelow;
+      const width = Math.min(Math.max(rect.width, 240), window.innerWidth - 16);
+      setFilterStyle({
+        position: "fixed",
+        left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
+        width,
+        maxHeight: Math.max(180, Math.min(340, (openAbove ? spaceAbove : spaceBelow) - gap)),
+        ...(openAbove
+          ? { bottom: window.innerHeight - rect.top + gap }
+          : { top: rect.bottom + gap }),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [filterOpen]);
+
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (filterBtnRef.current?.contains(target)) return;
+      if (filterMenuRef.current?.contains(target)) return;
+      setFilterOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFilterOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [filterOpen]);
 
   const openCommitMenu = useCallback(
     (e: ReactMouseEvent, commit: GitCommitDto) => {
@@ -160,6 +247,34 @@ export function GitCommitHistory({
       window.removeEventListener("keydown", onKey);
     };
   }, [closeMenu, menu]);
+
+  /**
+   * A new filter is a new list: start it from the newest commit instead of
+   * leaving the reader at the bottom of a list that no longer exists.
+   */
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [branchFilter]);
+
+  /**
+   * Scrolling into the list's end asks for the next page. The observer watches a
+   * sentinel under the last row, so a short page still loads without a click, and
+   * a tall window does not need a scroll event to get going.
+   */
+  useEffect(() => {
+    if (!hasMore || loadingMore) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const sentinel = moreRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMoreRef.current();
+      },
+      { root: scrollRef.current, rootMargin: "240px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingMore, commits.length]);
 
   const handleCopyCommit = useCallback(async () => {
     if (!menu) return;
@@ -197,17 +312,63 @@ export function GitCommitHistory({
     }
   }, [closeMenu, menu, t]);
 
-  if (loading) {
-    return <div className={styles.empty}>{t("common.loading")}</div>;
-  }
-
-  if (commits.length === 0 && !status?.dirty) {
-    return <div className={styles.empty}>{t("git.noCommits")}</div>;
-  }
-
   return (
     <div className={styles.wrap}>
-      <div className={styles.scroll}>
+      <div className={styles.filterBar}>
+        <button
+          ref={filterBtnRef}
+          type="button"
+          className={`${styles.filterBtn}${branchFilter.length > 0 ? ` ${styles.filterBtnActive}` : ""}`}
+          aria-haspopup="listbox"
+          aria-expanded={filterOpen}
+          aria-label={t("git.historyFilterLabel")}
+          title={t("git.historyFilterLabel")}
+          onClick={() => {
+            setFilterQuery("");
+            setFilterOpen((open) => !open);
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M4 6h16M7 12h10M10 18h4"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className={styles.filterLabel}>
+            {branchFilter.length === 0
+              ? t("git.historyBranchesAll")
+              : t("git.historyBranchesPicked", { count: branchFilter.length })}
+          </span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        {branchFilter.length > 0 ? (
+          <button
+            type="button"
+            className={styles.filterClear}
+            onClick={onClearBranchFilter}
+            aria-label={t("git.historyAllBranches")}
+            title={t("git.historyAllBranches")}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+        ) : null}
+      </div>
+
+      <div className={styles.scroll} ref={scrollRef}>
+        {loading && rows.length === 0 ? (
+          <div className={styles.empty}>{t("common.loading")}</div>
+        ) : null}
+        {!loading && rows.length === 0 && !status?.dirty ? (
+          <div className={styles.empty}>
+            {branchFilter.length > 0 ? t("git.historyEmptyFilter") : t("git.noCommits")}
+          </div>
+        ) : null}
         {status?.dirty ? (
           <button
             type="button"
@@ -229,10 +390,10 @@ export function GitCommitHistory({
           </button>
         ) : null}
 
-        {commits.map((commit, index) => {
+        {rows.map((commit, index) => {
           const active = selectedHash === commit.hash;
           const first = !status?.dirty && index === 0;
-          const last = index === commits.length - 1;
+          const last = index === rows.length - 1;
           return (
             <button
               key={commit.hash}
@@ -242,10 +403,14 @@ export function GitCommitHistory({
               onContextMenu={(e) => openCommitMenu(e, commit)}
               title={commit.subject}
             >
-              <CommitRail depth={commit.depth} merge={commit.merge} first={first} last={last} />
+              <CommitRail depth={commit.depth ?? 0} merge={commit.merge} first={first} last={last} />
               <span className={styles.main}>
                 <span className={styles.topLine}>
-                  <BranchPills refs={commit.refs} depth={commit.depth} currentBranch={status?.branch} />
+                  <BranchPills
+                    refs={commit.refs}
+                    depth={commit.depth ?? 0}
+                    currentBranch={status?.branch}
+                  />
                   <span className={styles.subject}>{commit.subject || commit.shortHash}</span>
                 </span>
                 <span className={styles.meta}>
@@ -267,7 +432,74 @@ export function GitCommitHistory({
             </button>
           );
         })}
+
+        {hasMore || loadingMore ? (
+          <div className={styles.more} ref={moreRef}>
+            <button type="button" disabled={loadingMore} onClick={onLoadMore}>
+              {loadingMore ? t("common.loading") : t("git.historyLoadMore")}
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {filterOpen
+        ? createPortal(
+            <div
+              ref={filterMenuRef}
+              className={styles.filterMenu}
+              style={filterStyle}
+              role="listbox"
+              aria-multiselectable
+              aria-label={t("git.historyFilterLabel")}
+            >
+              <input
+                className={styles.filterSearch}
+                value={filterQuery}
+                autoFocus
+                placeholder={t("git.historyFilterSearch")}
+                aria-label={t("git.historyFilterSearch")}
+                onChange={(e) => setFilterQuery(e.target.value)}
+              />
+              <button
+                type="button"
+                role="option"
+                aria-selected={branchFilter.length === 0}
+                className={`${styles.filterOption}${branchFilter.length === 0 ? ` ${styles.filterOptionOn}` : ""}`}
+                onClick={onClearBranchFilter}
+              >
+                <span className={styles.filterTick} aria-hidden>
+                  {branchFilter.length === 0 ? "✓" : ""}
+                </span>
+                <span className={styles.filterName}>{t("git.historyAllBranches")}</span>
+              </button>
+              <div className={styles.filterList}>
+                {filterMatches.map((branch) => {
+                  const on = branchFilter.includes(branch);
+                  return (
+                    <button
+                      key={branch}
+                      type="button"
+                      role="option"
+                      aria-selected={on}
+                      className={`${styles.filterOption}${on ? ` ${styles.filterOptionOn}` : ""}`}
+                      title={branch}
+                      onClick={() => onToggleBranch(branch)}
+                    >
+                      <span className={styles.filterTick} aria-hidden>
+                        {on ? "✓" : ""}
+                      </span>
+                      <span className={styles.filterName}>{branch}</span>
+                    </button>
+                  );
+                })}
+                {filterMatches.length === 0 ? (
+                  <div className={styles.filterNoMatch}>{t("git.historyFilterNoMatch")}</div>
+                ) : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {menu ? (
         <div
