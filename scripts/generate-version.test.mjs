@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   computeAppVersion,
   formatReleaseDate,
+  localDateKey,
   parseVersionsMarkdown,
   releaseEntriesFromCommitDates,
   renderVersionsMarkdown,
   uniqueCommitDays,
   upsertReleaseEntry,
+  withPendingCommitDay,
 } from "./versionHistory.mjs";
 
 describe("uniqueCommitDays", () => {
@@ -60,6 +62,38 @@ describe("releaseEntriesFromCommitDates", () => {
       { version: "0.1.1", released: "27.08.26" },
       { version: "0.1.0", released: "26.08.26" },
     ]);
+  });
+});
+
+describe("withPendingCommitDay", () => {
+  it("counts the day of the commit being created, so its bump lands in it", () => {
+    const history = ["2026-08-26"];
+    expect(computeAppVersion({ baseVersion: "0.1.0", epochDate: "2026-08-26", commitDates: history }).version).toBe(
+      "0.1.0",
+    );
+    expect(
+      computeAppVersion({
+        baseVersion: "0.1.0",
+        epochDate: "2026-08-26",
+        commitDates: withPendingCommitDay(history, "2026-08-27"),
+      }).version,
+    ).toBe("0.1.1");
+  });
+
+  it("does not bump twice when the day already has commits", () => {
+    expect(
+      computeAppVersion({
+        baseVersion: "0.1.0",
+        epochDate: "2026-08-26",
+        commitDates: withPendingCommitDay(["2026-08-26", "2026-08-27"], "2026-08-27"),
+      }).version,
+    ).toBe("0.1.1");
+  });
+});
+
+describe("localDateKey", () => {
+  it("formats the local calendar day as git's %as does", () => {
+    expect(localDateKey(new Date(2026, 7, 26, 23, 59))).toBe("2026-08-26");
   });
 });
 

@@ -9,6 +9,8 @@
     "packages/*"
   ],
   "scripts": {
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
     "predev": "node scripts/generate-version.mjs",
     "prebuild": "node scripts/generate-version.mjs",
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acpio/server\" \"npm run dev -w @acpio/web\"",

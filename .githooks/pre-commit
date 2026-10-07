@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stamp the version derived from git history into the commit being created, so
+# nobody bumps it by hand. Installed by `npm install` / `npm run hooks:install`
+# (core.hooksPath=.githooks). Skip it for one commit with `git commit --no-verify`.
+exec node "$(git rev-parse --show-toplevel)/scripts/stamp-version.mjs"

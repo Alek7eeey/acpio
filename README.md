@@ -175,6 +175,10 @@ Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent 
 
 `session/update` events, permissions, questions, plans and subagent cards are rendered in the chat feed via normalized adapter events.
 
+## Versioning
+
+The version is derived from git history — patch +1 per calendar day that has a commit since `versionEpoch` (`package.json`) — so the same revision reports the same version on every machine. Git bumps it by itself: the `pre-commit` hook (`scripts/stamp-version.mjs`, installed by `npm install` via `core.hooksPath=.githooks`; re-run with `npm run hooks:install`) writes the number into `README.md`, `readme-ru.md`, `VERSIONS.md` and `packages/shared/src/buildInfo.ts` and stages them, so a day's first commit carries its own bump. `git commit --no-verify` skips the stamp for one commit.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -2,13 +2,39 @@ export const VERSIONS_HEADER = `# Release history
 
 Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (\`versionEpoch\` in \`package.json\`, default \`2026-08-26\`).
 
-The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. \`npm run dev\` / \`npm run build\` refresh this table.
+The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. The \`pre-commit\` hook (\`scripts/stamp-version.mjs\`) writes this table, both README version lines and \`buildInfo.ts\` into the commit being created, so a day's first commit bumps the patch by itself; \`npm run dev\` / \`npm run build\` derive the same values again.
 
 Release dates use \`DD.MM.YY\` (author date of that day's commits).
 
 | Version | Released |
 |---------|----------|
 `;
+
+/** Files the version stamp rewrites; all of them travel inside the commit that bumps. */
+export const VERSION_STAMP = {
+  readme: "README.md",
+  readmeRu: "readme-ru.md",
+  versions: "VERSIONS.md",
+  buildInfo: "packages/shared/src/buildInfo.ts",
+};
+export const VERSION_STAMP_FILES = Object.values(VERSION_STAMP);
+
+/** Local calendar day as `YYYY-MM-DD` — the key `git log --format=%as` reports. */
+export function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Commit days plus the day of the commit that is being created right now: it is
+ * not in history yet, but it will count as a commit day the moment it exists, so
+ * its own bump belongs in it.
+ */
+export function withPendingCommitDay(commitDates, pendingDay = localDateKey()) {
+  return [...commitDates, pendingDay];
+}
 
 export function formatReleaseDate(date) {
   const d = String(date.getDate()).padStart(2, "0");

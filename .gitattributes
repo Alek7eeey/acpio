@@ -1,0 +1,3 @@
+# Git runs hooks from the work tree: keep them LF, or a Windows checkout with
+# core.autocrlf=true breaks the shebang on the POSIX side.
+/.githooks/* text eol=lf

@@ -2,7 +2,7 @@
 
 Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (`versionEpoch` in `package.json`, default `2026-08-26`).
 
-The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. `npm run dev` / `npm run build` refresh this table.
+The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. The `pre-commit` hook (`scripts/stamp-version.mjs`) writes this table, both README version lines and `buildInfo.ts` into the commit being created, so a day's first commit bumps the patch by itself; `npm run dev` / `npm run build` derive the same values again.
 
 Release dates use `DD.MM.YY` (author date of that day's commits).
 
