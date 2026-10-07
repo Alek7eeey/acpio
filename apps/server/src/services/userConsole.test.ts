@@ -4,6 +4,7 @@ import {
   attachUserConsole,
   releaseUserConsole,
   resetUserConsole,
+  resizeUserConsole,
   reviveUserConsole,
   writeUserConsole,
 } from "./userConsole.js";
@@ -13,15 +14,18 @@ type FakeProc = {
   killed: boolean;
   data: ((chunk: string) => void) | null;
   exit: (() => void) | null;
+  cols: number;
+  rows: number;
+  resizes: Array<[number, number]>;
 };
 
 const spawned: FakeProc[] = [];
 
 vi.mock("node-pty", () => ({
-  spawn: () => {
+  spawn: (_file: string, _args: string[], opts: { cols: number; rows: number }) => {
     const proc: FakeProc & {
       write: (data: string) => void;
-      resize: () => void;
+      resize: (cols: number, rows: number) => void;
       kill: () => void;
       onData: (cb: (chunk: string) => void) => void;
       onExit: (cb: () => void) => void;
@@ -30,10 +34,15 @@ vi.mock("node-pty", () => ({
       killed: false,
       data: null,
       exit: null,
+      cols: opts.cols,
+      rows: opts.rows,
+      resizes: [],
       write: (data: string) => {
         proc.writes.push(data);
       },
-      resize: () => {},
+      resize: (cols, rows) => {
+        proc.resizes.push([cols, rows]);
+      },
       kill: () => {
         proc.killed = true;
       },
@@ -54,7 +63,7 @@ vi.mock("./settings.js", () => ({ getSettings: async () => ({ terminalShell: "cm
 vi.mock("./wsHub.js", () => ({ broadcastToSession: vi.fn() }));
 
 const broadcast = vi.mocked(broadcastToSession);
-const SESSION_IDS = ["s-race", "s-exit", "s-young", "s-revive"];
+const SESSION_IDS = ["s-race", "s-exit", "s-young", "s-revive", "s-size"];
 
 beforeEach(() => {
   // The console keeps its own clock: shells have a spawn time and a revive has a
@@ -127,5 +136,29 @@ describe("userConsole lifecycle", () => {
     await reviveUserConsole("s-revive", process.cwd());
     expect(spawned).toHaveLength(1);
     expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it("brings a shell back at the size the panel is using", async () => {
+    await attachUserConsole("s-size", process.cwd(), "cmd", { cols: 52, rows: 30 });
+    expect(spawned[0]).toMatchObject({ cols: 52, rows: 30 });
+
+    vi.setSystemTime(1_100_000);
+    releaseUserConsole("s-size");
+    await reviveUserConsole("s-size", process.cwd());
+
+    // The 100x28 default would leave a TUI drawing wider than a docked panel.
+    expect(spawned[1]).toMatchObject({ cols: 52, rows: 30 });
+  });
+
+  it("remembers a panel resize for the next shell and applies it to the live one", async () => {
+    await attachUserConsole("s-size", process.cwd(), "cmd", { cols: 80, rows: 24 });
+    resizeUserConsole("s-size", 94, 64);
+    expect(spawned[0].resizes).toEqual([[94, 64]]);
+
+    vi.setSystemTime(1_200_000);
+    releaseUserConsole("s-size");
+    await reviveUserConsole("s-size", process.cwd());
+
+    expect(spawned[1]).toMatchObject({ cols: 94, rows: 64 });
   });
 });

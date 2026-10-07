@@ -38,6 +38,10 @@ const SHELL_EXIT_QUIET_MS = 1500;
 const REVIVE_COOLDOWN_MS = SHELL_EXIT_QUIET_MS;
 /** Last revive per session, kept after release: a broken profile must not spawn per keystroke. */
 const revivedAt = new Map<string, number>();
+/** Last size the panel used for a session: a shell revived without one would spawn at
+ *  the 100x28 default and a TUI started there draws wider than the panel. */
+const lastSizes = new Map<string, { cols: number; rows: number }>();
+let ptyFallbackLogged = false;
 
 function flushOutputBuffer(sessionId: string) {
   const entry = outputBuffers.get(sessionId);
@@ -148,7 +152,13 @@ async function spawnPtyBackend(
       onData: (cb) => proc.onData(cb),
       onExit: (cb) => proc.onExit(cb),
     };
-  } catch {
+  } catch (err) {
+    // A pipe backend has no terminal: no resize, and a TUI started there cannot
+    // work. Silent fallback made that failure invisible, so say it once.
+    if (!ptyFallbackLogged) {
+      ptyFallbackLogged = true;
+      console.error("[console] node-pty unavailable, console falls back to pipes:", err);
+    }
     return null;
   }
 }
@@ -193,8 +203,17 @@ async function spawnConsole(
   initialSize?: { cols?: number; rows?: number },
 ) {
   const root = await resolveConsoleRoot(cwd);
+  // A shell that comes back after a release must return at the size the panel is
+  // showing: the 100x28 default is wider than a docked panel, and a TUI started
+  // there draws wider than the panel can display.
+  const remembered = lastSizes.get(sessionId);
+  const size = {
+    cols: initialSize?.cols ?? remembered?.cols ?? 100,
+    rows: initialSize?.rows ?? remembered?.rows ?? 28,
+  };
+  lastSizes.set(sessionId, size);
   const backend =
-    (await spawnPtyBackend(root, shell, initialSize)) ??
+    (await spawnPtyBackend(root, shell, size)) ??
     (await spawnPipeBackend(root, shell));
   const entry: ConsoleEntry = { cwd: root, backend, shell, startedAt: Date.now() };
   consoles.set(sessionId, entry);
@@ -260,9 +279,11 @@ export function writeUserConsole(sessionId: string, data: string): boolean {
 }
 
 export function resizeUserConsole(sessionId: string, cols: number, rows: number) {
+  const size = clampConsoleTerminalSize({ cols, rows });
+  // Remembered even without a live shell: the next spawn uses the panel's size.
+  lastSizes.set(sessionId, size);
   const entry = consoles.get(sessionId);
   if (!entry) return;
-  const size = clampConsoleTerminalSize({ cols, rows });
   entry.backend.resize(size.cols, size.rows);
 }
 
@@ -312,6 +333,7 @@ export async function reviveUserConsole(sessionId: string, cwd: string): Promise
   const now = Date.now();
   if (now - (revivedAt.get(sessionId) ?? 0) < REVIVE_COOLDOWN_MS) return;
   revivedAt.set(sessionId, now);
+  console.error("[console] input arrived with no shell — starting one for session", sessionId);
   await attachUserConsole(sessionId, cwd);
   broadcastToSession(sessionId, { type: "process.cleared", sessionId });
 }
