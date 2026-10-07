@@ -271,6 +271,7 @@
     "tooManyFiles": "Up to 8 files can be attached",
     "attachmentUploading": "Uploading…",
     "attachmentUploadFailed": "Upload failed",
+    "attachmentDeleted": "File not found — it may have been deleted",
     "emptyTitle": "Acpio",
     "emptyDescription": "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with {{agents}}.",
     "emptyAgentsAny": "any agent you enable in Settings",

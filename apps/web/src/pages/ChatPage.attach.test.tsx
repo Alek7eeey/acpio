@@ -86,6 +86,39 @@ function runningSession(): SessionDetailDto {
   };
 }
 
+/** An idle chat holding one user message with text and a landed image part. */
+function landedImageSession(): SessionDetailDto {
+  const detail = runningSession();
+  detail.status = "idle";
+  detail.messages = [
+    {
+      id: "u1",
+      sessionId: "s1",
+      role: "user",
+      createdAt: "2026-10-01T09:00:00.000Z",
+      parts: [
+        {
+          id: "u1-text",
+          messageId: "u1",
+          type: "text",
+          order: 0,
+          payload: { text: "что тут" },
+          createdAt: "2026-10-01T09:00:00.000Z",
+        } satisfies MessagePartDto,
+        {
+          id: "u1-file-0",
+          messageId: "u1",
+          type: "file",
+          order: 1,
+          payload: { name: "shot.png", fileId: "shot.png", size: 1234, mime: "image/png" },
+          createdAt: "2026-10-01T09:00:00.000Z",
+        } satisfies MessagePartDto,
+      ],
+    },
+  ];
+  return detail;
+}
+
 function pasteImage(textarea: HTMLElement) {
   const file = new File([new Uint8Array([137, 80, 78, 71])], "screenshot.png", {
     type: "image/png",
@@ -184,34 +217,7 @@ describe("attached image in a landed user message", () => {
   // was replaced by the preview alone, so the file name vanished. The image
   // preview belongs above the chip, and the chip (with the name) stays.
   it("keeps the file chip below the image preview", async () => {
-    const detail = runningSession();
-    detail.status = "idle";
-    detail.messages = [
-      {
-        id: "u1",
-        sessionId: "s1",
-        role: "user",
-        createdAt: "2026-10-01T09:00:00.000Z",
-        parts: [
-          {
-            id: "u1-text",
-            messageId: "u1",
-            type: "text",
-            order: 0,
-            payload: { text: "что тут" },
-            createdAt: "2026-10-01T09:00:00.000Z",
-          } satisfies MessagePartDto,
-          {
-            id: "u1-file-0",
-            messageId: "u1",
-            type: "file",
-            order: 1,
-            payload: { name: "shot.png", fileId: "shot.png", size: 1234, mime: "image/png" },
-            createdAt: "2026-10-01T09:00:00.000Z",
-          } satisfies MessagePartDto,
-        ],
-      },
-    ];
+    const detail = landedImageSession();
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
 
     const { container } = renderComposer();
@@ -224,5 +230,25 @@ describe("attached image in a landed user message", () => {
     expect(chip?.textContent).toContain("shot.png");
     // Image first (above), chip second (below).
     expect(item!.firstElementChild).toBe(preview);
+  });
+
+  // The file behind a landed attachment can be deleted from the session folder
+  // afterwards; its preview then 404s. A bare broken image leaves the reader
+  // guessing, so the notice spells out the reason and the dead download link is
+  // dropped.
+  it("replaces a deleted image preview with a file-not-found notice", async () => {
+    const detail = landedImageSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    const img = container.querySelector<HTMLImageElement>(`.${styles.userFilePreview}`);
+    expect(img).toBeTruthy();
+
+    fireEvent.error(img!);
+
+    expect(await screen.findByText("Файл не найден — возможно, он был удалён")).toBeTruthy();
+    expect(container.querySelector(`.${styles.userFilePreviewWrap}`)).toBeNull();
+    expect(container.querySelector(`a.${styles.userFileChip}`)).toBeNull();
+    expect(container.querySelector(`span.${styles.userFileChip}`)?.textContent).toContain("shot.png");
   });
 });

@@ -548,65 +548,9 @@ function UserMessage({
       {body}
       {fileParts.length > 0 ? (
         <div className={styles.userFiles}>
-          {fileParts.map((p) => {
-            const name = String(p.payload.name ?? "file");
-            const fileId = String(p.payload.fileId ?? "");
-            const size = Number(p.payload.size ?? 0);
-            const href = fileId
-              ? `/api/sessions/${message.sessionId}/attachments/${encodeURIComponent(fileId)}`
-              : undefined;
-            const chip = (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path
-                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                    stroke="currentColor"
-                    strokeWidth="1.7"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                <span className={styles.userFileMeta}>
-                  <span className={styles.userFileName}>{name}</span>
-                  {size > 0 ? (
-                    <span className={styles.userFileSize}>{formatBytes(size)}</span>
-                  ) : null}
-                </span>
-              </>
-            );
-            return (
-              <div key={p.id} className={styles.userFileItem}>
-                {href && isImageFile(name) ? (
-                  <a
-                    className={styles.userFilePreviewWrap}
-                    href={`${href}?inline=1`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={name}
-                  >
-                    <img
-                      className={styles.userFilePreview}
-                      src={`${href}?inline=1`}
-                      alt={name}
-                      loading="lazy"
-                    />
-                  </a>
-                ) : null}
-                {href ? (
-                  <a
-                    className={styles.userFileChip}
-                    href={href}
-                    download={name}
-                    title={name}
-                  >
-                    {chip}
-                  </a>
-                ) : (
-                  <span className={styles.userFileChip}>{chip}</span>
-                )}
-              </div>
-            );
-          })}
+          {fileParts.map((p) => (
+            <UserFileItem key={p.id} part={p} sessionId={message.sessionId} />
+          ))}
         </div>
       ) : null}
       <UserMessageActions
@@ -616,6 +560,99 @@ function UserMessage({
         onEdit={() => onEdit(message.id, text)}
         ctxRef={ctxRef}
       />
+    </div>
+  );
+}
+
+/**
+ * One attached file under a user message. A raster image gets an inline
+ * preview; when the file has been deleted from the session folder the preview
+ * request 404s, so the broken-image icon is replaced by a short notice telling
+ * the reader the file is gone (and the download link is dropped).
+ */
+function UserFileItem({ part, sessionId }: { part: MessagePartDto; sessionId: string }) {
+  const t = useT();
+  const name = String(part.payload.name ?? "file");
+  const fileId = String(part.payload.fileId ?? "");
+  const size = Number(part.payload.size ?? 0);
+  const [missing, setMissing] = useState(false);
+  const href = fileId
+    ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(fileId)}`
+    : undefined;
+  const showPreview = Boolean(href) && isImageFile(name);
+  const chip = (
+    <>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className={styles.userFileMeta}>
+        <span className={styles.userFileName}>{name}</span>
+        {size > 0 ? <span className={styles.userFileSize}>{formatBytes(size)}</span> : null}
+      </span>
+    </>
+  );
+  return (
+    <div className={styles.userFileItem}>
+      {showPreview ? (
+        missing ? (
+          <div className={styles.userFileMissing} role="note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path d="M3 3l18 18" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              <path
+                d="M21 15V5a2 2 0 0 0-2-2H9"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M3.59 3.59A2 2 0 0 0 3 5v14a2 2 0 0 0 2 2h14a2 2 0 0 0 1.41-.59"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M10.41 10.41a2 2 0 1 1-2.83-2.83M18 12l3 3M13.5 13.5 6 21"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>{t("chat.attachmentDeleted")}</span>
+          </div>
+        ) : (
+          <a
+            className={styles.userFilePreviewWrap}
+            href={`${href}?inline=1`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={name}
+          >
+            <img
+              className={styles.userFilePreview}
+              src={`${href}?inline=1`}
+              alt={name}
+              loading="lazy"
+              onError={() => setMissing(true)}
+            />
+          </a>
+        )
+      ) : null}
+      {href && !missing ? (
+        <a className={styles.userFileChip} href={href} download={name} title={name}>
+          {chip}
+        </a>
+      ) : (
+        <span className={styles.userFileChip}>{chip}</span>
+      )}
     </div>
   );
 }

@@ -2854,6 +2854,26 @@ button.userSlashCmd:focus-visible {
   object-fit: cover;
 }
 
+/* Stand-in for a preview whose file is gone (404): dashed, muted, with the
+   reason spelled out so the broken image is never just an empty box. */
+.userFileMissing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(240px, 100%);
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+.userFileMissing svg {
+  flex: 0 0 auto;
+}
+
 .pendingFileChip,
 .userFileChip {
   display: inline-flex;
