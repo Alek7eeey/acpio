@@ -813,6 +813,43 @@
   color: var(--text);
 }
 
+/* A folder's tag — its one-line note — wherever the folder is named: the rail
+   row, the Todo lane head and the folders dialog. --bg-tertiary keeps the chip
+   readable on all three, whose own fills differ. */
+.folderTag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+/* Inline editor shown in place of the chip while the tag is being edited. */
+.folderTagEdit {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 55%;
+  padding: 2px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.folderTagEdit:focus {
+  outline: none;
+  box-shadow: var(--settings-focus-ring, 0 0 0 3px rgba(8, 102, 255, 0.18));
+}
+
 @media (hover: none), (pointer: coarse) {
   /* No hover to reveal them and no menu to fall back on: a board card's
      actions must be tappable as they are. */

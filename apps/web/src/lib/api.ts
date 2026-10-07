@@ -213,6 +213,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ cwds }),
     }),
+  setBoardFolderTag: (id: string, cwd: string, tag: string) =>
+    request<{ ok: boolean; folderTags: Record<string, string> }>(
+      `/api/boards/${id}/folders/tag`,
+      { method: "PUT", body: JSON.stringify({ cwd, tag }) },
+    ).then((r) => r.folderTags),
   deleteBoard: (id: string) =>
     request<{ ok: boolean; boards: BoardDto[] }>(`/api/boards/${id}`, { method: "DELETE" }),
   listBoardSessions: (boardId: string) =>

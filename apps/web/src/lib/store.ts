@@ -235,6 +235,8 @@ type AppState = {
    */
   reorderBoards: (items: Array<{ id: string; sortOrder: number }>) => Promise<void>;
   setBoardFolders: (id: string, cwds: string[]) => Promise<void>;
+  /** Board folder tag (its one-line note), set or cleared with an empty value. */
+  setBoardFolderTag: (id: string, cwd: string, tag: string) => Promise<void>;
   /** Tasks of the open board — the partitioned session list for /board/:id. */
   boardSessions: SessionDto[];
   refreshBoardSessions: (boardId: string) => Promise<void>;
@@ -1643,10 +1645,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await api.setBoardFolders(id, cwds);
       set((s) => ({
-        boards: s.boards.map((b) => (b.id === id ? { ...b, folders: res.folders } : b)),
+        boards: s.boards.map((b) =>
+          b.id === id
+            ? {
+                ...b,
+                folders: res.folders,
+                // A folder the board no longer carries loses its tag with it.
+                folderTags: Object.fromEntries(
+                  Object.entries(b.folderTags ?? {}).filter(([cwd]) => res.folders.includes(cwd)),
+                ),
+              }
+            : b,
+        ),
       }));
     } catch {
       // server offline — keep the current folders
+    }
+  },
+  setBoardFolderTag: async (id, cwd, tag) => {
+    try {
+      const folderTags = await api.setBoardFolderTag(id, cwd, tag);
+      set((s) => ({
+        boards: s.boards.map((b) => (b.id === id ? { ...b, folderTags } : b)),
+      }));
+    } catch {
+      // server offline — keep the current tags
     }
   },
   boardSessions: [],

@@ -166,6 +166,13 @@ export async function ensureSchema() {
     ON board_folders(board_id, cwd)
   `);
 
+  // Optional one-line note shown next to the folder name on the board.
+  try {
+    db.run(sql`ALTER TABLE board_folders ADD COLUMN tag TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

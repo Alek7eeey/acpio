@@ -110,6 +110,8 @@ export const boardFolders = sqliteTable("board_folders", {
     .references(() => boards.id, { onDelete: "cascade" }),
   cwd: text("cwd").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
+  /** Optional one-line note shown next to the folder name on the board. */
+  tag: text("tag"),
 });
 
 export const users = sqliteTable("users", {

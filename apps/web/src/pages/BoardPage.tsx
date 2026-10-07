@@ -41,6 +41,12 @@ const COLUMN_TITLE = {
 
 type TodoGroup = { cwd: string; label: string; loose: boolean; tasks: SessionDto[] };
 
+/** Where a board folder is named: the project rail, its Todo lane head, the folders dialog. */
+type FolderSpot = "rail" | "lane" | "dialog";
+
+/** The folder whose tag is being edited, and the row that took the editor over. */
+type FolderTagEdit = { cwd: string; where: Exclude<FolderSpot, "rail"> };
+
 export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // The shell hands the id over as a prop; the route element inside <Routes>
   // reaches it through params. Both exist because AppShell switches pages by
@@ -52,6 +58,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
 
   const boards = useAppStore((s) => s.boards);
   const board = boards.find((b) => b.id === boardId) ?? null;
+  /** The board's folder tags, keyed by canonical cwd (a board from before they
+   *  existed carries none). */
+  const folderTags = board?.folderTags ?? {};
   const tasks = useAppStore((s) => s.boardSessions);
   const defaultCwd = useAppStore((s) => s.settings.defaultCwd ?? "");
   const preferredProvider = useAppStore((s) => s.settings.defaultProvider ?? null);
@@ -65,6 +74,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
+  const setBoardFolderTag = useAppStore((s) => s.setBoardFolderTag);
   const reorderBoardTasks = useAppStore((s) => s.reorderBoardTasks);
   const selectSession = useAppStore((s) => s.selectSession);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
@@ -101,10 +111,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   );
   const [taskMenuPos, setTaskMenuPos] = useState<{ x: number; y: number } | null>(null);
   /** A folder's context menu (rail row, board lane head, folders dialog row). */
-  const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(
-    null,
-  );
+  const [folderMenu, setFolderMenu] = useState<
+    ({ cwd: string; where: FolderSpot } & { x: number; y: number }) | null
+  >(null);
   const [folderMenuPos, setFolderMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** The folder whose tag is being edited inline, and where it is edited. */
+  const [tagEdit, setTagEdit] = useState<FolderTagEdit | null>(null);
+  /** The tag as typed — committed on Enter or on blur, dropped on Escape. */
+  const [tagDraft, setTagDraft] = useState("");
   const [exportTaskId, setExportTaskId] = useState<string | null>(null);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
@@ -488,10 +502,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   });
 
   /** Open a folder's context menu where the press landed; placed after measuring. */
-  const openFolderMenu = (e: React.MouseEvent, cwd: string) => {
+  const openFolderMenu = (e: React.MouseEvent, cwd: string, where: FolderSpot) => {
     e.preventDefault();
     e.stopPropagation();
-    setFolderMenu({ cwd, x: e.clientX, y: e.clientY });
+    setFolderMenu({ cwd, where, x: e.clientX, y: e.clientY });
   };
 
   /** Measure → clamp into the viewport, before paint (no wrong-spot flash). */
@@ -514,7 +528,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFolderMenuPos((prev) => (prev && prev.x === x && prev.y === y ? prev : { x, y }));
   });
 
-  /** The menu's single command today: start the inline new-task form on the folder. */
+  /** The folder menu's first command: start the inline new-task form on the folder. */
   const addTaskToFolder = (cwd: string) => {
     setFolderMenu(null);
     setFoldersOpen(false);
@@ -522,6 +536,69 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFilterCwd(cwd);
     setAddingCwd(cwd);
     setDraft("");
+  };
+
+  /**
+   * Start editing a folder's tag on the row the menu was opened from. A rail
+   * row hands the editor to the folder's Todo lane head — the rail is a
+   * filter, and pointing it at that folder (and closing the mobile sheet)
+   * keeps the editor on screen.
+   */
+  const startFolderTagEdit = (cwd: string, where: FolderSpot) => {
+    setFolderMenu(null);
+    if (where === "rail") {
+      setFilterCwd(cwd);
+      setRailOpen(false);
+    }
+    setTagDraft(folderTags[cwd] ?? "");
+    setTagEdit({ cwd, where: where === "rail" ? "lane" : where });
+  };
+
+  /** Commit the inline folder-tag editor; an empty value clears the tag. */
+  const commitFolderTag = () => {
+    const edit = tagEdit;
+    setTagEdit(null);
+    if (!edit || tagDraft.trim() === (folderTags[edit.cwd] ?? "")) return;
+    void setBoardFolderTag(boardId, edit.cwd, tagDraft);
+  };
+
+  /**
+   * A folder's tag where the folder is named: the quiet chip, or the inline
+   * editor when this very row is the one the tag is being edited in (Enter
+   * saves, Escape cancels, an empty value clears it).
+   */
+  const renderFolderTag = (cwd: string, where?: FolderTagEdit["where"]) => {
+    if (where && tagEdit?.cwd === cwd && tagEdit.where === where) {
+      return (
+        <input
+          className={styles.folderTagEdit}
+          value={tagDraft}
+          maxLength={80}
+          placeholder={t("chat.folderTagPlaceholder")}
+          aria-label={t("chat.folderTagTitle")}
+          title={t("chat.folderTagTitle")}
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") commitFolderTag();
+            else if (e.key === "Escape") setTagEdit(null);
+          }}
+          onBlur={() => {
+            if (tagEdit?.cwd === cwd && tagEdit.where === where) commitFolderTag();
+          }}
+        />
+      );
+    }
+    const tag = folderTags[cwd];
+    return tag ? (
+      <span className={styles.folderTag} title={tag}>
+        {tag}
+      </span>
+    ) : null;
   };
 
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
@@ -720,9 +797,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     setFilterCwd(filterCwd === group.cwd ? null : group.cwd);
                     setRailOpen(false);
                   }}
-                  onContextMenu={(e) => openFolderMenu(e, group.cwd)}
+                  onContextMenu={(e) => openFolderMenu(e, group.cwd, "rail")}
                 >
                   <span className={styles.railLabel}>{group.label}</span>
+                  {renderFolderTag(group.cwd)}
                   <span className={styles.railCount}>
                     {tasks.filter((task) => task.cwd === group.cwd).length}
                   </span>
@@ -780,11 +858,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                         <div key={group.cwd} className={styles.group} data-group={group.cwd}>
                           <div
                             className={styles.groupHead}
-                            onContextMenu={(e) => openFolderMenu(e, group.cwd)}
+                            onContextMenu={(e) => openFolderMenu(e, group.cwd, "lane")}
                           >
                             <span className={styles.groupName} title={group.cwd}>
                               {group.label}
                             </span>
+                            {renderFolderTag(group.cwd, "lane")}
                             <span className={styles.groupCount}>{group.tasks.length}</span>
                             <span className={styles.groupSpacer} />
                             <span className={styles.groupActions}>
@@ -1121,6 +1200,28 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               </svg>
               {t("chat.boardAddTask")}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => startFolderTagEdit(folderMenu.cwd, folderMenu.where)}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4.5 7.5h15V18a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V7.5Z"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M7.5 11h9M7.5 14.5h5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+              </svg>
+              {t("chat.folderTagMenu")}
+            </button>
           </div>,
           document.body,
         )}
@@ -1142,11 +1243,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                     <div
                       key={cwd}
                       className={styles.folderRow}
-                      onContextMenu={(e) => openFolderMenu(e, cwd)}
+                      onContextMenu={(e) => openFolderMenu(e, cwd, "dialog")}
                     >
                       <span className={styles.folderPath} title={cwd}>
                         {cwd}
                       </span>
+                      {renderFolderTag(cwd, "dialog")}
                       <button
                         type="button"
                         className={styles.iconBtn}

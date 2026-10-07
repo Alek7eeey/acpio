@@ -72,6 +72,7 @@ import {
   deleteBoard,
   deleteBoardSessions,
   listBoards,
+  setBoardFolderTag,
   setBoardFolders,
   updateBoard,
 } from "./services/boards.js";
@@ -751,6 +752,16 @@ export async function registerRoutes(app: FastifyInstance) {
     const folders = await setBoardFolders(id, body.cwds);
     if (folders === null) return reply.code(404).send({ error: "Not found" });
     return { ok: true, folders };
+  });
+  // Set (or clear with an empty string) a board folder's one-line tag.
+  app.put("/api/boards/:id/folders/tag", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ cwd: z.string().min(1).max(4096), tag: z.string().max(80) })
+      .parse(req.body ?? {});
+    const folderTags = await setBoardFolderTag(id, body.cwd, body.tag);
+    if (folderTags === null) return reply.code(404).send({ error: "Not found" });
+    return { ok: true, folderTags };
   });
   app.delete("/api/boards/:id", async (req, reply) => {
     const { id } = req.params as { id: string };

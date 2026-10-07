@@ -889,6 +889,8 @@ export interface BoardDto {
   name: string;
   /** Folder paths (projects) in display order — doubles as the Todo group order. */
   folders: string[];
+  /** Tags (short notes) of the board's folders, keyed by canonical cwd. */
+  folderTags: Record<string, string>;
   sortOrder: number;
   createdAt: string;
 }

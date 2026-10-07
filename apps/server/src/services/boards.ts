@@ -16,15 +16,22 @@ async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<B
         .orderBy(asc(boardFolders.sortOrder), asc(boardFolders.id))
     : [];
   const byBoard = new Map<string, string[]>();
+  const tagsByBoard = new Map<string, Record<string, string>>();
   for (const row of folderRows) {
     const list = byBoard.get(row.boardId) ?? [];
     list.push(row.cwd);
     byBoard.set(row.boardId, list);
+    if (row.tag) {
+      const tags = tagsByBoard.get(row.boardId) ?? {};
+      tags[row.cwd] = row.tag;
+      tagsByBoard.set(row.boardId, tags);
+    }
   }
   return boardRows.map((row) => ({
     id: row.id,
     name: row.name,
     folders: byBoard.get(row.id) ?? [],
+    folderTags: tagsByBoard.get(row.id) ?? {},
     sortOrder: row.sortOrder ?? 0,
     createdAt: row.createdAt.toISOString(),
   }));
@@ -53,7 +60,7 @@ export async function createBoard(name: string): Promise<BoardDto> {
     .insert(boards)
     .values({ name: name.trim(), sortOrder })
     .returning();
-  return { id: row.id, name: row.name, folders: [], sortOrder: row.sortOrder, createdAt: row.createdAt.toISOString() };
+  return { id: row.id, name: row.name, folders: [], folderTags: {}, sortOrder: row.sortOrder, createdAt: row.createdAt.toISOString() };
 }
 
 export async function updateBoard(
@@ -95,12 +102,66 @@ export async function setBoardFolders(boardId: string, cwds: string[]): Promise<
     seen.add(cwd);
     ordered.push(cwd);
   }
+  // The rows are replaced wholesale to renumber the order, so their tags are
+  // carried over by hand — otherwise every add, remove and reorder wipes them.
+  const keptTags = new Map(
+    (
+      await db
+        .select({ cwd: boardFolders.cwd, tag: boardFolders.tag })
+        .from(boardFolders)
+        .where(eq(boardFolders.boardId, boardId))
+    ).map((row) => [row.cwd, row.tag]),
+  );
   await db.delete(boardFolders).where(eq(boardFolders.boardId, boardId));
   let order = 0;
   for (const cwd of ordered) {
-    await db.insert(boardFolders).values({ boardId, cwd, sortOrder: order++ });
+    await db
+      .insert(boardFolders)
+      .values({ boardId, cwd, sortOrder: order++, tag: keptTags.get(cwd) ?? null });
   }
   return ordered;
+}
+
+/** Tags (short notes) of a board's folders, keyed by canonical cwd. */
+export async function listBoardFolderTags(boardId: string): Promise<Record<string, string>> {
+  const rows = await db
+    .select({ cwd: boardFolders.cwd, tag: boardFolders.tag })
+    .from(boardFolders)
+    .where(eq(boardFolders.boardId, boardId));
+  const tags: Record<string, string> = {};
+  for (const row of rows) {
+    if (row.cwd && row.tag) tags[row.cwd] = row.tag;
+  }
+  return tags;
+}
+
+/**
+ * Set (or clear, with an empty tag) the one-line note of a folder on the
+ * board. Only a folder the board already carries can be tagged — the folder
+ * list and its order belong to `setBoardFolders`. Null = no such board, or
+ * the board does not carry that folder.
+ */
+export async function setBoardFolderTag(
+  boardId: string,
+  cwd: string,
+  tag: string,
+): Promise<Record<string, string> | null> {
+  const normalized = canonicalCwd(cwd);
+  if (!normalized) return null;
+  const board = await db
+    .select({ id: boards.id })
+    .from(boards)
+    .where(eq(boards.id, boardId))
+    .limit(1);
+  if (!board[0]) return null;
+  const trimmed = tag.trim().slice(0, 80);
+  const rows = await db
+    .update(boardFolders)
+    .set({ tag: trimmed || null })
+    .where(and(eq(boardFolders.boardId, boardId), eq(boardFolders.cwd, normalized)))
+    .returning({ cwd: boardFolders.cwd });
+  if (!rows.length) return null;
+  return listBoardFolderTags(boardId);
 }
 
 /** True when the board exists and the cwd is one of its configured folders. */
