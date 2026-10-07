@@ -129,43 +129,30 @@
   color: color-mix(in srgb, var(--accent) 70%, var(--text));
 }
 
-/* The branch name is the merge command: click it to merge that branch in. */
-.nameBtn {
+/* The row's own label — the merge is asked for from the context menu. */
+.name {
   min-width: 0;
   flex: 1 1 auto;
   padding: 3px 2px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
   color: var(--text);
-  font: inherit;
   font-size: 0.74rem;
   font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
-  text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-  touch-action: manipulation;
 }
 
-.nameBtn:hover:not(:disabled) {
+/* The row under the pointer is the branch the menu and the merge would take. */
+.row:hover .name {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
-.nameBtn:disabled {
-  cursor: default;
-  /* The checked-out branch has nowhere to merge into. */
-  opacity: 0.95;
-}
-
-.rowCurrent .nameBtn {
+.rowCurrent .name {
   font-weight: 700;
   color: color-mix(in srgb, var(--accent) 45%, var(--text));
 }
 
-.nameBtn:focus-visible,
 .iconBtn:focus-visible,
 .folder:focus-visible,
 .groupHead:focus-visible {

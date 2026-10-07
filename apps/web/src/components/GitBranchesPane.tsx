@@ -221,17 +221,10 @@ export function GitBranchesPane({
             />
           </svg>
         </span>
-        <button
-          type="button"
-          className={styles.nameBtn}
-          disabled={busy || isCurrent || !current}
-          title={
-            isCurrent ? ref : t("git.branchMergeHint", { branch: ref, target: current })
-          }
-          onClick={() => mergeIntoCurrent(ref)}
-        >
+        {/* The name is a label, not a command: merging is asked for in the menu. */}
+        <span className={styles.name} title={ref}>
           {branchLabel(ref)}
-        </button>
+        </span>
         {isCurrent ? <span className={styles.badge}>{t("git.branchCurrent")}</span> : null}
         <span className={styles.rowActions}>
           {remote ? null : (
