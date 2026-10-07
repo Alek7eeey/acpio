@@ -26,6 +26,8 @@ import { useT } from "../lib/i18n";
 
 import { isSidePanelResizeAllowed } from "../lib/panelLayout";
 
+import { isTypingTarget } from "../lib/messageHotkeys";
+
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 
 import { api } from "../lib/api";
@@ -188,6 +190,8 @@ export function ConsoleSidePanel({
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const panelRef = useRef<HTMLElement | null>(null);
 
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -740,6 +744,76 @@ export function ConsoleSidePanel({
 
 
 
+  /**
+
+   * The console owns the keyboard whenever focus has nowhere else to be. After a
+
+   * remount or a click on the panel chrome the terminal can look alive while the
+
+   * page body holds focus, and then every keystroke vanishes — in a shell chat the
+
+   * panel is the whole screen, so nothing else would even show the text. Hand those
+
+   * keys to xterm (the same event, so it maps them as usual) and take focus back;
+
+   * only plain typing — app shortcuts keep their meaning.
+
+   */
+
+  useEffect(() => {
+
+    if (!panelOpen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+
+      if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+
+      if (isTypingTarget(e.target)) return;
+
+      const focused = document.activeElement;
+
+      if (focused && focused !== document.body) {
+
+        // Anything else keeps its keys: a chat row, a dialog button, the panel's own
+
+        // close button. The console only takes over a keyboard nobody holds.
+
+        const panel = panelRef.current;
+
+        const control = focused.closest?.(
+          "button, a, [role='button'], [role='menuitem'], [role='tab']",
+        );
+
+        if (!panel?.contains(focused) || control) return;
+
+      }
+
+      const textarea = termRef.current?.element?.querySelector<HTMLTextAreaElement>(
+
+        ".xterm-helper-textarea",
+
+      );
+
+      if (!textarea) return;
+
+      textarea.focus();
+
+      textarea.dispatchEvent(e);
+
+      e.preventDefault();
+
+      e.stopPropagation();
+
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+
+  }, [panelOpen]);
+
+
+
   useEffect(() => {
 
     return subscribeShellConsole((event) => {
@@ -1032,6 +1106,8 @@ export function ConsoleSidePanel({
 
       <aside
 
+        ref={panelRef}
+
         className={`${styles.panel} ${styles.panelTerminal} ${isInline ? styles.panelInline : ""} ${
 
           dragging ? styles.resizing : ""
@@ -1045,6 +1121,8 @@ export function ConsoleSidePanel({
         hidden={!panelOpen}
 
         style={isInline ? undefined : ({ ["--console-panel-width"]: `${width}px` } as CSSProperties)}
+
+        onPointerDownCapture={() => scheduleTerminalFocus()}
 
       >
 
@@ -1100,7 +1178,6 @@ export function ConsoleSidePanel({
             ref={containerRef}
             className={styles.terminal}
             onContextMenu={onTerminalContextMenu}
-            onMouseDown={() => scheduleTerminalFocus()}
           />
           {shellLoading ? (
             <div className={styles.terminalLoader} role="status" aria-live="polite">
