@@ -255,6 +255,7 @@ export function GitDiffStage({
   jumpToken = 0,
   reloadToken = 0,
   compact = false,
+  filesInHost = false,
   expanded = false,
   flushTop = false,
   onToggleExpand,
@@ -277,6 +278,14 @@ export function GitDiffStage({
    * host's navigator is already thumb-reachable and lists the same files.
    */
   compact?: boolean;
+  /**
+   * The host keeps the changed files beside the stage (the git panel's navigator
+   * column lists them): the stage leaves out its own picker, because a list of
+   * the same paths in the same view is a second copy of the one on the right.
+   * The stepper stays — stepping through files is reading the diff, not listing
+   * it. The full view sends the navigator away, so there the picker returns.
+   */
+  filesInHost?: boolean;
   /** The host handed the stage the whole surface: the toggle now offers the way back. */
   expanded?: boolean;
   /** The stage sits at the top of the viewport, so its bar owns the notch inset. */
@@ -631,6 +640,12 @@ export function GitDiffStage({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, sheetOpen]);
 
+  // A sheet opened in the full view, where the navigator was out of the way, must
+  // not stay over the stage once the navigator is back beside it.
+  useEffect(() => {
+    if (filesInHost) setSheetOpen(false);
+  }, [filesInHost]);
+
   const contextSource = useMemo<DiffContextSource>(
     () => (mode === "commit" && rev ? { sessionId, mode: "commit", commitRev: rev } : { sessionId, mode: "working" }),
     [mode, rev, sessionId],
@@ -786,19 +801,21 @@ export function GitDiffStage({
                   />
                 </svg>
               </button>
-              <button
-                type="button"
-                className={styles.pickBtn}
-                onClick={() => setSheetOpen(true)}
-                title={t("git.diffStageFiles")}
-                aria-label={t("git.diffStageFiles")}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-                  <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-                <MiddleTruncate text={entries[currentIndex]?.path ?? ""} className={styles.pickPath} />
-                <span className={styles.pickCount}>{entries.length}</span>
-              </button>
+              {filesInHost ? null : (
+                <button
+                  type="button"
+                  className={styles.pickBtn}
+                  onClick={() => setSheetOpen(true)}
+                  title={t("git.diffStageFiles")}
+                  aria-label={t("git.diffStageFiles")}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path d="M4 6h16M4 12h16M4 18h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  <MiddleTruncate text={entries[currentIndex]?.path ?? ""} className={styles.pickPath} />
+                  <span className={styles.pickCount}>{entries.length}</span>
+                </button>
+              )}
               <button
                 type="button"
                 className={styles.navBtn}
@@ -922,7 +939,7 @@ export function GitDiffStage({
         </nav>
       ) : null}
 
-      {sheetOpen && !compact ? (
+      {sheetOpen && !compact && !filesInHost ? (
         <FileSheet
           entries={entries}
           currentIndex={currentIndex}

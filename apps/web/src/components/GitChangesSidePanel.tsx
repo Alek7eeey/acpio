@@ -1641,6 +1641,9 @@ export function GitChangesSidePanel({
   const stageSlot = blame ? (
     <GitBlameView path={blame.path} text={blame.text} onClose={() => setBlame(null)} />
   ) : (
+    /* The docked panel keeps its navigator (the tree on the right) with the
+       changed files, so the board drops its own list of them; the full view,
+       which sends the navigator away, is what brings the picker back. */
     <GitDiffStage
       sessionId={sessionId}
       scope={stageScope}
@@ -1649,6 +1652,7 @@ export function GitChangesSidePanel({
       jumpToken={jumpToken}
       reloadToken={reloadToken}
       compact={sheetNavigator && !fullscreen}
+      filesInHost={!fullscreen}
       expanded={fullscreen}
       flushTop={fullscreen || takeover}
       onToggleExpand={() => onFullscreenChange(!fullscreen)}
