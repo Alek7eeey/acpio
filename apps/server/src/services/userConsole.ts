@@ -21,6 +21,8 @@ type ConsoleEntry = {
   cwd: string;
   backend: PtyLike;
   shell: ConsoleShell;
+  /** Spawn time — a shell that dies sooner than this was never usable. */
+  startedAt: number;
 };
 
 const consoles = new Map<string, ConsoleEntry>();
@@ -30,6 +32,12 @@ const outputBuffers = new Map<
   { buf: string; timer: ReturnType<typeof setTimeout> | null }
 >();
 const OUTPUT_FLUSH_MS = 16;
+/** A shell that dies sooner than this never worked, so restarting it would spin. */
+const SHELL_EXIT_QUIET_MS = 1500;
+/** The same limit for a revive after the console vanished under the panel. */
+const REVIVE_COOLDOWN_MS = SHELL_EXIT_QUIET_MS;
+/** Last revive per session, kept after release: a broken profile must not spawn per keystroke. */
+const revivedAt = new Map<string, number>();
 
 function flushOutputBuffer(sessionId: string) {
   const entry = outputBuffers.get(sessionId);
@@ -188,10 +196,27 @@ async function spawnConsole(
   const backend =
     (await spawnPtyBackend(root, shell, initialSize)) ??
     (await spawnPipeBackend(root, shell));
-  const entry: ConsoleEntry = { cwd: root, backend, shell };
+  const entry: ConsoleEntry = { cwd: root, backend, shell, startedAt: Date.now() };
   consoles.set(sessionId, entry);
-  backend.onData((chunk) => pushOutput(sessionId, chunk));
-  backend.onExit(() => releaseUserConsole(sessionId));
+  // A replaced backend outlives its console: ConPTY teardown and killing the
+  // process tree of a busy shell (`omp`, a build) take a while, so the late
+  // output and exit of the shell that was just cleared must not touch the one
+  // that took its place — that used to kill a fresh shell within milliseconds.
+  backend.onData((chunk) => {
+    if (consoles.get(sessionId) !== entry) return;
+    pushOutput(sessionId, chunk);
+  });
+  backend.onExit(() => {
+    if (consoles.get(sessionId) !== entry) return;
+    releaseUserConsole(sessionId);
+    // The shell is gone on its own (exit, crash, the app it ran tore the console
+    // down). A panel that keeps swallowing keystrokes looks broken, so tell the
+    // client to attach a fresh shell — unless it never got to work at all, where
+    // a restart loop would only hide the failure.
+    if (Date.now() - entry.startedAt >= SHELL_EXIT_QUIET_MS) {
+      broadcastToSession(sessionId, { type: "process.cleared", sessionId });
+    }
+  });
 }
 
 /** Start a fresh interactive shell in the session workspace (reuse if already running). */
@@ -226,8 +251,12 @@ export async function attachUserConsole(
   }
 }
 
-export function writeUserConsole(sessionId: string, data: string) {
-  consoles.get(sessionId)?.backend.write(data);
+/** Write user input into the session shell; `false` when no shell is running there. */
+export function writeUserConsole(sessionId: string, data: string): boolean {
+  const entry = consoles.get(sessionId);
+  if (!entry) return false;
+  entry.backend.write(data);
+  return true;
 }
 
 export function resizeUserConsole(sessionId: string, cols: number, rows: number) {
@@ -258,7 +287,31 @@ export async function reconcileUserConsolesShell() {
 
 /** Kill the shell and spawn a new one — initial state, no scrollback. */
 export async function resetUserConsole(sessionId: string, cwd: string) {
+  // An attach that is still spawning owns the console: wait for it, otherwise the
+  // kill lands on nothing and the spawn it raced sets the panel back to a shell
+  // that was already released.
+  const pending = attachInFlight.get(sessionId);
+  if (pending) {
+    try {
+      await pending;
+    } catch {
+      /* a failed attach leaves no console to release */
+    }
+  }
   releaseUserConsole(sessionId);
   broadcastToSession(sessionId, { type: "process.cleared", sessionId });
   await attachUserConsole(sessionId, cwd);
+}
+
+/**
+ * Start a shell after the one the panel was attached to vanished (server restart,
+ * shell exited while nobody watched). The client is told to reset its screen and
+ * attach, which is also what makes the keystroke that got here meaningful.
+ */
+export async function reviveUserConsole(sessionId: string, cwd: string): Promise<void> {
+  const now = Date.now();
+  if (now - (revivedAt.get(sessionId) ?? 0) < REVIVE_COOLDOWN_MS) return;
+  revivedAt.set(sessionId, now);
+  await attachUserConsole(sessionId, cwd);
+  broadcastToSession(sessionId, { type: "process.cleared", sessionId });
 }

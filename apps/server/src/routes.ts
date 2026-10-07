@@ -93,6 +93,7 @@ import {
   releaseUserConsole,
   resetUserConsole,
   resizeUserConsole,
+  reviveUserConsole,
   writeUserConsole,
 } from "./services/userConsole.js";
 import {
@@ -1610,7 +1611,17 @@ export async function registerRoutes(app: FastifyInstance) {
           return;
         }
         if (msg.type === "process.input" && msg.sessionId && typeof msg.data === "string") {
-          writeUserConsole(msg.sessionId, msg.data);
+          const sessionId = msg.sessionId;
+          if (!writeUserConsole(sessionId, msg.data)) {
+            // The panel is attached to a shell that is no longer here (the server
+            // restarted, the shell exited, the profile changed). Keystrokes must
+            // not vanish into a terminal that looks alive: start one and let the
+            // client reset its screen.
+            void getSessionDetail(sessionId).then((detail) => {
+              if (!detail) return;
+              void reviveUserConsole(sessionId, detail.cwd);
+            });
+          }
           return;
         }
         if (
