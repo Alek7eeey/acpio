@@ -139,6 +139,24 @@
   background: transparent;
 }
 
+/* The row that holds the tag editor: a text field cannot live inside a button,
+   so this row is a plain container — no hover tint and no pointer over a row
+   that no longer switches the filter. */
+.railItemEditing {
+  cursor: default;
+}
+
+.railItemEditing:hover {
+  background: none;
+}
+
+/* The rail is a 216px column: the editor keeps a share of it, so the folder
+   name beside it stays readable instead of being squeezed away. */
+.railItemEditing .folderTagEdit {
+  flex: 0 1 auto;
+  width: 46%;
+}
+
 .railLabel {
   flex: 1;
   min-width: 0;

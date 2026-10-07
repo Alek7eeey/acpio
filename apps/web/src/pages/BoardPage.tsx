@@ -45,7 +45,7 @@ type TodoGroup = { cwd: string; label: string; loose: boolean; tasks: SessionDto
 type FolderSpot = "rail" | "lane" | "dialog";
 
 /** The folder whose tag is being edited, and the row that took the editor over. */
-type FolderTagEdit = { cwd: string; where: Exclude<FolderSpot, "rail"> };
+type FolderTagEdit = { cwd: string; where: FolderSpot };
 
 export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // The shell hands the id over as a prop; the route element inside <Routes>
@@ -539,19 +539,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   };
 
   /**
-   * Start editing a folder's tag on the row the menu was opened from. A rail
-   * row hands the editor to the folder's Todo lane head — the rail is a
-   * filter, and pointing it at that folder (and closing the mobile sheet)
-   * keeps the editor on screen.
+   * Start editing a folder's tag on the row the menu was opened from — the
+   * rail row, its Todo lane head or the folders dialog row. The editor stays
+   * where it was invoked, so the row the user pointed at is the one that goes
+   * editable; a rail row keeps the rail as it is (its mobile sheet stays open
+   * under the editor) rather than moving it to a lane that may be off screen.
    */
   const startFolderTagEdit = (cwd: string, where: FolderSpot) => {
     setFolderMenu(null);
-    if (where === "rail") {
-      setFilterCwd(cwd);
-      setRailOpen(false);
-    }
     setTagDraft(folderTags[cwd] ?? "");
-    setTagEdit({ cwd, where: where === "rail" ? "lane" : where });
+    setTagEdit({ cwd, where });
   };
 
   /** Commit the inline folder-tag editor; an empty value clears the tag. */
@@ -567,7 +564,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * editor when this very row is the one the tag is being edited in (Enter
    * saves, Escape cancels, an empty value clears it).
    */
-  const renderFolderTag = (cwd: string, where?: FolderTagEdit["where"]) => {
+  const renderFolderTag = (cwd: string, where?: FolderSpot) => {
     if (where && tagEdit?.cwd === cwd && tagEdit.where === where) {
       return (
         <input
@@ -783,44 +780,68 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               <span className={styles.railLabel}>{t("chat.boardAllProjects")}</span>
               <span className={styles.railCount}>{tasks.length}</span>
             </button>
-            {groups.map((group) => (
-              <div
-                key={group.cwd}
-                data-rail-cwd={group.cwd}
-                className={`${styles.railRow} ${filterCwd === group.cwd ? styles.railRowOn : ""}`}
-              >
-                <button
-                  type="button"
-                  className={styles.railItem}
-                  title={group.cwd}
-                  onClick={() => {
-                    setFilterCwd(filterCwd === group.cwd ? null : group.cwd);
-                    setRailOpen(false);
-                  }}
-                  onContextMenu={(e) => openFolderMenu(e, group.cwd, "rail")}
-                >
+            {groups.map((group) => {
+              /** This row took the tag editor over, and it opens right here. */
+              const editingTag = tagEdit?.cwd === group.cwd && tagEdit.where === "rail";
+              const row = (
+                <>
                   <span className={styles.railLabel}>{group.label}</span>
-                  {renderFolderTag(group.cwd)}
+                  {renderFolderTag(group.cwd, editingTag ? "rail" : undefined)}
                   <span className={styles.railCount}>
                     {tasks.filter((task) => task.cwd === group.cwd).length}
                   </span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.railAdd}
-                  title={t("chat.boardAddTaskHint")}
-                  aria-label={t("chat.boardAddTask")}
-                  onClick={() => {
-                    setFilterCwd(group.cwd);
-                    setAddingCwd(group.cwd);
-                    setRailOpen(false);
-                  }}
-                  onContextMenu={(e) => openTaskPicker(e, group.cwd)}
+                </>
+              );
+              return (
+                <div
+                  key={group.cwd}
+                  data-rail-cwd={group.cwd}
+                  className={`${styles.railRow} ${
+                    filterCwd === group.cwd ? styles.railRowOn : ""
+                  }`}
                 >
-                  +
-                </button>
-              </div>
-            ))}
+                  {/* A tag editor is a text field, and a field cannot live
+                      inside a button: the edited row is a plain container for
+                      as long as it holds the editor, its neighbours stay
+                      buttons. */}
+                  {editingTag ? (
+                    <div
+                      className={`${styles.railItem} ${styles.railItemEditing}`}
+                      title={group.cwd}
+                    >
+                      {row}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.railItem}
+                      title={group.cwd}
+                      onClick={() => {
+                        setFilterCwd(filterCwd === group.cwd ? null : group.cwd);
+                        setRailOpen(false);
+                      }}
+                      onContextMenu={(e) => openFolderMenu(e, group.cwd, "rail")}
+                    >
+                      {row}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.railAdd}
+                    title={t("chat.boardAddTaskHint")}
+                    aria-label={t("chat.boardAddTask")}
+                    onClick={() => {
+                      setFilterCwd(group.cwd);
+                      setAddingCwd(group.cwd);
+                      setRailOpen(false);
+                    }}
+                    onContextMenu={(e) => openTaskPicker(e, group.cwd)}
+                  >
+                    +
+                  </button>
+                </div>
+              );
+            })}
             <button
               type="button"
               className={styles.railAddFolder}
