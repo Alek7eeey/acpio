@@ -388,7 +388,8 @@
 .tabSwitch {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* Changes, history, branches: one column each. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
@@ -404,7 +405,8 @@
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc(50% - 5px);
+  /* One of three columns: padding, border and the two gaps come off first. */
+  width: calc((100% - 12px) / 3);
   border-radius: 7px;
   background: var(--surface);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14);

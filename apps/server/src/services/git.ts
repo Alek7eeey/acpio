@@ -529,15 +529,64 @@ export async function getGitDiff(cwd: string, filePath?: string): Promise<string
 export async function checkoutGitBranch(
   cwd: string,
   branch: string,
-  opts?: { create?: boolean },
+  opts?: { create?: boolean; startPoint?: string },
 ): Promise<{ ok: boolean; error?: string }> {
   const root = await resolveGitRoot(cwd);
   if (!root) return { ok: false, error: "Not a git repository" };
   const invalid = validateBranchName(branch);
   if (invalid) return { ok: false, error: invalid };
-  const args = opts?.create ? ["checkout", "-b", branch.trim()] : ["checkout", branch.trim()];
+  // A new branch can start anywhere — a local branch, a remote one, a tag — so
+  // the start point is the same revision shape the checkout of a commit takes.
+  const start = opts?.create && opts.startPoint ? validateRevision(opts.startPoint) : null;
+  if (opts?.create && opts.startPoint && !start) return { ok: false, error: "Invalid revision" };
+  const args = opts?.create
+    ? ["checkout", "-b", branch.trim(), ...(start ? [start] : [])]
+    : ["checkout", branch.trim()];
   const result = await runGit(root, args);
   return result.ok ? { ok: true } : { ok: false, error: result.err || result.out || "Checkout failed" };
+}
+
+/**
+ * Merge one branch into another.
+ *
+ * `into` names the branch that receives the merge. Without it the checked-out
+ * branch is the target, and the working tree is left as it is. With it the
+ * target is checked out first: git can only merge into the current branch, and
+ * a checkout that the working tree refuses (uncommitted changes) is the honest
+ * answer to "merge there" — the merge never happens behind the reader's back.
+ *
+ * A conflict is not a failed request: git keeps the merge half-done and the
+ * files carry the markers, so it is reported as `conflict` — the same shape a
+ * conflicting pull takes — and the caller sends the reader to those files.
+ */
+export async function mergeGitBranch(
+  cwd: string,
+  from: string,
+  opts?: { into?: string },
+): Promise<{ ok: boolean; conflict?: boolean; output?: string; error?: string }> {
+  const root = await resolveGitRoot(cwd);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const source = validateRevision(from);
+  if (!source) return { ok: false, error: "Invalid revision" };
+  const into = opts?.into?.trim();
+  if (into) {
+    const invalid = validateBranchName(into);
+    if (invalid) return { ok: false, error: invalid };
+    const current = await runGit(root, ["branch", "--show-current"]);
+    if (!current.ok || current.out !== into) {
+      const checkout = await runGit(root, ["checkout", into]);
+      if (!checkout.ok) {
+        return { ok: false, error: checkout.err || checkout.out || "Checkout failed" };
+      }
+    }
+  }
+  const result = await runGit(root, ["merge", "--no-edit", source]);
+  if (result.ok) return { ok: true, output: result.out || result.err };
+  const message = gitFailureMessage(result) || "Merge failed";
+  if ((await buildStatus(root)).conflict) {
+    return { ok: false, conflict: true, output: message, error: message };
+  }
+  return { ok: false, error: message };
 }
 
 export async function checkoutGitRevision(cwd: string, rev: string): Promise<{ ok: boolean; error?: string }> {
@@ -954,6 +1003,33 @@ export async function deleteGitBranch(
     return { ok: false, unmerged: true, error: message };
   }
   return { ok: false, error: message };
+}
+
+/**
+ * Rename a local branch.
+ *
+ * `git branch -m` also renames the checked-out branch, which is the one case a
+ * rename would otherwise be impossible from the app: the row is the same row
+ * whether HEAD is on it or not.
+ */
+export async function renameGitBranch(
+  cwd: string,
+  branch: string,
+  next: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const root = await resolveGitRoot(cwd);
+  if (!root) return { ok: false, error: "Not a git repository" };
+  const invalid = validateBranchName(branch);
+  if (invalid) return { ok: false, error: invalid };
+  const invalidNext = validateBranchName(next);
+  if (invalidNext) return { ok: false, error: invalidNext };
+  const from = branch.trim();
+  const to = next.trim();
+  if (from === to) return { ok: true };
+  const result = await runGit(root, ["branch", "-m", from, to]);
+  return result.ok
+    ? { ok: true }
+    : { ok: false, error: result.err || result.out || "Rename branch failed" };
 }
 
 export async function createGitTagAt(

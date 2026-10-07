@@ -26,6 +26,7 @@ import {
 } from "./GitChangesCommitPane";
 import { GitCommitHistory } from "./GitCommitHistory";
 import { GitCommitDetail } from "./GitCommitDetail";
+import { GitBranchesPane } from "./GitBranchesPane";
 import { GitBranchSwitcher, type GitBranchDeleteOutcome } from "./ComposerGitBar";
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
@@ -70,7 +71,10 @@ const COMMIT_FILE_BADGE: Record<GitCommitFileDto["status"], string> = {
   other: "M",
 };
 /** Which list the navigator column is showing. */
-type PanelTab = "changes" | "history";
+type PanelTab = "changes" | "history" | "branches";
+
+/** Position of a tab in the switch, which the sliding active half follows. */
+const TAB_INDEX: Record<PanelTab, number> = { changes: 0, history: 1, branches: 2 };
 
 /** One icon button of the navigator toolbar, hideable into the "…" menu. */
 type GitToolAction = {
@@ -158,7 +162,8 @@ export function GitChangesSidePanel({
   fullscreen: boolean;
   onClose: () => void;
   onStatusChange: (status: GitStatusDto) => void;
-  onCheckout: (branch: string, create?: boolean) => Promise<void>;
+  /** Create and switch: a new branch may start at any branch, not only at HEAD. */
+  onCheckout: (branch: string, create?: boolean, start?: string) => Promise<void>;
   onDeleteBranch: (branch: string, opts?: { force?: boolean }) => Promise<GitBranchDeleteOutcome>;
   onFullscreenChange: (fullscreen: boolean) => void;
 }) {
@@ -499,7 +504,9 @@ export function GitChangesSidePanel({
       const page = await api.gitLog(sessionId, { limit: HISTORY_PAGE, branches: filter });
       setCommits(page.commits);
       setHasMoreCommits(page.hasMore);
-      setCommitBranches(page.branches);
+      // A page without a branch list is not one: the tabs read this list, so it
+      // stays an array even when the response carries none.
+      setCommitBranches(page.branches ?? []);
       setOutgoing(page.outgoing ?? []);
       return page.commits;
     } catch {
@@ -591,8 +598,8 @@ export function GitChangesSidePanel({
   }, [selection, sessionId]);
 
   const handleCheckout = useCallback(
-    async (branch: string, create?: boolean) => {
-      await onCheckout(branch, create);
+    async (branch: string, create?: boolean, start?: string) => {
+      await onCheckout(branch, create, start);
       setSelection({ kind: "working", path: null });
       setBlame(null);
       setCommitDetail(null);
@@ -1014,6 +1021,47 @@ export function GitChangesSidePanel({
     }
   };
 
+  /**
+   * Merge one branch into another. The branch board names both ends, and the
+   * server checks the target out when it is not the current one — so the tab's
+   * "current" badge follows the merge. A merge stopped by conflicts is not a
+   * failure: the reader is sent to the files that carry the markers.
+   */
+  const mergeBranches = async (from: string, into: string) => {
+    setBusy(true);
+    try {
+      const result = await api.gitMerge(sessionId, from, into);
+      onStatusChange(result.status);
+      if (result.conflict) {
+        const conflicts = gitConflictFiles(result.status);
+        showToast(t("git.mergeConflicts", { count: conflicts.length }), { tone: "danger" });
+        focusConflictFiles(result.status);
+      } else {
+        showToast(t("git.mergeOk", { from, into: result.status.branch }), { tone: "success" });
+        await refreshAfterSync();
+      }
+    } catch (e) {
+      gitErrorToast(e, t("git.mergeFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Rename a local branch; the checked-out one is renamed in place by git. */
+  const renameBranch = async (branch: string, next: string) => {
+    setBusy(true);
+    try {
+      const result = await api.gitRenameBranch(sessionId, branch, next);
+      onStatusChange(result.status);
+      showToast(t("git.renameBranchOk"), { tone: "success" });
+      await refreshCommits();
+    } catch (e) {
+      gitErrorToast(e, t("git.renameBranchFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const createTagAt = async (hash: string, tag: string) => {
     setBusy(true);
     try {
@@ -1108,6 +1156,10 @@ export function GitChangesSidePanel({
   const repoPending = statusLoading || (awaitingGit && !status);
   const files = status?.files ?? [];
   const repo = status?.repo ?? false;
+  /** Local branches: the branch board lists them and picks them as targets. */
+  const branchNames = status?.branches ?? [];
+  /** Local names first, then remote ones — a merge source or a start point. */
+  const branchRefs = commitBranches.length > 0 ? commitBranches : branchNames;
   const conflictFiles = files.filter(isGitConflictFile);
   const stagedFiles = files.filter((f) => f.staged && !isGitConflictFile(f));
   const unstagedFiles = files.filter((f) => f.unstaged && !isGitConflictFile(f));
@@ -1357,7 +1409,7 @@ export function GitChangesSidePanel({
           <span
             className={styles.tabSwitchGlider}
             aria-hidden
-            style={{ transform: `translateX(${tab === "changes" ? "0%" : "calc(100% + 2px)"})` }}
+            style={{ transform: `translateX(calc(${TAB_INDEX[tab]} * (100% + 2px)))` }}
           />
           <button
             type="button"
@@ -1398,6 +1450,32 @@ export function GitChangesSidePanel({
               </span>
             ) : null}
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "branches"}
+            className={`${styles.tabSwitchBtn}${tab === "branches" ? ` ${styles.tabSwitchBtnActive}` : ""}`}
+            title={t("git.tabBranches")}
+            onClick={() => setTab("branches")}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <circle cx="7" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+              <circle cx="7" cy="18" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+              <circle cx="17" cy="12" r="2.2" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M7 8.2v7.6M9.2 6.8c3 .5 5.6 1.6 5.6 5.2"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              />
+            </svg>
+            <span className={styles.tabSwitchLabel}>{t("git.tabBranches")}</span>
+            {branchNames.length > 0 ? (
+              <span className={styles.tabCount} aria-hidden>
+                {branchNames.length}
+              </span>
+            ) : null}
+          </button>
         </div>
 
         <div className={styles.navMeta}>
@@ -1414,7 +1492,7 @@ export function GitChangesSidePanel({
                 </span>
               ) : null}
             </>
-          ) : (
+          ) : tab === "history" ? (
             <>
               <span className={styles.navChangeCaption}>
                 {branchFilter.length === 0
@@ -1424,6 +1502,13 @@ export function GitChangesSidePanel({
               <span className={styles.navClean}>
                 {t("git.historyShown", { count: commits.length })}
               </span>
+            </>
+          ) : (
+            <>
+              <span className={styles.navChangeCaption}>
+                {t("git.branchesCount", { count: branchNames.length })}
+              </span>
+              {status?.branch ? <span className={styles.navClean}>{status.branch}</span> : null}
             </>
           )}
         </div>
@@ -1568,6 +1653,18 @@ export function GitChangesSidePanel({
       <div className={styles.navBody}>
         {tab === "changes" ? (
           <GitChangesCommitPane {...commitPaneProps} />
+        ) : tab === "branches" ? (
+          <GitBranchesPane
+            status={status}
+            busy={busy}
+            branches={branchNames}
+            refs={branchRefs}
+            onSwitch={(branch) => void handleCheckout(branch)}
+            onCreate={(branch, start) => void handleCheckout(branch, true, start)}
+            onMerge={(from, into) => void mergeBranches(from, into)}
+            onRenameBranch={(branch, next) => void renameBranch(branch, next)}
+            onDeleteBranch={onDeleteBranch}
+          />
         ) : (
           <>
             <div
@@ -1743,10 +1840,16 @@ export function GitChangesSidePanel({
               >
                 <span className={styles.pullerBar} aria-hidden />
                 <span className={styles.pullerTitle}>
-                  {tab === "changes" ? t("git.tabChanges") : t("git.tabHistory")}
+                  {tab === "changes"
+                    ? t("git.tabChanges")
+                    : tab === "history"
+                      ? t("git.tabHistory")
+                      : t("git.tabBranches")}
                 </span>
                 <span className={styles.pullerMeta}>
-                  {status.dirty ? (
+                  {tab === "branches" ? (
+                    <span>{t("git.branchesCount", { count: branchNames.length })}</span>
+                  ) : status.dirty ? (
                     <>
                       <span>{t("git.changedFiles", { count: files.length })}</span>
                       <span className={styles.statAdd}>+{status.additions}</span>

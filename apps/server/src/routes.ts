@@ -116,6 +116,8 @@ import {
   getGitLog,
   getGitShow,
   getGitStatus,
+  mergeGitBranch,
+  renameGitBranch,
   setGitStage,
   stashGit,
   syncGit,
@@ -1140,7 +1142,12 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const body = z
       .union([
-        z.object({ branch: z.string().min(1).max(255), create: z.boolean().optional() }),
+        z.object({
+          branch: z.string().min(1).max(255),
+          create: z.boolean().optional(),
+          /** Where a new branch starts; the current HEAD when it is absent. */
+          start: z.string().min(1).max(64).optional(),
+        }),
         z.object({ rev: z.string().min(7).max(64) }),
       ])
       .parse(req.body);
@@ -1149,7 +1156,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const result =
       "rev" in body
         ? await checkoutGitRevision(cwd, body.rev)
-        : await checkoutGitBranch(cwd, body.branch, { create: body.create });
+        : await checkoutGitBranch(cwd, body.branch, { create: body.create, startPoint: body.start });
     if (!result.ok) return reply.code(400).send({ error: result.error ?? "Checkout failed" });
     return { ok: true, status: await getGitStatus(cwd) };
   });
@@ -1194,6 +1201,35 @@ export async function registerRoutes(app: FastifyInstance) {
         "git sync failed",
       );
       return reply.code(400).send({ error: result.error ?? "Sync failed" });
+    }
+    return {
+      ok: result.ok,
+      conflict: result.conflict ?? false,
+      output: result.output ?? "",
+      status: await getGitStatus(cwd),
+    };
+  });
+
+  app.post("/api/sessions/:id/git/merge", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        from: z.string().min(1).max(255),
+        /** Branch that receives the merge; the checked-out one when absent. */
+        into: z.string().min(1).max(255).optional(),
+      })
+      .parse(req.body);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await mergeGitBranch(cwd, body.from, { into: body.into });
+    // A merge stopped by conflicts is the question the reader answers next, not
+    // a failed request — same shape as a pull that stops on a conflict.
+    if (!result.ok && !result.conflict) {
+      req.log.warn(
+        { sessionId: id, cwd: cwd, from: body.from, into: body.into, error: result.error },
+        "git merge failed",
+      );
+      return reply.code(400).send({ error: result.error ?? "Merge failed" });
     }
     return {
       ok: result.ok,
@@ -1290,6 +1326,27 @@ export async function registerRoutes(app: FastifyInstance) {
       unmerged: result.unmerged ?? false,
       status: await getGitStatus(cwd),
     };
+  });
+
+  app.post("/api/sessions/:id/git/rename-branch", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        branch: z.string().min(1).max(255),
+        next: z.string().min(1).max(255),
+      })
+      .parse(req.body);
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    const result = await renameGitBranch(cwd, body.branch, body.next);
+    if (!result.ok) {
+      req.log.warn(
+        { sessionId: id, cwd: cwd, branch: body.branch, next: body.next, error: result.error },
+        "git branch rename failed",
+      );
+      return reply.code(400).send({ error: result.error ?? "Rename branch failed" });
+    }
+    return { ok: true, status: await getGitStatus(cwd) };
   });
 
   app.post("/api/sessions/:id/git/discard", async (req, reply) => {

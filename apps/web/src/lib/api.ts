@@ -326,11 +326,16 @@ export const api = {
     request<{ detail: GitCommitDetailDto }>(
       `/api/sessions/${id}/git/commit?rev=${encodeURIComponent(rev)}`,
     ),
-  gitCheckout: (id: string, branch: string, create?: boolean) =>
+  gitCheckout: (id: string, branch: string, create?: boolean, start?: string) =>
     request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/checkout`, {
       method: "POST",
-      body: JSON.stringify({ branch, create }),
+      body: JSON.stringify({ branch, create, start }),
     }),
+  gitMerge: (id: string, from: string, into?: string) =>
+    request<{ ok: boolean; conflict?: boolean; output: string; status: GitStatusDto }>(
+      `/api/sessions/${id}/git/merge`,
+      { method: "POST", body: JSON.stringify({ from, into }) },
+    ),
   gitCheckoutRev: (id: string, rev: string) =>
     request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/checkout`, {
       method: "POST",
@@ -373,6 +378,11 @@ export const api = {
     request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/create-tag`, {
       method: "POST",
       body: JSON.stringify({ rev, tag }),
+    }),
+  gitRenameBranch: (id: string, branch: string, next: string) =>
+    request<{ ok: boolean; status: GitStatusDto }>(`/api/sessions/${id}/git/rename-branch`, {
+      method: "POST",
+      body: JSON.stringify({ branch, next }),
     }),
   gitDeleteBranch: (id: string, branch: string, force?: boolean) =>
     request<{ ok: boolean; unmerged: boolean; status: GitStatusDto }>(

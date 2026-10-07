@@ -1,0 +1,309 @@
+/* The branch board: two groups — local and remote — each folded into folders. */
+.wrap {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-secondary);
+}
+
+.scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding: 4px 4px 12px;
+}
+
+.group {
+  margin-bottom: 6px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.groupHead:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.groupIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.groupTitle {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Where the group stands against everything the repo has: shown / total. */
+.groupCount {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.groupBody {
+  display: flex;
+  flex-direction: column;
+}
+
+.empty {
+  padding: 10px 8px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+/* Depth of a row inside the tree: one 14px step per folder. */
+.row,
+.folder {
+  padding-left: calc(6px + var(--branch-depth, 0) * 14px);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding-right: 4px;
+  border-radius: 7px;
+}
+
+.row:hover {
+  background: var(--bg-tertiary);
+}
+
+.rowCurrent {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.rowCurrent:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+}
+
+.check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.refIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+}
+
+.rowCurrent .refIcon,
+.rowCurrent .check {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+/* The branch name is the merge command: click it to merge that branch in. */
+.nameBtn {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 3px 2px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.74rem;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.nameBtn:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.nameBtn:disabled {
+  cursor: default;
+  /* The checked-out branch has nowhere to merge into. */
+  opacity: 0.95;
+}
+
+.rowCurrent .nameBtn {
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent) 45%, var(--text));
+}
+
+.nameBtn:focus-visible,
+.iconBtn:focus-visible,
+.folder:focus-visible,
+.groupHead:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+  font-size: 0.6rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rowActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.iconBtn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.iconBtn:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.iconBtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.folder {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 26px;
+  padding-right: 6px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.folder:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.chevron {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.folderIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.folderName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+}
+
+/* Right-click menu of a branch row: placed from the pointer, clamped on screen. */
+.contextMenu {
+  overscroll-behavior: contain;
+  position: fixed;
+  z-index: 520;
+  min-width: 220px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextMenu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.contextMenu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.contextMenu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+}

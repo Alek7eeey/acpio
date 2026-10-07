@@ -174,13 +174,13 @@ export function useGitStatus(
     return () => window.clearInterval(timer);
   }, [awaiting, context?.gitPanelOpen, refresh, sessionId]);
 
-  const checkout = useCallback(async (branch: string, create = false) => {
+  const checkout = useCallback(async (branch: string, create = false, start?: string) => {
     const sid = sessionRef.current;
     if (!sid || branchBusy) return;
     if (!create && branch === boundStatus?.branch) return;
     setBranchBusy(true);
     try {
-      const result = await api.gitCheckout(sid, branch, create);
+      const result = await api.gitCheckout(sid, branch, create, start);
       if (sessionRef.current !== sid) return;
       applyStatus(result.status);
       showToast(t("git.checkoutOk"), { tone: "success" });
