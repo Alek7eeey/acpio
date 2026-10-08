@@ -2681,6 +2681,14 @@ button.userSlashCmd:focus-visible {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
+/* Files dragged over the composer: the pill marks the drop target. */
+.composerDropActive .pill {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow:
+    var(--shadow),
+    0 0 0 3px var(--accent-soft);
+}
+
 .pillLoading {
   opacity: 0.78;
   pointer-events: none;

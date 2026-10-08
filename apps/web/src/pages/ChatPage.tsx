@@ -12,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type DragEvent as ReactDragEvent,
   type FormEvent,
   type MouseEvent,
   type ReactNode,
@@ -338,12 +339,14 @@ function readyAttachments(files: ComposerAttachment[]): PendingAttachment[] {
   return files.flatMap((f) => (f.status === "ready" && f.path ? [{ name: f.name, path: f.path }] : []));
 }
 
-function collectClipboardImages(data: DataTransfer | null): File[] {
+/** Every file the clipboard carries — a screenshot, a document, an archive.
+ *  Text paste is left to the browser: only real files are staged. */
+function collectClipboardFiles(data: DataTransfer | null): File[] {
   if (!data) return [];
   const out: File[] = [];
   const seen = new Set<string>();
   const push = (file: File | null) => {
-    if (!file || !file.type.startsWith("image/")) return;
+    if (!file) return;
     const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -354,12 +357,15 @@ function collectClipboardImages(data: DataTransfer | null): File[] {
   }
   if (out.length === 0 && data.items) {
     for (const item of data.items) {
-      if (item.kind === "file" && item.type.startsWith("image/")) {
-        push(item.getAsFile());
-      }
+      if (item.kind === "file") push(item.getAsFile());
     }
   }
   return out;
+}
+
+/** Whether a drag carries files, as opposed to the app's own row drags. */
+function dragHasFiles(data: DataTransfer | null): boolean {
+  return Array.from(data?.types ?? []).includes("Files");
 }
 
 function extForImageMime(mime: string): string {
@@ -388,6 +394,46 @@ function clipboardImageName(file: File, index: number): string {
   }
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return `clipboard-${stamp}${index > 0 ? `-${index + 1}` : ""}${ext}`;
+}
+
+/** Extensions for the non-image MIME types a clipboard blob can arrive as;
+ *  the server falls back to the name (or `.bin`) for anything else. */
+const FILE_EXT_BY_MIME: Record<string, string> = {
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "text/csv": ".csv",
+  "text/html": ".html",
+  "application/json": ".json",
+  "application/pdf": ".pdf",
+  "application/zip": ".zip",
+  "application/gzip": ".gz",
+  "application/x-tar": ".tar",
+  "application/msword": ".doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+  "application/vnd.ms-powerpoint": ".ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+  "audio/mpeg": ".mp3",
+  "audio/wav": ".wav",
+  "audio/ogg": ".ogg",
+  "video/mp4": ".mp4",
+  "video/webm": ".webm",
+};
+
+/**
+ * Name for a pasted file. An image keeps the clipboard naming above; any other
+ * file is copied from the file manager with its real name, so that one is kept
+ * as it arrived (the server appends an extension from the MIME type when the
+ * name has none) and only a nameless blob gets a timestamped name.
+ */
+function clipboardFileName(file: File, index: number): string {
+  if (file.type.startsWith("image/")) return clipboardImageName(file, index);
+  const raw = (file.name || "").trim();
+  if (raw) return raw;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const ext = FILE_EXT_BY_MIME[file.type.toLowerCase()] ?? "";
+  return `file-${stamp}${index > 0 ? `-${index + 1}` : ""}${ext}`;
 }
 
 /** Picked files keep their real name; the server appends an extension from the
@@ -3952,6 +3998,8 @@ function ChatThread() {
   const modelRef = useRef(model);
   modelRef.current = model;
   const [pendingFiles, setPendingFiles] = useState<ComposerAttachment[]>([]);
+  /** A drag carrying files is over the composer right now. */
+  const [fileDropActive, setFileDropActive] = useState(false);
   /** Object URLs behind the composer previews, keyed by attachment id: revoked
       the moment a chip leaves the composer so the blobs are not pinned. */
   const previewUrlsRef = useRef(new Map<string, string>());
@@ -4528,14 +4576,48 @@ function ChatThread() {
     ],
   );
 
-  const attachPastedImages = useCallback(
-    (files: File[]) => stageDeviceFiles(files, clipboardImageName),
+  const attachPastedFiles = useCallback(
+    (files: File[]) => stageDeviceFiles(files, clipboardFileName),
     [stageDeviceFiles],
   );
 
   const attachPickedFiles = useCallback(
     (files: File[]) => stageDeviceFiles(files, deviceFileName),
     [stageDeviceFiles],
+  );
+
+  const onComposerDragOver = useCallback(
+    (e: ReactDragEvent<HTMLElement>) => {
+      if (composerLocked || editingMessageId) return;
+      if (!dragHasFiles(e.dataTransfer)) return;
+      // Without preventDefault the browser would open the dropped file
+      // instead of handing it to the composer.
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setFileDropActive(true);
+    },
+    [composerLocked, editingMessageId],
+  );
+
+  const onComposerDragLeave = useCallback((e: ReactDragEvent<HTMLElement>) => {
+    const next = e.relatedTarget;
+    // Moving between the composer's own children is not leaving it.
+    if (next instanceof Node && e.currentTarget.contains(next)) return;
+    setFileDropActive(false);
+  }, []);
+
+  const onComposerDrop = useCallback(
+    (e: ReactDragEvent<HTMLElement>) => {
+      if (composerLocked || editingMessageId) return;
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      setFileDropActive(false);
+      // Dropped files carry real names from the file manager, so they stage
+      // the same way as picked ones.
+      const files = Array.from(e.dataTransfer.files ?? []);
+      if (files.length > 0) attachPickedFiles(files);
+    },
+    [attachPickedFiles, composerLocked, editingMessageId],
   );
 
   const attachDefaultSource: AttachSource =
@@ -6080,8 +6162,11 @@ function ChatThread() {
       <form
         className={`${styles.composer}${composerHeld ? ` ${styles.composerSkeleton}` : ""}${
           emptyReady || restoringEmpty || initializingEmpty ? ` ${styles.composerEmptyReady}` : ""
-        }`}
+        }${fileDropActive ? ` ${styles.composerDropActive}` : ""}`}
         onSubmit={onSubmit}
+        onDragOver={onComposerDragOver}
+        onDragLeave={onComposerDragLeave}
+        onDrop={onComposerDrop}
       >
         {scrolledAway && activeSession && !emptyReady && !restoringEmpty ? (
           <button
@@ -6305,10 +6390,10 @@ function ChatThread() {
               }}
               onPaste={(e) => {
                 if (composerLocked || editingMessageId) return;
-                const images = collectClipboardImages(e.clipboardData);
-                if (images.length === 0) return;
+                const files = collectClipboardFiles(e.clipboardData);
+                if (files.length === 0) return;
                 e.preventDefault();
-                attachPastedImages(images);
+                attachPastedFiles(files);
               }}
               placeholder={
                 slashInputHint ??
