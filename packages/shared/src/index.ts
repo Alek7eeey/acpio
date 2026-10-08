@@ -1268,6 +1268,12 @@ export interface BuiltinSubagentsSetting {
   enabled: boolean;
   /** Let the model compose ad-hoc children (its own systemPrompt + tools). */
   allowAdhoc: boolean;
+  /**
+   * Model the children run on, a composite `<provider>::<model>` value like
+   * every other picker. Absent (or empty) means the children inherit the
+   * session's current model — the default.
+   */
+  model?: string;
   /** User-defined agents; ids/names are deduped, `task`/`explore` reserved. */
   agents: BuiltinSubagentDef[];
 }
@@ -1330,6 +1336,9 @@ function healBuiltinSubagentRow(raw: unknown): BuiltinSubagentDef | null {
  */
 export function normalizeBuiltinSubagents(value: unknown): BuiltinSubagentsSetting {
   const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  // Children's model: a composite `<provider>::<model>` value. Empty or
+  // non-string drops the key — absent IS the default (inherit the session's).
+  const model = typeof raw.model === "string" ? raw.model.trim().slice(0, 200) : "";
   const agents: BuiltinSubagentDef[] = [];
   const seenIds = new Set<string>();
   const seenNames = new Set<string>(BUILTIN_SUBAGENT_RESERVED_NAMES);
@@ -1346,6 +1355,7 @@ export function normalizeBuiltinSubagents(value: unknown): BuiltinSubagentsSetti
   return {
     enabled: raw.enabled === true,
     allowAdhoc: raw.allowAdhoc !== false,
+    ...(model ? { model } : {}),
     agents,
   };
 }

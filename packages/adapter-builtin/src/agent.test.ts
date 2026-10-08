@@ -629,13 +629,27 @@ describe("builtin session store", () => {
 });
 
 describe("builtin subagents wiring", () => {
-  /** Like the routing stub, but records the system prompt and offered tools. */
-  async function startRecordingStub(): Promise<{
+  /** One scripted streaming reply: the delta to send and the finish reason. */
+  type StubReply = { delta: Record<string, unknown>; finishReason: string };
+  const TEXT_REPLY: StubReply = {
+    delta: { role: "assistant", content: "ok" },
+    finishReason: "stop",
+  };
+
+  /**
+   * Like the routing stub, but records the system prompt, the offered tools and
+   * the wire model. `script` answers request #n: a spawn test needs the first
+   * reply to be a tool call, then the child's own reply, then the parent's close.
+   */
+  async function startRecordingStub(
+    script: StubReply[] = [],
+  ): Promise<{
     url: string;
-    hits: Array<{ system: string; toolNames: string[] }>;
+    hits: Array<{ system: string; toolNames: string[]; model: string; messages: number }>;
     close(): Promise<void>;
   }> {
-    const hits: Array<{ system: string; toolNames: string[] }> = [];
+    const hits: Array<{ system: string; toolNames: string[]; model: string; messages: number }> =
+      [];
     const server = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => {
@@ -649,6 +663,7 @@ describe("builtin subagents wiring", () => {
           ? ((record as { messages: Array<Record<string, unknown>> }).messages)
           : [];
         const systemMessage = messages.find((m) => m?.role === "system");
+        const reply = script[hits.length] ?? TEXT_REPLY;
         hits.push({
           system: String(
             systemMessage
@@ -669,6 +684,8 @@ describe("builtin subagents wiring", () => {
                 ),
               )
             : [],
+          model: String((record as { model?: unknown }).model ?? ""),
+          messages: messages.length,
         });
         res.setHeader("content-type", "text/event-stream");
         const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
@@ -678,9 +695,7 @@ describe("builtin subagents wiring", () => {
             object: "chat.completion.chunk",
             created: 0,
             model: "stub",
-            choices: [
-              { index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null },
-            ],
+            choices: [{ index: 0, delta: reply.delta, finish_reason: null }],
           }),
         );
         res.write(
@@ -689,7 +704,7 @@ describe("builtin subagents wiring", () => {
             object: "chat.completion.chunk",
             created: 0,
             model: "stub",
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            choices: [{ index: 0, delta: {}, finish_reason: reply.finishReason }],
             usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
           }),
         );
@@ -744,6 +759,76 @@ describe("builtin subagents wiring", () => {
       await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
       expect(stub.hits[0]!.toolNames).not.toContain("task");
       expect(stub.hits[0]!.system).not.toContain("Subagents:");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  /** Request #1 spawns `explore`, #2 is the child's own call, #3 closes the turn. */
+  const SPAWN_SCRIPT: StubReply[] = [
+    {
+      delta: {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "task",
+              arguments: JSON.stringify({ agent: "explore", prompt: "find the bug" }),
+            },
+          },
+        ],
+      },
+      finishReason: "tool_calls",
+    },
+    { delta: { role: "assistant", content: "child report" }, finishReason: "stop" },
+    { delta: { role: "assistant", content: "done" }, finishReason: "stop" },
+  ];
+
+  const providersWithTwoModels = (url: string) => [
+    {
+      id: "p1",
+      name: "Test",
+      url,
+      apiKey: "",
+      models: [
+        { id: "m1", label: "M1", contextWindow: 8_000 },
+        { id: "m2", label: "M2", contextWindow: 32_000 },
+      ],
+    },
+  ];
+
+  it("runs children on the configured subagent model and the parent on its own", async () => {
+    const stub = await startRecordingStub(SPAWN_SCRIPT);
+    try {
+      const { call } = boot({
+        builtinProviders: providersWithTwoModels(stub.url),
+        builtinSubagents: { enabled: true, allowAdhoc: false, agents: [], model: "p1::m2" },
+      });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "go" }] });
+      expect(stub.hits.map((h) => h.model)).toEqual(["m1", "m2", "m1"]);
+      // The middle call is the child: its own explorer system prompt, fresh context.
+      expect(stub.hits[1]!.system).toContain("codebase explorer");
+      expect(stub.hits[1]!.messages).toBe(2);
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("inherits the session model for children when no subagent model is set", async () => {
+    const stub = await startRecordingStub(SPAWN_SCRIPT);
+    try {
+      const { call } = boot({
+        builtinProviders: providersWithTwoModels(stub.url),
+        builtinSubagents: { enabled: true, allowAdhoc: false, agents: [] },
+      });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "go" }] });
+      expect(stub.hits.map((h) => h.model)).toEqual(["m1", "m1", "m1"]);
     } finally {
       await stub.close();
     }

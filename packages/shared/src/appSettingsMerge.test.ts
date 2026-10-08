@@ -444,4 +444,22 @@ describe("normalizeBuiltinSubagents", () => {
     });
     expect(mergeClientAppSettings({ builtinSubagents: 42 }).builtinSubagents.enabled).toBe(false);
   });
+
+  it("keeps the children's model and drops an empty or non-string one", () => {
+    expect(
+      mergeClientAppSettings({ builtinSubagents: { enabled: true, model: "  p1::m2  " } })
+        .builtinSubagents,
+    ).toEqual({ enabled: true, allowAdhoc: true, model: "p1::m2", agents: [] });
+    // Absent IS the default: children inherit the session's current model.
+    expect(mergeClientAppSettings({ builtinSubagents: { model: "" } }).builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: true,
+      agents: [],
+    });
+    expect(mergeClientAppSettings({ builtinSubagents: { model: 42 } }).builtinSubagents).toEqual({
+      enabled: false,
+      allowAdhoc: true,
+      agents: [],
+    });
+  });
 });

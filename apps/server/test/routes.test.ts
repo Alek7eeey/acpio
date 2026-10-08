@@ -320,6 +320,7 @@ describe("health & settings", () => {
         builtinSubagents: {
           enabled: true,
           allowAdhoc: true,
+          model: "p1::m1",
           agents: [
             {
               id: "s1",
@@ -339,6 +340,7 @@ describe("health & settings", () => {
     expect(body.builtinSubagents).toEqual({
       enabled: true,
       allowAdhoc: true,
+      model: "p1::m1",
       // The reserved `explore` name drops its row; the valid one heals.
       agents: [
         {

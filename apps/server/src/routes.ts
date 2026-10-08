@@ -317,6 +317,7 @@ const settingsSchema = z.object({
     .object({
       enabled: z.boolean().optional(),
       allowAdhoc: z.boolean().optional(),
+      model: z.string().max(200).optional(),
       agents: z
         .array(
           z.object({

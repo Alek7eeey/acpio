@@ -12,6 +12,7 @@ import {
   hasBuiltinEndpoint,
   initialModelId,
   resolveBuiltinModel,
+  subagentModelChoice,
 } from "./config.js";
 import { createHostRpc } from "./host.js";
 import {
@@ -510,12 +511,36 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // One bridge per prompt: slots and the usage accumulator must span the
       // turn and its wrap-up continuation.
       const model = endpoint.chatModel(selection.modelId);
-      const subagents = this.opts.settings.builtinSubagents?.enabled
+      // Children run on their own model when one is configured — a fresh
+      // endpoint for that provider — and on the session's model otherwise.
+      const subagentsEnabled = this.opts.settings.builtinSubagents?.enabled === true;
+      const childChoice = subagentsEnabled
+        ? subagentModelChoice(this.opts.settings, selection)
+        : null;
+      if (childChoice?.fellBack) {
+        console.warn(
+          `[builtin] subagent model "${this.opts.settings.builtinSubagents?.model}" is not configured — children run on the session model`,
+        );
+      }
+      const childModel =
+        !childChoice || childChoice.selection.value === selection.value
+          ? model
+          : createOpenAICompatible({
+              name: `builtin:${childChoice.selection.provider.id}`,
+              baseURL: childChoice.selection.provider.url,
+              apiKey: childChoice.selection.provider.apiKey || undefined,
+              includeUsage: true,
+              headers: builtinProviderHeaders(
+                childChoice.selection.provider.headers,
+                this.sessionId,
+              ),
+            }).chatModel(childChoice.selection.modelId);
+      const subagents = subagentsEnabled
         ? createSubagentsBridge({
             mode: this.mode,
             ask,
-            model,
-            contextWindow,
+            model: childModel,
+            contextWindow: childChoice?.selection.contextWindow ?? contextWindow,
             cwd: this.cwd,
             signal: abort.signal,
             settings: this.opts.settings.builtinSubagents,

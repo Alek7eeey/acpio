@@ -92,6 +92,23 @@ export function contextWindowOf(settings: AppSettings, value: string): number {
   return resolveBuiltinModel(settings, value)?.contextWindow ?? BUILTIN_FALLBACK_CONTEXT_WINDOW;
 }
 
+/**
+ * Model the subagent children run on: the configured `builtinSubagents.model`
+ * when it resolves, else the session's own selection. An empty setting is the
+ * default — children inherit the current model — and never falls back.
+ * `fellBack` marks a configured value that no longer exists, so the caller can
+ * say so instead of silently running children on a model the user un-picked.
+ */
+export function subagentModelChoice(
+  settings: AppSettings,
+  parent: BuiltinModelSelection,
+): { selection: BuiltinModelSelection; fellBack: boolean } {
+  const configured = settings.builtinSubagents?.model?.trim();
+  if (!configured) return { selection: parent, fellBack: false };
+  const resolved = resolveBuiltinModel(settings, configured);
+  return resolved ? { selection: resolved, fellBack: false } : { selection: parent, fellBack: true };
+}
+
 /** Model the agent starts with: stored default → first offered model. The
  *  resolved value is returned so a bare legacy default comes back composite. */
 export function initialModelId(settings: AppSettings): string {

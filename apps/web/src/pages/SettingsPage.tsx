@@ -31,6 +31,7 @@ import {
   DEFAULT_MCP_PROJECT_FILES,
   DEFAULT_BUILTIN_SKILL_PATHS,
   DEFAULT_BUILTIN_SUBAGENTS,
+  builtinModelValue,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -2620,6 +2621,41 @@ export function SettingsPage() {
                         } satisfies BuiltinSubagentsSetting)
                       }
                       label={t("settings.subagentsAllowAdhoc")}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label={t("settings.subagentsModel")}
+                    hint={t("settings.subagentsModelHint")}
+                    terms={[
+                      t("settings.subagentsModel"),
+                      t("settings.subagentsModelHint"),
+                      "model",
+                    ]}
+                  >
+                    <OptionPicker
+                      variant="block"
+                      placement="down"
+                      menuTitle={t("settings.subagentsModel")}
+                      value={form.builtinSubagents?.model ?? ""}
+                      onChange={(v) =>
+                        patch("builtinSubagents", {
+                          ...(form.builtinSubagents ?? DEFAULT_BUILTIN_SUBAGENTS),
+                          model: v,
+                        } satisfies BuiltinSubagentsSetting)
+                      }
+                      options={[
+                        { value: "", label: t("settings.subagentsModelInherit") },
+                        ...form.builtinProviders.flatMap((provider) =>
+                          provider.models
+                            .filter((m) => m.enabled !== false)
+                            .map((m) => ({
+                              value: builtinModelValue(provider.id, m.id),
+                              label: m.label,
+                              hint:
+                                form.builtinProviders.length > 1 ? provider.name : undefined,
+                            })),
+                        ),
+                      ]}
                     />
                   </SettingRow>
                   <SettingRow

@@ -6,6 +6,7 @@ import {
   hasBuiltinEndpoint,
   initialModelId,
   resolveBuiltinModel,
+  subagentModelChoice,
 } from "./config.js";
 
 function provider(overrides: Partial<BuiltinProviderConfig> = {}): BuiltinProviderConfig {
@@ -138,5 +139,35 @@ describe("hasBuiltinEndpoint", () => {
     expect(hasBuiltinEndpoint(withProviders([]))).toBe(false);
     expect(hasBuiltinEndpoint(withProviders([provider({ url: "" })]))).toBe(false);
     expect(hasBuiltinEndpoint(withProviders([provider()]))).toBe(true);
+  });
+});
+
+describe("subagentModelChoice", () => {
+  it("inherits the session model when no subagent model is configured", () => {
+    const settings = withProviders([provider()]);
+    const parent = builtinModelOptions(settings)[0]!;
+    expect(subagentModelChoice(settings, parent)).toEqual({ selection: parent, fellBack: false });
+  });
+
+  it("resolves the configured composite value, keeping its context window", () => {
+    const settings: AppSettings = {
+      ...withProviders([provider()]),
+      builtinSubagents: { enabled: true, allowAdhoc: true, agents: [], model: "p1::on" },
+    };
+    const parent = builtinModelOptions(settings)[0]!;
+    expect(parent.value).toBe("p1::legacy");
+    expect(subagentModelChoice(settings, parent)).toEqual({
+      selection: expect.objectContaining({ value: "p1::on", contextWindow: 2_000 }),
+      fellBack: false,
+    });
+  });
+
+  it("falls back to the session model when the configured value is gone", () => {
+    const settings: AppSettings = {
+      ...withProviders([provider()]),
+      builtinSubagents: { enabled: true, allowAdhoc: true, agents: [], model: "p1::ghost" },
+    };
+    const parent = builtinModelOptions(settings)[0]!;
+    expect(subagentModelChoice(settings, parent)).toEqual({ selection: parent, fellBack: true });
   });
 });
