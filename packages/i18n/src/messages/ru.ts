@@ -317,6 +317,8 @@ export const ru = {
     boardAddTaskHint: "Новая задача — правый клик открывает выбор агента для пустого чата",
     boardTaskPlaceholder: "Опишите задачу…",
     boardEditTask: "Редактировать задачу",
+    boardNextPrompt: "Следующий промпт",
+    boardNextPromptPlaceholder: "Введите следующий промпт…",
     boardStart: "Начать работу",
     boardStartOther: "Запустить с другим агентом",
     boardAutoStart: "Запускать сразу",

@@ -129,6 +129,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  /** The Wait card whose next prompt is being typed on the board, and the text. */
+  const [promptTaskId, setPromptTaskId] = useState<string | null>(null);
+  const [promptDraft, setPromptDraft] = useState("");
+  const [sendingPrompt, setSendingPrompt] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
@@ -137,6 +141,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const composerBoxRef = useRef<HTMLDivElement>(null);
   /** The card editor as a whole — a press inside it must not dismiss it. */
   const taskEditorRef = useRef<HTMLDivElement>(null);
+  /** The quick-prompt form as a whole — a press inside it must not dismiss it. */
+  const promptBoxRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
   const railListRef = useRef<HTMLDivElement>(null);
@@ -244,22 +250,25 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   }, [addingCwd]);
 
   /**
-   * The card editor belongs to its card, exactly like the new-task form
-   * belongs to its group: a press anywhere else closes it the way its own
-   * Cancel button does, so a half-typed rewrite is not left sitting in the
-   * lane. A dialog the board opened on top keeps the press.
+   * The card editor and the quick-prompt form belong to their card, exactly
+   * like the new-task form belongs to its group: a press anywhere else closes
+   * them the way their own Cancel button does, so a half-typed rewrite — or a
+   * prompt that was never sent — is not left sitting in the lane. A dialog the
+   * board opened on top keeps the press.
    */
   useEffect(() => {
-    if (!editTaskId) return;
+    if (!editTaskId && !promptTaskId) return;
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (taskEditorRef.current?.contains(target)) return;
+      if (promptBoxRef.current?.contains(target)) return;
       if (target instanceof Element && target.closest('[role="dialog"]')) return;
       cancelTaskEdit();
+      cancelPromptEntry();
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [editTaskId]);
+  }, [editTaskId, promptTaskId]);
 
   useEffect(() => {
     if (!railOpen) return;
@@ -530,6 +539,37 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     await setTaskDescription(task.id, description);
     setSavingEdit(false);
     cancelTaskEdit();
+  };
+
+  /**
+   * Quick prompt: the next message to a task that is waiting is typed on its
+   * own card and sent from there — a task that stopped with a question, or
+   * simply finished its turn, is answered without leaving the board for its
+   * chat. The send goes through the same door the chat's composer uses, so a
+   * task whose agent is still busy has the text queued instead of lost.
+   */
+  const startPromptEntry = (task: SessionDto) => {
+    setTaskMenu(null);
+    setPromptDraft("");
+    setPromptTaskId(task.id);
+  };
+
+  const cancelPromptEntry = () => {
+    setPromptTaskId(null);
+    setPromptDraft("");
+  };
+
+  /** Send the typed prompt; a send that fails keeps the form and its text. */
+  const submitPrompt = async (task: SessionDto) => {
+    const text = promptDraft.trim();
+    if (!text || sendingPrompt) return;
+    setSendingPrompt(true);
+    try {
+      await sendPrompt(text, { sessionId: task.id });
+    } finally {
+      setSendingPrompt(false);
+    }
+    cancelPromptEntry();
   };
 
   /** Measure → clamp into the viewport, before paint (no wrong-spot flash). */
@@ -817,6 +857,48 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         ) : (
           <p className={styles.cardText}>{text}</p>
         )}
+        {column === "wait" && promptTaskId === task.id ? (
+          /* The next prompt is typed on the card itself: the task's own text
+             stays readable above it, and nothing leaves the board. */
+          <div
+            ref={promptBoxRef}
+            className={styles.cardEdit}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          >
+            <textarea
+              className={styles.composerInput}
+              value={promptDraft}
+              maxLength={20000}
+              placeholder={t("chat.boardNextPromptPlaceholder")}
+              aria-label={t("chat.boardNextPrompt")}
+              autoFocus
+              onChange={(e) => setPromptDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitPrompt(task);
+                } else if (e.key === "Escape") {
+                  cancelPromptEntry();
+                }
+              }}
+            />
+            <div className={styles.composerActions}>
+              <button type="button" className={styles.ghostBtn} onClick={cancelPromptEntry}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                disabled={!promptDraft.trim() || sendingPrompt}
+                onClick={() => void submitPrompt(task)}
+              >
+                {t("common.send")}
+              </button>
+            </div>
+          </div>
+        ) : null}
         {column === "progress" ? (
           <span className={styles.liveRow}>
             <span className={styles.pulse} aria-hidden />
@@ -1301,6 +1383,28 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   />
                 </svg>
                 {t("chat.boardEditTask")}
+              </button>
+            ) : null}
+            {/* A Wait card is a task whose agent stopped — its turn finished,
+                or it is asking something — so what is most likely wanted from
+                the board is the next prompt, typed right here. */}
+            {boardColumn(taskMenu.task) === "wait" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => startPromptEntry(taskMenu.task)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 19V5M12 5l-6 6M12 5l6 6"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {t("chat.boardNextPrompt")}
               </button>
             ) : null}
             <button
