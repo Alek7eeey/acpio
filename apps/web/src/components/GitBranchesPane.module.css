@@ -142,12 +142,6 @@
   white-space: nowrap;
 }
 
-/* The row under the pointer is the branch the menu and the merge would take. */
-.row:hover .name {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
 .rowCurrent .name {
   font-weight: 700;
   color: color-mix(in srgb, var(--accent) 45%, var(--text));
