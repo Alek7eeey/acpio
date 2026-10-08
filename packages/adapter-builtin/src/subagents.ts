@@ -27,9 +27,7 @@ export const SUBAGENT_MAX_PARALLEL = 3;
 export const EXPLORE_SUBAGENT: BuiltinSubagentDef = {
   id: "builtin-explore",
   name: "explore",
-  description:
-    "Read-only codebase explorer: locate code, trace call sites, survey structure. " +
-    "Reports findings with file:line references.",
+  description: "Read-only code investigation: locate, trace, survey.",
   systemPrompt:
     "You are a codebase explorer. You investigate a repository with read-only tools " +
     "and answer one research question.",
@@ -152,16 +150,12 @@ export interface TaskToolInput {
 }
 
 const taskInputSchema = z.object({
-  agent: z.string().optional().describe("Registered subagent name; exclusive with system_prompt."),
-  system_prompt: z.string().optional().describe("Ad-hoc subagent's role; exclusive with agent."),
-  tools: z
-    .array(z.enum(BUILTIN_TOOL_NAMES))
-    .optional()
-    .describe("Ad-hoc child's tools; default read/glob/grep."),
-  prompt: z
-    .string()
-    .min(1)
-    .describe("Full task for the child — it sees nothing of this conversation."),
+  // `agent`/`system_prompt`/`tools` carry no per-field descriptions: the tool
+  // description above states them, and every field here rides each model call.
+  agent: z.string().optional(),
+  system_prompt: z.string().optional(),
+  tools: z.array(z.enum(BUILTIN_TOOL_NAMES)).optional(),
+  prompt: z.string().min(1).describe("The child's task; it sees no conversation history."),
 });
 
 /** The `task` tool: spawns a child run and returns its final report. */
@@ -170,17 +164,17 @@ export function makeTaskTool(bridge: SubagentsBridge) {
   // This description rides every model call of the session — the feature's
   // whole standing cost is this string plus the schema, so it stays tight.
   const named = roster.map((a) => `${a.name} — ${a.description}`).join("; ");
-  const adhoc = bridge.settings.allowAdhoc
-    ? " Or system_prompt (+ optional tools, default read/glob/grep) spawns an ad-hoc child."
-    : " Ad-hoc children are disabled — use the named agents.";
+  const rules = bridge.settings.allowAdhoc
+    ? "Pass `agent` (a roster name) or `system_prompt` (ad-hoc child; its `tools` default to " +
+      "read/glob/grep), never both; children cannot spawn subagents."
+    : "Pass `agent`, a roster name — ad-hoc children are disabled; children cannot spawn subagents.";
   return tool({
+    // This description rides every model call of the session — the feature's
+    // whole standing cost is this string plus the schema, so it stays tight,
+    // and it only states mechanics: nothing here demands a spawn.
     description:
-      "Run a subagent with its own context; only its final report enters this conversation. " +
-      "Prefer delegating investigation: when the cause of a bug, slowdown or misbehavior is not " +
-      "already localized, spawn `explore` first and implement the fix yourself against its report " +
-      "(findings with file:line references). Also delegate broad surveys, parallel research and " +
-      "listing-heavy digging. Skip it only for single-file edits you already understand; children " +
-      `cannot spawn subagents. Named: ${named}.${adhoc}`,
+      "Run a subagent in its own context; only its final report returns. " +
+      `${rules} Named: ${named}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
       const report = await runSubagent(bridge, ctx.toolCallId, input);
