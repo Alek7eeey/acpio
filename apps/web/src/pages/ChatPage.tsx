@@ -445,6 +445,37 @@ function deviceFileName(file: File, index: number): string {
   return `file-${stamp}${index > 0 ? `-${index + 1}` : ""}`;
 }
 
+/** A pasted block this long — or this many lines — is a wall of text in the
+ *  composer, so the reader is offered to keep it as a file instead. Anything
+ *  shorter is pasted by the browser itself, as it always was. */
+const PASTE_AS_FILE_MIN_CHARS = 1500;
+const PASTE_AS_FILE_MIN_LINES = 20;
+
+function isLargePastedText(text: string): boolean {
+  return text.length >= PASTE_AS_FILE_MIN_CHARS || text.split("\n").length >= PASTE_AS_FILE_MIN_LINES;
+}
+
+/**
+ * Name of the file a pasted block becomes. Millisecond precision on purpose:
+ * the link written into the composer carries this name, so a second paste in
+ * the same second must not land on the name an earlier one already took (the
+ * server would then rename the file and the link would point at nothing).
+ */
+function pastedTextFileName(): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 23);
+  return `pasted-text-${stamp}.txt`;
+}
+
+/**
+ * What stands in the composer for a pasted block: a markdown link to the file
+ * the attachment staged, addressed by the same session-relative path the
+ * server hands the agent. The text stays short, the file rides along as an
+ * attachment, and both point at the same file.
+ */
+function pastedTextLink(sessionId: string, name: string): string {
+  return `[${name}](.acpio-attachments/${sessionId}/${name})`;
+}
+
 function MessageArticle({
   msg,
   isLiveAssistant,
@@ -4005,6 +4036,9 @@ function ChatThread() {
       the moment a chip leaves the composer so the blobs are not pinned. */
   const previewUrlsRef = useRef(new Map<string, string>());
   const [attachError, setAttachError] = useState<string | null>(null);
+  /** A pasted block waiting for the reader's answer: keep it as a file (link in
+   *  the text, the file as an attachment) or paste it as text after all. */
+  const [pasteOffer, setPasteOffer] = useState<string | null>(null);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Native picker for files on the device the browser runs on. */
   const deviceFileInputRef = useRef<HTMLInputElement>(null);
@@ -4502,27 +4536,36 @@ function ChatThread() {
   );
 
   const stageDeviceFiles = useCallback(
-    (files: File[], resolveName: (file: File, index: number) => string) => {
+    (
+      files: File[],
+      resolveName: (file: File, index: number) => string,
+      hooks?: {
+        /** The upload landed — the caller may point at the staged file. */
+        onSaved?: (saved: { name: string; path: string; size: number }) => void;
+        /** The upload failed; the chip above the composer already says so. */
+        onFailed?: (err: unknown) => void;
+      },
+    ): ComposerAttachment[] => {
       const sessionId = activeSession?.id;
-      if (!sessionId || files.length === 0) return;
+      if (!sessionId || files.length === 0) return [];
       // A running turn does not block staging: the bytes land in the session
       // folder and ride the *next* prompt, while the composer shows Stop
       // instead of Send, so nothing can go out by accident. Blocking it here
       // (and on the paperclip and paste) meant a screenshot taken while the
       // agent worked could not be queued at all.
-      if (editingMessageId || composerLocked) return;
+      if (editingMessageId || composerLocked) return [];
 
       const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
       if (oversized) {
         setAttachError(t("chat.fileTooLarge", { name: oversized.name || "file" }));
       }
       const ok = files.filter((f) => f.size <= MAX_ATTACH_SIZE);
-      if (ok.length === 0) return;
+      if (ok.length === 0) return [];
 
       const room = Math.max(0, MAX_ATTACH_COUNT - pendingFiles.length);
       if (ok.length > room) setAttachError(t("chat.tooManyFiles"));
       const accepted = ok.slice(0, room);
-      if (accepted.length === 0) return;
+      if (accepted.length === 0) return [];
 
       // Chips (with a local preview) land synchronously, before any await —
       // the upload fills in the staged path in the background.
@@ -4563,14 +4606,17 @@ function ChatThread() {
               status: "ready",
               error: undefined,
             });
+            hooks?.onSaved?.(saved);
           })
           .catch((err: unknown) => {
             patch(entry.id, {
               status: "error",
               error: err instanceof Error ? err.message : String(err),
             });
+            hooks?.onFailed?.(err);
           });
       });
+      return entries;
     },
     [
       activeSession?.id,
@@ -4589,6 +4635,94 @@ function ChatThread() {
   const attachPickedFiles = useCallback(
     (files: File[]) => stageDeviceFiles(files, deviceFileName),
     [stageDeviceFiles],
+  );
+
+  /**
+   * Put a block into the composer at the caret — the insert the browser would
+   * have done itself had the paste not been intercepted to offer a file.
+   */
+  const insertComposerText = useCallback(
+    (insertion: string) => {
+      const el = textareaRef.current;
+      const current = el ? el.value : text;
+      const start = el?.selectionStart ?? current.length;
+      const end = el?.selectionEnd ?? start;
+      const next = current.slice(0, start) + insertion + current.slice(end);
+      const caret = start + insertion.length;
+      // A programmatic insert is a fresh edit: the composer history cursor has
+      // to leave the recalled prompt, exactly as typing after it does.
+      if (!composerHistoryApplyingRef.current && composerHistoryIndexRef.current !== -1) {
+        resetComposerHistory();
+      }
+      setText(next);
+      setCursorPos(caret);
+      setComposerMultilineIfNeeded(next.includes("\n"));
+      requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) return;
+        node.focus({ preventScroll: true });
+        node.setSelectionRange(caret, caret);
+        syncComposerSize(node);
+      });
+    },
+    [text],
+  );
+
+  const pasteOfferAsText = useCallback(() => {
+    if (pasteOffer === null) return;
+    setPasteOffer(null);
+    insertComposerText(pasteOffer);
+  }, [insertComposerText, pasteOffer]);
+
+  /**
+   * Keep the pasted block as a file: the bytes are staged like any other
+   * attachment (chip above the composer) and the text keeps a short link to
+   * it. The link is written at once — the name is known before the upload — so
+   * Send never waits on the request and the message cannot lose the reference.
+   */
+  const pasteOfferAsFile = useCallback(() => {
+    if (pasteOffer === null) return;
+    const block = pasteOffer;
+    setPasteOffer(null);
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      insertComposerText(block);
+      return;
+    }
+    const name = pastedTextFileName();
+    const link = pastedTextLink(sessionId, name);
+    const staged = stageDeviceFiles(
+      [new File([block], name, { type: "text/plain" })],
+      () => name,
+      {
+        // The file never landed (or the server renamed it): the block must not
+        // be left behind a link that points nowhere.
+        onSaved: (saved) => {
+          if (saved.name === name) return;
+          const renamed = pastedTextLink(sessionId, saved.name);
+          setText((prev) => prev.replace(link, renamed));
+        },
+        onFailed: () => {
+          setText((prev) => (prev.includes(link) ? prev.replace(link, block) : prev));
+        },
+      },
+    );
+    // No room (or nothing stageable): the paste itself must not be dropped.
+    if (staged.length === 0) {
+      insertComposerText(block);
+      return;
+    }
+    insertComposerText(link);
+  }, [activeSession?.id, insertComposerText, pasteOffer, stageDeviceFiles]);
+
+  /** A big paste waits for the answer; a second one does not replace (and so
+   *  lose) the first — that one goes in as text and the new block is offered. */
+  const offerPasteAsFile = useCallback(
+    (pasted: string) => {
+      if (pasteOffer !== null) insertComposerText(pasteOffer);
+      setPasteOffer(pasted);
+    },
+    [insertComposerText, pasteOffer],
   );
 
   const onComposerDragOver = useCallback(
@@ -6269,6 +6403,34 @@ function ChatThread() {
                 </div>
               )}
           </div>
+          {pasteOffer !== null && (
+            <div
+              className={styles.pasteOffer}
+              role="group"
+              aria-label={t("chat.pasteAsFileTitle")}
+            >
+              <span className={styles.pasteOfferCopy}>
+                <span className={styles.pasteOfferTitle}>{t("chat.pasteAsFileTitle")}</span>
+                <span className={styles.pasteOfferHint}>{t("chat.pasteAsFileHint")}</span>
+              </span>
+              <span className={styles.pasteOfferActions}>
+                <button
+                  type="button"
+                  className={styles.pasteOfferPrimary}
+                  onClick={pasteOfferAsFile}
+                >
+                  {t("chat.pasteAsFile")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.pasteOfferGhost}
+                  onClick={pasteOfferAsText}
+                >
+                  {t("chat.pasteAsText")}
+                </button>
+              </span>
+            </div>
+          )}
           {(pendingFiles.length > 0 || attachError) && (
             <div className={styles.pendingFiles}>
               {attachError ? <span className={styles.attachError}>{attachError}</span> : null}
@@ -6413,9 +6575,18 @@ function ChatThread() {
               onPaste={(e) => {
                 if (composerLocked || editingMessageId) return;
                 const files = collectClipboardFiles(e.clipboardData);
-                if (files.length === 0) return;
+                if (files.length > 0) {
+                  e.preventDefault();
+                  attachPastedFiles(files);
+                  return;
+                }
+                // A wall of pasted text would swamp the composer (and the
+                // message), so it is offered as a file first; anything shorter
+                // is left to the browser, exactly as before.
+                const pasted = e.clipboardData?.getData("text/plain") ?? "";
+                if (!isLargePastedText(pasted)) return;
                 e.preventDefault();
-                attachPastedFiles(files);
+                offerPasteAsFile(pasted);
               }}
               placeholder={
                 slashInputHint ??

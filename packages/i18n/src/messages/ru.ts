@@ -271,6 +271,10 @@ export const ru = {
     tooManyFiles: "Можно прикрепить не больше 8 файлов",
     attachmentUploading: "Загрузка…",
     attachmentUploadFailed: "Не удалось загрузить",
+    pasteAsFileTitle: "Большой текст — вставить как файл?",
+    pasteAsFileHint: "Текст уедет вложением, а в поле останется ссылка на файл.",
+    pasteAsFile: "Вставить файлом",
+    pasteAsText: "Вставить текстом",
     emptyTitle: "Acpio",
     emptyDescription:
       "Здесь появится ваш разговор с агентом. Напишите что-нибудь — рассуждения и ответ придут в эту ленту. Поддерживаются {{agents}}.",

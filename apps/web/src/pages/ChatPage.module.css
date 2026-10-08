@@ -2984,6 +2984,76 @@ button.userSlashCmd:focus-visible {
   font-size: 0.72rem;
 }
 
+/* Offer shown for a pasted wall of text: the block is put in as a file (chip
+   above the composer, a link in the text) or, if the reader prefers, as the
+   text itself. */
+.pasteOffer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 2px 4px 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  max-width: 100%;
+}
+
+.pasteOfferCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pasteOfferTitle {
+  color: var(--text);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.pasteOfferHint {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.pasteOfferActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pasteOfferPrimary,
+.pasteOfferGhost {
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.pasteOfferPrimary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pasteOfferPrimary:hover {
+  background: color-mix(in srgb, var(--accent) 85%, #000);
+}
+
+.pasteOfferGhost {
+  background: transparent;
+  color: var(--text);
+}
+
+.pasteOfferGhost:hover {
+  background: var(--bg-tertiary);
+}
+
 .micBtn {
   order: 3;
 }

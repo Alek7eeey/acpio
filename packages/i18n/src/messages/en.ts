@@ -251,6 +251,10 @@ export const en = {
     tooManyFiles: "Up to 8 files can be attached",
     attachmentUploading: "Uploading…",
     attachmentUploadFailed: "Upload failed",
+    pasteAsFileTitle: "Large text — paste it as a file?",
+    pasteAsFileHint: "The text becomes an attachment and the field keeps a link to it.",
+    pasteAsFile: "Paste as file",
+    pasteAsText: "Paste as text",
     emptyTitle: "Acpio",
     emptyDescription:
       "This is where your conversation with the agent will appear. Say hello — reasoning and answers stream into this feed. Works with {{agents}}.",
