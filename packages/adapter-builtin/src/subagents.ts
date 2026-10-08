@@ -27,7 +27,7 @@ export const SUBAGENT_MAX_PARALLEL = 3;
 export const EXPLORE_SUBAGENT: BuiltinSubagentDef = {
   id: "builtin-explore",
   name: "explore",
-  description: "Read-only code investigation: locate, trace, survey.",
+  description: "Read-only code investigation.",
   systemPrompt:
     "You are a codebase explorer. You investigate a repository with read-only tools " +
     "and answer one research question.",
@@ -150,22 +150,20 @@ export interface TaskToolInput {
 }
 
 const taskInputSchema = z.object({
-  // `agent`/`system_prompt`/`tools` carry no per-field descriptions: the tool
-  // description above states them, and every field here rides each model call.
+  // `agent`/`system_prompt`/`tools`/`prompt` carry no per-field descriptions:
+  // the tool description states them, and every field here rides each model call.
   agent: z.string().optional(),
   system_prompt: z.string().optional(),
   tools: z.array(z.enum(BUILTIN_TOOL_NAMES)).optional(),
-  prompt: z.string().min(1).describe("The child's task; it sees no conversation history."),
+  prompt: z.string().min(1),
 });
 
 /** The `task` tool: spawns a child run and returns its final report. */
 export function makeTaskTool(bridge: SubagentsBridge) {
   const roster = subagentRoster(bridge.settings);
-  // This description rides every model call of the session — the feature's
-  // whole standing cost is this string plus the schema, so it stays tight.
   const named = roster.map((a) => `${a.name} — ${a.description}`).join("; ");
   const rules = bridge.settings.allowAdhoc
-    ? "Pass `agent` (a roster name) or `system_prompt` (ad-hoc child; its `tools` default to " +
+    ? "Pass `agent` (roster name) or `system_prompt` (ad-hoc child, `tools` defaults " +
       "read/glob/grep), never both; children cannot spawn subagents."
     : "Pass `agent`, a roster name — ad-hoc children are disabled; children cannot spawn subagents.";
   return tool({
@@ -173,7 +171,7 @@ export function makeTaskTool(bridge: SubagentsBridge) {
     // whole standing cost is this string plus the schema, so it stays tight,
     // and it only states mechanics: nothing here demands a spawn.
     description:
-      "Run a subagent in its own context; only its final report returns. " +
+      "Run a subagent in a fresh context; only its final report returns. " +
       `${rules} Named: ${named}`,
     inputSchema: taskInputSchema,
     execute: async (input, ctx) => {
