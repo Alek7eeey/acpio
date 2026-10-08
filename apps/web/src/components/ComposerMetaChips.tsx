@@ -220,6 +220,8 @@ export function ComposerMetaChips({
   const [composerMetaEdge, setComposerMetaEdge] = useState({ left: false, right: false });
   const [visibleCount, setVisibleCount] = useState<number | null>(null);
   const [compressing, setCompressing] = useState(false);
+  /** Bumped when the row had no size to measure (chat hidden behind a panel). */
+  const [measureRetry, setMeasureRetry] = useState(0);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowMenuReady, setOverflowMenuReady] = useState(false);
 
@@ -524,12 +526,20 @@ export function ComposerMetaChips({
   const overflowItems =
     isDesktop && visibleCount !== null ? chipItems.slice(visibleCount) : [];
 
+  /**
+   * Widths the row can fit, or `null` when it cannot be measured at all: a row
+   * with no width (its column is hidden behind a panel that took the whole
+   * page, or the composer is not on screen yet) reports 0 for every chip, and
+   * caching those zeros would leave a compressible chip forever "0 wide" — the
+   * row would then count as fitting everything and the "…" button would never
+   * come back. No decision is taken until the row has a real size again.
+   */
   const computeChipLayout = useCallback(
-    (captureWidths: boolean) => {
-      const fitsAll = { visible: chipItems.length, compress: false };
+    (captureWidths: boolean): { visible: number; compress: boolean } | null => {
       const start = startRef.current;
       const row = scrollRef.current;
-      if (!start || !row) return fitsAll;
+      if (!start || !row) return null;
+      if (row.clientWidth <= 0) return null;
 
       const gapPx = Number.parseFloat(getComputedStyle(start).columnGap || getComputedStyle(start).gap);
       const gap = Number.isFinite(gapPx) && gapPx > 0 ? gapPx : META_CHIP_GAP;
@@ -537,7 +547,8 @@ export function ComposerMetaChips({
       for (const item of chipItems) {
         const el = chipRefs.current.get(item.id);
         if (captureWidths) {
-          if (el) chipWidthsRef.current.set(item.id, el.offsetWidth);
+          const w = el?.offsetWidth ?? 0;
+          if (w > 0) chipWidthsRef.current.set(item.id, w);
           continue;
         }
         // A compressible chip is rendered shrunk while the row is overfull, so
@@ -553,9 +564,11 @@ export function ComposerMetaChips({
       const visibleRight = Math.min(rowRect.left + row.clientWidth, window.innerWidth);
       const available = visibleRight - rowRect.left - modeW;
 
+      // A chip that is not laid out yet is no reason to show everything: leave
+      // the row as it is and measure again on the next resize.
       const widths = chipItems.map((item) => chipWidthsRef.current.get(item.id) ?? 0);
-      if (available <= 0) return fitsAll;
-      if (widths.some((w) => w <= 0)) return fitsAll;
+      if (available <= 0) return null;
+      if (widths.some((w) => w <= 0)) return null;
 
       const sumWidths = (list: number[], upTo = list.length) => {
         let total = 0;
@@ -613,16 +626,25 @@ export function ComposerMetaChips({
       return;
     }
     const next = computeChipLayout(true);
+    if (!next) return;
     setVisibleCount(next.visible);
     setCompressing(next.compress);
-  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, visibleCount]);
+  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, visibleCount, measureRetry]);
 
   useEffect(() => {
-    if (!isDesktop || renderSkeleton || visibleCount === null) return;
+    if (!isDesktop || renderSkeleton) return;
     const shell = shellRef.current;
     if (!shell) return;
     const onResize = () => {
+      // Hidden behind a panel: nothing to measure, and the decision already on
+      // screen must not be replaced by "everything fits".
+      if ((scrollRef.current?.clientWidth ?? 0) <= 0) return;
+      if (visibleCount === null) {
+        setMeasureRetry((n) => n + 1);
+        return;
+      }
       const next = computeChipLayout(false);
+      if (!next) return;
       setVisibleCount((prev) => (prev === next.visible ? prev : next.visible));
       setCompressing((prev) => (prev === next.compress ? prev : next.compress));
     };
@@ -637,7 +659,7 @@ export function ComposerMetaChips({
       ro.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, showMode]);
+  }, [chipLayoutKey, computeChipLayout, isDesktop, renderSkeleton, showMode, visibleCount]);
 
   useEffect(() => {
     const el = scrollRef.current;
