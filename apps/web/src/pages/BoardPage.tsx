@@ -71,6 +71,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
   const createBoardTask = useAppStore((s) => s.createBoardTask);
   const setTaskDone = useAppStore((s) => s.setTaskDone);
+  const setTaskDescription = useAppStore((s) => s.setTaskDescription);
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
@@ -124,12 +125,18 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
+  /** The Todo card whose text is being rewritten, and the text as typed. */
+  const [editTaskId, setEditTaskId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** The new-task form as a whole — a press inside it must not dismiss it. */
   const composerBoxRef = useRef<HTMLDivElement>(null);
+  /** The card editor as a whole — a press inside it must not dismiss it. */
+  const taskEditorRef = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
   const railListRef = useRef<HTMLDivElement>(null);
@@ -235,6 +242,24 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [addingCwd]);
+
+  /**
+   * The card editor belongs to its card, exactly like the new-task form
+   * belongs to its group: a press anywhere else closes it the way its own
+   * Cancel button does, so a half-typed rewrite is not left sitting in the
+   * lane. A dialog the board opened on top keeps the press.
+   */
+  useEffect(() => {
+    if (!editTaskId) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (taskEditorRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest('[role="dialog"]')) return;
+      cancelTaskEdit();
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [editTaskId]);
 
   useEffect(() => {
     if (!railOpen) return;
@@ -481,6 +506,32 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setTaskMenu({ task, x: e.clientX, y: e.clientY });
   };
 
+  /**
+   * Rewrite a task card where it lies: the editor takes the card over, seeded
+   * with the text the card shows — a task created empty has none, and its
+   * title is that text.
+   */
+  const startTaskEdit = (task: SessionDto) => {
+    setTaskMenu(null);
+    setEditDraft(task.taskDescription?.trim() || task.title);
+    setEditTaskId(task.id);
+  };
+
+  const cancelTaskEdit = () => {
+    setEditTaskId(null);
+    setEditDraft("");
+  };
+
+  /** Commit the card editor; an empty text is never saved — a card without one is nothing to read. */
+  const submitTaskEdit = async (task: SessionDto) => {
+    const description = editDraft.trim();
+    if (!description || savingEdit) return;
+    setSavingEdit(true);
+    await setTaskDescription(task.id, description);
+    setSavingEdit(false);
+    cancelTaskEdit();
+  };
+
   /** Measure → clamp into the viewport, before paint (no wrong-spot flash). */
   useLayoutEffect(() => {
     const el = taskMenuRef.current;
@@ -620,6 +671,26 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               <>
                 <button
                   type="button"
+                  className={styles.iconBtn}
+                  title={t("chat.boardEditTask")}
+                  aria-label={t("chat.boardEditTask")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startTaskEdit(task);
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M4.5 19.5h15M6 15.5l9.6-9.6a1.7 1.7 0 0 1 2.4 2.4L8.4 18H6v-2.5Z"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   className={`${styles.iconBtn} ${styles.iconStart}`}
                   title={t("chat.boardStart")}
                   aria-label={t("chat.boardStart")}
@@ -702,7 +773,50 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             </button>
           </span>
         </div>
-        <p className={styles.cardText}>{text}</p>
+        {column === "todo" && editTaskId === task.id ? (
+          /* The editor takes the card over where the card lies: the text being
+             rewritten stays on the lane and in the project group it belongs to. */
+          <div
+            ref={taskEditorRef}
+            className={styles.cardEdit}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
+          >
+            <textarea
+              className={styles.composerInput}
+              value={editDraft}
+              maxLength={20000}
+              placeholder={t("chat.boardTaskPlaceholder")}
+              aria-label={t("chat.boardEditTask")}
+              autoFocus
+              onChange={(e) => setEditDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submitTaskEdit(task);
+                } else if (e.key === "Escape") {
+                  cancelTaskEdit();
+                }
+              }}
+            />
+            <div className={styles.composerActions}>
+              <button type="button" className={styles.ghostBtn} onClick={cancelTaskEdit}>
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                disabled={!editDraft.trim() || savingEdit}
+                onClick={() => void submitTaskEdit(task)}
+              >
+                {t("common.save")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className={styles.cardText}>{text}</p>
+        )}
         {column === "progress" ? (
           <span className={styles.liveRow}>
             <span className={styles.pulse} aria-hidden />
@@ -1168,6 +1282,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             }}
             role="menu"
           >
+            {/* A task that has not started is still only a description, so it
+                stays rewritable; once it runs, the text is what was sent. */}
+            {boardColumn(taskMenu.task) === "todo" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => startTaskEdit(taskMenu.task)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 19.5h15M6 15.5l9.6-9.6a1.7 1.7 0 0 1 2.4 2.4L8.4 18H6v-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {t("chat.boardEditTask")}
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"

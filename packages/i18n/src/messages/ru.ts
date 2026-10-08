@@ -315,6 +315,7 @@ export const ru = {
     boardRename: "Переименовать доску",
     boardAddTaskHint: "Новая задача — правый клик открывает выбор агента для пустого чата",
     boardTaskPlaceholder: "Опишите задачу…",
+    boardEditTask: "Редактировать задачу",
     boardStart: "Начать работу",
     boardStartOther: "Запустить с другим агентом",
     boardAutoStart: "Запускать сразу",

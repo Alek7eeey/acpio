@@ -248,6 +248,8 @@ type AppState = {
     provider?: AgentProvider;
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
+  /** Board task: edit the text an existing task card carries. */
+  setTaskDescription: (id: string, description: string) => Promise<void>;
   /** Board task: pick the agent before the first turn (the server accepts it only then). */
   setTaskProvider: (id: string, provider: AgentProvider) => Promise<void>;
   /** Board task: order within its project group (persisted as `sortOrder`). */
@@ -1708,6 +1710,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     } catch {
       // server offline — the WS mirror reconciles on the next event
+    }
+  },
+  setTaskDescription: async (id, description) => {
+    // The card's text and the chat's own name are the same line: the title is
+    // the description's first line, derived exactly as createBoardTask does.
+    const title = description.trim().split("\n")[0]?.slice(0, 120) || "";
+    try {
+      const updated = await api.updateSession(id, {
+        taskDescription: description,
+        ...(title ? { title } : {}),
+      });
+      set((s) => ({
+        boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)),
+      }));
+    } catch {
+      // server offline — the card keeps the text it had
     }
   },
   setTaskProvider: async (id, provider) => {

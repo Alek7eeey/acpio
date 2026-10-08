@@ -630,6 +630,14 @@
   overflow: hidden;
 }
 
+/* Card editor: the text being rewritten takes the card over in place, so the
+   task stays in its lane and its project group while it is edited. */
+.cardEdit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .liveRow {
   display: flex;
   align-items: center;

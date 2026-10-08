@@ -295,6 +295,7 @@ export const en = {
     boardRename: "Rename board",
     boardAddTaskHint: "New task — right-click to pick an agent for an empty chat",
     boardTaskPlaceholder: "Describe the task…",
+    boardEditTask: "Edit task",
     boardStart: "Start work",
     boardStartOther: "Start with another agent",
     boardAutoStart: "Start immediately",
