@@ -26,6 +26,22 @@ const EXPAND_CHUNK = 100;
    paint and extend on demand. */
 const INITIAL_VISIBLE_ROWS = 1500;
 const MORE_VISIBLE_ROWS = 3000;
+/* A single line can itself be megabytes long — a minified file written back, a
+   generated JSON, one long base64 blob. Laying such a line out blocks the tab
+   for seconds, and the row budget above cannot help: the cost is one line, not
+   their number. Cut what reaches the DOM and mark the cut. */
+const MAX_LINE_CHARS = 8000;
+const CLIPPED_MARK = " …";
+
+/** One line of text as it is painted: whole, or cut at the character budget. */
+function clipLine(text: string): string {
+  return text.length > MAX_LINE_CHARS ? `${text.slice(0, MAX_LINE_CHARS)}${CLIPPED_MARK}` : text;
+}
+
+/** Same cut for a parsed diff line, keeping the +/-/space marker in front. */
+function clipLines(lines: ParsedDiffLine[]): ParsedDiffLine[] {
+  return lines.map((line) => (line.text.length > MAX_LINE_CHARS ? { ...line, text: clipLine(line.text) } : line));
+}
 
 export type DiffContextSource = {
   sessionId: string;
@@ -42,7 +58,7 @@ type HunkExpansion = {
 function splitPlain(text: string) {
   return text.split("\n").map((line, idx) => (
     <div key={idx} className={styles.line}>
-      {line === "" ? "\u00A0" : line}
+      {line === "" ? "\u00A0" : clipLine(line)}
     </div>
   ));
 }
@@ -115,7 +131,7 @@ function DiffLineRow({ line, keyId }: { line: ParsedDiffLine; keyId: string }) {
 function ContextLines({ lines, prefix }: { lines: string[]; prefix: string }) {
   return lines.map((text, idx) => (
     <div key={`${prefix}-${idx}`} className={`${styles.line} ${styles.ctx}`}>
-      {text === "" ? " " : ` ${text}`}
+      {text === "" ? " " : ` ${clipLine(text)}`}
     </div>
   ));
 }
@@ -124,9 +140,13 @@ function SplitContextLines({ lines, prefix }: { lines: string[]; prefix: string 
   return lines.map((text, idx) => (
     <div key={`${prefix}-${idx}`} className={styles.splitRow}>
       <div className={styles.splitGutter} aria-hidden />
-      <div className={`${styles.splitCell} ${styles.splitCtx}`}>{text === "" ? "\u00A0" : text}</div>
+      <div className={`${styles.splitCell} ${styles.splitCtx}`}>
+        {text === "" ? "\u00A0" : clipLine(text)}
+      </div>
       <div className={styles.splitGutter} aria-hidden />
-      <div className={`${styles.splitCell} ${styles.splitCtx}`}>{text === "" ? "\u00A0" : text}</div>
+      <div className={`${styles.splitCell} ${styles.splitCtx}`}>
+        {text === "" ? "\u00A0" : clipLine(text)}
+      </div>
     </div>
   ));
 }
@@ -365,7 +385,9 @@ export const DiffTextView = memo(function DiffTextView({
         const visibleLines = partial ? hunk.lines.slice(0, budget) : hunk.lines;
         budget -= visibleLines.length;
         if (partial) truncated = true;
-        plannedHunks.push({ hunkIndex, hunk, visibleLines });
+        // Cut over-long lines here, before the split/unified row builders and
+        // their word-level LCS run over them.
+        plannedHunks.push({ hunkIndex, hunk, visibleLines: clipLines(visibleLines) });
       }
       blocks.push({ fileIndex, file, hunks: plannedHunks });
       if (truncated) break;
