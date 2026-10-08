@@ -4091,9 +4091,6 @@ function ChatThread() {
   }, [activeSession?.messages]);
   const answerVisible = useMemo(() => turnAnswerVisible(lastAssistantParts), [lastAssistantParts]);
   const stepsStreaming = turnBusy && !answerVisible;
-  // Keep Stop tied to the live turn (inflight/session), not to "answer started" —
-  // otherwise the button vanishes for seconds while Cursor is still thinking.
-  const showStop = turnBusy;
 
   // MCP servers this chat's agent session runs with: the folder's list
   // (globals minus folder-disabled, plus folder-specific) plus the servers its
@@ -4417,6 +4414,13 @@ function ChatThread() {
       !agentUnavailable &&
       modelsLoading &&
       models.length === 0);
+  // Keep Stop tied to the live turn (inflight/session), not to "answer started" —
+  // otherwise the button vanishes for seconds while Cursor is still thinking.
+  // The reader typing the next prompt is asking to queue it behind the running
+  // turn, so the square becomes Send; text the composer refuses (a locked one)
+  // is not that, and a parked question is not a running turn at all — Stop there
+  // dismisses the question and typing must not take it away.
+  const showStop = turnBusy && !questionParked && !(hasText && !composerLocked);
 
   const slashCommands = useMemo(
     () => mergeSlashCommands(activeSession?.slashCommands, t),
@@ -6363,7 +6367,7 @@ function ChatThread() {
           />
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
-              showStop ? styles.pillBusy : ""
+              turnBusy ? styles.pillBusy : ""
             } ${composerLocked ? styles.pillLoading : ""}`}
           >
             <SlashCommandMenu
