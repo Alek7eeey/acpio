@@ -389,10 +389,16 @@ type AppState = {
   ) => Promise<void>;
   removeQueuedPrompt: (id: string) => void;
   updateQueuedPrompt: (id: string, text: string) => void;
+  /**
+   * Send one queued request right away, interrupting the turn the agent is
+   * running; the requests queued behind it keep waiting.
+   */
+  sendQueuedPromptNow: (id: string) => Promise<void>;
   drainPromptQueue: () => Promise<void>;
   /** Optimistic local toggle; the save happens in the background. */
   setMultitask: (value: boolean) => Promise<void>;
-  cancelPrompt: (sessionId?: string) => Promise<void>;
+  /** `keepQueue` leaves the queued requests alone (a promotion, not a halt). */
+  cancelPrompt: (sessionId?: string, opts?: { keepQueue?: boolean }) => Promise<void>;
   setSidebarOpen: (open: boolean) => void;
   /**
    * Point the collapse flag at another sidebar scope and restore the state it
@@ -2846,6 +2852,45 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  /**
+   * "Send now": the request leaves the queue and goes to the server at once.
+   * The turn in flight is interrupted first — otherwise the server FIFO-runs
+   * the prompt behind it and the wait would not shorten by a second. Only this
+   * item leaves the queue; everything queued behind it keeps its place.
+   */
+  async sendQueuedPromptNow(id) {
+    const item = get().promptQueue.find((q) => q.id === id);
+    if (!item) return;
+    const sid = item.sessionId;
+    set({ promptQueue: get().promptQueue.filter((q) => q.id !== id) });
+    // Stop itself drops the queue — this is a promotion, so keep the rest.
+    await get().cancelPrompt(sid, { keepQueue: true });
+    const inf = (get().inflightBySession?.[sid] ?? 0) + 1;
+    const inflightBySession = { ...get().inflightBySession, [sid]: inf };
+    set({
+      inflightBySession,
+      inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+    });
+    try {
+      await get().runSendPrompt(
+        item.text,
+        {
+          sessionId: sid,
+          ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
+          ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+        },
+        { optimistic: inf <= 1 },
+      );
+    } catch {
+      const cur = Math.max(0, (get().inflightBySession?.[sid] ?? 1) - 1);
+      const next = { ...get().inflightBySession, [sid]: cur };
+      set({
+        inflightBySession: next,
+        inflight: Object.values(next).reduce((a, b) => a + b, 0),
+      });
+    }
+  },
+
   async setMultitask(value) {
     set({ settings: { ...get().settings, multitask: value } });
     try {
@@ -3076,7 +3121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
   },
 
-  async cancelPrompt(sessionId) {
+  async cancelPrompt(sessionId, opts) {
     const id = sessionId ?? get().activeSessionId;
     if (!id) return;
     const state = get();
@@ -3097,7 +3142,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       cancelledPromptEpoch: epoch,
       cancelledPromptEpochBySession: { ...state.cancelledPromptEpochBySession, [id]: epoch },
-      promptQueue: state.promptQueue.filter((item) => item.sessionId !== id),
+      // Stop drops every queued request too (the user asked to halt the work);
+      // a caller promoting one of them leaves the others in place.
+      promptQueue: opts?.keepQueue
+        ? state.promptQueue
+        : state.promptQueue.filter((item) => item.sessionId !== id),
       inflightBySession,
       inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
       pendingPermission:

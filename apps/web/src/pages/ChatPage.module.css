@@ -716,6 +716,16 @@
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
+/* "Send now" is the item's primary action — keep it apart from edit/delete. */
+.queueItemBtnSend {
+  color: var(--accent);
+}
+
+.queueItemBtnSend:hover {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+}
+
 .msg {
   max-width: var(--chat-col);
   width: 100%;

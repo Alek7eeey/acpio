@@ -261,6 +261,7 @@ export const en = {
     jumpToLatest: "Jump to latest",
     promptQueue: "Request queue",
     queueCount: "Queued: {{count}}",
+    sendNow: "Send now",
     sessionRunning: "Working…",
     sessionWaiting: "Waiting for you",
     sessionUnseen: "Response ready",

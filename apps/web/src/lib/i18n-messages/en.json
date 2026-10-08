@@ -282,6 +282,7 @@
     "promptQueue": "Request queue",
     "promptRail": "Prompts in this chat",
     "queueCount": "Queued: {{count}}",
+    "sendNow": "Send now",
     "sessionRunning": "Working…",
     "sessionWaiting": "Waiting for you",
     "sessionUnseen": "Response ready",

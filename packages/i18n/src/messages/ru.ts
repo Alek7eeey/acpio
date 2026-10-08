@@ -281,6 +281,7 @@ export const ru = {
     jumpToLatest: "Перейти к последним сообщениям",
     promptQueue: "Очередь запросов",
     queueCount: "В очереди: {{count}}",
+    sendNow: "Отправить сейчас",
     sessionRunning: "Работает…",
     sessionWaiting: "Ждёт вас",
     sessionUnseen: "Ответ готов",

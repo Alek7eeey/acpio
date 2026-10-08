@@ -302,6 +302,7 @@
     "promptQueue": "Очередь запросов",
     "promptRail": "Промпты в этом чате",
     "queueCount": "В очереди: {{count}}",
+    "sendNow": "Отправить сейчас",
     "sessionRunning": "Работает…",
     "sessionWaiting": "Ждёт вас",
     "sessionUnseen": "Ответ готов",

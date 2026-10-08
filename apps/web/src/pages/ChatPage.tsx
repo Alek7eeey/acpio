@@ -3878,6 +3878,7 @@ function ChatThread() {
     bind?.sessionId ? (s.inflightBySession?.[bind.sessionId] ?? 0) : s.inflight,
   );
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
+  const sendQueuedPromptNow = useAppStore((s) => s.sendQueuedPromptNow);
   const [text, setText] = useState("");
   const textRef = useRef(text);
   textRef.current = text;
@@ -6100,6 +6101,23 @@ function ChatThread() {
                 <span className={styles.queueItemText} title={item.text}>
                   {item.text}
                 </span>
+                <button
+                  type="button"
+                  className={`${styles.queueItemBtn} ${styles.queueItemBtnSend}`}
+                  title={t("chat.sendNow")}
+                  aria-label={t("chat.sendNow")}
+                  onClick={() => void sendQueuedPromptNow(item.id)}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                    <path
+                      d="M12 19V5M12 5l-6 6M12 5l6 6"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
                 <button
                   type="button"
                   className={styles.queueItemBtn}
