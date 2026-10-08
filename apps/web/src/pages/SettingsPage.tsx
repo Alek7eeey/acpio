@@ -59,6 +59,9 @@ import styles from "./SettingsPage.module.css";
 /** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
 type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
 
+/** Dumps rendered in one go; the wheel down the list asks for the next page. */
+const DIAG_DUMPS_PAGE = 30;
+
 /** Editable form state for one user-defined ACP agent (args/env as text). */
 type CustomAgentDraft = {
   id: string;
@@ -927,6 +930,10 @@ export function SettingsPage() {
   const [diagDirResolved, setDiagDirResolved] = useState("");
   const [exportDirDefault, setExportDirDefault] = useState("");
   const [diagItems, setDiagItems] = useState<DiagnosticsDumpMeta[]>([]);
+  /** How many of `diagItems` are built; the rest wait for the scroll. */
+  const [diagVisible, setDiagVisible] = useState(DIAG_DUMPS_PAGE);
+  const diagScrollRef = useRef<HTMLUListElement | null>(null);
+  const diagMoreRef = useRef<HTMLLIElement | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const [diagBusy, setDiagBusy] = useState(false);
   const [diagMessage, setDiagMessage] = useState<string | null>(null);
@@ -985,6 +992,29 @@ export function SettingsPage() {
       setDiagLoading(false);
     }
   };
+
+  // The folder can hold hundreds of dumps and every card is a row of controls:
+  // only the pages above the current scroll are built. The sentinel under the
+  // last card asks for the next page as soon as it scrolls into the list, so a
+  // list opened on a tall window fills itself instead of stopping at one page.
+  const diagShown = diagItems.slice(0, diagVisible);
+  const diagHasMore = diagShown.length < diagItems.length;
+
+  useEffect(() => {
+    if (!diagHasMore) return;
+    if (typeof IntersectionObserver === "undefined") return;
+    const sentinel = diagMoreRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setDiagVisible((n) => Math.min(n + DIAG_DUMPS_PAGE, diagItems.length));
+      },
+      { root: diagScrollRef.current, rootMargin: "200px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [diagHasMore, diagVisible, diagItems.length]);
 
   useEffect(() => {
     if (leaf !== "diagnostics") return;
@@ -3089,8 +3119,8 @@ export function SettingsPage() {
             {!diagLoading && diagItems.length === 0 ? (
               <p className={styles.hint}>{t("diagnostics.empty")}</p>
             ) : null}
-            <ul className={styles.diagList}>
-              {diagItems.map((item) => (
+            <ul className={styles.diagList} ref={diagScrollRef}>
+              {diagShown.map((item) => (
                 <li key={item.id} className={styles.diagCard}>
                   <div className={styles.diagCardMain}>
                     <div className={styles.diagCardTop}>
@@ -3149,6 +3179,9 @@ export function SettingsPage() {
                   </div>
                 </li>
               ))}
+              {diagHasMore ? (
+                <li ref={diagMoreRef} className={styles.diagMore} aria-hidden />
+              ) : null}
             </ul>
             </SearchGate>
             </div>

@@ -1461,6 +1461,18 @@
   padding: 0;
   display: grid;
   gap: 8px;
+  /* The folder collects hundreds of dumps: the list scrolls itself instead of
+     stretching the settings page, and the cards past the fold are built on
+     scroll (see the sentinel below). */
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 6px;
+}
+
+/* Zero-height hook the observer watches; it carries no content. */
+.diagMore {
+  min-height: 1px;
 }
 
 .diagCard {
