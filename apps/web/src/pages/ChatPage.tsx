@@ -45,6 +45,7 @@ import {
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
 import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
+import { composerCaretOnFirstLine, composerCaretOnLastLine } from "../lib/composerCaretLines";
 import { followsThreadBottom, showsJumpToLatest } from "../lib/chatScroll";
 import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
@@ -195,16 +196,6 @@ function writeMessageRating(messageId: string, rating: MsgRating | null) {
   } catch {
     // ignore
   }
-}
-
-function composerCaretOnFirstLine(el: HTMLTextAreaElement): boolean {
-  const pos = el.selectionStart;
-  return pos === 0 || !el.value.slice(0, pos).includes("\n");
-}
-
-function composerCaretOnLastLine(el: HTMLTextAreaElement): boolean {
-  const pos = el.selectionEnd;
-  return pos === el.value.length || !el.value.slice(pos).includes("\n");
 }
 
 function userMessageHistory(messages: MessageDto[]): Array<{ id: string; text: string }> {
