@@ -99,6 +99,11 @@ export function normalizeBoardAddCardStyle(value: unknown): AppSettings["boardAd
     : DEFAULT_SETTINGS.boardAddCardStyle;
 }
 
+/** The board's task agent picker is on unless it was explicitly switched off. */
+export function normalizeBoardTaskAgentPicker(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.boardTaskAgentPicker;
+}
+
 export function normalizeChatGitBranchPosition(value: unknown): "below" | "above" {
   return value === "above" ? "above" : "below";
 }
@@ -173,6 +178,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.boardAddCardStyle = normalizeBoardAddCardStyle(partial.boardAddCardStyle);
+  merged.boardTaskAgentPicker = normalizeBoardTaskAgentPicker(partial.boardTaskAgentPicker);
   // Anything but an explicit "server" falls back to the device default.
   merged.attachDefaultSource = partial.attachDefaultSource === "server" ? "server" : "device";
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);

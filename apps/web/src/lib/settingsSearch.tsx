@@ -251,6 +251,8 @@ export function settingsSearchIndex(
       t("settings.boardAddCardStyleCard"),
       t("settings.boardAddCardStyleCompact"),
       t("settings.boardAddCardStyleHidden"),
+      t("settings.boardTaskAgentPicker"),
+      t("settings.boardTaskAgentPickerHint"),
     ],
     colors: [
       t("settings.colors"),
@@ -356,7 +358,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.fontSizeHint"),
       t("settings.showBootSplashHint"),
     ],
-    board: [t("settings.boardAddCardStyleHint")],
+    board: [t("settings.boardAddCardStyleHint"), t("settings.boardTaskAgentPickerHint")],
     colors: [t("settings.lightSchemeHint"), t("settings.darkSchemeHint")],
     voice: [t("settings.ttsVoiceGenderHint"), t("settings.ttsNaturalHint"), t("settings.ttsOpenWindowsSpeech")],
     chat: [

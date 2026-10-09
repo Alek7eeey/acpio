@@ -1968,6 +1968,17 @@ export function SettingsPage() {
                 ]}
               />
             </SettingRow>
+
+            <SettingRow
+              label={t("settings.boardTaskAgentPicker")}
+              hint={t("settings.boardTaskAgentPickerHint")}
+            >
+              <Toggle
+                checked={form.boardTaskAgentPicker !== false}
+                onChange={(v) => patch("boardTaskAgentPicker", v)}
+                label={t("settings.boardTaskAgentPicker")}
+              />
+            </SettingRow>
           </SettingTable>
         )}
 

@@ -5,9 +5,11 @@ import { boardColumn, type AgentProvider, type BoardColumn, type SessionDto } fr
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
+import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
+import { pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore } from "../lib/store";
@@ -61,11 +63,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** The board's folder tags, keyed by canonical cwd (a board from before they
    *  existed carries none). */
   const folderTags = board?.folderTags ?? {};
+  /** Folders whose tasks run one after another, keyed by canonical cwd. */
+  const folderAutoRun = board?.folderAutoRun;
   const tasks = useAppStore((s) => s.boardSessions);
   const defaultCwd = useAppStore((s) => s.settings.defaultCwd ?? "");
   const preferredProvider = useAppStore((s) => s.settings.defaultProvider ?? null);
   /** Look of the "Add task" placeholder an empty group offers (settings). */
   const boardAddCardStyle = useAppStore((s) => s.settings.boardAddCardStyle ?? "card");
+  /** Whether the new-task form offers its agent picker (on unless switched off). */
+  const taskAgentPicker = useAppStore((s) => s.settings.boardTaskAgentPicker !== false);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
@@ -76,6 +82,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
   const setBoardFolderTag = useAppStore((s) => s.setBoardFolderTag);
+  const setBoardFolderAutoRun = useAppStore((s) => s.setBoardFolderAutoRun);
   const reorderBoardTasks = useAppStore((s) => s.reorderBoardTasks);
   const selectSession = useAppStore((s) => s.selectSession);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
@@ -91,6 +98,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     [adapters, agentAvailability],
   );
 
+  /**
+   * The agent a new task goes to unless the form says otherwise: the default
+   * agent from settings while it is online, the first online one otherwise —
+   * exactly what the new-chat picker preselects.
+   */
+  const defaultTaskProvider = useMemo(
+    () => pickCreateProvider(agentAvailability, adapters.map((a) => a.id), preferredProvider),
+    [adapters, agentAvailability, preferredProvider],
+  );
+
   const [newTaskPicker, setNewTaskPicker] = useState<{ x: number; y: number; cwd: string } | null>(
     null,
   );
@@ -98,6 +115,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [filterCwd, setFilterCwd] = useState<string | null>(null);
   const [addingCwd, setAddingCwd] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  /** Agent the form's picker shows; empty = the default agent of the settings. */
+  const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
   const [creating, setCreating] = useState(false);
   /** Creation form: send the description as the first message on create. */
   const createAutoStart = useBoardAutoStart("create");
@@ -228,6 +247,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     composerRef.current?.focus();
   }, [addingCwd]);
 
+  // Each form starts on the default agent instead of the last agent picked.
+  useEffect(() => {
+    setDraftProvider("");
+  }, [addingCwd]);
+
   /**
    * The new-task form belongs to its group, not to the screen: a press anywhere
    * else dismisses it exactly like its own Cancel button, so an accidental "+"
@@ -239,9 +263,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     const onDown = (e: MouseEvent) => {
       const target = e.target as Node;
       if (composerBoxRef.current?.contains(target)) return;
-      // A dialog the board opened on top (the agent picker behind "+") owns the
-      // press: choosing there closes the form through its own handler.
-      if (target instanceof Element && target.closest('[role="dialog"]')) return;
+      // A dialog (or a picker's list) the board opened on top owns the press:
+      // choosing there closes the form through its own handler.
+      if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
       setAddingCwd(null);
       setDraft("");
     };
@@ -405,11 +429,44 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (text) await sendPrompt(text, { sessionId: task.id });
   };
 
+  /** Tasks a folder queue has already handed to their agent on this visit. */
+  const queuedRef = useRef(new Set<string>());
+
+  /**
+   * Folder queue: with "run one after another" switched on for a folder, its
+   * Todo cards start by themselves, top to bottom — one at a time, each next
+   * one leaving as soon as the folder's running task stops. A card handed over
+   * once is never handed over again, so a refresh of the list cannot start the
+   * same task twice.
+   */
+  useEffect(() => {
+    if (!tasksReady || !board) return;
+    for (const cwd of board.folders) {
+      if (!folderAutoRun?.[cwd]) continue;
+      // One at a time: the folder waits for the task still running in it.
+      if (tasks.some((task) => task.cwd === cwd && task.status === "running")) continue;
+      const next = groups.find((group) => group.cwd === cwd)?.tasks[0];
+      if (!next || queuedRef.current.has(next.id)) continue;
+      // A card with no text has nothing to send — it waits for the user.
+      if (!(next.taskDescription?.trim() || next.title)) continue;
+      queuedRef.current.add(next.id);
+      void startTask(next).catch(() => queuedRef.current.delete(next.id));
+    }
+  }, [board, folderAutoRun, groups, startTask, tasks, tasksReady]);
+
   const submitNewTask = async (cwd: string) => {
     const description = draft.trim();
     if (!description || creating) return;
+    // The form's own pick, or the default agent it opened on; a form without
+    // the picker leaves the choice to the server (settings default).
+    const provider = taskAgentPicker ? draftProvider || defaultTaskProvider : null;
     setCreating(true);
-    const created = await createBoardTask({ boardId, cwd, description });
+    const created = await createBoardTask({
+      boardId,
+      cwd,
+      description,
+      ...(provider ? { provider } : {}),
+    });
     setCreating(false);
     if (!created) return; // keep the form so nothing the user typed is lost
     setDraft("");
@@ -688,6 +745,25 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       </span>
     ) : null;
   };
+
+  /**
+   * Marker on a folder whose tasks run one after another: the switch itself
+   * lives in the folder menu, this says at a glance that the queue is armed.
+   */
+  const renderQueueBadge = (cwd: string) =>
+    folderAutoRun?.[cwd] ? (
+      <span className={styles.queueBadge} title={t("chat.boardFolderQueue")} aria-hidden>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M4 7h11M4 12h11M4 17h7"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+          />
+          <path d="M17 11v7l6-3.5-6-3.5Z" fill="currentColor" />
+        </svg>
+      </span>
+    ) : null;
 
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = boardColumn(task);
@@ -983,6 +1059,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <>
                   <span className={styles.railLabel}>{group.label}</span>
                   {renderFolderTag(group.cwd, editingTag ? "rail" : undefined)}
+                  {renderQueueBadge(group.cwd)}
                   <span className={styles.railCount}>
                     {tasks.filter((task) => task.cwd === group.cwd).length}
                   </span>
@@ -1081,6 +1158,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               {group.label}
                             </span>
                             {renderFolderTag(group.cwd, "lane")}
+                            {renderQueueBadge(group.cwd)}
                             <span className={styles.groupCount}>{group.tasks.length}</span>
                             <span className={styles.groupSpacer} />
                             <span className={styles.groupActions}>
@@ -1184,6 +1262,29 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                   }
                                 }}
                               />
+                              {/* The agent the task is created for: the default
+                                  one unless the user picks another here. */}
+                              {taskAgentPicker && agentOptions.length ? (
+                                <div className={styles.composerField}>
+                                  <span className={styles.composerFieldLabel}>
+                                    {t("chat.boardTaskAgent")}
+                                  </span>
+                                  <OptionPicker
+                                    variant="compact"
+                                    placement="up"
+                                    menuTitle={t("chat.boardTaskAgent")}
+                                    placeholder={t("common.pickAgent")}
+                                    value={draftProvider || defaultTaskProvider || ""}
+                                    options={agentOptions.map((agent) => ({
+                                      value: agent.id,
+                                      label: agent.label,
+                                    }))}
+                                    onChange={(value) =>
+                                      setDraftProvider(value as AgentProvider)
+                                    }
+                                  />
+                                </div>
+                              ) : null}
                               <div className={styles.composerActions}>
                                 <button
                                   type="button"
@@ -1481,6 +1582,26 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 />
               </svg>
               {t("chat.folderTagMenu")}
+            </button>
+            {/* The folder's own setting: its tasks run one after another. */}
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={folderAutoRun?.[folderMenu.cwd] === true}
+              className={`${styles.menuItem} ${
+                folderAutoRun?.[folderMenu.cwd] ? `${styles.menuToggleOn} ${styles.switchOn}` : ""
+              }`}
+              onClick={() => {
+                const cwd = folderMenu.cwd;
+                const next = !folderAutoRun?.[cwd];
+                setFolderMenu(null);
+                void setBoardFolderAutoRun(boardId, cwd, next);
+              }}
+            >
+              {t("chat.boardFolderQueue")}
+              <span className={`${styles.switchTrack} ${styles.switchTrackEnd}`} aria-hidden>
+                <span className={styles.switchKnob} />
+              </span>
             </button>
           </div>,
           document.body,

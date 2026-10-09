@@ -218,6 +218,12 @@ export const api = {
       `/api/boards/${id}/folders/tag`,
       { method: "PUT", body: JSON.stringify({ cwd, tag }) },
     ).then((r) => r.folderTags),
+  /** Folder task queue: run its tasks one after another. */
+  setBoardFolderAutoRun: (id: string, cwd: string, autoRun: boolean) =>
+    request<{ ok: boolean; folderAutoRun: Record<string, boolean> }>(
+      `/api/boards/${id}/folders/auto-run`,
+      { method: "PUT", body: JSON.stringify({ cwd, autoRun }) },
+    ).then((r) => r.folderAutoRun),
   deleteBoard: (id: string) =>
     request<{ ok: boolean; boards: BoardDto[] }>(`/api/boards/${id}`, { method: "DELETE" }),
   listBoardSessions: (boardId: string) =>

@@ -157,6 +157,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.showBootSplash !== "boolean") {
     merged.showBootSplash = DEFAULT_SETTINGS.showBootSplash;
   }
+  if (typeof merged.boardTaskAgentPicker !== "boolean") {
+    merged.boardTaskAgentPicker = DEFAULT_SETTINGS.boardTaskAgentPicker;
+  }
   for (const key of ["fontFamily", "fontSize", "lightScheme", "darkScheme"] as const) {
     if (typeof merged[key] !== "string") {
       merged[key] = "";

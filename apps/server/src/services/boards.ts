@@ -17,6 +17,7 @@ async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<B
     : [];
   const byBoard = new Map<string, string[]>();
   const tagsByBoard = new Map<string, Record<string, string>>();
+  const autoRunByBoard = new Map<string, Record<string, boolean>>();
   for (const row of folderRows) {
     const list = byBoard.get(row.boardId) ?? [];
     list.push(row.cwd);
@@ -26,12 +27,18 @@ async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<B
       tags[row.cwd] = row.tag;
       tagsByBoard.set(row.boardId, tags);
     }
+    if (row.autoRun) {
+      const autoRun = autoRunByBoard.get(row.boardId) ?? {};
+      autoRun[row.cwd] = true;
+      autoRunByBoard.set(row.boardId, autoRun);
+    }
   }
   return boardRows.map((row) => ({
     id: row.id,
     name: row.name,
     folders: byBoard.get(row.id) ?? [],
     folderTags: tagsByBoard.get(row.id) ?? {},
+    folderAutoRun: autoRunByBoard.get(row.id) ?? {},
     sortOrder: row.sortOrder ?? 0,
     createdAt: row.createdAt.toISOString(),
   }));
@@ -60,7 +67,15 @@ export async function createBoard(name: string): Promise<BoardDto> {
     .insert(boards)
     .values({ name: name.trim(), sortOrder })
     .returning();
-  return { id: row.id, name: row.name, folders: [], folderTags: {}, sortOrder: row.sortOrder, createdAt: row.createdAt.toISOString() };
+  return {
+    id: row.id,
+    name: row.name,
+    folders: [],
+    folderTags: {},
+    folderAutoRun: {},
+    sortOrder: row.sortOrder,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 export async function updateBoard(
@@ -102,22 +117,28 @@ export async function setBoardFolders(boardId: string, cwds: string[]): Promise<
     seen.add(cwd);
     ordered.push(cwd);
   }
-  // The rows are replaced wholesale to renumber the order, so their tags are
-  // carried over by hand — otherwise every add, remove and reorder wipes them.
-  const keptTags = new Map(
+  // The rows are replaced wholesale to renumber the order, so their tags and
+  // queue switches are carried over by hand — otherwise every add, remove and
+  // reorder wipes them.
+  const kept = new Map(
     (
       await db
-        .select({ cwd: boardFolders.cwd, tag: boardFolders.tag })
+        .select({ cwd: boardFolders.cwd, tag: boardFolders.tag, autoRun: boardFolders.autoRun })
         .from(boardFolders)
         .where(eq(boardFolders.boardId, boardId))
-    ).map((row) => [row.cwd, row.tag]),
+    ).map((row) => [row.cwd, row]),
   );
   await db.delete(boardFolders).where(eq(boardFolders.boardId, boardId));
   let order = 0;
   for (const cwd of ordered) {
-    await db
-      .insert(boardFolders)
-      .values({ boardId, cwd, sortOrder: order++, tag: keptTags.get(cwd) ?? null });
+    const keptRow = kept.get(cwd);
+    await db.insert(boardFolders).values({
+      boardId,
+      cwd,
+      sortOrder: order++,
+      tag: keptRow?.tag ?? null,
+      autoRun: keptRow?.autoRun ?? false,
+    });
   }
   return ordered;
 }
@@ -162,6 +183,52 @@ export async function setBoardFolderTag(
     .returning({ cwd: boardFolders.cwd });
   if (!rows.length) return null;
   return listBoardFolderTags(boardId);
+}
+
+/**
+ * Folder queue switches of a board, keyed by canonical cwd. Only switched-on
+ * folders are listed — the map is read as "this folder runs in order".
+ */
+export async function listBoardFolderAutoRun(
+  boardId: string,
+): Promise<Record<string, boolean>> {
+  const rows = await db
+    .select({ cwd: boardFolders.cwd, autoRun: boardFolders.autoRun })
+    .from(boardFolders)
+    .where(eq(boardFolders.boardId, boardId));
+  const autoRun: Record<string, boolean> = {};
+  for (const row of rows) {
+    if (row.cwd && row.autoRun) autoRun[row.cwd] = true;
+  }
+  return autoRun;
+}
+
+/**
+ * Switch a folder's task queue on or off. Only a folder the board already
+ * carries can be switched — the folder list and its order belong to
+ * `setBoardFolders`. Null = no such board, or the board does not carry that
+ * folder.
+ */
+export async function setBoardFolderAutoRun(
+  boardId: string,
+  cwd: string,
+  autoRun: boolean,
+): Promise<Record<string, boolean> | null> {
+  const normalized = canonicalCwd(cwd);
+  if (!normalized) return null;
+  const board = await db
+    .select({ id: boards.id })
+    .from(boards)
+    .where(eq(boards.id, boardId))
+    .limit(1);
+  if (!board[0]) return null;
+  const rows = await db
+    .update(boardFolders)
+    .set({ autoRun })
+    .where(and(eq(boardFolders.boardId, boardId), eq(boardFolders.cwd, normalized)))
+    .returning({ cwd: boardFolders.cwd });
+  if (!rows.length) return null;
+  return listBoardFolderAutoRun(boardId);
 }
 
 /** True when the board exists and the cwd is one of its configured folders. */

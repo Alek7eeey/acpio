@@ -237,6 +237,8 @@ type AppState = {
   setBoardFolders: (id: string, cwds: string[]) => Promise<void>;
   /** Board folder tag (its one-line note), set or cleared with an empty value. */
   setBoardFolderTag: (id: string, cwd: string, tag: string) => Promise<void>;
+  /** Board folder task queue: start its tasks one after another, top to bottom. */
+  setBoardFolderAutoRun: (id: string, cwd: string, autoRun: boolean) => Promise<void>;
   /** Tasks of the open board — the partitioned session list for /board/:id. */
   boardSessions: SessionDto[];
   refreshBoardSessions: (boardId: string) => Promise<void>;
@@ -1662,6 +1664,12 @@ export const useAppStore = create<AppState>((set, get) => ({
                 folderTags: Object.fromEntries(
                   Object.entries(b.folderTags ?? {}).filter(([cwd]) => res.folders.includes(cwd)),
                 ),
+                // ...and so does its task queue switch.
+                folderAutoRun: Object.fromEntries(
+                  Object.entries(b.folderAutoRun ?? {}).filter(([cwd]) =>
+                    res.folders.includes(cwd),
+                  ),
+                ),
               }
             : b,
         ),
@@ -1678,6 +1686,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     } catch {
       // server offline — keep the current tags
+    }
+  },
+  setBoardFolderAutoRun: async (id, cwd, autoRun) => {
+    // Optimistic: the folder menu flips at once, the row follows on reconcile.
+    set((s) => ({
+      boards: s.boards.map((b) => {
+        if (b.id !== id) return b;
+        const folderAutoRun = { ...b.folderAutoRun };
+        if (autoRun) folderAutoRun[cwd] = true;
+        else delete folderAutoRun[cwd];
+        return { ...b, folderAutoRun };
+      }),
+    }));
+    try {
+      const folderAutoRun = await api.setBoardFolderAutoRun(id, cwd, autoRun);
+      set((s) => ({
+        boards: s.boards.map((b) => (b.id === id ? { ...b, folderAutoRun } : b)),
+      }));
+    } catch {
+      // server offline — the switch keeps the value the user picked
     }
   },
   boardSessions: [],

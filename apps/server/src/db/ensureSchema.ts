@@ -173,6 +173,13 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
 
+  // Folder runs its tasks one after another (task queue), off by default.
+  try {
+    db.run(sql`ALTER TABLE board_folders ADD COLUMN auto_run INTEGER NOT NULL DEFAULT 0`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

@@ -495,6 +495,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatSplit: true,
     chatToolbarStyle: "classic",
     boardAddCardStyle: "card",
+    boardTaskAgentPicker: true,
     chatGitBranchPosition: "below",
     chatChipOptions: {
       folder: { compress: true, truncate: "middle" },

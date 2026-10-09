@@ -112,6 +112,11 @@ export const boardFolders = sqliteTable("board_folders", {
   sortOrder: integer("sort_order").notNull().default(0),
   /** Optional one-line note shown next to the folder name on the board. */
   tag: text("tag"),
+  /**
+   * Run this folder's tasks one after another: the next Todo card starts as
+   * soon as the folder's running task stops, top to bottom.
+   */
+  autoRun: integer("auto_run", { mode: "boolean" }).notNull().default(false),
 });
 
 export const users = sqliteTable("users", {

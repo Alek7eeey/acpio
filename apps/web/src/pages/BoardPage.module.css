@@ -298,6 +298,16 @@
   flex: 1;
 }
 
+/* Folder queue marker: the folder's tasks run one after another (its menu
+   carries the switch itself). */
+.queueBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
 .groupActions {
   display: flex;
   align-items: center;
@@ -408,6 +418,24 @@
 
 .addCardCompact:active {
   transform: none;
+}
+
+/* Creation form: the agent the task is created for — its label left, the
+   picker right, on a line of its own like the "start immediately" switch. */
+.composerField {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.composerFieldLabel {
+  flex: 0 0 auto;
 }
 
 .composerInput {

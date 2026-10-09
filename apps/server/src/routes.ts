@@ -72,6 +72,7 @@ import {
   deleteBoard,
   deleteBoardSessions,
   listBoards,
+  setBoardFolderAutoRun,
   setBoardFolderTag,
   setBoardFolders,
   updateBoard,
@@ -244,6 +245,7 @@ const settingsSchema = z.object({
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   boardAddCardStyle: z.enum(["card", "compact", "hidden"]).optional(),
+  boardTaskAgentPicker: z.boolean().optional(),
   showBootSplash: z.boolean().optional(),
   fontFamily: z.string().optional(),
   fontSize: z.string().optional(),
@@ -764,6 +766,16 @@ export async function registerRoutes(app: FastifyInstance) {
     const folderTags = await setBoardFolderTag(id, body.cwd, body.tag);
     if (folderTags === null) return reply.code(404).send({ error: "Not found" });
     return { ok: true, folderTags };
+  });
+  // Switch a board folder's task queue on or off (tasks run one after another).
+  app.put("/api/boards/:id/folders/auto-run", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ cwd: z.string().min(1).max(4096), autoRun: z.boolean() })
+      .parse(req.body ?? {});
+    const folderAutoRun = await setBoardFolderAutoRun(id, body.cwd, body.autoRun);
+    if (folderAutoRun === null) return reply.code(404).send({ error: "Not found" });
+    return { ok: true, folderAutoRun };
   });
   app.delete("/api/boards/:id", async (req, reply) => {
     const { id } = req.params as { id: string };

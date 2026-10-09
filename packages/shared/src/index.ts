@@ -891,6 +891,13 @@ export interface BoardDto {
   folders: string[];
   /** Tags (short notes) of the board's folders, keyed by canonical cwd. */
   folderTags: Record<string, string>;
+  /**
+   * Folders whose tasks are started one after another, keyed by canonical cwd.
+   * A folder waits for its running task to stop before starting the next Todo
+   * card, so its tasks run top to bottom on their own. Only switched-on folders
+   * appear, so the map stays sparse.
+   */
+  folderAutoRun: Record<string, boolean>;
   sortOrder: number;
   createdAt: string;
 }
@@ -1362,6 +1369,11 @@ export interface AppSettings {
   chatToolbarStyle: ChatToolbarStyle;
   /** Look of the "Add task" placeholder in empty board groups. */
   boardAddCardStyle: BoardAddCardStyle;
+  /**
+   * Agent picker in the board's new-task form. Off hides the control: the task
+   * is created for the default agent, and the run menu can still pick another.
+   */
+  boardTaskAgentPicker: boolean;
   /** Position of the Git branch bar: "below" the input or "above" as a chip. */
   chatGitBranchPosition?: "below" | "above";
   /** Per-chip composer options: shrink behaviour and what each chip shows. */
@@ -1467,6 +1479,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatSplit: true,
   chatToolbarStyle: "classic",
   boardAddCardStyle: "card",
+  boardTaskAgentPicker: true,
   chatGitBranchPosition: "below",
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
