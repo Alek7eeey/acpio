@@ -31,6 +31,7 @@ import {
   type HarnessSessionDto,
   type ModelOption,
   type ModelParamDto,
+  type PromptDelivery,
   type SessionDetailDto,
   type SessionDto,
   type SlashCommandDto,
@@ -67,9 +68,9 @@ import {
   saveSessionUsage,
   markBoardTaskStarted,
 } from "../services/sessions.js";
+import { refineSessionTitle } from "../services/chatTitle.js";
 import { broadcastToSession } from "../services/wsHub.js";
 import { adapterCommand, adapters, getAdapter } from "../adapters/registry.js";
-import { reconcileModelCatalog } from "./cliModelCatalog.js";
 import {
   AcpClient,
   AcpRpcError,
@@ -345,7 +346,9 @@ function toModelList(options: ConfigOption[]): ModelOption[] {
   return (modelOpt?.options ?? []).map((o) => ({
     value: o.value,
     name: modelDisplayName(o.value, o.name),
-    provider: modelProviderFromValue(o.value),
+    // The builtin agent sends the provider name explicitly (its value is
+    // `providerId::modelId`, which carries no `/` prefix to derive from).
+    provider: o.provider ?? modelProviderFromValue(o.value),
   }));
 }
 
@@ -392,13 +395,8 @@ function modelsCacheTtlMs(provider: AgentProvider): number {
   return adapter?.cloudCatalog ? 2 * 60_000 : 24 * 60_000;
 }
 
-async function finalizeModelList(
-  provider: AgentProvider,
-  settings: Awaited<ReturnType<typeof getSettings>>,
-  acpModels: ModelOption[],
-): Promise<ModelOption[]> {
-  const reconciled = await reconcileModelCatalog(provider, settings, acpModels);
-  return filterDeniedModels(provider, reconciled);
+function finalizeModelList(provider: AgentProvider, acpModels: ModelOption[]): ModelOption[] {
+  return filterDeniedModels(provider, acpModels);
 }
 
 function pickCurrentModel(
@@ -437,10 +435,27 @@ type TurnOpts = {
   cwd: string;
   mode: AgentMode;
   titleHint?: string;
+  /**
+   * Source text for a model-written title of THIS session's first message.
+   * Absent when the setting is off, the title is not auto-derived (the user
+   * renamed the chat), or this is not the first message.
+   */
+  aiTitle?: string;
   /** Edit existing user message: truncate later turns and regenerate. */
   editMessageId?: string;
   /** Files to attach to a NEW user message; paths on the server machine. */
   attachments?: AttachmentInput[];
+  /**
+   * Open the chat's stored agent session even when resume-on-restart is off.
+   * A continuation after a crash is meaningless without the context the
+   * interrupted turn was building, so it asks for the stored session outright.
+   */
+  forceRestore?: boolean;
+  /**
+   * How this message reaches a busy agent. Absent = `queue`, the behaviour of
+   * every prompt that came through the wire before this existed.
+   */
+  delivery?: PromptDelivery;
 };
 
 /** Attachment chosen from the server machine — referenced or staged into the cwd. */
@@ -574,6 +589,12 @@ class SessionRuntime {
    * call finished — those must not clobber the terminal status.
    */
   terminalToolCallIds = new Set<string>();
+  /** Wall-clock start per tool call id — the source for the `durationMs` stamp. */
+  toolStartedAtByCallId = new Map<string, number>();
+  /** When the last tool call went terminal; the next token's `ttftMs` anchors here. */
+  lastToolFinishedAt: number | null = null;
+  /** A tool finished but no assistant token streamed yet — the next new part carries `ttftMs`. */
+  ttftPending = false;
   /** omp `_omp/agents/update` subagent cards, keyed by registry agent id. */
   subagentPartByAgentId = new Map<string, string>();
   /**
@@ -591,6 +612,14 @@ class SessionRuntime {
   availableCommands: import("@acpio/shared").SlashCommandDto[] = [];
   pending = new Map<string, PendingRequest>();
   running = false;
+  /**
+   * Resolves when the live turn has released the runtime — its own `finally`
+   * resets `running`/`acceptingStream`, which a steer must wait out before it
+   * starts the turn that replaces it.
+   */
+  turnSettled: Promise<void> | null = null;
+  /** Set while a steer owns the next turn: `dequeueTurn` must not race it. */
+  steerWaiting = false;
   /** True from the moment a prompt is accepted until its turn actually starts.
    *  The ACP cold start (spawn + initialize) can take seconds, and `running` is
    *  only set inside runTurn — without this flag both `GET /sessions/:id/turn`
@@ -871,7 +900,9 @@ async function bootAcp(
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
     const adapter = getAdapter(opts.provider);
-    const client = new AcpClient(adapter, settings, opts.cwd, opts.mode);
+    // The live getter is what lets a settings knob (built-in agent context
+    // management) reach a chat that is already running.
+    const client = new AcpClient(adapter, settings, opts.cwd, opts.mode, () => getSettings());
     rt.client = client;
     rt.provider = opts.provider;
     rt.adapter = adapter;
@@ -1012,12 +1043,7 @@ async function bootAcp(
         } finally {
           rt.ingestingReplay = false;
         }
-        const settings = await getSettings();
-        const models = await finalizeModelList(
-          opts.provider,
-          settings,
-          toModelList(client.configOptions),
-        );
+        const models = finalizeModelList(opts.provider, toModelList(client.configOptions));
         const modelParams = toModelParams(client.configOptions);
         const modes = toModesList(client.configOptions, getAdapter(opts.provider).defaultModes, client.sessionModes);
         const currentModel = pickCurrentModel(
@@ -1054,18 +1080,25 @@ async function bootAcp(
         });
         setAgentAvailable(opts.provider, true);
         if (paramsProbe?.provider === opts.provider) disposeParamsProbe();
-        await updateSession(sessionId, {
-          acpSessionId: client.sessionId,
-          // Don't clobber an in-flight prompt if warm-up finishes during runPrompt,
-          // and don't unlock a chat that is parked on an unanswered question —
-          // merely opening it must not pretend the agent is done asking. `startingTurn`
-          // covers the gap before runTurn flips `running`: the POST /prompt's own
-          // cold start finishing here would otherwise write "idle" over its
-          // "running", and a reloaded tab would restore the chat as finished.
-          ...(rt.running || rt.startingTurn || hasPendingQuestion(detail)
-            ? {}
-            : { status: "idle" as const }),
-        });
+        await updateSession(
+          sessionId,
+          {
+            acpSessionId: client.sessionId,
+            // Don't clobber an in-flight prompt if warm-up finishes during runPrompt,
+            // and don't unlock a chat that is parked on an unanswered question —
+            // merely opening it must not pretend the agent is done asking. `startingTurn`
+            // covers the gap before runTurn flips `running`: the POST /prompt's own
+            // cold start finishing here would otherwise write "idle" over its
+            // "running", and a reloaded tab would restore the chat as finished.
+            ...(rt.running || rt.startingTurn || hasPendingQuestion(detail)
+              ? {}
+              : { status: "idle" as const }),
+          },
+          // A boot is bookkeeping, not work: it must not restamp the activity
+          // stamp the board's Wait column orders by, or opening a task would
+          // send its card to the top of the column on its own.
+          { touch: false },
+        );
         return client;
       } catch (err) {
         rt.client = null;
@@ -1332,6 +1365,34 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     return;
   }
 
+  // A harness folded older turns into a digest. This is a row of its own in the
+  // thread — the reader has to see the squeeze, not find the transcript quietly
+  // shorter — so it becomes a part like any other, and the viewer keeps it out
+  // of the turn's work block.
+  if (update.kind === "compaction") {
+    if (!rt.acceptingStream) return;
+    const raw = update.raw;
+    const count = (value: unknown) =>
+      typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
+    const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
+    const coveredBefore = count(raw.coveredBefore);
+    const coveredAfter = count(raw.coveredAfter);
+    const tokensBefore = count(raw.tokensBefore);
+    const tokensAfter = count(raw.tokensAfter);
+    const summaryOutputTokens = count(raw.summaryOutputTokens);
+    const messageId = await ensureAssistantMessage(rt);
+    await appendPart(rt.sessionId, messageId, "compaction", {
+      manual: raw.manual === true,
+      ...(coveredBefore !== null ? { coveredBefore } : {}),
+      ...(coveredAfter !== null ? { coveredAfter } : {}),
+      ...(tokensBefore !== null ? { tokensBefore } : {}),
+      ...(tokensAfter !== null ? { tokensAfter } : {}),
+      ...(summaryOutputTokens !== null ? { summaryOutputTokens } : {}),
+      ...(summary ? { summary } : {}),
+    });
+    return;
+  }
+
   if (update.kind === "user_message_chunk") {
     if (!rt.ingestingReplay || !update.text) return;
     if (rt.ingestLastRole !== "user" || !rt.ingestUserMessageId) {
@@ -1368,6 +1429,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       "text",
       update.text,
       rt.openTextPartId,
+      rt.openTextPartId ? undefined : takeTtftPayload(rt),
     );
     return;
   }
@@ -1387,6 +1449,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         "thought",
         update.thought,
         rt.turnThoughtPartId ?? rt.openThoughtPartId,
+        (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeTtftPayload(rt),
       );
       rt.turnThoughtPartId = partId;
       rt.openThoughtPartId = partId;
@@ -1399,6 +1462,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         "text",
         update.text,
         rt.openTextPartId,
+        rt.openTextPartId ? undefined : takeTtftPayload(rt),
       );
     }
     return;
@@ -1420,6 +1484,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       "thought",
       update.text,
       rt.turnThoughtPartId ?? rt.openThoughtPartId,
+      (rt.turnThoughtPartId ?? rt.openThoughtPartId) ? undefined : takeTtftPayload(rt),
     );
     rt.turnThoughtPartId = partId;
     rt.openThoughtPartId = partId;
@@ -1439,7 +1504,12 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
     // OMP labels MCP tools generically ("MCP: tool"); the real name rides in
     // `toolName`. Cursor sends neither — its MCP calls only carry the args, so
     // the display falls back to the call's own subject (query/path/…).
-    if (toolCallId) rt.toolStartRawByCallId.set(toolCallId, update.raw);
+    if (toolCallId) {
+      rt.toolStartRawByCallId.set(toolCallId, update.raw);
+      if (!rt.toolStartedAtByCallId.has(toolCallId)) {
+        rt.toolStartedAtByCallId.set(toolCallId, Date.now());
+      }
+    }
     const title =
       toolDisplayTitle(update.title ?? "", toolNameFromRaw(update.raw), argsFromRaw(update.raw)) ||
       "Tool";
@@ -1466,6 +1536,13 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       (extra.title && !isPlaceholderSubagentTitle(extra.title) ? extra.title : "") ||
       (title && !isPlaceholderSubagentTitle(title) && !isGenericToolTitle(title) ? title : "") ||
       (isSubagent ? "Subagent" : title);
+    // Terminal on the very first event (instant tool): the start is this event.
+    const firstEventTerminal =
+      (update.status === "completed" || update.status === "failed") && !rt.ingestingReplay;
+    if (firstEventTerminal) {
+      rt.lastToolFinishedAt = Date.now();
+      rt.ttftPending = true;
+    }
     const payload: Record<string, unknown> = {
       toolCallId,
       subagentType:
@@ -1477,6 +1554,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       kind,
       raw: update.raw,
       ...extra,
+      ...(firstEventTerminal ? { durationMs: 0 } : {}),
       // Resolved display title wins over ACP placeholders from extra/raw.
       title: displayTitle,
       description: displayTitle,
@@ -1576,6 +1654,17 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
         ? update.raw
         : mergedRaw;
     const live = isSubagent ? extractSubagentLiveContent(liveRaw) : { thinking: [], result: "" };
+    // First terminal event stamps the tool duration and opens the "next token
+    // after a tool" window; late async progress must not reopen the card.
+    const firstTerminal =
+      terminal &&
+      !rt.ingestingReplay &&
+      (!toolCallId || !rt.terminalToolCallIds.has(toolCallId));
+    const durationMs = firstTerminal ? toolDurationMs(rt, toolCallId) : undefined;
+    if (firstTerminal) {
+      rt.lastToolFinishedAt = Date.now();
+      rt.ttftPending = true;
+    }
     // Terminal status is final: late async progress must not reopen the card.
     if (status === "completed" || status === "failed") {
       if (toolCallId) rt.terminalToolCallIds.add(toolCallId);
@@ -1603,11 +1692,16 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       }
     }
     if (!partId) {
+      // First event seen for this call id (the `tool_call` stream dropped it) — the clock starts here.
+      if (toolCallId && !rt.toolStartedAtByCallId.has(toolCallId)) {
+        rt.toolStartedAtByCallId.set(toolCallId, Date.now());
+      }
       const part = await appendPart(rt.sessionId, messageId, isSubagent ? "subagent" : "tool_call", {
         toolCallId,
         subagentType:
           (kindKey && kindKey !== "other" ? kind : "") || (isSubagent ? "task" : undefined),
         status: normalizedStatus,
+        ...(durationMs !== undefined ? { durationMs } : {}),
         kind,
         raw: mergedRaw,
         ...extra,
@@ -1643,6 +1737,7 @@ async function handleUpdate(rt: SessionRuntime, update: import("./AcpClient.js")
       {
         toolCallId,
         status: normalizedStatus,
+        ...(durationMs !== undefined ? { durationMs } : {}),
         kind,
         raw: mergedRaw,
         ...extra,
@@ -2421,6 +2516,15 @@ function buildPriorTranscript(
   return lines.join("\n\n");
 }
 
+/**
+ * How long a steer waits for the turn it interrupted to release the runtime.
+ * The wait is normally a few milliseconds; the ceiling is a safety net for a
+ * turn that wedged before it could reach its own `finally` (a persist failure
+ * on the way in), where waiting forever would strand the message with no turn
+ * and no error.
+ */
+const TURN_SETTLE_WAIT_MS = 3_000;
+
 export async function runPrompt(
   sessionId: string,
   text: string,
@@ -2486,7 +2590,10 @@ export async function runPrompt(
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
   // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
   // OLD transcript (including the reply being replaced) — fresh context is correct.
-  const acpReady = ensureAcp(sessionId, opts, { preferResume: !opts.editMessageId });
+  const acpReady = ensureAcp(sessionId, opts, {
+    preferResume: !opts.editMessageId,
+    forceRestore: opts.forceRestore,
+  });
   // Failures before runTurn never hit its finalize path — without restoring the
   // row here, a rejected cold start (or any persist error) would strand the chat
   // in "running" forever and lock the composer. Once runTurn owns the turn it
@@ -2564,6 +2671,14 @@ export async function runPrompt(
       await updateSession(sessionId, { title });
     }
   }
+  // The message already named the chat; now let a model make that name a
+  // short, clear task title. Fire-and-forget: a slow or failed call must not
+  // hold up the turn, and the message-derived title is a fine place to land.
+  if (opts.aiTitle) {
+    void refineSessionTitle(sessionId, opts.aiTitle, settings).catch((err) => {
+      console.error("chat title refinement failed", err);
+    });
+  }
   } catch (err) {
     settlePreTurnClaim();
     throw err;
@@ -2572,7 +2687,40 @@ export async function runPrompt(
   // claim if boot failed before the turn took it over.
   acpReady.catch(settlePreTurnClaim);
 
+  const delivery = opts.delivery ?? "queue";
+  // Steer: the user wants this message to go now, so the live turn has to go
+  // first. Stop's own path keeps the prompts already queued — only the runtime
+  // is taken for this turn, then everything below runs as a normal prompt.
+  if (delivery === "steer" && (rt.running || rt.pending.size > 0) && !rt.disposing) {
+    rt.steerWaiting = true;
+    try {
+      await stopLiveTurn(rt, true);
+    } finally {
+      rt.steerWaiting = false;
+    }
+  }
+
   if (rt.running || rt.pending.size > 0) {
+    if (
+      delivery === "afterStep" &&
+      rt.running &&
+      rt.pending.size === 0 &&
+      adapters.get(opts.provider)?.midTurnSteering === true
+    ) {
+      // Fold the text into the turn that is running: the model reads it on its
+      // next call, the current step is not interrupted and the answer keeps
+      // streaming into the same turn. The user message stays persisted, so the
+      // transcript shows what was asked. A turn that ends first (or an agent
+      // that cannot fold) falls through to the normal queue — so the wait
+      // covers only the window in which the prompt is not open yet (the turn
+      // is still booting), not a turn that genuinely has no next step left.
+      const folded = await steerUntilFolded(rt, promptUserText);
+      if (folded) {
+        rt.startingTurn = false;
+        await updateSession(sessionId, { status: "running" }).catch(() => {});
+        return { queued: false, steered: true };
+      }
+    }
     // A turn is already running (multitask burst): the user message above is
     // persisted immediately; the agent turn itself runs FIFO once the current
     // turn finishes, so streams never interleave. The active turn owns the
@@ -2601,6 +2749,119 @@ export async function runPrompt(
   } finally {
     rt.startingTurn = false;
   }
+}
+
+/**
+ * Hand a mid-turn message to the agent for the turn it has to ride — waiting
+ * out the window in which the runtime is already marked busy but the turn is
+ * still booting: `session/steer` before the agent's prompt is open answers
+ * "nothing to fold into", and that one answer used to drop the message into the
+ * end-of-turn queue — the exact behaviour `afterStep` exists to avoid (the
+ * message then arrived no differently from a plain queued prompt). The wait is
+ * bounded: a turn that never opens its prompt, or ends before taking the text,
+ * falls back to the queue as before.
+ */
+export async function steerUntilFolded(
+  rt: {
+    running: boolean;
+    pending: { size: number };
+    disposing: boolean;
+    client: { steer: (text: string) => Promise<boolean> } | null;
+  },
+  text: string,
+  maxWaitMs: number = AFTER_STEP_STEER_MAX_WAIT_MS,
+  retryMs: number = AFTER_STEP_STEER_RETRY_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    // The turn this message was aimed at is gone (or the runtime is being
+    // torn down): nothing left to fold into — the caller queues as usual.
+    if (rt.disposing || !rt.running) return false;
+    // Parked on a question, the model loop would not read the text until the
+    // user answers: keep the old queue behaviour instead of holding the wait.
+    if (rt.pending.size > 0) return false;
+    if (rt.client) {
+      // Blocks until the agent folds the text into its next model call (true)
+      // or answers that there is nothing to fold into yet (false: the prompt
+      // is not open — still booting — or it just closed).
+      const folded = await rt.client.steer(text);
+      if (folded) return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, retryMs));
+  }
+}
+
+/**
+ * Stop the live turn: cancel the agent, close the parts it had open and answer
+ * whatever it was waiting on with "cancelled". `keepTurnQueue` separates the
+ * two callers — Stop drops every queued prompt (the user asked to halt work),
+ * while a steer keeps them: it only borrows the runtime for its own turn.
+ */
+async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
+  const sessionId = rt.sessionId;
+  rt.acceptingStream = false;
+  rt.running = false;
+  rt.lastStopAt = Date.now();
+  if (!keepTurnQueue) rt.turnQueue = [];
+  rt.openTextPartId = null;
+  rt.openThoughtPartId = null;
+  // Mark in-flight tool/subagent calls as cancelled so their spinners stop
+  // (the agent won't send final statuses for calls it was interrupted on).
+  for (const [, partId] of rt.toolPartByCallId) {
+    try {
+      await updatePart(sessionId, partId, { status: "cancelled", interrupted: true });
+    } catch {
+      // ignore secondary failures
+    }
+  }
+  for (const [reqKey, p] of rt.pending) {
+    const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
+    try {
+      if (p.kind === "permission") {
+        rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+      } else if (p.kind === "elicitation") {
+        rt.client?.respond(id, { action: "cancel" });
+      } else {
+        // ask_question / create_plan
+        rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
+      }
+    } catch {
+      // ignore respond failures
+    }
+    p.resolve(undefined);
+    // Stop ends the question too: leaving the part "pending" would keep it
+    // answerable (and the session parked across restarts) after the user
+    // explicitly halted the turn.
+    if (p.kind === "elicitation" || p.kind === "ask_question") {
+      void markQuestionPartAnswered(sessionId, reqKey, {
+        outcome: { outcome: "cancelled" },
+      });
+    }
+  }
+  rt.pending.clear();
+  try {
+    await rt.client?.cancel();
+  } catch {
+    // ignore
+  }
+  if (keepTurnQueue) {
+    // The interrupted turn's own finalize is still running behind this call and
+    // its `finally` resets `running`/`acceptingStream` — landing on the turn we
+    // are about to start. Wait it out (`steerWaiting` holds the queue until
+    // then) so the new turn owns the runtime uncontested.
+    if (rt.turnSettled) {
+      const wedged = new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, TURN_SETTLE_WAIT_MS);
+        (timer as { unref?: () => void }).unref?.();
+      });
+      await Promise.race([rt.turnSettled.catch(() => {}), wedged]);
+    }
+    return;
+  }
+  // A deferred MCP restart (restartOnIdle) still needs to run even though the
+  // queue was cleared — otherwise the old MCP list survives Stop.
+  void dequeueTurn(rt);
 }
 
 const STREAM_SETTLE_QUIET_MS = 450;
@@ -2634,6 +2895,10 @@ const STOP_ADOPT_GRACE_MS = 10_000;
 const PROMPT_BUSY_RETRY_MS = 1_000;
 /** Give up on session_busy after this long and surface the agent's error (Stop is the escape hatch meanwhile). */
 const PROMPT_BUSY_MAX_WAIT_MS = 30 * 60_000;
+/** afterStep: pause between rejected `session/steer` attempts while the running turn opens its prompt. */
+const AFTER_STEP_STEER_RETRY_MS = 250;
+/** afterStep: bound on that wait — past it the message queues for the end of the turn as before. */
+const AFTER_STEP_STEER_MAX_WAIT_MS = 30_000;
 
 function isActiveToolStatus(status: string | undefined): boolean {
   const s = String(status ?? "pending").toLowerCase();
@@ -2687,6 +2952,26 @@ async function finalizeTurn(
   await completeDanglingTurnParts(sessionId);
   await stampThoughtDurations(sessionId, Math.max(0, Date.now() - agentStartedAt));
   await finishTurnSessionStatus(sessionId, rt, status);
+}
+
+/** `durationMs` for a call whose first event we timed; undefined when unknown. */
+function toolDurationMs(rt: SessionRuntime, toolCallId: string | null): number | undefined {
+  if (!toolCallId) return undefined;
+  const start = rt.toolStartedAtByCallId.get(toolCallId);
+  if (start === undefined) return undefined;
+  return Math.max(0, Date.now() - start);
+}
+
+/**
+ * Consume the pending "first token after a tool" mark: the next NEW text/thought
+ * part carries `ttftMs` — time from the tool's terminal status to the first
+ * streamed token. Continuations of an open part don't consume it.
+ */
+function takeTtftPayload(rt: SessionRuntime): Record<string, unknown> | undefined {
+  if (!rt.ttftPending || rt.lastToolFinishedAt == null) return undefined;
+  const ttftMs = Math.max(0, Date.now() - rt.lastToolFinishedAt);
+  rt.ttftPending = false;
+  return { ttftMs };
 }
 
 function trackToolFlight(rt: SessionRuntime, toolCallId: string, status: string | undefined) {
@@ -2928,6 +3213,8 @@ function adoptAutonomousTurn(rt: SessionRuntime) {
   rt.turnHasThought = false;
   rt.inFlightToolCalls = 0;
   rt.toolStatusByCallId.clear();
+  rt.toolStartedAtByCallId.clear();
+  rt.ttftPending = false;
   rt.interactiveAnswerAt = null;
   rt.streamedAfterInteractiveAnswer = false;
   rt.elicitationThisTurn = false;
@@ -3012,6 +3299,12 @@ async function runTurn(
   acpReady: Promise<AcpClient>,
 ) {
   const locale = settings.locale ?? "en";
+  // Published before anything can interrupt: whoever stops this turn awaits it
+  // instead of racing the `finally` below, which resets the runtime.
+  let releaseTurn!: () => void;
+  rt.turnSettled = new Promise<void>((resolve) => {
+    releaseTurn = resolve;
+  });
   rt.running = true;
   rt.streamGen += 1;
   rt.acceptingStream = true;
@@ -3024,6 +3317,8 @@ async function runTurn(
   rt.turnHasThought = false;
   rt.inFlightToolCalls = 0;
   rt.toolStatusByCallId.clear();
+  rt.toolStartedAtByCallId.clear();
+  rt.ttftPending = false;
   rt.interactiveAnswerAt = null;
   rt.streamedAfterInteractiveAnswer = false;
   rt.elicitationThisTurn = false;
@@ -3204,6 +3499,8 @@ async function runTurn(
     rt.running = false;
     rt.acceptingStream = false;
     void dequeueTurn(rt);
+    releaseTurn();
+    rt.turnSettled = null;
   }
 }
 
@@ -3233,6 +3530,9 @@ async function applyDeferredRestart(rt: SessionRuntime) {
 /** Start the next FIFO-queued turn, if any (after the current turn finished). */
 async function dequeueTurn(rt: SessionRuntime) {
   if (rt.running) return;
+  // A steer already took the next turn: starting a queued one here would run
+  // two turns on one runtime. The steer's own turn re-enters when it finishes.
+  if (rt.steerWaiting) return;
   if (rt.pending.size > 0) return;
   // MCP servers / the model were re-configured while the previous turn was
   // running — the OMP/Cursor protocol only accepts those at session/new, so
@@ -3268,57 +3568,7 @@ async function dequeueTurn(rt: SessionRuntime) {
 
 export async function cancelPrompt(sessionId: string) {
   const rt = runtimes.get(sessionId);
-  if (rt) {
-    rt.acceptingStream = false;
-    rt.running = false;
-    rt.lastStopAt = Date.now();
-    // Stop drops every queued turn too — the user asked to halt work.
-    rt.turnQueue = [];
-    rt.openTextPartId = null;
-    rt.openThoughtPartId = null;
-    // Mark in-flight tool/subagent calls as cancelled so their spinners stop
-    // (the agent won't send final statuses for calls it was interrupted on).
-    for (const [, partId] of rt.toolPartByCallId) {
-      try {
-        await updatePart(sessionId, partId, { status: "cancelled", interrupted: true });
-      } catch {
-        // ignore secondary failures
-      }
-    }
-    for (const [reqKey, p] of rt.pending) {
-      const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
-      try {
-        if (p.kind === "permission") {
-          rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
-        } else if (p.kind === "elicitation") {
-          rt.client?.respond(id, { action: "cancel" });
-        } else {
-          // ask_question / create_plan
-          rt.client?.respond(id, { outcome: { outcome: "cancelled" } });
-        }
-      } catch {
-        // ignore respond failures
-      }
-      p.resolve(undefined);
-      // Stop ends the question too: leaving the part "pending" would keep it
-      // answerable (and the session parked across restarts) after the user
-      // explicitly halted the turn.
-      if (p.kind === "elicitation" || p.kind === "ask_question") {
-        void markQuestionPartAnswered(sessionId, reqKey, {
-          outcome: { outcome: "cancelled" },
-        });
-      }
-    }
-    rt.pending.clear();
-    try {
-      await rt.client?.cancel();
-    } catch {
-      // ignore
-    }
-    // A deferred MCP restart (restartOnIdle) still needs to run even though
-    // the queue was cleared — otherwise the old MCP list survives Stop.
-    void dequeueTurn(rt);
-  }
+  if (rt) await stopLiveTurn(rt, false);
   await updateSession(sessionId, { status: "idle" });
 }
 
@@ -3337,7 +3587,7 @@ async function probeResultFromClient(
 ) {
   const settings = await getSettings();
   const acpModels = toModelList(client.configOptions);
-  const models = await finalizeModelList(selected, settings, acpModels);
+  const models = finalizeModelList(selected, acpModels);
   const modelParams = toModelParams(client.configOptions);
   const modes = toModesList(client.configOptions, getAdapter(selected).defaultModes, client.sessionModes);
   const sessionId = client.sessionId ?? undefined;
@@ -3698,11 +3948,7 @@ export async function setSessionModel(
       { model, modelParams: params },
     );
     const settings = await getSettings();
-    const models = await finalizeModelList(
-      detail.provider,
-      settings,
-      toModelList(client.configOptions),
-    );
+    const models = finalizeModelList(detail.provider, toModelList(client.configOptions));
     const modelParams = toModelParams(client.configOptions);
     const modes = toModesList(client.configOptions, getAdapter(detail.provider).defaultModes, client.sessionModes);
     // Trust only what the agent reports as current — never echo the pick back.
@@ -4260,6 +4506,68 @@ export function replayPendingInteractive(sessionId: string) {
       });
     }
   })();
+}
+
+/**
+ * Boots that continue several chats at once are staggered: each resumed turn
+ * boots its own agent process, and a dozen of them in the same tick would
+ * thrash the machine. A turn runs for minutes, so serialising the starts costs
+ * nothing.
+ */
+const INTERRUPTED_RESUME_STAGGER_MS = 1_500;
+
+/**
+ * Carry on the chats whose live turn died with the previous process.
+ * `reconcileStaleSessions` already unlocked their rows and handed back the ids;
+ * the interrupted work itself survives only in the agent's own stored session,
+ * so continuing means resuming that context and asking the agent to pick up
+ * where it stopped. Returns the ids it took on, immediately — a turn runs for
+ * minutes and the boot sequence must not wait for it.
+ */
+export async function resumeInterruptedTurns(
+  sessionIds: readonly string[],
+): Promise<string[]> {
+  if (!sessionIds.length) return [];
+  const settings = await getSettings();
+  if (!settings.resumeInterruptedTurns) return [];
+  const locale = settings.locale ?? "en";
+
+  const drive = async (sessionId: string) => {
+    // Something may already own this chat — a prompt that raced the boot sweep
+    // would otherwise be duplicated by the continuation.
+    const live = getLiveTurnState(sessionId);
+    if (live && (live.running || live.waiting)) return;
+    const detail = await getSessionDetail(sessionId);
+    if (!detail) return;
+    appendDeepLog({
+      kind: "interrupted-resume",
+      sessionId,
+      provider: detail.provider,
+      cwd: detail.cwd,
+    });
+    void runPrompt(sessionId, t(locale, "agent.continueInterrupted"), {
+      provider: detail.provider,
+      cwd: detail.cwd,
+      mode: detail.mode,
+      forceRestore: true,
+    }).catch((err) => {
+      // runTurn already surfaced the failure in the chat's banner.
+      console.error(`[acp:${sessionId}] interrupted turn failed to continue`, err);
+    });
+  };
+
+  void (async () => {
+    for (const [index, sessionId] of sessionIds.entries()) {
+      if (index > 0) {
+        await new Promise((r) => setTimeout(r, INTERRUPTED_RESUME_STAGGER_MS));
+      }
+      await drive(sessionId).catch((err) => {
+        console.error(`[acp:${sessionId}] resume interrupted turn failed`, err);
+      });
+    }
+  })();
+
+  return [...sessionIds];
 }
 
 /**

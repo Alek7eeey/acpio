@@ -95,6 +95,18 @@ Reset agents**), since MCP is only handed to the agent at `session/new|resume|lo
 model/MCP changes brings back the agent's ACP session (`resume` / `load`) instead of
 starting blank. Locale changes do not restart the agent — only UI and prompt hints update.
 
+### Continue interrupted chats
+
+**Settings → Continue interrupted chats** (on by default) covers the other restart: acpio
+was killed — crash, `Ctrl+C`, a reboot — while chats were working. A chat left in
+`running`/`waiting` has no process behind it any more, so at the next start acpio reopens
+the agent session that turn was using and sends *"the previous run was interrupted, continue
+where you stopped"* into the chat. The continuation is a normal visible turn: it streams,
+respects permissions and can be stopped. Chats waiting on an unanswered question are left
+alone (answering them later resumes them), and a chat whose harness is switched off or whose
+folder is gone is skipped. Turn the setting off to get the old behaviour — the chat is just
+unlocked and the last assistant message says the turn was interrupted.
+
 ## Kanban boards
 
 A **board** is a workspace of its own, for driving work across several projects at once.
@@ -168,16 +180,30 @@ endpoint it can reach.
   e.g. `x-opencode-session`; write `{{sessionId}}` in a value and it is replaced with the
   chat's session id at request time (rows with that placeholder are skipped when the
   settings page probes `/models`, where no session exists).
-- Tools: `read`, `glob`, `grep`, `write`, `edit` and `bash`. `glob`/`grep` search the
+- Tools: `read`, `glob`, `grep`, `write`, `edit`, `bash` and `ask`. `glob`/`grep` search the
   workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
   a file as one batched call and refuses an ambiguous or overlapping anchor instead of
   guessing, writes land through the same three-way merge the other harnesses use, and
   `bash` runs on the host — through Git Bash when it is installed (`C:\Program Files\Git\bin\bash.exe`
   or `bash.exe`/`sh.exe` on PATH; `ACPIO_SHELL` overrides the path), and through `cmd.exe`
   only when no POSIX shell exists, matching what pi does on Windows. Every mutating call
-  asks for permission through the chat's permission card. Plan and Ask modes get `read`,
-  `glob` and `grep` only — plus the read-only MCP tools — so a "look, don't touch" chat
-  cannot edit anything.
+  asks for permission through the chat's permission card. `ask` puts a question to you as the
+  same inline question card the CLI agents use — choices, several choices, an "Other" field or
+  free text — and the turn waits for your answer instead of guessing. Plan and Ask modes get
+  `read`, `glob`, `grep` and `ask` only — plus the read-only MCP tools — so a "look, don't touch"
+  chat cannot edit anything.
+- **Reasoning mode per model.** The composer's model row carries a mode (`Def` · `Low`) and
+  the `⋯` menu picks it. Both values shape the *prompt* only: **Default** leaves it alone,
+  **Low** appends a hard budget to the system prompt — 150 words of private reasoning,
+  written as a failure rather than a wish, because a preference gets reasoned around. The
+  pick is stored per model and comes back when the chat reopens.
+- **Turning thinking off is a chat command, not a mode.** `/thinking off` (or `/thinking on`;
+  bare `/thinking` toggles) makes the agent put `thinking: {"type": "disabled"}` into every
+  request body — the field an endpoint with a thinking knob (MiMo's `thinking`, the common
+  relay switches) understands, and the one that zeroes the reasoning tokens; a `⋯` mode
+  cannot do that, it only asks for brevity. The switch is session-level, is remembered with
+  the session, and binds subagents too. Endpoints without such a knob ignore the unknown
+  body field and keep thinking.
 - Token accounting comes from the endpoint's own `usage`, including prompt-cache hits: the
   context chip shows what the model had to read, and its tooltip reports how much of the
   input was served from the provider's cache (endpoints that never report usage leave the
@@ -252,8 +278,8 @@ The adapter then appears on its own:
 
 - **Own command/args/key** — settings fields declared by the adapter.
 - **Session restore** — `resume` / `load` / `new`.
-- **Models and parameters** — catalog from ACP options, a cloud catalog via `models --json`,
-  or a custom `probeModels`.
+- **Models and parameters** — the list and its params come from the agent's ACP config
+  options (`cloudCatalog` only shortens the cache TTL for a cloud-backed list).
 - **Subagents** — cards from `task` requests, rosters and progress; subagent thinking
   streaming when the harness exposes it.
 - **Todo lists, questions, plans, image generation** — through normalized events.

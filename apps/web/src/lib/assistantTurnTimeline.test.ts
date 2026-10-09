@@ -290,6 +290,84 @@ describe("buildAgentTimeline", () => {
     ];
     expect(shape(parts)).toEqual(["run(1)", "question", "run(1)"]);
   });
+
+  // The harness delivers the ask call's tool_call row after the elicitation it
+  // triggers (the request leaves the tool body directly; the row waits behind
+  // the streamed-text backlog), so the recorded order puts the question above
+  // its own call — 80 of 83 recorded dialogs hold this shape. The call is work
+  // that produced the question: it renders in the block ABOVE the card, not as
+  // a new "Работаю…" block below it. rawInput holds the harness schema
+  // (question/label) while the question part stores the UI conversion
+  // (prompt/label+id), so the match is by content, never byte-equal.
+  const rawQuestions = [
+    {
+      id: "branch",
+      header: "Ветка",
+      question: "Как назвать ветку?",
+      options: [{ label: "автозаполнение", description: "feature/10.0sp2/bb123" }],
+    },
+    { id: "labels", header: "Метки", question: "Метки?", multi: true, options: [{ label: "deploy" }] },
+  ];
+  const uiQuestions = [
+    {
+      id: "branch",
+      prompt: "Как назвать ветку?",
+      options: [{ id: "q0_opt", label: "автозаполнение" }],
+    },
+    { id: "labels", prompt: "Метки?", allowMultiple: true, options: [{ id: "q1_opt", label: "deploy" }] },
+  ];
+  const askCall = (order: number, questions: unknown, title = "Collecting PR answers") =>
+    part("tool_call", order, {
+      toolCallId: "call_ask",
+      title,
+      status: "completed",
+      kind: "other",
+      raw: { sessionUpdate: "tool_call_update", toolCallId: "call_ask", title, rawInput: { questions } },
+    });
+
+  it("lifts the ask call into the run above its question card", () => {
+    const parts = [
+      part("text", 0, { text: "Осталось ответить на вопросы PR." }),
+      part("question", 1, { requestId: "q1", pending: false, title: "Answer 2 questions", questions: uiQuestions }),
+      askCall(2, rawQuestions),
+      part("text", 3, { text: "Дальше работает человек." }),
+    ];
+    const items = buildAgentTimeline(parts);
+    expect(items.map((item) => item.kind)).toEqual(["text", "run", "question", "text"]);
+    const run = items[1];
+    if (run?.kind !== "run") throw new Error("expected a run");
+    expect(run.parts.map((p) => p.payload.title)).toEqual(["Collecting PR answers"]);
+  });
+
+  it("joins the ask call to the open run when no lead-in text precedes", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("question", 1, { requestId: "q1", pending: false, questions: uiQuestions }),
+      askCall(2, rawQuestions),
+    ];
+    const items = buildAgentTimeline(parts);
+    expect(items.map((item) => item.kind)).toEqual(["run", "question"]);
+    const run = items[0];
+    if (run?.kind !== "run") throw new Error("expected a run");
+    expect(run.parts.map((p) => p.payload.title)).toEqual(["Read a.ts", "Collecting PR answers"]);
+  });
+
+  it("keeps an unrelated tool row that follows a question below the card", () => {
+    const parts = [
+      part("tool_call", 0, { title: "Read a.ts", status: "completed" }),
+      part("question", 1, { requestId: "q1", pending: false, questions: uiQuestions }),
+      part("tool_call", 2, { title: "Read b.ts", status: "completed" }),
+    ];
+    expect(shape(parts)).toEqual(["run(1)", "question", "run(1)"]);
+  });
+
+  it("does not match an ask call from another message", () => {
+    const parts = [
+      part("question", 0, { requestId: "q1", pending: false, questions: uiQuestions }),
+      { ...askCall(1, rawQuestions), messageId: "m2" },
+    ];
+    expect(shape(parts)).toEqual(["question", "run(1)"]);
+  });
 });
 
 describe("isSingleItemTimeline", () => {
@@ -394,6 +472,57 @@ describe("question preamble", () => {
     const question = items[2];
     if (question?.kind !== "question") throw new Error("expected a question item");
     expect(question.preamble.map((p) => p.payload.text)).toEqual(["Какой порт использовать?"]);
+  });
+
+  // This harness records the question's own ask call BETWEEN the lead-in and
+  // the question (`text → ask → question`): the request leaves the tool body
+  // directly while the row waits behind the streamed-text backlog. Stopping the
+  // walk at that row left the lead-in as loose dimmed narration under a fresh
+  // run header of its own — the thread read as still working while the agent
+  // was parked on the reader.
+  it("walks through the question's own ask call", () => {
+    const rawQuestions = [
+      { id: "place", question: "Где разместить блок?", options: [{ label: "Интерфейс" }] },
+    ];
+    const uiQuestions = [
+      { id: "place", prompt: "Где разместить блок?", options: [{ id: "opt0", label: "Интерфейс" }] },
+    ];
+    const parts = [
+      sameMessage("thought", 0, { text: "Смотрю, где живут настройки." }),
+      sameMessage("text", 1, { text: "Посмотрел, как это устроено. Коротко по фактам:" }),
+      sameMessage("tool_call", 2, {
+        toolCallId: "call_ask",
+        title: "ask",
+        status: "cancelled",
+        raw: { rawInput: { questions: rawQuestions } },
+      }),
+      sameMessage("question", 3, {
+        requestId: "q1",
+        pending: true,
+        title: "Где разместить блок?",
+        questions: uiQuestions,
+      }),
+    ];
+
+    const preamble = splitQuestionPreamble(parts);
+    expect((preamble.get("question-3") ?? []).map((p) => p.id)).toEqual(["text-1"]);
+
+    // What the thread draws: the lead-in leaves the timeline body, and the ask
+    // call rides into the run above the card — one run, no block of its own.
+    const attached = new Set([...preamble.values()].flat().map((p) => p.id));
+    const body = parts.filter((p) => p.type !== "question" && !attached.has(p.id));
+    expect(buildAgentTimeline(body).map((item) => item.kind)).toEqual(["run"]);
+
+    const items = buildAgentTimeline(parts);
+    expect(items.map((item) => item.kind)).toEqual(["run", "question"]);
+    const run = items[0];
+    if (run?.kind !== "run") throw new Error("expected a run");
+    expect(run.parts.map((p) => p.type)).toEqual(["thought", "tool_call"]);
+    const question = items[1];
+    if (question?.kind !== "question") throw new Error("expected a question item");
+    expect(question.preamble.map((p) => p.payload.text)).toEqual([
+      "Посмотрел, как это устроено. Коротко по фактам:",
+    ]);
   });
 
   it("takes a multi-part lead-in, not just the last one", () => {

@@ -1,0 +1,217 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.viewToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--bg-secondary);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.viewBtn {
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease;
+}
+
+.viewBtn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.viewBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.viewBtnActive {
+  color: var(--text);
+  border-color: var(--border-soft);
+  background: var(--surface);
+}
+
+.plain,
+.diff,
+.diffSplit {
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 12px 12px;
+}
+
+.diff,
+.diffSplit {
+  min-width: 0;
+}
+
+/*
+ * No-wrap mode: the diff grows to its longest line and the surrounding pane
+ * (fullscreen `.scroll`, panel `.diffPane`) scrolls horizontally. Split view
+ * keeps wrapping — its two grid columns cannot stretch per-row in lockstep.
+ */
+.noWrap {
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
+  width: max-content;
+  min-width: 100%;
+  /* border-box keeps the 12px side padding inside that 100%, so a diff whose
+     lines fit gains no phantom horizontal scrollbar. */
+  box-sizing: border-box;
+}
+
+.line {
+  padding: 0 2px;
+}
+
+.file {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.hunk {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.add {
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+}
+
+.ctx {
+  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+}
+
+.del {
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.wordAdd {
+  background: color-mix(in srgb, #22c55e 58%, transparent);
+  border-radius: 2px;
+}
+
+.wordDel {
+  background: color-mix(in srgb, #ef4444 52%, transparent);
+  border-radius: 2px;
+}
+
+.fileBlock {
+  min-width: 0;
+}
+
+.hunkBlock {
+  min-width: 0;
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.splitGutter {
+  padding: 0 6px;
+  text-align: right;
+  color: color-mix(in srgb, var(--text-secondary) 82%, transparent);
+  user-select: none;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 80%, transparent);
+}
+
+.splitCell {
+  padding: 0 8px;
+  min-width: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 55%, transparent);
+}
+
+.splitRow .splitCell:last-child {
+  border-right: none;
+}
+
+.splitCtx {
+  color: color-mix(in srgb, var(--text) 88%, var(--text-secondary));
+}
+
+.splitAdd {
+  background: color-mix(in srgb, #22c55e 12%, transparent);
+}
+
+.splitDel {
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
+
+.splitEmpty {
+  background: color-mix(in srgb, var(--bg-secondary) 35%, transparent);
+}
+
+.expandRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin: 1px 0;
+  padding: 1px 2px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+}
+
+.expandRowUp {
+  margin-bottom: 0;
+}
+
+.expandRowDown {
+  margin-top: 0;
+}
+
+.expandRule {
+  flex: 1;
+  min-width: 12px;
+  height: 0;
+  border-top: 1px dotted color-mix(in srgb, var(--text-secondary) 45%, transparent);
+}
+
+.expandBtn {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 18px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 88%, var(--text));
+  cursor: pointer;
+}
+
+.expandBtn:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.expandBtn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}

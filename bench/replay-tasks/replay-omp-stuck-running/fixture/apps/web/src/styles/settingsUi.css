@@ -1,0 +1,46 @@
+/**
+ * Shared settings UI tokens — import wherever settings controls/text are styled
+ * (SettingRow, SettingsPage). Keep control + typography metrics identical.
+ */
+:root {
+  --settings-label-size: 0.92rem;
+  --settings-label-weight: 600;
+  --settings-hint-size: 0.8rem;
+  --settings-hint-weight: 500;
+  --settings-hint-line: 1.4;
+  --settings-section-size: 0.92rem;
+  --settings-section-weight: 700;
+  --settings-control-radius: 10px;
+  --settings-control-pad-y: 11px;
+  --settings-control-pad-x: 12px;
+  --settings-control-weight: 500;
+  --settings-control-size: 0.88rem;
+  --settings-btn-weight: 650;
+  --settings-btn-size: 0.82rem;
+  --settings-btn-pad-y: 7px;
+  --settings-btn-pad-x: 12px;
+  --settings-note-pad-y: 10px;
+  --settings-note-pad-x: 12px;
+  --settings-focus-ring: 0 0 0 4px var(--accent-soft);
+}
+
+/* Desktop: fields and buttons a bit larger; phones keep the compact tokens. */
+@media (min-width: 900px) {
+  :root {
+    --settings-control-size: 0.94rem;
+    --settings-control-pad-y: 13px;
+    --settings-control-pad-x: 14px;
+    --settings-btn-size: 0.9rem;
+    --settings-btn-pad-y: 10px;
+    --settings-btn-pad-x: 14px;
+  }
+}
+
+/* Phones: buttons match fields (desktop buttons stay slightly smaller than fields). */
+@media (max-width: 899px) {
+  :root {
+    --settings-btn-size: var(--settings-control-size);
+    --settings-btn-pad-y: var(--settings-control-pad-y);
+    --settings-btn-pad-x: var(--settings-control-pad-x);
+  }
+}

@@ -30,3 +30,7 @@ dist-app/
 
 # omp session export dumps
 /omp-session-*.html
+
+# Local scratch: session/board dumps and ad-hoc git checks
+/bs.json
+/.tmp-git-verify/

@@ -142,7 +142,7 @@ export function ServerFolderBrowseDialog({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.target === pathInputRef.current) return;
+      if (e.target === pathInputRef.current || e.target === newFolderRef.current) return;
       if (e.key === "Escape") onClose();
       if (e.key === "Enter" && browse?.path && browse.path !== DRIVES_ROOT) {
         e.preventDefault();
@@ -167,28 +167,38 @@ export function ServerFolderBrowseDialog({
     if (open && mode === "create") newFolderRef.current?.focus();
   }, [open, mode]);
 
+  /**
+   * Make the typed folder inside the browsed one and hand it back as the
+   * choice — the browser's own "new folder", so a reader who came to pick a
+   * folder can still lay one down where they need it.
+   */
+  const createInBrowsed = () => {
+    if (!browse?.path || browse.path === DRIVES_ROOT || newFolderBusy) return;
+    const name = newFolderName.trim();
+    if (!name) return;
+    // Drive roots (E:\) already end with a separator — strip it so the
+    // joined path has exactly one (E:\new instead of E:\\new).
+    const sep = browse.path.includes("\\") ? "\\" : "/";
+    const base = browse.path.replace(/[\\/]+$/, "");
+    const fullPath = `${base}${sep}${name}`;
+    setNewFolderBusy(true);
+    setError(null);
+    void api
+      .createFolder(fullPath)
+      .then(() => {
+        onSelect(fullPath);
+        onClose();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err));
+        setNewFolderBusy(false);
+      });
+  };
+
   const submit = () => {
     if (!browse?.path || browse.path === DRIVES_ROOT || newFolderBusy) return;
     if (mode === "create") {
-      const name = newFolderName.trim();
-      if (!name) return;
-      // Drive roots (E:\) already end with a separator — strip it so the
-      // joined path has exactly one (E:\new instead of E:\\new).
-      const sep = browse.path.includes("\\") ? "\\" : "/";
-      const base = browse.path.replace(/[\\/]+$/, "");
-      const fullPath = `${base}${sep}${name}`;
-      setNewFolderBusy(true);
-      setError(null);
-      void api
-        .createFolder(fullPath)
-        .then(() => {
-          onSelect(fullPath);
-          onClose();
-        })
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : String(err));
-          setNewFolderBusy(false);
-        });
+      createInBrowsed();
       return;
     }
     onSelect(browse.path);
@@ -339,7 +349,7 @@ export function ServerFolderBrowseDialog({
               title={browse?.path && browse.path !== DRIVES_ROOT ? browse.path : ""}
             />
           </label>
-          {mode === "create" && !isDrivesView ? (
+          {!isDrivesView ? (
             <div className={styles.newFolderRow}>
               <input
                 ref={newFolderRef}
@@ -351,10 +361,19 @@ export function ServerFolderBrowseDialog({
                 aria-label={t("common.newFolderPlaceholder")}
                 disabled={newFolderBusy}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") void submit();
+                  if (e.key === "Enter") createInBrowsed();
                   if (e.key === "Escape") { setNewFolderName(""); setError(null); }
                 }}
               />
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                title={t("common.newFolder")}
+                disabled={newFolderBusy || !newFolderName.trim()}
+                onClick={createInBrowsed}
+              >
+                {t("common.newFolder")}
+              </button>
             </div>
           ) : null}
           {error ? <p className={styles.error}>{error}</p> : null}

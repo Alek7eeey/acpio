@@ -56,10 +56,13 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   label?: string;
+  /** Off = the switch is greyed out and ignores clicks; the row's hint says why. */
+  disabled?: boolean;
 }) {
   return (
     <label className={styles.toggle}>
@@ -67,6 +70,7 @@ export function Toggle({
         type="checkbox"
         className={styles.toggleInput}
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         aria-label={label}
       />

@@ -1,0 +1,79 @@
+.menu {
+  position: fixed;
+  z-index: 260;
+  max-height: min(280px, 42vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  contain: layout paint;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface) 94%, var(--bg));
+  box-shadow: var(--shadow);
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  will-change: transform;
+}
+
+.loading {
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.section {
+  padding: 8px 10px 4px;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px 10px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.item:hover,
+.itemActive {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+}
+
+.name {
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: var(--text);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.description {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  font-size: 0.72rem;
+  color: color-mix(in srgb, var(--text-secondary) 85%, var(--accent));
+  font-style: italic;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

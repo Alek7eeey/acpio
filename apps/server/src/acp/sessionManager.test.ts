@@ -13,6 +13,7 @@ import {
   parseRpcId,
   pickRestoreMode,
   requestIdFor,
+  steerUntilFolded,
   toModelParams,
 } from "./sessionManager.js";
 import { subagentFieldsFromRaw, textFromUnknown } from "@acpio/shared";
@@ -443,6 +444,117 @@ describe("toModelParams", () => {
     ]);
     expect(params.filter((p) => p.id === "reasoning" || p.id === "effort")).toHaveLength(1);
     expect(params.find((p) => p.id === "context")?.options.map((o) => o.value)).toEqual(["272k"]);
+  });
+});
+
+describe("steerUntilFolded (afterStep delivery)", () => {
+  type FoldRt = {
+    running: boolean;
+    pending: { size: number };
+    disposing: boolean;
+    client: { steer: (text: string) => Promise<boolean> } | null;
+  };
+
+  it("waits out the boot window and reports the fold that lands later", async () => {
+    // The agent refuses every `session/steer` until its prompt is open — the
+    // turn is still booting — and takes the text from then on.
+    let promptOpen = false;
+    let attempts = 0;
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: false,
+      client: {
+        steer: async () => {
+          attempts += 1;
+          return promptOpen;
+        },
+      },
+    };
+    setTimeout(() => {
+      promptOpen = true;
+    }, 60);
+
+    // Negative control: the single attempt the call site used to make lands
+    // inside that window — a false that handed the message to the queue that
+    // `afterStep` exists to bypass.
+    expect(await rt.client!.steer("после шага")).toBe(false);
+
+    await expect(steerUntilFolded(rt, "после шага", 5_000, 5)).resolves.toBe(true);
+    expect(attempts).toBeGreaterThan(1);
+  });
+
+  it("takes the text on the first ask when the prompt is already open", async () => {
+    let attempts = 0;
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: false,
+      client: {
+        steer: async () => {
+          attempts += 1;
+          return true;
+        },
+      },
+    };
+    await expect(steerUntilFolded(rt, "текст", 5_000, 5)).resolves.toBe(true);
+    expect(attempts).toBe(1);
+  });
+
+  it("stops asking as soon as the turn it was aimed at ends", async () => {
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: false,
+      client: { steer: async () => false },
+    };
+    setTimeout(() => {
+      rt.running = false;
+    }, 30);
+    await expect(steerUntilFolded(rt, "текст", 5_000, 5)).resolves.toBe(false);
+  });
+
+  it("gives up at the bound while the prompt never opens", async () => {
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: false,
+      client: { steer: async () => false },
+    };
+    await expect(steerUntilFolded(rt, "текст", 60, 5)).resolves.toBe(false);
+  });
+
+  it("falls back to the queue when a question parks the turn", async () => {
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: false,
+      client: {
+        steer: async () => {
+          rt.pending.size = 1;
+          return false;
+        },
+      },
+    };
+    await expect(steerUntilFolded(rt, "текст", 5_000, 5)).resolves.toBe(false);
+  });
+
+  it("waits for a client that is still booting", async () => {
+    const rt: FoldRt = { running: true, pending: { size: 0 }, disposing: false, client: null };
+    setTimeout(() => {
+      rt.client = { steer: async () => true };
+    }, 30);
+    await expect(steerUntilFolded(rt, "текст", 5_000, 5)).resolves.toBe(true);
+  });
+
+  it("does not fold into a runtime that is being disposed", async () => {
+    const rt: FoldRt = {
+      running: true,
+      pending: { size: 0 },
+      disposing: true,
+      client: { steer: async () => true },
+    };
+    await expect(steerUntilFolded(rt, "текст", 5_000, 5)).resolves.toBe(false);
   });
 });
 

@@ -27,28 +27,35 @@ afterEach(async () => {
 });
 
 describe("globFiles", () => {
-  it("matches a recursive pattern and skips node_modules", async () => {
+  it("matches a recursive pattern, skips node_modules and sizes each file", async () => {
     const root = await workspace();
     expect(await globFiles({ root, pattern: "**/*.ts" })).toEqual({
-      files: ["src/a.ts", "src/nested/b.ts"],
+      files: [
+        { path: "src/a.ts", bytes: Buffer.byteLength("export const calcTotal = 1;\n") },
+        { path: "src/nested/b.ts", bytes: Buffer.byteLength("// call calctotal here\n") },
+      ],
       truncated: false,
     });
   });
 
   it("matches a bare filename pattern at any depth", async () => {
     const root = await workspace();
-    expect((await globFiles({ root, pattern: "*.md" })).files).toEqual(["README.md"]);
+    expect((await globFiles({ root, pattern: "*.md" })).files.map((f) => f.path)).toEqual([
+      "README.md",
+    ]);
   });
 
   it("keeps the depth of a non-recursive pattern", async () => {
     const root = await workspace();
-    expect((await globFiles({ root, pattern: "src/*.ts" })).files).toEqual(["src/a.ts"]);
+    expect((await globFiles({ root, pattern: "src/*.ts" })).files.map((f) => f.path)).toEqual([
+      "src/a.ts",
+    ]);
   });
 
   it("reports truncation instead of scanning past the limit", async () => {
     const root = await workspace();
     expect(await globFiles({ root, pattern: "**/*.ts", maxResults: 1 })).toEqual({
-      files: ["src/a.ts"],
+      files: [{ path: "src/a.ts", bytes: Buffer.byteLength("export const calcTotal = 1;\n") }],
       truncated: true,
     });
   });
@@ -56,6 +63,19 @@ describe("globFiles", () => {
   it("returns nothing for an empty pattern", async () => {
     const root = await workspace();
     expect((await globFiles({ root, pattern: "   " })).files).toEqual([]);
+  });
+
+  it("counts the lines of a file that matched, the way hits number them", async () => {
+    const root = await workspace();
+    const { hits, files } = await searchFiles({ root, pattern: "calcTotal" });
+    const a = files.find((f) => f.path === "src/a.ts");
+    expect(a).toEqual({
+      path: "src/a.ts",
+      bytes: Buffer.byteLength("export const calcTotal = 1;\n"),
+      // The empty tail after the final newline counts, as it does in hit numbering.
+      lines: 2,
+    });
+    expect(hits.find((h) => h.path === "src/a.ts")?.line).toBe(1);
   });
 });
 

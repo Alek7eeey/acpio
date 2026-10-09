@@ -69,7 +69,7 @@ interface HarnessAdapter {
   // Возможности
   parameterizedModelPicker: boolean; // отдельные опции fast/effort/… в ACP
   subagentStreaming: boolean;        // стриминг транскриптов субагентов
-  cloudCatalog: boolean;             // модели через CLI `models --json`
+  cloudCatalog: boolean;             // облачный список моделей, короткий TTL кэша
   defaultModes: AgentModeOption[];   // режимы, если агент не отдаёт свои
   subagentToolKinds: readonly string[]; // ACP tool kinds, означающие субагента
 
@@ -81,9 +81,6 @@ interface HarnessAdapter {
   subagentCardFromRoster?: (entry) => SubagentCardUpdate | null;
   subagentCardFromProgress?: (entry) => SubagentProgressUpdate | null;
   readSubagentTranscript?: (client, agentId, fromByte) => Promise<SubagentTranscriptPage | undefined>;
-
-  // Каталог моделей
-  probeModels?: (ctx: AdapterProbeContext) => Promise<ModelOption[] | null>;
 }
 ```
 
@@ -115,9 +112,9 @@ interface HarnessAdapter {
 возвращает одну страницу (`messages`, `fromByte`, `nextByte`, `reset`). Сам поллинг,
 дедупликация и лимиты — в ядре.
 
-**Каталог моделей.** `probeModels` получает `{ settings, runCli }` — `runCli(args)` запускает
-вашу CLI-команду (с полями `commandField`/`argsField` и бинарным резолвом ядра) и возвращает
-stdout. Верните `null`, если расширенный каталог не нужен.
+**Каталог моделей.** Список моделей и их параметры берутся из ACP-опций самого агента.
+`cloudCatalog: true` помечает список, который часто меняется (облачный): ядро перечитывает
+его раз в пару минут вместо того, чтобы доверять кэшу сутки.
 
 ## Как написать свой адаптер
 

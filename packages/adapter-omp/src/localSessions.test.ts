@@ -110,10 +110,10 @@ describe("OMP local sessions", () => {
         "utf8",
       );
     };
-    write("C:/MyFolder/ips", "019fea5d-0001-7000-86cd-c486c1ed8a72");
-    write("C:/MyFolder/ips/ips_10", "019fea5d-0002-7000-86cd-c486c1ed8a72");
-    write("C:/MyFolder/ips/ips_10/consoleServer", "019fea5d-0003-7000-86cd-c486c1ed8a72");
-    const rows = await listOmpSessions({ root, cwd: "C:/MyFolder/ips/ips_10" });
-    expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/MyFolder/ips/ips_10"]);
+    write("C:/work/proj", "019fea5d-0001-7000-86cd-c486c1ed8a72");
+    write("C:/work/proj/app", "019fea5d-0002-7000-86cd-c486c1ed8a72");
+    write("C:/work/proj/app/server", "019fea5d-0003-7000-86cd-c486c1ed8a72");
+    const rows = await listOmpSessions({ root, cwd: "C:/work/proj/app" });
+    expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/work/proj/app"]);
   });
 });

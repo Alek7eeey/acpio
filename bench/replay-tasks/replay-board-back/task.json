@@ -1,0 +1,7 @@
+{
+  "id": "replay-board-back",
+  "title": "Replay: no way back to the board from a task chat (session a815a57f, gold 25e6726)",
+  "prompt": "из чата который открыт из доски невозможно быстро попасть обратно в доску, приходится выходить и выбирать доску заново. Сделай так, чтобы из чата задачи можно было вернуться на доску.",
+  "timeoutMs": 1200000,
+  "horizon": "m"
+}

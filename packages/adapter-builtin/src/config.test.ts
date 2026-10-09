@@ -36,17 +36,17 @@ describe("builtinModelOptions", () => {
     ]);
   });
 
-  it("qualifies labels with the provider name when several providers exist", () => {
+  it("keeps labels plain across providers — the provider name rides beside them", () => {
     const options = builtinModelOptions(
       withProviders([
         provider(),
         provider({ id: "p2", name: "OpenRouter", models: [{ id: "on", label: "On", contextWindow: 2_000 }] }),
       ]),
     );
-    expect(options.map((o) => [o.value, o.name])).toEqual([
-      ["p1::legacy", "Legacy (Ollama)"],
-      ["p1::on", "On (Ollama)"],
-      ["p2::on", "On (OpenRouter)"],
+    expect(options.map((o) => [o.value, o.name, o.provider.name])).toEqual([
+      ["p1::legacy", "Legacy", "Ollama"],
+      ["p1::on", "On", "Ollama"],
+      ["p2::on", "On", "OpenRouter"],
     ]);
   });
 

@@ -10,6 +10,7 @@ import type {
   ModelOption,
   ModelParamDto,
   ProjectMcpInfo,
+  PromptDelivery,
   SessionDetailDto,
   SessionDto,
   SessionStatus,
@@ -25,6 +26,7 @@ import {
   modelProviderFromValue,
   SHELL_SESSION_PROVIDER,
   summarizeQuestionAnswer,
+  titleFromTaskDescription,
   type AdapterMetaDto,
 } from "@acpio/shared";
 import { api } from "./api";
@@ -72,14 +74,17 @@ if (typeof window !== "undefined") {
     localStorage.removeItem("acpio.consoleLog.v1");
     // The git panel is docked only now; drop the removed side/full-screen choice.
     localStorage.removeItem("acpio.gitPanelPresentation.v1");
+    // Catalogs cached before model options carried a `provider` field.
+    localStorage.removeItem("acpio.modelsCatalog.v7");
+    sessionStorage.removeItem("acpio.modelsCatalog.session.v1");
   } catch {
     /* ignore */
   }
 }
 
-const MODELS_CACHE_KEY = "acpio.modelsCatalog.v7";
+const MODELS_CACHE_KEY = "acpio.modelsCatalog.v8";
 const MODELS_CACHE_KEY_LEGACY = "acpio.modelsCatalog.v6";
-const MODELS_SESSION_KEY = "acpio.modelsCatalog.session.v1";
+const MODELS_SESSION_KEY = "acpio.modelsCatalog.session.v2";
 const ACTIVE_SESSION_KEY = "acpio.activeSessionId";
 /** Desktop tree collapse preference ("1" open, "0" collapsed). */
 const SIDEBAR_OPEN_KEY = "acpio.sidebarOpen.v1";
@@ -248,6 +253,9 @@ type AppState = {
     description: string;
     /** Pre-start agent pick — a board task may be created for a chosen agent. */
     provider?: AgentProvider;
+    /** Pictures attached while writing the task — staged in acpio's own
+     *  folder by the server and carried by the task's first turn. */
+    images?: File[];
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
   /** Board task: edit the text an existing task card carries. */
@@ -297,6 +305,13 @@ type AppState = {
    */
   boardFoldersOpen: boolean;
   setBoardFoldersOpen: (open: boolean) => void;
+  /**
+   * The board page on screen (`null` on any other route). Board tasks live in
+   * their own partition — they are not in the chat tree — so the reconnect
+   * resync needs the id to re-read the list the reader is looking at.
+   */
+  openBoardId: string | null;
+  setOpenBoardId: (id: string | null) => void;
   connected: boolean;
   /** Fine-grained socket state for the toolbar chip; `connected` mirrors it. */
   connection: ConnectionState;
@@ -396,6 +411,11 @@ type AppState = {
    * running; the requests queued behind it keep waiting.
    */
   sendQueuedPromptNow: (id: string) => Promise<void>;
+  /**
+   * Hand a queued message over right now instead of waiting for the turn to
+   * end: `steer` stops the live turn, `afterStep` folds the text into it.
+   */
+  deliverQueuedPrompt: (id: string, delivery: PromptDelivery) => Promise<void>;
   drainPromptQueue: () => Promise<void>;
   /** Optimistic local toggle; the save happens in the background. */
   setMultitask: (value: boolean) => Promise<void>;
@@ -726,6 +746,35 @@ function reviveRunningIfTurnActive(
 }
 
 /**
+ * True only while this tab itself owns a live turn for the chat: a prompt it put on
+ * the wire (`inflightBySession`) or a busy status the server confirmed over WS. A
+ * pane or row that merely *says* running is not a witness — it can be a snapshot
+ * from before the turn ended, and letting it outrank the server kept Stop and
+ * "Работаю…" over an answer the agent had already finished, until a reload.
+ */
+function localTurnLive(sessionId: string): boolean {
+  const state = useAppStore.getState();
+  return (state.inflightBySession?.[sessionId] ?? 0) > 0 || serverConfirmedBusy.has(sessionId);
+}
+
+/**
+ * Settle the status an entry GET just brought in against the live runtime, which
+ * is the only witness of a turn that is still running. The row is a snapshot: read
+ * before the turn's terminal write it still claims `running`, and painting that
+ * back put Stop and "Работаю…" over a finished chat until a reload. A `waiting`
+ * row is the agent parked on the user — it is kept exactly as the server reported
+ * it. Returns the status the pane should carry after the probe.
+ */
+async function adoptEntryStatus(sessionId: string, fetched: SessionStatus): Promise<SessionStatus> {
+  if (fetched === "waiting") {
+    confirmServerBusy(sessionId, "waiting");
+    return fetched;
+  }
+  const settled = await adoptLiveTurnStatus(sessionId, fetched === "running" ? "idle" : fetched);
+  return settled ?? fetched;
+}
+
+/**
  * Adopt a status the server itself reported. `inflightBySession` only counts prompts
  * this tab sent, so after a reload it is 0 and Stop would vanish for a turn still
  * running in the server process; this set is what keeps the button alive across it.
@@ -782,25 +831,33 @@ function releaseClientBusy(sessionId: string, status: SessionStatus) {
  *  start), so trusting the row alone left a reloaded tab streaming with no Stop.
  *  The opposite answer is just as authoritative: when the runtime has no turn,
  *  whatever busy this tab still shows is stale — a `session.updated` frame lost
- *  on a dropped socket, or a prompt that failed before it ever started. */
-async function adoptLiveTurnStatus(sessionId: string, settledStatus?: SessionStatus) {
+ *  on a dropped socket, or a prompt that failed before it ever started.
+ *  Returns the status the chat carries afterwards, or undefined when the answer
+ *  never arrived. */
+async function adoptLiveTurnStatus(
+  sessionId: string,
+  settledStatus?: SessionStatus,
+): Promise<SessionStatus | undefined> {
   try {
     const live = await api.getLiveTurn(sessionId);
     if (!live.running) {
       if (settledStatus) releaseClientBusy(sessionId, settledStatus);
-      return;
+      return settledStatus;
     }
-    confirmServerBusy(sessionId, live.waiting ? "waiting" : "running");
+    const busyStatus = live.waiting ? ("waiting" as const) : ("running" as const);
+    confirmServerBusy(sessionId, busyStatus);
     const state = useAppStore.getState();
     const pane = liveDetail(state, sessionId);
     if (pane && pane.status !== "running" && pane.status !== "waiting") {
       commitDetail(useAppStore.getState, useAppStore.setState, {
         ...pane,
-        status: live.waiting ? "waiting" : "running",
+        status: busyStatus,
       });
     }
+    return busyStatus;
   } catch {
     // Server unreachable — nothing to reconcile; the next WS event decides.
+    return undefined;
   }
 }
 
@@ -826,6 +883,75 @@ async function reconcileLiveTurnStatuses(sessions: SessionDto[]): Promise<void> 
       }
     }),
   );
+}
+
+/** Every chat the screen is showing: the focused one plus each open pane. */
+function openSessionIds(state: AppState): string[] {
+  const ids = new Set<string>();
+  if (state.activeSessionId) ids.add(state.activeSessionId);
+  for (const slot of paneSlots(state)) if (slot) ids.add(slot);
+  return [...ids];
+}
+
+/**
+ * Re-read one open chat from the server after the socket came back. Applied to
+ * the focused chat and to every other pane alike: the focused chat also owns
+ * the single-thread fields (skeleton, error banner), while a pane is only the
+ * snapshot in `sessionDetails` it renders from.
+ */
+async function resyncOpenSession(
+  id: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+): Promise<void> {
+  let detail: SessionDetailDto;
+  try {
+    detail = preferSlashCommands(await api.getSession(id), liveDetail(get(), id));
+  } catch {
+    // Socket is back; the next selection retries the fetch.
+    return;
+  }
+  const focused = get().activeSessionId === id;
+  // Closed while the fetch was in flight (a pane can be dropped by a click) —
+  // there is nothing to paint it on.
+  if (!focused && !paneSlots(get()).includes(id)) return;
+  // The local thread is not merged in: it is missing everything the agent
+  // produced while the device slept, which is the window this resync exists to
+  // repair. The optimistic placeholders and their id aliases are obsolete
+  // against a full snapshot — keeping them would map replayed parts onto
+  // dropped ids.
+  clearMessageIdAliases(id);
+  const live = liveDetail(get(), id);
+  if (detail.messages.length === 0 && live && live.messages.length > 0) {
+    // The snapshot raced the persist of the turn we are watching — keep the
+    // live thread instead of blanking it out; the stream fills the rest.
+    rememberSessionDetail(live);
+    if (focused) set({ sessionLoading: false });
+    return;
+  }
+  rememberSessionDetail(detail);
+  if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
+  const question = pendingQuestionFromDetail(detail);
+  set({
+    sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
+    ...(focused
+      ? {
+          sessionLoading: false,
+          activeSession: detail,
+          error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+        }
+      : {}),
+    ...(question ? { pendingQuestion: question } : {}),
+  });
+  // Same as the warm path: the DB row can lag a turn still live in the server
+  // process, so let the runtime settle the status. It works the other way too
+  // — a frame the socket never delivered leaves this tab busy forever, and the
+  // runtime's "nothing running" is what clears it.
+  if (detail.status === "running" || detail.status === "waiting") {
+    confirmServerBusy(id, detail.status);
+  } else {
+    await adoptLiveTurnStatus(id, detail.status);
+  }
 }
 
 function clearDelayedIdle(sessionId: string) {
@@ -861,6 +987,28 @@ function clearMessageIdAliases(sessionId?: string) {
   serverConfirmedBusy.clear();
   for (const timer of delayedIdleTimers.values()) window.clearTimeout(timer);
   delayedIdleTimers.clear();
+}
+
+/**
+ * Take back the optimistic user/assistant pair of a prompt the server never
+ * took. The two bubbles exist to be adopted by the server's own frames — with
+ * the POST failed there are none coming, so the user bubble would sit in the
+ * thread as a question nobody answers, and the retry of the same text (it waits
+ * in the queue) would paint a second pair on top of it.
+ */
+function rollbackOptimisticPair(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  pair: { userId: string; assistantId: string; sessionId: string },
+): void {
+  if (pendingOptimisticPair === pair) pendingOptimisticPair = null;
+  const current = liveDetail(get(), pair.sessionId);
+  if (!current) return;
+  const messages = current.messages.filter(
+    (message) => message.id !== pair.userId && message.id !== pair.assistantId,
+  );
+  if (messages.length === current.messages.length) return;
+  commitDetail(get, set, { ...current, messages });
 }
 
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
@@ -1718,9 +1866,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description, provider }) => {
+  createBoardTask: async ({ boardId, cwd, description, provider, images }) => {
     try {
-      const title = description.trim().split("\n")[0]?.slice(0, 120) || "";
+      const title = titleFromTaskDescription(description);
       const task = await api.createSession({
         boardId,
         cwd,
@@ -1728,6 +1876,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...(provider ? { provider } : {}),
         ...(title ? { title } : {}),
       });
+      // The pictures ride behind the row (the upload is per session) and are
+      // bound to the task server-side, so they reach the agent with the first
+      // turn — including one that runs days later, from another device.
+      for (const image of images ?? []) {
+        try {
+          await api.uploadAttachment(task.id, image, image.name || "image.png");
+        } catch {
+          // The task exists; one lost picture must not undo the creation.
+        }
+      }
       set((s) => ({ boardSessions: [task, ...s.boardSessions] }));
       return task;
     } catch {
@@ -1815,6 +1973,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   adaptersLoaded: false,
   sidebarOpen: readStoredSidebarOpen("tree"),
   boardFoldersOpen: false,
+  openBoardId: null,
   connected: false,
   connection: "connecting",
   agentAvailable: false,
@@ -2272,7 +2431,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
         if (seq !== selectSessionSeq || get().activeSessionId !== id) return;
         const live = get().activeSession;
-        if (live?.status === "running") {
+        // Don't clobber an in-flight optimistic turn with a lagging GET snapshot —
+        // but only this tab's own live turn earns that, never a pane that merely
+        // says running.
+        if (live?.id === id && live.status === "running" && localTurnLive(id)) {
           set({
             sessionLoading: false,
             activeSession: {
@@ -2287,19 +2449,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         // The server is authoritative about a turn this tab did not start: after a
         // reload `inflight` is 0, and without this the fetched running status would
         // be dropped and Stop never reappear.
-        if (detail.status === "running" || detail.status === "waiting") {
-          confirmServerBusy(id, detail.status);
-        } else {
-          await adoptLiveTurnStatus(id, detail.status);
-        }
-        if (sessionDetailQuickEqual(live, detail)) {
+        const next = { ...detail, status: await adoptEntryStatus(id, detail.status) };
+        rememberSessionDetail(next);
+        if (sessionDetailQuickEqual(live, next)) {
           if (get().sessionLoading) set({ sessionLoading: false });
           return;
         }
         set({
-          activeSession: detail,
+          activeSession: next,
           sessionLoading: false,
-          error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
+          error: next.status === "error" ? lastAssistantErrorMessage(next) : null,
         });
         // Wiping aliases also drops the adopted server-busy marker — skip it when a
         // live turn was just confirmed for this chat.
@@ -2357,8 +2516,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Don't clobber an in-flight optimistic turn with a stale GET snapshot —
       // but still deliver the fetched messages so a fresh load of a running
       // session isn't left with an empty thread (skeleton would vanish first).
-      if (get().activeSession?.status === "running" && get().activeSession?.id === id) {
-        const live = get().activeSession!;
+      // Only this tab's own live turn counts: a pane that merely says running can
+      // be a snapshot from before the turn ended.
+      if (live?.id === id && live.status === "running" && localTurnLive(id)) {
         set({
           sessionLoading: false,
           activeSession: {
@@ -2371,20 +2531,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         return;
       }
       // Same as the warm path: a reload must not lose a turn the server is still
-      // running just because this tab never sent its prompt.
-      if (detail.status === "running" || detail.status === "waiting") {
-        confirmServerBusy(id, detail.status);
-      } else {
-        await adoptLiveTurnStatus(id, detail.status);
-      }
-      if (sessionDetailQuickEqual(get().activeSession, detail) && !get().sessionLoading) {
+      // running just because this tab never sent its prompt — and a row left
+      // claiming running by a finished turn must not keep Stop on screen either.
+      const next = { ...detail, status: await adoptEntryStatus(id, detail.status) };
+      rememberSessionDetail(next);
+      if (sessionDetailQuickEqual(get().activeSession, next) && !get().sessionLoading) {
         return;
       }
       set({
-        activeSession: detail,
+        activeSession: next,
         sessionLoading: false,
-        error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
-        sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
+        error: next.status === "error" ? lastAssistantErrorMessage(next) : null,
+        sessionDetails: { ...(get().sessionDetails ?? {}), [id]: next },
         pendingQuestion: pendingQuestionFromDetail(detail) ?? get().pendingQuestion,
       });
       if (detail.messages.length) markRestoringDone(get, set, id);
@@ -2851,6 +3009,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await get().runSendPrompt(text, opts, { optimistic: true });
     } catch (err) {
+      // Nothing reached the server. The text goes to the head of the queue — it
+      // was meant for now — so the reconnect hands it over instead of the user
+      // retyping what the broken connection swallowed.
+      const target = sid ?? get().activeSessionId;
+      if (target) {
+        set({
+          error: err instanceof Error ? err.message : String(err),
+          promptQueue: [
+            {
+              id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              text,
+              sessionId: target,
+              editMessageId: opts?.editMessageId ?? null,
+              attachments: opts?.attachments,
+            },
+            ...get().promptQueue,
+          ],
+        });
+      }
       // No terminal frame follows a prompt that never became a turn, so nothing
       // else would ever take `inflight` back down: Stop stayed on screen and
       // every later prompt piled into the queue instead of reaching the wire.
@@ -2919,6 +3096,58 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Send a queued message now rather than at the end of the turn. The server
+   * owns both deliveries — this tab only hands the text over and stops tracking
+   * it, so the item leaves the queue exactly like a drained one. A `steer`
+   * starts a fresh turn and is counted as one here (Stop must stay on screen
+   * without waiting for the first server frame); `afterStep` rides inside the
+   * turn that is already running.
+   */
+  async deliverQueuedPrompt(id, delivery) {
+    const item = get().promptQueue.find((q) => q.id === id);
+    // `queue` is the state the item is already in — nothing to hand over.
+    if (!item || delivery === "queue") return;
+    set({ promptQueue: get().promptQueue.filter((q) => q.id !== id), error: null });
+    if (delivery === "steer" && item.sessionId) {
+      const inflightBySession = {
+        ...get().inflightBySession,
+        [item.sessionId]: (get().inflightBySession?.[item.sessionId] ?? 0) + 1,
+      };
+      set({
+        inflightBySession,
+        inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+      });
+    }
+    try {
+      await api.prompt(item.sessionId, item.text, {
+        delivery,
+        // An edited message keeps its edit: the server truncates and regenerates
+        // it, which is itself an interrupt for the live turn.
+        ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
+        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+      });
+    } catch (err) {
+      // Nothing reached the server: put the message back (at the head — it was
+      // meant for now) and say why, rather than losing it silently. Undo the
+      // optimistic count of a turn that never started.
+      if (delivery === "steer" && item.sessionId) {
+        const inflightBySession = {
+          ...get().inflightBySession,
+          [item.sessionId]: Math.max(0, (get().inflightBySession?.[item.sessionId] ?? 1) - 1),
+        };
+        set({
+          inflightBySession,
+          inflight: Object.values(inflightBySession).reduce((a, b) => a + b, 0),
+        });
+      }
+      set({
+        promptQueue: [item, ...get().promptQueue.filter((q) => q.id !== id)],
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
   async setMultitask(value) {
     set({ settings: { ...get().settings, multitask: value } });
     try {
@@ -2961,13 +3190,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         },
         { optimistic: inf <= 1 },
       );
-    } catch {
+    } catch (err) {
+      // The attempt is over; the message is not. Back to the head of the queue,
+      // where the user still sees it — dropping it here is the same silent loss
+      // the direct send used to make. This pass ends: retrying inside it would
+      // spin on a server that is still down, and the next trigger (a turn
+      // ending, another send, the reconnect) picks the queue up again.
       const cur = Math.max(0, (get().inflightBySession?.[item.sessionId] ?? 1) - 1);
       const next = { ...get().inflightBySession, [item.sessionId]: cur };
       set({
         inflightBySession: next,
         inflight: Object.values(next).reduce((a, b) => a + b, 0),
+        promptQueue: [item, ...get().promptQueue],
+        error: err instanceof Error ? err.message : String(err),
       });
+      return;
     }
     void get().drainPromptQueue();
   },
@@ -3139,14 +3376,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const current = id ? liveDetail(get(), id) : null;
+    let optimisticPair: { userId: string; assistantId: string; sessionId: string } | null = null;
     if (current && optimistic) {
       const pair = buildOptimisticPair(id, current.messages);
-      pendingOptimisticPair = { userId: pair.userId, assistantId: pair.assistantId, sessionId: id };
+      optimisticPair = { userId: pair.userId, assistantId: pair.assistantId, sessionId: id };
+      pendingOptimisticPair = optimisticPair;
       commitRunning(id, pair.messages, pair.epoch);
     } else {
       commitRunning(id, null, (get().promptEpochBySession?.[id ?? ""] ?? get().promptEpoch) + 1);
     }
-    await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
+    try {
+      await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
+    } catch (err) {
+      if (optimisticPair) rollbackOptimisticPair(get, set, optimisticPair);
+      throw err;
+    }
   },
 
   async cancelPrompt(sessionId, opts) {
@@ -3211,57 +3455,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ boardFoldersOpen: open });
   },
 
+  setOpenBoardId(id) {
+    set({ openBoardId: id });
+  },
+
   setConnection(connection) {
     set({ connection, connected: connection === "open" });
   },
 
   async resyncAfterReconnect() {
     // The socket only carries live traffic: whatever was broadcast while it was
-    // down is lost. Re-read what the server owns — the list plus the open chat.
+    // down is lost. Re-read what the server owns — the tree, every chat on
+    // screen (a pane the outage outran is as stale as the focused one) and the
+    // board, whose tasks are a partition of their own and reach no tree.
     void get().refreshSessions().catch(() => {});
-    const id = get().activeSessionId;
-    if (!id) return;
-    let detail: SessionDetailDto;
-    try {
-      detail = preferSlashCommands(await api.getSession(id), liveDetail(get(), id));
-    } catch {
-      // Socket is back; the next selection retries the fetch.
-      return;
-    }
-    if (get().activeSessionId !== id) return;
-    // The local thread is not merged in: it is missing everything the agent
-    // produced while the device slept, which is the window this resync exists to
-    // repair. The optimistic placeholders and their id aliases are obsolete
-    // against a full snapshot — keeping them would map replayed parts onto
-    // dropped ids.
-    clearMessageIdAliases(id);
-    const live = get().activeSession;
-    if (detail.messages.length === 0 && live?.id === id && live.messages.length > 0) {
-      // The snapshot raced the persist of the turn we are watching — keep the
-      // live thread instead of blanking it out; the stream fills the rest.
-      rememberSessionDetail(live);
-      set({ sessionLoading: false });
-      return;
-    }
-    rememberSessionDetail(detail);
-    if (slashListStillLoading(detail.slashCommands)) pollSlashCommands(id, get, set);
-    const question = pendingQuestionFromDetail(detail);
-    set({
-      sessionLoading: false,
-      activeSession: detail,
-      sessionDetails: { ...(get().sessionDetails ?? {}), [id]: detail },
-      error: detail.status === "error" ? lastAssistantErrorMessage(detail) : null,
-      ...(question ? { pendingQuestion: question } : {}),
-    });
-    // Same as the warm path: the DB row can lag a turn still live in the server
-    // process, so let the runtime settle the status. It works the other way too
-    // — a frame the socket never delivered leaves this tab busy forever, and the
-    // runtime's "nothing running" is what clears it.
-    if (detail.status === "running" || detail.status === "waiting") {
-      confirmServerBusy(id, detail.status);
-    } else {
-      await adoptLiveTurnStatus(id, detail.status);
-    }
+    void get().refreshBoards().catch(() => {});
+    const boardId = get().openBoardId;
+    if (boardId) void get().refreshBoardSessions(boardId);
+    await Promise.all(openSessionIds(get()).map((id) => resyncOpenSession(id, get, set)));
+    // Whatever the outage left in the queue — a prompt the server never took —
+    // goes over now that the pipe is back, against the statuses just settled.
+    void get().drainPromptQueue();
   },
 
   setAgentAvailable(provider, available) {

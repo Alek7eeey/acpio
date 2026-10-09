@@ -251,15 +251,66 @@ export function splitQuestionPreamble(parts: MessagePartDto[]): Map<string, Mess
         preamble.unshift(prev);
         continue;
       }
-      // Only whitespace, error rows and other questions are transparent to the
-      // walk; anything else (thought, tool, subagent) ends the lead-in.
+      // Only whitespace, error rows, other questions and the question's own ask
+      // row are transparent to the walk; anything else (thought, tool,
+      // subagent) ends the lead-in.
       if (prev.type === "question" || prev.type === "error") break;
       if (prev.type === "status" || prev.type === "plan" || prev.type === "permission") continue;
+      // This harness records the ask call BETWEEN the lead-in and the prompt it
+      // introduces (`text → ask → question`): the request leaves the tool body
+      // directly while the row waits behind the streamed-text backlog. The call
+      // is the question's own work, so it neither ends the lead-in nor keeps the
+      // text out of the prompt's bucket — stopping here left the narration loose
+      // and dimmed in the timeline with the call's own "Работал" block over the
+      // card, while the agent was already parked on the reader.
+      if (isAskToolCallRow(part, prev)) continue;
       break;
     }
     result.set(part.id, preamble);
   }
   return result;
+}
+
+/** Questions an ask tool call carries in its recorded rawInput — the harness
+ *  schema shape (`question`/`header`/`multi`), not the UI payload shape. */
+function askToolCallQuestions(part: MessagePartDto): Array<Record<string, unknown>> | null {
+  if (part.type !== "tool_call" && part.type !== "subagent") return null;
+  const raw = part.payload.raw as { rawInput?: { questions?: unknown } } | undefined;
+  const input = (raw?.rawInput ?? part.payload.rawInput) as { questions?: unknown } | undefined;
+  const questions = input?.questions;
+  return Array.isArray(questions) && questions.length > 0
+    ? (questions as Array<Record<string, unknown>>)
+    : null;
+}
+
+/** Content fingerprint of a question list. The question part stores the UI
+ *  conversion of what the call recorded in rawInput, so byte equality never
+ *  matches (`prompt` vs `question`, options gain `id`); prompt text and option
+ *  labels do — they are the same strings in both shapes. */
+function questionFingerprint(questions: Array<Record<string, unknown>>): string {
+  return JSON.stringify(
+    questions.map((q) => [
+      String(q.prompt ?? q.question ?? ""),
+      (Array.isArray(q.options) ? q.options : []).map((o) =>
+        String((o as Record<string, unknown>).label ?? ""),
+      ),
+    ]),
+  );
+}
+
+/** True when the candidate part is the tool call that asked this question.
+ *  The harness delivers the ask call's tool_call row after the elicitation it
+ *  triggers — the request leaves the tool body directly while the row waits
+ *  behind the streamed-text backlog — so the recorded order puts the question
+ *  above its own call (80 of 83 recorded dialogs: the call is the very next
+ *  part with matching questions). */
+export function isAskToolCallRow(question: MessagePartDto, candidate: MessagePartDto): boolean {
+  if (candidate.messageId !== question.messageId) return false;
+  const asked = question.payload.questions;
+  if (!Array.isArray(asked) || asked.length === 0) return false;
+  const raw = askToolCallQuestions(candidate);
+  if (!raw) return false;
+  return questionFingerprint(raw) === questionFingerprint(asked as Array<Record<string, unknown>>);
 }
 
 /**
@@ -277,6 +328,10 @@ export function splitQuestionPreamble(parts: MessagePartDto[]): Map<string, Mess
  * body renders — and they do not close the run either. Closing on them stacked
  * two "Работал" headers with nothing between them, which is what omp's per-todo
  * `plan` updates did to nearly every long turn.
+ *
+ * An ask dialog's own tool call is that work too, even though the harness
+ * delivered it after the question (see `isAskToolCallRow`): it rides up into
+ * the run above the card instead of opening a new "Работаю…" block under it.
  */
 export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[] {
   const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -284,6 +339,7 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
   const attachedIds = new Set<string>();
   for (const list of preambles.values()) for (const p of list) attachedIds.add(p.id);
   const items: AgentTimelineItem[] = [];
+  const consumed = new Set<string>();
   let runBuf: MessagePartDto[] = [];
 
   const flushRun = () => {
@@ -292,14 +348,22 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
     runBuf = [];
   };
 
-  for (const part of sorted) {
+  for (let i = 0; i < sorted.length; i += 1) {
+    const part = sorted[i]!;
     // A part the question absorbed renders inside that question's bucket, never
     // on its own — the run it would have opened above the prompt is gone.
     if (attachedIds.has(part.id)) continue;
-    const preamble = preambles.get(part.id);
-    if (preamble) {
+    if (consumed.has(part.id)) continue;
+    if (part.type === "question") {
+      // The ask call following the question renders with the work above it:
+      // pull it into the current run (or a fresh one) before the card closes.
+      const call = i + 1 < sorted.length ? sorted[i + 1] : undefined;
+      if (call && isAskToolCallRow(part, call)) {
+        runBuf.push(call);
+        consumed.add(call.id);
+      }
       flushRun();
-      items.push({ kind: "question", part, preamble, key: part.id });
+      items.push({ kind: "question", part, preamble: preambles.get(part.id) ?? [], key: part.id });
       continue;
     }
     if (part.type === "thought") {
@@ -309,11 +373,6 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
     }
     if (part.type === "tool_call" || part.type === "subagent") {
       runBuf.push(part);
-      continue;
-    }
-    if (part.type === "question") {
-      flushRun();
-      items.push({ kind: "question", part, preamble: [], key: part.id });
       continue;
     }
     if (part.type === "text" && visibleText(part)) {

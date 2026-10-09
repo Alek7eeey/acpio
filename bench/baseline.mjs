@@ -9,7 +9,7 @@
 // <stamp>.jsonl. Runs with known task defects are excluded via BASELINE_SKIP.
 //
 //   node bench/baseline.mjs            # print the baseline table (all models)
-//   node bench/baseline.mjs --model im-llm   # one model's table only
+//   node bench/baseline.mjs --model local-model   # one model's table only
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

@@ -1,0 +1,511 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  pointer-events: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  margin: 0;
+  padding: 0;
+  background: color-mix(in srgb, #0b1020 42%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.dialog {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  width: min(660px, 100%);
+  max-width: 100%;
+  height: min(640px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow:
+    0 24px 64px rgba(8, 12, 20, 0.22),
+    0 2px 8px rgba(8, 12, 20, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  color: var(--text);
+}
+
+.titleBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--surface));
+}
+
+.title {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.closeBtn {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.45rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.closeBtn:hover {
+  background: color-mix(in srgb, var(--danger) 12%, var(--bg-secondary));
+  color: var(--danger);
+}
+
+.main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* Quick access sidebar — like the Windows file picker. Hidden on narrow
+   screens where the horizontal quick strip takes over. */
+.sidebar {
+  flex: 0 0 172px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px 6px;
+  border-right: 1px solid var(--border-soft);
+  background: var(--surface);
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.sidebarLabel {
+  padding: 2px 10px 6px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
+.sidebarItem {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebarItem:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+  color: var(--text);
+}
+
+.sidebarItemActive {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--text);
+  font-weight: 700;
+}
+
+.sidebarItemIcon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, #e8b84a 75%, var(--accent));
+}
+
+.sidebarItemName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.navBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+
+.upBtn {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.upBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.upBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.addressBar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  cursor: text;
+  scrollbar-gutter: stable;
+}
+
+.addressBar:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.crumbWrap {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.crumbSep {
+  margin: 0 2px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  user-select: none;
+}
+
+.crumb {
+  border: none;
+  background: transparent;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.crumb:hover {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.crumbActive {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.crumbMuted {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.editGlyph {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 0.8;
+}
+
+.addressInput {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  outline: none;
+}
+
+/* Horizontal quick-access strip — shown only on narrow screens. */
+.quickStrip {
+  display: none;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface);
+  scrollbar-gutter: stable;
+}
+
+.quickStripItem {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.quickStripItem:hover {
+  background: var(--bg-tertiary);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.quickStripItemActive {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+}
+
+.quickStripIcon {
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, #e8b84a 75%, var(--accent));
+}
+
+@media (max-width: 899px) {
+  .overlay {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: max(10px, env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px))
+      max(10px, env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .dialog {
+    width: 100%;
+    height: 100%;
+    max-height: 100%;
+    border-radius: 14px;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .quickStrip {
+    display: flex;
+  }
+
+  .upBtn,
+  .closeBtn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .addressBar,
+  .addressInput {
+    height: 40px;
+  }
+
+  .row {
+    min-height: 48px;
+    padding: 10px 12px;
+  }
+
+  .secondaryBtn {
+    min-height: 42px;
+    padding: 10px 14px;
+  }
+
+  .resizeHandle {
+    display: none;
+  }
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 6px;
+  background: var(--bg);
+  display: grid;
+  gap: 1px;
+  align-content: start;
+  scrollbar-gutter: stable;
+}
+
+.empty {
+  margin: 18px 12px;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-secondary));
+}
+
+.rowIcon {
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, #e8b84a 75%, var(--accent));
+}
+
+.rowName {
+  font-weight: 500;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowSize {
+  font-size: 0.72rem;
+  color: var(--text-tertiary, var(--text-secondary));
+  white-space: nowrap;
+}
+
+.error {
+  margin: 0;
+  padding: 10px 14px 0;
+  font-size: 0.82rem;
+  color: var(--danger);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+}
+
+.secondaryBtn {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  color: var(--text);
+}
+
+.secondaryBtn:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, var(--border));
+}
+
+/* Bottom-right drag handle for resizing the dialog. */
+.resizeHandle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  cursor: nwse-resize;
+  touch-action: none;
+  opacity: 0.75;
+  border-radius: 4px;
+}
+
+.resizeHandle:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}

@@ -96,6 +96,24 @@ describe("elicitationContentFromUiAnswers", () => {
     expect(content).toEqual({ q0__other: "custom" });
   });
 
+  it("keeps the picked list and the typed words for multi-select", () => {
+    const payload = elicitationSchemaToQuestionPayload("Pick", {
+      type: "object",
+      properties: {
+        q0: {
+          type: "array",
+          title: "Pick",
+          items: { anyOf: [{ const: "Bugbot", title: "Bugbot" }] },
+        },
+        q0__other: { type: "string", title: "Other" },
+      },
+    });
+    const content = elicitationContentFromUiAnswers(payload, [
+      { questionId: "q0", selectedOptionIds: ["Bugbot"], freeText: "both" },
+    ]);
+    expect(content).toEqual({ q0: ["Bugbot"], q0__other: "both" });
+  });
+
   it("returns selected option when no custom text", () => {
     const payload = elicitationSchemaToQuestionPayload("Pick", {
       type: "object",

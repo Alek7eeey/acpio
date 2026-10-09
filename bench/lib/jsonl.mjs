@@ -101,3 +101,74 @@ export function summarizeAgentStream(text) {
     stopReason,
   };
 }
+
+/**
+ * opencode's `run --format json` stream: one JSON object per line, each an
+ * envelope `{type, part}` — `tool_use`/`tool` per tool execution,
+ * `step_finish`/`step-finish` per model call (its `tokens` are per step, and
+ * `input` EXCLUDES the cached prefix: `cache.read` is reported separately),
+ * `text`/`text` for the assistant's prose.
+ */
+export function summarizeOpenCodeStream(text) {
+  const events = parseJsonl(text);
+  const toolNames = new Map();
+  let toolCalls = 0;
+  let toolErrors = 0;
+  let modelCalls = 0;
+  let tokensIn = 0;
+  let tokensOut = 0;
+  let tokensCached = 0;
+  let contextTokens = 0;
+  let lastTotal = 0;
+  let cost = 0;
+  let finalText = "";
+  let stopReason = "";
+
+  for (const e of events) {
+    const p = e?.part;
+    if (e?.type === "tool_use" && p?.type === "tool") {
+      toolCalls += 1;
+      if (p.state?.status === "error" || p.state?.error != null || p.state?.isError === true) toolErrors += 1;
+      const name = String(p.tool || "?");
+      toolNames.set(name, (toolNames.get(name) || 0) + 1);
+      continue;
+    }
+    if (e?.type === "step_finish" && p?.type === "step-finish") {
+      modelCalls += 1;
+      const t = p.tokens ?? {};
+      const cached = num(t.cache?.read);
+      const input = num(t.input);
+      const output = num(t.output);
+      tokensIn += input + cached; // the real prompt spend: input excludes the cache hit
+      tokensCached += cached;
+      tokensOut += output;
+      lastTotal = input + cached + output || lastTotal;
+      contextTokens = lastTotal;
+      cost += num(p.cost);
+      if (p.reason) stopReason = String(p.reason);
+      continue;
+    }
+    if (e?.type === "text" && typeof p?.text === "string" && p.text) finalText = p.text;
+  }
+
+  return {
+    eventCount: events.length,
+    modelCalls,
+    toolCalls,
+    toolErrors,
+    toolNames: Object.fromEntries(toolNames),
+    tokensIn,
+    tokensOut,
+    tokensTotal: lastTotal,
+    tokensCached,
+    contextTokens,
+    cost,
+    finalText,
+    stopReason,
+  };
+}
+
+/** One entry point for every runner: pi/omp streams and opencode streams. */
+export function summarizeAgentOutput(agent, text) {
+  return agent === "opencode" ? summarizeOpenCodeStream(text) : summarizeAgentStream(text);
+}

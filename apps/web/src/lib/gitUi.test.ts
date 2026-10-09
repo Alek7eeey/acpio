@@ -12,17 +12,17 @@ import {
 
 const samplePushOutput = `remote:
 remote: Visit the existing pull request:
-remote:   https://scm.dev.imdomain/intermech/ips-kernel/pulls/2205
+remote:   https://git.example/team/example-repo/pulls/2205
 remote:
 remote: . Processing 1 references
 remote: Processed 1 references in total
-To https://scm.dev.imdomain/intermech/ips-kernel.git
+To https://git.example/team/example-repo.git
    b70853de9c5..681b8e6aaba  feature/11.0/bb1933042 -> feature/11.0/bb1933042`;
 
 describe("parseGitSyncOutput", () => {
   it("extracts branch, range, and pull request url from push output", () => {
     expect(parseGitSyncOutput(samplePushOutput)).toEqual({
-      pullRequestUrl: "https://scm.dev.imdomain/intermech/ips-kernel/pulls/2205",
+      pullRequestUrl: "https://git.example/team/example-repo/pulls/2205",
       branch: "feature/11.0/bb1933042",
       range: "b70853de9c5..681b8e6aaba",
       isNewBranch: false,
@@ -204,7 +204,7 @@ describe("buildGitSyncFeedback", () => {
       "Pushed feature/11.0/bb1933042 (b70853d…681b8e6)",
     );
     expect(buildGitSyncFeedback("push", samplePushOutput, t).href).toBe(
-      "https://scm.dev.imdomain/intermech/ips-kernel/pulls/2205",
+      "https://git.example/team/example-repo/pulls/2205",
     );
   });
 });

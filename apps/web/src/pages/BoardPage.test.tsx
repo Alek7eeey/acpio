@@ -104,6 +104,49 @@ afterEach(() => {
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
 
+describe("BoardPage card headline", () => {
+  // The model-refined title lives in task.title, while the card body is the
+  // task description — without a headline the refinement was invisible here.
+  it("shows a refined title above the description", async () => {
+    useAppStore.setState({
+      boardSessions: [{ ...task, title: "Validate the login form" }],
+    });
+    renderBoard();
+
+    const card = (await screen.findByText("Fix the login bug")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+    expect(within(card).getByText("Validate the login form")).toBeTruthy();
+  });
+
+  // Before refinement the title *is* the description's first line — showing
+  // it too would print the same words twice on one card.
+  it("omits the headline while the title still duplicates the description", async () => {
+    useAppStore.setState({
+      boardSessions: [{ ...task, title: "Fix the login bug" }],
+    });
+    renderBoard();
+
+    await screen.findByText("Fix the login bug");
+    expect(screen.queryByText("Fix the login bug")).toBeTruthy();
+    // One element carries the text — the body, not a headline above it.
+    expect(screen.getAllByText("Fix the login bug")).toHaveLength(1);
+  });
+
+  // A task without a description falls back to the title as its body text.
+  it("uses the title as the body when there is no description", async () => {
+    useAppStore.setState({
+      boardSessions: [{ ...task, title: "Empty-task title", taskDescription: "" }],
+    });
+    renderBoard();
+
+    const body = await screen.findByText("Empty-task title");
+    expect(body.closest("[data-task-id]")).toBeTruthy();
+    // The body is the description-classed paragraph, not a headline.
+    expect(body.className).toContain("cardText");
+  });
+});
+
 describe("BoardPage card click", () => {
   // Regression: the click used to await the full session-detail round-trip
   // before navigate(), so the board sat unresponsive for seconds.
@@ -163,6 +206,47 @@ describe("Board Done lane order", () => {
 
     await screen.findByText("Shipped a minute ago");
     const lane = container.querySelector('[data-column="done"] .columnBody, [data-column="done"]');
+
+    const order = Array.from(lane!.querySelectorAll("[data-task-id]")).map((el) =>
+      el.getAttribute("data-task-id"),
+    );
+    expect(order).toEqual(["t-new", "t-mid", "t-old"]);
+  });
+});
+
+describe("Board Wait lane order", () => {
+  // Wait is a finish log as well: the turn that ended a minute ago belongs
+  // above one that ended yesterday, whatever order the cards were dragged into.
+  it("lists tasks whose turn finished last on top, ignoring the manual order", async () => {
+    const finished = (id: string, text: string, updatedAt: string, sortOrder: number): SessionDto => ({
+      ...task,
+      id,
+      title: id,
+      taskDescription: text,
+      status: "idle",
+      startedAt: "2026-09-20T11:00:00.000Z",
+      doneAt: null,
+      updatedAt,
+      sortOrder,
+      createdAt: "2026-09-20T10:00:00.000Z",
+    });
+    const oldest = finished("t-old", "Finished yesterday", "2026-09-26T10:00:00.000Z", 0);
+    const newest = finished("t-new", "Finished a minute ago", "2026-09-27T10:00:00.000Z", 5);
+    const middle = finished("t-mid", "Finished an hour ago", "2026-09-27T09:00:00.000Z", 2);
+    useAppStore.setState({ boardSessions: [oldest, newest, middle] });
+
+    const { container } = render(
+      <MemoryRouter initialEntries={["/board/b1"]}>
+        <I18nProvider>
+          <Routes>
+            <Route path="/board/:boardId" element={<BoardPage />} />
+          </Routes>
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Finished a minute ago");
+    const lane = container.querySelector('[data-column="wait"] .columnBody, [data-column="wait"]');
 
     const order = Array.from(lane!.querySelectorAll("[data-task-id]")).map((el) =>
       el.getAttribute("data-task-id"),
@@ -304,23 +388,75 @@ describe("BoardPage new task form", () => {
   });
 
   // Regression: the form ignored every press outside it, so an accidental "+"
-  // left it in the lane until Cancel was found.
-  it("dismisses the form on a press outside it", async () => {
+  // left it in the lane until Cancel was found — an empty form still goes away.
+  it("dismisses an empty form on a press outside it", async () => {
     renderBoard();
     await screen.findByText("Fix the login bug");
 
     const group = document.querySelector("[data-group]") as HTMLElement;
     await userEvent.click(within(group).getByLabelText("New task"));
-    const textarea = within(group).getByPlaceholderText("Describe the task…");
-    await userEvent.type(textarea, "Half-typed");
+    expect(within(group).getByPlaceholderText("Describe the task…")).toBeTruthy();
 
     fireEvent.mouseDown(document.body);
 
     expect(screen.queryByPlaceholderText("Describe the task…")).toBeNull();
-    // Back to the placeholder, and the abandoned draft is gone with the form.
+    // Back to the placeholder, and reopening it starts an empty form.
     expect(within(group).getByRole("button", { name: "Add task" })).toBeTruthy();
     await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
     expect((within(group).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement).value).toBe("");
+  });
+
+  // The report: a press anywhere outside the form dropped it and took the
+  // half-written task with it. A form the user has written in stays put.
+  it("keeps a typed form and its text on a press outside it", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    await userEvent.type(within(group).getByPlaceholderText("Describe the task…"), "Half-typed");
+
+    // Stray presses outside the block, more than once.
+    fireEvent.mouseDown(document.body);
+    fireEvent.mouseDown(document.body);
+
+    const kept = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+    expect(kept.value).toBe("Half-typed");
+  });
+
+  // The folder's own "+" is outside the form too: pressing it used to reset
+  // the form through the same dismissal path and wipe the text.
+  it("keeps the text when the same folder's + is pressed again", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    await userEvent.type(within(group).getByPlaceholderText("Describe the task…"), "Half-typed");
+
+    await userEvent.click(within(group).getByLabelText("New task"));
+
+    const kept = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+    expect(kept.value).toBe("Half-typed");
+  });
+
+  // Escape (and Cancel) are still the way out of a form with text in it.
+  it("drops a typed form on Escape", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+    await userEvent.type(within(group).getByPlaceholderText("Describe the task…"), "Half-typed");
+
+    await userEvent.keyboard("{Escape}");
+
+    expect(screen.queryByPlaceholderText("Describe the task…")).toBeNull();
+    expect(within(group).getByRole("button", { name: "Add task" })).toBeTruthy();
   });
 
   it("keeps the form for a press inside it", async () => {

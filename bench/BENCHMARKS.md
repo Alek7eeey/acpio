@@ -218,7 +218,7 @@ Docker-образ (`swebench/sweb.eval.x86_64.<repo>:<id>`): репозитор�
 - ✅ Агентская фаза идёт через наш прокси как обычно (метрики с провода)
 - ✅ Сравнение harness'ов на этом корпусе: pi и omp исполняются в тех же
   официальных контейнерах из бандла (`--agents builtin,pi,omp`), у каждого
-  свой чистый /testbed. Первый смок 2026-09-30, flask-5014 × im-llm:
+  свой чистый /testbed. Первый смок 2026-09-30, flask-5014 × local-model:
   builtin ✅ (290с, 15 tools), omp ✅ (496с, 25 tools), pi ❌ — починил
   FAIL_TO_PASS, но сломал 1 тест из PASS_TO_PASS. Провод (89 модельных вызовов):
   builtin 173k in / 12k uncached / 7.4k out; omp 525k in / 24k uncached / 15k out;

@@ -1,0 +1,306 @@
+.panel {
+  --console-panel-width: 380px;
+  position: relative;
+  flex: 0 0 var(--console-panel-width);
+  width: var(--console-panel-width);
+  max-width: min(70vw, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 4%, var(--surface)) 0%,
+      color-mix(in srgb, var(--bg-secondary) 35%, var(--surface)) 100%
+    );
+  box-shadow:
+    -10px 0 24px rgba(0, 0, 0, 0.05),
+    inset 2px 0 0 color-mix(in srgb, var(--text-secondary) 18%, transparent);
+  animation: slideIn 0.2s ease;
+}
+
+.panelTerminal {
+  --term-surface-bg: var(--bg);
+  --term-splitter: color-mix(in srgb, #ffffff 18%, #3a3a3a);
+
+  background: var(--term-surface-bg);
+  box-shadow: none;
+  animation: slideIn 0.2s ease;
+}
+
+:global([data-theme="light"]) .panelTerminal {
+  --term-surface-bg: var(--bg);
+  --term-splitter: color-mix(in srgb, var(--text-secondary) 28%, var(--border));
+}
+
+:global([data-theme="light"]) .panel:not(.panelTerminal) {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 3%, #ffffff) 0%,
+      color-mix(in srgb, var(--bg-secondary) 22%, #ffffff) 100%
+    );
+  box-shadow:
+    -8px 0 20px rgba(15, 23, 42, 0.06),
+    inset 2px 0 0 color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: var(--term-splitter, color-mix(in srgb, #ffffff 18%, #3a3a3a));
+}
+
+.panelHidden {
+  display: none;
+}
+
+.panelInline {
+  position: relative;
+  flex: 1 1 0;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  margin: 0;
+  padding: 6px;
+  box-sizing: border-box;
+  box-shadow: var(--shadow-soft);
+  animation: none;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+  --term-surface-bg: var(--surface);
+  display: flex;
+  flex-direction: column;
+}
+
+.panelInline .terminal {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sideCloseBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--bg) 12%, transparent);
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.sideCloseBtn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 18%, var(--border));
+  background: var(--surface);
+}
+
+.sideCloseBtn svg {
+  display: block;
+}
+
+.terminalWrap {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal {
+  flex: 1 1 0;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--term-surface-bg);
+}
+
+.terminalLoader {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--term-surface-bg) 94%, transparent);
+  pointer-events: none;
+}
+
+.loaderSpin {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: terminalLoaderSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.loaderLabel {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+@keyframes terminalLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.panelTerminal .terminal :global(.xterm) {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.panelTerminal .terminal :global(.xterm-viewport) {
+  overflow-y: auto !important;
+  height: 100% !important;
+  max-height: 100%;
+  background-color: var(--term-surface-bg) !important;
+}
+
+.panelTerminal .terminal :global(.xterm-screen),
+.panelTerminal .terminal :global(.xterm-scroll-area) {
+  background-color: var(--term-surface-bg) !important;
+}
+
+.contextMenu {
+  /* The menu scrolls itself when the viewport cannot fit every item. */
+  overscroll-behavior: contain;
+  position: fixed;
+  z-index: 400;
+  min-width: 210px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextMenu button {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.contextMenu button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.menuShortcut {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.contextMenuDivider {
+  height: 1px;
+  margin: 4px 6px;
+  background: color-mix(in srgb, var(--border) 85%, transparent);
+}
+
+.menuDanger {
+  color: var(--danger);
+}
+
+.menuDanger .menuShortcut {
+  color: color-mix(in srgb, var(--danger) 70%, var(--text-secondary));
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 1180px) {
+  .panel {
+    position: absolute;
+    inset: 0;
+    z-index: 28;
+    width: 100%;
+    flex-basis: auto;
+    max-width: none;
+  }
+
+  .splitter {
+    display: none;
+  }
+}

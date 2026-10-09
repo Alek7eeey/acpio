@@ -5,6 +5,11 @@ import {
   McpServerConfig,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
+  normalizeBuiltinMaxOutputTokens,
+  normalizeBuiltinTurnRetryAttempts,
+  normalizeBuiltinThinkingLimit,
+  normalizeBuiltinContextSettings,
+  normalizeBuiltinExtraInstructions,
   normalizeBuiltinProviders,
   normalizeBuiltinSubagents,
   normalizeChatChipOptions,
@@ -155,6 +160,9 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.resumeAgentContext !== "boolean") {
     merged.resumeAgentContext = DEFAULT_SETTINGS.resumeAgentContext;
   }
+  if (typeof merged.resumeInterruptedTurns !== "boolean") {
+    merged.resumeInterruptedTurns = DEFAULT_SETTINGS.resumeInterruptedTurns;
+  }
   if (typeof merged.showBootSplash !== "boolean") {
     merged.showBootSplash = DEFAULT_SETTINGS.showBootSplash;
   }
@@ -271,6 +279,15 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatSplit !== "boolean") {
     merged.chatSplit = DEFAULT_SETTINGS.chatSplit;
   }
+  if (typeof merged.chatAutoTitle !== "boolean") {
+    merged.chatAutoTitle = DEFAULT_SETTINGS.chatAutoTitle;
+  }
+  if (typeof merged.boardShowFirstMessage !== "boolean") {
+    merged.boardShowFirstMessage = DEFAULT_SETTINGS.boardShowFirstMessage;
+  }
+  if (typeof merged.chatTitleModel !== "string") {
+    merged.chatTitleModel = DEFAULT_SETTINGS.chatTitleModel;
+  }
   merged.chatToolbarStyle =
     merged.chatToolbarStyle === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
   if (merged.attachDefaultSource !== "server") {
@@ -315,6 +332,12 @@ function mergeSettings(raw: unknown): AppSettings {
   // After the default-model copy above so a legacy builtin default lands
   // already rewritten to its composite `<provider>::<model>` form.
   normalizeBuiltinProviders(merged);
+  merged.builtinMaxOutputTokens = normalizeBuiltinMaxOutputTokens(merged.builtinMaxOutputTokens);
+  merged.builtinTurnRetryAttempts = normalizeBuiltinTurnRetryAttempts(
+    merged.builtinTurnRetryAttempts,
+  );
+  merged.builtinThinkingLimit = normalizeBuiltinThinkingLimit(merged.builtinThinkingLimit);
+  normalizeBuiltinContextSettings(merged);
   // Fields replaced by icon-level controls / never shipped.
   for (const stale of [
     "chatReadAloud",
@@ -355,8 +378,15 @@ function mergeSettings(raw: unknown): AppSettings {
   merged.mcpProjectFiles = normalizeMcpProjectFiles(merged.mcpProjectFiles);
   // Built-in skill folders: relative to the chat cwd, absolute = global.
   merged.builtinSkillPaths = normalizeSkillPaths(merged.builtinSkillPaths);
+  // User's own instructions appended to the built-in agent's system prompt.
+  merged.builtinExtraInstructions = normalizeBuiltinExtraInstructions(
+    merged.builtinExtraInstructions,
+  );
   // Built-in agent subagents: row shapes, caps, reserved names.
   merged.builtinSubagents = normalizeBuiltinSubagents(merged.builtinSubagents);
+  if (typeof merged.builtinAllowOutsideCwd !== "boolean") {
+    merged.builtinAllowOutsideCwd = DEFAULT_SETTINGS.builtinAllowOutsideCwd;
+  }
   // Composer drafts persist so typed text survives a reload. Heal the map:
   // only string keys with non-empty trimmed string values survive, and the
   // whole blob is capped so it cannot grow without bound.

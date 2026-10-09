@@ -55,6 +55,11 @@ export const sessions = sqliteTable("sessions", {
   boardId: text("board_id"),
   /** Board task description (card text / first-message prefill). */
   taskDescription: text("task_description"),
+  /** Pictures attached when the task was created: staged in acpio's own data
+   *  folder and carried along by the task's first turn. */
+  taskAttachments: text("task_attachments", { mode: "json" })
+    .notNull()
+    .$defaultFn(() => []),
   /** First turn start of a board task (Todo ⇄ Wait split). */
   startedAt: integer("started_at", { mode: "timestamp_ms" }),
   /** User-marked completion of a board task (Wait ⇄ Done). */

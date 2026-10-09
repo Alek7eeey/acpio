@@ -1586,6 +1586,150 @@
   white-space: nowrap;
 }
 
+/* --- built-in providers: one folded card per endpoint --- */
+.providerList {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.providerCard {
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.providerCardSummary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.providerCardSummary::-webkit-details-marker {
+  display: none;
+}
+
+.providerCardSummary::before {
+  content: "▸";
+  display: inline-block;
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  transition: transform 0.12s ease;
+}
+
+.providerCard[open] > .providerCardSummary::before {
+  transform: rotate(90deg);
+}
+
+.providerCardSummary:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+}
+
+.providerCardName {
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerCardUrl {
+  flex: 1 1 auto;
+  font-size: var(--settings-hint-size);
+  color: var(--text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.providerCardSummary .secondaryBtn {
+  flex: 0 0 auto;
+}
+
+/* On/off is a switch, like the built-in knobs above the list: the header keeps
+   a single text button (Delete) beside it, and the state is the control. */
+.providerSwitch {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.providerSwitchTrack {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong, var(--border));
+  transition: background 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.providerSwitchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s ease;
+}
+
+.providerSwitch[aria-checked="true"] .providerSwitchTrack {
+  background: var(--accent);
+}
+
+.providerSwitch[aria-checked="true"] .providerSwitchKnob {
+  transform: translateX(18px);
+}
+
+.providerSwitch:focus-visible .providerSwitchTrack {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (min-width: 900px) {
+  .providerSwitchTrack {
+    width: 42px;
+    height: 22px;
+  }
+
+  .providerSwitchKnob {
+    width: 18px;
+    height: 18px;
+  }
+
+  .providerSwitch[aria-checked="true"] .providerSwitchKnob {
+    transform: translateX(20px);
+  }
+}
+
+.providerCardOff > .providerCardSummary .providerCardName,
+.providerCardOff > .providerCardSummary .providerCardUrl {
+  color: var(--text-secondary);
+}
+
+.providerCardBody .table {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
 .mcpRowMetaInline {
   display: inline-flex;
   align-items: center;

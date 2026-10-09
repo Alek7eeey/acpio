@@ -75,6 +75,11 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
   try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN task_attachments TEXT NOT NULL DEFAULT '[]'`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  try {
     db.run(sql`ALTER TABLE sessions ADD COLUMN started_at INTEGER`);
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;

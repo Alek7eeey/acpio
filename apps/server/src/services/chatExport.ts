@@ -56,6 +56,12 @@ function formatDate(iso: string, locale: AppLocale): string {
   }
 }
 
+/** `830ms` / `1.24s` for a duration in milliseconds; "" when unknown. */
+function fmtMs(value: unknown): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return "";
+  return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(2)}s`;
+}
+
 /** Text payload field of a part, whatever the shape. */
 function partText(part: MessageDto["parts"][number]): string {
   const payload = part.payload ?? {};
@@ -182,6 +188,8 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
       case "text": {
         const text = String(payload.text ?? "");
         if (text.trim()) {
+          const ttft = fmtMs(payload.ttftMs);
+          if (ttft) lines.push(`_${t(locale, "export.ttft")}: ${ttft}_`, "");
           lines.push(text.trimEnd(), "");
         }
         break;
@@ -189,7 +197,11 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
       case "thought": {
         const text = String(payload.text ?? "").trim();
         if (!text) break;
-        lines.push(`**${t(locale, "export.thinking")}**`, "");
+        const ttft = fmtMs(payload.ttftMs);
+        lines.push(
+          `**${t(locale, "export.thinking")}${ttft ? ` · ${t(locale, "export.ttft")} ${ttft}` : ""}**`,
+          "",
+        );
         lines.push(...text.split("\n").map((l) => `> ${l}`), "");
         break;
       }
@@ -203,7 +215,11 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
           ) || t(locale, "export.tool");
         // Exports feed agent-side analysis: output goes in full, never clipped.
         const output = toolOutputText(part);
-        lines.push(`**${t(locale, "export.tool")}: ${title}**`, "");
+        const dur = fmtMs(payload.durationMs);
+        lines.push(
+          `**${t(locale, "export.tool")}: ${title}**${dur ? ` · ${t(locale, "export.duration")} ${dur}` : ""}`,
+          "",
+        );
         if (output) {
           const fence = fenceFor(output);
           lines.push(`${fence}text`, output, fence, "");
@@ -213,7 +229,11 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
       case "subagent": {
         const title = subagentTitle(part);
         const body = subagentBody(part);
-        lines.push(`**${t(locale, "export.subagent")}${title ? `: ${title}` : ""}**`, "");
+        const dur = fmtMs(payload.durationMs);
+        lines.push(
+          `**${t(locale, "export.subagent")}${title ? `: ${title}` : ""}**${dur ? ` · ${t(locale, "export.duration")} ${dur}` : ""}`,
+          "",
+        );
         if (body) {
           lines.push(body, "");
         }
@@ -345,6 +365,9 @@ export function renderJson(detail: SessionDetailDto): string {
         order: p.order,
         createdAt: p.createdAt,
         payload: p.payload,
+        // Tool timing lifted to the part root so analysis reads it directly.
+        ...(typeof p.payload?.durationMs === "number" ? { durationMs: p.payload.durationMs } : {}),
+        ...(typeof p.payload?.ttftMs === "number" ? { ttftMs: p.payload.ttftMs } : {}),
       })),
     })),
   };

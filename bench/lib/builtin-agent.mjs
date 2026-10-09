@@ -144,6 +144,11 @@ export class BenchServer {
       defaultProvider: "builtin",
       defaultMode: "agent",
       permissionPolicy: "always",
+      // The harness's own skill folders (the checkout's `.agents/skills`, the
+      // server user's `~/.agents/skills`) must not ride into a bench prompt:
+      // they are the operator's commands, no task asks for them, and they sit
+      // in the fixed per-call cost. An empty list turns discovery off.
+      builtinSkillPaths: [],
       builtinProviders: [
         {
           id: this.provider.provider,

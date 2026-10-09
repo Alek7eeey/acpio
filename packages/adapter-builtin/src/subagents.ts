@@ -103,6 +103,11 @@ export interface SubagentsBridge {
   ask: AskPermission;
   /** The parent turn's model — children share the endpoint, model and signal. */
   model: TurnModel;
+  /** Parent-turn rules that must also bind children (the "Low" reasoning budget). */
+  extraSystem: string;
+  /** The parent's `/thinking-limit` fuse, chars — a child's rumination costs
+   * the same user the same money. 0 = off. */
+  reasoningLimitChars: number;
   contextWindow: number;
   cwd: string;
   signal: AbortSignal;
@@ -126,6 +131,8 @@ export function createSubagentsBridge(parts: {
   mode: AgentMode;
   ask: AskPermission;
   model: TurnModel;
+  extraSystem?: string;
+  reasoningLimitChars?: number;
   contextWindow: number;
   cwd: string;
   signal: AbortSignal;
@@ -135,6 +142,8 @@ export function createSubagentsBridge(parts: {
 }): SubagentsBridge {
   return {
     ...parts,
+    extraSystem: parts.extraSystem ?? "",
+    reasoningLimitChars: parts.reasoningLimitChars ?? 0,
     usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, totalTokens: 0 },
     results: new Map(),
     slots: new Semaphore(SUBAGENT_MAX_PARALLEL),
@@ -290,18 +299,66 @@ export async function runSubagent(
       // Text/thought chunks and tool results are not forwarded: the child's
       // report arrives once, as this tool's return value.
     };
+    const childMessages: ModelMessage[] = [
+      { role: "user", content: [{ type: "text", text: input.prompt }] },
+    ];
     const outcome = await runTurn({
       model: bridge.model,
-      system: [def.systemPrompt.trim(), `Working directory: ${bridge.cwd}`, REPORT_CONTRACT].join(
-        "\n\n",
-      ),
-      messages: [{ role: "user", content: [{ type: "text", text: input.prompt }] }],
+      system: [
+        def.systemPrompt.trim(),
+        `Working directory: ${bridge.cwd}`,
+        bridge.extraSystem.trim(),
+        REPORT_CONTRACT,
+      ]
+        .filter((part) => part)
+        .join("\n\n"),
+      messages: childMessages,
       tools: picked,
       abortSignal: bridge.signal,
       contextWindow: bridge.contextWindow,
       maxSteps: Math.min(def.maxTurns, BUILTIN_SUBAGENT_MAX_TURNS_CAP),
+      reasoningLimitChars: bridge.reasoningLimitChars,
       emit: childEmit,
     });
+    // A reasoning cut folds the thinking into the child's own history and the
+    // same turn runs on with the reminder — the parent's fuse, the parent's
+    // remedy. Bounded like the parent's (one rerun per cut, two cuts max).
+    if (outcome.reasoningLimitHit && !bridge.signal.aborted) {
+      childMessages.push(...outcome.response);
+      childMessages.push({
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              `The step's reasoning exceeded the ${bridge.reasoningLimitChars}-char limit and was cut — ` +
+              "its beginning is kept above. Do not keep thinking: act right now on what you " +
+              "already know, and finish with the report.",
+          },
+        ],
+      });
+      const continued = await runTurn({
+        model: bridge.model,
+        system: [
+          def.systemPrompt.trim(),
+          `Working directory: ${bridge.cwd}`,
+          bridge.extraSystem.trim(),
+          REPORT_CONTRACT,
+        ]
+          .filter((part) => part)
+          .join("\n\n"),
+        messages: childMessages,
+        tools: picked,
+        abortSignal: bridge.signal,
+        contextWindow: bridge.contextWindow,
+        maxSteps: Math.min(def.maxTurns, BUILTIN_SUBAGENT_MAX_TURNS_CAP),
+        reasoningLimitChars: bridge.reasoningLimitChars,
+        emit: childEmit,
+      });
+      outcome.response.push(...continued.response);
+      outcome.stepBudgetHit = continued.stepBudgetHit;
+      outcome.stopReason = continued.stopReason;
+    }
     // Clip before annotating: the budget note must survive the cut.
     let report = clipResult(finalText(outcome.response));
     if (outcome.stepBudgetHit) {

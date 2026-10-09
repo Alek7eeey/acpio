@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "bench-runner",
+    "env": "production",
+    "server": {
+      "host": "127.0.0.1",
+      "port": 8080,
+      "timeoutMs": 5000
+    }
+  },
+  "logging": {
+    "level": "info",
+    "targets": {
+      "file": {
+        "path": "logs/bench.log",
+        "rotate": true,
+        "maxSizeMb": 10
+      },
+      "console": {
+        "enabled": true
+      }
+    }
+  },
+  "features": {
+    "betaDashboard": false,
+    "cache": {
+      "ttlSeconds": 60
+    }
+  }
+}

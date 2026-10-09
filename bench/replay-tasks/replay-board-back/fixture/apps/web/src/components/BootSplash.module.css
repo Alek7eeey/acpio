@@ -1,0 +1,235 @@
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  isolation: isolate;
+  cursor: pointer;
+  outline: none;
+}
+
+.splash.exiting {
+  animation: splashOut 320ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: none;
+  cursor: default;
+}
+
+.splash.skipping .letter,
+.splash.skipping .sub,
+.splash.skipping .hint,
+.splash.skipping .ring,
+.splash.skipping .ringSoft,
+.splash.skipping .glowA,
+.splash.skipping .glowB,
+.splash.skipping .grid {
+  animation: none !important;
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.splash.skipping .ring,
+.splash.skipping .ringSoft {
+  opacity: 0.5;
+}
+
+.splash.skipping .grid {
+  opacity: 0.28;
+}
+
+.splash.skipping .hint {
+  opacity: 0;
+}
+
+.glowA,
+.glowB {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  pointer-events: none;
+}
+
+.glowA {
+  width: min(42vw, 380px);
+  height: min(42vw, 380px);
+  top: 18%;
+  left: 50%;
+  translate: -70% -30%;
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
+  animation: glowDrift 2.6s ease-in-out both;
+}
+
+.glowB {
+  width: min(36vw, 300px);
+  height: min(36vw, 300px);
+  top: 42%;
+  left: 50%;
+  translate: 10% 20%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  animation: glowDrift 2.6s ease-in-out 0.15s both reverse;
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.28;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(circle at 50% 48%, #000 0%, transparent 52%);
+  animation: gridIn 900ms ease-out both;
+}
+
+.stage {
+  position: relative;
+  z-index: 1;
+  width: min(280px, 78vw);
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 20px;
+  text-align: center;
+}
+
+.ring,
+.ringSoft {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  translate: -50% -50%;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  pointer-events: none;
+}
+
+.ring {
+  width: 200px;
+  height: 200px;
+  animation: ringPulse 2.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ringSoft {
+  width: 250px;
+  height: 250px;
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+  animation: ringPulse 2.6s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+}
+
+.brand {
+  display: inline-flex;
+  justify-content: center;
+  font-family: "Syne", var(--font);
+  font-weight: 750;
+  font-size: clamp(1.55rem, 4.2vw, 2rem);
+  letter-spacing: -0.03em;
+  line-height: 1;
+  perspective: 80px;
+  white-space: nowrap;
+}
+
+.letter {
+  display: inline-block;
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  opacity: 0;
+  animation: letterIn 640ms cubic-bezier(0.22, 1, 0.36, 1) calc(240ms + var(--i, 0) * 55ms) both;
+}
+
+.accent {
+  color: var(--accent);
+}
+
+.sub {
+  margin: 0;
+  max-width: 220px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0;
+  animation: subIn 700ms ease-out 1s both;
+}
+
+.hint {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--text-secondary);
+  opacity: 0;
+  animation: subIn 600ms ease-out 1.6s both;
+}
+
+@keyframes letterIn {
+  0% {
+    opacity: 0;
+    transform: rotateY(-90deg) translateY(8px) scale(0.9);
+  }
+  65% {
+    opacity: 1;
+    transform: rotateY(8deg) translateY(0) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateY(0deg) translateY(0) scale(1);
+  }
+}
+
+@keyframes subIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ringPulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+}
+
+@keyframes glowDrift {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes gridIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.28;
+  }
+}
+
+@keyframes splashOut {
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+    filter: blur(4px);
+  }
+}

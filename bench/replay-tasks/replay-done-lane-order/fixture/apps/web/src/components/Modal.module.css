@@ -1,0 +1,311 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  /* Above the app header (z-index 200) so modals dim/blur the whole screen. */
+  z-index: 500;
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  width: min(640px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  display: grid;
+  gap: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.18);
+}
+
+.modalWide {
+  width: min(720px, 100%);
+  max-height: min(86vh, 860px);
+}
+
+.modal h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.muted {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  font-size: 0.8rem;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.permissionBody {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.permissionTitle {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.kindChip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  border: 1px solid var(--border);
+}
+
+.planBody {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.planTitle {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+}
+
+.planOverview {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.planMarkdown {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
+  max-height: min(48vh, 420px);
+  overflow: auto;
+}
+
+.planMarkdownFree {
+  max-height: none;
+  overflow: visible;
+}
+
+.planSection {
+  display: grid;
+  gap: 8px;
+}
+
+.planSectionLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.planTodos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+/* Rows report the agent's status: no pointer cursor, no hover/focus affordance,
+   and text stays selectable so a plan can be copied out. */
+.planTodo {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.planTodoMark {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: transparent;
+  color: #fff;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.planTodoMark svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+
+.planTodo[data-status="completed"] .planTodoMark,
+.planTodo[data-status="complete"] .planTodoMark {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.planTodo[data-status="in_progress"] .planTodoMark,
+.planTodo[data-status="in-progress"] .planTodoMark {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.planTodoLabel {
+  min-width: 0;
+}
+
+.planTodo[data-status="completed"] .planTodoLabel,
+.planTodo[data-status="complete"] .planTodoLabel {
+  text-decoration: line-through;
+  color: var(--text-secondary);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.actions button {
+  border: none;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  color: var(--text);
+  transition: transform 0.12s ease, background 0.12s ease, opacity 0.12s ease;
+}
+
+.actions button:hover {
+  transform: translateY(-1px);
+}
+
+.actions button:active {
+  transform: translateY(0);
+}
+
+.primary {
+  background: var(--accent) !important;
+  color: #fff !important;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ghost {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+}
+
+.danger {
+  background: color-mix(in srgb, var(--danger, #c44) 14%, var(--bg-tertiary)) !important;
+  color: var(--danger, #c44) !important;
+}
+
+.dialogCompact {
+  width: min(440px, 100%);
+  max-height: none;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.field input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.field input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.questions {
+  display: grid;
+  gap: 12px;
+}
+
+.qPrompt {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.opt,
+.optActive {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 999px;
+  padding: 8px 12px;
+}
+
+.optActive {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}

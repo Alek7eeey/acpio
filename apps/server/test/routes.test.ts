@@ -2260,6 +2260,9 @@ describe("built-in agent image attachments", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // Not a title test: the default-on refinement would race its request
+        // into the stub and shift the recorded bodies.
+        chatAutoTitle: false,
         builtinProviders: [
           {
             id: "p1",
@@ -2402,6 +2405,9 @@ describe("built-in agent MCP tools", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // Not a title test: the default-on refinement would land a request of
+        // its own in the stub and move bodies[1] off the second turn call.
+        chatAutoTitle: false,
         builtinProviders: [
           {
             id: "p1",
@@ -2758,5 +2764,131 @@ describe("git routes", () => {
     expect(main.statusCode).toBe(400);
     expect(main.json().error).toContain("main branch");
     expect(git(dir, ["branch", "--list", "main"]).trim()).toBe("main");
+  });
+});
+
+/** Every part's text, whatever its type — a thought chunk ("tick 2") proves the
+ *  agent's model call is genuinely streaming, which a "wait for running" poll
+ *  cannot tell apart from the pre-turn claim. */
+function allPartTexts(detail: SessionDetailDto): string[] {
+  return detail.messages
+    .flatMap((m) => m.parts)
+    .map((p) => String(p.payload.text ?? ""))
+    .filter(Boolean);
+}
+
+describe("prompt delivery while the agent is busy", () => {
+  it("advertises mid-turn folding for the harness that can do it, and only it", async () => {
+    const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
+      id: string;
+      midTurnSteering: boolean;
+    }>;
+    // The queue bar hides the "after the step" chip on this flag.
+    expect(meta.map((a) => [a.id, a.midTurnSteering])).toEqual([
+      ["cursor", false],
+      ["omp", false],
+      ["builtin", true],
+    ]);
+  });
+
+  it("steers: interrupts the live turn and sends the message right away", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    // A turn that never ends by itself: only an interrupt frees the runtime.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG долгая работа" },
+    });
+    await waitForDetail(session.id, (d) => allPartTexts(d).some((t) => t.includes("hang tick")));
+
+    const steered = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "нужно сейчас", delivery: "steer" },
+    });
+    expect(steered.statusCode).toBe(200);
+
+    // Answered although the first turn is still open — so the message was
+    // neither queued behind it nor waiting for it.
+    const detail = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("echo: нужно сейчас")),
+    );
+    // Both messages are in the transcript, in the order the user sent them.
+    expect(
+      detail.messages
+        .filter((m) => m.role === "user")
+        .map((m) => String(m.parts.find((p) => p.type === "text")?.payload.text ?? "")),
+    ).toEqual(["SLOW-HANG долгая работа", "нужно сейчас"]);
+  });
+
+  it("keeps the default delivery: the same message without one waits for the turn", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG долгая работа" },
+    });
+    await waitForDetail(session.id, (d) => allPartTexts(d).some((t) => t.includes("hang tick")));
+
+    // No delivery = the queue, exactly as before this existed: the live turn is
+    // left alone, so the message must not reach the agent while it runs.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "ждёт хода" },
+    });
+    await expect(
+      waitForDetail(
+        session.id,
+        (d) => textParts(d).some((t) => t.includes("echo: ждёт хода")),
+        1_500,
+      ),
+    ).rejects.toThrow(/condition not met/);
+  });
+
+  it("queues an afterStep message for a harness that cannot fold it", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-ACTIVE долгая работа" },
+    });
+    await waitForDetail(session.id, (d) => allPartTexts(d).some((t) => t.includes("tick 0")));
+
+    // OMP has no mid-turn folding, so this must not pretend: the live turn is
+    // left alone and the message waits for its end like any queued prompt.
+    const folded = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "после шага", delivery: "afterStep" },
+    });
+    expect(folded.statusCode).toBe(200);
+
+    await waitForDetail(
+      session.id,
+      (d) =>
+        d.status === "idle" &&
+        textParts(d).some((t) => t.includes("slow-active done")) &&
+        textParts(d).some((t) => t.includes("echo: после шага")),
+    );
   });
 });

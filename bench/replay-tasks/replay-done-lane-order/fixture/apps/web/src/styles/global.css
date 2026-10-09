@@ -1,0 +1,180 @@
+:root {
+  --bg: #f7f8fa;
+  --bg-secondary: #eef1f6;
+  --bg-tertiary: #e4e8ef;
+  --surface: #ffffff;
+  --surface-2: #fbfcfd;
+  --border: #d8dee8;
+  --border-soft: #ebedf2;
+  --text: #0f1419;
+  --text-secondary: #667085;
+  --accent: #0866ff;
+  --accent-soft: rgba(8, 102, 255, 0.1);
+  --accent-hover: #0654d5;
+  --danger: #e41e3f;
+  --danger-soft: rgba(228, 30, 63, 0.1);
+  --success: #1f8f4e;
+  --success-soft: rgba(31, 143, 78, 0.12);
+  --warning: #b78103;
+  --slash-cmd: #e67e22;
+  --shadow: 0 8px 24px rgba(15, 20, 25, 0.06);
+  --shadow-soft: 0 1px 2px rgba(15, 20, 25, 0.04);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --sidebar-width: 300px;
+  --header-height: 52px;
+  /* Mobile bottom dock (the sheet puller). Root-level because dialogs portaled
+     to <body> are outside the shell subtree and still must clear it. */
+  --mobile-dock-h: calc(28px + env(safe-area-inset-bottom, 0px));
+  --toolbar-btn-size: 36px;
+  --font: "Figtree", sans-serif;
+  --motion: 180ms ease;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #0f1115;
+  --bg-secondary: #171a21;
+  --bg-tertiary: #262b36;
+  --surface: #171a21;
+  --surface-2: #1d222c;
+  --border: #2f3643;
+  --border-soft: #242a35;
+  --text: #f2f4f8;
+  --text-secondary: #9aa3b2;
+  --accent: #4b8dff;
+  --accent-soft: rgba(75, 141, 255, 0.14);
+  --accent-hover: #6aa0ff;
+  --danger: #ff5a74;
+  --danger-soft: rgba(255, 90, 116, 0.14);
+  --success: #3ecf8e;
+  --success-soft: rgba(62, 207, 142, 0.14);
+  --warning: #f0b429;
+  --slash-cmd: #f5a524;
+  --shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.25);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Text blocks never legitimately show a text caret. Hide it everywhere and
+   keep it only in real inputs — also tames browser caret-browsing artifacts
+   that otherwise blink a cursor in every paragraph on click. */
+* {
+  caret-color: transparent;
+}
+input,
+textarea,
+[contenteditable="true"],
+[contenteditable="plaintext-only"] {
+  caret-color: auto;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%),
+    radial-gradient(900px 400px at 100% 0%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+button {
+  cursor: pointer;
+  transition: background var(--motion), color var(--motion), border-color var(--motion), transform var(--motion);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.boot {
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.boot-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 22px 28px;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  animation: rise 0.35s ease;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 899px) {
+  :root {
+    --toolbar-btn-size: clamp(34px, 9vw, 40px);
+    --header-height: 52px;
+  }
+}

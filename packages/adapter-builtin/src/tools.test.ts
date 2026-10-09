@@ -11,7 +11,11 @@ type HostMock = { request: Mock };
 function setup(mode: AgentMode, host?: HostMock, ask?: Mock) {
   const h: HostMock = host ?? { request: vi.fn(async () => ({})) };
   const a: Mock = ask ?? vi.fn(async () => undefined);
-  return { tools: createBuiltinTools({ host: h, mode, ask: a }), host: h, ask: a };
+  return {
+    tools: createBuiltinTools({ host: h, mode, ask: a, sessionId: "S1" }),
+    host: h,
+    ask: a,
+  };
 }
 
 const exec = (tools: Record<string, any>, name: string, input: unknown) =>
@@ -19,9 +23,9 @@ const exec = (tools: Record<string, any>, name: string, input: unknown) =>
 
 describe("createBuiltinTools", () => {
   it.each([
-    ["plan", ["read", "glob", "grep"]],
-    ["ask", ["read", "glob", "grep"]],
-    ["agent", ["read", "glob", "grep", "write", "edit", "bash"]],
+    ["plan", ["read", "glob", "grep", "ask"]],
+    ["ask", ["read", "glob", "grep", "ask"]],
+    ["agent", ["read", "glob", "grep", "write", "edit", "bash", "ask"]],
   ] as const)("mode %s exposes exactly %j", (mode, expected) => {
     expect(Object.keys(setup(mode).tools)).toEqual([...expected]);
   });
@@ -70,11 +74,25 @@ describe("createBuiltinTools", () => {
     expect(host.request).not.toHaveBeenCalled();
   });
 
-  it("glob lists what the host matched", async () => {
+  it("glob lists what the host matched, with each file's size", async () => {
     const { tools, host } = setup("agent");
-    host.request.mockResolvedValue({ files: ["a.ts", "b.ts"], truncated: false });
-    await expect(exec(tools, "glob", { pattern: "**/*.ts" })).resolves.toBe("a.ts\nb.ts");
+    host.request.mockResolvedValue({
+      files: [
+        { path: "a.ts", bytes: 2048 },
+        { path: "b.ts", bytes: 512 },
+      ],
+      truncated: false,
+    });
+    await expect(exec(tools, "glob", { pattern: "**/*.ts" })).resolves.toBe(
+      "  2.0 KB  a.ts\n   512 B  b.ts",
+    );
     expect(host.request).toHaveBeenCalledWith("fs/glob", { pattern: "**/*.ts" });
+  });
+
+  it("glob survives a host that reports no size at all", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ files: [{ path: "a.ts" }], truncated: false });
+    await expect(exec(tools, "glob", { pattern: "**/*.ts" })).resolves.toBe("       ?  a.ts");
   });
 
   it("glob says so when nothing matched", async () => {
@@ -82,14 +100,23 @@ describe("createBuiltinTools", () => {
     await expect(exec(tools, "glob", { pattern: "*.rs" })).resolves.toContain("No files match");
   });
 
-  it("grep renders hits as path:line: text", async () => {
+  it("grep heads each file once and lists its hits underneath", async () => {
     const { tools, host } = setup("agent");
     host.request.mockResolvedValue({
-      hits: [{ path: "a.ts", line: 3, text: "calcTotal()" }],
+      hits: [
+        { path: "a.ts", line: 3, text: "calcTotal()" },
+        { path: "a.ts", line: 9, text: "calcTotal()" },
+        { path: "b.ts", line: 1, text: "calcTotal()" },
+      ],
+      files: [
+        { path: "a.ts", bytes: 2048, lines: 120 },
+        { path: "b.ts", bytes: 512, lines: 8 },
+      ],
       truncated: false,
     });
     await expect(exec(tools, "grep", { pattern: "calcTotal", ignore_case: true })).resolves.toBe(
-      "a.ts:3: calcTotal()",
+      "a.ts (2.0 KB, 120 lines)\n  3: calcTotal()\n  9: calcTotal()\n" +
+        "b.ts (512 B, 8 lines)\n  1: calcTotal()",
     );
     expect(host.request).toHaveBeenCalledWith("fs/search", {
       pattern: "calcTotal",
@@ -99,7 +126,11 @@ describe("createBuiltinTools", () => {
 
   it("grep marks a truncated result", async () => {
     const { tools, host } = setup("agent");
-    host.request.mockResolvedValue({ hits: [{ path: "a.ts", line: 1, text: "x" }], truncated: true });
+    host.request.mockResolvedValue({
+      hits: [{ path: "a.ts", line: 1, text: "x" }],
+      files: [{ path: "a.ts", bytes: 512, lines: 8 }],
+      truncated: true,
+    });
     await expect(exec(tools, "grep", { pattern: "x" })).resolves.toContain("more matches than shown");
   });
 
@@ -198,6 +229,172 @@ describe("createBuiltinTools", () => {
     await expect(exec(tools, "bash", { command: "echo hi" })).rejects.toThrow(/отклонена/);
     expect(host.request).not.toHaveBeenCalled();
   });
+
+  it("ask shows the question card the CLI agents use", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "accept", content: { target: "src/api" } });
+    await exec(tools, "ask", { questions: [{ id: "target", question: "Where to put it?" }] });
+    expect(host.request).toHaveBeenCalledWith("elicitation/create", {
+      sessionId: "S1",
+      mode: "form",
+      message: "Where to put it?",
+      requestedSchema: {
+        type: "object",
+        properties: { target: { type: "string", title: "Where to put it?" } },
+        required: ["target"],
+      },
+    });
+  });
+
+  it("ask maps options, multi-select and the Other field into the form", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "accept", content: {} });
+    await exec(tools, "ask", {
+      questions: [
+        {
+          id: "scope",
+          question: "How far?",
+          description: "Pick one.",
+          options: [
+            { id: "types", label: "Types only", description: "No runtime change" },
+            { id: "all", label: "Everything" },
+          ],
+        },
+        {
+          id: "files",
+          question: "Which files?",
+          multiple: true,
+          options: [{ id: "a.ts", label: "a.ts" }],
+        },
+      ],
+    });
+    const [, params] = host.request.mock.calls.at(-1) as [string, { requestedSchema: unknown }];
+    expect(params.requestedSchema).toEqual({
+      type: "object",
+      properties: {
+        scope: {
+          type: "string",
+          title: "How far?",
+          description: "Pick one.",
+          oneOf: [
+            { const: "types", title: "Types only", description: "No runtime change" },
+            { const: "all", title: "Everything" },
+          ],
+        },
+        scope__other: { type: "string", title: "Other" },
+        files: {
+          type: "array",
+          title: "Which files?",
+          items: { anyOf: [{ const: "a.ts", title: "a.ts" }] },
+        },
+        files__other: { type: "string", title: "Other" },
+      },
+      required: ["scope", "files"],
+    });
+  });
+
+  it("ask drops the Other field only when the model opts out", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "accept", content: {} });
+    await exec(tools, "ask", {
+      questions: [
+        {
+          id: "scope",
+          question: "How far?",
+          allow_free_text: false,
+          options: [{ id: "all", label: "Everything" }],
+        },
+        {
+          id: "files",
+          question: "Which files?",
+          multiple: true,
+          allow_free_text: false,
+          options: [{ id: "a.ts", label: "a.ts" }],
+        },
+      ],
+    });
+    const [, params] = host.request.mock.calls.at(-1) as [string, { requestedSchema: any }];
+    expect(Object.keys(params.requestedSchema.properties)).toEqual(["scope", "files"]);
+  });
+
+  it("ask hands the model one line per answer, without repeating the question", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({
+      action: "accept",
+      content: {
+        scope: "types",
+        scope__other: "types + docs",
+        files: ["a.ts", "b.ts"],
+      },
+    });
+    const out = await exec(tools, "ask", {
+      questions: [
+        { id: "scope", question: "How far?", allow_free_text: true },
+        { id: "files", question: "Which files?" },
+      ],
+    });
+    expect(out).toBe(
+      "The user answered:\n- scope: \"types\" — their own words: \"types + docs\"\n- files: \"a.ts\", \"b.ts\"",
+    );
+  });
+
+  it("ask marks a question the user left empty", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "accept", content: { target: "" } });
+    await expect(
+      exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
+    ).resolves.toBe("The user answered:\n- target: (no answer)");
+  });
+
+  it("a declined question continues the turn instead of failing it", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "decline" });
+    await expect(
+      exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
+    ).resolves.toContain("declined to answer");
+  });
+
+  it("a skipped question continues the turn instead of failing it", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "cancel" });
+    await expect(
+      exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
+    ).resolves.toContain("left unanswered");
+  });
+
+  // The hand-written schema validates nothing, so the guard has to: a malformed
+  // call must come back as something the model can correct in its next step.
+  it.each([
+    [{}, /non-empty `questions`/],
+    [{ questions: [] }, /non-empty `questions`/],
+    [{ questions: "Where?" }, /non-empty `questions`/],
+    [{ questions: [{ id: "target" }] }, /needs an `id` and a `question`/],
+    [{ questions: [{ id: "t", question: "Where?", options: "src/api" }] }, /`options` must be an array/],
+    [{ questions: [{ id: "t", question: "Where?", options: [{ label: "src/api" }] }] }, /needs an `id`/],
+  ])("ask answers a malformed call with a sentence: %j", async (input, expected) => {
+    const { tools, host } = setup("agent");
+    await expect(exec(tools, "ask", input)).rejects.toThrow(expected);
+    // Nothing reached the user: a broken call must not open a card.
+    expect(host.request).not.toHaveBeenCalled();
+  });
+
+  it("ask reads a bare option as its own label and an empty list as free text", async () => {
+    const { tools, host } = setup("agent");
+    host.request.mockResolvedValue({ action: "accept", content: {} });
+    await exec(tools, "ask", {
+      questions: [
+        { id: "target", question: "Where?", options: [{ id: "src/api" }] },
+        { id: "note", question: "Anything else?", options: [] },
+      ],
+    });
+    const [, params] = host.request.mock.calls.at(-1) as [string, { requestedSchema: any }];
+    expect(params.requestedSchema.properties.target).toEqual({
+      type: "string",
+      title: "Where?",
+      oneOf: [{ const: "src/api", title: "src/api" }],
+    });
+    expect(params.requestedSchema.properties.note).toEqual({ type: "string", title: "Anything else?" });
+  });
 });
 
 describe("read windowing", () => {
@@ -281,6 +478,7 @@ describe("createBuiltinTools with subagents", () => {
       "read",
       "glob",
       "grep",
+      "ask",
       "task",
     ]);
     expect(Object.keys(createBuiltinTools({ host, mode: "agent", ask, subagents: bridge }))).toEqual([
@@ -290,6 +488,7 @@ describe("createBuiltinTools with subagents", () => {
       "write",
       "edit",
       "bash",
+      "ask",
       "task",
     ]);
   });

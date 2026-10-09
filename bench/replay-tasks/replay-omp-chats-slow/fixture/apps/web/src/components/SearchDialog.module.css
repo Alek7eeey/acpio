@@ -1,0 +1,401 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 520;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(48px, env(safe-area-inset-top, 0px)) 16px max(24px, env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: none;
+  margin: 0;
+  padding: 0;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(14px) saturate(1.12);
+  pointer-events: auto;
+  cursor: default;
+}
+
+.glowA,
+.glowB {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(64px);
+  pointer-events: none;
+}
+
+.glowA {
+  width: min(42vw, 380px);
+  height: min(42vw, 380px);
+  top: 8%;
+  left: 38%;
+  translate: -50% 0;
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.glowB {
+  width: min(34vw, 300px);
+  height: min(34vw, 300px);
+  top: 22%;
+  right: 18%;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.2;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--border) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border) 50%, transparent) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(circle at 50% 18%, #000 0%, transparent 62%);
+}
+
+.panel {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  width: min(620px, 100%);
+  max-height: min(680px, 86dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  box-shadow:
+    0 28px 72px color-mix(in srgb, #000 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 10%, transparent);
+  backdrop-filter: blur(20px) saturate(1.15);
+  animation: rise 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:global([data-theme="dark"]) .panel {
+  box-shadow:
+    0 32px 80px color-mix(in srgb, #000 48%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 10px;
+}
+
+.titleWrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.titleIcon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.closeBtn {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.closeBtn:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 16px 12px;
+  padding: 4px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--surface));
+  border: 1px solid var(--border-soft);
+}
+
+.tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tabActive {
+  color: var(--text);
+  background: var(--surface);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 50%, transparent) inset,
+    0 4px 14px color-mix(in srgb, #000 8%, transparent);
+}
+
+:global([data-theme="dark"]) .tabActive {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset,
+    0 6px 18px color-mix(in srgb, #000 32%, transparent);
+}
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px 12px;
+  padding: 0 12px;
+  min-height: 46px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: color-mix(in srgb, var(--bg) 65%, var(--surface));
+  color: var(--text-secondary);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.searchRow:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.94rem;
+  outline: none;
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.spinner {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0 10px 10px;
+  padding: 4px;
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+
+.empty {
+  margin: 28px 16px;
+  text-align: center;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.error {
+  margin: 28px 16px;
+  text-align: center;
+  font-size: 0.88rem;
+  color: var(--danger);
+}
+
+.hit {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.hit:hover,
+.hitActive {
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-secondary));
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.hitTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.hitTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.hitMeta {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.hitSub {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hitSnippet {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.hitTitle mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.hitSnippet mark {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+}
+
+.hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  padding: 1px 5px;
+  margin: 0 2px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    animation: none;
+  }
+}

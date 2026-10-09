@@ -308,6 +308,57 @@ describe("AcpClient against the fake agent", () => {
     }
   });
 
+  // The 2026-10-08 incident: a `[js]` tool call runs a model request for
+  // 5–15 minutes without a single frame on the wire, and the idle ceiling
+  // killed session/prompt mid-turn ("агент останавливается").
+  it("never times out a prompt while the agent has a tool in progress", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    try {
+      await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
+        // Tool runs silent for 300ms — many idle ceilings — then closes and
+        // the turn ends. Without the active-tool exemption this rejects with
+        // "Таймаут ответа ACP" (the negative control).
+        const result = await client.prompt("TOOL-SILENT please");
+        expect(result.stopReason).toBe("end_turn");
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
+  it("times out once a tool has finished and the line went quiet", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    try {
+      await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
+        // The tool closes immediately — the exemption must be released, not
+        // latched, or a silent agent after a tool would hang forever.
+        await expect(client.prompt("TOOL-THEN-SILENT please")).rejects.toThrow(
+          /Таймаут ответа ACP/,
+        );
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
+  it("a tool left open by a finished turn does not exempt the next prompt", async () => {
+    const prev = AcpClient.requestTimeoutMs;
+    try {
+      await withClient(async (client) => {
+        AcpClient.requestTimeoutMs = 80;
+        const first = await client.prompt("TOOL-NOEND please");
+        expect(first.stopReason).toBe("end_turn");
+        // The open tool_call never got a terminal update — stale tracking
+        // would disable the hang detector for the rest of the session.
+        await expect(client.prompt("SLOW-SILENT please")).rejects.toThrow(/Таймаут ответа ACP/);
+      });
+    } finally {
+      AcpClient.requestTimeoutMs = prev;
+    }
+  });
+
   it("a session_busy rejection keeps its JSON-RPC code and data for callers", async () => {
     process.env.FAKE_PROMPT_BUSY = "1";
     try {

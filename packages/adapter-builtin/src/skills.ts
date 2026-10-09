@@ -3,9 +3,12 @@
 // configured search paths come from Settings → Built-in agent — relative to
 // the chat's cwd, `~` for the server user's home, absolute for anything else
 // global. Found skills are announced
-// to the harness as slash commands and listed in the system prompt — the model
-// applies one by reading its SKILL.md with the `read` tool, and an explicit
-// `/name` message has the body injected up front.
+// to the harness as slash commands, and the model-invocable ones are listed in
+// the system prompt — a SKILL.md carrying `disable-model-invocation: true`
+// stays user-invocable only, because announcing a skill the model may not call
+// is pure overhead. The model applies a listed skill by reading its SKILL.md
+// with the `read` tool, and an explicit `/name` message has the body injected
+// up front.
 import { readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
@@ -19,6 +22,11 @@ export interface BuiltinSkill {
   description: string;
   /** Absolute path of the SKILL.md the model reads to apply the skill. */
   path: string;
+  /**
+   * Frontmatter `disable-model-invocation: true`: the user reaches the skill
+   * with `/name`, but it is never advertised to the model.
+   */
+  disableModelInvocation: boolean;
 }
 
 const MAX_SKILLS = 100;
@@ -29,16 +37,23 @@ const SKILL_NAME_RE = /^[A-Za-z][\w.-]*$/;
 export interface ParsedSkillMarkdown {
   name: string;
   description: string;
+  disableModelInvocation: boolean;
   body: string;
 }
 
 /**
- * `---`-fenced `key: value` frontmatter off a SKILL.md. Only `name` and
- * `description` matter; an absent or malformed block degrades to the folder
- * name and an empty description instead of rejecting the skill.
+ * `---`-fenced `key: value` frontmatter off a SKILL.md. Only `name`,
+ * `description` and `disable-model-invocation` matter; an absent or malformed
+ * block degrades to the folder name and an empty description instead of
+ * rejecting the skill.
  */
 export function parseSkillMarkdown(text: string, fallbackName: string): ParsedSkillMarkdown {
-  const out: ParsedSkillMarkdown = { name: fallbackName, description: "", body: text.trim() };
+  const out: ParsedSkillMarkdown = {
+    name: fallbackName,
+    description: "",
+    disableModelInvocation: false,
+    body: text.trim(),
+  };
   if (!text.startsWith("---")) return out;
   const end = text.indexOf("\n---", 3);
   if (end === -1) return out;
@@ -47,14 +62,15 @@ export function parseSkillMarkdown(text: string, fallbackName: string): ParsedSk
     const at = line.indexOf(":");
     if (at === -1) continue;
     const key = line.slice(0, at).trim().toLowerCase();
-    if (key !== "name" && key !== "description") continue;
+    if (key !== "name" && key !== "description" && key !== "disable-model-invocation") continue;
     const value = line
       .slice(at + 1)
       .trim()
       .replace(/^["']|["']$/g, "");
     if (!value) continue;
     if (key === "name") out.name = value;
-    else out.description = value;
+    else if (key === "description") out.description = value;
+    else out.disableModelInvocation = /^(true|yes|1|on)$/i.test(value);
   }
   out.body = text.slice(end + 4).trim();
   return out;
@@ -87,7 +103,12 @@ async function skillsInDir(dir: string): Promise<BuiltinSkill[]> {
     const parsed = parseSkillMarkdown(text, entry.name);
     const name = usableName(parsed.name);
     if (!name) continue;
-    found.push({ name, description: parsed.description, path: md });
+    found.push({
+      name,
+      description: parsed.description,
+      disableModelInvocation: parsed.disableModelInvocation,
+      path: md,
+    });
   }
   return found;
 }
@@ -153,10 +174,16 @@ export function matchSkillInvocation(
   return { skill, args: match[2].trim() };
 }
 
-/** System-prompt block listing the skills; empty when none were found. */
+/**
+ * System-prompt block listing the skills the model may invoke by itself; empty
+ * when none qualifies. A skill flagged `disable-model-invocation` stays out:
+ * the user still reaches it with `/name` — see {@link expandSkillInvocation} —
+ * but announcing it would invite a call the model is not allowed to make.
+ */
 export function renderSkillsSection(skills: readonly BuiltinSkill[]): string {
-  if (!skills.length) return "";
-  const rows = skills.map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ""} — \`${s.path}\``);
+  const offered = skills.filter((s) => !s.disableModelInvocation);
+  if (!offered.length) return "";
+  const rows = offered.map((s) => `- ${s.name}${s.description ? `: ${s.description}` : ""} — \`${s.path}\``);
   return [
     "",
     "Skills available (read a skill's SKILL.md with `read` and follow it when the user's task matches):",

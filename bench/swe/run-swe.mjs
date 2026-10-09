@@ -39,7 +39,7 @@ function parseArgs(argv) {
   // The default provider lives in bench/.cache/swe-provider.json (gitignored):
   // opencode zen + the free model, per the 2026-09-30 decision — runs cost no
   // tokens by default. BENCH_BASE_URL / BENCH_API_KEY env and CLI flags override.
-  let provider = { url: "http://api.ai.dev.imdomain/v1", key: "no", model: "im/im-llm" };
+  let provider = { url: "http://127.0.0.1:11434/v1", key: "no", model: "local/local-model" };
   try {
     const p = JSON.parse(readFileSync(path.join(REPO, "bench", ".cache", "swe-provider.json"), "utf8"));
     provider = { url: p.url, key: p.key, model: p.model };
@@ -210,6 +210,37 @@ const containerModelUrl = (url) => url.replace("//127.0.0.1", "//host.docker.int
  */
 const labeledModelUrl = (modelUrl, agent, instanceId) =>
   containerModelUrl(`${modelUrl}/_lbl/${encodeURIComponent(agent)}/${encodeURIComponent(instanceId)}/1`);
+
+/**
+ * Wire totals for one pair label, summed from the proxy's captured calls.
+ * The session API undercounts the CLI agents: their `usage_update` carries
+ * only `used` (final context) and `cost`, so tokensIn reads as the last
+ * call's prompt and cachedInputTokens is always absent — the ledger's
+ * tokensCached=0 for pi/omp came from exactly that. The proxy's labeled sums
+ * are the same numbers bench/swe/baseline.mjs reads, so they are
+ * authoritative wherever the wire saw the pair at all (with --no-proxy the
+ * session self-report stays the only source and keeps its known bias).
+ */
+function wireMetrics(proxy, agent, instanceId) {
+  if (!proxy) return null;
+  let calls = 0;
+  let prompt = 0;
+  let cached = 0;
+  let completion = 0;
+  let sawUsage = false;
+  for (const c of proxy.calls) {
+    if (c.label?.agent !== agent || c.label?.task !== instanceId || c.label?.repeat !== 1) continue;
+    calls += 1;
+    const u = c.response?.usage;
+    if (typeof u?.prompt !== "number") continue;
+    sawUsage = true;
+    prompt += u.prompt;
+    cached += u.cached ?? 0;
+    completion += u.completion ?? 0;
+  }
+  if (!sawUsage) return null;
+  return { modelCalls: calls, tokensIn: prompt, tokensCached: cached, tokensOut: completion };
+}
 
 /** Server launch env mirrors what the eval script's `conda activate testbed` gives. */
 function startServer(container) {
@@ -573,6 +604,13 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
     } else {
       throw new Error(`unknown agent: ${agent}`);
     }
+
+    // Token fields come from the wire, not the session self-report (see
+    // wireMetrics): modelCalls/tokensIn/tokensOut/tokensCached are replaced
+    // in place when the proxy captured the pair, wall/tools/session fields
+    // stay as measured.
+    const wire = wireMetrics(proxy, agent, id);
+    if (wire && rec.metrics) Object.assign(rec.metrics, wire);
 
     await resetTestPatchPaths(container, row);
     rec.patch = await extractPatch(container, row);

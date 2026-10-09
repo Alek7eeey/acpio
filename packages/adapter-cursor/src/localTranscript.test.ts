@@ -42,15 +42,15 @@ describe("listCursorAcpSessions", () => {
       fs.writeFileSync(path.join(dir, "meta.json"), JSON.stringify({ cwd, title: cwd }));
       fs.writeFileSync(path.join(dir, "store.db"), Buffer.alloc(8192, 1));
     };
-    write("11111111-1111-4111-8111-111111111111", "C:/MyFolder/ips");
-    write("22222222-2222-4222-8222-222222222222", "C:/MyFolder/ips/ips_10");
-    write("33333333-3333-4333-8333-333333333333", "C:/MyFolder/ips/ips_10/consoleServer");
-    write("44444444-4444-4444-8444-444444444444", "C:/MyFolder");
+    write("11111111-1111-4111-8111-111111111111", "C:/work/proj");
+    write("22222222-2222-4222-8222-222222222222", "C:/work/proj/app");
+    write("33333333-3333-4333-8333-333333333333", "C:/work/proj/app/server");
+    write("44444444-4444-4444-8444-444444444444", "C:/work");
     const rows = await listCursorAcpSessions({
       root,
       chatsRoot: path.join(root, "no-chats"),
-      cwd: "C:/MyFolder/ips/ips_10",
+      cwd: "C:/work/proj/app",
     });
-    expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/MyFolder/ips/ips_10"]);
+    expect(rows.map((r) => r.cwd.replace(/\\/g, "/"))).toEqual(["C:/work/proj/app"]);
   });
 });

@@ -1,7 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
-import { boardColumn, type AgentProvider, type BoardColumn, type SessionDto } from "@acpio/shared";
+import {
+  boardColumn,
+  titleFromTaskDescription,
+  type AgentProvider,
+  type BoardColumn,
+  type SessionDto,
+} from "@acpio/shared";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
@@ -49,6 +64,257 @@ type FolderSpot = "rail" | "lane" | "dialog";
 /** The folder whose tag is being edited, and the row that took the editor over. */
 type FolderTagEdit = { cwd: string; where: FolderSpot };
 
+/** Pictures one new task may carry — the same ceiling the chat composer has. */
+const MAX_TASK_IMAGES = 8;
+
+/** One picture picked for the task being written: the file plus its preview. */
+type DraftImage = { id: string; file: File; url: string };
+
+/** Image files out of a paste payload — the board's screenshot path. */
+function clipboardImageFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const out: File[] = [];
+  for (const file of data.files ?? []) {
+    if (file.type.startsWith("image/")) out.push(file);
+  }
+  if (out.length > 0) return out;
+  for (const item of data.items ?? []) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file) out.push(file);
+  }
+  return out;
+}
+
+/**
+ * The board's inline new-task form. What is being written — the description
+ * and the pictures — lives here rather than on the page: a keystroke or a
+ * pasted screenshot then repaints this form alone, while the rail, the lanes
+ * and every card stay as they are. Held on the page, each of those updates
+ * re-rendered the whole board, so on a lane with a few dozen cards the card
+ * the user was describing appeared to answer a beat late.
+ */
+const NewTaskComposer = memo(function NewTaskComposer({
+  cwd,
+  busy,
+  boxRef,
+  inputRef,
+  dirtyRef,
+  agentOptions,
+  showAgentPicker,
+  defaultProvider,
+  onSubmit,
+  onCancel,
+}: {
+  cwd: string;
+  /** A creation is already in flight — the form must not start a second one. */
+  busy: boolean;
+  /** The form as a whole: the page keeps a press outside it from dismissing it. */
+  boxRef: RefObject<HTMLDivElement | null>;
+  /** The textarea, so the page can put the caret back into text it kept. */
+  inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** What is written here: the page weighs a press outside the form on it. */
+  dirtyRef: RefObject<boolean>;
+  /** The agents the form may pick from — empty hides the picker. */
+  agentOptions: Array<{ id: string; label: string; online: boolean }>;
+  /** Settings switch: whether the form offers its agent picker at all. */
+  showAgentPicker: boolean;
+  /** The agent the form opens on — the settings default while it is online. */
+  defaultProvider: AgentProvider | null;
+  onSubmit: (cwd: string, description: string, images: File[], provider: AgentProvider | null) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const [draft, setDraft] = useState("");
+  /** Pictures for the task being written — uploaded with it, staged in acpio. */
+  const [images, setImages] = useState<DraftImage[]>([]);
+  /** Agent this task is created for; empty = the default the form opened on. */
+  const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
+  const imageSeq = useRef(0);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const createAutoStart = useBoardAutoStart("create");
+
+  // The form is opened by a "+", so the caret belongs in it.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [inputRef]);
+
+  // A press outside only drops a form that costs nothing to drop: this ref is
+  // how the page sees that there is text (or a pasted picture) to protect.
+  useEffect(() => {
+    dirtyRef.current = draft.trim().length > 0 || images.length > 0;
+  }, [dirtyRef, draft, images]);
+
+  // The previews are object URLs of files the user picked: nothing else
+  // releases them, so a dismissed form (or a board left behind) must.
+  const imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(
+    () => () => {
+      for (const image of imagesRef.current) URL.revokeObjectURL(image.url);
+    },
+    [],
+  );
+
+  /** Pick up pictures from the file input or the clipboard (a screenshot). */
+  const addImages = (files: File[]) => {
+    const picked = files.filter((file) => file.type.startsWith("image/"));
+    if (!picked.length) return;
+    const created = picked.map((file) => {
+      imageSeq.current += 1;
+      return { id: `task-image-${imageSeq.current}`, file, url: URL.createObjectURL(file) };
+    });
+    setImages((prev) => {
+      const room = Math.max(0, MAX_TASK_IMAGES - prev.length);
+      // Past the ceiling the extras are dropped, and their previews with them.
+      for (const image of created.slice(room)) URL.revokeObjectURL(image.url);
+      const added = created.slice(0, room);
+      return added.length ? [...prev, ...added] : prev;
+    });
+  };
+
+  const removeImage = (id: string) => {
+    const gone = images.find((image) => image.id === id);
+    if (gone) URL.revokeObjectURL(gone.url);
+    setImages((prev) => prev.filter((image) => image.id !== id));
+  };
+
+  const submit = () => {
+    void onSubmit(
+      cwd,
+      draft,
+      images.map((image) => image.file),
+      draftProvider || defaultProvider,
+    );
+  };
+
+  return (
+    <div ref={boxRef} className={styles.composer}>
+      <textarea
+        ref={inputRef}
+        className={styles.composerInput}
+        value={draft}
+        placeholder={t("chat.boardTaskPlaceholder")}
+        aria-label={t("chat.boardTaskPlaceholder")}
+        onChange={(e) => setDraft(e.target.value)}
+        onPaste={(e) => {
+          const pasted = clipboardImageFiles(e.clipboardData);
+          if (!pasted.length) return;
+          e.preventDefault();
+          addImages(pasted);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          }
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+      <div className={styles.composerFiles}>
+        <button
+          type="button"
+          className={styles.attachImage}
+          title={t("chat.boardAttachImage")}
+          aria-label={t("chat.boardAttachImage")}
+          onClick={() => imageInputRef.current?.click()}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect
+              x="3"
+              y="4"
+              width="18"
+              height="16"
+              rx="2.5"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            />
+            <circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" />
+            <path
+              d="m4 17 5-5 4.5 4.5L17 13l3 3"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <input
+          ref={imageInputRef}
+          className={styles.imageInput}
+          type="file"
+          accept="image/*"
+          multiple
+          aria-label={t("chat.boardAttachImage")}
+          onChange={(e) => {
+            addImages(Array.from(e.target.files ?? []));
+            // Clear it so the same picture can be picked again after being
+            // removed from the row.
+            e.target.value = "";
+          }}
+        />
+        {images.map((image) => (
+          <span key={image.id} className={styles.imageChip}>
+            <img className={styles.imageThumb} src={image.url} alt="" />
+            <span className={styles.imageName}>{image.file.name}</span>
+            <button
+              type="button"
+              className={styles.imageRemove}
+              title={t("chat.removeFile")}
+              aria-label={t("chat.removeFile")}
+              onClick={() => removeImage(image.id)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      {/* The agent the task is created for: the default one unless the user
+          picks another here. */}
+      {showAgentPicker && agentOptions.length ? (
+        <div className={styles.composerField}>
+          <span className={styles.composerFieldLabel}>{t("chat.boardTaskAgent")}</span>
+          <OptionPicker
+            variant="compact"
+            placement="up"
+            menuTitle={t("chat.boardTaskAgent")}
+            placeholder={t("common.pickAgent")}
+            value={draftProvider || defaultProvider || ""}
+            options={agentOptions.map((agent) => ({ value: agent.id, label: agent.label }))}
+            onChange={(value) => setDraftProvider(value as AgentProvider)}
+          />
+        </div>
+      ) : null}
+      <div className={styles.composerActions}>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={createAutoStart}
+          className={`${styles.autoStart}${createAutoStart ? ` ${styles.switchOn}` : ""}`}
+          title={t("chat.boardAutoStart")}
+          onClick={() => toggleBoardAutoStart("create")}
+        >
+          {t("chat.boardAutoStart")}
+          <span className={styles.switchTrack} aria-hidden>
+            <span className={styles.switchKnob} />
+          </span>
+        </button>
+        <button type="button" className={styles.ghostBtn} onClick={onCancel}>
+          {t("common.cancel")}
+        </button>
+        <button
+          type="button"
+          className={styles.primaryBtn}
+          disabled={!draft.trim() || busy}
+          onClick={submit}
+        >
+          {t("common.create")}
+        </button>
+      </div>
+    </div>
+  );
+});
+
 export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // The shell hands the id over as a prop; the route element inside <Routes>
   // reaches it through params. Both exist because AppShell switches pages by
@@ -72,9 +338,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const boardAddCardStyle = useAppStore((s) => s.settings.boardAddCardStyle ?? "card");
   /** Whether the new-task form offers its agent picker (on unless switched off). */
   const taskAgentPicker = useAppStore((s) => s.settings.boardTaskAgentPicker !== false);
+  /** First-message preview under a model-written card title (settings). */
+  const boardShowFirstMessage = useAppStore((s) => s.settings.boardShowFirstMessage ?? true);
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
+  const setOpenBoardId = useAppStore((s) => s.setOpenBoardId);
   const createBoardTask = useAppStore((s) => s.createBoardTask);
   const setTaskDone = useAppStore((s) => s.setTaskDone);
   const setTaskDescription = useAppStore((s) => s.setTaskDescription);
@@ -117,6 +386,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [draft, setDraft] = useState("");
   /** Agent the form's picker shows; empty = the default agent of the settings. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
+  /** Bumped on every close, so a reopened form starts empty again. */
+  const [composerEpoch, setComposerEpoch] = useState(0);
   const [creating, setCreating] = useState(false);
   /** Creation form: send the description as the first message on create. */
   const createAutoStart = useBoardAutoStart("create");
@@ -153,13 +424,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const taskMenuRef = useRef<HTMLDivElement>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
   /** The new-task form as a whole — a press inside it must not dismiss it. */
   const composerBoxRef = useRef<HTMLDivElement>(null);
   /** The card editor as a whole — a press inside it must not dismiss it. */
   const taskEditorRef = useRef<HTMLDivElement>(null);
   /** The quick-prompt form as a whole — a press inside it must not dismiss it. */
   const promptBoxRef = useRef<HTMLDivElement>(null);
+  /** Its textarea: a press that did not dismiss the form puts the caret back. */
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  /** Whether the open form holds text or pictures — never dropped by a press. */
+  const composerDirtyRef = useRef(false);
   const railRef = useRef<HTMLElement>(null);
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
   const railListRef = useRef<HTMLDivElement>(null);
@@ -170,6 +444,35 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const restoringRef = useRef(false);
   const restoredBoardRef = useRef<string | null>(null);
 
+  /**
+   * Close the new-task form. The form owns what it held and releases the
+   * previews when it unmounts; the epoch makes the next open a fresh form
+   * even when it is the same folder's "+" that reopens the one on screen.
+   */
+  const closeNewTask = useCallback(() => {
+    composerDirtyRef.current = false;
+    setAddingCwd(null);
+    setComposerEpoch((epoch) => epoch + 1);
+  }, []);
+
+  /**
+   * Open the new-task form for a folder. A form already on screen that holds
+   * a half-written task is not swapped out or reset by a click outside it —
+   * the writer keeps it (caret and all) until they cancel, escape or create.
+   * An empty form gives way to the one asked for, as before.
+   */
+  const openComposer = useCallback(
+    (cwd: string) => {
+      if (composerDirtyRef.current) {
+        composerInputRef.current?.focus();
+        return;
+      }
+      closeNewTask();
+      setAddingCwd(cwd);
+    },
+    [closeNewTask],
+  );
+
   /** Tasks arrive over the network; the position waits for this board's list. */
   const [tasksReady, setTasksReady] = useState(false);
   useEffect(() => {
@@ -177,6 +480,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (!boardId) return;
     void refreshBoardSessions(boardId).finally(() => setTasksReady(true));
   }, [boardId, refreshBoardSessions]);
+
+  // A reconnect re-reads this board's tasks along with the rest of the
+  // server-owned state; the store cannot tell which board is on screen from the
+  // route, so the page hands its id over while it is mounted.
+  useEffect(() => {
+    setOpenBoardId(boardId || null);
+    return () => setOpenBoardId(null);
+  }, [boardId, setOpenBoardId]);
 
   const saveScroll = () => {
     if (!boardId || restoringRef.current) return;
@@ -239,22 +550,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // on the next visit to the board.
   useEffect(() => () => setFoldersOpen(false), [setFoldersOpen]);
 
-  // The composer only exists while a group has it open.
-  useEffect(() => {
-    if (!addingCwd) return;
-    composerRef.current?.focus();
-  }, [addingCwd]);
-
   // Each form starts on the default agent instead of the last agent picked.
   useEffect(() => {
     setDraftProvider("");
   }, [addingCwd]);
-
   /**
    * The new-task form belongs to its group, not to the screen: a press anywhere
-   * else dismisses it exactly like its own Cancel button, so an accidental "+"
-   * (or a change of mind) does not leave a form sitting in the lane. The lane's
-   * placeholder opens the same form again with one click.
+   * else dismisses an empty one exactly like its own Cancel button, so an
+   * accidental "+" (or a change of mind) does not leave a form sitting in the
+   * lane. A form with something written in it is a different matter: dropping
+   * it takes the half-written task with it, so a press outside leaves it be.
+   * The lane's placeholder opens the same form again with one click.
    */
   useEffect(() => {
     if (!addingCwd) return;
@@ -264,8 +570,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       // A dialog (or a picker's list) the board opened on top owns the press:
       // choosing there closes the form through its own handler.
       if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
-      setAddingCwd(null);
-      setDraft("");
+      if (composerDirtyRef.current) return;
+      closeNewTask();
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
@@ -361,12 +667,19 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     };
     for (const task of tasks) byColumn[boardColumn(task)].push(task);
     for (const column of COLUMN_ORDER) {
-      // Done is a log, not a list to arrange: most recently finished on top.
-      // The manual order stays where it means something — Todo.
+      // Done and Wait are logs, not lists to arrange: most recently finished on
+      // top in both. Wait carries no completion stamp of its own — its row is
+      // written when the turn ends (status back to idle), so `updatedAt` is
+      // that finish time. Opening the chat boots the agent and writes the row
+      // too, but as a bookkeeping write that leaves the stamp alone, so the
+      // order moves on the agent's own last action only. The manual order
+      // stays where it means something — Todo.
       byColumn[column].sort(
         column === "done"
           ? (a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "")
-          : (a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt),
+          : column === "wait"
+            ? (a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")
+            : (a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt),
       );
     }
     return byColumn;
@@ -452,25 +765,25 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     }
   }, [board, folderAutoRun, groups, startTask, tasks, tasksReady]);
 
-  const submitNewTask = async (cwd: string) => {
-    const description = draft.trim();
-    if (!description || creating) return;
-    // The form's own pick, or the default agent it opened on; a form without
-    // the picker leaves the choice to the server (settings default).
-    const provider = taskAgentPicker ? draftProvider || defaultTaskProvider : null;
-    setCreating(true);
-    const created = await createBoardTask({
-      boardId,
-      cwd,
-      description,
-      ...(provider ? { provider } : {}),
-    });
-    setCreating(false);
-    if (!created) return; // keep the form so nothing the user typed is lost
-    setDraft("");
-    setAddingCwd(null);
-    if (createAutoStart) void startTask(created);
-  };
+  const submitNewTask = useCallback(
+    async (cwd: string, rawDescription: string, images: File[], rawProvider: AgentProvider | null) => {
+            const description = rawDescription.trim();
+      if (!description || creating) return;
+      // The form's own pick, or the default agent it opened on; a form without
+      // the picker leaves the choice to the server (settings default).
+      const provider = taskAgentPicker ? rawProvider || defaultTaskProvider : null;
+      setCreating(true);
+      const created = await createBoardTask({ boardId, cwd, description,
+        ...(provider ? { provider } : {}),
+        images,
+      });
+      setCreating(false);
+      if (!created) return; // keep the form so nothing the user typed is lost
+      closeNewTask();
+      if (createAutoStart) void startTask(created);
+    },
+    [boardId, closeNewTask, createAutoStart, createBoardTask, creating, defaultTaskProvider, taskAgentPicker],
+  );
 
   /**
    * Right-click on a folder's **+**: rather than the inline description form,
@@ -774,7 +1087,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = boardColumn(task);
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
-    const text = task.taskDescription?.trim() || task.title;
+    const description = task.taskDescription?.trim();
+    const text = description || task.title;
+    // A title the model refined (or a user renamed) no longer repeats the
+    // description's first line — it takes the card's headline. An untouched
+    // title *is* that first line, so showing it would double the same words.
+    const headline =
+      description && task.title !== titleFromTaskDescription(description) ? task.title : "";
+    // With the headline taken by a refined title the first message is a second
+    // block the board setting may drop; without a headline it *is* the card.
+    const showFirstMessage = !headline || boardShowFirstMessage;
     return (
       <article
         key={task.id}
@@ -905,6 +1227,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             </button>
           </span>
         </div>
+        {headline ? <p className={styles.cardTitle}>{headline}</p> : null}
         {column === "todo" && editTaskId === task.id ? (
           /* The editor takes the card over where the card lies: the text being
              rewritten stays on the lane and in the project group it belongs to. */
@@ -946,9 +1269,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               </button>
             </div>
           </div>
-        ) : (
+        ) : showFirstMessage ? (
           <p className={styles.cardText}>{text}</p>
-        )}
+        ) : null}
         {column === "wait" && promptTaskId === task.id ? (
           /* The next prompt is typed on the card itself: the task's own text
              stays readable above it, and nothing leaves the board. */
@@ -1235,10 +1558,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                 className={styles.iconBtn}
                                 title={t("chat.boardAddTaskHint")}
                                 aria-label={t("chat.boardAddTask")}
-                                onClick={() => {
-                                  setAddingCwd(group.cwd);
-                                  setDraft("");
-                                }}
+                                onClick={() => openComposer(group.cwd)}
                                 onContextMenu={(e) => openTaskPicker(e, group.cwd)}
                               >
                                 <svg
@@ -1259,84 +1579,19 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                             </span>
                           </div>
                           {addingCwd === group.cwd ? (
-                            <div ref={composerBoxRef} className={styles.composer}>
-                              <textarea
-                                ref={composerRef}
-                                className={styles.composerInput}
-                                value={draft}
-                                placeholder={t("chat.boardTaskPlaceholder")}
-                                aria-label={t("chat.boardTaskPlaceholder")}
-                                onChange={(e) => setDraft(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter" && !e.shiftKey) {
-                                    e.preventDefault();
-                                    void submitNewTask(group.cwd);
-                                  }
-                                  if (e.key === "Escape") {
-                                    setAddingCwd(null);
-                                    setDraft("");
-                                  }
-                                }}
-                              />
-                              {/* The agent the task is created for: the default
-                                  one unless the user picks another here. */}
-                              {taskAgentPicker && agentOptions.length ? (
-                                <div className={styles.composerField}>
-                                  <span className={styles.composerFieldLabel}>
-                                    {t("chat.boardTaskAgent")}
-                                  </span>
-                                  <OptionPicker
-                                    variant="compact"
-                                    placement="up"
-                                    menuTitle={t("chat.boardTaskAgent")}
-                                    placeholder={t("common.pickAgent")}
-                                    value={draftProvider || defaultTaskProvider || ""}
-                                    options={agentOptions.map((agent) => ({
-                                      value: agent.id,
-                                      label: agent.label,
-                                    }))}
-                                    onChange={(value) =>
-                                      setDraftProvider(value as AgentProvider)
-                                    }
-                                  />
-                                </div>
-                              ) : null}
-                              <div className={styles.composerActions}>
-                                <button
-                                  type="button"
-                                  role="switch"
-                                  aria-checked={createAutoStart}
-                                  className={`${styles.autoStart}${
-                                    createAutoStart ? ` ${styles.switchOn}` : ""
-                                  }`}
-                                  title={t("chat.boardAutoStart")}
-                                  onClick={() => toggleBoardAutoStart("create")}
-                                >
-                                  {t("chat.boardAutoStart")}
-                                  <span className={styles.switchTrack} aria-hidden>
-                                    <span className={styles.switchKnob} />
-                                  </span>
-                                </button>
-                                <button
-                                  type="button"
-                                  className={styles.ghostBtn}
-                                  onClick={() => {
-                                    setAddingCwd(null);
-                                    setDraft("");
-                                  }}
-                                >
-                                  {t("common.cancel")}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={styles.primaryBtn}
-                                  disabled={!draft.trim() || creating}
-                                  onClick={() => void submitNewTask(group.cwd)}
-                                >
-                                  {t("common.create")}
-                                </button>
-                              </div>
-                            </div>
+                            <NewTaskComposer
+                              key={`${group.cwd}:${composerEpoch}`}
+                              cwd={group.cwd}
+                              busy={creating}
+                              boxRef={composerBoxRef}
+                              inputRef={composerInputRef}
+                              dirtyRef={composerDirtyRef}
+                              onSubmit={submitNewTask}
+                              agentOptions={agentOptions}
+                              showAgentPicker={taskAgentPicker}
+                              defaultProvider={defaultTaskProvider}
+                              onCancel={closeNewTask}
+                            />
                           ) : boardAddCardStyle !== "hidden" ? (
                             <button
                               type="button"
@@ -1346,10 +1601,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                                   : styles.addCard
                               }
                               title={t("chat.boardAddTaskCard")}
-                              onClick={() => {
-                                setAddingCwd(group.cwd);
-                                setDraft("");
-                              }}
+                              onClick={() => openComposer(group.cwd)}
                             >
                               {t("chat.boardAddTaskCard")}
                             </button>

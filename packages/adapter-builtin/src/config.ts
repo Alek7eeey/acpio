@@ -20,7 +20,7 @@ export interface BuiltinEndpoint {
 export interface BuiltinModelSelection {
   /** Composite value as offered in pickers: `<provider id>::<model id>`. */
   value: string;
-  /** Label for pickers — qualified with the provider name when there are several. */
+  /** Label for pickers — plain; the provider rides in its own right-hand column. */
   name: string;
   provider: BuiltinProviderConfig;
   /** Wire id sent to the endpoint. */
@@ -33,22 +33,27 @@ export function builtinProviders(settings: AppSettings): BuiltinProviderConfig[]
   return healBuiltinProviders(settings.builtinProviders);
 }
 
-/** True when at least one provider points at an endpoint — the agent can boot. */
+/** A provider offers its models — and its endpoint is used — unless switched off. */
+function providerOn(provider: BuiltinProviderConfig): boolean {
+  return provider.enabled !== false;
+}
+
+/** True when at least one switched-on provider points at an endpoint — the
+ *  agent can boot. */
 export function hasBuiltinEndpoint(settings: AppSettings): boolean {
-  return builtinProviders(settings).some((p) => p.url);
+  return builtinProviders(settings).some((p) => providerOn(p) && p.url);
 }
 
 /** Every configured selection (switched-off rows included) — healing must not
  *  strand a chat pinned to a model the user later turned off. */
 function configuredSelections(settings: AppSettings): BuiltinModelSelection[] {
   const providers = builtinProviders(settings);
-  const qualify = providers.length > 1;
   const out: BuiltinModelSelection[] = [];
   for (const provider of providers) {
     for (const model of provider.models) {
       out.push({
         value: builtinModelValue(provider.id, model.id),
-        name: qualify ? `${model.label} (${provider.name})` : model.label,
+        name: model.label,
         provider,
         modelId: model.id,
         contextWindow: model.contextWindow,
@@ -58,14 +63,19 @@ function configuredSelections(settings: AppSettings): BuiltinModelSelection[] {
   return out;
 }
 
-/** Models the agent offers in its picker: switched-off rows are hidden. */
+/** Models the agent offers in its picker: switched-off providers and rows are
+ *  hidden (a chat already pinned to one still resolves it). */
 export function builtinModelOptions(settings: AppSettings): BuiltinModelSelection[] {
+  const providers = builtinProviders(settings);
+  const off = new Set(providers.filter((p) => !providerOn(p)).map((p) => p.id));
   const disabled = new Set(
-    builtinProviders(settings).flatMap((p) =>
+    providers.flatMap((p) =>
       p.models.filter((m) => m.enabled === false).map((m) => builtinModelValue(p.id, m.id)),
     ),
   );
-  return configuredSelections(settings).filter((s) => !disabled.has(s.value));
+  return configuredSelections(settings).filter(
+    (s) => !disabled.has(s.value) && !off.has(s.provider.id),
+  );
 }
 
 /**

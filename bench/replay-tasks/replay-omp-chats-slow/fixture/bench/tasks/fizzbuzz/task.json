@@ -1,0 +1,6 @@
+{
+  "id": "fizzbuzz",
+  "title": "Create a new module from a spec",
+  "prompt": "Create fizzbuzz.mjs in the workspace root that exports a function fizzbuzz(n). It must return Fizz when n is divisible by 3, Buzz when divisible by 5, FizzBuzz when divisible by both, and String(n) otherwise. Check your work with a quick node command before answering.",
+  "timeoutMs": 240000
+}

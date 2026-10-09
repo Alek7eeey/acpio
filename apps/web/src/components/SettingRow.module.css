@@ -152,6 +152,15 @@
   outline-offset: 2px;
 }
 
+/* Disabled switch: greyed out, and the label stops acting as a hit area. */
+.toggle:has(.toggleInput:disabled) {
+  cursor: not-allowed;
+}
+
+.toggleInput:disabled + .toggleTrack {
+  opacity: 0.45;
+}
+
 .rowStack {
   flex-direction: column;
   align-items: stretch;

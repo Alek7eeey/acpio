@@ -16,6 +16,7 @@ import type {
   ModelOption,
   ModelParamDto,
   ProjectMcpInfo,
+  PromptDelivery,
   SessionDetailDto,
   SessionDto,
   HarnessSessionDto,
@@ -526,6 +527,8 @@ export const api = {
     opts?: {
       editMessageId?: string;
       attachments?: Array<{ name: string; path: string }>;
+      /** How to reach an agent that is already working — see PromptDelivery. */
+      delivery?: PromptDelivery;
     },
   ) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/prompt`, {
@@ -533,6 +536,7 @@ export const api = {
       body: JSON.stringify({
         text,
         ...(opts?.editMessageId ? { editMessageId: opts.editMessageId } : {}),
+        ...(opts?.delivery ? { delivery: opts.delivery } : {}),
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),

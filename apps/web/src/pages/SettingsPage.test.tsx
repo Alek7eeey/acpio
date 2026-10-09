@@ -40,7 +40,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false });
+  // The search query lives in the store: leaving it set would open the next
+  // test on the result list instead of the leaf it deep-links to.
+  useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false, settingsQuery: "" });
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -155,25 +157,51 @@ describe("SettingsPage form state", () => {
     );
 
     const field = screen.getByLabelText("Skill folders") as HTMLTextAreaElement;
-    expect(field.value).toBe(".agents/skills");
+    expect(field.value).toBe(".agents/skills\n~/.agents/skills");
 
     // Still focused: the draft must hold the fresh empty line.
     await user.type(field, "{Enter}");
-    expect(field.value).toBe(".agents/skills\n");
+    expect(field.value).toBe(".agents/skills\n~/.agents/skills\n");
 
     await user.type(field, "~/x/skills");
-    expect(field.value).toBe(".agents/skills\n~/x/skills");
+    expect(field.value).toBe(".agents/skills\n~/.agents/skills\n~/x/skills");
 
     // Left the field: the canonical one-path-per-line form is back.
     await user.tab();
-    expect(field.value).toBe(".agents/skills\n~/x/skills");
+    expect(field.value).toBe(".agents/skills\n~/.agents/skills\n~/x/skills");
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
     const saved = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
       builtinSkillPaths?: string[];
     };
-    expect(saved.builtinSkillPaths).toEqual([".agents/skills", "~/x/skills"]);
+    expect(saved.builtinSkillPaths).toEqual([
+      ".agents/skills",
+      "~/.agents/skills",
+      "~/x/skills",
+    ]);
+  });
+
+  // The switch is what lets the agent open a skill folder outside the chat
+  // folder, so it applies at once instead of waiting for the Save button.
+  it("saves the outside-the-folder switch as soon as it is flipped", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByLabelText("Work outside the working folder") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ builtinAllowOutsideCwd: true }),
+    );
+    expect(toggle.checked).toBe(true);
   });
 });
 
@@ -193,19 +221,33 @@ describe("Built-in providers", () => {
     models: [],
   };
 
-  it("edits, adds and removes providers and saves them as one list", async () => {
-    const user = userEvent.setup();
+  /** Provider cards are `<details>` (the CSS-module class suffix is hashed). */
+  const providerCards = (container: HTMLElement) =>
+    Array.from(
+      container.querySelectorAll("details[class*=providerCard]"),
+    ) as HTMLDetailsElement[];
+  const cardSummary = (card: HTMLDetailsElement) =>
+    card.querySelector("summary") as HTMLElement;
+
+  const renderProviders = () => {
     useAppStore.setState({
       settings: { ...DEFAULT_SETTINGS, builtinProviders: [providerA, providerB] },
       bootstrapped: true,
     });
-    render(
+    return render(
       <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>
       </MemoryRouter>,
     );
+  };
+
+  it("edits, adds and removes providers and saves them as one list", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+    // The endpoint of the provider being edited lives under its folded header.
+    await user.click(cardSummary(providerCards(container)[0]!));
 
     // Every field carries its provider's name, so the rows never collide.
     const urlA = screen.getByLabelText("Ollama · Endpoint") as HTMLInputElement;
@@ -233,6 +275,57 @@ describe("Built-in providers", () => {
     expect(rows[0]).toMatchObject({ id: "p1", name: "Ollama", url: "http://localhost:11434/v2" });
     expect(rows[0]?.models).toEqual(providerA.models);
     expect(rows[1]).toMatchObject({ id: expect.any(String), name: "", url: "" });
+  });
+
+  // The leaf used to paint the name, endpoint, key, headers and model rows of
+  // every provider at once — a couple of providers buried the rest of the
+  // section. The list stays scannable only while the cards are shut.
+  it("keeps each provider folded until its header is clicked", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+
+    const cards = providerCards(container);
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => !card.hasAttribute("open"))).toBe(true);
+
+    // The header alone tells the providers apart.
+    expect(cardSummary(cards[0]!).textContent).toContain("Ollama");
+    expect(cardSummary(cards[0]!).textContent).toContain("http://localhost:11434/v1");
+    expect(cardSummary(cards[1]!).textContent).toContain("OpenRouter");
+
+    await user.click(cardSummary(cards[0]!));
+    expect(cards[0]!.hasAttribute("open")).toBe(true);
+    await user.click(cardSummary(cards[0]!));
+    expect(cards[0]!.hasAttribute("open")).toBe(false);
+  });
+
+  it("unfolds the card of a provider the user just added", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+
+    await user.click(screen.getByRole("button", { name: /\+ Add provider/ }));
+
+    const cards = providerCards(container);
+    expect(cards).toHaveLength(3);
+    expect(cards[2]!.hasAttribute("open")).toBe(true);
+  });
+
+  // A search hunts for single rows, which live inside the folded cards: the
+  // hits must be on screen when the leaf is opened from the result list.
+  it("unfolds the cards while a search is running", async () => {
+    const user = userEvent.setup();
+    const { container } = renderProviders();
+
+    await user.type(screen.getAllByLabelText("Search settings…")[0]!, "providers");
+    const hit = screen
+      .getAllByRole("button")
+      .find((button) => button.textContent?.includes("Built-in agent"));
+    expect(hit).toBeTruthy();
+    await user.click(hit!);
+
+    const cards = providerCards(container);
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => card.hasAttribute("open"))).toBe(true);
   });
 });
 
@@ -262,5 +355,88 @@ describe("SettingsPage board leaf", () => {
     );
 
     expect(screen.queryByText("Board “Add task” placeholder")).toBeNull();
+  });
+});
+
+describe("Chat title from a model", () => {
+  const provider = {
+    id: "p1",
+    name: "Ollama",
+    url: "http://localhost:11434/v1",
+    apiKey: "",
+    models: [{ id: "qwen", label: "Qwen", contextWindow: 32_000 }],
+  };
+
+  const renderChatLeaf = () =>
+    render(
+      <MemoryRouter initialEntries={["/settings?section=interface&leaf=chat"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+  it("locks the switch and says why while the built-in agent is unconfigured", async () => {
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    renderChatLeaf();
+
+    const toggle = screen.getByLabelText("Refine the title with a model") as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+    // The stored default is on, but with no endpoint it must read as off —
+    // a checked switch that can never fire would promise a feature that isn't there.
+    expect(toggle.checked).toBe(false);
+    expect(
+      screen.getByText(/The built-in agent is not configured/),
+    ).toBeTruthy();
+    expect(screen.getByText("Open built-in agent settings")).toBeTruthy();
+  });
+
+  it("unlocks the switch once a provider with a model exists", async () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, builtinProviders: [provider] },
+      bootstrapped: true,
+    });
+    renderChatLeaf();
+
+    const toggle = screen.getByLabelText("Refine the title with a model") as HTMLInputElement;
+    expect(toggle.disabled).toBe(false);
+    // Default on: a configured built-in agent gets model titles without a click.
+    expect(toggle.checked).toBe(true);
+    expect(screen.queryByText(/The built-in agent is not configured/)).toBeNull();
+  });
+
+  it("stays locked when a provider has an endpoint but no model to write titles", async () => {
+    useAppStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        builtinProviders: [{ ...provider, models: [] }],
+      },
+      bootstrapped: true,
+    });
+    renderChatLeaf();
+
+    const toggle = screen.getByLabelText("Refine the title with a model") as HTMLInputElement;
+    expect(toggle.disabled).toBe(true);
+    expect(screen.getByText(/The built-in agent is not configured/)).toBeTruthy();
+  });
+
+  it("saves the switch with the chat leaf's Save", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, builtinProviders: [provider], chatAutoTitle: false },
+      bootstrapped: true,
+    });
+    renderChatLeaf();
+
+    const toggle = screen.getByLabelText("Refine the title with a model") as HTMLInputElement;
+    await user.click(toggle);
+    expect(toggle.checked).toBe(true);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ chatAutoTitle: true }),
+      ),
+    );
   });
 });

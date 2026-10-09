@@ -10,7 +10,7 @@ import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BenchServer, runBuiltinAgent, sessionTranscriptHasNul } from "./lib/builtin-agent.mjs";
-import { ensureOmpModel, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
+import { ensureOmpModel, ensureOpenCodeConfig, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
 import { applyFaults } from "./lib/faults.mjs";
 import { changedFiles, makeWorkspace, splitPrompt, verifyWorkspace } from "./lib/util.mjs";
@@ -25,7 +25,7 @@ function providerDefaults() {
     const p = JSON.parse(readFileSync(path.join(REPO, "bench", ".cache", "swe-provider.json"), "utf8"));
     return { url: p.url, key: p.key, model: p.model };
   } catch {
-    return { url: process.env.BENCH_BASE_URL || "http://api.ai.dev.imdomain/v1", key: process.env.BENCH_API_KEY || "no", model: "im/im-llm" };
+    return { url: process.env.BENCH_BASE_URL || "http://127.0.0.1:11434/v1", key: process.env.BENCH_API_KEY || "no", model: "local/local-model" };
   }
 }
 
@@ -35,7 +35,7 @@ const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen" };
 function parseArgs(argv) {
   const defaults = providerDefaults();
   const out = {
-    agents: ["pi", "omp", "builtin"],
+    agents: ["pi", "omp", "builtin", "opencode"],
     tasks: null,
     tasksRoot: [path.join(REPO, "bench", "tasks")],
     family: null,
@@ -137,7 +137,7 @@ async function main() {
         "",
         "Pairs (agent × task × repeat) run on N parallel slots; every pair's",
         "provider URL carries its own wire label. Default model/provider comes",
-        "from bench/.cache/swe-provider.json (space-bunny-free), same as the SWE",
+        "from bench/.cache/swe-provider.json (longcat-2.5-preview-free), same as the SWE",
         "runner.",
         "",
         "--turns N sends the task prompt to the builtin agent as N user turns",
@@ -223,6 +223,7 @@ async function main() {
       // declared faults run clean instead of erroring the pair.
       faults = await applyFaults(task.dir, ws, opts.faults.includes("all") ? (task.faults ?? []) : opts.faults);
       let piConfigDir;
+      let opencodeConfigDir;
       try {
         if (agent === "builtin") {
           if (!slot.server) {
@@ -249,7 +250,20 @@ async function main() {
           if (agent === "omp") {
             ensureOmpModel(ompProfile(), { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
           }
-          result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir });
+          if (agent === "opencode") {
+            // One config dir per slot; the file is rewritten per pair (the
+            // labelled URL and the session id are per pair).
+            opencodeConfigDir = path.join(workRoot, `opencode-s${slot.idx}`);
+            ensureOpenCodeConfig(opencodeConfigDir, {
+              provider: providerSlug,
+              baseUrl: url,
+              apiKey: opts.builtinKey,
+              modelId,
+              contextWindow: opts.contextWindow,
+              sessionId: `acpio-bench-${agent}-${task.id}-r${rep}`,
+            });
+          }
+          result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir, opencodeConfigDir });
         }
       } catch (err) {
         result = {

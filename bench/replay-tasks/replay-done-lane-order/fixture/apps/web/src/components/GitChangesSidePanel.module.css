@@ -1,0 +1,675 @@
+/**
+ * The git review surface is [stage | navigator]: the stage reads the diff, the
+ * navigator stages files and writes the commit. The panel owns the split and the
+ * sheet the navigator turns into when there is no room for two columns.
+ */
+.panel {
+  --git-panel-width: 900px;
+  --git-navigator-width: 380px;
+  position: relative;
+  flex: 0 0 var(--git-panel-width);
+  width: var(--git-panel-width);
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  z-index: 4;
+  overflow: hidden;
+  background: var(--surface);
+  border-left: 1px solid var(--border-soft);
+  box-shadow: -8px 0 20px rgba(0, 0, 0, 0.04);
+  animation: slideIn 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:global([data-theme="light"]) .panel {
+  box-shadow: -8px 0 20px rgba(15, 23, 42, 0.04);
+}
+
+/* Compact viewport: the panel covers the page instead of docking beside it. */
+.panelOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 28;
+  flex: 1 1 auto;
+  flex-basis: auto;
+  width: auto;
+  max-width: none;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/**
+ * Phone: the whole viewport, not the slice the shell leaves between its header
+ * and its chat dock. Portalled to the body (see the component), so it also sits
+ * above the shell chrome — the header costs no height here and the chats sheet
+ * stays out of reach until the review is closed.
+ */
+.panelTakeover {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  flex: 0 0 auto;
+  flex-basis: auto;
+  width: auto;
+  max-width: none;
+  height: auto;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/* No room for two columns: the navigator is a sheet, so the panel is one column. */
+.panelSheetNav {
+  flex-direction: column;
+}
+
+/**
+ * Full view: the whole screen, not a wider dock. Portalled to the body (see the
+ * component), fixed to the viewport and above the shell chrome — under dialogs
+ * (500) and toasts (400), which must still be able to appear over it.
+ */
+.panelFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 380;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  height: auto;
+  border-left: none;
+  box-shadow: none;
+  animation: none;
+}
+
+/* Grab strip for the dock edge. The shell hides every separator once the panel
+   fills the page, so it is never offered where dragging would mean nothing. */
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
+  transition:
+    background 0.15s ease,
+    width 0.15s ease;
+}
+
+/* Grip at the reading height: the edge is the only thing that says "drag me". */
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 44px;
+  margin-top: -22px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+}
+
+.splitter:hover::before,
+.splitter:hover::after,
+.resizing .splitter::before,
+.resizing .splitter::after {
+  width: 4px;
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.resizingBody,
+.resizingBody * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.stageHost {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  /* The board measures itself: the stage's bar tightens on a narrow dock. */
+  container-type: inline-size;
+  container-name: git-stage;
+}
+
+.navigator {
+  flex: 0 0 var(--git-navigator-width);
+  width: var(--git-navigator-width);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-soft);
+}
+
+.panelSheetNav .navigator {
+  flex: 1 1 auto;
+  width: 100%;
+  border-left: none;
+}
+
+/* --- navigator: repo, branch, sync ------------------------------------- */
+
+.navHead {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.navHeadTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.navRepoIcon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.navLead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.navTitle {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.navStats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.statAdd {
+  color: #16a34a;
+}
+
+.statDel {
+  color: #dc2626;
+}
+
+.navClean {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.navIcons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.actionDivider {
+  width: 1px;
+  height: 18px;
+  margin: 0 1px;
+  background: var(--border-soft);
+}
+
+/* --- navigator: the two segment switches -------------------------------- */
+
+.segSwitch {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.segBtn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.segBtn:hover {
+  color: var(--text);
+}
+
+.segBtnActive,
+.segBtnActive:hover {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.segBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.navPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.countPill {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 50%, var(--surface));
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.countPillStaged {
+  color: color-mix(in srgb, #22c55e 78%, var(--text));
+  border-color: color-mix(in srgb, #22c55e 28%, var(--border));
+  background: color-mix(in srgb, #22c55e 10%, var(--surface));
+}
+
+.countPillUnstaged {
+  color: color-mix(in srgb, #f59e0b 82%, var(--text));
+  border-color: color-mix(in srgb, #f59e0b 30%, var(--border));
+  background: color-mix(in srgb, #f59e0b 10%, var(--surface));
+}
+
+.countPillConflict {
+  color: #fff;
+  border-color: #dc2626;
+  background: #dc2626;
+}
+
+.iconBtn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* --- navigator: action bar --------------------------------------------- */
+
+/**
+ * The navigator's controls live at its bottom, not over the list: on the phone
+ * the navigator is a bottom sheet, so this row is the closest thing to the
+ * thumb — the same row for both surfaces, one code path. The changes/history
+ * switch, the list/tree switch and the sync buttons share one weight, so nothing
+ * claims a row of its own; wrapping is the coarse-pointer escape hatch.
+ */
+.navFoot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  row-gap: 6px;
+  /* The row is the panel's bottom edge, and a takeover reaches the home indicator. */
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-soft);
+}
+
+.navFoot .iconBtn {
+  width: 26px;
+  height: 28px;
+}
+
+/**
+ * A manual refresh in flight. The glyph turns so a click that changes nothing on
+ * screen — the background poll keeps the lists fresh anyway — still reads as an
+ * update with a visible end.
+ */
+.iconSpin {
+  display: grid;
+  place-items: center;
+  animation: gitPanelLoaderSpin 0.8s linear infinite;
+}
+
+/* The ops the row cannot hold: one button, a menu above the bar. */
+.footMenu {
+  position: fixed;
+  z-index: 520;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, 0.18));
+  animation: footMenuIn 0.14s ease both;
+}
+
+.footMenu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.footMenu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.footMenu button:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
+
+@keyframes footMenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* --- navigator: body --------------------------------------------------- */
+
+.navBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Commit list over the commit's own detail: the detail is the taller half. */
+.historyList {
+  flex: 1 1 40%;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.historyDetail {
+  flex: 1 1 60%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* --- phone: navigator as a bottom sheet -------------------------------- */
+
+.puller {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "bar bar bar"
+    "title meta chevron";
+  align-items: center;
+  gap: 3px 8px;
+  min-height: 52px;
+  padding: 6px 12px max(10px, env(safe-area-inset-bottom));
+  border: none;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.puller:active {
+  background: var(--bg-tertiary);
+}
+
+.pullerBar {
+  grid-area: bar;
+  width: 38px;
+  height: 4px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: var(--border-soft);
+}
+
+.pullerTitle {
+  grid-area: title;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.pullerMeta {
+  grid-area: meta;
+  display: inline-flex;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.pullerChevron {
+  grid-area: chevron;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+
+.pullerChevronUp {
+  transform: rotate(180deg);
+}
+
+.sheetBackdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.34);
+  animation: sheetBackdropIn 0.18s ease both;
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  height: min(78%, 640px);
+  max-height: calc(100% - 56px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  box-shadow: 0 -14px 34px rgba(0, 0, 0, 0.22);
+  animation: sheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sheetGrabber {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  height: 24px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.sheetGrabber span {
+  width: 40px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--border-soft);
+}
+
+/* --- states ------------------------------------------------------------ */
+
+.empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.emptyLoading {
+  gap: 8px;
+}
+
+.loaderSpin {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-top-color: var(--accent);
+  animation: gitPanelLoaderSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes gitPanelLoaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(24px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes sheetBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (pointer: coarse) {
+  .navFoot .iconBtn,
+  .navIcons .iconBtn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .segBtn {
+    width: 40px;
+    height: 34px;
+  }
+
+  .puller {
+    min-height: 58px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .sheet,
+  .sheetBackdrop,
+  .footMenu {
+    animation: none;
+  }
+}

@@ -68,6 +68,21 @@ function chipMinWidth(id: MetaChipId, options: ChatChipOptions): number {
   return wraps ? (CHIP_MIN_WIDTH[id] ?? 0) : 0;
 }
 
+/**
+ * The token panel is anchored to the context chip itself: above it while there
+ * is room, below it on a phone where the composer row sits low.
+ */
+function placeContextPanel(panel: HTMLElement, anchor: DOMRect) {
+  const pad = MENU_VIEWPORT_PAD;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const left = Math.min(Math.max(pad, anchor.left), Math.max(pad, vw - pad - panel.offsetWidth));
+  let top = anchor.top - 8 - panel.offsetHeight;
+  if (top < pad) top = Math.min(anchor.bottom + 8, vh - pad - panel.offsetHeight);
+  panel.style.left = `${left}px`;
+  panel.style.top = `${Math.max(pad, top)}px`;
+}
+
 function placeOverflowMenu(menu: HTMLElement, anchor: DOMRect) {
   const pad = MENU_VIEWPORT_PAD;
   const vw = window.innerWidth;
@@ -174,7 +189,12 @@ export function ComposerMetaChips({
   /** Servers this chat can attach (folder list), even if all are disabled here. */
   availableMcpCount: number;
   /** ACP-reported context usage; null hides the chip (no estimate fallback). */
-  contextDisplay: { label: string; title: string } | null;
+  contextDisplay: {
+    label: string;
+    title: string;
+    /** Token rows the click opens: cache %, totals, cached/uncached/output… */
+    rows: Array<{ id: string; label: string; value: string }>;
+  } | null;
   consoleOpen: boolean;
   onToggleConsole: () => void;
   modeSwitcher: Array<{ value: string; name?: string }>;
@@ -227,6 +247,10 @@ export function ComposerMetaChips({
   const [measureRetry, setMeasureRetry] = useState(0);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowMenuReady, setOverflowMenuReady] = useState(false);
+  const contextChipRef = useRef<HTMLButtonElement | null>(null);
+  const contextPanelRef = useRef<HTMLDivElement | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [contextPanelReady, setContextPanelReady] = useState(false);
 
   const chipOptions = settings.chatChipOptions;
 
@@ -439,11 +463,17 @@ export function ComposerMetaChips({
       } else if (id === "context" && activeSession && contextDisplay) {
         node = (
           <button
+            ref={contextChipRef}
             type="button"
             className={`${styles.metaChip} ${styles.metaChipForceLabel}`}
             title={contextDisplay.title}
             aria-label={contextDisplay.title}
-            onClick={() => showToast(contextDisplay.title)}
+            aria-haspopup="dialog"
+            aria-expanded={contextOpen}
+            onClick={() => {
+              setContextPanelReady(false);
+              setContextOpen((open) => !open);
+            }}
           >
             <span className={styles.metaChipIcon} aria-hidden>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -504,6 +534,8 @@ export function ComposerMetaChips({
     consoleOpen,
     contextDisplay?.label,
     contextDisplay?.title,
+    contextDisplay?.rows,
+    contextOpen,
     availableMcpCount,
     gitChip,
     isDesktop,
@@ -740,6 +772,60 @@ export function ComposerMetaChips({
     setOverflowOpen(true);
   };
 
+  // The token panel rides above the chip: placed once open, re-placed whenever
+  // the numbers underneath it change (a turn landing mid-read).
+  useLayoutEffect(() => {
+    if (!contextOpen) return;
+    const place = () => {
+      const panel = contextPanelRef.current;
+      const chip = contextChipRef.current;
+      if (!panel || !chip) return;
+      placeContextPanel(panel, chip.getBoundingClientRect());
+      setContextPanelReady(true);
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("scroll", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("scroll", place);
+    };
+  }, [contextOpen, contextDisplay?.rows]);
+
+  useEffect(() => {
+    if (!contextOpen) {
+      setContextPanelReady(false);
+      return;
+    }
+    // Clicks on the chip itself are the toggle, not a dismissal — without that
+    // carve-out the panel would close on mousedown and reopen on click, forever.
+    const close = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && contextPanelRef.current?.contains(target)) return;
+      if (target && contextChipRef.current?.contains(target)) return;
+      setContextOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [contextOpen]);
+
+  // Another chat has no rows of its own to show: the panel follows its chat.
+  useEffect(() => setContextOpen(false), [activeSession?.id]);
+  useEffect(() => {
+    if (!contextDisplay) setContextOpen(false);
+  }, [contextDisplay]);
+
   const modePicker =
     showMode && !renderSkeleton ? (
       <div ref={modeRef} className={styles.composerMode}>
@@ -880,6 +966,29 @@ export function ComposerMetaChips({
           </svg>
         </span>
       ) : null}
+
+      {contextOpen && contextDisplay
+        ? createPortal(
+            <div
+              ref={contextPanelRef}
+              className={styles.contextTokenPanel}
+              style={{ visibility: contextPanelReady ? "visible" : "hidden" }}
+              role="dialog"
+              aria-label={t("chat.contextTokensTitle")}
+            >
+              <div className={styles.contextTokenHead}>{t("chat.contextTokensTitle")}</div>
+              <dl className={styles.contextTokenList}>
+                {contextDisplay.rows.map((row) => (
+                  <div className={styles.contextTokenRow} key={row.id}>
+                    <dt className={styles.contextTokenKey}>{row.label}</dt>
+                    <dd className={styles.contextTokenVal}>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {overflowOpen && overflowItems.length > 0
         ? createPortal(

@@ -165,26 +165,4 @@ describe("omp adapter", () => {
     expect(card.body).toContain("посчитать");
     expect(card.body).toContain("время: 3 с");
   });
-
-  it("probeModels parses the omp models --json catalog", async () => {
-    const models = await ompAdapter.probeModels!({
-      settings: DEFAULT_SETTINGS,
-      runCli: async () =>
-        JSON.stringify({
-          models: [
-            { selector: "grok-4.5", name: "Grok 4.5" },
-            { provider: "opencode-go", id: "deepseek-v4-flash", name: "DeepSeek" },
-            { id: "", name: "" },
-          ],
-        }),
-    });
-    expect(models).toEqual([
-      { value: "grok-4.5", name: "Grok 4.5", provider: undefined },
-      {
-        value: "opencode-go/deepseek-v4-flash",
-        name: "DeepSeek",
-        provider: "opencode-go",
-      },
-    ]);
-  });
 });

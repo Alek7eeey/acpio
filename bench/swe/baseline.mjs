@@ -9,7 +9,7 @@
 // self-reports undercount (they mostly drop cached tokens and whole calls).
 //
 //   node bench/swe/baseline.mjs                  # all models
-//   node bench/swe/baseline.mjs --model im/im-llm
+//   node bench/swe/baseline.mjs --model local/local-model
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

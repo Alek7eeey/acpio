@@ -1,0 +1,199 @@
+.table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--settings-control-radius);
+  /* No overflow:hidden — it would clip OptionPicker dropdowns. */
+  background: var(--surface);
+  /* As a grid/flex item, allow shrinking below the widest row's min-content
+     (long unbreakable hints) instead of inflating the container. */
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 16px;
+  position: relative;
+  z-index: 0;
+}
+
+.row:focus-within {
+  z-index: 2;
+}
+
+.row:first-child {
+  border-top-left-radius: calc(var(--settings-control-radius) - 1px);
+  border-top-right-radius: calc(var(--settings-control-radius) - 1px);
+}
+
+.row:last-child {
+  border-bottom-left-radius: calc(var(--settings-control-radius) - 1px);
+  border-bottom-right-radius: calc(var(--settings-control-radius) - 1px);
+}
+
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+}
+
+.text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.label {
+  font-size: var(--settings-label-size);
+  font-weight: var(--settings-label-weight);
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.hint {
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
+  color: var(--text-secondary);
+  /* Let long unbreakable hint content (URLs) shrink and ellipsize instead
+     of forcing the row wider than the table. */
+  min-width: 0;
+}
+
+.control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.table select,
+.table textarea {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-control-pad-y) var(--settings-control-pad-x);
+  font-weight: var(--settings-control-weight);
+  font-size: var(--settings-control-size);
+  color: var(--text);
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):focus,
+.table select:focus,
+.table textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--settings-focus-ring);
+}
+
+.table input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* --- toggle --- */
+.toggle {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.toggleInput {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggleTrack {
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--border-strong, var(--border));
+  position: relative;
+  transition: background 0.15s ease;
+  flex: 0 0 auto;
+}
+
+.toggleKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.toggleInput:checked + .toggleTrack {
+  background: var(--accent);
+}
+
+.toggleInput:checked + .toggleTrack .toggleKnob {
+  transform: translateX(18px);
+}
+
+.toggleInput:focus-visible + .toggleTrack {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.rowStack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.rowStack .control {
+  width: 100%;
+  justify-content: stretch;
+}
+
+@media (max-width: 700px) {
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 12px 14px;
+  }
+
+  .control {
+    justify-content: flex-start;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .control > * {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 900px) {
+  .toggleTrack {
+    width: 42px;
+    height: 22px;
+  }
+
+  .toggleKnob {
+    width: 18px;
+    height: 18px;
+  }
+
+  .toggleInput:checked + .toggleTrack .toggleKnob {
+    transform: translateX(20px);
+  }
+}

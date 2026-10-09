@@ -5,9 +5,13 @@ import {
   normalizeBuiltinProviders,
 } from "./index.js";
 import {
+  BUILTIN_EXTRA_INSTRUCTIONS_MAX,
+  BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+  BUILTIN_THINKING_LIMIT_MAX,
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeClientAppSettings,
+  normalizeBuiltinExtraInstructions,
   normalizeChatMetaChips,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
@@ -192,6 +196,42 @@ describe("mergeClientAppSettings", () => {
     expect(mergeClientAppSettings({ chatTreeRecentLimit: Number.NaN }).chatTreeRecentLimit).toBe(0);
   });
 
+  it("heals the built-in agent's output ceiling", () => {
+    expect(mergeClientAppSettings({}).builtinMaxOutputTokens).toBe(
+      DEFAULT_SETTINGS.builtinMaxOutputTokens,
+    );
+    expect(mergeClientAppSettings({ builtinMaxOutputTokens: 9_999 }).builtinMaxOutputTokens).toBe(
+      9_999,
+    );
+    expect(mergeClientAppSettings({ builtinMaxOutputTokens: 0 }).builtinMaxOutputTokens).toBe(0);
+    expect(mergeClientAppSettings({ builtinMaxOutputTokens: -5 }).builtinMaxOutputTokens).toBe(0);
+    expect(mergeClientAppSettings({ builtinMaxOutputTokens: 12.6 }).builtinMaxOutputTokens).toBe(13);
+    expect(mergeClientAppSettings({ builtinMaxOutputTokens: 9e9 }).builtinMaxOutputTokens).toBe(
+      BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+    );
+    expect(
+      mergeClientAppSettings({ builtinMaxOutputTokens: "many" }).builtinMaxOutputTokens,
+    ).toBe(DEFAULT_SETTINGS.builtinMaxOutputTokens);
+  });
+
+  it("heals the mid-think fuse cap", () => {
+    expect(mergeClientAppSettings({}).builtinThinkingLimit).toBe(
+      DEFAULT_SETTINGS.builtinThinkingLimit,
+    );
+    expect(mergeClientAppSettings({ builtinThinkingLimit: 4_000 }).builtinThinkingLimit).toBe(
+      4_000,
+    );
+    // 0 stays "off", negatives clamp to it, junk falls back to the default.
+    expect(mergeClientAppSettings({ builtinThinkingLimit: -7 }).builtinThinkingLimit).toBe(0);
+    expect(mergeClientAppSettings({ builtinThinkingLimit: 12.6 }).builtinThinkingLimit).toBe(13);
+    expect(mergeClientAppSettings({ builtinThinkingLimit: 9e9 }).builtinThinkingLimit).toBe(
+      BUILTIN_THINKING_LIMIT_MAX,
+    );
+    expect(
+      mergeClientAppSettings({ builtinThinkingLimit: "many" }).builtinThinkingLimit,
+    ).toBe(DEFAULT_SETTINGS.builtinThinkingLimit);
+  });
+
   it("migrates a pre-provider builtin payload from the API", () => {
     const merged = mergeClientAppSettings({
       builtinAgentUrl: "http://localhost:11434/v1",
@@ -369,6 +409,26 @@ describe("readSettingsSchema", () => {
   it("defaults to 1 when absent", () => {
     expect(readSettingsSchema({})).toBe(1);
     expect(readSettingsSchema(null)).toBe(1);
+  });
+});
+
+describe("normalizeBuiltinExtraInstructions", () => {
+  it("keeps a string, heals anything else to empty", () => {
+    expect(normalizeBuiltinExtraInstructions("Think briefly.")).toBe("Think briefly.");
+    expect(normalizeBuiltinExtraInstructions(undefined)).toBe("");
+    expect(normalizeBuiltinExtraInstructions(42)).toBe("");
+    expect(normalizeBuiltinExtraInstructions({ text: "hi" })).toBe("");
+  });
+
+  it("caps the appended instructions", () => {
+    expect(normalizeBuiltinExtraInstructions("x".repeat(9_000)).length).toBe(
+      BUILTIN_EXTRA_INSTRUCTIONS_MAX,
+    );
+  });
+
+  it("merge uses the default when the payload omits the field", () => {
+    expect(mergeClientAppSettings({}).builtinExtraInstructions).toBe("");
+    expect(mergeClientAppSettings({ builtinExtraInstructions: 7 }).builtinExtraInstructions).toBe("");
   });
 });
 

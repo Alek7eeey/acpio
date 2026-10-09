@@ -1,0 +1,222 @@
+.card {
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  max-width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warning, #b45309) 9%, var(--surface));
+  color: var(--text);
+  display: grid;
+  gap: 8px;
+  pointer-events: auto;
+  isolation: isolate;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--warning, #b45309) 55%, var(--text-secondary));
+}
+
+.title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.overview {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-start;
+  padding-top: 1px;
+  pointer-events: auto;
+}
+
+.actions button,
+.opt,
+.optActive {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 550;
+  cursor: pointer;
+  line-height: 1.2;
+  pointer-events: auto;
+  position: relative;
+  z-index: 2;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.primary {
+  background: transparent;
+  color: color-mix(in srgb, var(--warning, #b45309) 70%, var(--text));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning, #b45309) 35%, var(--border));
+}
+
+.primary:hover {
+  background: color-mix(in srgb, var(--warning, #b45309) 10%, transparent);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.ghost:hover {
+  color: var(--text);
+}
+
+.danger {
+  background: transparent;
+  color: color-mix(in srgb, var(--danger, #c44) 75%, var(--text-secondary));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger, #c44) 28%, var(--border));
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--danger, #c44) 8%, transparent);
+}
+
+.questions {
+  display: grid;
+  gap: 8px;
+}
+
+.qPrompt {
+  font-weight: 550;
+  margin-bottom: 6px;
+  font-size: 0.84rem;
+}
+
+.qOptions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Options carrying an explanation stack as full-width rows instead of pills. */
+.qOptionsStack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.qOptionsStack .opt,
+.qOptionsStack .optActive {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 11px;
+}
+
+.optLabel {
+  display: block;
+}
+
+.optDesc {
+  font-weight: 400;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.opt {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.optActive {
+  color: color-mix(in srgb, var(--warning, #b45309) 65%, var(--text));
+  background: color-mix(in srgb, var(--warning, #b45309) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning, #b45309) 30%, var(--border));
+}
+
+.optFocused {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--warning, #b45309) 45%, var(--border)),
+    0 0 0 2px color-mix(in srgb, var(--warning, #b45309) 22%, transparent);
+}
+
+.card:focus {
+  outline: none;
+}
+
+.qHint {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.textInput {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.82rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.textInput:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning, #b45309) 35%, var(--border));
+}
+
+.embedded {
+  max-width: none;
+  margin: 8px 0 0;
+  position: relative;
+  z-index: 2;
+}
+
+.answered {
+  opacity: 1;
+}
+
+.answeredBlock {
+  display: grid;
+  gap: 2px;
+}
+
+.answeredLabel {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 550;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}

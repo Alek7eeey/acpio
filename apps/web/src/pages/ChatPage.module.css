@@ -693,6 +693,45 @@
   white-space: nowrap;
 }
 
+.queueModes {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+  padding: 1px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.queueMode {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 20px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.queueMode svg {
+  display: block;
+}
+
+.queueMode:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* The default the queue is already in — a state, not a button. */
+.queueModeActive {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
 .queueItemBtn {
   display: grid;
   place-items: center;
@@ -877,7 +916,10 @@
 }
 
 /* The preamble rides the question rail: same indent as the transcript rows
-   above it, so the card reads as the continuation the model meant it to be. */
+   above it, so the card reads as the continuation the model meant it to be.
+   It is the model's own message, so it takes the thread's typography — at the
+   steps body's dimmed narration size it read as hidden grey text next to the
+   prompt it introduces. */
 .questionPreamble {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -885,16 +927,91 @@
   margin-left: 7px;
   padding: 2px 0 4px 14px;
   border-left: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
-  font-size: 0.86rem;
-  color: color-mix(in srgb, var(--text) 78%, transparent);
+  font-size: 0.96rem;
+  color: var(--text);
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
 }
 
-.agentTimeline .questionPreamble {
-  font-size: 0.92rem;
+/* One compaction pass, on the surface of the thread. Its own row with its own
+   rail: folded into the turn's "Работал" block the squeeze was invisible until
+   the reader opened a spoiler, and then it read as one more tool of the turn.
+   The accent rail marks it as something that happened to the conversation
+   itself, not to the task. */
+.compactionRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  margin: 2px 0;
+  padding: 6px 0 6px 12px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.compactionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  min-width: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.compactionIcon {
+  color: color-mix(in srgb, var(--accent) 85%, var(--text));
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.compactionTitle {
+  color: color-mix(in srgb, var(--text) 88%, transparent);
+  font-weight: 500;
+}
+
+.compactionMeta {
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--text-secondary) 92%, transparent);
+}
+
+.compactionToggle {
+  margin-left: auto;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text-secondary) 95%, transparent);
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.compactionToggle:hover {
   color: var(--text);
+  background: var(--accent-soft);
+}
+
+.compactionBody {
+  max-height: 40vh;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  font-size: 0.84rem;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* State of a parked turn, under the prompt. Deliberately static: the agent has
@@ -2659,6 +2776,59 @@ button.userSlashCmd:focus-visible {
 .composerMetaOverflowItem .sessionCwdText {
   white-space: normal;
   word-break: break-all;
+}
+
+/* The context chip's click panel: the token bill of this chat, glass card of
+   the overflow menu so the two never read as different surfaces. */
+.contextTokenPanel {
+  position: fixed;
+  z-index: 330;
+  min-width: 216px;
+  max-width: min(90vw, 320px);
+  box-sizing: border-box;
+  padding: 10px 12px 11px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+}
+
+.contextTokenHead {
+  margin-bottom: 7px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.contextTokenList {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.contextTokenRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.contextTokenKey {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.contextTokenVal {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
 .pill {

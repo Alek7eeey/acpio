@@ -5,7 +5,7 @@
 // falls off. Reads the per-run ledgers and each task's horizon bucket.
 //
 //   node bench/horizon.mjs                      # every model, both ledgers
-//   node bench/horizon.mjs --model im/im-llm
+//   node bench/horizon.mjs --model local/local-model
 //   node bench/horizon.mjs --ledger <file>      # extra per-run ledger
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";

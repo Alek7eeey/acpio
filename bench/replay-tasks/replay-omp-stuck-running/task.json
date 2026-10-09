@@ -1,0 +1,7 @@
+{
+  "id": "replay-omp-stuck-running",
+  "title": "Replay: omp done but chat stuck running (session 46e6e0b4, gold c779705; ending reconstructed from the session title)",
+  "prompt": "Очень часто начал замечать, что omp вроде уже закончил работу и даже вывел какой-то результат работы, но чат всё ещё помечен как работающий — Stop не исчезает и следующие промпты встают в очередь до перезагрузки страницы. Найди причину в коде и исправь её.",
+  "timeoutMs": 1200000,
+  "horizon": "m"
+}

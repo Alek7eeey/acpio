@@ -1,4 +1,5 @@
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lte, max, or, sql } from "drizzle-orm";
 import type {
   MessageDto,
@@ -8,7 +9,9 @@ import type {
   SessionDto,
   AgentMode,
   AgentProvider,
+  AppSettings,
   SessionStatus,
+  TaskAttachmentDto,
   AcpUsage,
 } from "@acpio/shared";
 import {
@@ -19,6 +22,7 @@ import {
 } from "@acpio/shared";
 import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
+import { adapters } from "../adapters/registry.js";
 import { boardFolders, chatFolders, messageParts, messages, sessions } from "../db/schema.js";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
@@ -51,6 +55,9 @@ function mapSession(
     archived: row.archived ?? false,
     boardId: row.boardId ?? null,
     taskDescription: row.taskDescription ?? null,
+    taskAttachments: Array.isArray(row.taskAttachments)
+      ? (row.taskAttachments as TaskAttachmentDto[])
+      : [],
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     doneAt: row.doneAt ? row.doneAt.toISOString() : null,
     mcpDisabledIds: Array.isArray(row.mcpDisabledIds)
@@ -199,6 +206,19 @@ export async function getSessionCwd(id: string): Promise<string | null> {
 }
 
 /**
+ * Just the title — the title refinement reads it twice around a model call and
+ * must not drag every message of a long chat through `getSessionDetail`.
+ */
+export async function getSessionTitle(id: string): Promise<string | null> {
+  const rows = await db
+    .select({ title: sessions.title })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .limit(1);
+  return rows[0]?.title ?? null;
+}
+
+/**
  * Rewrite working directories stored in the pre-fix canonical form. A drive
  * root used to be written as the drive-relative `C:` (see `canonicalCwd`),
  * which no harness can start in — OMP answers `session/new` with an opaque
@@ -314,11 +334,20 @@ export async function updateSession(
     taskDescription?: string | null;
     doneAt?: Date | null;
   }>,
+  /**
+   * `{ touch: false }` records what the row *is* — the harness id a boot
+   * negotiated, a status normalization — without claiming the agent did
+   * anything. `updatedAt` is the row's activity stamp and the board's Wait
+   * column orders by it (the moment a turn ends), so a bookkeeping write must
+   * not move the card: merely opening a chat boots the agent and would
+   * otherwise send that task to the top of the column.
+   */
+  opts?: { touch?: boolean },
 ): Promise<SessionDto | null> {
   if (patch.cwd !== undefined) patch.cwd = canonicalCwd(patch.cwd);
   const [row] = await db
     .update(sessions)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...patch, ...(opts?.touch === false ? {} : { updatedAt: new Date() }) })
     .where(eq(sessions.id, id))
     .returning();
   if (!row) return null;
@@ -326,6 +355,37 @@ export async function updateSession(
   broadcastToSession(id, { type: "session.updated", sessionId: id, session: dto });
   return dto;
 }
+/** How many pictures one board task may carry into its first turn. */
+export const MAX_TASK_ATTACHMENTS = 8;
+
+/**
+ * Remember a picture attached to a board task at creation. The file itself is
+ * already on disk (acpio's attachment folder); this only binds it to the task,
+ * so the first turn carries it whenever that turn happens to run.
+ */
+export async function addTaskAttachments(
+  id: string,
+  items: TaskAttachmentDto[],
+): Promise<void> {
+  if (!items.length) return;
+  const rows = await db
+    .select({ list: sessions.taskAttachments })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .limit(1);
+  if (!rows[0]) return;
+  const current = Array.isArray(rows[0].list) ? (rows[0].list as TaskAttachmentDto[]) : [];
+  const seen = new Set(current.map((a) => a.path));
+  const next = [...current, ...items.filter((a) => !seen.has(a.path))].slice(
+    0,
+    MAX_TASK_ATTACHMENTS,
+  );
+  await db
+    .update(sessions)
+    .set({ taskAttachments: next, updatedAt: new Date() })
+    .where(eq(sessions.id, id));
+}
+
 /**
  * Stamp the first turn start of a board task — the Todo ⇄ Wait split marker.
  * Idempotent: only fires while the task has never started.
@@ -526,9 +586,11 @@ export async function appendTextChunk(
   type: "text" | "thought",
   text: string,
   openPartId?: string | null,
+  /** Extra fields stamped only when a NEW part is created (e.g. `ttftMs`). */
+  extraPayload?: Record<string, unknown>,
 ): Promise<string> {
   if (!text) {
-    return openPartId ?? (await appendPart(sessionId, messageId, type, { text: "" })).id;
+    return openPartId ?? (await appendPart(sessionId, messageId, type, { text: "", ...extraPayload })).id;
   }
   if (openPartId) {
     const rows = await db.select().from(messageParts).where(eq(messageParts.id, openPartId)).limit(1);
@@ -559,12 +621,12 @@ export async function appendTextChunk(
       if (sameTurn) {
         // Anchor the turn's thought slot to this message so later genuine
         // chunks land here; the duplicate content itself is dropped.
-        const anchor = await appendPart(sessionId, messageId, type, { text: "" });
+        const anchor = await appendPart(sessionId, messageId, type, { text: "", ...extraPayload });
         return anchor.id;
       }
     }
   }
-  const part = await appendPart(sessionId, messageId, type, { text });
+  const part = await appendPart(sessionId, messageId, type, { text, ...extraPayload });
   return part.id;
 }
 
@@ -632,6 +694,29 @@ const INTERRUPT_NOTE =
   "Сервер был перезапущен — этот ход прерван. Отправьте сообщение ещё раз.";
 
 /**
+ * Whether a chat that was mid-turn can be re-driven now: the harness must
+ * still be usable (registered, switched on, and not declaring itself
+ * unconfigured — a built-in agent without an endpoint), and the folder must
+ * still exist, since no agent can start in a path that is gone. A chat parked
+ * on an unanswered question never gets here: the human owes it an answer, not
+ * a continuation.
+ */
+function canResumeInterruptedTurn(
+  row: typeof sessions.$inferSelect,
+  settings: AppSettings,
+): boolean {
+  const provider = row.provider as AgentProvider;
+  if (provider === SHELL_SESSION_PROVIDER) return false;
+  if (settings.disabledProviders.includes(provider)) return false;
+  const adapter = adapters.get(provider);
+  if (!adapter || adapter.unavailableReason?.(settings)) return false;
+  // The row may still hold a pre-canonical cwd; repairStoredCwds runs later and
+  // the driver reads the canonical form. Check what the agent will actually use.
+  const cwd = canonicalCwd(row.cwd);
+  return Boolean(cwd) && existsSync(cwd);
+}
+
+/**
  * Pin the resolved model on chats created before creation-time pinning: they
  * still carry an empty `model` and follow the global settings default, so a
  * pick made in another chat would switch them mid-conversation. Pinning uses
@@ -665,17 +750,28 @@ export async function pinResolvedSessionModels(): Promise<number> {
  * Reset both, and leave a visible note in the last assistant message.
  * Safe to call at boot: the runtime map is empty, so every such part/session
  * is stale by definition.
+ *
+ * The reset turn is handed back as {@link interrupted} so the caller can carry
+ * the work on instead of asking the user to send the message again.
  */
 export async function reconcileStaleSessions(): Promise<{
   sessions: number;
   parts: number;
+  /**
+   * Chats whose live turn died with the process and can be re-driven now:
+   * the caller resumes their stored agent session and asks the agent to carry
+   * on. Empty when the user switched auto-continue off.
+   */
+  interrupted: string[];
 }> {
+  const settings = await getSettings();
   const stale = await db
     .select()
     .from(sessions)
     .where(or(eq(sessions.status, "running"), eq(sessions.status, "waiting")));
   let fixedSessions = 0;
   let fixedParts = 0;
+  const interrupted: string[] = [];
 
   // A session parked on an unanswered question is NOT stale: the agent asked
   // and is waiting for the human, and the question part is the durable,
@@ -696,6 +792,11 @@ export async function reconcileStaleSessions(): Promise<{
 
   for (const row of stale) {
     if (parkedOnQuestion.has(row.id)) continue;
+    // Decide before the reset below: the "running" row is the only record that
+    // a turn was live when the process died.
+    if (settings.resumeInterruptedTurns && canResumeInterruptedTurn(row, settings)) {
+      interrupted.push(row.id);
+    }
     await updateSession(row.id, { status: "idle" });
     fixedSessions++;
   }
@@ -718,7 +819,12 @@ export async function reconcileStaleSessions(): Promise<{
   }
 
   // One explanatory note per touched session (idempotent across restarts).
+  // Chats that continue on their own get no note: the turn they were in the
+  // middle of is not lost, and saying "send the message again" would contradict
+  // the continuation message the resume writes into the chat.
+  const continuing = new Set(interrupted);
   for (const sessionId of touchedSessions) {
+    if (continuing.has(sessionId)) continue;
     const alreadyNoted = await db
       .select({ id: messageParts.id })
       .from(messageParts)
@@ -748,5 +854,5 @@ export async function reconcileStaleSessions(): Promise<{
     }
   }
 
-  return { sessions: fixedSessions, parts: fixedParts };
+  return { sessions: fixedSessions, parts: fixedParts, interrupted };
 }

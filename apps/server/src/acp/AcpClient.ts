@@ -36,10 +36,14 @@ import {
   type DeepLogContext,
 } from "../services/deepLogging.js";
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
-import { globFiles, searchFiles } from "./agentFs.js";
+import { globFiles, searchFiles, splitGlobScope } from "./agentFs.js";
 import { DATA_DIR } from "../db/client.js";
+import { offloadDir } from "@acpio/adapter-builtin";
 
 const execFileAsync = promisify(execFile);
+
+/** Built-in sessions, their stored conversations and their result archives. */
+const BUILTIN_STATE_DIR = path.join(DATA_DIR, "agent-sessions");
 
 // ACPIO_ACP_WIRE debug dumps fire once per frame (including token chunks), so a
 // synchronous append would block the event loop for every chunk of a turn.
@@ -100,6 +104,7 @@ export type AcpUpdate =
   | { kind: "available_commands"; raw: Record<string, unknown> }
   | { kind: "mixed_chunks"; thought?: string; text?: string }
   | { kind: "usage"; usage: AcpUsage; raw: Record<string, unknown> }
+  | { kind: "compaction"; raw: Record<string, unknown> }
   | { kind: "other"; sessionUpdate: string; raw: Record<string, unknown> };
 
 export type AcpRequest =
@@ -131,7 +136,7 @@ export type ConfigOption = {
   category?: string;
   type?: string;
   currentValue?: string;
-  options?: Array<{ value: string; name: string }>;
+  options?: Array<{ value: string; name: string; provider?: string }>;
 };
 
 function normalizeConfigOptions(raw: ConfigOption[]): ConfigOption[] {
@@ -151,6 +156,7 @@ function normalizeConfigOptions(raw: ConfigOption[]): ConfigOption[] {
         options: (opt.options ?? []).map((o) => ({
           value: String(o.value),
           name: String(o.name ?? o.value),
+          ...(o.provider == null ? {} : { provider: String(o.provider) }),
         })),
       };
     })
@@ -528,6 +534,29 @@ const NOISY_UPDATE_KINDS: ReadonlySet<AcpUpdate["kind"]> = new Set([
   "tool_call_content_chunk",
 ]);
 
+/** Statuses that mean "the tool is still running" (mirrors sessionManager's
+ *  STUCK_TURN_PART: a missing status reads as pending/active). */
+const ACTIVE_TOOL_STATUS: ReadonlySet<string> = new Set([
+  "pending",
+  "in_progress",
+  "running",
+]);
+
+function isActiveToolStatus(status: string | undefined): boolean {
+  const s = String(status ?? "pending").toLowerCase();
+  if (!s) return true;
+  return ACTIVE_TOOL_STATUS.has(s);
+}
+
+/**
+ * The one update a `session/load` replay cannot stand in for: the slash-command
+ * list is session state the agent announces exactly once, at load. (It is not
+ * history — nothing about it is replayed from the transcript.)
+ */
+const KINDS_ALLOWED_THROUGH_LOAD_REPLAY: ReadonlySet<AcpUpdate["kind"]> = new Set([
+  "available_commands",
+]);
+
 /** One ACP `image` content block: base64 payload plus its IANA type. */
 export interface PromptImageBlock {
   /** Base64 bytes — no `data:` prefix. */
@@ -547,6 +576,15 @@ export class AcpClient extends EventEmitter {
    * user reads for five minutes gets killed mid-thought.
    */
   private awaitingReply = new Set<JsonRpcId>();
+  /**
+   * Tool calls announced by the agent but not yet closed. A tool that runs
+   * a model request (`[js]` eval) can hold the wire quiet for many minutes
+   * — that is work, not a hang — so the idle ceiling in {@link request}
+   * must not kill the prompt while one is open, exactly like awaitingReply.
+   * Cleared on prompt settle/start/stop so a stale open tool never exempts
+   * the next prompt from its hang detector.
+   */
+  private activeTools = new Set<string>();
   private promptRequestId: JsonRpcId | null = null;
   private closed = false;
   private stderrBuf = "";
@@ -560,7 +598,11 @@ export class AcpClient extends EventEmitter {
     loadSession?: boolean;
     sessionCapabilities?: { resume?: Record<string, unknown>; list?: unknown };
   } = {};
-  /** While true (Cursor session/load replay), drop session/update notifications. */
+  /**
+   * While true (a load-replaying harness), drop the replayed conversation from
+   * session/update notifications — our DB already stores it. Session state the
+   * agent only reports at load (its command list) still passes through.
+   */
   private suppressUpdates = false;
   /** Last inbound ACP traffic (updates, replies, client method calls). */
   private lastActivityAt = Date.now();
@@ -586,6 +628,12 @@ export class AcpClient extends EventEmitter {
     private readonly settings: AppSettings,
     private readonly cwd: string,
     private mode: AgentMode,
+    /**
+     * Re-reads settings for in-process agents, so a setting changed after this
+     * client started still reaches the agent on its next turn. Absent = the
+     * snapshot taken here is final (spawned CLIs read their env once anyway).
+     */
+    private readonly settingsProvider?: () => Promise<AppSettings>,
   ) {
     super();
   }
@@ -628,6 +676,7 @@ export class AcpClient extends EventEmitter {
       }
       this.pending.clear();
       this.awaitingReply.clear();
+      this.activeTools.clear();
     });
 
     // A harness that dies mid-turn leaves writes racing its exit. Without a
@@ -682,6 +731,7 @@ export class AcpClient extends EventEmitter {
     }
     this.pending.clear();
     this.awaitingReply.clear();
+    this.activeTools.clear();
     this.killAllTerminals();
     this.emit("exit", { code, signal });
   }
@@ -756,9 +806,10 @@ export class AcpClient extends EventEmitter {
       this.bindInProcess(
         this.adapter.createTransport({
           settings: this.settings,
+          ...(this.settingsProvider ? { settingsProvider: this.settingsProvider } : {}),
           cwd,
           mode: this.mode,
-          stateDir: path.join(DATA_DIR, "agent-sessions"),
+          stateDir: BUILTIN_STATE_DIR,
         }),
       );
     } else {
@@ -1044,8 +1095,8 @@ export class AcpClient extends EventEmitter {
           .join(",")}]`;
         target = allowedModels.includes(rebuilt) ? rebuilt : sameBase;
       } else {
-        // OMP catalogs one model under different provider prefixes (`models
-        // --json` offers "opencode-go/x" while the session list carries
+        // OMP catalogs one model under different provider prefixes (a stored
+        // value may read "opencode-go/x" while the session list carries
         // "alibaba-token-plan/x"). Prefer the agent's own enumerated wire for
         // the same model id — the agent listed it, so it is accepted as is.
         const wantedId = modelIdFromValue(base);
@@ -1055,11 +1106,11 @@ export class AcpClient extends EventEmitter {
         if (sameId) {
           target = sameId;
         } else {
-          // The agent's list can lag its own catalog: omp's `session/new`
-          // enumeration omits models its live provider feed added (new SKUs)
-          // while `session/set_config_option` accepts them. Send the requested
-          // value and let the agent decide; a rejection (handled below) leaves
-          // its own model in place, exactly like the old pre-check did.
+          // Nothing the agent enumerated matches: a value stored by an older
+          // build, or one typed into settings. OMP rejects what its own list
+          // omits ("Unknown ACP model"), but another harness may accept it —
+          // send the requested value and let the agent decide; a rejection
+          // (handled below) leaves its own model in place.
           target = wire;
           tentative = true;
         }
@@ -1105,6 +1156,10 @@ export class AcpClient extends EventEmitter {
     if (this.promptRequestId != null) {
       throw new Error("ACP prompt already in flight");
     }
+    // Each prompt starts with a clean tool ledger: entries left by a turn that
+    // never closed its tools (or by an autonomous run between prompts) must
+    // not pre-exempt this turn's idle ceiling.
+    this.activeTools.clear();
     // Images ride as ACP `image` blocks after the text; the agent decides
     // whether its model can take them.
     const prompt: Array<Record<string, unknown>> = [{ type: "text", text }];
@@ -1125,6 +1180,33 @@ export class AcpClient extends EventEmitter {
       return { stopReason, raw };
     } finally {
       if (this.promptRequestId === id) this.promptRequestId = null;
+      // Turn over: an open tool the agent never closed must not leak into the
+      // next prompt's exemption window.
+      this.activeTools.clear();
+    }
+  }
+
+  /**
+   * Fold `text` into the turn this client is already running, without
+   * cancelling it: a `midTurnSteering` agent puts it into the next model call,
+   * so the model reads it right after the current tool step. ACP itself has no
+   * steering — any other agent answers this method with an error (or never),
+   * so the caller falls back to its own queue. Only asked of adapters whose
+   * `midTurnSteering` says they can, and only for a prompt that is open.
+   */
+  async steer(text: string): Promise<boolean> {
+    if (!this.sessionId || !this.isConnected() || !this.isPromptPending()) return false;
+    if (!text.trim()) return false;
+    try {
+      const raw = await this.send("session/steer", { sessionId: this.sessionId, text });
+      return (
+        raw !== null &&
+        typeof raw === "object" &&
+        (raw as { delivered?: unknown }).delivered === true
+      );
+    } catch {
+      // Unsupported method or a turn that ended while we were asking.
+      return false;
     }
   }
 
@@ -1134,6 +1216,7 @@ export class AcpClient extends EventEmitter {
     // Stop ends the turn: any request the agent was still waiting on is moot,
     // and a stale entry would exempt the NEXT prompt from its idle ceiling.
     this.awaitingReply.clear();
+    this.activeTools.clear();
     // Child tools must stop too: host-side terminals spawned for this session
     // would otherwise keep running even after the agent's prompt is cancelled.
     this.killAllTerminals();
@@ -1172,6 +1255,7 @@ export class AcpClient extends EventEmitter {
   dispose() {
     this.closed = true;
     this.awaitingReply.clear();
+    this.activeTools.clear();
     this.killAllTerminals();
     try {
       this.proc?.stdin.end();
@@ -1190,9 +1274,42 @@ export class AcpClient extends EventEmitter {
     return path.resolve(this.cwd || process.cwd());
   }
 
+  /**
+   * Whether the built-in agent's tools may leave the session cwd right now.
+   * Refreshed per request (see {@link refreshOutsideCwd}), so the switch in
+   * Settings → Built-in agent reaches a chat that is already running instead of
+   * waiting for a restart — the same reason the transport re-reads its knobs
+   * per turn.
+   */
+  private outsideCwdAllowed = false;
+
+  /** Settings as of right now, falling back to the boot snapshot. */
+  private async liveSettings(): Promise<AppSettings> {
+    if (!this.settingsProvider) return this.settings;
+    try {
+      return await this.settingsProvider();
+    } catch {
+      return this.settings;
+    }
+  }
+
+  private async refreshOutsideCwd(): Promise<void> {
+    // Only the built-in agent has the switch: a spawned CLI keeps the workspace
+    // boundary whatever a built-in setting says.
+    if (this.adapter.id !== "builtin") {
+      this.outsideCwdAllowed = false;
+      return;
+    }
+    const settings = await this.liveSettings();
+    this.outsideCwdAllowed = settings.builtinAllowOutsideCwd === true;
+  }
+
   private assertInsideCwd(targetPath: string) {
     const root = this.rootCwd();
     const resolved = path.resolve(root, targetPath);
+    // The switch is the user lifting the workspace boundary: every path the
+    // agent names is then simply resolved against the cwd as before.
+    if (this.outsideCwdAllowed) return resolved;
     const rel = path.relative(root, resolved);
     if (rel.startsWith("..") || path.isAbsolute(rel)) {
       // The cwd in the message is the recovery path: a model aiming at a temp
@@ -1207,11 +1324,21 @@ export class AcpClient extends EventEmitter {
   /** Reads may also target user-attached files outside the cwd (exact paths). */
   private assertReadablePath(targetPath: string) {
     const resolved = path.resolve(this.rootCwd(), targetPath);
+    if (this.outsideCwdAllowed) return resolved;
     const rel = path.relative(this.rootCwd(), resolved);
     if (!rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
     const norm = (p: string) =>
       process.platform === "win32" ? p.toLowerCase() : p;
     if ([...this.extraReadFiles].some((f) => norm(f) === norm(resolved))) {
+      return resolved;
+    }
+    // The built-in agent's own offload archive lives outside the cwd and is
+    // read back with the ordinary `read` tool, so that one folder is readable —
+    // for this session's files only.
+    const archived = this.sessionId
+      ? path.relative(offloadDir(BUILTIN_STATE_DIR, this.sessionId), resolved)
+      : "";
+    if (archived && !archived.startsWith("..") && !path.isAbsolute(archived)) {
       return resolved;
     }
     throw new Error(
@@ -1254,7 +1381,9 @@ export class AcpClient extends EventEmitter {
     const start = Math.max(0, Number(params.line ?? 1) - 1);
     const limit = params.limit == null ? undefined : Number(params.limit);
     const sliced = limit == null ? lines.slice(start) : lines.slice(start, start + limit);
-    return { content: sliced.join("\n") };
+    // A slice hides the file's real length: the agent needs it to say "continue
+    // with line N" against the right file, not against what it was sent.
+    return { content: sliced.join("\n"), totalLines: lines.length };
   }
 
   private async handleFsWrite(params: Record<string, unknown>) {
@@ -1264,11 +1393,21 @@ export class AcpClient extends EventEmitter {
     return {};
   }
 
-  /** Agent-side `glob`: paths relative to the session cwd, never escaping it. */
+  /**
+   * Agent-side `glob`. The pattern's leading folders are the search area: `src/`
+   * with a `*.ts` tail walks `src`, and an absolute pattern walks the folder it
+   * names — an absolute pattern used to match nothing, because the walk never
+   * left the session cwd. A folder outside the cwd needs the Built-in agent's
+   * workspace switch; paths come back cwd-relative inside it and absolute
+   * outside, either form ready for `read`.
+   */
   private async handleFsGlob(params: Record<string, unknown>) {
+    const scope = splitGlobScope(String(params.pattern ?? params.glob ?? ""));
     return globFiles({
-      root: this.rootCwd(),
-      pattern: String(params.pattern ?? params.glob ?? ""),
+      root: scope.dir ? this.assertInsideCwd(scope.dir) : this.rootCwd(),
+      base: this.rootCwd(),
+      pattern: scope.pattern,
+      nameOnly: scope.nameOnly,
       maxResults: params.max_results == null ? undefined : Number(params.max_results),
     });
   }
@@ -1399,7 +1538,19 @@ export class AcpClient extends EventEmitter {
     return {};
   }
 
+  /** Client methods that carry a location the workspace switch can lift. */
+  private static readonly PATH_METHODS = new Set([
+    "fs/read_text_file",
+    "fs/write_text_file",
+    "fs/glob",
+    "fs/search",
+    "terminal/create",
+  ]);
+
   private async handleClientMethod(method: string, params: Record<string, unknown>) {
+    // A path-bearing call reads the switch first, so a Settings flip reaches
+    // the very next tool call.
+    if (AcpClient.PATH_METHODS.has(method)) await this.refreshOutsideCwd();
     switch (method) {
       case "fs/read_text_file":
         return this.handleFsRead(params);
@@ -1476,16 +1627,22 @@ export class AcpClient extends EventEmitter {
           // Waiting for a human is not a hang: keep the prompt alive so the
           // question stays answerable however long the user takes.
           const awaitingUser = this.awaitingReply.size > 0;
+          // A tool the agent announced and has not closed yet may run for
+          // minutes without one frame (a model eval inside `[js]`) — same
+          // reasoning: silence with an open tool is work, not a hang.
+          const runningTool = this.activeTools.size > 0;
           if (
             !this.closed &&
             this.isConnected() &&
-            (awaitingUser || idleMs < AcpClient.requestTimeoutMs)
+            (awaitingUser || runningTool || idleMs < AcpClient.requestTimeoutMs)
           ) {
             this.emit(
               "log",
               awaitingUser
                 ? `ACP "${method}" awaiting user input — not timing out`
-                : `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,
+                : runningTool
+                  ? `ACP "${method}" tool in progress (${this.activeTools.size}) — extending wait`
+                  : `ACP "${method}" still active (last traffic ${Math.round(idleMs / 1000)}s ago) — extending wait`,
             );
             armTimeout();
             return;
@@ -1574,10 +1731,23 @@ export class AcpClient extends EventEmitter {
     if (!method) return;
 
     if (method === "session/update") {
-      if (this.suppressUpdates) return; // Cursor session/load replay — history is already in our DB
       const params = (msg.params ?? {}) as Record<string, unknown>;
       const update = (params.update ?? params) as Record<string, unknown>;
       const mapped = this.mapUpdate(update);
+      // session/load replays the stored conversation, which our DB already
+      // holds — swallowed so the turn is not written twice. The agent's
+      // command list rides along with that same load, so muting it left every
+      // restored chat with an empty slash menu ("Загружаем список команд…").
+      if (this.suppressUpdates && !KINDS_ALLOWED_THROUGH_LOAD_REPLAY.has(mapped.kind)) return;
+      // An open tool keeps the prompt alive even through a silent stretch:
+      // tracked after the replay guard so a load replay cannot leave stale
+      // in-progress entries behind.
+      if (mapped.kind === "tool_call" || mapped.kind === "tool_call_update") {
+        if (mapped.toolCallId) {
+          if (isActiveToolStatus(mapped.status)) this.activeTools.add(mapped.toolCallId);
+          else this.activeTools.delete(mapped.toolCallId);
+        }
+      }
       // Token/content chunks arrive per-message and drown the log; log only
       // discrete events (tool lifecycle, plan, mode, …).
       if (!NOISY_UPDATE_KINDS.has(mapped.kind)) {
@@ -1794,6 +1964,12 @@ export class AcpClient extends EventEmitter {
       sessionUpdate === "context_update"
     ) {
       return { kind: "usage", usage: this.normalizeUsage(update), raw: update };
+    }
+    // A harness's own report that it folded older turns into a digest. Not part
+    // of ACP: the built-in agent emits it, and any other harness that learns to
+    // gets a top-level chat row for free.
+    if (sessionUpdate === "compaction" || sessionUpdate === "compaction_update") {
+      return { kind: "compaction", raw: update };
     }
     return { kind: "other", sessionUpdate, raw: update };
   }

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { DEFAULT_SETTINGS, customAgentAdapter, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acpio/shared";
 import { getAdapter } from "../adapters/registry.js";
@@ -640,7 +642,11 @@ describe("ACP usage_update normalization", () => {
   // single named cast so the test can drive the ACP ingestion path directly.
   type TestableAcp = AcpClient & {
     normalizeUsage: (r: Record<string, unknown>) => AcpUsage;
-    mapUpdate: (u: Record<string, unknown>) => { kind: string; usage?: AcpUsage };
+    mapUpdate: (u: Record<string, unknown>) => {
+      kind: string;
+      usage?: AcpUsage;
+      raw?: Record<string, unknown>;
+    };
   };
   const makeClient = () =>
     new AcpClient(fakeAdapter, DEFAULT_SETTINGS, "/tmp", "agent" as AgentMode) as unknown as TestableAcp;
@@ -671,6 +677,20 @@ describe("ACP usage_update normalization", () => {
     expect(ev.kind).toBe("usage");
     expect(ev.usage?.usedTokens).toBe(1);
     expect(ev.usage?.contextWindow).toBe(2);
+  });
+
+  it("keeps a compaction report instead of filing it as 'other'", () => {
+    const acp = makeClient();
+    const ev = acp.mapUpdate({
+      sessionUpdate: "compaction",
+      manual: false,
+      coveredAfter: 6,
+      summary: "Задача: …",
+    });
+    expect(ev.kind).toBe("compaction");
+    // The digest and the sizes ride along untouched — the row is built from them.
+    expect(ev.kind === "compaction" ? ev.raw.summary : "").toBe("Задача: …");
+    expect(acp.mapUpdate({ sessionUpdate: "compaction_update" }).kind).toBe("compaction");
   });
 });
 
@@ -775,5 +795,156 @@ describe("path guards", () => {
     const attached = path.resolve("elsewhere", "attached.pdf");
     acp.allowReadFile(attached);
     expect(acp.assertReadablePath(attached)).toBe(attached);
+  });
+});
+
+/**
+ * Settings → Built-in agent: "Work outside the working folder". The switch is
+ * read by the harness, so the door to test is the client-method handler the
+ * built-in agent asks over JSON-RPC — `fs/read_text_file` is what its `read`
+ * tool (and therefore a global skill it was told to open) goes through.
+ */
+describe("built-in agent outside the session cwd", () => {
+  /** A chat folder plus a skill collection that lives outside it. */
+  async function room() {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "acpio-outside-"));
+    const cwd = path.join(root, "chat");
+    const outsideDir = path.join(root, "skills", "notes");
+    await fsp.mkdir(cwd, { recursive: true });
+    await fsp.mkdir(outsideDir, { recursive: true });
+    const outsideFile = path.join(outsideDir, "SKILL.md");
+    await fsp.writeFile(outsideFile, "---\nname: notes\n---\nbody\n", "utf8");
+    return { cwd, outsideDir, outsideFile };
+  }
+
+  function client(
+    harness: HarnessAdapter,
+    cwd: string,
+    settings: AppSettings,
+    provider?: () => Promise<AppSettings>,
+  ) {
+    const acp = new AcpClient(harness, settings, cwd, "agent" as AgentMode, provider);
+    return acp as unknown as {
+      handleClientMethod: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+  }
+
+  const outsideError = /^Path outside session cwd:/;
+
+  it("reads a file outside the folder once the switch is on", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
+    const res = (await acp.handleClientMethod("fs/read_text_file", { path: outsideFile })) as {
+      content: string;
+    };
+    expect(res.content).toContain("body");
+  });
+
+  it("rejects that same read while the switch is off", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    await expect(acp.handleClientMethod("fs/read_text_file", { path: outsideFile })).rejects.toThrow(
+      outsideError,
+    );
+  });
+
+  it("is off out of the box", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(getAdapter("builtin"), cwd, DEFAULT_SETTINGS);
+    await expect(acp.handleClientMethod("fs/read_text_file", { path: outsideFile })).rejects.toThrow(
+      outsideError,
+    );
+  });
+
+  it("follows the live settings of a chat that is already running", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(
+      getAdapter("builtin"),
+      cwd,
+      settingsWith({ builtinAllowOutsideCwd: false }),
+      async () => settingsWith({ builtinAllowOutsideCwd: true }),
+    );
+    await expect(
+      acp.handleClientMethod("fs/read_text_file", { path: outsideFile }),
+    ).resolves.toEqual({ content: "---\nname: notes\n---\nbody\n" });
+  });
+
+  it("leaves a spawned harness confined whatever the switch says", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(
+      customAgentAdapter({ id: "my-agent", label: "My Agent", command: "agent.exe", args: [] }),
+      cwd,
+      settingsWith({ builtinAllowOutsideCwd: true }),
+    );
+    await expect(acp.handleClientMethod("fs/read_text_file", { path: outsideFile })).rejects.toThrow(
+      outsideError,
+    );
+  });
+
+  it("writes and greps outside too, and neither while the switch is off", async () => {
+    const { cwd, outsideDir } = await room();
+    const target = path.join(outsideDir, "scratch.txt");
+    const on = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
+    await on.handleClientMethod("fs/write_text_file", { path: target, content: "hi" });
+    expect(await fsp.readFile(target, "utf8")).toBe("hi");
+    const found = (await on.handleClientMethod("fs/search", {
+      pattern: "name",
+      path: outsideDir,
+    })) as { hits: Array<{ path: string }> };
+    expect(found.hits.map((h) => h.path)).toEqual(["SKILL.md"]);
+
+    const off = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    await expect(
+      off.handleClientMethod("fs/write_text_file", { path: target, content: "hi" }),
+    ).rejects.toThrow(outsideError);
+    await expect(
+      off.handleClientMethod("fs/search", { pattern: "name", path: outsideDir }),
+    ).rejects.toThrow(outsideError);
+  });
+
+  it("globs an absolute pattern outside the folder once the switch is on", async () => {
+    const { cwd, outsideDir } = await room();
+    const pattern = `${outsideDir.split(path.sep).join("/")}/*.md`;
+    const on = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
+    const res = (await on.handleClientMethod("fs/glob", { pattern })) as {
+      files: Array<{ path: string }>;
+    };
+    expect(res.files.map((f) => f.path)).toEqual([outsideDir.split(path.sep).join("/") + "/SKILL.md"]);
+
+    const off = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    await expect(off.handleClientMethod("fs/glob", { pattern })).rejects.toThrow(outsideError);
+  });
+
+  it("globs a workspace pattern exactly as before, absolute or relative", async () => {
+    const { cwd } = await room();
+    await fsp.mkdir(path.join(cwd, "src", "nested"), { recursive: true });
+    await fsp.writeFile(path.join(cwd, "src", "a.ts"), "", "utf8");
+    await fsp.writeFile(path.join(cwd, "src", "nested", "b.ts"), "", "utf8");
+    await fsp.writeFile(path.join(cwd, "src", "SKILL.md"), "", "utf8");
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    const glob = async (pattern: string) =>
+      ((await acp.handleClientMethod("fs/glob", { pattern })) as {
+        files: Array<{ path: string }>;
+      }).files.map((f) => f.path);
+
+    expect(await glob("src/**/*.ts")).toEqual(["src/a.ts", "src/nested/b.ts"]);
+    expect(await glob("src/*.ts")).toEqual(["src/a.ts"]);
+    expect(await glob("**/*.ts")).toEqual(["src/a.ts", "src/nested/b.ts"]);
+    expect(await glob("src/SKILL.md")).toEqual(["src/SKILL.md"]);
+    expect(await glob(`${cwd.split(path.sep).join("/")}/src/*.ts`)).toEqual(["src/a.ts"]);
+  });
+
+  it("takes a foreign command cwd only with the switch on", async () => {
+    const { cwd, outsideDir } = await room();
+    const create = { command: "acpio-no-such-utility", args: [], cwd: outsideDir };
+    const on = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
+    const { terminalId } = (await on.handleClientMethod("terminal/create", create)) as {
+      terminalId: string;
+    };
+    expect(typeof terminalId).toBe("string");
+    await on.handleClientMethod("terminal/release", { terminalId });
+
+    const off = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    await expect(off.handleClientMethod("terminal/create", create)).rejects.toThrow(outsideError);
   });
 });

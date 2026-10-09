@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   CHAT_TREE_RECENT_LIMIT_MAX,
@@ -32,6 +32,24 @@ import {
   DEFAULT_BUILTIN_SKILL_PATHS,
   DEFAULT_BUILTIN_SUBAGENTS,
   builtinModelValue,
+  BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+  BUILTIN_THINKING_LIMIT_MAX,
+  BUILTIN_TURN_RETRY_ATTEMPTS_MIN,
+  BUILTIN_TURN_RETRY_ATTEMPTS_MAX,
+  BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN,
+  BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX,
+  BUILTIN_KEEP_RECENT_PERCENT_MIN,
+  BUILTIN_KEEP_RECENT_PERCENT_MAX,
+  BUILTIN_MAX_SUMMARY_TOKENS_MAX,
+  BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX,
+  normalizeBuiltinMaxOutputTokens,
+  normalizeBuiltinThinkingLimit,
+  normalizeBuiltinTurnRetryAttempts,
+  normalizeBuiltinCompactionThresholdPercent,
+  normalizeBuiltinKeepRecentPercent,
+  normalizeBuiltinMaxSummaryTokens,
+  normalizeBuiltinOffloadToolResultTokens,
+  normalizeBuiltinPruneToolResultsKeepLast,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -631,6 +649,274 @@ function ChatBehaviorConfigRows({
   );
 }
 
+/**
+ * Model-written chat titles. The switch needs a built-in endpoint to talk to:
+ * without one the feature cannot run, so the row is disabled and the note says
+ * exactly why instead of failing silently on the first message.
+ */
+function ChatTitleConfigRows({
+  form,
+  patch,
+}: {
+  form: AppSettings;
+  patch: (key: string, value: unknown) => void;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const builtinReady = form.builtinProviders.some(
+    (p) => p.enabled !== false && p.url && p.models.some((m) => m.enabled !== false),
+  );
+  const models = form.builtinProviders.flatMap((provider) =>
+    provider.enabled !== false && provider.url
+      ? provider.models
+          .filter((m) => m.enabled !== false)
+          .map((m) => ({
+            value: builtinModelValue(provider.id, m.id),
+            label: m.label,
+            hint: form.builtinProviders.length > 1 ? provider.name : undefined,
+          }))
+      : [],
+  );
+  return (
+    <SettingTable>
+      <SettingRow
+        label={t("settings.chatAutoTitle")}
+        hint={t("settings.chatAutoTitleHint")}
+        terms={[t("settings.chatAutoTitle"), t("settings.chatAutoTitleHint")]}
+      >
+        <Toggle
+          // Default reads on only while the feature can actually run: with no
+          // endpoint to call, the stored default must show as off, not as a
+          // checked switch that never fires.
+          checked={Boolean(form.chatAutoTitle) && builtinReady}
+          disabled={!builtinReady}
+          onChange={(v) => patch("chatAutoTitle", v)}
+          label={t("settings.chatAutoTitle")}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t("settings.chatAutoTitleModel")}
+        hint={t("settings.chatAutoTitleModelHint")}
+        terms={[t("settings.chatAutoTitleModel"), t("settings.chatAutoTitleModelHint")]}
+      >
+        <OptionPicker
+          variant="block"
+          placement="down"
+          menuTitle={t("settings.chatAutoTitleModel")}
+          disabled={!builtinReady}
+          value={form.chatTitleModel || "auto"}
+          onChange={(v) => patch("chatTitleModel", v)}
+          options={[
+            { value: "auto", label: t("settings.chatAutoTitleModelAuto") },
+            ...models,
+          ]}
+        />
+      </SettingRow>
+      {!builtinReady ? (
+        <div className={styles.hint}>
+          <p>{t("settings.chatAutoTitleNeedsBuiltin")}</p>
+          <button
+            type="button"
+            className={styles.secondaryBtn}
+            onClick={() => navigate(settingsPath("agent", "builtin"))}
+          >
+            {t("settings.chatAutoTitleOpenBuiltin")}
+          </button>
+        </div>
+      ) : null}
+    </SettingTable>
+  );
+}
+
+/** One bounded number field of the built-in agent's context knobs. The raw
+ *  text is kept while typing so a half-erased value ("1" of "12") is not
+ *  force-corrected; the parent heals the committed number. */
+function ContextNumberRow({
+  label,
+  hint,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => {
+    setRaw(String(value));
+  }, [value]);
+  return (
+    <SettingRow label={label} hint={hint}>
+      <input
+        type="number"
+        className={styles.numberInput}
+        min={min}
+        max={max}
+        step={1}
+        inputMode="numeric"
+        value={raw}
+        aria-label={label}
+        onChange={(e) => {
+          const text = e.target.value;
+          setRaw(text);
+          if (text.trim() === "") return;
+          const parsed = Number(text);
+          if (!Number.isFinite(parsed)) return;
+          onCommit(parsed);
+        }}
+        onBlur={() => setRaw(String(value))}
+      />
+    </SettingRow>
+  );
+}
+
+/** Context-window knobs of the built-in agent: what a pass does, when it fires,
+ *  how much stays verbatim, how long a digest may be, and how much `read`/`grep`
+ *  output is masked before any of that. */
+function BuiltinContextRows({
+  form,
+  patch,
+}: {
+  form: AppSettings;
+  patch: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+}) {
+  const t = useT();
+  const saveSettings = useAppStore((s) => s.saveSettings);
+  const commit = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    patch(key, value);
+    void saveSettings({ [key]: value });
+  };
+  return (
+    <SettingTable>
+      <SettingRow
+        label={t("settings.builtinContextMode")}
+        hint={t("settings.builtinContextModeHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["summary", t("settings.builtinContextModeSummary")],
+              ["prune", t("settings.builtinContextModePrune")],
+              ["off", t("settings.builtinContextModeOff")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.builtinContextMode ?? "summary") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => commit("builtinContextMode", id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <ContextNumberRow
+        label={t("settings.builtinCompactionThresholdPercent")}
+        hint={t("settings.builtinCompactionThresholdPercentHint")}
+        value={form.builtinCompactionThresholdPercent ?? 80}
+        min={BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN}
+        max={BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX}
+        onCommit={(v) =>
+          commit(
+            "builtinCompactionThresholdPercent",
+            normalizeBuiltinCompactionThresholdPercent(v),
+          )
+        }
+      />
+
+      <ContextNumberRow
+        label={t("settings.builtinKeepRecentPercent")}
+        hint={t("settings.builtinKeepRecentPercentHint")}
+        value={form.builtinKeepRecentPercent ?? 20}
+        min={BUILTIN_KEEP_RECENT_PERCENT_MIN}
+        max={BUILTIN_KEEP_RECENT_PERCENT_MAX}
+        onCommit={(v) => commit("builtinKeepRecentPercent", normalizeBuiltinKeepRecentPercent(v))}
+      />
+
+      <ContextNumberRow
+        label={t("settings.builtinMaxSummaryTokens")}
+        hint={t("settings.builtinMaxSummaryTokensHint")}
+        value={form.builtinMaxSummaryTokens ?? 16_384}
+        min={0}
+        max={BUILTIN_MAX_SUMMARY_TOKENS_MAX}
+        onCommit={(v) => commit("builtinMaxSummaryTokens", normalizeBuiltinMaxSummaryTokens(v))}
+      />
+
+      <ContextNumberRow
+        label={t("settings.builtinPruneToolResultsKeepLast")}
+        hint={t("settings.builtinPruneToolResultsKeepLastHint")}
+        value={form.builtinPruneToolResultsKeepLast ?? 3}
+        min={0}
+        max={BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX}
+        onCommit={(v) =>
+          commit("builtinPruneToolResultsKeepLast", normalizeBuiltinPruneToolResultsKeepLast(v))
+        }
+      />
+
+      <SettingRow
+        label={t("settings.builtinPruneReasoning")}
+        hint={t("settings.builtinPruneReasoningHint")}
+      >
+        <div className={styles.actionChips}>
+          {(
+            [
+              ["keep", t("settings.builtinPruneReasoningKeep")],
+              ["before-last-message", t("settings.builtinPruneReasoningBeforeLast")],
+              ["drop", t("settings.builtinPruneReasoningDrop")],
+            ] as const
+          ).map(([id, label]) => {
+            const on = (form.builtinPruneReasoning ?? "keep") === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                aria-pressed={on}
+                onClick={() => commit("builtinPruneReasoning", id)}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </SettingRow>
+
+      <SettingRow
+        label={t("settings.builtinRespectReasoningHistory")}
+        hint={t("settings.builtinRespectReasoningHistoryHint")}
+      >
+        <Toggle
+          checked={form.builtinRespectReasoningHistory !== false}
+          onChange={(v) => commit("builtinRespectReasoningHistory", v)}
+          label={t("settings.builtinRespectReasoningHistory")}
+        />
+      </SettingRow>
+
+      <ContextNumberRow
+        label={t("settings.builtinOffloadToolResultTokens")}
+        hint={t("settings.builtinOffloadToolResultTokensHint")}
+        value={form.builtinOffloadToolResultTokens ?? 4_000}
+        min={0}
+        max={BUILTIN_MAX_SUMMARY_TOKENS_MAX}
+        onCommit={(v) =>
+          commit("builtinOffloadToolResultTokens", normalizeBuiltinOffloadToolResultTokens(v))
+        }
+      />
+    </SettingTable>
+  );
+}
+
 function SchemeCard({
   active,
   name,
@@ -890,6 +1176,26 @@ export function SettingsPage() {
     );
   }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
+  /**
+   * The output-ceiling field is a free-text number input, like the chat-tree
+   * limit: keep the raw string while the user types so a half-erased value
+   * ("1" of "16384") is not force-corrected to the default.
+   */
+  const [outputCapDraft, setOutputCapDraft] = useState(
+    String(form.builtinMaxOutputTokens ?? 0),
+  );
+  useEffect(() => {
+    setOutputCapDraft(String(form.builtinMaxOutputTokens ?? 0));
+  }, [form.builtinMaxOutputTokens]);
+  /**
+   * Built-in provider cards are folded by default: the leaf used to paint the
+   * name, endpoint, key, headers and model rows of every provider at once, so
+   * a couple of providers buried the rest of the section. Holds the ids the
+   * user unfolded; a settings search unfolds them all, since the hit can be in
+   * any of the rows.
+   */
+  const [openProviderCards, setOpenProviderCards] = useState<string[]>([]);
+  const providerSearchActive = settingsQuery.trim().length > 0;
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
   const [folderBrowseTarget, setFolderBrowseTarget] = useState<
     "defaultCwd" | "diagnosticsDir" | "exportDir"
@@ -1983,6 +2289,17 @@ export function SettingsPage() {
                 label={t("settings.boardTaskAgentPicker")}
               />
             </SettingRow>
+
+            <SettingRow
+              label={t("settings.boardShowFirstMessage")}
+              hint={t("settings.boardShowFirstMessageHint")}
+            >
+              <Toggle
+                checked={form.boardShowFirstMessage ?? true}
+                onChange={(v) => patch("boardShowFirstMessage", v)}
+                label={t("settings.boardShowFirstMessage")}
+              />
+            </SettingRow>
           </SettingTable>
         )}
 
@@ -2300,6 +2617,8 @@ export function SettingsPage() {
                 <ChatInteractiveConfigRows form={form} patch={patchAny} persistChatSplit={persistChatSplit} />
                 <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatBehavior"), settingsQuery)}</h2>
                 <ChatBehaviorConfigRows form={form} patch={patchAny} />
+                <h2 className={styles.sectionHeading}>{highlightText(t("settings.chatTitleBlock"), settingsQuery)}</h2>
+                <ChatTitleConfigRows form={form} patch={patchAny} />
               </div>
             ) : (
               <>
@@ -2313,6 +2632,10 @@ export function SettingsPage() {
                 <div className={styles.chatBehaviorBlock}>
                   <h2 className={styles.sectionHeading}>{t("settings.chatBehavior")}</h2>
                   <ChatBehaviorConfigRows form={form} patch={patchAny} />
+                </div>
+                <div className={styles.chatBehaviorBlock}>
+                  <h2 className={styles.sectionHeading}>{t("settings.chatTitleBlock")}</h2>
+                  <ChatTitleConfigRows form={form} patch={patchAny} />
                 </div>
               </>
             )}
@@ -2410,6 +2733,63 @@ export function SettingsPage() {
           <>
             <p className={styles.hint}>{t("settings.builtinDesc")}</p>
             <SettingTable>
+              <SettingRow
+                label={t("settings.builtinMaxOutputTokens")}
+                hint={t("settings.builtinMaxOutputTokensHint")}
+              >
+                <input
+                  type="number"
+                  className={styles.numberInput}
+                  min={0}
+                  max={BUILTIN_MAX_OUTPUT_TOKENS_MAX}
+                  step={1024}
+                  inputMode="numeric"
+                  value={outputCapDraft}
+                  aria-label={t("settings.builtinMaxOutputTokens")}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setOutputCapDraft(raw);
+                    if (raw.trim() === "") return;
+                    const parsed = Number(raw);
+                    if (!Number.isFinite(parsed)) return;
+                    const next = normalizeBuiltinMaxOutputTokens(parsed);
+                    patch("builtinMaxOutputTokens", next);
+                    void saveSettings({ builtinMaxOutputTokens: next });
+                  }}
+                  onBlur={() =>
+                    setOutputCapDraft(String(form.builtinMaxOutputTokens ?? 0))
+                  }
+                />
+              </SettingRow>
+              <ContextNumberRow
+                label={t("settings.builtinThinkingLimit")}
+                hint={t("settings.builtinThinkingLimitHint")}
+                value={form.builtinThinkingLimit ?? 0}
+                min={0}
+                max={BUILTIN_THINKING_LIMIT_MAX}
+                onCommit={(v) => {
+                  const next = normalizeBuiltinThinkingLimit(v);
+                  patch("builtinThinkingLimit", next);
+                  void saveSettings({ builtinThinkingLimit: next });
+                }}
+              />
+              <ContextNumberRow
+                label={t("settings.builtinTurnRetryAttempts")}
+                hint={t("settings.builtinTurnRetryAttemptsHint")}
+                value={form.builtinTurnRetryAttempts ?? 3}
+                min={BUILTIN_TURN_RETRY_ATTEMPTS_MIN}
+                max={BUILTIN_TURN_RETRY_ATTEMPTS_MAX}
+                onCommit={(v) => {
+                  const next = normalizeBuiltinTurnRetryAttempts(v);
+                  patch("builtinTurnRetryAttempts", next);
+                  void saveSettings({ builtinTurnRetryAttempts: next });
+                }}
+              />
+            </SettingTable>
+            <BuiltinContextRows form={form} patch={patch} />
+            {/* Cards, not table rows: each provider is its own box, folded to
+                a single header until the user opens it. */}
+            <div className={styles.providerList}>
               {form.builtinProviders.map((provider, index) => {
                 const displayName =
                   provider.name.trim() ||
@@ -2430,91 +2810,164 @@ export function SettingsPage() {
                 const urlLabel = `${displayName} · ${t("settings.builtinUrlTitle")}`;
                 const keyLabel = `${displayName} · ${t("settings.builtinKeyTitle")}`;
                 const modelsLabel = `${displayName} · ${t("settings.builtinModelsTitle")}`;
+                const on = provider.enabled !== false;
+                const open =
+                  providerSearchActive || openProviderCards.includes(provider.id);
+                const setOpen = (next: boolean) =>
+                  setOpenProviderCards((prev) =>
+                    next
+                      ? prev.includes(provider.id)
+                        ? prev
+                        : [...prev, provider.id]
+                      : prev.filter((id) => id !== provider.id),
+                  );
                 return (
-                  <Fragment key={provider.id}>
-                    <SettingRow
-                      layout="stack"
-                      label={nameLabel}
-                      hint={t("settings.builtinProviderNameHint")}
-                      terms={[provider.name, displayName]}
-                    >
-                      <div className={styles.cwdPickRow}>
-                        <input
-                          type="text"
-                          autoComplete="off"
-                          value={provider.name}
-                          onChange={(e) => update({ name: e.target.value })}
-                          placeholder={t("settings.builtinProviderNamePlaceholder")}
-                          aria-label={nameLabel}
-                        />
-                        <button
-                          type="button"
-                          className={styles.secondaryBtn}
-                          onClick={remove}
-                          aria-label={`${t("common.delete")} · ${displayName}`}
+                  <details
+                    key={provider.id}
+                    className={`${styles.providerCard}${on ? "" : ` ${styles.providerCardOff}`}`}
+                    open={open}
+                    onToggle={(e) => setOpen(e.currentTarget.open)}
+                  >
+                    <summary className={styles.providerCardSummary}>
+                      <span className={styles.providerCardName}>{displayName}</span>
+                      {provider.url.trim() ? (
+                        <span className={styles.providerCardUrl}>{provider.url}</span>
+                      ) : null}
+                      <button
+                        type="button"
+                        role="switch"
+                        className={styles.providerSwitch}
+                        // A switched-off provider keeps its settings and just
+                        // stops offering its models in the picker.
+                        aria-checked={on}
+                        aria-label={displayName}
+                        // The switch shows the state, the tooltip names the
+                        // action — the button it replaces said both.
+                        title={t(
+                          on ? "settings.builtinProviderDisable" : "settings.builtinProviderEnable",
+                        )}
+                        // Like Delete: acting inside the header must not fold
+                        // or unfold the card it belongs to.
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          update({ enabled: !on });
+                        }}
+                      >
+                        <span className={styles.providerSwitchTrack} aria-hidden>
+                          <span className={styles.providerSwitchKnob} />
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.secondaryBtn}
+                        // The summary is the fold control, so deleting must not
+                        // also unfold — or fold — the card it removes.
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          remove();
+                        }}
+                        aria-label={`${t("common.delete")} · ${displayName}`}
+                      >
+                        {t("common.delete")}
+                      </button>
+                    </summary>
+                    <div className={styles.providerCardBody}>
+                      <SettingTable>
+                        <SettingRow
+                          layout="stack"
+                          label={nameLabel}
+                          hint={t("settings.builtinProviderNameHint")}
+                          terms={[provider.name, displayName]}
                         >
-                          {t("common.delete")}
-                        </button>
-                      </div>
-                    </SettingRow>
-                    <SettingRow
-                      layout="stack"
-                      label={urlLabel}
-                      hint={t("settings.builtinUrlHint")}
-                      terms={[provider.url]}
-                    >
-                      <input
-                        type="text"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={provider.url}
-                        onChange={(e) => update({ url: e.target.value })}
-                        placeholder="https://api.openai.com/v1"
-                        aria-label={urlLabel}
-                      />
-                    </SettingRow>
-                    <SettingRow
-                      layout="stack"
-                      label={keyLabel}
-                      hint={t("settings.builtinKeyHint")}
-                    >
-                      <input
-                        type="password"
-                        autoComplete="off"
-                        value={provider.apiKey}
-                        onChange={(e) => update({ apiKey: e.target.value })}
-                        placeholder="sk-…"
-                        aria-label={keyLabel}
-                      />
-                    </SettingRow>
-                    <SettingRow
-                      layout="stack"
-                      label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
-                      hint={t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" })}
-                      terms={[provider.name]}
-                    >
-                      <BuiltinHeadersEditor
-                        value={provider.headers ?? []}
-                        onChange={(headers) => update({ headers })}
-                      />
-                    </SettingRow>
-                    <SettingRow
-                      layout="stack"
-                      label={modelsLabel}
-                      hint={t("settings.builtinModelsHint")}
-                      terms={[provider.name]}
-                    >
-                      <BuiltinModelsEditor
-                        endpointUrl={provider.url}
-                        apiKey={provider.apiKey}
-                        headers={provider.headers}
-                        value={provider.models}
-                        onChange={(models) => update({ models })}
-                      />
-                    </SettingRow>
-                  </Fragment>
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            value={provider.name}
+                            onChange={(e) => update({ name: e.target.value })}
+                            placeholder={t("settings.builtinProviderNamePlaceholder")}
+                            aria-label={nameLabel}
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          layout="stack"
+                          label={urlLabel}
+                          hint={t("settings.builtinUrlHint")}
+                          terms={[provider.url]}
+                        >
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            spellCheck={false}
+                            value={provider.url}
+                            onChange={(e) => update({ url: e.target.value })}
+                            placeholder="https://api.openai.com/v1"
+                            aria-label={urlLabel}
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          layout="stack"
+                          label={keyLabel}
+                          hint={t("settings.builtinKeyHint")}
+                        >
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={provider.apiKey}
+                            onChange={(e) => update({ apiKey: e.target.value })}
+                            placeholder="sk-…"
+                            aria-label={keyLabel}
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          layout="stack"
+                          label={`${displayName} · ${t("settings.builtinHeadersTitle")}`}
+                          hint={t("settings.builtinHeadersHint", { sessionId: "{{sessionId}}" })}
+                          terms={[provider.name]}
+                        >
+                          <BuiltinHeadersEditor
+                            value={provider.headers ?? []}
+                            onChange={(headers) => update({ headers })}
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          layout="stack"
+                          label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
+                          hint={t("settings.builtinBodyHint")}
+                          terms={[provider.name, t("settings.builtinBodyTitle")]}
+                        >
+                          <textarea
+                            className={styles.mcpFilesInput}
+                            rows={3}
+                            spellCheck={false}
+                            value={provider.body ?? ""}
+                            onChange={(e) => update({ body: e.target.value })}
+                            aria-label={`${displayName} · ${t("settings.builtinBodyTitle")}`}
+                            placeholder={'{"thinking":{"type":"disabled"}}'}
+                          />
+                        </SettingRow>
+                        <SettingRow
+                          layout="stack"
+                          label={modelsLabel}
+                          hint={t("settings.builtinModelsHint")}
+                          terms={[provider.name]}
+                        >
+                          <BuiltinModelsEditor
+                            endpointUrl={provider.url}
+                            apiKey={provider.apiKey}
+                            headers={provider.headers}
+                            value={provider.models}
+                            onChange={(models) => update({ models })}
+                          />
+                        </SettingRow>
+                      </SettingTable>
+                    </div>
+                  </details>
                 );
               })}
+            </div>
+            <SettingTable>
               <SettingRow
                 layout="stack"
                 label={t("settings.builtinProvidersTitle")}
@@ -2532,21 +2985,44 @@ export function SettingsPage() {
                 <button
                   type="button"
                   className={styles.secondaryBtn}
-                  onClick={() =>
+                  onClick={() => {
+                    const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
                     patch("builtinProviders", [
                       ...form.builtinProviders,
-                      {
-                        id: `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-                        name: "",
-                        url: "",
-                        apiKey: "",
-                        models: [],
-                      },
-                    ])
-                  }
+                      { id, name: "", url: "", apiKey: "", models: [] },
+                    ]);
+                    // A fresh provider comes unfolded: naming it is the first
+                    // thing to do, and an empty header says nothing.
+                    setOpenProviderCards((prev) => [...prev, id]);
+                  }}
                 >
                   + {t("settings.builtinProviderAdd")}
                 </button>
+              </SettingRow>
+            </SettingTable>
+
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinExtraInstructionsTitle")}
+                hint={t("settings.builtinExtraInstructionsHint")}
+                terms={[
+                  t("settings.builtinExtraInstructionsTitle"),
+                  t("settings.builtinExtraInstructionsHint"),
+                  "system prompt",
+                  "промпт",
+                  "размышления",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={4}
+                  spellCheck={false}
+                  value={form.builtinExtraInstructions ?? ""}
+                  onChange={(e) => patch("builtinExtraInstructions", e.target.value)}
+                  aria-label={t("settings.builtinExtraInstructionsTitle")}
+                  placeholder={t("settings.builtinExtraInstructionsPlaceholder")}
+                />
               </SettingRow>
             </SettingTable>
 
@@ -2675,6 +3151,27 @@ export function SettingsPage() {
                   </SettingRow>
                 </>
               ) : null}
+              <SettingRow
+                label={t("settings.builtinAllowOutsideCwd")}
+                hint={t("settings.builtinAllowOutsideCwdHint")}
+                terms={[
+                  t("settings.builtinAllowOutsideCwd"),
+                  t("settings.builtinAllowOutsideCwdHint"),
+                  "cwd",
+                  "~/.agents/skills",
+                ]}
+              >
+                <Toggle
+                  checked={form.builtinAllowOutsideCwd === true}
+                  onChange={(v) => {
+                    patch("builtinAllowOutsideCwd", v);
+                    // A switch applies at once, like the other built-in knobs:
+                    // the agent reads it on its next tool call.
+                    void saveSettings({ builtinAllowOutsideCwd: v });
+                  }}
+                  label={t("settings.builtinAllowOutsideCwd")}
+                />
+              </SettingRow>
             </SettingTable>
           </>
         )}
@@ -2764,6 +3261,16 @@ export function SettingsPage() {
                   checked={Boolean(form.resumeAgentContext)}
                   onChange={(v) => patch("resumeAgentContext", v)}
                   label={t("settings.resumeAgentContext")}
+                />
+              </SettingRow>
+              <SettingRow
+                label={t("settings.resumeInterruptedTurns")}
+                hint={t("settings.resumeInterruptedTurnsHint")}
+              >
+                <Toggle
+                  checked={Boolean(form.resumeInterruptedTurns)}
+                  onChange={(v) => patch("resumeInterruptedTurns", v)}
+                  label={t("settings.resumeInterruptedTurns")}
                 />
               </SettingRow>
               <SettingRow label={t("settings.resetAgents")} hint={t("settings.resetAgentsHint")}>

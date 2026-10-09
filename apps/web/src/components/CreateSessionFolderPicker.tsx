@@ -156,6 +156,12 @@ export function CreateSessionFolderPicker({
   const [error, setError] = useState<string | null>(null);
   const onlineAgents = useMemo(() => agents.filter((a) => a.online), [agents]);
   const [provider, setProvider] = useState<AgentProvider | null>(() => {
+    // Settings promise the default agent is what a new chat opens with, so it
+    // outranks the remembered agent: the memory may step in only when that one
+    // cannot be used (offline or unset), never as a way around the setting.
+    if (preferredProvider && onlineAgents.some((a) => a.id === preferredProvider)) {
+      return preferredProvider;
+    }
     let lastSelected: AgentProvider | null = null;
     if (typeof localStorage !== "undefined") {
       try {
@@ -167,9 +173,6 @@ export function CreateSessionFolderPicker({
     }
     if (lastSelected && onlineAgents.some((a) => a.id === lastSelected)) {
       return lastSelected;
-    }
-    if (preferredProvider && onlineAgents.some((a) => a.id === preferredProvider)) {
-      return preferredProvider;
     }
     return onlineAgents[0]?.id ?? null;
   });

@@ -4,12 +4,12 @@ import type {
   AgentProvider,
   CustomAgentSpec,
   ModelOption,
+  PromptDelivery,
 } from "./adapters.js";
 
 export type {
   AdapterExtensionKind,
   AdapterMetaDto,
-  AdapterProbeContext,
   AdapterRegistry,
   AdapterRestoreMode,
   AdapterTranscriptClient,
@@ -21,6 +21,7 @@ export type {
   InProcessAgentOptions,
   InProcessAgentTransport,
   ModelOption,
+  PromptDelivery,
   SubagentCardUpdate,
   SubagentProgressUpdate,
   SubagentToolEvent,
@@ -42,10 +43,33 @@ export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./p
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
+  BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+  BUILTIN_TURN_RETRY_ATTEMPTS_MIN,
+  BUILTIN_TURN_RETRY_ATTEMPTS_MAX,
+  BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN,
+  BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX,
+  BUILTIN_KEEP_RECENT_PERCENT_MIN,
+  BUILTIN_KEEP_RECENT_PERCENT_MAX,
+  BUILTIN_MAX_SUMMARY_TOKENS_MAX,
+  BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX,
+  BUILTIN_EXTRA_INSTRUCTIONS_MAX,
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
   mergeClientAppSettings,
+  normalizeBuiltinContextSettings,
+  normalizeBuiltinContextMode,
+  normalizeBuiltinOffloadToolResultTokens,
+  normalizeBuiltinPruneReasoning,
+  normalizeBuiltinCompactionThresholdPercent,
+  normalizeBuiltinKeepRecentPercent,
+  normalizeBuiltinMaxSummaryTokens,
+  normalizeBuiltinPruneToolResultsKeepLast,
+  normalizeBuiltinExtraInstructions,
+  normalizeBuiltinMaxOutputTokens,
+  normalizeBuiltinTurnRetryAttempts,
+  normalizeBuiltinThinkingLimit,
+  BUILTIN_THINKING_LIMIT_MAX,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
   normalizeChatTreeRecentLimit,
@@ -70,6 +94,7 @@ export { summarizeQuestionAnswer, type QuestionAnswerPayload } from "./questionA
 export {
   SESSION_TITLE_MAX_LEN,
   sanitizeTitleSource,
+  titleFromTaskDescription,
   titleFromUserText,
   truncateSessionTitle,
 } from "./sessionTitle.js";
@@ -583,7 +608,10 @@ export function normalizeMcpProjectFiles(files: unknown): string[] {
  * home and absolute paths name other global collections. Configurable in
  * Settings → Built-in agent; an empty list turns skill discovery off.
  */
-export const DEFAULT_BUILTIN_SKILL_PATHS: readonly string[] = [".agents/skills"];
+export const DEFAULT_BUILTIN_SKILL_PATHS: readonly string[] = [
+  ".agents/skills",
+  "~/.agents/skills",
+];
 
 /**
  * Configured skill folders: trimmed, forward-slashed, de-duplicated. `~`- and
@@ -879,7 +907,8 @@ export type MessagePartType =
   | "question"
   | "error"
   | "status"
-  | "file";
+  | "file"
+  | "compaction";
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
@@ -1058,10 +1087,66 @@ export interface BuiltinProviderConfig {
   url: string;
   /** Sent as a Bearer token ("" for local endpoints that need no key). */
   apiKey: string;
+  /**
+   * Whether this provider's models are offered in pickers. Absent = enabled
+   * (rows written before this flag existed). A switched-off provider keeps its
+   * endpoint, key and model list, so turning it back on restores everything.
+   */
+  enabled?: boolean;
   /** Models this provider exposes in the agent's picker. */
   models: BuiltinModelConfig[];
   /** Extra HTTP headers sent with every request to this provider. */
   headers?: BuiltinHeaderConfig[];
+  /**
+   * Extra JSON merged into every request body this provider's models send
+   * (Settings → Built-in agent). The OpenAI-compatible schema has no field for
+   * provider-specific knobs, so this is the door for them: MiMo takes
+   * `{"thinking":{"type":"disabled"}}` to stop reasoning, OpenAI takes
+   * `{"reasoning_effort":"low"}`, and so on. Empty or unparsable = no change.
+   */
+  body?: string;
+}
+
+/**
+ * Context-window policy of the built-in agent — what it does when the stored
+ * history no longer fits the active window (Settings → Built-in agent).
+ * `"summary"` digests the oldest turns with a model call, `"prune"` drops
+ * them without one, `"off"` sends the whole history.
+ */
+export type BuiltinContextMode = "off" | "prune" | "summary";
+
+export const BUILTIN_CONTEXT_MODES: readonly BuiltinContextMode[] = ["off", "prune", "summary"];
+
+/**
+ * What the built-in agent does with assistant reasoning parts when it shapes a
+ * prompt. `"keep"` (default) sends them as they are, `"drop"` removes them from
+ * every older turn, `"before-last-message"` keeps them only in the newest one.
+ */
+export type BuiltinReasoningPolicy = "keep" | "before-last-message" | "drop";
+
+export const BUILTIN_REASONING_POLICIES: readonly BuiltinReasoningPolicy[] = [
+  "keep",
+  "before-last-message",
+  "drop",
+];
+
+
+/**
+ * Parse a provider's extra request body (Settings → Built-in agent). Returns
+ * null for empty, unparsable or non-object JSON so a typo never fails a turn —
+ * the request then goes out unchanged. Keys merge over the built request body.
+ */
+export function parseBuiltinBody(body: string | undefined): Record<string, unknown> | null {
+  const raw = body?.trim();
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Separator inside a composite built-in model value: `<provider>::<model>`. */
@@ -1153,14 +1238,18 @@ export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
     const name = typeof r.name === "string" ? r.name.trim().slice(0, 120) : "";
     const url = typeof r.url === "string" ? r.url.trim().slice(0, 500) : "";
     const headers = normalizeBuiltinHeaderRows(r.headers);
+    const body = typeof r.body === "string" ? r.body.trim().slice(0, 4000) : "";
     out.push({
       id,
       name: name || url || id,
       url,
       apiKey: typeof r.apiKey === "string" ? r.apiKey.trim().slice(0, 500) : "",
       models: normalizeBuiltinModelRows(r.models),
+      // Conditional: a row written before the switch existed stays enabled.
+      ...(r.enabled === false ? { enabled: false as const } : {}),
       // Conditional: settings written before headers existed keep their shape.
       ...(headers.length ? { headers } : {}),
+      ...(body ? { body } : {}),
     });
   }
   return out;
@@ -1402,6 +1491,70 @@ export interface AppSettings {
    * model list (Settings → Built-in agent). Empty = the agent stays offline.
    */
   builtinProviders: BuiltinProviderConfig[];
+  /**
+   * Output ceiling for one built-in model call, in tokens (Settings →
+   * Built-in agent). Default 16 384 — the number pi and omp send. 0 = no
+   * ceiling: nothing goes out as `max_tokens`, so the provider default (the
+   * whole window for most endpoints) applies.
+   */
+  builtinMaxOutputTokens: number;
+  /**
+   * Attempts one built-in turn may run (Settings → Built-in agent): the first
+   * run plus the retries after a model call died — a gateway answering 400, a
+   * stream the endpoint dropped. The messages an attempt already produced stay
+   * in the history, so the retry continues from them instead of repeating that
+   * work. 1 = never retry.
+   */
+  builtinTurnRetryAttempts: number;
+  /**
+   * Mid-think fuse cap, chars of one step's private reasoning (Settings →
+   * Built-in agent). 0 = off — the default: a model call is only cut when
+   * `/thinking-limit` arms it in a chat, or when this global line is raised
+   * above zero. A chat's own `/thinking-limit` value overrides this per
+   * session.
+   */
+  builtinThinkingLimit: number;
+  /**
+   * What the built-in agent does when the stored history outgrows the active
+   * window (Settings → Built-in agent). `"summary"` — the default — replaces
+   * the oldest turns with a model-written digest and falls back to plain
+   * pruning when the digest does not fit; `"prune"` only drops the oldest
+   * turns, spending nothing; `"off"` sends everything and lets the endpoint
+   * reject the request. Storage is never rewritten: this shapes one turn's
+   * prompt only.
+   */
+  builtinContextMode: BuiltinContextMode;
+  /** Percent of the context window that may fill before that pass runs. */
+  builtinCompactionThresholdPercent: number;
+  /** Percent of the window kept verbatim; everything older is digested or dropped. */
+  builtinKeepRecentPercent: number;
+  /** Ceiling for one digest, in tokens (0 = no ceiling: the provider default applies). */
+  builtinMaxSummaryTokens: number;
+  /** Mask `read`/`grep` results older than the last N messages before sending (0 = off). */
+  builtinPruneToolResultsKeepLast: number;
+  /** Reasoning parts in older turns: kept, dropped, or kept only in the newest. */
+  builtinPruneReasoning: BuiltinReasoningPolicy;
+  /**
+   * Skip masking when the history carries reasoning parts. A thinking model
+   * reads its observation history, and hard masking costs it ~10% of its solve
+   * rate (arXiv 2508.21433), so the cheap tier is not applied blind.
+   */
+  builtinRespectReasoningHistory: boolean;
+  /**
+   * Extra instructions appended to the built-in agent's system prompt. The
+   * user's own dial for what the built-in rules do not cover — a house style,
+   * a project convention, or a nudge to reason less before answering. Sent
+   * verbatim; the rest of the prompt is unchanged.
+   */
+  builtinExtraInstructions: string;
+  /**
+   * Tool results above this many tokens move to the session's archive as files of
+   * their own and reach the model as an `[offloaded file=…]` citation it reads
+   * back with the ordinary `read` tool (0 = off). A `read` window is never
+   * archived — that is what the model asked to see. Reversible, unlike masking —
+   * and deterministic per message, so the cached prefix survives.
+   */
+  builtinOffloadToolResultTokens: number;
   permissionPolicy: PermissionPolicy;
   permissionAllowlist: string[];
   /** Folder on the server where diagnostic dumps are written. Empty → default under repo. */
@@ -1416,6 +1569,12 @@ export interface AppSettings {
    * agent's context instead of starting each spawn with a blank slate.
    */
   resumeAgentContext: boolean;
+  /**
+   * A chat that was mid-turn when the previous acpio process died (crash,
+   * kill, power loss) continues on its own at the next start: its stored agent
+   * session is resumed and the agent is asked to carry on.
+   */
+  resumeInterruptedTurns: boolean;
   /**
    * Queue requests back-to-back (agent keeps working on the next one as soon
    * as the previous reply is done). Only meaningful for agents that support
@@ -1491,6 +1650,20 @@ export interface AppSettings {
   chatAgentTurnTimeline: boolean;
   /** Desktop: allow two chats side by side. */
   chatSplit: boolean;
+  /**
+   * After the first message names the chat as usual, a builtin-provider model
+   * rewrites it into a short, clear task title. Default on — it only ever runs
+   * while a builtin endpoint is configured, and the switch reads off until one
+   * is. Off = the message-derived title stays (the behavior every chat had
+   * before this setting).
+   */
+  chatAutoTitle: boolean;
+  /**
+   * Model that writes those titles, `<provider>::<model>` from the builtin
+   * providers. "auto" = fall back to the default builtin model, then the
+   * first configured one.
+   */
+  chatTitleModel: string;
   /** New chat + search controls in the tree sidebar. */
   chatToolbarStyle: ChatToolbarStyle;
   /** Look of the "Add task" placeholder in empty board groups. */
@@ -1500,6 +1673,12 @@ export interface AppSettings {
    * is created for the default agent, and the run menu can still pick another.
    */
   boardTaskAgentPicker: boolean;
+  /**
+   * Board card under a model-written (or renamed) title: show the first
+   * message as the card's preview text. On = today's look; off keeps only the
+   * title. Untitled cards (the title *is* the first message) always show it.
+   */
+  boardShowFirstMessage: boolean;
   /** Position of the Git branch bar: "below" the input or "above" as a chip. */
   chatGitBranchPosition?: "below" | "above";
   /** Per-chip composer options: shrink behaviour and what each chip shows. */
@@ -1539,6 +1718,15 @@ export interface AppSettings {
    */
   builtinSubagents: BuiltinSubagentsSetting;
   /**
+   * Let the built-in agent's tools reach paths outside the chat's working
+   * directory (Settings → Built-in agent): `read`, `write` and `edit` take
+   * paths elsewhere, `grep` may scope to such a folder, and a command may run
+   * with a foreign cwd. Off by default — the workspace stays the boundary; a
+   * skill collection outside it (see {@link builtinSkillPaths}) is the reason
+   * to turn it on.
+   */
+  builtinAllowOutsideCwd: boolean;
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent.
@@ -1571,12 +1759,43 @@ export const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKey: "",
   openaiApiKey: "",
   builtinProviders: [],
+  builtinMaxOutputTokens: 16_384,
+  // Five attempts: one bad answer from a flaky gateway (a 400 from its own
+  // upstream, a dropped stream) is worth re-issuing, and the messages the dead
+  // attempt produced are kept, so the retry resumes rather than repeats. A dead
+  // upstream comes back on its own over half an hour, so the extra attempts are
+  // worth having — the backoff between them keeps growing.
+  builtinTurnRetryAttempts: 5,
+  // The mid-think fuse stays off until asked for: cutting a model call is a
+  // deliberate choice per install (and per chat via `/thinking-limit`).
+  builtinThinkingLimit: 0,
+  builtinContextMode: "summary",
+  builtinCompactionThresholdPercent: 80,
+  // 20% verbatim, not 60%: with a carried-over digest the tail only has to hold
+  // what the model needs word for word, and every point of tail is paid on each
+  // turn until the next pass. omp keeps ~20k tokens verbatim; 20% of a 200k
+  // window is 40k, and our own replay of 38 stored sessions shows the wire total
+  // is lowest there while the summariser work drops by the same 93%.
+  builtinKeepRecentPercent: 20,
+  // 16 384 is omp's ceiling for a digest: past that a model copies instead of
+  // compressing, and the pass gets thrown away for exceeding the line.
+  builtinMaxSummaryTokens: 16_384,
+  // Masking is free and measured at half the cost of a digest for an equal
+  // solve rate, so the last three messages stay verbatim and the rest is stubbed.
+  builtinPruneToolResultsKeepLast: 3,
+  builtinPruneReasoning: "keep",
+  builtinRespectReasoningHistory: true,
+  builtinExtraInstructions: "",
+  // 4 000 tokens is above what a normal read or test run returns, so ordinary
+  // results stay verbatim and only the bulky ones need a recall.
+  builtinOffloadToolResultTokens: 4_000,
   permissionPolicy: "always",
   permissionAllowlist: [],
   diagnosticsDir: "",
   diagnosticsDeepLogging: false,
   exportDir: "",
   resumeAgentContext: true,
+  resumeInterruptedTurns: true,
   multitask: false,
   sidebarCollapse: "full",
   showBootSplash: true,
@@ -1608,9 +1827,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatShowMessageTime: false,
   chatAgentTurnTimeline: false,
   chatSplit: true,
+  chatAutoTitle: true,
+  chatTitleModel: "auto",
   chatToolbarStyle: "classic",
   boardAddCardStyle: "card",
   boardTaskAgentPicker: true,
+  boardShowFirstMessage: true,
   chatGitBranchPosition: "below",
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
@@ -1619,6 +1841,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
+  builtinAllowOutsideCwd: false,
   composerDrafts: {},
 };
 
@@ -2058,6 +2281,12 @@ export interface AcpUsage {
   raw?: Record<string, unknown>;
 }
 
+/** Image attached to a board task when it was created (absolute server path). */
+export interface TaskAttachmentDto {
+  name: string;
+  path: string;
+}
+
 export interface SessionDto {
   id: string;
   title: string;
@@ -2078,6 +2307,9 @@ export interface SessionDto {
   /** Task description written at creation: card text and the prefill for the
    *  first message. Null for regular chats. */
   taskDescription: string | null;
+  /** Pictures attached to the task at creation. Stored under acpio's own data
+   *  folder (not the task's cwd) and attached to its first turn. */
+  taskAttachments?: TaskAttachmentDto[];
   /** Server-set when the board task's first turn starts (Todo ⇄ Wait split). */
   startedAt: string | null;
   /** Set while the user considers the task finished (Wait ⇄ Done). Board Done
@@ -2357,7 +2589,7 @@ export function modelParamLabel(
   if (family === "effort") {
     const map: Record<string, string> = {
       none: "None",
-      off: "None",
+      off: "Off",
       low: "Low",
       medium: "Medium",
       med: "Medium",

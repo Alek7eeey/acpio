@@ -10,6 +10,16 @@
 //   prompt containing "EXIT-NOW" → process exits with code 1 mid-turn
 //   prompt containing "SLOW-ACTIVE" → streams updates then finishes (tests timeout extend)
 //   prompt containing "SLOW-SILENT" → stays quiet then finishes (tests hard timeout)
+//   prompt containing "TOOL-SILENT" → opens a tool, runs it past the idle
+//                            ceiling, then completes the tool and the turn
+//                            (the open tool must keep the prompt alive)
+//   prompt containing "TOOL-THEN-SILENT" → opens and closes a tool at once,
+//                            then stays quiet (the exemption must be released)
+//   prompt containing "TOOL-NOEND" → opens a tool and finishes the turn
+//                            without ever closing it (a stale entry must not
+//                            exempt the NEXT prompt from its idle ceiling)
+//   prompt containing "SLOW-HANG" → streams one thought, then holds the turn
+//                            open forever: only an interrupt can free the runtime
 //   prompt starting with "PERMISSION:" → issues session/request_permission
 //                                  and waits for the client's decision
 //   prompt starting with "ELICIT:" → issues elicitation/create (form mode),
@@ -209,8 +219,95 @@ async function handle(method, params, id) {
         });
         return { stopReason: "end_turn" };
       }
+      if (text.includes("SLOW-HANG")) {
+        // A turn that never ends on its own. A host that queues the next prompt
+        // behind it waits forever; one that interrupts sends it right away.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_thought_chunk",
+            messageId: "hang-0",
+            content: { type: "text", text: "hang tick" },
+          },
+        });
+        await new Promise(() => {});
+      }
       if (text.includes("SLOW-SILENT")) {
         await sleep(250);
+        return { stopReason: "end_turn" };
+      }
+      if (text.includes("TOOL-SILENT")) {
+        // The tool runs silently past the short idle ceiling: the open
+        // tool_call is the only thing saying the agent is alive.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-silent-1",
+            title: "js eval",
+            toolName: "js",
+            kind: "execute",
+            status: "in_progress",
+          },
+        });
+        await sleep(300);
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool-silent-1",
+            status: "completed",
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "tool-silent-final",
+            content: { type: "text", text: "tool silent done" },
+          },
+        });
+        return { stopReason: "end_turn" };
+      }
+      if (text.includes("TOOL-THEN-SILENT")) {
+        // Tool opens and closes immediately — nothing is running afterwards,
+        // so the idle ceiling must fire exactly as it does without a tool.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-quick-1",
+            title: "js eval",
+            toolName: "js",
+            kind: "execute",
+            status: "in_progress",
+          },
+        });
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tool-quick-1",
+            status: "completed",
+          },
+        });
+        await sleep(400);
+        return { stopReason: "end_turn" };
+      }
+      if (text.includes("TOOL-NOEND")) {
+        // The tool never reports a terminal status: whatever the host tracked
+        // for it must not survive into the next prompt.
+        notify("session/update", {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "tool-noend-1",
+            title: "js eval",
+            toolName: "js",
+            kind: "execute",
+            status: "in_progress",
+          },
+        });
         return { stopReason: "end_turn" };
       }
       if (text.startsWith("ELICIT-DIE:")) {

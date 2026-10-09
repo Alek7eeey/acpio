@@ -69,7 +69,7 @@ interface HarnessAdapter {
   // Capabilities
   parameterizedModelPicker: boolean; // separate fast/effort/… ACP options
   subagentStreaming: boolean;        // subagent transcript streaming
-  cloudCatalog: boolean;             // models via CLI `models --json`
+  cloudCatalog: boolean;             // cloud-backed model list, short cache TTL
   defaultModes: AgentModeOption[];   // modes when the agent omits its own
   subagentToolKinds: readonly string[]; // ACP tool kinds denoting a subagent
 
@@ -81,9 +81,6 @@ interface HarnessAdapter {
   subagentCardFromRoster?: (entry) => SubagentCardUpdate | null;
   subagentCardFromProgress?: (entry) => SubagentProgressUpdate | null;
   readSubagentTranscript?: (client, agentId, fromByte) => Promise<SubagentTranscriptPage | undefined>;
-
-  // Model catalog
-  probeModels?: (ctx: AdapterProbeContext) => Promise<ModelOption[] | null>;
 }
 ```
 
@@ -114,9 +111,9 @@ interface HarnessAdapter {
 by byte offset. `readSubagentTranscript(client, agentId, fromByte)` returns one page
 (`messages`, `fromByte`, `nextByte`, `reset`). Polling, dedup and caps live in the core.
 
-**Model catalog.** `probeModels` receives `{ settings, runCli }` — `runCli(args)` runs your
-CLI command (using the core's `commandField`/`argsField` resolution and binary lookup) and
-returns stdout. Return `null` when no broader catalog is needed.
+**Model catalog.** The model list and its params come from the agent's own ACP config
+options. `cloudCatalog: true` marks a list that changes often (cloud-backed): the core then
+re-reads it every couple of minutes instead of trusting the cache for a day.
 
 ## Writing your own adapter
 

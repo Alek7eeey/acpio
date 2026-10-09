@@ -1,0 +1,7 @@
+{
+  "id": "replay-omp-chats-slow",
+  "title": "Replay: omp chats open slowly (session 97c3c24f, gold 5479b24)",
+  "prompt": "очень долго открываются чаты omp что с ними не так? где просадка? Разберись в коде, найди причину и исправь её.",
+  "timeoutMs": 1200000,
+  "horizon": "m"
+}

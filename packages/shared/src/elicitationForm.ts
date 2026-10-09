@@ -180,6 +180,9 @@ export function elicitationContentFromUiAnswers(
 
     if (question.allowMultiple) {
       content[question.id] = selected;
+      if (question.freeTextField && freeText) {
+        content[question.freeTextField] = freeText;
+      }
       continue;
     }
 

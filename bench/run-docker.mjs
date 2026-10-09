@@ -30,7 +30,7 @@ function providerDefaults() {
     const p = JSON.parse(readFileSync(path.join(CACHE, "swe-provider.json"), "utf8"));
     return { url: p.url, key: p.key, model: p.model };
   } catch {
-    return { url: process.env.BENCH_BASE_URL || "http://api.ai.dev.imdomain/v1", key: process.env.BENCH_API_KEY || "no", model: "im/im-llm" };
+    return { url: process.env.BENCH_BASE_URL || "http://127.0.0.1:11434/v1", key: process.env.BENCH_API_KEY || "no", model: "local/local-model" };
   }
 }
 
@@ -170,6 +170,34 @@ const containerModelUrl = (url) => url.replace("//127.0.0.1", "//host.docker.int
 const labeledUrl = (modelUrl, agent, taskId, rep) =>
   containerModelUrl(`${modelUrl}/_lbl/${encodeURIComponent(agent)}/${encodeURIComponent(taskId)}/${rep}`);
 
+/**
+ * Wire totals for one pair label, summed from the proxy's captured calls.
+ * The session API undercounts the CLI agents: their `usage_update` carries
+ * only `used` (final context) and `cost`, so tokensIn reads as the last
+ * call's prompt and cachedInputTokens is always absent. The wire is
+ * authoritative wherever it saw the pair (see bench/swe/run-swe.mjs).
+ */
+function wireMetrics(proxy, agent, taskId, rep) {
+  if (!proxy) return null;
+  let calls = 0;
+  let prompt = 0;
+  let cached = 0;
+  let completion = 0;
+  let sawUsage = false;
+  for (const c of proxy.calls) {
+    if (c.label?.agent !== agent || c.label?.task !== taskId || c.label?.repeat !== rep) continue;
+    calls += 1;
+    const u = c.response?.usage;
+    if (typeof u?.prompt !== "number") continue;
+    sawUsage = true;
+    prompt += u.prompt;
+    cached += u.cached ?? 0;
+    completion += u.completion ?? 0;
+  }
+  if (!sawUsage) return null;
+  return { modelCalls: calls, tokensIn: prompt, tokensCached: cached, tokensOut: completion };
+}
+
 async function api(base, method, p, body) {
   // Port-mapped requests arrive from the docker gateway; the server honors
   // x-real-ip behind a trusted proxy, and this runner is that trusted proxy.
@@ -277,9 +305,11 @@ async function driveSession(base, prompt, timeoutMs) {
   };
 }
 
-async function runCliAgentInContainer(container, agent, { prompt, taskDir, timeoutMs, modelUrl, opts, slotIdx }) {
+async function runCliAgentInContainer(container, agent, { prompt, taskDir, timeoutMs, modelUrl, opts, slotIdx, rep = 1 }) {
   const provider = AGENT_PROVIDER_ALIAS[agent] ?? opts.provider;
-  const url = labeledUrl(modelUrl, agent, taskDir, 1);
+  // The label must carry the pair's real repeat: two repeats sharing one
+  // label would merge their wire calls under a single key.
+  const url = labeledUrl(modelUrl, agent, taskDir, rep);
   let envFlags = ["-w", "/workspace"];
   if (agent === "pi") {
     // Per-slot dirs: parallel slots would race on a shared config's rmSync.
@@ -493,10 +523,16 @@ async function main() {
           modelUrl,
           opts,
           slotIdx: slot.idx,
+          rep,
         });
       } else {
         throw new Error(`unknown agent: ${agent}`);
       }
+
+      // Token fields come from the wire, not the session self-report (see
+      // wireMetrics); wall/tools/session fields stay as measured.
+      const wire = wireMetrics(proxy, agent, task.id, rep);
+      if (wire && row.metrics) Object.assign(row.metrics, wire);
 
       // Hidden verify, exec'd in the same environment the agent worked in.
       await dockerOk(["cp", path.join(task.dir, "verify.mjs"), `${container}:/workspace/verify.mjs`], { timeoutMs: 60_000 });

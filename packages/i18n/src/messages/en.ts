@@ -266,6 +266,10 @@ export const en = {
     promptQueue: "Request queue",
     queueCount: "Queued: {{count}}",
     sendNow: "Send now",
+    queueDeliveryLabel: "How to send",
+    queueDeliveryQueue: "Send after the turn finishes",
+    queueDeliverySteer: "Stop the current step and send now",
+    queueDeliveryAfterStep: "Send after the current step, without interrupting",
     sessionRunning: "Working…",
     sessionWaiting: "Waiting for you",
     sessionUnseen: "Response ready",
@@ -303,6 +307,7 @@ export const en = {
     boardEditTask: "Edit task",
     boardNextPrompt: "Next prompt",
     boardNextPromptPlaceholder: "Type the next prompt…",
+    boardAttachImage: "Attach an image",
     boardStart: "Start work",
     boardStartOther: "Start with another agent",
     boardAutoStart: "Start immediately",
@@ -382,6 +387,13 @@ export const en = {
     contextAcpTooltipNoWindow: "Context from ACP: {{used}} tokens used",
     contextAcpCached: "{{tokens}} cached input tokens",
     contextAcpCost: "cost {{cost}}",
+    compactionTitle: "Context compacted",
+    compactionManualTitle: "Digest updated by hand",
+    compactionHint: "Older turns were folded into a digest to fit the context window",
+    compactionTurns: "turns {{from}}–{{to}}",
+    compactionTokens: "{{from}} → {{to}} tokens",
+    compactionShow: "show digest",
+    compactionHide: "hide digest",
   },
   settings: {
     agents: "Agents",
@@ -404,9 +416,48 @@ export const en = {
       "Agent that runs inside the server — no CLI to install. Add one or more OpenAI-compatible endpoints and tick the models the agent may use.",
     builtinHint:
       "Works out of the box: reads and edits files in the chat folder, runs commands and asks for permission like any other harness.",
+    builtinMaxOutputTokens: "Maximum length of one answer, tokens",
+    builtinMaxOutputTokensHint:
+      "A cap on one answer from the model. 16 384 is enough for ordinary work. 0 = no cap: one runaway answer can take the whole window, leaving no room for the next step.",
+    builtinThinkingLimit: "Cut overlong reasoning, chars (0 = off)",
+    builtinThinkingLimitHint:
+      "The fuse for the built-in agent: one step's private reasoning past this many chars is cut and the turn carries on with a reminder to act. 0 = off. A chat can override it with /thinking-limit.",
+    builtinTurnRetryAttempts: "Turn retries after a provider error",
+    builtinTurnRetryAttemptsHint:
+      "How many times one turn may run when the endpoint answers with an error (a 400 from a gateway) or breaks the connection. The messages an attempt already produced are kept, so the retry continues from them and usually finishes the work. 1 = never retry: the error goes straight to the chat. 5 = the default, the wait between attempts grows (2s, 6s, 10s, 20s).",
+    builtinContextMode: "What to do with a long conversation",
+    builtinContextModeHint:
+      "Sooner or later the conversation no longer fits the model's window. “Digest” asks the model to retell the old turns briefly — that is a normal paid request. “Prune” just drops the old turns, free, but with no retelling: the agent loses what happened earlier. “Off” does nothing: the request grows too large and the provider rejects it. When unsure, keep “Digest”.",
+    builtinContextModeSummary: "Digest",
+    builtinContextModePrune: "Prune",
+    builtinContextModeOff: "Off",
+    builtinCompactionThresholdPercent: "Start squeezing after the window is, %",
+    builtinCompactionThresholdPercentHint:
+      "How full the window may get before the agent starts squeezing the conversation. 80 leaves room for the answer. Lower squeezes earlier: sharper answers, more paid retellings. Higher means fewer retellings, but a bigger chance of hitting the limit and getting an error.",
+    builtinKeepRecentPercent: "Newest part kept word for word, %",
+    builtinKeepRecentPercentHint:
+      "This slice of the conversation reaches the model exactly as written — it is what the agent continues the work from, so it should stay fresh. Everything older goes into the retelling (or is dropped). Always held at least 10 points below the start line: otherwise there would be nothing left to retell.",
+    builtinMaxSummaryTokens: "Maximum retelling length, tokens",
+    builtinMaxSummaryTokensHint:
+      "A cap on the length of the retelling. If the model writes longer, the retelling will not fit and gets thrown away along with the request you paid for. 16 384 is safe for any window. 0 = no cap.",
+    builtinPruneToolResultsKeepLast: "Forget old file reads (except the last messages)",
+    builtinPruneToolResultsKeepLastHint:
+      "File reads and search results older than the last N messages are replaced with a short note. That is safe: the same content can be read or searched again. The cheapest way to free room — it costs nothing at all. 0 = off.",
+    builtinPruneReasoning: "The model's thinking in older turns",
+    builtinPruneReasoningHint:
+      "Many models think out loud before answering, and that thinking takes room too. “Keep” leaves it alone — thinking models follow their own reasoning better that way. “Only in the last” keeps it for the newest answer only. “Drop” clears it from older turns to free room.",
+    builtinPruneReasoningKeep: "Keep",
+    builtinPruneReasoningBeforeLast: "Only in the last",
+    builtinPruneReasoningDrop: "Drop",
+    builtinRespectReasoningHistory: "Do not forget old reads for thinking models",
+    builtinRespectReasoningHistoryHint:
+      "When a model thinks out loud, it does better seeing what it read and ran: without that it makes more mistakes. With this switch on, the agent refuses to “forget” in such conversations. Turn it off when room matters more than quality.",
+    builtinOffloadToolResultTokens: "Archive tool answers larger than, tokens",
+    builtinOffloadToolResultTokensHint:
+      "A bulky answer (a large file, a long test log) is not sent to the model whole: it is saved into the chat's archive, and the conversation keeps a short line with the beginning of the text and a record id. The agent brings the full text back by that id when it really needs it. Room is saved, nothing is lost. 0 = off, 4 000 is a sensible threshold.",
     builtinProvidersTitle: "Providers",
     builtinProvidersHint:
-      "Each provider is one OpenAI-compatible endpoint with its own API key and model list; the agent offers the models of every provider in its picker.",
+      "Each provider is one OpenAI-compatible endpoint with its own API key and model list; the agent offers the models of every provider in its picker. A provider switched off stays in the list with its settings, but its models are not offered.",
     builtinProvidersEmpty:
       "No providers yet — add one so the agent has an endpoint to talk to.",
     builtinProviderAdd: "Add provider",
@@ -414,6 +465,8 @@ export const en = {
     builtinProviderNameHint: "Shown in the model picker next to this provider's models.",
     builtinProviderNamePlaceholder: "e.g. OpenRouter",
     builtinProviderUntitled: "Unnamed provider",
+    builtinProviderEnable: "Turn on",
+    builtinProviderDisable: "Turn off",
     builtinUrlTitle: "Endpoint",
     builtinUrlHint:
       "Base URL of an OpenAI-compatible API, e.g. https://api.openai.com/v1 or http://localhost:11434/v1. Empty switches this provider off.",
@@ -426,6 +479,9 @@ export const en = {
     builtinHeadersValue: "Value",
     builtinHeadersAdd: "Add header",
     builtinHeadersRemove: "Remove header",
+    builtinBodyTitle: "Extra request body",
+    builtinBodyHint:
+      "A JSON object merged into every request body this provider sends — the door for knobs the OpenAI-compatible schema has no field for. MiMo stops reasoning with {\"thinking\":{\"type\":\"disabled\"}}; OpenAI takes {\"reasoning_effort\":\"low\"}. Empty or invalid JSON is ignored.",
     builtinModelsTitle: "Models",
     builtinModelsHint:
       "Models come from the endpoint's /models list. Tick the ones the agent may use, rename them or set their context window; add whatever is missing by hand.",
@@ -455,6 +511,11 @@ export const en = {
     builtinSkillPathsHint:
       "Folders the agent scans for skills — a skill is a subfolder with a SKILL.md — one path per line. Relative paths resolve against each chat's folder; `~` is the server user's home (e.g. ~/.agents/skills); absolute paths are global too. Clear the list to turn skills off. A `/name` message invokes a skill.",
     builtinSkillPathsReset: "Reset to defaults",
+    builtinExtraInstructionsTitle: "Extra instructions for the agent",
+    builtinExtraInstructionsHint:
+      "Appended to the built-in agent's system prompt and sent with every turn. Your own dial for what the built-in rules do not cover — a house style, a project convention, or a nudge to reason less. For reasoning models a budget-style rule works best: name a limit on private reasoning and say that exceeding it is a failure. Leave empty for the built-in prompt alone.",
+    builtinExtraInstructionsPlaceholder:
+      "Hard rule: your private reasoning budget is 150 words. Think once, decide, then answer. No enumeration of options, no re-derivation of obvious facts, no restating the task, no planning commentary. Exceeding the budget is a failure; write the answer immediately once you have decided.",
     subagentsEnabled: "Subagents",
     subagentsEnabledHint: "Let the built-in agent spawn subagents with the `task` tool. A subagent runs with its own context window in this workspace and returns one final report — only the report enters the conversation. Works in every mode; children of plan mode stay read-only.",
     subagentsAllowAdhoc: "Allow ad-hoc subagents",
@@ -477,6 +538,9 @@ export const en = {
     subagentsBuiltInTag: "built-in",
     subagentsExploreDesc: "Read-only codebase explorer: locate code, trace call sites, survey structure.",
     subagentsMaxReached: "Roster is full — up to {{max}} agents.",
+    builtinAllowOutsideCwd: "Work outside the working folder",
+    builtinAllowOutsideCwdHint:
+      "Let the agent's tools leave the chat folder: read and search by absolute path (global skills in ~/.agents/skills, for instance), write outside it, and run a command in another folder. Off — the chat folder stays the boundary and a path outside it is rejected.",
     agentAdvancedTitle: "Advanced",
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",
@@ -556,6 +620,16 @@ export const en = {
     chatTreeElMore: "Chat menu",
     chatAdvanced: "Advanced",
     chatBehavior: "Chat behavior",
+    chatTitleBlock: "Chat title",
+    chatAutoTitle: "Refine the title with a model",
+    chatAutoTitleHint:
+      "The first message names the chat right away, as before; then a model replaces it with a short, clear task title.",
+    chatAutoTitleModel: "Model for titles",
+    chatAutoTitleModelHint: "Which model writes the titles of new chats.",
+    chatAutoTitleModelAuto: "Automatic",
+    chatAutoTitleNeedsBuiltin:
+      "The built-in agent is not configured: add an endpoint and a model under Agents → Built-in agent — until then, titles come from the first message only.",
+    chatAutoTitleOpenBuiltin: "Open built-in agent settings",
     customScheme: "Custom palette",
     customAccent: "Accent",
     customBg: "Background",
@@ -934,6 +1008,8 @@ export const en = {
       "[System: you have web/fetch, terminal and fs tools in this environment. For up-to-date data (weather, sites, news) call tools immediately — do not say you have no internet/weather access.]",
     answerToQuestion:
       "Answer to your earlier question.\n\nQuestion: {{question}}\nMy answer: {{answer}}\n\nContinue from this answer.",
+    continueInterrupted:
+      "The previous acpio run was interrupted in the middle of this turn (server restart). Continue from where you stopped — do not start over.",
     subagent: "Subagent",
   },
   diagnostics: {
@@ -970,6 +1046,8 @@ export const en = {
     thinking: "Thinking",
     tool: "Tool",
     subagent: "Subagent",
+    duration: "took",
+    ttft: "first token after",
     file: "File",
     error: "Error",
     status: "Status",

@@ -1477,6 +1477,68 @@ function QuestionBucketView({
   );
 }
 
+/**
+ * One compaction pass, on the surface of the thread.
+ *
+ * Unfolded into the turn's work it was invisible twice over: the reader had to
+ * open the "Работал" block to learn the window had been squeezed, and opening
+ * it showed the squeeze mixed in with the tools that followed. Here it keeps
+ * its own row — what the harness folded away, how far the window shrank, and
+ * the digest itself behind the toggle, where it can be read back, quoted and
+ * checked against what the agent later does.
+ */
+function CompactionRow({ part }: { part: MessagePartDto }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const manual = part.payload.manual === true;
+  const summary = String(part.payload.summary ?? "").trim();
+  const coveredBefore = Number(part.payload.coveredBefore ?? 0);
+  const coveredAfter = Number(part.payload.coveredAfter ?? 0);
+  const tokensBefore = Number(part.payload.tokensBefore ?? 0);
+  const tokensAfter = Number(part.payload.tokensAfter ?? 0);
+  const meta = [
+    coveredAfter > coveredBefore
+      ? t("chat.compactionTurns", { from: coveredBefore + 1, to: coveredAfter })
+      : "",
+    tokensBefore > 0 && tokensAfter > 0
+      ? t("chat.compactionTokens", {
+          from: formatCompact(tokensBefore),
+          to: formatCompact(tokensAfter),
+        })
+      : "",
+  ].filter(Boolean);
+  return (
+    <div className={styles.compactionRow} data-compaction-id={part.id}>
+      <div className={styles.compactionHead} title={t("chat.compactionHint")}>
+        <span className={styles.compactionIcon} aria-hidden>
+          ⤵
+        </span>
+        <span className={styles.compactionTitle}>
+          {manual ? t("chat.compactionManualTitle") : t("chat.compactionTitle")}
+        </span>
+        {meta.length > 0 ? (
+          <span className={styles.compactionMeta}>{meta.join(" · ")}</span>
+        ) : null}
+        {summary ? (
+          <button
+            type="button"
+            className={styles.compactionToggle}
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? t("chat.compactionHide") : t("chat.compactionShow")}
+          </button>
+        ) : null}
+      </div>
+      {open && summary ? (
+        <div className={styles.compactionBody}>
+          <MarkdownContent text={summary} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 /** Icon for thinking toggle (composer) and in-message thinking header. */
 function ThoughtSparkIcon({ size = 16 }: { size?: number }) {
   return (
@@ -2639,6 +2701,8 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
     if (p.type === "subagent" || p.type === "tool_call") {
       return true;
     }
+    // A compaction row is the whole transcript of a manual `/compact` turn.
+    if (p.type === "compaction") return true;
     return false;
   });
 }
@@ -3585,10 +3649,17 @@ function AssistantParts({
       (p) =>
         p !== finalText &&
         p.type !== "error" &&
+        // A compaction row is status for the whole window, not work of this
+        // turn: folded into "Работал" it is a squeeze nobody can look up later.
+        p.type !== "compaction" &&
         !parkedQuestions.includes(p) &&
         !parkedPreambleParts.has(p.id),
     );
   }, [parts, stepsStreaming, parkedQuestions, parkedPreambleParts]);
+  const compactionParts = useMemo(
+    () => parts.filter((p) => p.type === "compaction"),
+    [parts],
+  );
   const stepsLive = useMemo(
     () => stepsPartsStillLive(parts, stepsStreaming),
     [parts, stepsStreaming],
@@ -3656,6 +3727,9 @@ function AssistantParts({
         actionsCtxRef.current?.openAt(e.clientX, e.clientY);
       }}
     >
+      {compactionParts.map((part) => (
+        <CompactionRow key={part.id} part={part} />
+      ))}
       {agentTurnTimeline && turnActive ? (
         <AgentTurnTimeline
           parts={stepsParts}
@@ -3913,6 +3987,14 @@ function ChatThread() {
   );
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const sendQueuedPromptNow = useAppStore((s) => s.sendQueuedPromptNow);
+  const deliverQueuedPrompt = useAppStore((s) => s.deliverQueuedPrompt);
+  // Only a harness that folds a message into the turn it is already running can
+  // offer "after the step" — the others hide it instead of showing a dead button.
+  const queueMidTurnSteering = useAppStore(
+    (s) =>
+      s.adapters.find((a) => a.id === (activeSession?.provider ?? ""))?.midTurnSteering ===
+      true,
+  );
   const [text, setText] = useState("");
   const textRef = useRef(text);
   textRef.current = text;
@@ -5638,8 +5720,75 @@ function ChatThread() {
     ]
       .filter((part): part is string => part != null)
       .join(" · ");
-    return { label, title };
-  }, [activeSession?.usage, settings.chatChipOptions.context.format, t]);
+    // The rows the click opens: the spend the label cannot carry. Total is the
+    // whole bill of the pass — cached + uncached input plus output — and cache
+    // percent is the cached share of the input it comes from.
+    const input = acp?.inputTokens ?? null;
+    const output = acp?.outputTokens ?? null;
+    const cacheTokens = cached ?? null;
+    const uncached = input != null && cacheTokens != null ? Math.max(0, input - cacheTokens) : null;
+    const total = input != null && output != null ? input + output : null;
+    const cachePercent =
+      input != null && input > 0 && cacheTokens != null
+        ? Math.round((cacheTokens / input) * 100)
+        : null;
+    // A field the harness never sent reads "—": a confident 0 would be a lie.
+    const num = (value: number | null) => (value == null ? "—" : value.toLocaleString());
+    // Compaction is a fact of THIS chat: how many passes have run, and what
+    // their digests cost in output tokens.
+    let compactions = 0;
+    let digestTokens: number | null = null;
+    for (const message of activeSession?.messages ?? []) {
+      for (const part of message.parts) {
+        if (part.type !== "compaction") continue;
+        compactions += 1;
+        const reported = part.payload.summaryOutputTokens;
+        const value = typeof reported === "number" && Number.isFinite(reported) ? reported : null;
+        if (value != null) digestTokens = (digestTokens ?? 0) + value;
+      }
+    }
+    const rows = [
+      // The two figures the chip itself quotes, spelled out: the window, and
+      // what fills it right now.
+      {
+        id: "window",
+        label: t("chat.contextTokensWindow"),
+        // Same "0 = unknown" rule as the label: a windowless harness reads "—".
+        value: windowKnown ? win.toLocaleString() : "—",
+      },
+      { id: "used", label: t("chat.contextTokensUsed"), value: used.toLocaleString() },
+      {
+        id: "cache",
+        label: t("chat.contextTokensCache"),
+        value: cachePercent == null ? "—" : `${cachePercent}%`,
+      },
+      { id: "total", label: t("chat.contextTokensTotal"), value: num(total) },
+      { id: "cached", label: t("chat.contextTokensCached"), value: num(cacheTokens) },
+      { id: "uncached", label: t("chat.contextTokensUncached"), value: num(uncached) },
+      { id: "output", label: t("chat.contextTokensOutput"), value: num(output) },
+      {
+        id: "cost",
+        label: t("chat.contextTokensCost"),
+        // Same figure and rounding the chip's tooltip already quotes: the money
+        // the harness itself reports, never a price list of our own.
+        value:
+          cost == null
+            ? "—"
+            : cost.toLocaleString(undefined, { maximumFractionDigits: 4 }),
+      },
+      ...(compactions > 0
+        ? [
+            {
+              id: "compactions",
+              label: t("chat.contextTokensCompactions"),
+              value: compactions.toLocaleString(),
+            },
+            { id: "digest", label: t("chat.contextTokensDigest"), value: num(digestTokens) },
+          ]
+        : []),
+    ];
+    return { label, title, rows };
+  }, [activeSession?.usage, activeSession?.messages, settings.chatChipOptions.context.format, t]);
 
   const prevSessionIdRef = useRef<string | null>(null);
   const stickToBottomRef = useRef(true);
@@ -6242,6 +6391,71 @@ function ChatThread() {
                 <span className={styles.queueItemText} title={item.text}>
                   {item.text}
                 </span>
+                <div
+                  className={styles.queueModes}
+                  role="group"
+                  aria-label={t("chat.queueDeliveryLabel")}
+                >
+                  {/* Waiting for the end of the turn is the default, not a
+                      choice: it is what happens if nothing else is pressed. */}
+                  <span
+                    className={`${styles.queueMode} ${styles.queueModeActive}`}
+                    title={t("chat.queueDeliveryQueue")}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.7" />
+                      <path
+                        d="M12 7.5V12l3 2"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.queueMode}
+                    title={t("chat.queueDeliverySteer")}
+                    aria-label={t("chat.queueDeliverySteer")}
+                    onClick={() => void deliverQueuedPrompt(item.id, "steer")}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <path
+                        d="M13 3 5 13h5l-1 8 8-10h-5l1-8Z"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </button>
+                  {queueMidTurnSteering && (
+                    <button
+                      type="button"
+                      className={styles.queueMode}
+                      title={t("chat.queueDeliveryAfterStep")}
+                      aria-label={t("chat.queueDeliveryAfterStep")}
+                      onClick={() => void deliverQueuedPrompt(item.id, "afterStep")}
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                        <path
+                          d="M6 5v6a3 3 0 0 0 3 3h8"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <path
+                          d="m14 11 3 3-3 3"
+                          stroke="currentColor"
+                          strokeWidth="1.7"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   className={`${styles.queueItemBtn} ${styles.queueItemBtnSend}`}

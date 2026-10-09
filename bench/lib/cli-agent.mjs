@@ -1,10 +1,11 @@
 // Drivers for the spawn-based harnesses. Both print one JSON event per line in
 // `--mode json`, so the metrics come from the same parser. `omp` is a pi fork:
-// same event names, different CLI surface.
+// same event names, different CLI surface. `opencode` prints its own
+// `run --format json` envelope (see summarizeOpenCodeStream).
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { summarizeAgentStream } from "./jsonl.mjs";
+import { summarizeAgentOutput } from "./jsonl.mjs";
 import { runProcess } from "./util.mjs";
 
 /** pi's npm shim is a `.cmd`; its node entry spawns cleanly without a shell. */
@@ -21,6 +22,78 @@ export function piCommand() {
 
 export function ompCommand() {
   return { cmd: process.env.OMP_BIN || "omp", prefix: [] };
+}
+
+/**
+ * opencode ships as a self-contained native binary behind an npm shim. On
+ * Windows that shim is a shell script, which node's shell-less spawn cannot
+ * exec — resolve the package's own bin (the file the shim points at).
+ */
+export function opencodeCommand() {
+  const explicit = process.env.OPENCODE_BIN;
+  if (explicit) return { cmd: explicit, prefix: [] };
+  const guess = path.join(process.env.APPDATA || "", "npm", "node_modules", "@opencode", "cli", "bin", "opencode.exe");
+  if (existsSync(guess)) return { cmd: guess, prefix: [] };
+  return { cmd: "opencode", prefix: [] };
+}
+
+/**
+ * Stage the opencode config a bench rollout needs: one custom provider wired to
+ * the labelled proxy URL, the model under test, and the gateway's session
+ * header (zen answers every request without it with MissingSessionID — a
+ * stable per-pair id is also the cache/routing key the gateway keys on).
+ * The config lives in the bench's own dir, never the user's ~/.config/opencode.
+ */
+export function ensureOpenCodeConfig(dir, { provider, baseUrl, apiKey, modelId, contextWindow, sessionId }) {
+  mkdirSync(dir, { recursive: true });
+  for (const sub of ["data", "state", "cache", "run"]) mkdirSync(path.join(dir, sub), { recursive: true });
+  const file = path.join(dir, "opencode.json");
+  writeFileSync(
+    file,
+    JSON.stringify(
+      {
+        $schema: "https://opencode.ai/config.json",
+        model: `${provider}/${modelId}`,
+        provider: {
+          [provider]: {
+            name: provider,
+            npm: "@ai-sdk/openai-compatible",
+            options: {
+              baseURL: baseUrl,
+              apiKey,
+              headers: { "x-opencode-session": sessionId },
+            },
+            models: {
+              [modelId]: { name: modelId, limit: { context: contextWindow, output: 16384 } },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+  return file;
+}
+
+/**
+ * Everything opencode reads comes from the staged dir: config, XDG data/state/
+ * cache/runtime (sessions, db, logs) and no project config from the fixture —
+ * a run must not depend on, or mutate, the machine's real opencode setup.
+ */
+export function opencodeEnv(dir) {
+  return {
+    OPENCODE_CONFIG: path.join(dir, "opencode.json"),
+    OPENCODE_CONFIG_DIR: dir,
+    XDG_DATA_HOME: path.join(dir, "data"),
+    XDG_STATE_HOME: path.join(dir, "state"),
+    XDG_CACHE_HOME: path.join(dir, "cache"),
+    XDG_RUNTIME_DIR: path.join(dir, "run"),
+    OPENCODE_DISABLE_AUTOUPDATE: "1",
+    OPENCODE_DISABLE_MODELS_FETCH: "1",
+    OPENCODE_DISABLE_FILEWATCHER: "1",
+    OPENCODE_DISABLE_PROJECT_CONFIG: "1",
+  };
 }
 
 export const ompProfile = () => process.env.OMP_PROFILE || "omp-bench";
@@ -144,21 +217,39 @@ export function agentArgs(agent, { prompt, provider, modelId }) {
       prompt,
     ];
   }
+  if (agent === "opencode") {
+    return [
+      "run",
+      "--standalone", // private server per rollout, no shared background service
+      "--auto", // auto-approve permissions (the bench sandbox is the permission)
+      "--format",
+      "json",
+      "-m",
+      `${provider}/${modelId}`,
+      prompt,
+    ];
+  }
   throw new Error(`unknown cli agent: ${agent}`);
 }
 
 export function agentCommand(agent) {
   if (agent === "pi") return piCommand();
   if (agent === "omp") return ompCommand();
+  if (agent === "opencode") return opencodeCommand();
   throw new Error(`unknown cli agent: ${agent}`);
 }
 
-export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir }) {
+export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir, opencodeConfigDir }) {
   const { cmd, prefix } = agentCommand(agent);
   const args = [...prefix, ...agentArgs(agent, { prompt: task.prompt, provider, modelId })];
-  const env = agent === "pi" && piConfigDir ? { PI_CODING_AGENT_DIR: piConfigDir, PI_OFFLINE: "1" } : undefined;
+  const env =
+    agent === "pi" && piConfigDir
+      ? { PI_CODING_AGENT_DIR: piConfigDir, PI_OFFLINE: "1" }
+      : agent === "opencode" && opencodeConfigDir
+        ? opencodeEnv(opencodeConfigDir)
+        : undefined;
   const res = await runProcess(cmd, args, { cwd: ws, timeoutMs, env });
-  const summary = summarizeAgentStream(res.stdout);
+  const summary = summarizeAgentOutput(agent, res.stdout);
   return {
     ...summary,
     wallMs: res.wallMs,

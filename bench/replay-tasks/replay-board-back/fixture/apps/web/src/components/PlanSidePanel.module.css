@@ -1,0 +1,376 @@
+.panel {
+  --plan-panel-width: 380px;
+  position: relative;
+  flex: 0 0 var(--plan-panel-width);
+  width: var(--plan-panel-width);
+  max-width: min(70vw, 100%);
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 4;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--accent) 7%, var(--surface)) 0%,
+      color-mix(in srgb, var(--bg-secondary) 45%, var(--surface)) 120px,
+      color-mix(in srgb, var(--bg-secondary) 55%, var(--surface)) 100%
+    );
+  box-shadow:
+    -12px 0 28px rgba(0, 0, 0, 0.06),
+    inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  animation: slideIn 0.2s ease;
+}
+
+.panelFill {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: none;
+  box-shadow: none;
+  border-left: none;
+}
+
+.panelFill .body {
+  padding: 16px clamp(16px, 4vw, 48px);
+}
+
+.resizing {
+  transition: none;
+  user-select: none;
+}
+
+.resizingBody,
+.resizingBody * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  margin-left: -6px;
+  z-index: 6;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
+  transition:
+    background 0.15s ease,
+    width 0.15s ease,
+    opacity 0.15s ease;
+  opacity: 1;
+}
+
+.splitter:hover::before,
+.resizing .splitter::before {
+  width: 4px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 1;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  flex-shrink: 0;
+}
+
+.headerText {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.eyebrow {
+  font-family: var(--font);
+  font-size: 0.84rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: color-mix(in srgb, var(--accent) 42%, var(--text));
+  line-height: 1.25;
+}
+
+.pendingBadge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.removeBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.removeBtn:hover {
+  color: var(--danger, #dc2626);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 45%, var(--border));
+  background: var(--surface);
+}
+
+.closeBtn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  color: var(--text-secondary);
+  border-radius: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color var(--motion, 0.15s ease),
+    border-color var(--motion, 0.15s ease),
+    background var(--motion, 0.15s ease);
+}
+
+.closeBtn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 22%, var(--border));
+  background: var(--surface);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.footer {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px;
+  border: none;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+}
+
+.footer button svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.primary {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+    0 2px 8px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+:global([data-theme="light"]) .primary {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 30%, transparent) inset,
+    0 1px 3px rgb(15 23 42 / 10%), 0 4px 12px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.primary:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+    0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.primary:active {
+  transform: translateY(0);
+  filter: brightness(0.97);
+}
+
+.danger {
+  background: transparent;
+  color: color-mix(in srgb, var(--danger, #c44) 82%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--danger, #c44) 28%, var(--border));
+  border-radius: 999px;
+}
+
+.danger:hover {
+  background: color-mix(in srgb, var(--danger, #c44) 8%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #c44) 45%, var(--border));
+  transform: translateY(-1px);
+}
+
+.danger:active {
+  background: color-mix(in srgb, var(--danger, #c44) 12%, transparent);
+  transform: translateY(0);
+}
+
+.tab {
+  position: absolute;
+  top: 96px;
+  right: 0;
+  left: auto;
+  z-index: 20;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 28px;
+  min-height: 52px;
+  padding: 10px 0;
+  border: 1px solid var(--border-soft);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg-secondary));
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.04);
+  opacity: 0.82;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.tab:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--text) 12%, var(--border-soft));
+}
+
+.tabActive {
+  opacity: 1;
+  color: color-mix(in srgb, var(--accent) 75%, var(--text));
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
+}
+
+.tabPending .tabDot {
+  animation: tabDotPulse 1.4s ease-in-out infinite;
+}
+
+.tabIcon {
+  display: block;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.tabDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+@keyframes tabDotPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 700px) {
+  .tab {
+    display: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .panel {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    width: 100%;
+    flex-basis: auto;
+    max-width: none;
+    border-left: none;
+    box-shadow: none;
+    background: color-mix(in srgb, var(--bg-secondary) 55%, var(--surface));
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .footer {
+    grid-template-columns: 1fr 1fr;
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+  }
+}

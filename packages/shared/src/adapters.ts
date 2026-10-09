@@ -21,6 +21,17 @@ export function isShellSession(provider: string | null | undefined): boolean {
 
 export type AgentMode = "agent" | "plan" | "ask";
 
+/**
+ * How a message reaches an agent that is already working:
+ * - `queue` — the default: wait for the whole turn to finish;
+ * - `steer` — stop the current turn now and run this message instead;
+ * - `afterStep` — fold it into the running turn, so the model sees it on its
+ *   next call (the current step is not interrupted).
+ * Only a `midTurnSteering` harness can honour `afterStep`; for the rest it
+ * degrades to `queue` on the server.
+ */
+export type PromptDelivery = "queue" | "steer" | "afterStep";
+
 export interface AgentModeOption {
   value: string;
   name: string;
@@ -250,6 +261,12 @@ export interface SubagentTranscriptPage {
  */
 export interface InProcessAgentOptions {
   settings: AppSettings;
+  /**
+   * Settings as of right now, for in-process agents. The server re-reads them
+   * instead of handing over a boot-time snapshot, so a knob turned in Settings
+   * reaches a chat that is already running. Missing = the snapshot is final.
+   */
+  settingsProvider?: () => Promise<AppSettings>;
   /** Session workspace — agent tools run against this directory. */
   cwd: string;
   /** Session mode at boot (agent/plan/ask). */
@@ -331,8 +348,15 @@ export interface HarnessAdapter {
   parameterizedModelPicker: boolean;
   /** Agent streams subagent transcripts (live thinking into cards). */
   subagentStreaming: boolean;
-  /** Models come from the CLI `models --json` catalog (cloud-backed). */
+  /** Model list is cloud-backed and changes often — short cache TTL. */
   cloudCatalog: boolean;
+  /**
+   * The agent folds a message into the turn it is already running (the model
+   * picks it up on its next call). Only the in-process builtin agent can:
+   * ACP has no steering, and an external agent answers a second
+   * `session/prompt` with session_busy, so `afterStep` degrades to `queue`.
+   */
+  midTurnSteering?: boolean;
   /** Modes offered when the agent omits its own list. */
   defaultModes: AgentModeOption[];
   /** ACP tool `kind` values that denote nested agents. */
@@ -378,17 +402,6 @@ export interface HarnessAdapter {
    * probe so "online" never means merely "the process started".
    */
   unavailableReason?: (settings: AppSettings) => string | null;
-
-  // ── Model catalog ────────────────────────────────────────────────────────
-  /** Broader catalog than the ACP option list (CLI `models --json`). */
-  probeModels?: (ctx: AdapterProbeContext) => Promise<ModelOption[] | null>;
-}
-
-/** Context the core provides to {@link HarnessAdapter.probeModels}. */
-export interface AdapterProbeContext {
-  settings: AppSettings;
-  /** Run the adapter's CLI with the given args; returns stdout. */
-  runCli(args: string[]): Promise<string>;
 }
 
 /** Static registry: every harness the core knows about. */
@@ -421,6 +434,8 @@ export interface AdapterMetaDto {
   parameterizedModelPicker: boolean;
   subagentStreaming: boolean;
   cloudCatalog: boolean;
+  /** Harness accepts a mid-turn message (see {@link HarnessAdapter.midTurnSteering}). */
+  midTurnSteering: boolean;
   defaultModes: AgentModeOption[];
   subagentToolKinds: string[];
 }

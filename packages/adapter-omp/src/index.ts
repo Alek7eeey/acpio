@@ -1,10 +1,6 @@
 import {
-  modelDisplayName,
-  modelProviderFromValue,
-  type AdapterProbeContext,
   type AdapterTranscriptClient,
   type HarnessAdapter,
-  type ModelOption,
   type SubagentCardUpdate,
   type SubagentProgressUpdate,
   type SubagentTranscriptPage,
@@ -143,28 +139,6 @@ async function readOmpTranscript(
   };
 }
 
-/** `omp models --json` — broader cloud-backed catalog than the ACP list. */
-async function probeOmpModels(ctx: AdapterProbeContext): Promise<ModelOption[] | null> {
-  const stdout = await ctx.runCli(["models", "--json"]);
-  const parsed = JSON.parse(stdout) as {
-    models?: Array<{ selector?: string; provider?: string; id?: string; name?: string }>;
-  };
-  const rows = parsed.models ?? [];
-  return rows
-    .map((row): ModelOption | null => {
-      const value =
-        row.selector?.trim() ||
-        (row.provider && row.id ? `${row.provider}/${row.id}` : row.id?.trim() || "");
-      if (!value) return null;
-      return {
-        value,
-        name: row.name?.trim() || modelDisplayName(value),
-        provider: row.provider?.trim() || modelProviderFromValue(value),
-      };
-    })
-    .filter((m): m is ModelOption => m != null);
-}
-
 /**
  * OMP harness: ACP over the `omp` CLI. Session restore is a silent context
  * resume (`session/resume`, no history replay); subagent work streams in via
@@ -214,5 +188,4 @@ export const ompAdapter: HarnessAdapter = {
   subagentCardFromRoster: ompCardFromRoster,
   subagentCardFromProgress: ompCardFromProgress,
   readSubagentTranscript: readOmpTranscript,
-  probeModels: probeOmpModels,
 };

@@ -276,6 +276,32 @@ describe("ModelPicker", () => {
     expect(onParamsChange).toHaveBeenCalledWith("claude", { effort: "ultra" });
   });
 
+  it("renders the built-in Default/Low thinking modes and reports the pick", async () => {
+    const user = userEvent.setup();
+    const onParamsChange = vi.fn();
+    renderPicker({
+      showParamsMenu: true,
+      params: [
+        {
+          id: "thinking",
+          name: "Thinking",
+          currentValue: "default",
+          // Off is not a menu mode: turning thinking off is the /thinking command.
+          options: [
+            { value: "default", name: "Default" },
+            { value: "low", name: "Low" },
+          ],
+        },
+      ],
+      onParamsOpen: () => {},
+      onParamsChange,
+    });
+    await user.click(screen.getByRole("button", { name: /GPT-4o Fast/ }));
+    await user.click(screen.getAllByRole("button", { name: "Effort" })[0]);
+    await user.click(await screen.findByRole("menuitemradio", { name: "Low" }));
+    expect(onParamsChange).toHaveBeenCalledWith("gpt-4o", { thinking: "low" });
+  });
+
   it("the flyout keeps the loader until the target model's params arrive", async () => {
     const user = userEvent.setup();
     let resolveOpen: () => void = () => {};

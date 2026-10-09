@@ -288,7 +288,7 @@ describe("renderMarkdown", () => {
     [{ description: "D" }, "D"],
     [{}, "Инструмент"],
     // generic MCP placeholder falls back to the real tool name from raw
-    [{ title: "MCP: tool", raw: { toolName: "mcp__intermech_grep" } }, "intermech_grep"],
+    [{ title: "MCP: tool", raw: { toolName: "mcp__example_grep" } }, "example_grep"],
     [{ title: "Tool", raw: { toolName: "bash" } }, "bash"],
     [{ title: "MCP: tool" }, "Инструмент"],
   ])("tool title for payload %j is %s", (payload, title) => {

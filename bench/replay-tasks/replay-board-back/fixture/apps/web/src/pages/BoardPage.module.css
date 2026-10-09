@@ -1,0 +1,837 @@
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.headerTitle {
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerSpacer {
+  flex: 1;
+}
+
+/* Bottom action bar — mobile only: the board's actions sit under the thumb
+   instead of in the two top corners. */
+.actions {
+  display: none;
+}
+
+.actionBtn {
+  flex: 1 1 0;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.actionBtn:active {
+  background: var(--bg-tertiary);
+}
+
+.actionBtnOn {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.actionLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Mobile-only drawer parts: the rail is inline everywhere else. */
+.railScrim {
+  display: none;
+}
+
+.headerBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.headerBtn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+
+.body {
+  position: relative;
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.rail {
+  flex: 0 0 216px;
+  width: 216px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+}
+
+.railRow {
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+/* Mobile-only sheet handle; desktop keeps the rail inline. */
+.railGrabber {
+  display: none;
+}
+
+.railList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+.railRowOn {
+  background: var(--accent-soft);
+}
+
+.railItem {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.railItem:hover {
+  background: var(--bg-secondary);
+}
+
+/* Row entries share the line with their "+" button; the "all projects" item is
+   a direct child of the column rail and must not grow along its main axis. */
+.railRow .railItem {
+  flex: 1 1 auto;
+}
+
+.railItemOn,
+.railItemOn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.railLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railCount {
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.railAdd,
+.railAddFolder {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.railAdd {
+  width: 26px;
+  height: 26px;
+  margin-right: 2px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.railAdd:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.railAddFolder {
+  margin-top: 6px;
+  padding: 7px 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border: 1px dashed var(--border);
+  text-align: left;
+}
+
+.railAddFolder:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+
+.columns {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.column {
+  flex: 1 0 264px;
+  min-width: 264px;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+}
+
+.columnHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.columnCount {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.columnBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.groupName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.groupCount {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.groupSpacer {
+  flex: 1;
+}
+
+.groupActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+}
+
+.group:hover .groupActions,
+.group:focus-within .groupActions {
+  opacity: 1;
+}
+
+.iconBtn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.iconBtn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.iconStart:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.iconDanger:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.composerInput {
+  width: 100%;
+  min-height: 56px;
+  resize: vertical;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  outline: none;
+}
+
+.composerActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.primaryBtn {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.primaryBtn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.primaryBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ghostBtn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghostBtn:hover {
+  color: var(--text);
+  background: var(--bg-secondary);
+}
+
+.dangerBtn {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.dangerBtn:hover {
+  background: var(--danger);
+  filter: brightness(0.94);
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+}
+
+.card:hover {
+  border-color: var(--accent);
+}
+
+.cardLive {
+  border-color: var(--accent);
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+.cardSpacer {
+  flex: 1;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+}
+
+.card:hover .cardActions,
+.card:focus-within .cardActions {
+  opacity: 1;
+}
+
+.cardText {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.liveRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: boardPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes boardPulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+
+.doneToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doneToggle:hover {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.empty {
+  margin: 4px 2px;
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 208px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.menuHead {
+  padding: 5px 8px 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--bg-secondary);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.dotOn {
+  background: var(--success);
+}
+
+.dotOff {
+  background: var(--border);
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15, 20, 25, 0.35);
+}
+
+.modal {
+  width: min(420px, 100%);
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.modalTitle {
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.modalText {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.folderList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.folderRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.folderPath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+@media (hover: none), (pointer: coarse) {
+  /* No hover to reveal them and no menu to fall back on: a board card's
+     actions must be tappable as they are. */
+  .groupActions,
+  .cardActions {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 899px) {
+  .actions {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+    padding: 8px 10px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .headerBtn {
+    display: none;
+  }
+
+  /* Same reason as the action bar: a centered dialog puts its buttons in the
+     middle of the screen, out of thumb reach. The bottom inset also keeps the
+     card above the shell's sheet puller, which is fixed and sits on top. */
+  .backdrop {
+    align-items: flex-end;
+    padding: 10px;
+    padding-bottom: calc(10px + var(--mobile-dock-h, env(safe-area-inset-bottom, 0px)));
+  }
+
+  /* The project rail is a workspace switcher, not content: on phones it is a
+     bottom sheet under the thumb instead of a column that squeezes the lanes. */
+  .rail {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    flex: none;
+    width: auto;
+    max-height: min(70dvh, 100%);
+    overflow: hidden;
+    padding: 6px 8px 10px;
+    border: 1px solid var(--border);
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    box-shadow: var(--shadow);
+    transform: translateY(calc(100% + 2px));
+    transition:
+      transform 0.24s cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 0.24s;
+    visibility: hidden;
+  }
+
+  .railOpen {
+    transform: translateY(var(--rail-drag, 0px));
+    visibility: visible;
+    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .rail[data-dragging] {
+    transition: none;
+  }
+
+  .railGrabber {
+    display: block;
+    flex: 0 0 auto;
+    align-self: center;
+    width: 44px;
+    height: 4px;
+    margin: 2px 0 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .railList {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+  }
+
+  /* Sheet rows are thumb targets, so they are taller than the desktop tree. */
+  .railItem {
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 0.9rem;
+  }
+
+  .railAdd {
+    width: 32px;
+    height: 32px;
+    font-size: 1.1rem;
+  }
+
+  .railAddFolder {
+    padding: 10px;
+    font-size: 0.86rem;
+  }
+
+  .railScrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    border: 0;
+    padding: 0;
+    background: rgba(15, 20, 25, 0.35);
+  }
+
+  /* One lane per screen with the next one peeking: the four lanes stay a
+     horizontal swipe apart instead of a 232px sliver of a 412px viewport. */
+  .columns {
+    gap: 10px;
+    padding: 10px;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+  }
+
+  .column {
+    flex: 0 0 86%;
+    min-width: 0;
+    max-width: none;
+    scroll-snap-align: start;
+  }
+}

@@ -1,0 +1,214 @@
+/* Settings → Built-in agent → Models: toolbar, add form, scrolling model list. */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.scope {
+  display: flex;
+  flex-shrink: 0;
+  gap: 1px;
+  padding: 2px;
+  border-radius: var(--settings-control-radius);
+  background: var(--bg-tertiary);
+}
+
+.scopeBtn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: calc(var(--settings-control-radius) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.scopeBtn:hover:not(.scopeBtnActive) {
+  color: var(--text);
+}
+
+.scopeBtnActive {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.search {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.btn,
+.btnPrimary {
+  border-radius: var(--settings-control-radius);
+  padding: var(--settings-btn-pad-y) var(--settings-btn-pad-x);
+  font-size: var(--settings-btn-size);
+  font-weight: var(--settings-btn-weight);
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btnPrimary {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+}
+
+.addForm {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  align-items: end;
+  padding: 4px 0 2px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fieldLabel {
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  color: var(--text-secondary);
+}
+
+.addActions {
+  display: flex;
+  gap: 8px;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  color: var(--text-secondary);
+}
+
+.hint,
+.error {
+  margin: 0;
+  font-size: var(--settings-hint-size);
+  font-weight: var(--settings-hint-weight);
+  line-height: var(--settings-hint-line);
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--danger);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: min(340px, 50vh);
+  overflow: auto;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--settings-control-radius);
+  background: var(--surface);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) 110px 28px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.remove {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: var(--settings-control-size);
+}
+
+.tag {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: var(--settings-hint-size);
+  color: var(--text-secondary);
+}
+
+/* Inside SettingTable the inputs already carry the shared field chrome —
+   only size them for the row grid here. */
+.labelInput,
+.windowInput {
+  min-width: 0;
+  width: 100%;
+}
+
+@media (max-width: 700px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

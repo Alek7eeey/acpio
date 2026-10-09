@@ -9,9 +9,12 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { pinResolvedSessionModels, reconcileStaleSessions, repairStoredCwds } from "./services/sessions.js";
+import { resumeInterruptedTurns } from "./acp/sessionManager.js";
 import { registerRoutes } from "./routes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
+import { DB_PATH } from "./db/client.js";
+import { acquireInstanceLock } from "./db/instanceLock.js";
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 dotenv.config({ path: path.join(rootDir, ".env") });
 dotenv.config();
@@ -35,6 +38,15 @@ function applyWebNoCacheHeaders(res: ServerResponse) {
 }
 
 async function main() {
+  // Two servers on one database wreck each other: the rows are shared, the
+  // agent runtimes are not, so the second boot steals live chats and its turn
+  // ends overwrite the first one's status. Claim the file before anything else.
+  try {
+    await acquireInstanceLock(DB_PATH);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(1);
+  }
   await ensureSchema();
   const app = Fastify({
     logger: true,
@@ -89,9 +101,13 @@ async function main() {
   // Sessions left "running"/"waiting" by the previous process (crash, kill,
   // hung MCP tool call) have no live runtime — unlock them and stop their
   // pending tool calls from spinning forever. Runs after listen so startup
-  // is not blocked by the sweep.
+  // is not blocked by the sweep. The sweep also names the chats that were in
+  // the middle of a turn; they are carried on further down, once the stored
+  // cwds and models are known to be sane.
+  let interrupted: string[] = [];
   try {
     const recovered = await reconcileStaleSessions();
+    interrupted = recovered.interrupted;
     if (recovered.sessions > 0 || recovered.parts > 0) {
       console.log(
         `[sessions] recovered ${recovered.sessions} stale session(s), ` +
@@ -122,6 +138,18 @@ async function main() {
     }
   } catch (err) {
     console.error("[sessions] cwd repair failed", err);
+  }
+
+  // Chats that were mid-turn when the previous process died continue on their
+  // own: the stored agent session is resumed and the agent is asked to pick up
+  // where it stopped (Settings → resumeInterruptedTurns turns this off).
+  try {
+    const continuing = await resumeInterruptedTurns(interrupted);
+    if (continuing.length) {
+      console.log(`[sessions] continuing ${continuing.length} interrupted chat(s)`);
+    }
+  } catch (err) {
+    console.error("[sessions] resume interrupted turns failed", err);
   }
 }
 

@@ -1,0 +1,42 @@
+{
+  "name": "acpio",
+  "private": true,
+  "version": "0.1.0",
+  "versionEpoch": "2026-08-26",
+  "license": "MIT",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "predev": "node scripts/generate-version.mjs",
+    "prebuild": "node scripts/generate-version.mjs",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acpio/server\" \"npm run dev -w @acpio/web\"",
+    "dev:server": "npm run dev -w @acpio/server",
+    "dev:web": "npm run dev -w @acpio/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "npm run build -w @acpio/shared && npm run build -w @acpio/i18n && npm run build -w @acpio/adapter-cursor && npm run build -w @acpio/adapter-omp && npm run build -w @acpio/server && npm run build -w @acpio/web",
+    "postinstall": "node scripts/patch-node-pty.mjs",
+    "prestart": "node scripts/ensure-built.mjs",
+    "start": "npm run start -w @acpio/server",
+    "dist": "node scripts/package-dist.mjs",
+    "db:generate": "npm run db:generate -w @acpio/server",
+    "db:migrate": "npm run db:migrate -w @acpio/server",
+    "db:push": "npm run db:push -w @acpio/server",
+    "screens": "node scripts/capture-screens.mjs"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.4",
+    "concurrently": "^9.1.2",
+    "jsdom": "^28.1.0",
+    "playwright": "^1.49.0",
+    "sharp": "^0.35.3",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -7,6 +7,7 @@ import {
   expandSkillInvocation,
   matchSkillInvocation,
   parseSkillMarkdown,
+  renderSkillsSection,
 } from "./skills.js";
 
 const created: string[] = [];
@@ -37,8 +38,21 @@ describe("parseSkillMarkdown", () => {
     expect(parsed).toEqual({
       name: "commit",
       description: "Выполнить git-коммит",
+      disableModelInvocation: false,
       body: "Do the thing.",
     });
+  });
+
+  it("reads disable-model-invocation off the frontmatter", () => {
+    const flagged = parseSkillMarkdown(
+      "---\nname: commit\ndescription: Make a commit\ndisable-model-invocation: true\n---\nBody.",
+      "folder",
+    );
+    expect(flagged.disableModelInvocation).toBe(true);
+    expect(flagged.description).toBe("Make a commit");
+    expect(parseSkillMarkdown("---\nname: a\ndisable-model-invocation: yes\n---\nb", "f").disableModelInvocation).toBe(true);
+    expect(parseSkillMarkdown("---\nname: a\ndisable-model-invocation: false\n---\nb", "f").disableModelInvocation).toBe(false);
+    expect(parseSkillMarkdown("---\nname: a\n---\nb", "f").disableModelInvocation).toBe(false);
   });
 
   it("falls back to the folder name and keeps the whole text without frontmatter", () => {
@@ -59,8 +73,20 @@ describe("discoverSkills", () => {
     );
     const notes = skill(join(cwd, ".agents", "skills"), "notes", "no frontmatter");
     expect(await discoverSkills([".agents/skills"], cwd)).toEqual([
-      { name: "commit", description: "Make a commit", path: commit },
-      { name: "notes", description: "", path: notes },
+      { name: "commit", description: "Make a commit", disableModelInvocation: false, path: commit },
+      { name: "notes", description: "", disableModelInvocation: false, path: notes },
+    ]);
+  });
+
+  it("carries disable-model-invocation through discovery", async () => {
+    const cwd = tempDir();
+    const commit = skill(
+      join(cwd, ".agents", "skills"),
+      "commit",
+      "---\nname: commit\ndescription: Make a commit\ndisable-model-invocation: true\n---\nbody",
+    );
+    expect(await discoverSkills([".agents/skills"], cwd)).toEqual([
+      { name: "commit", description: "Make a commit", disableModelInvocation: true, path: commit },
     ]);
   });
 
@@ -68,7 +94,7 @@ describe("discoverSkills", () => {
     const global = tempDir();
     const deploy = skill(global, "deploy", "---\ndescription: Ship it\n---\nbody");
     expect(await discoverSkills([global, join(global, "missing")], tempDir())).toEqual([
-      { name: "deploy", description: "Ship it", path: deploy },
+      { name: "deploy", description: "Ship it", disableModelInvocation: false, path: deploy },
     ]);
   });
 
@@ -80,7 +106,7 @@ describe("discoverSkills", () => {
       "---\nname: commit\ndescription: From the home collection\n---\nbody",
     );
     expect(await discoverSkills(["~/.agents/skills"], tempDir(), home)).toEqual([
-      { name: "commit", description: "From the home collection", path: global },
+      { name: "commit", description: "From the home collection", disableModelInvocation: false, path: global },
     ]);
   });
 
@@ -90,7 +116,7 @@ describe("discoverSkills", () => {
     const a = skill(first, "same", "---\nname: same\n---\nfirst");
     skill(second, "same", "---\nname: same\n---\nsecond");
     expect(await discoverSkills([first, second], tempDir())).toEqual([
-      { name: "same", description: "", path: a },
+      { name: "same", description: "", disableModelInvocation: false, path: a },
     ]);
   });
 
@@ -103,8 +129,8 @@ describe("discoverSkills", () => {
 
 describe("matchSkillInvocation", () => {
   const skills = [
-    { name: "commit", description: "", path: "C:/x/commit/SKILL.md" },
-    { name: "notes", description: "", path: "C:/x/notes/SKILL.md" },
+    { name: "commit", description: "", disableModelInvocation: false, path: "C:/x/commit/SKILL.md" },
+    { name: "notes", description: "", disableModelInvocation: false, path: "C:/x/notes/SKILL.md" },
   ];
 
   it("matches /name with and without args, case-insensitively", () => {
@@ -122,7 +148,32 @@ describe("matchSkillInvocation", () => {
   });
 });
 
+describe("renderSkillsSection", () => {
+  it("lists the skills the model may invoke and skips the flagged ones", async () => {
+    const cwd = tempDir();
+    skill(cwd, "commit", "---\nname: commit\ndescription: Make a commit\ndisable-model-invocation: true\n---\nbody");
+    skill(cwd, "notes", "---\nname: notes\ndescription: Take notes\n---\nbody");
+    const section = renderSkillsSection(await discoverSkills([cwd], cwd));
+    expect(section).toContain("- notes: Take notes");
+    expect(section).not.toContain("commit");
+  });
+
+  it("renders nothing when every skill is flagged", async () => {
+    const cwd = tempDir();
+    skill(cwd, "commit", "---\nname: commit\ndisable-model-invocation: true\n---\nbody");
+    expect(renderSkillsSection(await discoverSkills([cwd], cwd))).toBe("");
+  });
+});
+
 describe("expandSkillInvocation", () => {
+  it("still inlines a flagged skill when the user asks for it by name", async () => {
+    const cwd = tempDir();
+    skill(cwd, "commit", "---\nname: commit\ndisable-model-invocation: true\n---\nRun git commit.\n");
+    const skills = await discoverSkills([cwd], cwd);
+    const expanded = await expandSkillInvocation("/commit", skills);
+    expect(expanded).toContain("Run git commit.");
+  });
+
   it("inlines the skill body plus the request", async () => {
     const cwd = tempDir();
     skill(cwd, "commit", "---\nname: commit\n---\nRun git commit.\n");

@@ -6,9 +6,10 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
+  addTaskAttachments,
   createSession,
   deleteSession,
   getSessionCwd,
@@ -56,6 +57,7 @@ import { fetchBuiltinModelCatalog } from "./services/builtinModelCatalog.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import {
   MAX_ATTACH_UPLOAD_BYTES,
+  stageAcpioUpload,
   stageSessionUpload,
 } from "./services/attachmentUpload.js";
 import {
@@ -211,6 +213,7 @@ const settingsSchema = z.object({
         name: z.string().max(120).optional(),
         url: z.string().max(500).optional(),
         apiKey: z.string().max(500).optional(),
+        enabled: z.boolean().optional(),
         models: z
           .array(
             z.object({
@@ -236,16 +239,59 @@ const settingsSchema = z.object({
     )
     .max(50)
     .optional(),
+  builtinMaxOutputTokens: z.number().int().min(0).max(BUILTIN_MAX_OUTPUT_TOKENS_MAX).optional(),
+  builtinTurnRetryAttempts: z
+    .number()
+    .int()
+    .min(BUILTIN_TURN_RETRY_ATTEMPTS_MIN)
+    .max(BUILTIN_TURN_RETRY_ATTEMPTS_MAX)
+    .optional(),
+  builtinThinkingLimit: z
+    .number()
+    .int()
+    .min(0)
+    .max(BUILTIN_THINKING_LIMIT_MAX)
+    .optional(),
+  builtinContextMode: z.enum(["off", "prune", "summary"]).optional(),
+  builtinCompactionThresholdPercent: z
+    .number()
+    .int()
+    .min(BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN)
+    .max(BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX)
+    .optional(),
+  builtinKeepRecentPercent: z
+    .number()
+    .int()
+    .min(BUILTIN_KEEP_RECENT_PERCENT_MIN)
+    .max(BUILTIN_KEEP_RECENT_PERCENT_MAX)
+    .optional(),
+  builtinMaxSummaryTokens: z.number().int().min(0).max(BUILTIN_MAX_SUMMARY_TOKENS_MAX).optional(),
+  builtinPruneToolResultsKeepLast: z
+    .number()
+    .int()
+    .min(0)
+    .max(BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX)
+    .optional(),
+  builtinPruneReasoning: z.enum(["keep", "before-last-message", "drop"]).optional(),
+  builtinRespectReasoningHistory: z.boolean().optional(),
+  builtinOffloadToolResultTokens: z
+    .number()
+    .int()
+    .min(0)
+    .max(BUILTIN_MAX_SUMMARY_TOKENS_MAX)
+    .optional(),
   permissionPolicy: z.enum(["prompt", "allowlist", "always"]).optional(),
   permissionAllowlist: z.array(z.string()).optional(),
   diagnosticsDir: z.string().optional(),
   diagnosticsDeepLogging: z.boolean().optional(),
   exportDir: z.string().optional(),
   resumeAgentContext: z.boolean().optional(),
+  resumeInterruptedTurns: z.boolean().optional(),
   multitask: z.boolean().optional(),
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   boardAddCardStyle: z.enum(["card", "compact", "hidden"]).optional(),
   boardTaskAgentPicker: z.boolean().optional(),
+  boardShowFirstMessage: z.boolean().optional(),
   showBootSplash: z.boolean().optional(),
   fontFamily: z.string().optional(),
   fontSize: z.string().optional(),
@@ -293,6 +339,8 @@ const settingsSchema = z.object({
     })
     .optional(),
   chatSplit: z.boolean().optional(),
+  chatAutoTitle: z.boolean().optional(),
+  chatTitleModel: z.string().max(200).optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
   composerDrafts: z.record(z.string().max(20_000)).optional(),
@@ -333,6 +381,7 @@ const settingsSchema = z.object({
         .optional(),
     })
     .optional(),
+  builtinAllowOutsideCwd: z.boolean().optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only
@@ -515,6 +564,7 @@ export async function registerRoutes(app: FastifyInstance) {
       parameterizedModelPicker: a.parameterizedModelPicker,
       subagentStreaming: a.subagentStreaming,
       cloudCatalog: a.cloudCatalog,
+      midTurnSteering: a.midTurnSteering === true,
       defaultModes: a.defaultModes,
       subagentToolKinds: [...a.subagentToolKinds],
     }));
@@ -1472,7 +1522,9 @@ export async function registerRoutes(app: FastifyInstance) {
     return { blame };
   });
 
-  /** Stage a pasted/uploaded image into the session cwd; returns a path attachment. */
+  /** Stage a pasted/uploaded image; returns a path attachment. A board task's
+   *  pictures land in acpio's own data folder — the task is worked in the
+   *  user's project, and their repository must not collect task screenshots. */
   app.post("/api/sessions/:id/attachments/upload", async (req, reply) => {
     const { id } = req.params as { id: string };
     const detail = await getSessionDetail(id);
@@ -1490,7 +1542,14 @@ export async function registerRoutes(app: FastifyInstance) {
     if (!name) return reply.code(400).send({ error: "Missing file name" });
     const mime = headerValue(req.headers["x-file-mime"]).trim();
     try {
-      const saved = await stageSessionUpload(id, detail.cwd, { name, mime, bytes });
+      const saved = detail.boardId
+        ? await stageAcpioUpload(id, { name, mime, bytes })
+        : await stageSessionUpload(id, detail.cwd, { name, mime, bytes });
+      // A board task keeps the picture on itself: its first turn carries what
+      // the task was created with, however long the card waits in Todo.
+      if (detail.boardId && !detail.startedAt) {
+        await addTaskAttachments(id, [{ name: saved.name, path: saved.path }]);
+      }
       return { name: saved.name, path: saved.path, size: saved.size };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1507,6 +1566,10 @@ export async function registerRoutes(app: FastifyInstance) {
       .object({
         text: z.string().min(1),
         editMessageId: z.string().uuid().optional(),
+        // How to reach an agent that is already working. `queue` (the default,
+        // and what an older client always meant) waits for the whole turn;
+        // `steer` stops it now; `afterStep` folds the text into it.
+        delivery: z.enum(["queue", "steer", "afterStep"]).optional(),
         attachments: z
           .array(
             z.object({
@@ -1531,16 +1594,44 @@ export async function registerRoutes(app: FastifyInstance) {
     }
 
     const defaultTitle = defaultSessionTitle(settings.locale);
+    // A title the system derived itself — the placeholder, the board
+    // description's first line, or this very message — may be rewritten by a
+    // model. A name the user chose may not.
+    const titleIsDefault =
+      detail.title === defaultTitle || detail.title === "Новый чат" || detail.title === "New chat";
+    const descTitle = detail.taskDescription
+      ? titleFromTaskDescription(detail.taskDescription)
+      : "";
+    const titleIsAuto =
+      titleIsDefault || (descTitle !== "" && detail.title === descTitle);
+    // `detail` predates this prompt's own message: an empty list means this is
+    // the first message of the chat, the only place a title may be refined.
+    const firstMessage = detail.messages.length === 0;
+    const aiTitle =
+      settings.chatAutoTitle && titleIsAuto && firstMessage
+        ? titleIsDefault
+          ? titleFromUserText(body.text) || undefined
+          : body.text
+        : undefined;
+    // Pictures the task was created with ride along with its first turn: the
+    // form that uploaded them is long gone by the time the card starts. Once
+    // the task has started, they belong to that first message and are never
+    // attached again — the chat's own attachment flow takes over from there.
+    const taskAttachments = detail.startedAt ? [] : (detail.taskAttachments ?? []);
+    const alreadySent = new Set((body.attachments ?? []).map((a) => a.path));
+    const attachments = [
+      ...(body.attachments ?? []),
+      ...taskAttachments.filter((a) => !alreadySent.has(a.path)),
+    ];
     void runPrompt(id, body.text, {
       provider: detail.provider,
       cwd: detail.cwd,
       mode: detail.mode,
       editMessageId: body.editMessageId,
-      attachments: body.attachments,
-      titleHint:
-        detail.title === defaultTitle || detail.title === "Новый чат" || detail.title === "New chat"
-          ? body.text
-          : undefined,
+      delivery: body.delivery,
+      attachments: attachments.length ? attachments : undefined,
+      titleHint: titleIsDefault ? body.text : undefined,
+      aiTitle,
     }).catch((err) => {
       console.error("prompt failed", err);
     });

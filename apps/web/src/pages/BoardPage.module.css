@@ -461,6 +461,84 @@
   justify-content: flex-end;
 }
 
+/** Pictures picked for the task being written: the attach button, then the
+ *  chips of what it already holds. */
+.composerFiles {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.attachImage {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.attachImage:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+}
+
+/* The picker is driven by the button above; it only has to exist. */
+.imageInput {
+  display: none;
+}
+
+.imageChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 3px 8px 3px 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.imageThumb {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  object-fit: cover;
+}
+
+.imageName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imageRemove {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.imageRemove:hover {
+  color: var(--danger);
+}
+
 .primaryBtn {
   height: 28px;
   padding: 0 10px;
@@ -671,6 +749,21 @@
 .card:hover .cardActions,
 .card:focus-within .cardActions {
   opacity: 1;
+}
+
+/* The model-refined (or hand-renamed) title: the card's headline over the
+   description it no longer duplicates. Hidden until a title earns it. */
+.cardTitle {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 650;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .cardText {

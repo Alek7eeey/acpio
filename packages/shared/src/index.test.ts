@@ -31,6 +31,8 @@ import {
   canonicalCwd,
   toAcpMcpServer,
   boardColumn,
+  healBuiltinProviders,
+  parseBuiltinBody,
 } from "@acpio/shared";
 
 describe("parseModelWire", () => {
@@ -298,7 +300,7 @@ describe("modelParamLabel", () => {
     ["fast_mode", "true", undefined, undefined, "Fast"],
     // effort family
     ["effort", "high", undefined, undefined, "High"],
-    ["effort", "off", undefined, undefined, "None"],
+    ["effort", "off", undefined, undefined, "Off"],
     ["effort", "med", undefined, undefined, "Medium"],
     ["effort", "xhigh", undefined, undefined, "Extra High"],
     ["effort", "extra_high", undefined, undefined, "Extra High"],
@@ -307,7 +309,7 @@ describe("modelParamLabel", () => {
     ["effort", "default", undefined, undefined, "Default"],
     ["effort", "unknown", undefined, undefined, "Unknown"],
     ["effort", "", undefined, undefined, ""],
-    ["reasoning", "off", undefined, undefined, "None"],
+    ["reasoning", "off", undefined, undefined, "Off"],
     // effort value falls back to a labeled name
     ["effort", "huge", "high", undefined, "High"],
     // family inferred from the name for unknown ids
@@ -398,7 +400,7 @@ describe("isGenericToolTitle", () => {
     ["Web Search", false],
     ["grep", false],
     ["Запуск двух сабагентов", false],
-    ["mcp__intermech_grep", false],
+    ["mcp__example_grep", false],
   ])("isGenericToolTitle(%j) -> %s", (title, expected) => {
     expect(isGenericToolTitle(title)).toBe(expected);
   });
@@ -410,11 +412,11 @@ describe("toolDisplayTitle", () => {
     ["Web Search", "web_search", undefined, "Web Search"],
     ["Поиск в интернете", "web_search", undefined, "Поиск в интернете"],
     // generic placeholder falls back to the real tool name
-    ["MCP: tool", "mcp__intermech_grep", undefined, "intermech_grep"],
+    ["MCP: tool", "mcp__example_grep", undefined, "example_grep"],
     ["Tool", "bash", undefined, "bash"],
     ["", "read", undefined, "read"],
     // mcp__ transport prefix is stripped for display
-    ["", "mcp__Intermech_web_search", undefined, "Intermech_web_search"],
+    ["", "mcp__Example_web_search", undefined, "Example_web_search"],
     // nothing left → empty, callers use their own "Tool" label
     ["", "", undefined, ""],
     ["MCP: tool", "MCP: tool", undefined, ""],
@@ -456,12 +458,25 @@ describe("DEFAULT_SETTINGS", () => {
     anthropicApiKey: "",
     openaiApiKey: "",
     builtinProviders: [],
+    builtinMaxOutputTokens: 16_384,
+    builtinTurnRetryAttempts: 5,
+    builtinThinkingLimit: 0,
+    builtinContextMode: "summary",
+    builtinCompactionThresholdPercent: 80,
+    builtinKeepRecentPercent: 20,
+    builtinMaxSummaryTokens: 16_384,
+    builtinPruneToolResultsKeepLast: 3,
+    builtinPruneReasoning: "keep",
+    builtinRespectReasoningHistory: true,
+    builtinExtraInstructions: "",
+    builtinOffloadToolResultTokens: 4_000,
     permissionPolicy: "always",
     permissionAllowlist: [],
     diagnosticsDir: "",
     diagnosticsDeepLogging: false,
     exportDir: "",
     resumeAgentContext: true,
+    resumeInterruptedTurns: true,
     multitask: false,
     sidebarCollapse: "full",
     showBootSplash: true,
@@ -493,9 +508,12 @@ describe("DEFAULT_SETTINGS", () => {
     chatShowMessageTime: false,
     chatAgentTurnTimeline: false,
     chatSplit: true,
+    chatAutoTitle: true,
+    chatTitleModel: "auto",
     chatToolbarStyle: "classic",
     boardAddCardStyle: "card",
     boardTaskAgentPicker: true,
+    boardShowFirstMessage: true,
     chatGitBranchPosition: "below",
     chatChipOptions: {
       folder: { compress: true, truncate: "middle" },
@@ -507,8 +525,9 @@ describe("DEFAULT_SETTINGS", () => {
     mcpServers: [],
     mcpFolderConfigs: {},
     mcpProjectFiles: [".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"],
-    builtinSkillPaths: [".agents/skills"],
+    builtinSkillPaths: [".agents/skills", "~/.agents/skills"],
     builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
+    builtinAllowOutsideCwd: false,
     composerDrafts: {},
   };
 
@@ -871,8 +890,8 @@ describe("normalizeMcpProjectFiles", () => {
 
 describe("normalizeSkillPaths", () => {
   it("falls back to the default folder for a missing setting", () => {
-    expect(normalizeSkillPaths(undefined)).toEqual([".agents/skills"]);
-    expect(normalizeSkillPaths("nope")).toEqual([".agents/skills"]);
+    expect(normalizeSkillPaths(undefined)).toEqual([".agents/skills", "~/.agents/skills"]);
+    expect(normalizeSkillPaths("nope")).toEqual([".agents/skills", "~/.agents/skills"]);
   });
 
   it("keeps an explicitly empty list empty", () => {
@@ -1005,6 +1024,32 @@ describe("parseMcpProjectFile", () => {
     );
     expect(result.warnings).toEqual(['mcp.json: server "gh": sse is sent as http']);
     expect(result.servers[0].type).toBe("remote");
+  });
+});
+
+describe("parseBuiltinBody", () => {
+  it.each([
+    [undefined, null],
+    ["", null],
+    ["   ", null],
+    ["not json", null],
+    ["[1,2]", null],
+    ['"a string"', null],
+    ["42", null],
+    ["null", null],
+    ['{"thinking":{"type":"disabled"}}', { thinking: { type: "disabled" } }],
+    ['{"reasoning_effort":"low"}', { reasoning_effort: "low" }],
+  ])("parseBuiltinBody(%j)", (body, expected) => {
+    expect(parseBuiltinBody(body)).toEqual(expected);
+  });
+
+  it("heal keeps a provider's extra body and drops a blank one", () => {
+    const [kept, dropped] = healBuiltinProviders([
+      { id: "p1", url: "u", body: '  {"thinking":{"type":"disabled"}}  ' },
+      { id: "p2", url: "u", body: "   " },
+    ]);
+    expect(kept.body).toBe('{"thinking":{"type":"disabled"}}');
+    expect(dropped.body).toBeUndefined();
   });
 });
 

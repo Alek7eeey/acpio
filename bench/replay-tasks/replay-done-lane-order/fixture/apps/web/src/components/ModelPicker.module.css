@@ -1,0 +1,827 @@
+.modelPicker {
+  position: relative;
+  flex: 0 1 auto;
+  align-self: center;
+  z-index: 30;
+  overflow: visible;
+  isolation: isolate;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The menu is inside the picker's stacking context (isolation: isolate), so
+   raise the whole picker when open — otherwise the next picker (same z-index,
+   later in DOM) paints over the dropdown. Two classes beat single-class
+   overrides like `.composerModel { z-index: 20 }`, which would otherwise
+   sink the open picker below the composer's floating jump-to-latest button. */
+.modelPickerOpen.modelPicker {
+  z-index: 150;
+}
+
+.block {
+  width: 100%;
+  align-self: stretch;
+}
+
+.modelTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: min(340px, 100%);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  overflow: hidden;
+}
+
+@media (max-width: 700px) {
+  .modelTrigger {
+    max-width: 100%;
+    font-size: 0.82rem;
+    padding: 5px 6px;
+  }
+}
+
+.modelTriggerBlock {
+  width: 100%;
+  max-width: none;
+  justify-content: flex-start;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--settings-control-radius, 12px);
+  padding: var(--settings-control-pad-y, 11px) var(--settings-control-pad-x, 12px);
+  font-weight: var(--settings-control-weight, 500);
+  font-size: var(--settings-control-size, 0.88rem);
+}
+
+.modelTriggerBlock .modelTriggerText {
+  max-width: none;
+  flex: 1;
+  text-align: left;
+  font-size: inherit;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelTriggerBlock .modelChevron {
+  margin-left: auto;
+}
+
+.modelTrigger:hover,
+.modelTriggerOpen {
+  background: color-mix(in srgb, var(--bg-tertiary) 70%, transparent);
+  color: var(--text);
+}
+
+.modelTriggerBlock:hover,
+.modelTriggerBlock.modelTriggerOpen {
+  background: var(--bg);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.modelTriggerDisabled,
+.modelTriggerDisabled:hover,
+.modelTriggerBlock.modelTriggerDisabled,
+.modelTriggerBlock.modelTriggerDisabled:hover {
+  opacity: 0.62;
+  cursor: not-allowed;
+  color: var(--text-secondary);
+  border-color: var(--border);
+  background: var(--bg-secondary);
+}
+
+.modelBot {
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.modelTriggerText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+  font-size: 0.82rem;
+}
+
+.modelTriggerName {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.modelTriggerChips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.paramChip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-tertiary) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.paramChipFast {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+
+.paramChipEffort {
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-secondary) 70%, var(--surface));
+  border-color: var(--border);
+}
+
+/* Context window size — numeric, so keep its digits from jittering. */
+.paramChipContext {
+  font-variant-numeric: tabular-nums;
+}
+
+.triggerParamsSpinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.paramChipLoading {
+  width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.paramChipLoader {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+}
+
+.modelTrigger:hover .modelTriggerName,
+.modelTriggerOpen .modelTriggerName {
+  color: var(--text);
+}
+
+.modelChevron {
+  display: grid;
+  place-items: center;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.quiet {
+  z-index: 25;
+}
+
+.quietTrigger {
+  max-width: 7rem;
+  gap: 3px;
+  padding: 2px 5px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--text-secondary) 78%, transparent);
+  border-radius: 8px;
+}
+
+.quietTrigger:hover,
+.quietTrigger.modelTriggerOpen {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text-secondary);
+}
+
+.quietTriggerName {
+  max-width: 5.2rem;
+  color: inherit;
+}
+
+.quietChevron {
+  opacity: 0.55;
+}
+
+.modelMenu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(320px, calc(100vw - 48px));
+  max-width: calc(100vw - 48px);
+  max-height: min(340px, 50vh);
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  z-index: 100;
+  animation: rise 0.16s ease;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+.modelMenuPortal {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 1100;
+}
+
+.modelMenuDown {
+  bottom: auto;
+  top: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  /* Grow to the longest option; never narrower than the trigger. */
+  width: max-content;
+  min-width: 100%;
+  max-width: min(420px, calc(100vw - 48px));
+  max-height: min(400px, 55vh);
+  animation: drop 0.16s ease;
+}
+
+/* Intrinsic width must come from labels — undo the usual flex shrink clamps.
+   Do NOT set min-width:100% on .modelRowMain: that plus .rowMore overflows
+   and .modelList { overflow-x: hidden } clips the ⋯ button (settings uses
+   placement=down; the chat composer menu is a fixed 320px). */
+.modelMenuDown .modelList,
+.modelMenuDown .modelRow {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.modelMenuDown .modelRowMain,
+.modelMenuDown .modelOption {
+  width: max-content;
+  min-width: 0;
+  max-width: none;
+}
+
+.modelMenuDown .modelRowMain .modelOptionName,
+.modelMenuDown .modelOptionName,
+.modelMenuDown .modelOptionMeta {
+  max-width: none;
+  white-space: nowrap;
+}
+
+.modelList {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modelRow {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  border-radius: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
+.modelRowActive {
+  background: var(--accent-soft);
+}
+
+.modelRowExpanded {
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--bg-secondary));
+}
+
+.modelRowMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 8px 8px 8px 12px;
+  color: var(--text);
+}
+
+/* --bg-secondary equals --surface in the dark theme (the menu backdrop), so a
+   bg-secondary tint painted nothing over it. A text-alpha overlay reads in
+   both themes and, unlike an opaque fill, keeps the selected row's
+   accent-soft tint visible underneath. */
+.modelRowMain:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.modelRowMain .modelOptionName {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.modelOptionProvider {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  text-align: right;
+}
+
+.rowMore {
+  flex: 0 0 34px;
+  flex-shrink: 0;
+  width: 34px;
+  margin: 4px 4px 4px 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.rowMore:hover,
+.rowMoreOpen {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.paramsFlyout {
+  position: fixed;
+  z-index: 1200;
+  padding: 8px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: min(360px, calc(100vh - 24px));
+  box-sizing: border-box;
+  animation: flyIn 0.14s ease;
+}
+
+@keyframes flyIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.paramsPopupTitle {
+  padding: 4px 10px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.paramsEmpty {
+  padding: 10px 12px;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.paramsLoader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 12px;
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+}
+
+.paramsSpinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: paramsSpin 0.7s linear infinite;
+  flex: 0 0 auto;
+}
+
+.rowMoreSpinner {
+  width: 12px;
+  height: 12px;
+}
+
+@keyframes paramsSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.paramSection + .paramSection {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.fastToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  min-height: 40px;
+}
+
+.fastToggleLabel {
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.fastSwitch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.fastSwitchOn {
+  background: var(--accent);
+}
+
+.fastSwitchThumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.22);
+  transition: transform 0.18s ease;
+}
+
+.fastSwitchOn .fastSwitchThumb {
+  transform: translateX(18px);
+}
+
+.paramsHint {
+  padding: 8px 10px 4px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.modelTriggerParams {
+  color: var(--text-secondary);
+  font-weight: 550;
+}
+
+.modelMenuHead {
+  padding: 6px 10px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.modelSearch {
+  position: relative;
+  flex: 0 0 auto;
+  padding: 2px 4px 6px;
+}
+
+.modelSearchIcon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.modelSearchInput {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 7px 28px 7px 32px;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.modelSearchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.modelSearchInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 1px;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.modelSearchClear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.modelSearchClear:hover {
+  color: var(--text);
+  background: var(--bg-tertiary);
+}
+
+.modelSearchClear svg {
+  display: block;
+}
+
+.modelEmpty {
+  padding: 12px 10px;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.modelEmptyLoading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.modelOption {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 12px;
+  padding: 9px 12px;
+  color: var(--text);
+}
+
+/* Hover feedback only for real pointers: on touch :hover sticks after a tap and
+   used to wipe the selected item's accent, making it look unselected.
+   Same trap as .modelRowMain: --bg-secondary equals --surface (the flyout
+   backdrop) in the dark theme, so a bg-secondary fill painted nothing. */
+@media (hover: hover) and (pointer: fine) {
+  .modelOption:hover {
+    background: color-mix(in srgb, var(--text) 7%, transparent);
+  }
+
+  /* The selected row must keep its accent while hovered — losing it on hover
+     made the current effort look like nothing was picked. */
+  .modelOption.modelOptionActive:hover {
+    background: color-mix(in srgb, var(--text) 6%, var(--accent-soft));
+  }
+}
+
+.modelOptionActive {
+  background: var(--accent-soft);
+}
+
+.modelOptionName {
+  font-weight: 400;
+  font-size: 0.84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelOptionMeta {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@container chat-composer (max-width: 900px) {
+  .modelTrigger {
+    max-width: 100%;
+    gap: 4px;
+    padding: 4px 5px;
+  }
+
+  .modelTriggerText {
+    max-width: 96px;
+  }
+
+  .modelTriggerName {
+    max-width: 72px;
+  }
+
+  /* Effort is the reasoning level a turn actually runs at, so it keeps its
+     chip on a narrow composer; the secondary Fast/context chips yield instead. */
+  .paramChipFast,
+  .paramChipContext {
+    display: none;
+  }
+
+  .paramChipLoading {
+    display: inline-flex;
+  }
+}
+
+@container chat-composer (max-width: 520px) {
+  .modelTriggerText {
+    max-width: 72px;
+  }
+
+  .modelTriggerName {
+    max-width: 56px;
+  }
+}
+
+@media (max-width: 899px) {
+  .modelTriggerBlock {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 700px) {
+  .modelTrigger {
+    max-width: min(280px, 72vw);
+  }
+
+  .modelTriggerBlock {
+    max-width: none;
+  }
+
+  .modelTriggerName {
+    max-width: 72px;
+  }
+
+  .modelTriggerText {
+    max-width: 88px;
+  }
+
+  .modelTriggerBlock .modelTriggerText {
+    max-width: none;
+  }
+
+  .paramChip {
+    padding: 0 6px;
+    font-size: 0.64rem;
+  }
+
+  .modelMenu {
+    /* Horizontal placement is applied via JS (fixed + insets). */
+    width: auto;
+    max-width: none;
+    max-height: min(50vh, 420px);
+    z-index: 1100;
+  }
+
+  .modelMenuDown {
+    width: auto;
+    max-height: min(55vh, 460px);
+  }
+}
+
+.sectionHead {
+  padding: 6px 10px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.rowStar {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -1px;
+  color: var(--accent);
+}
+
+.ctxMenu {
+  position: fixed;
+  z-index: 1300;
+  min-width: 170px;
+  padding: 5px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  animation: rise 0.12s ease;
+}
+
+.ctxMenuItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.84rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ctxMenuItem:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}

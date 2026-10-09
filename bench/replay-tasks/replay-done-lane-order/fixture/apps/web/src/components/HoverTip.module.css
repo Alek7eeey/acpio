@@ -1,0 +1,32 @@
+.host {
+  cursor: not-allowed !important;
+}
+
+.hostLabel {
+  cursor: default !important;
+}
+
+.tip {
+  position: fixed;
+  z-index: 200;
+  transform: translate(12px, 14px);
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: var(--shadow-soft);
+  max-width: min(240px, calc(100vw - 24px));
+}
+
+.tipWrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: min(36rem, calc(100vw - 24px));
+  font-weight: 550;
+  line-height: 1.35;
+}

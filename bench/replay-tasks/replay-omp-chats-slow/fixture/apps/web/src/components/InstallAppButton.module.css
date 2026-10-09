@@ -1,0 +1,106 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  flex: 0 0 auto;
+}
+
+.btn {
+  width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  min-width: var(--toolbar-btn-size, 36px);
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0;
+  margin: 0;
+  line-height: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  transform-origin: center bottom;
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn:hover,
+.btnActive {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn:hover .icon {
+    animation: installNudge 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes installNudge {
+  0% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(3px);
+  }
+  55% {
+    transform: translateY(-2px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.menu {
+  position: fixed;
+  z-index: 600;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.menuTitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.menuText {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.menuList,
+.menuListOrdered {
+  margin: 0;
+  padding-left: 1.15em;
+  display: grid;
+  gap: 6px;
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.menuListOrdered {
+  padding-left: 1.25em;
+}

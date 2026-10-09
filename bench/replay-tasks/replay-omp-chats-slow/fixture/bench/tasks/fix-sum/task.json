@@ -1,0 +1,6 @@
+{
+  "id": "fix-sum",
+  "title": "Fix an off-by-one in one file",
+  "prompt": "In calc.mjs the exported add(a, b) returns a wrong result. Make the exported function correct so that `node test.mjs` passes. Run the test to verify before answering.",
+  "timeoutMs": 240000
+}

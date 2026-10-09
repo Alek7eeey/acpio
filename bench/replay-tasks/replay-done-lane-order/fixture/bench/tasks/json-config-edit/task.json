@@ -1,0 +1,6 @@
+{
+  "id": "json-config-edit",
+  "title": "Edit two nested JSON values and add one key",
+  "prompt": "In config.json make exactly three changes: set app.server.port to 9000, set logging.targets.file.maxSizeMb to 25, and add app.server.gzip set to true; leave every other part of the file byte-for-byte unchanged and confirm the file still parses with node before answering.",
+  "timeoutMs": 240000
+}

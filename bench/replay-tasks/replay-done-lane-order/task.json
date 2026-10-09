@@ -1,0 +1,7 @@
+{
+  "id": "replay-done-lane-order",
+  "title": "Replay: order the board's Done lane by completion time (session 1790604367, gold a6e8e22)",
+  "prompt": "задачи в столбце done пусть сортируются по тому когда они были завершены, то есть недавно завершенные выше. Внеси изменения в код.",
+  "timeoutMs": 1200000,
+  "horizon": "m"
+}

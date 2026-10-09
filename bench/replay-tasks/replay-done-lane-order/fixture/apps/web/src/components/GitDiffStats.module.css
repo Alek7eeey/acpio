@@ -1,0 +1,17 @@
+.stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.add {
+  color: #22c55e;
+}
+
+.del {
+  color: #ef4444;
+}

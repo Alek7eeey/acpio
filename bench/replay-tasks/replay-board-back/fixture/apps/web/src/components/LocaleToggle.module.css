@@ -1,0 +1,205 @@
+.wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: var(--toolbar-btn-size, 36px);
+  height: var(--toolbar-btn-size, 36px);
+  flex: 0 0 auto;
+  max-width: none;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+/* Trigger becomes the toolCluster flex item so it lines up with icon buttons. */
+.wrapCompact {
+  display: contents;
+}
+
+.trigger {
+  height: var(--toolbar-btn-size, 36px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  box-shadow: none;
+  line-height: 1;
+  box-sizing: border-box;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.trigger:hover,
+.triggerOpen {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--text);
+  box-shadow: none;
+}
+
+.triggerCompact {
+  width: var(--toolbar-btn-size, 36px) !important;
+  min-width: var(--toolbar-btn-size, 36px) !important;
+  height: var(--toolbar-btn-size, 36px) !important;
+  min-height: var(--toolbar-btn-size, 36px) !important;
+  justify-content: center;
+  align-items: center;
+  padding: 0 !important;
+  gap: 0;
+  line-height: 1 !important;
+}
+
+.triggerCompact .triggerLabel {
+  display: none;
+}
+
+.compactCode {
+  font-family:
+    ui-monospace,
+    "Cascadia Mono",
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: lowercase;
+  transform: translateY(0);
+  transition:
+    color 160ms ease,
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .trigger:hover .flagWrap {
+    animation: flagWave 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .triggerCompact:hover .compactCode {
+    color: var(--accent);
+    transform: translateY(-1px) scale(1.08);
+  }
+}
+
+.flagWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  line-height: 0;
+}
+
+.triggerLabel {
+  /* Figtree has little Cyrillic — use a dual-script stack so RU/EN match. */
+  font-family:
+    system-ui,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+}
+
+@media (max-width: 899px) {
+  .triggerLabel {
+    display: none;
+  }
+
+  .triggerCompact {
+    width: var(--toolbar-btn-size, 36px) !important;
+    min-width: var(--toolbar-btn-size, 36px) !important;
+    padding: 0 !important;
+    gap: 0;
+  }
+}
+
+@keyframes flagWave {
+  0% {
+    transform: rotate(0deg) translateY(0);
+  }
+  25% {
+    transform: rotate(-10deg) translateY(-1px);
+  }
+  55% {
+    transform: rotate(8deg) translateY(1px);
+  }
+  100% {
+    transform: rotate(0deg) translateY(0);
+  }
+}
+
+.chevron {
+  opacity: 0.72;
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.triggerOpen .chevron {
+  transform: rotate(180deg);
+}
+
+.menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 600;
+  min-width: 148px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 2px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.84rem;
+}
+
+.option:hover,
+.optionActive {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+}
+
+.optionLabel {
+  font-family:
+    system-ui,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}

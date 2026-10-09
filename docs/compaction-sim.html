@@ -1,0 +1,754 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Симуляция сжатия контекста — встроенный агент</title>
+<style>
+  :root {
+    --bg:#0f1216; --panel:#161b22; --panel2:#1c232c; --line:#2a3340;
+    --text:#d7dee8; --dim:#8b97a7; --accent:#3d8bfd;
+    --user:#1d3a5c; --assistant:#1b2430; --tool:#141a22;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding:14px 22px 10px; border-bottom:1px solid var(--line); }
+  h1 { margin:0 0 4px; font-size:18px; }
+  header p { margin:0; color:var(--dim); font-size:13px; max-width:1200px; }
+  .wrap { display:grid; grid-template-columns:390px 1fr; gap:16px; padding:14px 22px 30px; align-items:start; }
+  @media (max-width:1100px) { .wrap { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:13px; margin-bottom:14px; }
+  .panel h2 { margin:0 0 9px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+  label.field { display:block; margin-bottom:9px; font-size:13px; }
+  label.field span { display:flex; justify-content:space-between; gap:8px; color:var(--dim); margin-bottom:3px; }
+  label.field b { color:var(--text); }
+  input[type="number"], select { width:100%; background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:5px 7px; font:inherit; }
+  input[type="range"] { width:100%; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+  button { background:var(--panel2); color:var(--text); border:1px solid var(--line); border-radius:7px; padding:7px 11px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.ghost { background:transparent; }
+  button:disabled { opacity:.4; cursor:default; }
+  .checks { display:flex; gap:14px; flex-wrap:wrap; font-size:13px; color:var(--dim); margin-bottom:8px; }
+  .checks label { display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(112px,1fr)); gap:7px; margin-bottom:12px; }
+  .card { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:7px 9px; }
+  .card .k { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.03em; }
+  .card .v { font-size:16px; font-weight:600; margin-top:1px; }
+  .card.warn .v { color:#f0a44a; }
+  .card.good .v { color:#4ec27f; }
+  .strip { display:flex; height:44px; border-radius:8px; overflow:hidden; border:1px solid var(--line); background:#0b0e12; }
+  .seg { min-width:2px; }
+  .seg.system { background:#4a5568; }
+  .seg.digest { background:#4b7ad1; }
+  .seg.cached { background:#1f6f43; }
+  .seg.lost { background:#8a4a12; }
+  .seg.fresh { background:#2b4a6f; }
+  .seg.note.cached { background:repeating-linear-gradient(45deg,#2f7a4d,#2f7a4d 3px,#245c3b 3px,#245c3b 6px); }
+  .seg.note.lost, .seg.note.fresh { background:repeating-linear-gradient(45deg,#46596e,#46596e 3px,#33414f 3px,#33414f 6px); }
+  .legend { margin:8px 0 0; display:flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--dim); }
+  .swatch { display:inline-block; width:11px; height:11px; border-radius:3px; vertical-align:-1px; margin-right:5px; }
+  .explain { background:var(--panel2); border-left:3px solid var(--accent); border-radius:6px; padding:9px 11px; margin-bottom:12px; font-size:13px; }
+  .explain b { color:#fff; }
+  .hint { color:var(--dim); font-size:12px; margin:8px 0 0; }
+  /* ——— журнал ——— */
+  .log { display:flex; flex-direction:column; gap:8px; max-height:40vh; overflow:auto; font-size:13px; }
+  .entry { border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:var(--panel2); }
+  .entry .head { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; }
+  .entry .head strong { font-size:13px; }
+  .entry .head .meta { color:var(--dim); font-size:12px; }
+  .tags { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .tag { font-size:11px; padding:2px 7px; border-radius:20px; border:1px solid var(--line); color:var(--dim); }
+  .tag.archive { border-color:#3f6b52; color:#7fd0a3; }
+  .tag.summary { border-color:#5c48a8; color:#b9a6f5; }
+  .tag.refuse { border-color:#8a5a12; color:#f0a44a; }
+  .tag.miss { border-color:#8a4a12; color:#f0a44a; }
+  .tag.hit { border-color:#2f6b47; color:#7fd0a3; }
+  .entry ul { margin:6px 0 0 16px; padding:0; color:var(--dim); font-size:12px; }
+  /* ——— чат ——— */
+  .chat { display:flex; flex-direction:column; gap:8px; max-height:66vh; overflow:auto; padding-right:4px; }
+  .msg { display:flex; flex-direction:column; gap:4px; }
+  .msg .who { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.03em; }
+  .bubble { border:1px solid var(--line); border-radius:9px; padding:7px 10px; background:var(--assistant); }
+  .msg.user .bubble { background:var(--user); }
+  .msg.user { align-items:flex-end; }
+  .msg.tool .bubble, .msg.call .bubble { background:var(--tool); font-family:Consolas, "Cascadia Mono", monospace; font-size:12.5px; }
+  .msg.call .bubble { border-left:3px solid #5a6b80; }
+  .msg.tool .bubble { border-left:3px solid #3f6b52; }
+  .msg.digest .bubble { border-left:3px solid #6b46c1; background:#1a1630; }
+  .msg.answer .bubble { background:#182028; }
+  .msg.gone .bubble { opacity:.45; }
+  .tagline { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .badge { font-size:11px; padding:1px 7px; border-radius:20px; border:1px solid var(--line); color:var(--dim); }
+  .badge.plain { border-color:#2f6b47; color:#7fd0a3; }
+  .badge.citation { border-color:#3f6b52; color:#7fd0a3; }
+  .badge.note { border-color:#8a5a12; color:#f0a44a; }
+  .badge.digest { border-color:#5c48a8; color:#b9a6f5; }
+  .mono { font-family:Consolas, "Cascadia Mono", monospace; font-size:12px; color:#c3ccd8; white-space:pre-wrap; word-break:break-word; }
+  .dimtext { color:var(--dim); }
+  .empty { color:var(--dim); font-size:13px; padding:10px 0; }
+  table.items { width:100%; border-collapse:collapse; margin-top:6px; font-size:12px; }
+  table.items td { padding:2px 6px; border-top:1px solid var(--line); }
+  table.items td.n { text-align:right; color:var(--text); white-space:nowrap; }
+  details.items { margin-top:8px; font-size:12px; color:var(--dim); }
+  details.items summary { cursor:pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Симуляция сжатия контекста — встроенный агент</h1>
+  <p>Слева — что уходит модели и во что обходится кэш. Справа — сама переписка: вызовы инструментов, их результаты, ответы модели и момент, когда старая часть хода превращается в конспект.</p>
+  <p>История не выдумана: это наша же работа над компакцией — те же вопросы, файлы и команды, 16 ходов. Дальше они повторяются по кругу, чтобы прогон можно было продолжать.</p>
+</header>
+
+<div class="wrap">
+  <div>
+    <div class="panel">
+      <h2>Настройки</h2>
+      <label class="field"><span>Окно модели, токенов</span>
+        <input id="cfgWindow" type="number" min="20000" step="10000" />
+      </label>
+      <label class="field"><span>Начинать сжимать после заполнения <b id="vTrigger"></b></span>
+        <input id="cfgTrigger" type="range" min="10" max="95" step="1" />
+      </label>
+      <label class="field"><span>Сколько последнего оставлять дословно <b id="vKeep"></b></span>
+        <input id="cfgKeep" type="range" min="10" max="90" step="1" />
+      </label>
+      <label class="field"><span>В архив ответы больше, токенов</span>
+        <input id="cfgOffload" type="number" min="0" step="500" />
+      </label>
+      <label class="field"><span>Забывать чтения старше N сообщений</span>
+        <input id="cfgKeepLast" type="number" min="0" max="50" step="1" />
+      </label>
+      <label class="field"><span>Что делать с длинной перепиской</span>
+        <select id="cfgMode">
+          <option value="summary">Конспект</option>
+          <option value="prune">Обрезка</option>
+          <option value="off">Выкл</option>
+        </select>
+      </label>
+      <div class="checks">
+        <label><input id="cfgArchive" type="checkbox" /> архив ответов</label>
+        <label><input id="cfgNotes" type="checkbox" /> записки вместо чтений</label>
+        <label><input id="cfgRaw" type="checkbox" /> показывать чат так, как он уходит модели</label>
+      </div>
+      <p class="hint">Смена настроек начинает симуляцию заново.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Что уходит модели</h2>
+      <div class="cards" id="cards"></div>
+      <div class="explain" id="explain">Нажми «Ещё ход» справа.</div>
+      <div class="strip" id="strip"></div>
+      <div class="legend">
+        <span><i class="swatch" style="background:#4a5568"></i>инструкция</span>
+        <span><i class="swatch" style="background:#4b7ad1"></i>конспект</span>
+        <span><i class="swatch" style="background:#1f6f43"></i>из кэша</span>
+        <span><i class="swatch" style="background:#8a4a12"></i>пересчёт</span>
+        <span><i class="swatch" style="background:#2b4a6f"></i>новое</span>
+        <span><i class="swatch" style="background:#33414f"></i>записка</span>
+      </div>
+      <p class="hint">Ширина куска — корень из размера, иначе мелочь рядом с большим ответом не видна.</p>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <div class="row" style="margin-top:0">
+        <button id="btnBack">‹ ход назад</button>
+        <button id="btnFwd">ход вперёд ›</button>
+        <button class="primary" id="btnStep">Ещё ход</button>
+        <button id="btn5">+5 ходов</button>
+        <button id="btnUntil">До пересказа</button>
+        <button id="btnCompact">/compact</button>
+        <button class="ghost" id="btnReset">Сброс</button>
+        <span class="hint" id="posInfo" style="margin:0 0 0 auto"></span>
+      </div>
+      <p class="hint">«ход назад» возвращает чат и запрос к тому, что было раньше — видно, что именно изменилось.</p>
+    </div>
+    <div class="panel">
+      <h2>Переписка</h2>
+      <div class="chat" id="chat"></div>
+    </div>
+    <div class="panel">
+      <h2>Журнал ходов (свежие сверху)</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+<script>
+/* ===== CORE (pure: no DOM, runnable in node for checks) ===== */
+var DEFAULTS = {
+  window: 80000, trigger: 80, keepRecent: 20, offloadTokens: 4000,
+  keepLast: 3, maxSummary: 16384, mode: "summary", archive: true, notes: true, seed: 16,
+};
+var SYSTEM_TOKENS = 900, CITATION_TOKENS = 140, NOTE_TOKENS = 30;
+
+/* Настоящая история: та же работа с компакцией, что мы делали в этом чате.
+   Каждый ход — как в жизни: запрос, мысль, вызов инструмента, результат, ответ. */
+var SCRIPT = [
+  { ask: "Почему /compact отказывается сжимать, когда контекст ещё ниже порога?",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/agent.ts" }, thought: "Смотрю ручной проход.", tokens: 5200,
+        preview: ["// packages/adapter-builtin/src/agent.ts", "const thresholdPercent = opts.force !== undefined ? 1 : settings.builtinCompactionThresholdPercent;", "private async compactNow(selection, focus) {", "  await this.promptHistory({ contextWindow, force: focus, manual: true });", "  if (after <= before) { текст «сжимать нечего» }", "}"] },
+      { tool: "grep", input: { pattern: "keepBudgetRatio" }, thought: "Ищу, где считался размер хвоста.", tokens: 700,
+        preview: ["src/loop.ts:296: const keepBudgetRatio = Math.min(ratioFromPercent(...), threshold - 0.05);", "src/loop.ts:297: const keepBudget = contextWindow * keepBudgetRatio;", "src/loop.ts:307: if (!cut) return pruned();"] }
+    ],
+    answer: "Порог запуска и бюджет хвоста считались из одного числа: при /compact бюджет уходил в минус, точка реза не находилась, и проход ничего не сворачивал." },
+  { ask: "Поправь, чтобы работало и ниже порога.",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/loop.ts" }, thought: "Правлю расчёт.", tokens: 3400,
+        preview: ["// packages/adapter-builtin/src/loop.ts", "const line = contextWindow * (opts.thresholdPercent / 100);", "const tailBudget = contextWindow * ((opts.keepRecentPercent ?? 60) / 100);", "if (cut <= covered) return { messages: pruneFallback(), ...keepState };", "if (estimateTokens(view) > fit) return { messages: pruneFallback() };"] },
+      { tool: "bash", input: { command: "npx vitest run packages/adapter-builtin/src/loop.test.ts -t compact" }, thought: "Гоняю тесты по этому месту.", tokens: 1900,
+        preview: ["$ npx vitest run packages/adapter-builtin/src/loop.test.ts -t compact", "✓ fires at a lowered line but still has to land under the configured one", "Test Files  1 passed (1)", "      Tests  7 passed | 22 skipped (29)", "Duration  271ms"] }
+    ],
+    answer: "Развёл два числа: порог срабатывания и линию, под которую обязан улечься результат. Тесты по компакции зелёные." },
+  { ask: "Что при этом происходит с кэшем провайдера?",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/agent.ts" }, thought: "Смотрю, что уходит наверх.", tokens: 5200,
+        preview: ["// packages/adapter-builtin/src/agent.ts", "const view = skipMask ? offloaded : maskToolResults(offloaded, keepLast, settings.builtinPruneReasoning);", "this.compaction = result.state;", "this.advanceMaskBoundary(keepLastConfigured);", "this.emitCompaction({ manual, coveredBefore, coveredAfter, tokensBefore, tokensAfter, summary });"] },
+      { tool: "read", input: { path: "packages/adapter-builtin/src/loop.test.ts" }, thought: "Сверюсь с тестами.", tokens: 2400,
+        preview: ["// packages/adapter-builtin/src/loop.test.ts", "it('fires at a lowered line but still has to land under the configured one', async () => {", "  const forced = await compactHistory({ messages, contextWindow: 1000, thresholdPercent: 1, fitPercent: 80, summarize });", "  expect(forced.state?.covered).toBeGreaterThan(0);"] }
+    ],
+    answer: "Начало запроса правят два места: сам пересказ и записки, которые двигаются вместе с ним. Между проходами префикс стабилен, и провайдер отдаёт его из кэша." },
+  { ask: "Прогони тесты целиком и покажи лог.",
+    steps: [
+      { tool: "bash", input: { command: "npm test" }, thought: "Запускаю весь прогон.", tokens: 29000,
+        preview: ["$ npm test", "✓ packages/adapter-builtin/src/loop.test.ts (29 tests)", "✓ apps/server/test/routes.test.ts (58 tests)", "... ещё ~900 строк вывода ...", "Tests  105 passed (105)", "Duration  42.1s"] },
+      { tool: "read", input: { path: "packages/adapter-builtin/src/offload.ts" }, thought: "Заодно посмотрю архив ответов.", tokens: 2600,
+        preview: ["// packages/adapter-builtin/src/offload.ts", "export function offloadToolResults(messages, store, minTokens) {", "  if (!(minTokens > 0)) return messages;", "  const id = offloadId(part.toolName, part.toolCallId);", "  return { ...part, output: { type: 'text', value: offloadCitation(record, file) } };"] }
+    ],
+    answer: "105 тестов, все зелёные. Лог большой: в промпт он не уходит целиком, вместо него остаётся ссылка на файл в архиве чата." },
+  { ask: "А записки вместо старых чтений когда встают?",
+    steps: [
+      { tool: "grep", input: { pattern: "advanceMaskBoundary" }, thought: "Ищу, кто двигает границу.", tokens: 1100,
+        preview: ["src/agent.ts:637: this.advanceMaskBoundary(keepLastConfigured);", "src/agent.ts:660: private advanceMaskBoundary(keepLastConfigured: number): void {", "src/agent.ts:662:   this.maskUpTo = Math.max(this.maskUpTo, Math.max(0, this.messages.length - keepLastConfigured));", "src/agent.ts:584: this.advanceMaskBoundary(keepLastConfigured); // режим «Обрезка»"] },
+      { tool: "read", input: { path: "packages/adapter-builtin/src/agent.ts" }, thought: "Читаю этот участок целиком.", tokens: 5200,
+        preview: ["// packages/adapter-builtin/src/agent.ts", "const keepLast = Math.max(0, offloaded.length - this.maskUpTo);", "const view = skipMask ? offloaded : maskToolResults(offloaded, keepLast, ...);", "// Граница записок меняется только вместе с проходом: иначе префикс переписывался бы каждый ход."] }
+    ],
+    answer: "Граница записок двигается только вместе с удачным пересказом — пометки уходят уже на этом ходу, а до первого пересказа их нет вообще." },
+  { ask: "Собери страницу-симуляцию, чтобы это увидеть.",
+    steps: [
+      { tool: "bash", input: { command: "ls docs" }, tokens: 200,
+        preview: ["$ ls docs", "adapters-ru.md  usage-ru.md  screens", "status-2026-10-05-2.md"] },
+      { tool: "read", input: { path: "docs/usage-ru.md" }, thought: "Посмотрю стиль описаний.", tokens: 3600,
+        preview: ["# Acpio — как пользоваться", "## Чат", "- **Субагенты** — task-запросы с прогрессом, ростером и вложенным thinking.", "- **Поле ввода** — вложения, выбор модели и режима на чат, Стоп для отмены хода."] }
+    ],
+    answer: "Собрал одностраничник docs/compaction-sim.html: настройки слева, полоска запроса, лента и журнал ходов." },
+  { ask: "В ленте пустые поля — разберись.",
+    steps: [
+      { tool: "read", input: { path: "docs/compaction-sim.html" }, thought: "Смотрю генератор содержимого.", tokens: 4200,
+        preview: ["// docs/compaction-sim.html", "function rand(st) {", "  x ^= x >>> 15;", "  return x / 4294967296;   // ← оставляет знак", "}", "function pick(st, arr) { return arr[Math.floor(rand(st) * arr.length) % arr.length]; }"] },
+      { tool: "grep", input: { pattern: "Math.floor(rand" }, tokens: 600,
+        preview: ["docs/compaction-sim.html:199: return arr[Math.floor(rand(st) * arr.length) % arr.length];", "docs/compaction-sim.html:250: var n = 4 + Math.floor(rand(st) * 4);"] }
+    ],
+    answer: "Нашёл: последний XOR оставлял знак, число изредка выходило отрицательным, индекс уходил в минус — поле становилось undefined." },
+  { ask: "Давай на реальной истории чата, а не на случайной.",
+    steps: [
+      { tool: "read", input: { path: "docs/compaction-sim.html" }, thought: "Переделываю генератор ходов.", tokens: 4200,
+        preview: ["// docs/compaction-sim.html", "function growTurn(st) {", "  var t = SCRIPT[(st.turn - 1) % SCRIPT.length];", "  pushMessage(st, { role: 'user', kind: 'user', text: t.ask });", "}"] },
+      { tool: "read", input: { path: "packages/adapter-builtin/src/store.ts" }, thought: "Сверюсь, как хранится история.", tokens: 1100,
+        preview: ["// packages/adapter-builtin/src/store.ts", "export function saveBuiltinSession(dir, sessionId, data) {", "  writeFileSync(file, JSON.stringify({ version: 1, ...data }));", "}"] }
+    ],
+    answer: "Переписал: ходы теперь прописаны руками — по нашей же работе с компакцией, без случайности." },
+  { ask: "Покажи, что уходит модели на этом ходу.",
+    steps: [
+      { tool: "bash", input: { command: "node scripts/check.mjs" }, thought: "Считаю размер запроса.", tokens: 1700,
+        preview: ["$ node scripts/check.mjs", "80 turns: 5 passes, no request over the window", "  pass turns: [15, 29, 42, 57, 70]", "prune mode: cache lost on 38 of 40 turns"] }
+    ],
+    answer: "Сейчас около 45k из 80k: до линии есть запас, поэтому ничего не сжимается." },
+  { ask: "А когда случится пересказ?",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/loop.ts" }, thought: "Прикидываю по коду.", tokens: 3400,
+        preview: ["// packages/adapter-builtin/src/loop.ts", "const line = contextWindow * (opts.thresholdPercent / 100);", "if (!(contextWindow > 0) || estimateTokens(messages) <= line) return { messages, ...keepState };", "// проход стартует ровно на 80% окна"] }
+    ],
+    answer: "Как только запрос перевалит 64k. По симуляции это случится на 14-м ходу — можно нажать «До пересказа»." },
+  { ask: "Покажи конспект, который получится.",
+    steps: [
+      { tool: "read", input: { path: "apps/server/src/acp/sessionManager.ts" }, thought: "Смотрю, как строка попадает в ленту.", tokens: 3100,
+        preview: ["// apps/server/src/acp/sessionManager.ts", "if (update.kind === 'compaction') {", "  await appendPart(rt.sessionId, messageId, 'compaction', {", "    manual, coveredBefore, coveredAfter, tokensBefore, tokensAfter, summary,", "  });", "}"] }
+    ],
+    answer: "Конспект — это один вызов модели; в ленте он появится строкой «Контекст сжат» с раскрывающимся текстом." },
+  { ask: "Проверь, что после пересказа ничего не теряется.",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/agent.test.ts" }, thought: "Смотрю, что проверяют тесты агента.", tokens: 2600,
+        preview: ["// packages/adapter-builtin/src/agent.test.ts", "it('marks a `/compact` pass as manual and answers with the row alone', async () => {", "  expect(row?.manual).toBe(true);", "  expect(textChunks(frames)).toEqual([]);"] },
+      { tool: "read", input: { path: "packages/shared/src/appSettingsMerge.ts" }, thought: "Сверюсь с границами настроек.", tokens: 3200,
+        preview: ["// packages/shared/src/appSettingsMerge.ts", "settings.builtinKeepRecentPercent = Math.max(BUILTIN_KEEP_RECENT_PERCENT_MIN, Math.min(", "  settings.builtinKeepRecentPercent, settings.builtinCompactionThresholdPercent - 10));", "// хвост всегда минимум на 10 пунктов ниже порога"] }
+    ],
+    answer: "История в файле сессии остаётся целой: сжимается только то, что уходит модели, — поэтому в ленте всё видно по-прежнему." },
+  { ask: "Обнови документацию по настройкам контекста.",
+    steps: [
+      { tool: "read", input: { path: "packages/shared/src/index.ts" }, thought: "Смотрю значения по умолчанию.", tokens: 4400,
+        preview: ["// packages/shared/src/index.ts", "builtinContextMode: 'summary',", "builtinCompactionThresholdPercent: 80,", "builtinKeepRecentPercent: 20,", "builtinPruneToolResultsKeepLast: 3,", "builtinOffloadToolResultTokens: 4000,"] }
+    ],
+    answer: "Дописал в README раздел про настройки контекста: порог, хвост, архив больших ответов и записки вместо старых чтений." },
+  { ask: "Прогони сборку и проверь страницу после правок.",
+    steps: [
+      { tool: "bash", input: { command: "npm run build" }, thought: "Собираю после правок.", tokens: 2100,
+        preview: ["$ npm run build", "✓ @acpio/shared  tsc", "✓ @acpio/adapter-builtin  tsc", "✓ @acpio/server  tsc", "✓ @acpio/web  vite build in 12.4s"] },
+      { tool: "read", input: { path: "docs/compaction-sim.html" }, thought: "Проверяю историю ходов.", tokens: 4200,
+        preview: ["// docs/compaction-sim.html", "var SCRIPT = [", "  { ask: 'Почему /compact отказывается сжимать...',", "    steps: [ { tool: 'read', input: { path: 'packages/adapter-builtin/src/agent.ts' }, tokens: 5200 } ] },", "];"] }
+    ],
+    answer: "Сборка прошла. Страница теперь идёт по настоящей истории: те же вопросы и те же вызовы инструментов." },
+  { ask: "Что видно в симуляции после пересказа?",
+    steps: [
+      { tool: "bash", input: { command: "git diff --stat" }, thought: "Смотрю объём правок.", tokens: 900,
+        preview: ["$ git diff --stat", " docs/compaction-sim.html           | 480 ++++++++++", " packages/adapter-builtin/src/loop.ts | 305 ++++++---", " 11 files changed, 1556 insertions(+), 203 deletions(-)"] },
+      { tool: "read", input: { path: "packages/adapter-builtin/src/loop.ts" }, thought: "Сверюсь с проходом.", tokens: 3400,
+        preview: ["// packages/adapter-builtin/src/agent.ts", "var moved = advanceMask(st);", "items = buildItems(st);", "// граница и запрос двигаются вместе: пометки уходят этим же ходом"] }
+    ],
+    answer: "Видно два места, где запрос переписывается: сам пересказ (вместе с ним встают записки) и смена режима. Всё остальное время префикс стабилен." },
+  { ask: "Оставь в симуляции только то, что важно для понимания.",
+    steps: [
+      { tool: "read", input: { path: "packages/adapter-builtin/src/loop.test.ts" }, thought: "Проверю, что тесты на месте.", tokens: 2400,
+        preview: ["// packages/adapter-builtin/src/loop.test.ts", "describe('compactMessages', () => {", "  it('does not summarise while the history fits', ...)", "  it('falls back to pruning when the summariser fails', ...)"] },
+      { tool: "bash", input: { command: "npx vitest run -t compact" }, thought: "Прогоняю тесты ещё раз.", tokens: 1900,
+        preview: ["$ npx vitest run -t compact", "Test Files  1 passed (1)", "      Tests  7 passed | 22 skipped (29)", "Duration  271ms"] }
+    ],
+    answer: "Оставил четыре вещи: порог, дословный хвост, архив больших ответов и записки вместо старых чтений. Остальное — в обычных Настройках." },
+];
+
+function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+function fmt(n) {
+  n = Math.round(n);
+  if (n < 1000) return String(n);
+  var v = (n / 1000).toFixed(n >= 10000 ? 0 : 1);
+  if (v.slice(-2) === ".0") v = v.slice(0, -2);
+  return v + "k";
+}
+function sumTokens(items) { var s = 0; for (var i = 0; i < items.length; i++) s += items[i].tokens; return s; }
+function pct(part, whole) { return whole > 0 ? Math.round((part / whole) * 100) : 0; }
+
+function newState(cfgIn) {
+  var cfg = {}, k;
+  for (k in DEFAULTS) cfg[k] = DEFAULTS[k];
+  if (cfgIn) for (k in cfgIn) if (cfgIn[k] !== undefined && cfgIn[k] !== null) cfg[k] = cfgIn[k];
+  return {
+    cfg: cfg, rand: 0, messages: [], maskUpTo: 0, compaction: null, passes: [],
+    turn: 0, nextId: 1, prevItems: [], log: [], answerCalls: 0, summaryCalls: 0,
+  };
+}
+
+function pushMessage(st, m) { m.id = st.nextId++; st.messages.push(m); return m; }
+function msgLabel(m) {
+  if (m.kind === "user") return "сообщение пользователя";
+  if (m.kind === "call") return "вызов " + m.tool;
+  if (m.kind === "text") return "ответ модели";
+  return "результат " + m.tool;
+}
+function inputLine(tool, input) {
+  if (!input) return "";
+  if (input.path) return "read " + input.path;
+  if (input.pattern) return "grep " + input.pattern;
+  if (input.command) return "bash " + input.command;
+  return tool;
+}
+/* Размер текста в токенах — тем же счётом chars/4, что и в настоящем коде. */
+function tokensOf(text) { return Math.max(20, Math.round(20 + String(text || "").length / 4)); }
+
+/* Один ход: просьба, мысль, вызов инструмента, его ответ, ответ модели — всё из SCRIPT. */
+function growTurn(st) {
+  st.turn++;
+  var turn = SCRIPT[(st.turn - 1) % SCRIPT.length];
+  pushMessage(st, { role: "user", kind: "user", tokens: tokensOf(turn.ask), text: turn.ask });
+  for (var s = 0; s < turn.steps.length; s++) {
+    var step = turn.steps[s];
+    pushMessage(st, { role: "assistant", kind: "call", tool: step.tool, input: step.input,
+      tokens: tokensOf(step.thought) + 30, text: step.thought || "" });
+    pushMessage(st, { role: "tool", kind: "result", tool: step.tool, input: step.input,
+      tokens: step.tokens, preview: step.preview });
+  }
+  pushMessage(st, { role: "assistant", kind: "text", tokens: tokensOf(turn.answer), text: turn.answer });
+}
+function isArchivable(m) { return m.kind === "result" && m.tool !== "read"; }
+function isMaskable(m) { return m.kind === "result" && (m.tool === "read" || m.tool === "grep"); }
+
+/* Уровень 0: объёмный ответ становится ссылкой на файл. */
+function applyArchive(st, events) {
+  if (!st.cfg.archive || !(st.cfg.offloadTokens > 0)) return;
+  for (var i = 0; i < st.messages.length; i++) {
+    var m = st.messages[i];
+    if (!isArchivable(m) || m.archived) continue;
+    if (m.tokens < st.cfg.offloadTokens) continue;
+    m.archived = true; m.citationTokens = CITATION_TOKENS; m.citationPath = "archive/" + m.id + "-" + m.tool + ".txt";
+    events.push({ tag: "архив", text: msgLabel(m) + " на " + fmt(m.tokens) + " токенов → файл " + m.citationPath + ", " + fmt(CITATION_TOKENS) + " токенов в запросе" });
+  }
+}
+function citationText(m) {
+  return "[offloaded file=" + m.citationPath + " tool=" + m.tool + " ~" + fmt(m.tokens) + " tokens] начать: " + (m.preview && m.preview[0] ? m.preview[0] : "") + " … полный текст в файле: перечитай инструментом read";
+}
+function noteText(m) { return "[stale result elided — ~" + fmt(m.tokens) + " tokens; вызови " + m.tool + " заново, если нужен текущий текст]"; }
+
+/* Уровень 1: результаты read/grep старше границы становятся короткими пометками. */
+function isNoted(st, index) {
+  return st.cfg.notes && st.cfg.keepLast > 0 && index < st.maskUpTo && isMaskable(st.messages[index]);
+}
+function tokenOf(st, index) {
+  var m = st.messages[index];
+  if (m.archived) return m.citationTokens;
+  if (isNoted(st, index)) return NOTE_TOKENS;
+  return m.tokens;
+}
+function tailSum(st, from) { var s = 0; for (var i = from; i < st.messages.length; i++) s += tokenOf(st, i); return s; }
+
+function itemFor(st, i) {
+  var m = st.messages[i], noted = isNoted(st, i), tokens = tokenOf(st, i);
+  var kind = noted ? "note" : (m.archived ? "citation" : m.kind);
+  var label = noted ? "записка вместо " + msgLabel(m) : (m.archived ? "ссылка на файл (" + m.tool + ")" : msgLabel(m));
+  var mode = m.archived ? "cite" : (noted ? "note" : "full");
+  return { key: m.id + ":" + mode + ":" + tokens, kind: kind, tokens: tokens, label: label };
+}
+function buildItems(st, from) {
+  var covered = st.compaction ? st.compaction.covered : 0;
+  var items = [{ key: "system", kind: "system", tokens: SYSTEM_TOKENS, label: "системная инструкция" }];
+  if (covered > 0 && from === undefined) {
+    items.push({ key: "digest@" + covered + "/" + st.compaction.digestTokens, kind: "digest", tokens: st.compaction.digestTokens, label: "конспект ходов 1–" + covered });
+  }
+  var start = from === undefined ? Math.min(covered, st.messages.length) : from;
+  for (var i = start; i < st.messages.length; i++) items.push(itemFor(st, i));
+  return items;
+}
+function pruneItems(st, budget) {
+  var covered = st.compaction ? st.compaction.covered : 0;
+  var start = st.messages.length;
+  for (var i = Math.max(1, covered); i < st.messages.length; i++) {
+    if (st.messages[i].role !== "user") continue;
+    if (tailSum(st, i) <= budget) { start = i; break; }
+  }
+  return buildItems(st, start);
+}
+
+/* Что провайдер берёт из прошлого запроса: самый длинный одинаковый префикс. */
+function cacheStats(prev, items) {
+  var i = 0, cached = 0;
+  while (i < prev.length && i < items.length && prev[i].key === items[i].key) { cached += items[i].tokens; i++; }
+  var lost = 0;
+  for (var j = i; j < prev.length; j++) lost += items[j] ? items[j].tokens : 0;
+  var fresh = 0;
+  for (var k = Math.max(i, prev.length); k < items.length; k++) fresh += items[k].tokens;
+  return { cached: cached, lost: lost, fresh: fresh, firstChanged: i, prevLen: prev.length, hadPrev: prev.length > 0 };
+}
+function countNotes(list) {
+  var n = 0;
+  for (var i = 0; i < list.length; i++) if (String(list[i].key).indexOf(":note:") > 0) n++;
+  return n;
+}
+function advanceMask(st) {
+  if (!(st.cfg.keepLast > 0)) return false;
+  var next = Math.max(0, st.messages.length - st.cfg.keepLast);
+  if (next <= st.maskUpTo) return false;
+  st.maskUpTo = next;
+  return true;
+}
+function plural(n, one, few, many) {
+  var m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+/* Конспект собирается из тех самых ходов, которые он заменяет, — без выдумок. */
+function digestText(st, from, to) {
+  var asks = [], touched = [], lastAnswer = "";
+  for (var i = from; i < to; i++) {
+    var m = st.messages[i];
+    if (m.kind === "user" && m.text && asks.indexOf(m.text) < 0) asks.push(m.text);
+    if (m.kind === "call" && m.input) {
+      var line = inputLine(m.tool, m.input);
+      if (touched.indexOf(line) < 0) touched.push(line);
+    }
+    if (m.kind === "text" && m.text) lastAnswer = m.text;
+  }
+  var head = asks.slice(0, 3).join(" · ");
+  if (asks.length > 3) head += " · и ещё " + (asks.length - 3) + " " + plural(asks.length - 3, "просьба", "просьбы", "просьб");
+  var work = touched.slice(0, 4).join(", ");
+  if (touched.length > 4) work += " и ещё " + (touched.length - 4);
+  return [
+    "Задача: " + (head || "работа по проекту"),
+    "Сделано: " + (work || "просмотр кода"),
+    "В работе: " + (asks[asks.length - 1] || "текущая задача"),
+    "Важное: " + (lastAnswer || "решений не зафиксировано"),
+  ].join(" · ");
+}
+
+function step(st, opts) {
+  opts = opts || {};
+  var forced = !!opts.forced, cfg = st.cfg, events = [], i;
+  if (!forced) { growTurn(st); st.answerCalls++; }
+  applyArchive(st, events);
+
+  var items = buildItems(st);
+  var total = sumTokens(items);
+  var line = cfg.window * (forced ? 1 : cfg.trigger) / 100;
+  var pass = { kind: "fits" };
+
+  if (cfg.mode === "off" && !forced) {
+    pass = { kind: "off" };
+  } else if (cfg.mode === "prune" && !forced) {
+    if (advanceMask(st)) events.push({ tag: "записки", text: "граница записок сдвинута (режим «Обрезка»): всё старше последних " + cfg.keepLast + " сообщений" });
+    items = pruneItems(st, line);
+    pass = { kind: "prune", before: total, after: sumTokens(items) };
+    events.push({ tag: "обрезка", text: "старые ходы выброшены без пересказа: " + fmt(total) + " → " + fmt(pass.after) + " токенов, вызовов модели нет" });
+  } else if (total <= line) {
+    pass = { kind: "fits", total: total, line: line };
+  } else {
+    var covered = st.compaction ? st.compaction.covered : 0;
+    var tailBudget = cfg.window * cfg.keepRecent / 100;
+    var cut = 0;
+    for (i = Math.max(1, covered); i < st.messages.length; i++) {
+      if (st.messages[i].role !== "user") continue;
+      if (tailSum(st, i) <= tailBudget) { cut = i; break; }
+    }
+    if (cut <= covered) {
+      items = pruneItems(st, line);
+      pass = { kind: "nothing", total: total };
+      events.push({ tag: "отказ", text: "резать нечего: конспект уже покрывает всё, что стоило бы свернуть" });
+    } else {
+      st.summaryCalls++;
+      var delta = tailSum(st, covered) - tailSum(st, cut);
+      var digestTokens = clamp(Math.round(delta * 0.08), 200, cfg.maxSummary);
+      var viewTokens = digestTokens + tailSum(st, cut);
+      var fit = cfg.window * cfg.trigger / 100;
+      events.push({ tag: "пересказ", text: "вызов модели: пересказ ходов " + (covered + 1) + "–" + cut + " (" + fmt(delta) + " токенов на входе) → конспект в " + fmt(digestTokens) });
+      if (viewTokens > fit) {
+        items = pruneItems(st, line);
+        pass = { kind: "retold", total: total, viewTokens: viewTokens, fit: fit };
+        events.push({ tag: "отказ", text: "получилось " + fmt(viewTokens) + " токенов — выше линии " + fmt(fit) + ": конспект выброшен, старые ходы отрезаны" });
+      } else {
+        st.compaction = { covered: cut, digestTokens: digestTokens };
+        /* Граница записок двигается вместе с конспектом, и уходящий запрос
+           пересобирается тут же: пометки попадают в него сразу, а не в
+           следующий ход — иначе хвост пересчитывался бы дважды. */
+        var moved = advanceMask(st);
+        items = buildItems(st);
+        var sent = sumTokens(items);
+        st.passes.push({ turn: st.turn, covered: cut, before: total, after: sent, digestTokens: digestTokens, text: digestText(st, 0, cut), manual: forced });
+        pass = { kind: "pass", manual: forced, total: total, viewTokens: sent, cut: cut, delta: delta, digestTokens: digestTokens, movedMask: moved };
+        events.push({ tag: "пересказ", text: "запрос: " + fmt(total) + " → " + fmt(sent) + " токенов (линия " + fmt(line) + ")" });
+        if (moved) events.push({ tag: "записки", text: "граница записок сдвинута вместе с конспектом: всё старше последних " + cfg.keepLast + " сообщений уходит записками уже на этом ходу" });
+      }
+    }
+  }
+
+  var notesNow = countNotes(items), notesPrev = countNotes(st.prevItems);
+  if (notesNow > notesPrev) {
+    events.push({ tag: "записки", text: "записки применились: " + (notesNow - notesPrev) + " старых чтений превратились в короткие пометки" });
+  }
+  var stats = cacheStats(st.prevItems, items);
+  st.prevItems = items.map(function (it) { return { key: it.key, tokens: it.tokens }; });
+  var entry = { turn: st.turn, forced: forced, events: events, items: items, stats: stats, total: sumTokens(items), totalBefore: total, pass: pass, line: line };
+  st.log.unshift(entry);
+  return entry;
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.SimCore = { DEFAULTS: DEFAULTS, newState: newState, step: step, fmt: fmt, sumTokens: sumTokens, pct: pct, cacheStats: cacheStats };
+}
+/* ===== END CORE ===== */
+/* ---- UI ---- */
+function el(id) { return document.getElementById(id); }
+function clone(x) { return JSON.parse(JSON.stringify(x)); }
+var frames = [], cursor = 0;
+function cur() { return frames[cursor]; }
+function readCfg() {
+  return {
+    window: Math.max(20000, Number(el("cfgWindow").value) || DEFAULTS.window),
+    trigger: Number(el("cfgTrigger").value),
+    keepRecent: Number(el("cfgKeep").value),
+    offloadTokens: Math.max(0, Number(el("cfgOffload").value) || 0),
+    keepLast: Math.max(0, Number(el("cfgKeepLast").value) || 0),
+    mode: el("cfgMode").value,
+    archive: el("cfgArchive").checked,
+    notes: el("cfgNotes").checked,
+  };
+}
+function paintCfg(cfg) {
+  el("cfgWindow").value = cfg.window;
+  el("cfgTrigger").value = cfg.trigger;
+  el("cfgKeep").value = cfg.keepRecent;
+  el("cfgOffload").value = cfg.offloadTokens;
+  el("cfgKeepLast").value = cfg.keepLast;
+  el("cfgMode").value = cfg.mode;
+  el("cfgArchive").checked = cfg.archive;
+  el("cfgNotes").checked = cfg.notes;
+  el("vTrigger").textContent = cfg.trigger + "% = " + fmt(cfg.window * cfg.trigger / 100) + " токенов";
+  el("vKeep").textContent = cfg.keepRecent + "% = " + fmt(cfg.window * cfg.keepRecent / 100) + " токенов";
+}
+function reset() {
+  frames = [{ state: SimCore.newState(readCfg()), entry: null }];
+  cursor = 0;
+  render();
+}
+function card(k, v, cls) {
+  return '<div class="card ' + (cls || "") + '"><div class="k">' + k + '</div><div class="v">' + v + '</div></div>';
+}
+function renderCards() {
+  var st = cur().state, e = cur().entry;
+  var total = e ? e.total : 0;
+  var s = e ? e.stats : { cached: 0, lost: 0, fresh: 0, prevLen: 0, hadPrev: false };
+  var covered = st.compaction ? st.compaction.covered : 0;
+  var html = "";
+  html += card("ход", st.turn);
+  html += card("сообщений", st.messages.length);
+  html += card("в запросе", fmt(total) + " <small>" + pct(total, st.cfg.window) + "% окна</small>", total > st.cfg.window ? "warn" : "");
+  html += card("линия", fmt(st.cfg.window * st.cfg.trigger / 100));
+  html += card("конспект", covered ? "ходы 1-" + covered : "нет");
+  html += card("граница записок", st.maskUpTo ? "до #" + st.maskUpTo : "нет");
+  html += card("вызовы модели", st.answerCalls + " ответ / " + st.summaryCalls + " пересказ");
+  html += card("из кэша", fmt(s.cached), s.cached > 0 ? "good" : "");
+  html += card("потеряно", fmt(s.lost), s.lost > 0 ? "warn" : "");
+  html += card("новое", fmt(s.fresh));
+  el("cards").innerHTML = html;
+}
+function renderStrip() {
+  var e = cur().entry;
+  if (!e) { el("strip").innerHTML = ""; return; }
+  var s = e.stats, out = "";
+  for (var i = 0; i < e.items.length; i++) {
+    var it = e.items[i];
+    var cached = i < s.firstChanged;
+    var cls;
+    if (it.kind === "system") cls = "system";
+    else if (it.kind === "digest") cls = cached ? "digest" : "lost";
+    else cls = (cached ? "cached" : (i < s.prevLen ? "lost" : "fresh")) + (it.kind === "note" ? " note" : "");
+    out += '<div class="seg ' + cls + '" style="flex:' + Math.sqrt(it.tokens) + ' 1 0" title="' + it.label + ' — ' + fmt(it.tokens) + ' токенов"></div>';
+  }
+  el("strip").innerHTML = out;
+}
+function badgeFor(st, i, m) {
+  var covered = st.compaction ? st.compaction.covered : 0;
+  if (i < covered) return { cls: "digest", text: "в конспекте — в запрос не идёт" };
+  if (m.archived) return { cls: "citation", text: "в запросе ссылка на файл" };
+  if (isNoted(st, i)) return { cls: "note", text: "в запросе записка «устарело»" };
+  return { cls: "plain", text: "уходит целиком" };
+}
+function bubble(text) { return '<div class="bubble">' + text + '</div>'; }
+function chatBlock(st, i, m, raw) {
+  var b = badgeFor(st, i, m);
+  var who = m.kind === "user" ? "ты" : (m.kind === "result" ? "инструмент" : "агент");
+  var cls = "msg " + (m.kind === "user" ? "user" : m.kind === "result" ? "tool" : m.kind === "text" ? "answer" : "call");
+  var body;
+  if (m.kind === "user" || m.kind === "text") {
+    body = bubble(m.text || "");
+  } else if (m.kind === "call") {
+    body = bubble((m.text ? '<div class="dimtext">' + m.text + '</div>' : "") + '<div class="mono">⚙ ' + inputLine(m.tool, m.input) + '</div>');
+  } else {
+    var text;
+    if (raw && m.archived) text = citationText(m);
+    else if (raw && isNoted(st, i)) text = noteText(m);
+    else text = (m.preview || []).join('<br>');
+    body = bubble('<div class="mono">' + text + '</div><div class="dimtext" style="margin-top:4px">~' + fmt(m.tokens) + ' токенов</div>');
+  }
+  var gone = (st.compaction && i < st.compaction.covered) ? " gone" : "";
+  return '<div class="' + cls + gone + '"><div class="who">' + who + '</div>' + body +
+    '<div class="tagline"><span class="badge ' + b.cls + '">' + b.text + '</span></div></div>';
+}
+function digestBlock(p) {
+  return '<div class="msg digest"><div class="who">система</div><div class="bubble">' +
+    '<div><b>⚙ вызов модели: пересказ ходов 1–' + p.covered + '</b></div>' +
+    '<div class="dimtext">запрос ' + fmt(p.before) + ' → ' + fmt(p.after) + ' токенов, конспект ' + fmt(p.digestTokens) + (p.manual ? ' · вызвано вручную' : '') + '</div>' +
+    '<details><summary>показать конспект</summary><div class="mono" style="margin-top:6px">' + p.text + '</div></details>' +
+    '<div class="badge digest" style="margin-top:6px">дальше вместо этих ходов идёт конспект</div></div></div>';
+}
+function renderChat() {
+  var st = cur().state, raw = el("cfgRaw").checked, out = "", i, j;
+  if (!st.messages.length) { el("chat").innerHTML = '<div class="empty">Пока пусто. Нажми «Ещё ход».</div>'; return; }
+  var passes = (st.passes || []).slice().sort(function (a, b) { return a.covered - b.covered; });
+  for (i = 0; i < st.messages.length; i++) {
+    for (j = 0; j < passes.length; j++) if (passes[j].covered === i) out += digestBlock(passes[j]);
+    out += chatBlock(st, i, st.messages[i], raw);
+  }
+  for (j = 0; j < passes.length; j++) if (passes[j].covered >= st.messages.length) out += digestBlock(passes[j]);
+  var chat = el("chat");
+  chat.innerHTML = out;
+  chat.scrollTop = chat.scrollHeight;
+}
+function explain() {
+  var e = cur().entry;
+  if (!e) return "Нажми «Ещё ход» — симуляция начнёт добавлять работу агента и смотреть, влезает ли запрос.";
+  var p = e.pass, s = e.stats, out = [];
+  if (e.forced) out.push("<b>Ручной /compact.</b> ");
+  if (p.kind === "fits") out.push("Запрос " + fmt(e.total) + " токенов — ниже линии " + fmt(e.line) + ". Ни пересказа, ни вызова модели: отвечаем как есть.");
+  if (p.kind === "off") out.push("Режим «Выкл»: размером запроса не занимаемся. Сейчас " + fmt(e.total) + " токенов — однажды провайдер его отклонит.");
+  if (p.kind === "prune") out.push("Режим «Обрезка»: старые ходы выброшены, " + fmt(p.before) + " → " + fmt(p.after) + " токенов. Вызовов модели нет, но граница записок едет каждый ход — и кэш теряется тоже каждый ход.");
+  if (p.kind === "pass") out.push("<b>Пересказ.</b> Запрос " + fmt(p.total) + " выше линии " + fmt(e.line) + ". Модель пересказала ходы 1–" + p.cut + " в конспект на " + fmt(p.digestTokens) + " токенов; запрос стал " + fmt(p.viewTokens) + "." + (p.movedMask ? " Граница записок сдвинута вместе с конспектом — пометки уже в этом запросе." : ""));
+  if (p.kind === "retold") out.push("Пересказ не ужал: " + fmt(p.viewTokens) + " токенов выше линии " + fmt(p.fit) + " — конспект выброшен, ходы отрезаны.");
+  if (p.kind === "nothing") out.push("Резать нечего: конспект уже покрывает всё, что стоило бы свернуть, а хвост остаётся дословно по настройке. Так /compact отвечает, когда нового не появилось.");
+  if (!s.hadPrev) out.push("Первый запрос: кэшу взяться неоткуда.");
+  else if (s.lost > 0) out.push("<b>Кэш потерян на " + fmt(s.lost) + " токенов</b>: запрос изменился в середине, и всё оттуда провайдер считает заново (оранжевое на полоске).");
+  else out.push("<b>Кэш цел.</b> Пересчитывается только новое — " + fmt(s.fresh) + " токенов, остальное провайдер взял готовым.");
+  return out.join(" ");
+}
+function renderLog() {
+  var st = cur().state, out = "";
+  for (var i = 0; i < st.log.length; i++) {
+    var e = st.log[i], tags = "", list = "", rows = "", j;
+    for (j = 0; j < e.events.length; j++) {
+      var t = e.events[j].tag, cls = t === "архив" ? "archive" : (t === "пересказ" ? "summary" : t === "отказ" ? "refuse" : "");
+      tags += '<span class="tag ' + cls + '">' + t + '</span>';
+      list += "<li>" + e.events[j].text + "</li>";
+    }
+    if (e.stats.hadPrev) {
+      tags += '<span class="tag ' + (e.stats.lost > 0 ? "miss" : "hit") + '">' + (e.stats.lost > 0 ? "кэш потерян: " + fmt(e.stats.lost) : "кэш цел") + '</span>';
+    }
+    for (j = 0; j < e.items.length; j++) {
+      var it = e.items[j];
+      var where = j < e.stats.firstChanged ? "кэш" : (j < e.stats.prevLen ? "пересчёт" : "новое");
+      rows += "<tr><td>" + it.label + '</td><td>' + where + '</td><td class="n">' + fmt(it.tokens) + "</td></tr>";
+    }
+    out += '<div class="entry"><div class="head"><strong>' + (e.forced ? "/compact" : "Ход " + e.turn) +
+      '</strong><span class="meta">запрос ' + fmt(e.total) + ' токенов' + (e.total !== e.totalBefore ? " (было " + fmt(e.totalBefore) + ")" : "") + ' · линия ' + fmt(e.line) + '</span></div>' +
+      '<div class="tags">' + tags + '</div>' + (list ? "<ul>" + list + "</ul>" : "") +
+      '<details class="items"><summary>что было в запросе (' + e.items.length + ' кусков)</summary><table class="items">' + rows + "</table></details></div>";
+  }
+  el("log").innerHTML = out;
+}
+
+function render() {
+  paintCfg(cur().state.cfg);
+  renderCards();
+  renderStrip();
+  el("explain").innerHTML = explain();
+  renderChat();
+  renderLog();
+  el("posInfo").textContent = "шаг " + cursor + " из " + (frames.length - 1) + " · всего ходов " + cur().state.turn;
+  el("btnBack").disabled = cursor === 0;
+  el("btnFwd").disabled = cursor >= frames.length - 1;
+}
+
+function forward(opts) {
+  if (frames.length > cursor + 1) frames = frames.slice(0, cursor + 1);
+  if (!opts && cursor < frames.length - 1) { cursor++; render(); return; }
+  var st = clone(frames[cursor].state);
+  var entry = SimCore.step(st, opts || {});
+  frames.push({ state: clone(st), entry: entry });
+  cursor = frames.length - 1;
+  render();
+}
+function back() { if (cursor > 0) { cursor--; render(); } }
+
+el("btnStep").onclick = function () { forward({}); };
+el("btn5").onclick = function () { for (var i = 0; i < 5; i++) forward({}); };
+el("btnUntil").onclick = function () {
+  for (var i = 0; i < 400; i++) {
+    forward({});
+    var p = cur().entry.pass;
+    if (p.kind === "pass" || p.kind === "retold") break;
+  }
+};
+el("btnCompact").onclick = function () { forward({ forced: true }); };
+el("btnBack").onclick = back;
+el("btnFwd").onclick = function () { if (cursor < frames.length - 1) { cursor++; render(); } };
+el("btnReset").onclick = reset;
+el("cfgRaw").onchange = render;
+["cfgWindow", "cfgTrigger", "cfgKeep", "cfgOffload", "cfgKeepLast", "cfgMode", "cfgArchive", "cfgNotes"].forEach(function (id) {
+  el(id).oninput = reset;
+  el(id).onchange = reset;
+});
+paintCfg(SimCore.DEFAULTS);
+reset();
+</script>
+</body>
+</html>
