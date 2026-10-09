@@ -9,7 +9,7 @@ import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
-import { pickCreateProvider } from "../lib/harness";
+import { harnessLabel, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore } from "../lib/store";
@@ -786,6 +786,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         <div className={styles.cardTop}>
           <span className={styles.chip} title={task.cwd}>
             {folderLabel(task.cwd, task.cwd)}
+          </span>
+          {/* Who the task is done with, right next to where it runs: the same
+              label the chat tree's row badge wears. */}
+          <span
+            className={`${styles.agentBadge}${
+              agentAvailability[task.provider] === false ? ` ${styles.agentBadgeOff}` : ""
+            }`}
+            title={harnessLabel(task.provider, adapters)}
+          >
+            {harnessLabel(task.provider, adapters)}
           </span>
           <span className={styles.cardSpacer} />
           <span className={styles.cardActions}>

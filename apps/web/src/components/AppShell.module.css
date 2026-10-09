@@ -367,6 +367,36 @@
 }
 
 /**
+ * The agent a board task's chat runs on, beside the title: the outlined pill
+ * the board's card and the chat tree's rows wear, so the agent a task was
+ * handed to is read the same way wherever it is met. The context pill aligns
+ * folder and title on the baseline, so the badge centres itself instead.
+ */
+.headerChatAgent {
+  flex: 0 0 auto;
+  align-self: center;
+  margin-left: 0.6em;
+  min-width: 0;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+/* An agent that is not available right now reads as such without a tooltip. */
+.headerChatAgentOff {
+  opacity: 0.55;
+}
+
+/**
  * The open board's name in the header pill doubles as its rename control: a
  * board draws no title row of its own, so the pill is the only place the name
  * is changed from inside the board. Chrome-free on purpose — it has to read as

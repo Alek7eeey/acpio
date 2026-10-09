@@ -632,6 +632,31 @@
   padding: 1px 6px;
 }
 
+/* The agent a task is done with, beside the folder chip: the outlined pill the
+   chat tree's rows wear, kept quiet so the folder name stays the louder one,
+   and clamped so a long agent name never pushes the chip out. */
+.agentBadge {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+/* An agent that is not available right now reads as such without a tooltip. */
+.agentBadgeOff {
+  opacity: 0.55;
+}
+
 .cardSpacer {
   flex: 1;
 }

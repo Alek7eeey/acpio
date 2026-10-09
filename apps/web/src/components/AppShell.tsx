@@ -243,6 +243,17 @@ export function AppShell() {
   const activeRailBoardId = openBoard?.id ?? headerBoard?.id ?? null;
   /** The owning board is a way back, so it only exists while off the board. */
   const backToBoard = isChat && headerBoard ? headerBoard : null;
+  /**
+   * The agent a board task's chat runs on. The card wears that badge on the
+   * board, so the chat it opens into has to say it too — otherwise the agent
+   * a task was handed to disappears the moment the task is opened.
+   */
+  const headerChatProvider = backToBoard ? (headerSession?.provider ?? null) : null;
+  const headerChatAgent = headerChatProvider ? harnessLabel(headerChatProvider, adapters) : "";
+  /** The task's agent is out of reach right now — the badge says so, quietly. */
+  const headerChatAgentOff = Boolean(
+    headerChatProvider && agentAvailability[headerChatProvider] === false,
+  );
   // The board is a workspace of its own: its sidebar carries the board rows and
   // the chat tree, so it stays visible there too.
   const treeRoute = isChat || isBoard;
@@ -1712,6 +1723,16 @@ export function AppShell() {
                   </>
                 ) : null}
                 <span className={styles.headerChatTitle}>{headerTitle}</span>
+                {headerChatAgent ? (
+                  <span
+                    className={`${styles.headerChatAgent}${
+                      headerChatAgentOff ? ` ${styles.headerChatAgentOff}` : ""
+                    }`}
+                    title={headerChatAgent}
+                  >
+                    {headerChatAgent}
+                  </span>
+                ) : null}
               </HoverTip>
               <div className={styles.headerSpacerMobile} aria-hidden />
             </>
