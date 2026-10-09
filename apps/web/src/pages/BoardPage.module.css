@@ -504,7 +504,7 @@
 /* Creation form: "start immediately" reads as a switch — label left, track
    right — and owns its own line, because a 264px board column has no room to
    squeeze the label between the track and Cancel/Create. The track/knob are
-   shared with the agent menu's copy of the same switch. */
+   shared with the folder menu's switch. */
 .autoStart {
   flex: 0 0 100%;
   display: inline-flex;
@@ -773,12 +773,6 @@
    it is invisible against the menu; --bg-tertiary differs in both themes. */
 .menuItem:hover {
   background: var(--bg-tertiary);
-}
-
-/* Mode row above the agent entries: decides what picking one does. */
-.menuToggle {
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--border);
 }
 
 .menuToggleOn,

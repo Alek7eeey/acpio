@@ -120,8 +120,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [creating, setCreating] = useState(false);
   /** Creation form: send the description as the first message on create. */
   const createAutoStart = useBoardAutoStart("create");
-  /** Agent menu, per run: start at once (on) vs open the chat to review (off). */
-  const menuAutoStart = useBoardAutoStart("menu");
   const [agentMenu, setAgentMenu] = useState<{ task: SessionDto; x: number; y: number } | null>(
     null,
   );
@@ -554,7 +552,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (dy > Math.max(64, el.offsetHeight / 3)) setRailOpen(false);
   };
 
+  /**
+   * Right-click on the card's play icon: run the task with an agent other than
+   * the one it was created for. The new-task form has an agent picker of its
+   * own (settings), and with it on the agent was already picked when the task
+   * was created — then the arrow has no second choice to offer, and the press
+   * falls through to the card's menu like it does on the card's other icons.
+   */
   const openAgentMenu = (e: React.MouseEvent, task: SessionDto) => {
+    if (taskAgentPicker) return;
     e.preventDefault();
     e.stopPropagation();
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -1413,20 +1419,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             role="menu"
           >
             <div className={styles.menuHead}>{t("chat.boardStartOther")}</div>
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={menuAutoStart}
-              className={`${styles.menuItem} ${styles.menuToggle} ${
-                menuAutoStart ? `${styles.menuToggleOn} ${styles.switchOn}` : ""
-              }`}
-              onClick={() => toggleBoardAutoStart("menu")}
-            >
-              {t("chat.boardAutoStart")}
-              <span className={`${styles.switchTrack} ${styles.switchTrackEnd}`} aria-hidden>
-                <span className={styles.switchKnob} />
-              </span>
-            </button>
+            {/* The arrow that opened this menu is the start button itself, so
+                the agent picked here is a start, not a question to re-ask. */}
             {adapters.map((adapter) => (
               <button
                 key={adapter.id}
@@ -1436,8 +1430,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 onClick={() => {
                   const task = agentMenu.task;
                   setAgentMenu(null);
-                  const run = menuAutoStart ? startTask : openTask;
-                  void run(task, adapter.id);
+                  void startTask(task, adapter.id);
                 }}
               >
                 <span
