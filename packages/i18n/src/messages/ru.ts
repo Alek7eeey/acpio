@@ -327,7 +327,7 @@ export const ru = {
     boardEditTask: "Редактировать задачу",
     boardNextPrompt: "Следующий промпт",
     boardNextPromptPlaceholder: "Введите следующий промпт…",
-    boardAttachImage: "Приложить картинку",
+    boardAttachFile: "Приложить файл",
     boardStart: "Начать работу",
     boardStartOther: "Запустить с другим агентом",
     boardAutoStart: "Запускать сразу",

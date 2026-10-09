@@ -307,7 +307,7 @@ export const en = {
     boardEditTask: "Edit task",
     boardNextPrompt: "Next prompt",
     boardNextPromptPlaceholder: "Type the next prompt…",
-    boardAttachImage: "Attach an image",
+    boardAttachFile: "Attach a file",
     boardStart: "Start work",
     boardStartOther: "Start with another agent",
     boardAutoStart: "Start immediately",

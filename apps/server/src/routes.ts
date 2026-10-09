@@ -1522,9 +1522,9 @@ export async function registerRoutes(app: FastifyInstance) {
     return { blame };
   });
 
-  /** Stage a pasted/uploaded image; returns a path attachment. A board task's
-   *  pictures land in acpio's own data folder — the task is worked in the
-   *  user's project, and their repository must not collect task screenshots. */
+  /** Stage a pasted/uploaded file; returns a path attachment. A board task's
+   *  files land in acpio's own data folder — the task is worked in the user's
+   *  project, and their repository must not collect the task's attachments. */
   app.post("/api/sessions/:id/attachments/upload", async (req, reply) => {
     const { id } = req.params as { id: string };
     const detail = await getSessionDetail(id);
@@ -1545,7 +1545,7 @@ export async function registerRoutes(app: FastifyInstance) {
       const saved = detail.boardId
         ? await stageAcpioUpload(id, { name, mime, bytes })
         : await stageSessionUpload(id, detail.cwd, { name, mime, bytes });
-      // A board task keeps the picture on itself: its first turn carries what
+      // A board task keeps the file on itself: its first turn carries what
       // the task was created with, however long the card waits in Todo.
       if (detail.boardId && !detail.startedAt) {
         await addTaskAttachments(id, [{ name: saved.name, path: saved.path }]);

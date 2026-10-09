@@ -6,9 +6,9 @@ import { DATA_DIR } from "../db/client.js";
 export const ATTACH_DIR = ".acpio-attachments";
 
 /**
- * Acpio's own attachment root, beside the DB. Pictures attached to a board
- * task live here: the task is worked in the user's project folder, and a
- * screenshot that belongs to the card must not appear in their repository.
+ * Acpio's own attachment root, beside the DB. Files attached to a board task
+ * live here: the task is worked in the user's project folder, and an
+ * attachment that belongs to the card must not appear in their repository.
  */
 export const ACPIO_ATTACHMENTS_DIR = path.join(DATA_DIR, "attachments");
 
@@ -80,9 +80,9 @@ async function stageUpload(
 }
 
 /**
- * Write a pasted/uploaded image into the session cwd and return a path-based
+ * Write a pasted/uploaded file into the session cwd and return a path-based
  * attachment the existing prompt flow can consume. Regular chats keep their
- * pictures next to the code the agent reads.
+ * files next to the code the agent reads.
  */
 export async function stageSessionUpload(
   sessionId: string,
@@ -93,9 +93,9 @@ export async function stageSessionUpload(
 }
 
 /**
- * Write a pasted/uploaded image into acpio's own data folder instead of the
- * session cwd — the scope board tasks use, so their pictures never land in
- * the project the task is worked in. The attachment is still a plain absolute
+ * Write a pasted/uploaded file into acpio's own data folder instead of the
+ * session cwd — the scope board tasks use, so their files never land in the
+ * project the task is worked in. The attachment is still a plain absolute
  * path, which the prompt flow reads in place like any other server file.
  */
 export async function stageAcpioUpload(

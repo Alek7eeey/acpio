@@ -2282,7 +2282,7 @@ export interface AcpUsage {
   raw?: Record<string, unknown>;
 }
 
-/** Image attached to a board task when it was created (absolute server path). */
+/** File attached to a board task when it was created (absolute server path). */
 export interface TaskAttachmentDto {
   name: string;
   path: string;
@@ -2308,7 +2308,7 @@ export interface SessionDto {
   /** Task description written at creation: card text and the prefill for the
    *  first message. Null for regular chats. */
   taskDescription: string | null;
-  /** Pictures attached to the task at creation. Stored under acpio's own data
+  /** Files attached to the task at creation. Stored under acpio's own data
    *  folder (not the task's cwd) and attached to its first turn. */
   taskAttachments?: TaskAttachmentDto[];
   /** Server-set when the board task's first turn starts (Todo ⇄ Wait split). */

@@ -253,9 +253,9 @@ type AppState = {
     description: string;
     /** Pre-start agent pick — a board task may be created for a chosen agent. */
     provider?: AgentProvider;
-    /** Pictures attached while writing the task — staged in acpio's own
-     *  folder by the server and carried by the task's first turn. */
-    images?: File[];
+    /** Files attached while writing the task — staged in acpio's own folder
+     *  by the server and carried by the task's first turn. */
+    files?: File[];
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
   /** Board task: edit the text an existing task card carries. */
@@ -1866,7 +1866,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description, provider, images }) => {
+  createBoardTask: async ({ boardId, cwd, description, provider, files }) => {
     try {
       const title = titleFromTaskDescription(description);
       const task = await api.createSession({
@@ -1876,14 +1876,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         ...(provider ? { provider } : {}),
         ...(title ? { title } : {}),
       });
-      // The pictures ride behind the row (the upload is per session) and are
+      // The files ride behind the row (the upload is per session) and are
       // bound to the task server-side, so they reach the agent with the first
       // turn — including one that runs days later, from another device.
-      for (const image of images ?? []) {
+      for (const file of files ?? []) {
         try {
-          await api.uploadAttachment(task.id, image, image.name || "image.png");
+          await api.uploadAttachment(task.id, file, file.name || "file");
         } catch {
-          // The task exists; one lost picture must not undo the creation.
+          // The task exists; one lost file must not undo the creation.
         }
       }
       set((s) => ({ boardSessions: [task, ...s.boardSessions] }));

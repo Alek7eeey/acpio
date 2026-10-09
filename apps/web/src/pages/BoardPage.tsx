@@ -64,24 +64,30 @@ type FolderSpot = "rail" | "lane" | "dialog";
 /** The folder whose tag is being edited, and the row that took the editor over. */
 type FolderTagEdit = { cwd: string; where: FolderSpot };
 
-/** Pictures one new task may carry — the same ceiling the chat composer has. */
-const MAX_TASK_IMAGES = 8;
+/** Files one new task may carry — the same ceiling the chat composer has. */
+const MAX_TASK_FILES = 8;
 
-/** One picture picked for the task being written: the file plus its preview. */
-type DraftImage = { id: string; file: File; url: string };
+/** One file picked for the task being written: the file, and a preview when it
+ *  is a picture (an <img> pointed at a document would only render broken). */
+type DraftFile = { id: string; file: File; url?: string };
 
-/** Image files out of a paste payload — the board's screenshot path. */
-function clipboardImageFiles(data: DataTransfer | null): File[] {
+/** Every file out of a paste payload — a screenshot, a document, an archive. */
+function clipboardFiles(data: DataTransfer | null): File[] {
   if (!data) return [];
   const out: File[] = [];
-  for (const file of data.files ?? []) {
-    if (file.type.startsWith("image/")) out.push(file);
-  }
+  const seen = new Set<string>();
+  const push = (file: File | null) => {
+    if (!file) return;
+    const key = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(file);
+  };
+  for (const file of data.files ?? []) push(file);
   if (out.length > 0) return out;
   for (const item of data.items ?? []) {
-    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
-    const file = item.getAsFile();
-    if (file) out.push(file);
+    if (item.kind !== "file") continue;
+    push(item.getAsFile());
   }
   return out;
 }
@@ -121,17 +127,17 @@ const NewTaskComposer = memo(function NewTaskComposer({
   showAgentPicker: boolean;
   /** The agent the form opens on — the settings default while it is online. */
   defaultProvider: AgentProvider | null;
-  onSubmit: (cwd: string, description: string, images: File[], provider: AgentProvider | null) => void;
+  onSubmit: (cwd: string, description: string, files: File[], provider: AgentProvider | null) => void;
   onCancel: () => void;
 }) {
   const t = useT();
   const [draft, setDraft] = useState("");
-  /** Pictures for the task being written — uploaded with it, staged in acpio. */
-  const [images, setImages] = useState<DraftImage[]>([]);
+  /** Files for the task being written — uploaded with it, staged in acpio. */
+  const [files, setFiles] = useState<DraftFile[]>([]);
   /** Agent this task is created for; empty = the default the form opened on. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
-  const imageSeq = useRef(0);
-  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileSeq = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const createAutoStart = useBoardAutoStart("create");
 
   // The form is opened by a "+", so the caret belongs in it.
@@ -140,50 +146,57 @@ const NewTaskComposer = memo(function NewTaskComposer({
   }, [inputRef]);
 
   // A press outside only drops a form that costs nothing to drop: this ref is
-  // how the page sees that there is text (or a pasted picture) to protect.
+  // how the page sees that there is text (or a pasted file) to protect.
   useEffect(() => {
-    dirtyRef.current = draft.trim().length > 0 || images.length > 0;
-  }, [dirtyRef, draft, images]);
+    dirtyRef.current = draft.trim().length > 0 || files.length > 0;
+  }, [dirtyRef, draft, files]);
 
   // The previews are object URLs of files the user picked: nothing else
   // releases them, so a dismissed form (or a board left behind) must.
-  const imagesRef = useRef(images);
-  imagesRef.current = images;
+  const filesRef = useRef(files);
+  filesRef.current = files;
   useEffect(
     () => () => {
-      for (const image of imagesRef.current) URL.revokeObjectURL(image.url);
+      for (const entry of filesRef.current) {
+        if (entry.url) URL.revokeObjectURL(entry.url);
+      }
     },
     [],
   );
 
-  /** Pick up pictures from the file input or the clipboard (a screenshot). */
-  const addImages = (files: File[]) => {
-    const picked = files.filter((file) => file.type.startsWith("image/"));
+  /** Pick up files from the file input or the clipboard (a screenshot, a PDF). */
+  const addFiles = (picked: File[]) => {
     if (!picked.length) return;
     const created = picked.map((file) => {
-      imageSeq.current += 1;
-      return { id: `task-image-${imageSeq.current}`, file, url: URL.createObjectURL(file) };
+      fileSeq.current += 1;
+      return {
+        id: `task-file-${fileSeq.current}`,
+        file,
+        url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+      };
     });
-    setImages((prev) => {
-      const room = Math.max(0, MAX_TASK_IMAGES - prev.length);
+    setFiles((prev) => {
+      const room = Math.max(0, MAX_TASK_FILES - prev.length);
       // Past the ceiling the extras are dropped, and their previews with them.
-      for (const image of created.slice(room)) URL.revokeObjectURL(image.url);
+      for (const entry of created.slice(room)) {
+        if (entry.url) URL.revokeObjectURL(entry.url);
+      }
       const added = created.slice(0, room);
       return added.length ? [...prev, ...added] : prev;
     });
   };
 
-  const removeImage = (id: string) => {
-    const gone = images.find((image) => image.id === id);
-    if (gone) URL.revokeObjectURL(gone.url);
-    setImages((prev) => prev.filter((image) => image.id !== id));
+  const removeFile = (id: string) => {
+    const gone = files.find((entry) => entry.id === id);
+    if (gone?.url) URL.revokeObjectURL(gone.url);
+    setFiles((prev) => prev.filter((entry) => entry.id !== id));
   };
 
   const submit = () => {
     void onSubmit(
       cwd,
       draft,
-      images.map((image) => image.file),
+      files.map((entry) => entry.file),
       draftProvider || defaultProvider,
     );
   };
@@ -198,10 +211,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
         aria-label={t("chat.boardTaskPlaceholder")}
         onChange={(e) => setDraft(e.target.value)}
         onPaste={(e) => {
-          const pasted = clipboardImageFiles(e.clipboardData);
+          const pasted = clipboardFiles(e.clipboardData);
           if (!pasted.length) return;
           e.preventDefault();
-          addImages(pasted);
+          addFiles(pasted);
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
@@ -214,24 +227,14 @@ const NewTaskComposer = memo(function NewTaskComposer({
       <div className={styles.composerFiles}>
         <button
           type="button"
-          className={styles.attachImage}
-          title={t("chat.boardAttachImage")}
-          aria-label={t("chat.boardAttachImage")}
-          onClick={() => imageInputRef.current?.click()}
+          className={styles.attachFile}
+          title={t("chat.boardAttachFile")}
+          aria-label={t("chat.boardAttachFile")}
+          onClick={() => fileInputRef.current?.click()}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <rect
-              x="3"
-              y="4"
-              width="18"
-              height="16"
-              rx="2.5"
-              stroke="currentColor"
-              strokeWidth="1.7"
-            />
-            <circle cx="8.5" cy="9.5" r="1.6" fill="currentColor" />
             <path
-              d="m4 17 5-5 4.5 4.5L17 13l3 3"
+              d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
               stroke="currentColor"
               strokeWidth="1.7"
               strokeLinecap="round"
@@ -240,29 +243,47 @@ const NewTaskComposer = memo(function NewTaskComposer({
           </svg>
         </button>
         <input
-          ref={imageInputRef}
-          className={styles.imageInput}
+          ref={fileInputRef}
+          className={styles.fileInput}
           type="file"
-          accept="image/*"
           multiple
-          aria-label={t("chat.boardAttachImage")}
+          aria-label={t("chat.boardAttachFile")}
           onChange={(e) => {
-            addImages(Array.from(e.target.files ?? []));
-            // Clear it so the same picture can be picked again after being
+            addFiles(Array.from(e.target.files ?? []));
+            // Clear it so the same file can be picked again after being
             // removed from the row.
             e.target.value = "";
           }}
         />
-        {images.map((image) => (
-          <span key={image.id} className={styles.imageChip}>
-            <img className={styles.imageThumb} src={image.url} alt="" />
-            <span className={styles.imageName}>{image.file.name}</span>
+        {files.map((entry) => (
+          <span key={entry.id} className={styles.fileChip}>
+            {entry.url ? (
+              <img className={styles.fileThumb} src={entry.url} alt="" />
+            ) : (
+              <svg
+                className={styles.fileGlyph}
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden
+              >
+                <path
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            )}
+            <span className={styles.fileName}>{entry.file.name}</span>
             <button
               type="button"
-              className={styles.imageRemove}
+              className={styles.fileRemove}
               title={t("chat.removeFile")}
               aria-label={t("chat.removeFile")}
-              onClick={() => removeImage(image.id)}
+              onClick={() => removeFile(entry.id)}
             >
               ×
             </button>
@@ -766,7 +787,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   }, [board, folderAutoRun, groups, startTask, tasks, tasksReady]);
 
   const submitNewTask = useCallback(
-    async (cwd: string, rawDescription: string, images: File[], rawProvider: AgentProvider | null) => {
+    async (cwd: string, rawDescription: string, files: File[], rawProvider: AgentProvider | null) => {
             const description = rawDescription.trim();
       if (!description || creating) return;
       // The form's own pick, or the default agent it opened on; a form without
@@ -775,7 +796,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setCreating(true);
       const created = await createBoardTask({ boardId, cwd, description,
         ...(provider ? { provider } : {}),
-        images,
+        files,
       });
       setCreating(false);
       if (!created) return; // keep the form so nothing the user typed is lost

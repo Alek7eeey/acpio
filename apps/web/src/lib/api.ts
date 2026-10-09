@@ -540,7 +540,7 @@ export const api = {
         ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       }),
     }),
-  /** Save a pasted/device image into the session folder; returns a path attachment. */
+  /** Save a pasted/device file into the session folder; returns a path attachment. */
   uploadAttachment: (id: string, file: File, name: string) =>
     request<{ name: string; path: string; size: number }>(
       `/api/sessions/${id}/attachments/upload`,
