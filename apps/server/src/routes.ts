@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   addTaskAttachments,
@@ -1604,13 +1604,20 @@ export async function registerRoutes(app: FastifyInstance) {
       : "";
     const titleIsAuto =
       titleIsDefault || (descTitle !== "" && detail.title === descTitle);
+    // `/commit-en` alone is a command, not words: the sanitizer eats the
+    // command and leaves nothing to title from. The command's own description —
+    // a skill's — says what the chat is about, so it titles it instead; the
+    // list is whatever this chat's composer already offered.
+    const messageTitle =
+      titleFromUserText(body.text) ||
+      titleFromSlashCommand(body.text, getSessionSlashCommands(id));
     // `detail` predates this prompt's own message: an empty list means this is
     // the first message of the chat, the only place a title may be refined.
     const firstMessage = detail.messages.length === 0;
     const aiTitle =
       settings.chatAutoTitle && titleIsAuto && firstMessage
         ? titleIsDefault
-          ? titleFromUserText(body.text) || undefined
+          ? messageTitle || undefined
           : body.text
         : undefined;
     // Pictures the task was created with ride along with its first turn: the

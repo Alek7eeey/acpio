@@ -94,6 +94,7 @@ export { summarizeQuestionAnswer, type QuestionAnswerPayload } from "./questionA
 export {
   SESSION_TITLE_MAX_LEN,
   sanitizeTitleSource,
+  titleFromSlashCommand,
   titleFromTaskDescription,
   titleFromUserText,
   truncateSessionTitle,

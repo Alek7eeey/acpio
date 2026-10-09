@@ -36,6 +36,7 @@ import {
   type SessionDto,
   type SlashCommandDto,
   type SubagentCardUpdate,
+  titleFromSlashCommand,
   titleFromUserText,
   effectiveMcpServers,
   mcpServerEndpoint,
@@ -2666,7 +2667,16 @@ export async function runPrompt(
   }
 
   if (opts.titleHint) {
-    const title = titleFromUserText(opts.titleHint);
+    // A bare `/skill` message carries no words of its own — the sanitizer eats
+    // the command and leaves nothing to title from — so the skill's own
+    // description names the chat. That list arrives with the boot (`session/new`
+    // announces it), so only this case waits for the runtime; a message with
+    // words of its own keeps titling before the agent is even up.
+    let title = titleFromUserText(opts.titleHint);
+    if (!title && !rt.availableCommands.length) {
+      await acpReady.catch(() => {});
+    }
+    if (!title) title = titleFromSlashCommand(opts.titleHint, rt.availableCommands);
     if (title) {
       await updateSession(sessionId, { title });
     }
