@@ -421,9 +421,12 @@
 }
 
 /* Creation form: the agent the task is created for — its label left, the
-   picker right, on a line of its own like the "start immediately" switch. */
+   picker right, on a line of its own like the "start immediately" switch.
+   The form stacks in a column, so a 100% basis would be on the *height*: the
+   row stretched to the whole box and pushed Cancel and Create out of it, over
+   the folder blocks below. The row is already alone on its line. */
 .composerField {
-  flex: 0 0 100%;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
