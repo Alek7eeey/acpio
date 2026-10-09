@@ -761,7 +761,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (text) await sendPrompt(text, { sessionId: task.id });
   };
 
-  /** Tasks a folder queue has already handed to their agent on this visit. */
+  /** Tasks this board has already handed to their agent on this visit — by the
+   *  folder queue or by the creation form's own "start immediately". */
   const queuedRef = useRef(new Set<string>());
 
   /**
@@ -769,7 +770,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * Todo cards start by themselves, top to bottom — one at a time, each next
    * one leaving as soon as the folder's running task stops. A card handed over
    * once is never handed over again, so a refresh of the list cannot start the
-   * same task twice.
+   * same task twice. `queuedRef` is what keeps that promise across the two doors
+   * that start a card: the creation form claims the task it just created, and a
+   * card the queue itself picked up is left to the queue.
    */
   useEffect(() => {
     if (!tasksReady || !board) return;
@@ -801,7 +804,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setCreating(false);
       if (!created) return; // keep the form so nothing the user typed is lost
       closeNewTask();
-      if (createAutoStart) void startTask(created);
+      // The folder queue may have picked the fresh card up already: the board
+      // re-renders over the created task before this continuation runs. Starting
+      // it here as well sent the description twice — the second copy waited in
+      // the prompt queue behind the turn the first one had just started.
+      if (createAutoStart && !queuedRef.current.has(created.id)) {
+        queuedRef.current.add(created.id);
+        void startTask(created);
+      }
     },
     [boardId, closeNewTask, createAutoStart, createBoardTask, creating, defaultTaskProvider, taskAgentPicker],
   );

@@ -3796,8 +3796,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         // A few ACP adapters finish their RPC before the final WS part has
         // crossed the proxy. Reconcile only after a real in-flight turn goes
         // idle — not on every warm/open session.updated.
-        if ((wasBusy || hadInflight) && liveDetail(get(), event.sessionId)) {
-          reconcileFinishedTurn(event.sessionId, get, set);
+        if (wasBusy || hadInflight) {
+          // The pane holds the thread to reconcile; a board task has none.
+          if (liveDetail(get(), event.sessionId)) {
+            reconcileFinishedTurn(event.sessionId, get, set);
+          }
+          // The queue, though, belongs to every chat. Gating this on a pane left
+          // a message queued behind a board task's turn waiting for a reload:
+          // that task is never a pane, so its own end of turn could not hand the
+          // message over.
           void get().drainPromptQueue();
         }
       }
