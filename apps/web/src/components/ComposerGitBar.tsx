@@ -4,6 +4,7 @@ import type { ChatChangesMetrics, GitStatusDto, SessionStatus } from "@acpio/sha
 import { useT } from "../lib/i18n";
 import { api } from "../lib/api";
 import { formatGitErrorToast, shouldAwaitGitRepo } from "../lib/gitUi";
+import { useFixedMenuPlacement, type MenuAnchor } from "../lib/menuPosition";
 import { showToast } from "../lib/toast";
 import { GitDiffStats } from "./GitDiffStats";
 import styles from "./ComposerGitBar.module.css";
@@ -281,9 +282,16 @@ export function GitComposerLoadingBar({
   );
 }
 
+/** A git command the changes chip hands the agent as a prompt straight from its menu. */
+export type GitChangesAgentCommand = "commit" | "commit+push";
+
+/** Menu rows of the changes chip. The row's text is also the prompt it sends. */
+const CHANGES_AGENT_COMMANDS: GitChangesAgentCommand[] = ["commit", "commit+push"];
+
 export function ComposerGitChangesButton({  status,
   changesOpen,
   onOpenChanges,
+  onAgentCommand,
   iconOnly = false,
   premium = false,
   metrics = "linesAndFiles",
@@ -291,6 +299,11 @@ export function ComposerGitChangesButton({  status,
   status: GitStatusDto;
   changesOpen: boolean;
   onOpenChanges: () => void;
+  /**
+   * Right click offers these commands as prompts for the agent. Omitted, the
+   * chip keeps the browser's own menu.
+   */
+  onAgentCommand?: (command: GitChangesAgentCommand) => void;
   /** Collapsed to the icon (row is squeezed, or the user hides the numbers). */
   iconOnly?: boolean;
   premium?: boolean;
@@ -298,6 +311,29 @@ export function ComposerGitChangesButton({  status,
   metrics?: ChatChangesMetrics;
 }) {
   const t = useT();
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuStyle = useFixedMenuPlacement(menu, menuRef);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onPointerDown = (event: Event) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("scroll", onPointerDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("scroll", onPointerDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   const fileCount = status.files.length;
   const detail = status.dirty
     ? `+${status.additions} -${status.deletions} · ${t("git.changedFiles", { count: fileCount })}`
@@ -311,63 +347,100 @@ export function ComposerGitChangesButton({  status,
   const collapsed = iconOnly || metrics === "none" || (metrics === "lines" && !linesAvailable);
 
   return (
-    <button
-      type="button"
-      className={`${styles.changesChip}${changesOpen ? ` ${styles.changesChipActive}` : ""}${
-        status.dirty ? "" : ` ${styles.changesChipQuiet}`
-      }${collapsed ? ` ${styles.changesChipIconOnly}` : ""}${premium ? ` ${styles.changesChipPremium}` : ""}`}
-      onClick={onOpenChanges}
-      title={detail}
-      aria-label={`${t("git.openChanges")}: ${detail}`}
-      aria-pressed={changesOpen}
-    >
-      {collapsed ? (
-        <>
-          <svg className={styles.changesChipIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-            <path
-              d="M7 7h10v10H7V7Z"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinejoin="round"
-            />
-            <path
-              d="M9 12h6M12 9v6"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-          {status.dirty ? <span className={styles.changesChipBadge}>{fileCount}</span> : null}
-        </>
-      ) : (
-        <>
-          {premium ? (
-            <span className={styles.changesChipLeadIcon} aria-hidden>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </span>
-          ) : null}
-          <span className={styles.changesChipMetrics}>
-            {showLines ? (
-              <GitDiffStats additions={status.additions} deletions={status.deletions} />
-            ) : null}
-            {showLines && showFiles ? (
-              <span className={styles.changesChipSep} aria-hidden>
-                ·
+    <>
+      <button
+        type="button"
+        className={`${styles.changesChip}${changesOpen ? ` ${styles.changesChipActive}` : ""}${
+          status.dirty ? "" : ` ${styles.changesChipQuiet}`
+        }${collapsed ? ` ${styles.changesChipIconOnly}` : ""}${premium ? ` ${styles.changesChipPremium}` : ""}`}
+        onClick={onOpenChanges}
+        onContextMenu={
+          onAgentCommand
+            ? (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setMenu({ x: event.clientX, y: event.clientY });
+              }
+            : undefined
+        }
+        title={detail}
+        aria-label={`${t("git.openChanges")}: ${detail}`}
+        aria-pressed={changesOpen}
+      >
+        {collapsed ? (
+          <>
+            <svg className={styles.changesChipIcon} width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M7 7h10v10H7V7Z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9 12h6M12 9v6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+              />
+            </svg>
+            {status.dirty ? <span className={styles.changesChipBadge}>{fileCount}</span> : null}
+          </>
+        ) : (
+          <>
+            {premium ? (
+              <span className={styles.changesChipLeadIcon} aria-hidden>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </span>
             ) : null}
-            {showFiles ? <span className={styles.changesChipCount}>{fileCount}</span> : null}
-          </span>
-        </>
-      )}
-    </button>
+            <span className={styles.changesChipMetrics}>
+              {showLines ? (
+                <GitDiffStats additions={status.additions} deletions={status.deletions} />
+              ) : null}
+              {showLines && showFiles ? (
+                <span className={styles.changesChipSep} aria-hidden>
+                  ·
+                </span>
+              ) : null}
+              {showFiles ? <span className={styles.changesChipCount}>{fileCount}</span> : null}
+            </span>
+          </>
+        )}
+      </button>
+      {menu && onAgentCommand
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className={styles.contextMenu}
+              style={menuStyle ?? undefined}
+              role="menu"
+              aria-label={t("git.changesMenu")}
+            >
+              {CHANGES_AGENT_COMMANDS.map((command) => (
+                <button
+                  key={command}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenu(null);
+                    onAgentCommand(command);
+                  }}
+                >
+                  {command}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 

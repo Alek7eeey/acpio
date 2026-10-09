@@ -873,6 +873,7 @@
     "branchSwitchLabel": "Переключиться на ветку {{branch}}",
     "branchMergeHint": "Слить {{branch}} в {{target}}",
     "branchActions": "Действия с веткой",
+    "changesMenu": "Действия с изменениями",
     "branchRename": "Переименовать",
     "branchRenamePrompt": "Новое имя ветки {{branch}}",
     "renameBranchOk": "Ветка переименована",

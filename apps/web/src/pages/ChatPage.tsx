@@ -89,6 +89,7 @@ import {
   ComposerGitBranchBar,
   GitComposerLoadingBar,
   useGitStatus,
+  type GitChangesAgentCommand,
 } from "../components/ComposerGitBar";
 import { GitChangesSidePanel } from "../components/GitChangesSidePanel";
 import { ComposerMetaChips } from "../components/ComposerMetaChips";
@@ -3869,6 +3870,17 @@ function ChatThread() {
       sendPromptStore(text, { ...opts, sessionId: bind?.sessionId ?? undefined }),
     [sendPromptStore, bind?.sessionId],
   );
+  /**
+   * The changes chip's right-click menu sends its command as a prompt: a commit
+   * here is the agent's job, so it rides the same send path as typed text and
+   * queues behind a running turn instead of interrupting it.
+   */
+  const runGitChangesCommand = useCallback(
+    (command: GitChangesAgentCommand) => {
+      void sendPrompt(command);
+    },
+    [sendPrompt],
+  );
   const cancelPromptStore = useAppStore((s) => s.cancelPrompt);
   const cancelPrompt = useCallback(
     () => cancelPromptStore(bind?.sessionId ?? undefined),
@@ -6523,6 +6535,7 @@ function ChatThread() {
                     onLoadBranches: () => void git.loadBranches(),
                     changesOpen: gitPanelOpen,
                     onOpenChanges: openGitChangesPanel,
+                    onAgentCommand: runGitChangesCommand,
                   }
                 : undefined
             }

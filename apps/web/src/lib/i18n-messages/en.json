@@ -853,6 +853,7 @@
     "branchSwitchLabel": "Switch to branch {{branch}}",
     "branchMergeHint": "Merge {{branch}} into {{target}}",
     "branchActions": "Branch actions",
+    "changesMenu": "Changes actions",
     "branchRename": "Rename",
     "branchRenamePrompt": "New name for {{branch}}",
     "renameBranchOk": "Branch renamed",

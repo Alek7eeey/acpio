@@ -28,6 +28,7 @@ import {
   GitChangesChipLoader,
   GitBranchSwitcher,
   type GitBranchDeleteOutcome,
+  type GitChangesAgentCommand,
 } from "./ComposerGitBar";
 import gitBarStyles from "./ComposerGitBar.module.css";
 import { MiddleTruncate } from "./MiddleTruncate";
@@ -199,6 +200,8 @@ export function ComposerMetaChips({
     onLoadBranches?: () => void;
     changesOpen: boolean;
     onOpenChanges: () => void;
+    /** Right click on the changes chip sends this straight to the agent. */
+    onAgentCommand?: (command: GitChangesAgentCommand) => void;
   };
   trailing?: ReactNode;
 }) {
@@ -375,6 +378,7 @@ export function ComposerMetaChips({
               status={gitChip.status}
               changesOpen={gitChip.changesOpen}
               onOpenChanges={gitChip.onOpenChanges}
+              onAgentCommand={gitChip.onAgentCommand}
               premium={settings.chatGitBranchPosition !== "above"}
               metrics={chipOptions.gitChanges.metrics}
               iconOnly={compressing && chipOptions.gitChanges.compress}

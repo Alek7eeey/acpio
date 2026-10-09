@@ -423,6 +423,41 @@
     0 4px 14px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+/* Right-click menu of the changes chip: placed from the pointer, clamped on screen. */
+.contextMenu {
+  overscroll-behavior: contain;
+  position: fixed;
+  z-index: 520;
+  min-width: 148px;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, 0.18));
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.contextMenu button {
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-family: ui-monospace, "Cascadia Mono", "Segoe UI Mono", Consolas, monospace;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.contextMenu button:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
 .menu {
   position: absolute;
   left: 0;
