@@ -244,7 +244,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  createSession: (body?: Partial<SessionDto>) =>
+  createSession: (
+    body?: Partial<SessionDto> & {
+      /** Files already on the server, picked from its filesystem (board tasks). */
+      attachments?: Array<{ name: string; path: string }>;
+    },
+  ) =>
     request<SessionDto>("/api/sessions", {
       method: "POST",
       body: JSON.stringify(body ?? {}),

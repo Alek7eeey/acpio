@@ -14,9 +14,11 @@ import {
   boardColumn,
   titleFromTaskDescription,
   type AgentProvider,
+  type AttachSource,
   type BoardColumn,
   type SessionDto,
 } from "@acpio/shared";
+import { AttachDialog } from "../components/AttachDialog";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
@@ -27,7 +29,7 @@ import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
 import { harnessLabel, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
-import { useAppStore } from "../lib/store";
+import { useAppStore, type PendingAttachment } from "../lib/store";
 import styles from "./BoardPage.module.css";
 
 /** Column order on the board — the same order the spec's four lanes read in. */
@@ -67,9 +69,23 @@ type FolderTagEdit = { cwd: string; where: FolderSpot };
 /** Files one new task may carry — the same ceiling the chat composer has. */
 const MAX_TASK_FILES = 8;
 
-/** One file picked for the task being written: the file, and a preview when it
- *  is a picture (an <img> pointed at a document would only render broken). */
-type DraftFile = { id: string; file: File; url?: string };
+/** Hold this long on a touch screen and the paperclip opens its other source —
+ *  a phone has no right button to open it with. */
+const ATTACH_HOLD_MS = 500;
+
+/** One file picked for the task being written: a file the browser holds — up to
+ *  be uploaded with the task — or one already on the server's disk, plus a
+ *  preview when a picture is the thing the browser holds (an <img> pointed at a
+ *  server path would only render broken). */
+type DraftFile = {
+  id: string;
+  name: string;
+  /** Device pick: uploaded to the task once it exists. */
+  file?: File;
+  /** Server pick: already staged on the server, only bound to the task. */
+  path?: string;
+  url?: string;
+};
 
 /** Every file out of a paste payload — a screenshot, a document, an archive. */
 function clipboardFiles(data: DataTransfer | null): File[] {
@@ -109,6 +125,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   agentOptions,
   showAgentPicker,
   defaultProvider,
+  attachSource,
   onSubmit,
   onCancel,
 }: {
@@ -127,7 +144,16 @@ const NewTaskComposer = memo(function NewTaskComposer({
   showAgentPicker: boolean;
   /** The agent the form opens on — the settings default while it is online. */
   defaultProvider: AgentProvider | null;
-  onSubmit: (cwd: string, description: string, files: File[], provider: AgentProvider | null) => void;
+  /** Which source a plain click opens — the setting the chat composer obeys. */
+  attachSource: AttachSource;
+  onSubmit: (
+    cwd: string,
+    description: string,
+    files: File[],
+    /** Server picks: nothing to upload, only paths to carry into the task. */
+    attachments: PendingAttachment[],
+    provider: AgentProvider | null,
+  ) => void;
   onCancel: () => void;
 }) {
   const t = useT();
@@ -138,6 +164,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
   const fileSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /** The server's filesystem picker, open while its source is the one chosen. */
+  const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   const createAutoStart = useBoardAutoStart("create");
 
   // The form is opened by a "+", so the caret belongs in it.
@@ -164,26 +192,45 @@ const NewTaskComposer = memo(function NewTaskComposer({
     [],
   );
 
-  /** Pick up files from the file input or the clipboard (a screenshot, a PDF). */
-  const addFiles = (picked: File[]) => {
-    if (!picked.length) return;
-    const created = picked.map((file) => {
-      fileSeq.current += 1;
-      return {
-        id: `task-file-${fileSeq.current}`,
-        file,
-        url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
-      };
-    });
+  /** Add drafts to the row, dropping whatever goes past the ceiling — and the
+   *  previews of what was dropped with it. */
+  const appendDrafts = (created: DraftFile[]) => {
     setFiles((prev) => {
       const room = Math.max(0, MAX_TASK_FILES - prev.length);
-      // Past the ceiling the extras are dropped, and their previews with them.
       for (const entry of created.slice(room)) {
         if (entry.url) URL.revokeObjectURL(entry.url);
       }
       const added = created.slice(0, room);
       return added.length ? [...prev, ...added] : prev;
     });
+  };
+
+  /** Pick up files from the file input or the clipboard (a screenshot, a PDF). */
+  const addFiles = (picked: File[]) => {
+    if (!picked.length) return;
+    appendDrafts(
+      picked.map((file) => {
+        fileSeq.current += 1;
+        return {
+          id: `task-file-${fileSeq.current}`,
+          name: file.name,
+          file,
+          url: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+        };
+      }),
+    );
+  };
+
+  /** A file picked on the server is already on its disk: there is nothing to
+   *  upload, the task only has to carry its path into the first turn. */
+  const addServerFiles = (picked: PendingAttachment[]) => {
+    if (!picked.length) return;
+    appendDrafts(
+      picked.map((entry) => {
+        fileSeq.current += 1;
+        return { id: `task-file-${fileSeq.current}`, name: entry.name, path: entry.path };
+      }),
+    );
   };
 
   const removeFile = (id: string) => {
@@ -196,9 +243,58 @@ const NewTaskComposer = memo(function NewTaskComposer({
     void onSubmit(
       cwd,
       draft,
-      files.map((entry) => entry.file),
+      files.flatMap((entry) => (entry.file ? [entry.file] : [])),
+      files.flatMap((entry) => (entry.path ? [{ name: entry.name, path: entry.path }] : [])),
       draftProvider || defaultProvider,
     );
+  };
+
+  const attachSourceLabels: Record<AttachSource, string> = {
+    device: t("chat.attachPickDevice"),
+    server: t("chat.attachPickServer"),
+  };
+  const otherAttachSource: AttachSource = attachSource === "server" ? "device" : "server";
+
+  const openAttachSource = (source: AttachSource) => {
+    if (source === "server") {
+      setAttachDialogOpen(true);
+      return;
+    }
+    const input = fileInputRef.current;
+    if (!input) return;
+    // Re-picking the same file must fire onChange again.
+    input.value = "";
+    input.click();
+  };
+
+  /** A press already opened the other source: the click that follows it — a
+   *  right-click's, or a hold's on a touch screen — must not open the default
+   *  one on top of it. */
+  const otherOpenedRef = useRef(false);
+  const holdTimerRef = useRef<number | null>(null);
+
+  const cancelHold = () => {
+    if (holdTimerRef.current === null) return;
+    window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+  };
+  useEffect(() => cancelHold, []);
+
+  const openOtherSource = () => {
+    otherOpenedRef.current = true;
+    openAttachSource(otherAttachSource);
+  };
+
+  const onAttachPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    otherOpenedRef.current = false;
+    // Only a finger holds: a mouse and a pen have a right button for this.
+    if (e.pointerType !== "touch") return;
+    cancelHold();
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      if (otherOpenedRef.current) return;
+      openOtherSource();
+    }, ATTACH_HOLD_MS);
   };
 
   return (
@@ -228,9 +324,29 @@ const NewTaskComposer = memo(function NewTaskComposer({
         <button
           type="button"
           className={styles.attachFile}
-          title={t("chat.boardAttachFile")}
-          aria-label={t("chat.boardAttachFile")}
-          onClick={() => fileInputRef.current?.click()}
+          aria-label={attachSourceLabels[attachSource]}
+          title={`${attachSourceLabels[attachSource]} · ${t("chat.attachSwapHint", {
+            other: attachSourceLabels[otherAttachSource],
+          })}`}
+          onPointerDown={onAttachPointerDown}
+          onPointerUp={cancelHold}
+          onPointerCancel={cancelHold}
+          onPointerLeave={cancelHold}
+          onClick={() => {
+            if (otherOpenedRef.current) {
+              otherOpenedRef.current = false;
+              return;
+            }
+            openAttachSource(attachSource);
+          }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (otherOpenedRef.current) {
+              otherOpenedRef.current = false;
+              return;
+            }
+            openOtherSource();
+          }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
@@ -255,6 +371,12 @@ const NewTaskComposer = memo(function NewTaskComposer({
             e.target.value = "";
           }}
         />
+        <AttachDialog
+          open={attachDialogOpen}
+          initialDir={cwd}
+          onClose={() => setAttachDialogOpen(false)}
+          onAttach={addServerFiles}
+        />
         {files.map((entry) => (
           <span key={entry.id} className={styles.fileChip}>
             {entry.url ? (
@@ -277,7 +399,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
                 />
               </svg>
             )}
-            <span className={styles.fileName}>{entry.file.name}</span>
+            <span className={styles.fileName}>{entry.name}</span>
             <button
               type="button"
               className={styles.fileRemove}
@@ -361,6 +483,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const taskAgentPicker = useAppStore((s) => s.settings.boardTaskAgentPicker !== false);
   /** First-message preview under a model-written card title (settings). */
   const boardShowFirstMessage = useAppStore((s) => s.settings.boardShowFirstMessage ?? true);
+  /** Which source the new-task form's paperclip opens on a plain click. */
+  const attachDefaultSource: AttachSource =
+    useAppStore((s) => s.settings.attachDefaultSource) === "server" ? "server" : "device";
   const adapters = useAppStore((s) => s.adapters);
   const agentAvailability = useAppStore((s) => s.agentAvailability);
   const refreshBoardSessions = useAppStore((s) => s.refreshBoardSessions);
@@ -790,7 +915,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   }, [board, folderAutoRun, groups, startTask, tasks, tasksReady]);
 
   const submitNewTask = useCallback(
-    async (cwd: string, rawDescription: string, files: File[], rawProvider: AgentProvider | null) => {
+    async (
+      cwd: string,
+      rawDescription: string,
+      files: File[],
+      attachments: PendingAttachment[],
+      rawProvider: AgentProvider | null,
+    ) => {
             const description = rawDescription.trim();
       if (!description || creating) return;
       // The form's own pick, or the default agent it opened on; a form without
@@ -800,6 +931,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const created = await createBoardTask({ boardId, cwd, description,
         ...(provider ? { provider } : {}),
         files,
+        attachments,
       });
       setCreating(false);
       if (!created) return; // keep the form so nothing the user typed is lost
@@ -1621,6 +1753,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               agentOptions={agentOptions}
                               showAgentPicker={taskAgentPicker}
                               defaultProvider={defaultTaskProvider}
+                              attachSource={attachDefaultSource}
                               onCancel={closeNewTask}
                             />
                           ) : boardAddCardStyle !== "hidden" ? (

@@ -976,6 +976,17 @@ export async function registerRoutes(app: FastifyInstance) {
         /** Board task: partition id + description; created without a live turn. */
         boardId: z.string().uuid().optional(),
         taskDescription: z.string().max(20000).optional(),
+        /** Files picked on the server's own filesystem: they are already on
+         *  its disk, so a board task only has to carry their paths. */
+        attachments: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(255),
+              path: z.string().min(1).max(4096),
+            }),
+          )
+          .max(8)
+          .optional(),
       })
       .parse(req.body ?? {});
     const settings = await getSettings();
@@ -1007,6 +1018,12 @@ export async function registerRoutes(app: FastifyInstance) {
       model: body.model,
       boardId: body.boardId ?? null,
       taskDescription: body.taskDescription ?? null,
+      // Files picked from the server's own filesystem ride the same way
+      // uploaded ones do: on the task, carried by its first turn whenever it
+      // runs. A plain chat has no first turn to carry them into.
+      ...(body.boardId && body.attachments?.length
+        ? { taskAttachments: body.attachments }
+        : {}),
     });
     // Board tasks must not boot an agent: the start action may pick another one.
     if (!body.boardId && !isShellSession(session.provider)) {

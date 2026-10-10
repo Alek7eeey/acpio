@@ -256,6 +256,9 @@ type AppState = {
     /** Files attached while writing the task — staged in acpio's own folder
      *  by the server and carried by the task's first turn. */
     files?: File[];
+    /** Files picked from the server's own filesystem: already on its disk, so
+     *  they are only bound to the task and ride the same first turn. */
+    attachments?: PendingAttachment[];
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
   /** Board task: edit the text an existing task card carries. */
@@ -1866,7 +1869,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description, provider, files }) => {
+  createBoardTask: async ({ boardId, cwd, description, provider, files, attachments }) => {
     try {
       const title = titleFromTaskDescription(description);
       const task = await api.createSession({
@@ -1875,6 +1878,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         taskDescription: description,
         ...(provider ? { provider } : {}),
         ...(title ? { title } : {}),
+        // Files the server already holds are bound to the task as it is made:
+        // there is nothing to upload, and nothing may start before they land.
+        ...(attachments?.length ? { attachments } : {}),
       });
       // The files ride behind the row (the upload is per session) and are
       // bound to the task server-side, so they reach the agent with the first

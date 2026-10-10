@@ -127,7 +127,12 @@ order is saved on the server, so it survives a reload.
 
 Every task is a chat session of its own. **+** on a group writes a card carrying the project
 chip, and the **Add task** rectangle in the group opens the same form — clicking away from the
-form dismisses it the way **Cancel** does. **Right-clicking** that **+** (on a group or a rail
+form dismisses it the way **Cancel** does. The form's paperclip reads like the composer's: a
+plain click attaches from the browser's own device, a right-click from the server's
+filesystem instead, and which source the click uses is the same **Attach button opens**
+setting. On a phone, where there is no right button, holding the paperclip opens the other
+source. Files from the device are uploaded with the task, files from the server are bound to
+it where they already are, and either way the task's first turn carries them. **Right-clicking** that **+** (on a group or a rail
 row) opens the standard new-chat picker with the folder locked, and confirming it creates the
 task empty — no description form — then opens its chat, so the first message is what names and
 forms it. That is the shape a chat has

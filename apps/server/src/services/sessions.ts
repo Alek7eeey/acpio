@@ -269,6 +269,9 @@ export async function createSession(input: {
   boardId?: string | null;
   /** Task description (card text / first-message prefill) for board tasks. */
   taskDescription?: string | null;
+  /** Files a board task is created with — already on the server's disk, so
+   *  created together with it instead of bound in a second round trip. */
+  taskAttachments?: TaskAttachmentDto[];
 }): Promise<SessionDto> {
   const siblings = input.boardId
     ? await db.select().from(sessions).where(eq(sessions.boardId, input.boardId))
@@ -307,6 +310,9 @@ export async function createSession(input: {
       ...(input.acpSessionId?.trim() ? { acpSessionId: input.acpSessionId.trim() } : {}),
       ...(input.boardId ? { boardId: input.boardId } : {}),
       ...(input.taskDescription != null ? { taskDescription: input.taskDescription } : {}),
+      ...(input.taskAttachments?.length
+        ? { taskAttachments: input.taskAttachments.slice(0, MAX_TASK_ATTACHMENTS) }
+        : {}),
     })
     .returning();
   // Keep the folder alive after the last chat in it is deleted. Board tasks
