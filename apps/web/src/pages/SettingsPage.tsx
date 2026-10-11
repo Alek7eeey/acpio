@@ -1111,7 +1111,7 @@ export function SettingsPage() {
         description:
           a.custom === true
             ? [a.defaultCommand, ...a.defaultArgs].join(" ")
-            : t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc"),
+            : t(a.descriptionKey as "settings.cursorDesc" | "settings.ompDesc" | "settings.opencodeDesc"),
         enabled: a.enabled !== false,
       })),
     [allAdapters, t],

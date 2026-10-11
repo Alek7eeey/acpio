@@ -15,6 +15,7 @@
     "@acpio/adapter-builtin": "*",
     "@acpio/adapter-cursor": "*",
     "@acpio/adapter-omp": "*",
+    "@acpio/adapter-opencode": "*",
     "@acpio/i18n": "*",
     "@acpio/shared": "*",
     "@fastify/cookie": "^11.1.2",

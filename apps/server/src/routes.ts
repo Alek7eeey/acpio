@@ -203,6 +203,8 @@ const settingsSchema = z.object({
   cursorArgs: z.array(z.string()).optional(),
   ompCommand: z.string().optional(),
   ompArgs: z.array(z.string()).optional(),
+  opencodeCommand: z.string().optional(),
+  opencodeArgs: z.array(z.string()).optional(),
   cursorApiKey: z.string().optional(),
   anthropicApiKey: z.string().optional(),
   openaiApiKey: z.string().optional(),

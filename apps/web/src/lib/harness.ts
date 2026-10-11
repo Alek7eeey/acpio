@@ -62,6 +62,7 @@ export function harnessShortLabel(provider: AgentProvider | string | null | unde
   if (isShellSession(provider)) return "Shell";
   if (provider === "cursor") return "Cursor";
   if (provider === "omp") return "OMP";
+  if (provider === "opencode") return "OpenCode";
   return provider ? String(provider) : "";
 }
 

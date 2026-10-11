@@ -2,7 +2,7 @@
 
 Acpio works with any agent speaking [ACP](https://agentclientprotocol.com/)
 (JSON-RPC over stdio). The core (server + web) does not know harness names — it only knows
-the **adapter registry**. Each harness (Cursor, OMP, or your own) is a package implementing
+the **adapter registry**. Each harness (Cursor, OMP, OpenCode, or your own) is a package implementing
 the `HarnessAdapter` interface from `@acpio/shared`.
 
 ```mermaid
@@ -11,9 +11,10 @@ flowchart LR
     Registry[Adapter registry]
     Cur[adapter-cursor]
     Omp[adapter-omp]
+    Ocp[adapter-opencode]
     Mine[adapter-my-harness]
     Core --> Registry
-    Registry --> Cur & Omp & Mine
+    Registry --> Cur & Omp & Ocp & Mine
 ```
 
 ## Where things live
@@ -23,6 +24,7 @@ flowchart LR
 | Adapter contract | `packages/shared/src/adapters.ts` |
 | Cursor adapter | `packages/adapter-cursor/src/index.ts` |
 | OMP adapter | `packages/adapter-omp/src/index.ts` |
+| OpenCode adapter | `packages/adapter-opencode/src/index.ts` |
 | Registry (the only place that knows concrete harnesses) | `apps/server/src/adapters/registry.ts` |
 | Web metadata (`GET /api/adapters`) | `apps/server/src/routes.ts` |
 
@@ -65,6 +67,7 @@ interface HarnessAdapter {
   restoreMode: "resume" | "load" | "new";
   suppressReplayOnLoad: boolean; // mute the history replay during session/load
   authenticateMethodId?: string; // authenticate method at boot ("cursor_login")
+  initializeMeta?: Record<string, unknown>; // extra initialize clientCapabilities._meta
 
   // Capabilities
   parameterizedModelPicker: boolean; // separate fast/effort/… ACP options
@@ -248,7 +251,8 @@ The settings description is looked up by `descriptionKey` in
 ## References
 
 - Contract: `packages/shared/src/adapters.ts`
-- Reference adapters: `packages/adapter-cursor/src/index.ts`, `packages/adapter-omp/src/index.ts`
+- Reference adapters: `packages/adapter-cursor/src/index.ts`, `packages/adapter-omp/src/index.ts`,
+  `packages/adapter-opencode/src/index.ts`
 - Registry: `apps/server/src/adapters/registry.ts`
 - Registry tests: `apps/server/src/adapters/registry.test.ts`
 - Usage guide: [docs/usage.md](usage.md)

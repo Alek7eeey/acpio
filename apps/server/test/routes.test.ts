@@ -1388,7 +1388,7 @@ describe("agent status", () => {
     expect(res.json()).toEqual({
       provider: null,
       available: false,
-      availability: { cursor: false, omp: false, builtin: false },
+      availability: { cursor: false, omp: false, opencode: false, builtin: false },
     });
   });
 
@@ -1885,6 +1885,7 @@ describe("disabled providers", () => {
     expect(adapters.map((a) => [a.id, a.enabled])).toEqual([
       ["cursor", true],
       ["omp", false],
+      ["opencode", true],
       ["builtin", true],
     ]);
 
@@ -1892,7 +1893,7 @@ describe("disabled providers", () => {
     expect(status).toEqual({
       provider: null,
       available: false,
-      availability: { cursor: false, builtin: false },
+      availability: { cursor: false, opencode: false, builtin: false },
     });
   });
 
@@ -1905,13 +1906,13 @@ describe("disabled providers", () => {
     const off = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       enabled: boolean;
     }>;
-    expect(off.map((a) => a.enabled)).toEqual([false, false, true]);
+    expect(off.map((a) => a.enabled)).toEqual([false, false, true, true]);
 
     await app.inject({ method: "PUT", url: "/api/settings", payload: { disabledProviders: [] } });
     const on = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       enabled: boolean;
     }>;
-    expect(on.map((a) => a.enabled)).toEqual([true, true, true]);
+    expect(on.map((a) => a.enabled)).toEqual([true, true, true, true]);
   });
 
   it("refuses a new session for a switched-off harness", async () => {
@@ -1997,8 +1998,8 @@ describe("user-defined agents", () => {
       commandField: string;
       defaultCommand: string;
     }>;
-    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "builtin", "fake-acp"]);
-    expect(meta[3]).toMatchObject({
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "opencode", "builtin", "fake-acp"]);
+    expect(meta[4]).toMatchObject({
       custom: true,
       label: "Fake ACP",
       commandField: "",
@@ -2045,7 +2046,7 @@ describe("user-defined agents", () => {
     const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
       id: string;
     }>;
-    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "builtin"]);
+    expect(meta.map((a) => a.id)).toEqual(["cursor", "omp", "opencode", "builtin"]);
 
     const res = await app.inject({
       method: "POST",
@@ -2787,6 +2788,7 @@ describe("prompt delivery while the agent is busy", () => {
     expect(meta.map((a) => [a.id, a.midTurnSteering])).toEqual([
       ["cursor", false],
       ["omp", false],
+      ["opencode", false],
       ["builtin", true],
     ]);
   });

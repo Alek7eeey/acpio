@@ -856,7 +856,10 @@ export class AcpClient extends EventEmitter {
           elicitation: { form: {} },
           // Harnesses with a parameterized model picker expose model params
           // (fast/effort/…) as separate config options.
-          _meta: { parameterizedModelPicker: this.adapter.parameterizedModelPicker },
+          _meta: {
+            parameterizedModelPicker: this.adapter.parameterizedModelPicker,
+            ...this.adapter.initializeMeta,
+          },
         },
         clientInfo: { name: "acpio", version: "0.1.0" },
       })) as {

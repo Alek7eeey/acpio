@@ -6,6 +6,7 @@
 import { builtinAdapter } from "@acpio/adapter-builtin";
 import { cursorAdapter } from "@acpio/adapter-cursor";
 import { ompAdapter } from "@acpio/adapter-omp";
+import { opencodeAdapter } from "@acpio/adapter-opencode";
 import { customAgentAdapter, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 import type {
   AdapterRegistry,
@@ -14,7 +15,7 @@ import type {
   HarnessAdapter,
 } from "@acpio/shared";
 
-const BUILT_IN: HarnessAdapter[] = [cursorAdapter, ompAdapter, builtinAdapter];
+const BUILT_IN: HarnessAdapter[] = [cursorAdapter, ompAdapter, opencodeAdapter, builtinAdapter];
 
 /** Ids a user-defined agent may not take: built-ins and the shell session. */
 export const RESERVED_AGENT_IDS: readonly string[] = [

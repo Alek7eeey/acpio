@@ -20,6 +20,10 @@
 //                            exempt the NEXT prompt from its idle ceiling)
 //   prompt containing "SLOW-HANG" → streams one thought, then holds the turn
 //                            open forever: only an interrupt can free the runtime
+//   prompt containing "SUBAGENT-CHILD" → speaks opencode's subagent wire: a
+//                            "subagent" spawn tool_call plus
+//                            opencode/session/child_update frames (status/
+//                            update) — one merged subagent card is the result
 //   prompt starting with "PERMISSION:" → issues session/request_permission
 //                                  and waits for the client's decision
 //   prompt starting with "ELICIT:" → issues elicitation/create (form mode),
@@ -194,6 +198,67 @@ async function handle(method, params, id) {
       const text = String(params.prompt?.[0]?.text ?? "");
       if (text.includes("EXIT-NOW")) {
         process.exit(1);
+      }
+      if (text.includes("SUBAGENT-CHILD")) {
+        // opencode's exact subagent shape (see tmp/probe output): the parent
+        // spawn call carries `name`, the child stream rides its own method.
+        const root = String(params.sessionId);
+        const child = "ses_childfake0001";
+        const ids = { rootSessionId: root, childSessionId: child, parentSessionId: root, depth: 1, title: "Answer 2+2" };
+        notify("session/update", {
+          sessionId: root,
+          update: {
+            sessionUpdate: "tool_call",
+            toolCallId: "sub-t1",
+            name: "subagent",
+            title: "subagent",
+            kind: "think",
+            status: "pending",
+            locations: [],
+            rawInput: {},
+          },
+        });
+        notify("session/update", {
+          sessionId: root,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "sub-t1",
+            status: "in_progress",
+            kind: "think",
+            title: "subagent",
+            locations: [],
+            rawInput: { agent: "general", description: "Answer 2+2", prompt: "What is 2+2?" },
+          },
+        });
+        notify("opencode/session/child_update", { ...ids, type: "status", status: "running" });
+        notify("opencode/session/child_update", {
+          ...ids,
+          type: "update",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "4" },
+            _meta: { "opencode/child-session": { id: child, parentID: root, depth: 1, title: "Answer 2+2" } },
+          },
+        });
+        notify("opencode/session/child_update", { ...ids, type: "status", status: "completed" });
+        notify("session/update", {
+          sessionId: root,
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "sub-t1",
+            status: "completed",
+            content: [{ type: "content", content: { type: "text", text: "4" } }],
+          },
+        });
+        notify("session/update", {
+          sessionId: root,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            messageId: "sub-final",
+            content: { type: "text", text: "4" },
+          },
+        });
+        return { stopReason: "end_turn" };
       }
       if (text.includes("SLOW-ACTIVE")) {
         // Keep sending traffic past a short host timeout so the client must

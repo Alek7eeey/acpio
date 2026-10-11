@@ -342,6 +342,12 @@ export interface HarnessAdapter {
   suppressReplayOnLoad: boolean;
   /** ACP `authenticate` method id sent at boot (e.g. "cursor_login"). */
   authenticateMethodId?: string;
+  /**
+   * Extra entries for the `initialize` `clientCapabilities._meta` — opt-ins
+   * the agent only enables when the client asks (opencode child-session
+   * streaming). Merged after the core's own `_meta` keys.
+   */
+  initializeMeta?: Record<string, unknown>;
 
   // ── Capabilities ─────────────────────────────────────────────────────────
   /** Agent exposes model params as separate config options (fast/effort/…). */

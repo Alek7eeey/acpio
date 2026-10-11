@@ -454,6 +454,8 @@ describe("DEFAULT_SETTINGS", () => {
     customAgents: [],
     ompCommand: "omp",
     ompArgs: ["acp"],
+    opencodeCommand: "opencode",
+    opencodeArgs: ["acp"],
     cursorApiKey: "",
     anthropicApiKey: "",
     openaiApiKey: "",

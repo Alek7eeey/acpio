@@ -1484,6 +1484,8 @@ export interface AppSettings {
   cursorArgs: string[];
   ompCommand: string;
   ompArgs: string[];
+  opencodeCommand: string;
+  opencodeArgs: string[];
   cursorApiKey: string;
   anthropicApiKey: string;
   openaiApiKey: string;
@@ -1756,6 +1758,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   cursorArgs: ["acp"],
   ompCommand: "omp",
   ompArgs: ["acp"],
+  opencodeCommand: "opencode",
+  opencodeArgs: ["acp"],
   cursorApiKey: "",
   anthropicApiKey: "",
   openaiApiKey: "",

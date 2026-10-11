@@ -597,6 +597,7 @@
     "profileDesc": "Account name and password",
     "cursorDesc": "Cursor CLI via ACP",
     "ompDesc": "OMP CLI via ACP",
+    "opencodeDesc": "OpenCode CLI via ACP",
     "customAgentsHint": "Your own ACP agent: point to an executable and its arguments for an agent that speaks the Agent Client Protocol. It joins the list above and behaves like a built-in harness.",
     "customAgents": "Custom agents",
     "customAgentsEmpty": "No custom agents yet",

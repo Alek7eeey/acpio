@@ -106,10 +106,9 @@ function mergeSettings(raw: unknown): AppSettings {
   const base = { ...DEFAULT_SETTINGS };
   if (!raw || typeof raw !== "object") return base;
   const merged = { ...base, ...(raw as Partial<AppSettings>) };
-  // Drop fields of harnesses removed from the app (OpenCode / PI).
+  // Drop fields of harnesses removed from the app (PI) or never shipped
+  // (OpenCode keeps its auth in `opencode auth login`, not a settings key).
   for (const stale of [
-    "opencodeCommand",
-    "opencodeArgs",
     "opencodeApiKey",
     "piCommand",
     "piArgs",
@@ -124,6 +123,10 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!merged.ompCommand) merged.ompCommand = DEFAULT_SETTINGS.ompCommand;
   if (!Array.isArray(merged.ompArgs)) {
     merged.ompArgs = [...DEFAULT_SETTINGS.ompArgs];
+  }
+  if (!merged.opencodeCommand) merged.opencodeCommand = DEFAULT_SETTINGS.opencodeCommand;
+  if (!Array.isArray(merged.opencodeArgs)) {
+    merged.opencodeArgs = [...DEFAULT_SETTINGS.opencodeArgs];
   }
   if (!isKnownProvider(merged.defaultProvider)) {
     merged.defaultProvider = DEFAULT_SETTINGS.defaultProvider;

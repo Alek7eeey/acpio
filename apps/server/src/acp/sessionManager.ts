@@ -221,9 +221,13 @@ function isSubagentToolUpdate(
   return false;
 }
 
-/** Real tool name from an ACP tool update's raw payload (runtime-narrowed). */
+/**
+ * Real tool name from an ACP tool update's raw payload (runtime-narrowed).
+ * ACP drafts spell it `toolName`; opencode sends `name` — both are the tool's
+ * own name, so a harness renaming nothing gets recognized either way.
+ */
 function toolNameFromRaw(raw: Record<string, unknown> | undefined): string | undefined {
-  const name = raw?.toolName;
+  const name = raw?.toolName ?? raw?.name;
   return typeof name === "string" ? name : undefined;
 }
 
@@ -2339,7 +2343,9 @@ async function handleExtension(
       return;
     }
     case "subagent_progress": {
-      const entry = (ext.params.agent ?? {}) as Record<string, unknown>;
+      // OMP wraps the snapshot in `{agent}`; opencode (and most harnesses) send
+      // the flat entry itself — fall back to the params as the entry.
+      const entry = (ext.params.agent ?? ext.params) as Record<string, unknown>;
       const card = adapter?.subagentCardFromProgress?.(entry);
       if (!card) return;
       await applySubagentCard(rt, messageId, card);

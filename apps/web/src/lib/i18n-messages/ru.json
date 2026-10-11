@@ -617,6 +617,7 @@
     "profileDesc": "Имя и пароль аккаунта",
     "cursorDesc": "Cursor CLI через ACP",
     "ompDesc": "OMP CLI через ACP",
+    "opencodeDesc": "OpenCode CLI через ACP",
     "customAgentsHint": "Свой ACP-агент: укажите исполняемый файл и аргументы агента, который говорит по Agent Client Protocol. Он появится в списке выше и работает наравне со встроенными.",
     "customAgents": "Свои агенты",
     "customAgentsEmpty": "Своих агентов пока нет",
