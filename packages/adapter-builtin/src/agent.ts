@@ -218,6 +218,39 @@ function systemPrompt(
 }
 
 /**
+ * A relay in front of a thinking model demands its own reasoning back: an
+ * assistant message that carries tool calls and no `reasoning_content` makes
+ * the whole request fail with `400 … The reasoning_content in the thinking
+ * mode must be passed back to the API`. A relay can answer a step with bare
+ * tool calls — it then rejects the very history it produced, and which upstream
+ * instance handles the next request decides whether the turn survives. An
+ * empty echo satisfies the check (measured against the endpoint), so the gap
+ * is filled rather than left to chance.
+ *
+ * Only a body that already carries some reasoning is touched: an endpoint that
+ * never thinks keeps exactly the messages it built, so no provider is handed a
+ * field it did not ask for.
+ */
+export function fillReasoningEcho(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  const thinking = messages.some((message) => {
+    const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
+    return row?.role === "assistant" && typeof row.reasoning_content === "string";
+  });
+  if (!thinking) return messages;
+  let changed = false;
+  const filled = messages.map((message) => {
+    const row = message as { role?: unknown; tool_calls?: unknown; reasoning_content?: unknown } | undefined;
+    if (row?.role !== "assistant") return message;
+    if (!Array.isArray(row.tool_calls) || row.tool_calls.length === 0) return message;
+    if (typeof row.reasoning_content === "string") return message;
+    changed = true;
+    return { ...row, reasoning_content: "" };
+  });
+  return changed ? filled : messages;
+}
+
+/**
  * Endpoint client for one provider: its URL, key and headers, plus any extra
  * request body the provider configures (Settings → Built-in agent). The extra
  * object merges over the built body, so a provider-specific knob the
@@ -240,11 +273,13 @@ function builtinEndpoint(
     // Most OpenAI-compatible servers only report usage when asked to.
     includeUsage: true,
     headers: builtinProviderHeaders(provider.headers, sessionId),
-    ...(Object.keys(extra).length > 0
-      ? {
-          transformRequestBody: (args: Record<string, any>) => ({ ...args, ...extra }),
-        }
-      : {}),
+    // Always on: the reasoning echo is not a provider knob but a rule the
+    // endpoint enforces on the history the agent hands back.
+    transformRequestBody: (args: Record<string, any>) => {
+      const body = Object.keys(extra).length > 0 ? { ...args, ...extra } : args;
+      const messages = fillReasoningEcho(body.messages);
+      return messages === body.messages ? body : { ...body, messages };
+    },
   });
 }
 

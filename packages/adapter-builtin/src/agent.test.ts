@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
-import { createBuiltinTransport } from "./agent.js";
+import { createBuiltinTransport, fillReasoningEcho } from "./agent.js";
 import { estimateTokens, promptView } from "./loop.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 
@@ -1466,6 +1466,279 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("hands a bare tool step back with an empty reasoning echo", async () => {
+    // The incident this guards: a relay in thinking mode answered a step with
+    // tool calls and no reasoning of its own, then refused the very history it
+    // had produced — `400 … The reasoning_content in the thinking mode must be
+    // passed back to the API` — and the turn died mid-flight. Every assistant
+    // message carrying tool calls has to go back with the field, empty where
+    // the step gave none.
+    const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        bodies.push(JSON.parse(body) as { messages?: Array<Record<string, unknown>> });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        const toolCall = (message: Record<string, unknown>) => ({
+          id: "c1",
+          object: "chat.completion.chunk",
+          created: 0,
+          model: "stub",
+          choices: [{ index: 0, delta: message, finish_reason: null }],
+        });
+        if (requests === 1) {
+          // Step one thinks and then asks for a tool: the endpoint is in
+          // thinking mode from here on.
+          res.write(chunk(toolCall({ role: "assistant", reasoning_content: "думаю" })));
+          res.write(
+            chunk(
+              toolCall({
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-1",
+                    type: "function",
+                    function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                  },
+                ],
+              }),
+            ),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        if (requests === 2) {
+          // Step two acts without a word of reasoning — the shape that used to
+          // leave the history unsendable.
+          res.write(
+            chunk(
+              toolCall({
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call-2",
+                    type: "function",
+                    function: { name: "bash", arguments: '{"command":"echo bye"}' },
+                  },
+                ],
+              }),
+            ),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(chunk(toolCall({ role: "assistant", content: "готово" })));
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Relay",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: "hi\n" };
+          return {};
+        },
+      );
+      await call<{ sessionId: string }>("session/new", { cwd: dir });
+      const res = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(res.stopReason).toBe("end_turn");
+      expect(requests).toBe(3);
+      // The first call carries no reasoning yet: the agent must not hand the
+      // endpoint a field its own answer has not asked for.
+      expect(JSON.stringify(bodies[0])).not.toContain("reasoning_content");
+      const sent = bodies[2]?.messages ?? [];
+      const acting = sent.filter(
+        (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
+      );
+      expect(acting).toHaveLength(2);
+      // What the endpoint thought travels back verbatim…
+      expect(acting[0]?.reasoning_content).toBe("думаю");
+      // …and the step that thought nothing still comes back with the field.
+      expect(acting[1]).toHaveProperty("reasoning_content");
+      expect(acting[1]?.reasoning_content).toBe("");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("leaves an endpoint that never thinks without the reasoning field", async () => {
+    const bodies: Array<{ messages?: Array<Record<string, unknown>> }> = [];
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        bodies.push(JSON.parse(body) as { messages?: Array<Record<string, unknown>> });
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        if (requests === 1) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-1",
+                        type: "function",
+                        function: { name: "bash", arguments: '{"command":"echo hi"}' },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null }],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Plain",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+        (method) => {
+          if (method === "session/request_permission") {
+            return { outcome: { outcome: "selected", optionId: "allow_once" } };
+          }
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: "hi\n" };
+          return {};
+        },
+      );
+      await call<{ sessionId: string }>("session/new", { cwd: dir });
+      const res = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(res.stopReason).toBe("end_turn");
+      expect(requests).toBe(2);
+      // The second call hands the endpoint its own bare tool step back: an
+      // endpoint that never reasoned must not be handed the field at all.
+      const acting = (bodies[1]?.messages ?? []).filter(
+        (message) => message.role === "assistant" && Array.isArray(message.tool_calls),
+      );
+      expect(acting).toHaveLength(1);
+      expect(acting[0]).not.toHaveProperty("reasoning_content");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("asks the user through the harness and carries the answer into the turn", async () => {
     const asked: Array<{ method: string; params: Record<string, unknown> }> = [];
     let requests = 0;
@@ -2488,5 +2761,43 @@ describe("builtin subagents wiring", () => {
     } finally {
       await stub.close();
     }
+  });
+});
+
+// The wire-level rule the incident turned on: a thinking relay rejects the
+// history it produced when one acting step comes back without the field.
+describe("reasoning echo", () => {
+  const acting = (reasoning?: string) => ({
+    role: "assistant",
+    tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: "{}" } }],
+    ...(reasoning === undefined ? {} : { reasoning_content: reasoning }),
+  });
+  const tool = { role: "tool", tool_call_id: "call-1", content: "hi" };
+
+  it("fills the gaps of a request that is already in thinking mode", () => {
+    const messages = [{ role: "user", content: "hi" }, acting("думаю"), tool, acting(), tool];
+    const filled = fillReasoningEcho(messages) as Array<Record<string, unknown>>;
+    // The step that thought travels back verbatim…
+    expect(filled[1]?.reasoning_content).toBe("думаю");
+    // …and the bare one gains the empty echo instead of staying without it.
+    expect(filled[3]).toHaveProperty("reasoning_content");
+    expect(filled[3]?.reasoning_content).toBe("");
+    // Untouched rows keep their identity, so an unchanged body stays equal.
+    expect(filled[0]).toBe(messages[0]);
+    expect(filled[2]).toBe(messages[2]);
+  });
+
+  it("leaves a body alone when no assistant turn ever reasoned", () => {
+    const messages = [{ role: "user", content: "hi" }, acting(), tool];
+    expect(fillReasoningEcho(messages)).toBe(messages);
+  });
+
+  it("touches neither a plain answer nor a body that is not a message list", () => {
+    const quiet = { role: "assistant", content: "ок" };
+    const messages = [{ role: "user", content: "hi" }, acting("думаю"), { role: "assistant", content: "ок" }];
+    const filled = fillReasoningEcho(messages) as Array<Record<string, unknown>>;
+    expect(filled[2]).toEqual(quiet);
+    expect(filled[2]).not.toHaveProperty("reasoning_content");
+    expect(fillReasoningEcho(undefined)).toBeUndefined();
   });
 });
