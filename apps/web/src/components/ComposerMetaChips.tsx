@@ -807,15 +807,36 @@ export function ComposerMetaChips({
       if (target && contextChipRef.current?.contains(target)) return;
       setContextOpen(false);
     };
+    // A scroll is not a dismissal: the timeline follows a streaming turn, so
+    // closing here would tear the panel away while the model is still writing.
+    // Keep it glued to its chip instead, and close only once the chip itself is
+    // hidden or has scrolled out of the viewport.
+    const onScroll = (e: Event) => {
+      const panel = contextPanelRef.current;
+      const chip = contextChipRef.current;
+      if (!panel || !chip) return;
+      if (e.target instanceof Node && panel.contains(e.target)) return;
+      const rect = chip.getBoundingClientRect();
+      const offscreen =
+        (rect.width === 0 && rect.height === 0) ||
+        rect.bottom <= 0 ||
+        rect.top >= window.innerHeight;
+      if (offscreen) {
+        setContextOpen(false);
+        return;
+      }
+      placeContextPanel(panel, rect);
+      setContextPanelReady(true);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setContextOpen(false);
     };
     window.addEventListener("mousedown", close);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("keydown", onKey);
     };
   }, [contextOpen]);
