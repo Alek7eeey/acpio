@@ -188,7 +188,7 @@ const PI_ISOLATION = [
 const OMP_ISOLATION = ["--no-extensions", "--no-skills", "--no-rules"];
 
 /** Args a driver should run; exported so `--print-command` can show them. */
-export function agentArgs(agent, { prompt, provider, modelId }) {
+export function agentArgs(agent, { prompt, provider, modelId, ompProfileName }) {
   if (agent === "pi") {
     return [
       "-p",
@@ -205,7 +205,10 @@ export function agentArgs(agent, { prompt, provider, modelId }) {
   if (agent === "omp") {
     return [
       "--profile",
-      ompProfile(),
+      // The flag, not the env: an explicit --profile wins over OMP_PROFILE, so
+      // the runner's per-slot name has to be threaded through here or every
+      // slot would quietly share one profile file (and one wire label).
+      ompProfileName ?? ompProfile(),
       "--mode=json",
       "-p",
       "--no-session",
@@ -239,9 +242,12 @@ export function agentCommand(agent) {
   throw new Error(`unknown cli agent: ${agent}`);
 }
 
-export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir, opencodeConfigDir }) {
+export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutMs, piConfigDir, opencodeConfigDir, ompProfileName }) {
   const { cmd, prefix } = agentCommand(agent);
-  const args = [...prefix, ...agentArgs(agent, { prompt: task.prompt, provider, modelId })];
+  const args = [
+    ...prefix,
+    ...agentArgs(agent, { prompt: task.prompt, provider, modelId, ompProfileName }),
+  ];
   const env =
     agent === "pi" && piConfigDir
       ? { PI_CODING_AGENT_DIR: piConfigDir, PI_OFFLINE: "1" }

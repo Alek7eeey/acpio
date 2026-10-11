@@ -32,6 +32,36 @@ function providerDefaults() {
 /** Each CLI turns its native provider session header on by provider name. */
 const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen" };
 
+/**
+ * Built-in variants: the same shipped agent with one of its own thinking knobs
+ * pinned, so a run compares configurations of one harness instead of its
+ * average. `-low` / `-extra-low` is the ⋯ menu's per-chat "Thinking" mode (a
+ * model param, pinned per provider in settings); `-with-thinking-limit-N` adds
+ * the fuse that cuts one step's overlong reasoning (`builtinThinkingLimit`).
+ */
+const BUILTIN_VARIANT_RE = /^builtin(?:-(low|extra-low))?(?:-with-thinking-limit-(\d+))?$/;
+
+/** `--agents` entries → { name (label and wire), base (driver), knobs }. */
+function parseAgents(names) {
+  return names.map((name) => {
+    const variant = BUILTIN_VARIANT_RE.exec(name);
+    if (variant) {
+      return {
+        name,
+        base: "builtin",
+        thinking: variant[1] ?? null,
+        thinkingLimit: variant[2] ? Number(variant[2]) : null,
+      };
+    }
+    if (name === "pi" || name === "omp" || name === "opencode") {
+      return { name, base: name, thinking: null, thinkingLimit: null };
+    }
+    throw new Error(
+      `unknown agent "${name}" — known: pi, omp, opencode, builtin[-low|-extra-low][-with-thinking-limit-<chars>]`,
+    );
+  });
+}
+
 function parseArgs(argv) {
   const defaults = providerDefaults();
   const out = {
@@ -47,6 +77,7 @@ function parseArgs(argv) {
     builtinKey: process.env.BENCH_API_KEY || defaults.key,
     contextWindow: Number(process.env.BENCH_CONTEXT_WINDOW || 64000),
     timeoutMs: 300_000,
+    timeoutScale: 1,
     concurrency: 4,
     keep: false,
     proxy: true,
@@ -75,6 +106,7 @@ function parseArgs(argv) {
       case "--builtin-key": out.builtinKey = take(); break;
       case "--context-window": out.contextWindow = Number(take()); break;
       case "--timeout": out.timeoutMs = Number(take()); break;
+      case "--timeout-scale": out.timeoutScale = Number(take()); break;
       case "--concurrency": out.concurrency = Math.max(1, Number(take())); break;
       case "--out": out.out = path.resolve(take()); break;
       case "--keep": out.keep = true; break;
@@ -115,8 +147,10 @@ const pad = (s, n) => String(s).padEnd(n).slice(0, n);
 
 function logRow(row, done, total) {
   const label = `${row.agent}-${row.task}-r${row.repeat}`;
+  // A variant's label is longer than the column: pad, never cut it — the
+  // truncated task name would make two rows indistinguishable in the live log.
   console.log(
-    `[${done}/${total}] ${row.ok ? "PASS" : "FAIL"}  ${pad(label, 26)} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${String(row.toolCalls).padStart(2)}  in=${String(row.tokensIn).padStart(6)}  out=${String(row.tokensOut).padStart(5)}  ${row.timedOut ? "TIMEOUT" : ""}${row.crashed ? `exit=${row.exitCode}` : ""}`,
+    `[${done}/${total}] ${row.ok ? "PASS" : "FAIL"}  ${pad(label, Math.max(26, label.length))} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${String(row.toolCalls).padStart(2)}  in=${String(row.tokensIn).padStart(6)}  out=${String(row.tokensOut).padStart(5)}  ${row.timedOut ? "TIMEOUT" : ""}${row.crashed ? `exit=${row.exitCode}` : ""}`,
   );
   if (!row.ok) console.log(`      ↳ ${row.verifyOutput.split("\n").slice(0, 4).join(" | ").slice(0, 300)}`);
 }
@@ -131,6 +165,7 @@ async function main() {
         "  node bench/run.mjs [--agents pi,omp,builtin] [--tasks fix-sum,fizzbuzz]",
         "                     [--tasks-root <dir,...>] [--family long,...] [--faults a,b]",
         "                     [--repeats N] [--turns N] [--model <provider>/<id>] [--timeout ms]",
+        "                     [--timeout-scale N]  (multiplies every task's own budget)",
         "                     [--concurrency N] [--builtin-url <url>] [--builtin-key <key>]",
         "                     [--context-window N] [--out <dir>] [--keep]",
         "                     [--no-proxy] [--proxy-dump] [--proxy-verbose]",
@@ -147,6 +182,11 @@ async function main() {
         "",
         "Results: bench/results/<stamp>.jsonl and <stamp>.md",
         "         <stamp>.calls.jsonl - every model call as seen by the proxy",
+        "",
+        "Agents: pi, omp, opencode, and built-in variants — builtin, builtin-low,",
+        "        builtin-extra-low, ...-with-thinking-limit-<chars>: the shipped",
+        "        agent re-run with its per-chat Thinking mode and its reasoning",
+        "        fuse pinned, so one run compares configurations of a harness.",
       ].join("\n"),
     );
     return;
@@ -154,6 +194,12 @@ async function main() {
 
   const tasks = loadTasks(opts.tasksRoot, opts.tasks, opts.family);
   if (!tasks.length) throw new Error("no tasks selected");
+  // Validated up front: a typo must fail before the first pair, not spawn a
+  // process per task and report the mistake as a failed benchmark row.
+  const agents = parseAgents(opts.agents);
+  if (!Number.isFinite(opts.timeoutScale) || opts.timeoutScale <= 0) {
+    throw new Error(`--timeout-scale must be a positive number, got "${opts.timeoutScale}"`);
+  }
 
   const slash = opts.model.indexOf("/");
   if (slash < 1) throw new Error(`--model must be <provider>/<id>, got "${opts.model}"`);
@@ -165,9 +211,9 @@ async function main() {
   mkdirSync(workRoot, { recursive: true });
   mkdirSync(opts.out, { recursive: true });
 
-  console.log(`model: ${provider}/${modelId}   agents: ${opts.agents.join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}   concurrency: ${opts.concurrency}${opts.turns > 1 ? `   turns: ${opts.turns}` : ""}\n`);
-  if (opts.turns > 1 && opts.agents.some((a) => a !== "builtin")) {
-    console.warn("note: --turns applies to the builtin agent only; CLI agents still get one prompt.\n");
+  console.log(`model: ${provider}/${modelId}   agents: ${agents.map((a) => a.name).join(", ")}   tasks: ${tasks.map((t) => t.id).join(", ")}   repeats: ${opts.repeats}   concurrency: ${opts.concurrency}${opts.turns > 1 ? `   turns: ${opts.turns}` : ""}${opts.timeoutScale !== 1 ? `   timeout ×${opts.timeoutScale}` : ""}\n`);
+  if (opts.turns > 1 && agents.some((a) => a.base !== "builtin")) {
+    console.warn("note: --turns applies to the built-in agent only; CLI agents still get one prompt.\n");
   }
 
   // Every agent talks to the proxy, so the wire is captured regardless of what
@@ -196,9 +242,12 @@ async function main() {
   /** One (agent, task, repeat) pair, run on the given slot. */
   const runPair = async (pair, slot) => {
     const { agent, task, rep } = pair;
-    const label = `${agent}-${task.id}-r${rep}`;
-    const url = labeledUrl(agent, task.id, rep);
-    const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
+    // `agent.name` is the label the row and the wire carry; `agent.base` is the
+    // driver — every built-in variant runs through the same one.
+    const base = agent.base;
+    const label = `${agent.name}-${task.id}-r${rep}`;
+    const url = labeledUrl(agent.name, task.id, rep);
+    const timeoutMs = Math.round((task.timeoutMs ?? opts.timeoutMs) * opts.timeoutScale);
     let result;
     let ws;
     let faults = [];
@@ -209,7 +258,7 @@ async function main() {
     // task.json wins, otherwise --turns splits the single prompt at sentence
     // boundaries. Default is one prompt — the plain single-turn session.
     const prompts =
-      agent === "builtin" && (task.prompts?.length || opts.turns > 1)
+      base === "builtin" && (task.prompts?.length || opts.turns > 1)
         ? task.prompts?.length
           ? task.prompts
           : splitPrompt(task.prompt, opts.turns)
@@ -224,33 +273,40 @@ async function main() {
       faults = await applyFaults(task.dir, ws, opts.faults.includes("all") ? (task.faults ?? []) : opts.faults);
       let piConfigDir;
       let opencodeConfigDir;
+      let ompProfileName;
       try {
-        if (agent === "builtin") {
+        if (base === "builtin") {
           if (!slot.server) {
             slot.server = new BenchServer({
               repo: REPO,
               stateDir: path.join(workRoot, `server-s${slot.idx}`),
-              provider: { provider: AGENT_PROVIDER_ALIAS[agent] ?? provider, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow },
+              provider: { provider: AGENT_PROVIDER_ALIAS[base] ?? provider, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow },
               headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
             });
             await slot.server.start();
             console.log(`builtin server (slot ${slot.idx}) up on ${slot.server.base}`);
-          } else {
-            // Same server, next pair: relabel so the wire attribution follows.
-            await slot.server.configure(url);
           }
+          // Same server, next pair: relabel so the wire attribution follows,
+          // and pin this variant's knobs — the server's settings are per slot,
+          // so a pair must never inherit the previous variant's thinking mode.
+          await slot.server.configure(url, { thinking: agent.thinking, thinkingLimit: agent.thinkingLimit });
           result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs, prompts });
         } else {
-          const providerSlug = AGENT_PROVIDER_ALIAS[agent] ?? provider;
-          if (agent === "pi") {
+          const providerSlug = AGENT_PROVIDER_ALIAS[base] ?? provider;
+          if (base === "pi") {
             if (!piConfigDirs.has(slot.idx)) piConfigDirs.set(slot.idx, path.join(workRoot, `pi-s${slot.idx}`));
             piConfigDir = piConfigDirs.get(slot.idx);
             ensurePiModel(piConfigDir, { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
           }
-          if (agent === "omp") {
-            ensureOmpModel(ompProfile(), { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
+          if (base === "omp") {
+            // One profile per slot, not one per run: the profile file carries
+            // the pair's labelled URL, so a shared profile would pin every omp
+            // pair to one chain (the old shape). OMP_PROFILE is omp's own
+            // switch for isolated agent state, and each slot owns its file.
+            ompProfileName = `${ompProfile()}-s${slot.idx}`;
+            ensureOmpModel(ompProfileName, { provider: providerSlug, baseUrl: url, apiKey: opts.builtinKey, modelId, contextWindow: opts.contextWindow });
           }
-          if (agent === "opencode") {
+          if (base === "opencode") {
             // One config dir per slot; the file is rewritten per pair (the
             // labelled URL and the session id are per pair).
             opencodeConfigDir = path.join(workRoot, `opencode-s${slot.idx}`);
@@ -260,10 +316,10 @@ async function main() {
               apiKey: opts.builtinKey,
               modelId,
               contextWindow: opts.contextWindow,
-              sessionId: `acpio-bench-${agent}-${task.id}-r${rep}`,
+              sessionId: `acpio-bench-${agent.name}-${task.id}-r${rep}`,
             });
           }
-          result = await runCliAgent(agent, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir, opencodeConfigDir });
+          result = await runCliAgent(agent.name, { task, ws, provider: providerSlug, modelId, timeoutMs, piConfigDir, opencodeConfigDir, ompProfileName });
         }
       } catch (err) {
         result = {
@@ -289,9 +345,9 @@ async function main() {
       // 9/10 firings already on disk). Same call ceiling as the stall wall;
       // verify-first keeps a green pair from being re-rolled.
       const sessionError =
-        !result.timedOut && agent === "builtin" && result.exitCode === 1 && result.toolCalls <= 5;
+        !result.timedOut && base === "builtin" && result.exitCode === 1 && result.toolCalls <= 5;
       let corrupted = false;
-      if (agent === "builtin" && !verify.ok && !stall && !instantFinish && !sessionError && !retried) {
+      if (base === "builtin" && !verify.ok && !stall && !instantFinish && !sessionError && !retried) {
         for (const delay of [0, 500, 1500]) {
           if (delay) await new Promise((r) => setTimeout(r, delay));
           if (await sessionTranscriptHasNul(slot.server, ws)) {
@@ -312,7 +368,7 @@ async function main() {
       console.warn(`artifact signature on ${label} (${retryReason}) — retrying once`);
     }
     const row = {
-      agent,
+      agent: agent.name,
       task: task.id,
       repeat: rep,
       ok: verify.ok,
@@ -337,17 +393,17 @@ async function main() {
     return row;
   };
 
-  // All (agent, task, repeat) pairs; builtin+pi run on N parallel slots, omp
-  // runs on a single chain (its profile file is global — one config at a time).
+  // Every (agent, task, repeat) pair runs on one of N parallel slots: each
+  // harness is given its own config per pair (a config dir for pi/opencode, a
+  // profile name for omp), so nothing forces a serial chain any more.
   const rows = [];
   let done = 0;
-  const total = opts.agents.length * tasks.length * opts.repeats;
-  const ompPairs = [];
+  const total = agents.length * tasks.length * opts.repeats;
   const freePairs = [];
-  for (const agent of opts.agents) {
+  for (const agent of agents) {
     for (const task of tasks) {
       for (let rep = 1; rep <= opts.repeats; rep++) {
-        (agent === "omp" ? ompPairs : freePairs).push({ agent, task, rep });
+        freePairs.push({ agent, task, rep });
       }
     }
   }
@@ -359,9 +415,9 @@ async function main() {
     try {
       return await runPair(pair, slot);
     } catch (err) {
-      console.warn(`pair failed: ${pair.agent}/${pair.task.id}: ${String(err).split("\n")[0]}`);
+      console.warn(`pair failed: ${pair.agent.name}/${pair.task.id}: ${String(err).split("\n")[0]}`);
       return {
-        agent: pair.agent, task: pair.task.id, repeat: pair.rep, ok: false,
+        agent: pair.agent.name, task: pair.task.id, repeat: pair.rep, ok: false,
         verifyOutput: `pair failed: ${String(err).slice(0, 400)}`, files: [],
         toolCalls: 0, toolErrors: 0, toolNames: {}, tokensIn: 0, tokensOut: 0,
         tokensTotal: 0, tokensCached: 0, contextTokens: 0, cost: 0, finalText: "",
@@ -382,17 +438,7 @@ async function main() {
       }
     })(),
   );
-  const ompWorker = (async () => {
-    for (;;) {
-      const pair = ompPairs.shift();
-      if (!pair) break;
-      const row = await safeRunPair(pair, slots[0]);
-      rows.push(row);
-      done += 1;
-      logRow(row, done, total);
-    }
-  })();
-  await Promise.all([...pairWorkers, ompWorker]);
+  await Promise.all(pairWorkers);
   for (const slot of slots) slot.server?.stop();
 
   const file = path.join(opts.out, `${stamp}.jsonl`);
@@ -408,21 +454,24 @@ async function main() {
     console.log(`${callsFile}  (${proxy.calls.length} model calls)`);
   }
 
-  console.log("\nagent      pass  runs  wall(s)  tools  tokIn   tokOut  cached  fails");
-  for (const agent of opts.agents) {
-    const rs = rows.filter((r) => r.agent === agent);
+  // Every table gets the widest label in the run: a variant name is long, and
+  // a cut one reads as its base agent.
+  const agentCol = Math.max(11, ...agents.map((a) => a.name.length));
+  console.log(`\n${pad("agent", agentCol)}pass  runs  wall(s)  tools  tokIn   tokOut  cached  fails`);
+  for (const agent of agents) {
+    const rs = rows.filter((r) => r.agent === agent.name);
     if (!rs.length) continue;
     const sum = (pick) => rs.reduce((n, r) => n + (typeof pick(r) === "number" ? pick(r) : 0), 0);
     console.log(
-      `${pad(agent, 11)}${String(rs.filter((r) => r.ok).length).padStart(3)}/${String(rs.length).padEnd(4)} ${String(Math.round(sum((r) => r.wallMs) / rs.length / 1000)).padStart(6)}  ${String(Math.round(sum((r) => r.toolCalls) / rs.length)).padStart(5)}  ${String(sum((r) => r.tokensIn)).padStart(7)} ${String(sum((r) => r.tokensOut)).padStart(7)} ${String(sum((r) => r.tokensCached)).padStart(7)}  ${String(rs.filter((r) => r.crashed).length).padStart(4)}`,
+      `${pad(agent.name, agentCol)}${String(rs.filter((r) => r.ok).length).padStart(3)}/${String(rs.length).padEnd(4)} ${String(Math.round(sum((r) => r.wallMs) / rs.length / 1000)).padStart(6)}  ${String(Math.round(sum((r) => r.toolCalls) / rs.length)).padStart(5)}  ${String(sum((r) => r.tokensIn)).padStart(7)} ${String(sum((r) => r.tokensOut)).padStart(7)} ${String(sum((r) => r.tokensCached)).padStart(7)}  ${String(rs.filter((r) => r.crashed).length).padStart(4)}`,
     );
   }
 
   if (diagnostics.length) {
     console.log("\nwire (seen by the proxy, not self-reported):");
-    console.log("agent      calls  usage  sysChars  tools  schemaChars  prompt  cached  uncached  personality");
-    for (const agent of opts.agents) {
-      const ds = diagnostics.filter((d) => d.agent === agent);
+    console.log(`${pad("agent", agentCol)}calls  usage  sysChars  tools  schemaChars  prompt  cached  uncached  personality`);
+    for (const agent of agents) {
+      const ds = diagnostics.filter((d) => d.agent === agent.name);
       if (!ds.length) continue;
       const first = ds[0];
       const calls = ds.reduce((n, d) => n + d.calls, 0);
@@ -431,7 +480,7 @@ async function main() {
       const cached = ds.reduce((n, d) => n + (d.cachedTokens ?? 0), 0);
       const traits = describeParams(first.params);
       console.log(
-        `${pad(agent, 11)}${String(calls).padStart(5)}  ${String(usage).padStart(5)}  ${String(first.systemChars).padStart(8)}  ${String(first.tools).padStart(5)}  ${String(first.toolsChars).padStart(11)}  ${String(prompt).padStart(6)}  ${String(cached).padStart(6)}  ${String(prompt - cached).padStart(8)}  ${traits}`,
+        `${pad(agent.name, agentCol)}${String(calls).padStart(5)}  ${String(usage).padStart(5)}  ${String(first.systemChars).padStart(8)}  ${String(first.tools).padStart(5)}  ${String(first.toolsChars).padStart(11)}  ${String(prompt).padStart(6)}  ${String(cached).padStart(6)}  ${String(prompt - cached).padStart(8)}  ${traits}`,
       );
     }
   }

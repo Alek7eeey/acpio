@@ -1,5 +1,6 @@
 // Drives the in-process builtin agent the way a user does: the real acpio
 // server, its HTTP API, `permissionPolicy=always`, a per-run temp database.
+import { builtinModelValue } from "@acpio/shared";
 import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -136,10 +137,17 @@ export class BenchServer {
    * Point the running server at `url`. A slot server is reused across pairs,
    * and the pair's wire label lives in the provider URL — without a re-PUT
    * every later pair on the slot rides the first pair's label on the wire.
+   *
+   * `thinking` / `thinkingLimit` pin a built-in *variant* (the runner's
+   * `builtin-low`, `...-with-thinking-limit-N`): the mode is the harness's own
+   * per-chat model param, read at session boot from the provider's defaults,
+   * and the fuse is its global setting, re-read on every turn. Both are always
+   * written — a slot serves several variants in turn, so "no knob" must reset
+   * the slot instead of inheriting the previous pair's mode.
    */
-  async configure(url = this.provider.baseUrl) {
+  async configure(url = this.provider.baseUrl, { thinking = null, thinkingLimit = null } = {}) {
     this.provider.baseUrl = url;
-    await this.api("PUT", "/api/settings", {
+    const applied = await this.api("PUT", "/api/settings", {
       locale: "en",
       defaultProvider: "builtin",
       defaultMode: "agent",
@@ -171,7 +179,23 @@ export class BenchServer {
       ...(process.env.BENCH_SUBAGENTS === "on"
         ? { builtinSubagents: { enabled: true, allowAdhoc: true, agents: [] } }
         : {}),
+      // The session has to be pinned to a real model value: the server only
+      // hands `modelParams` to the agent alongside a model, so without this
+      // the variant's thinking mode would never reach the wire (an empty
+      // default makes the boot's model step bail out before the params).
+      defaultModelByProvider: {
+        builtin: builtinModelValue(this.provider.provider, this.provider.modelId),
+      },
+      defaultModelParamsByProvider: { builtin: { thinking: thinking ?? "default" } },
+      builtinThinkingLimit: thinkingLimit ?? 0,
     });
+    // A knob the server quietly dropped would make the variant a lie in the
+    // results table, so say so on the spot instead of at analysis time.
+    if (thinkingLimit !== null && applied?.builtinThinkingLimit !== thinkingLimit) {
+      console.warn(
+        `thinking limit ${thinkingLimit} did not stick (server reports ${applied?.builtinThinkingLimit})`,
+      );
+    }
   }
 
   stop() {

@@ -59,6 +59,7 @@ node bench/horizon.mjs                              # pass rate by human-time bu
 node bench/selftest.mjs                             # bug fails, golds pass, faults don't mask
 node bench/run.mjs --keep                           # leave workspaces on disk
 node bench/run.mjs --model openai/gpt-4o-mini       # another provider
+node bench/run.mjs --agents builtin,builtin-low --timeout-scale 2  # thinking variants, 2× budgets
 node bench/run.mjs --proxy-verbose                  # log every model call
 node bench/run.mjs --proxy-dump                     # keep full request bodies
 node bench/run.mjs --no-proxy                       # direct calls, no capture
@@ -72,6 +73,16 @@ agent never saw. `PASS` means the verifier exited 0. Results are written to
 `bench/results/<stamp>.jsonl` (machine rows), `<stamp>.md` (table), and
 `<stamp>.calls.jsonl` (one line per model call, from the proxy).
 
+A built-in **variant** is that same shipped agent with one of its own thinking
+knobs pinned, so one run compares configurations of a harness instead of one
+agent against another: `builtin-low` / `builtin-extra-low` set the ⋯ menu's
+per-chat Thinking mode, and a `-with-thinking-limit-<chars>` suffix adds the
+fuse that cuts one step's overlong reasoning. Both are the app's own knobs —
+the per-provider model param (`defaultModelParamsByProvider`) and
+`builtinThinkingLimit` — written to the slot's settings before each pair, so a
+pair never inherits the previous variant's mode. `--timeout-scale N` multiplies
+each task's own budget (its `task.json` `timeoutMs`).
+
 ## How each agent is driven
 
 | agent | transport | permissions | isolation |
@@ -80,11 +91,15 @@ agent never saw. `PASS` means the verifier exited 0. Results are written to
 | `omp` | `omp --mode=json -p` | `--auto-approve` | `--no-extensions --no-skills --no-rules` |
 | `builtin` | real `acpio` server, `POST /api/sessions/:id/prompt` | `permissionPolicy=always` | per-run temp SQLite DB, own port |
 | `builtin-clm` | the same server, sessions created with `provider: builtin-clm` | `permissionPolicy=always` | same as `builtin`; the CLM variant keeps its memory in a context file |
+| `builtin-<variant>` | the same server, its settings pinned per pair | `permissionPolicy=always` | same as `builtin`; the variant is the `thinking` model param (plus `builtinThinkingLimit` when the name names one) |
 
 Custom providers are written per run, never inherited from daily-use config:
-`omp` gets `~/.omp/profiles/omp-bench/agent/models.yml` (never the default
-profile), `pi` gets `<run>/pi-agent/models.json` with `PI_CODING_AGENT_DIR`
-pointing at it, `builtin` gets `PUT /api/settings`.
+`omp` gets `~/.omp/profiles/omp-bench-s<slot>/agent/models.yml` and runs with
+`OMP_PROFILE` pointing at it (never the default profile), `pi` gets
+`<run>/pi-agent/models.json` with `PI_CODING_AGENT_DIR` pointing at it,
+`builtin` gets `PUT /api/settings`. omp's config is per slot because the profile
+file carries the pair's labelled URL: a shared profile would serialise every
+omp pair onto one chain.
 
 ## Metrics
 
