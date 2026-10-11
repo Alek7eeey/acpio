@@ -452,6 +452,7 @@ describe("DEFAULT_SETTINGS", () => {
     cursorCommand: "agent",
     cursorArgs: ["acp"],
     customAgents: [],
+    builtinPresets: [],
     ompCommand: "omp",
     ompArgs: ["acp"],
     opencodeCommand: "opencode",
@@ -530,6 +531,7 @@ describe("DEFAULT_SETTINGS", () => {
     builtinSkillPaths: [".agents/skills", "~/.agents/skills"],
     builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
     builtinAllowOutsideCwd: false,
+    builtinMarkdownImages: true,
     composerDrafts: {},
   };
 

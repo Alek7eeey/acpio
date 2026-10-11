@@ -71,7 +71,12 @@ import {
 } from "../services/sessions.js";
 import { refineSessionTitle } from "../services/chatTitle.js";
 import { broadcastToSession } from "../services/wsHub.js";
-import { adapterCommand, adapters, getAdapter } from "../adapters/registry.js";
+import {
+  adapterCommand,
+  adapters,
+  getAdapter,
+  isBuiltinFamily,
+} from "../adapters/registry.js";
 import {
   AcpClient,
   AcpRpcError,
@@ -2650,7 +2655,7 @@ export async function runPrompt(
       // have never been sent `image` blocks — leaving them on the path hint
       // keeps their prompt shape unchanged.
       const embedded = new Set<string>();
-      if (opts.provider === "builtin") {
+      if (isBuiltinFamily(opts.provider)) {
         for (const f of saved) {
           const block = await readPromptImage(f);
           if (!block) continue;
@@ -3368,7 +3373,7 @@ async function runTurn(
     // web/fetch — the hint would be both wasted first-call tokens and a lie to
     // the model, so it rides only with external CLIs.
     if (
-      opts.provider !== "builtin" &&
+      !isBuiltinFamily(opts.provider) &&
       !rt.toolsHintSent &&
       !isAgentSlashPrompt(promptUserText)
     ) {
@@ -3837,15 +3842,15 @@ export async function restartSessionsForMcpChange(): Promise<void> {
 /**
  * The built-in agent snapshots endpoint/settings when its transport boots, so
  * a Settings edit would otherwise only reach chats created afterwards. Restart
- * every live built-in session the moment the endpoint or its model list
- * changes. `restartSessionMcp` is the generic "restart one session's agent,
+ * every live session of that family — the agent itself and each of its presets
+ * — the moment the endpoint, a preset or a model list changes. `restartSessionMcp` is the generic "restart one session's agent,
  * keep its model" helper — the name is historical.
  */
 export async function restartSessionsForBuiltinChange(): Promise<void> {
   let restarted = 0;
   for (const sessionId of [...runtimes.keys()]) {
     const rt = runtimes.get(sessionId);
-    if (rt?.provider !== "builtin") continue;
+    if (!rt?.provider || !isBuiltinFamily(rt.provider)) continue;
     if (await restartSessionMcp(sessionId)) restarted += 1;
   }
   if (restarted) {

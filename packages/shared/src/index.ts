@@ -2,6 +2,7 @@ import type {
   AgentMode,
   AgentModeOption,
   AgentProvider,
+  BuiltinPresetSpec,
   CustomAgentSpec,
   ModelOption,
   PromptDelivery,
@@ -16,6 +17,7 @@ export type {
   AgentModeOption,
   AgentProvider,
   AgentMode,
+  BuiltinPresetSpec,
   CustomAgentSpec,
   HarnessAdapter,
   InProcessAgentOptions,
@@ -28,6 +30,9 @@ export type {
   SubagentTranscriptPage,
 } from "./adapters.js";
 export {
+  BUILTIN_PRESET_MAX,
+  BUILTIN_PRESET_PROVIDER_PREFIX,
+  builtinPresetProviderId,
   CUSTOM_AGENT_ID_RE,
   CUSTOM_AGENT_MAX,
   customAgentAdapter,
@@ -69,6 +74,7 @@ export {
   normalizeBuiltinMaxOutputTokens,
   normalizeBuiltinTurnRetryAttempts,
   normalizeBuiltinThinkingLimit,
+  normalizeBuiltinPresets,
   BUILTIN_THINKING_LIMIT_MAX,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
@@ -1480,6 +1486,12 @@ export interface AppSettings {
   favoriteModelsByProvider: Partial<Record<AgentProvider, string[]>>;
   /** User-defined ACP agents (Settings → Connect) — registered at runtime. */
   customAgents: CustomAgentSpec[];
+  /**
+   * Presets of the built-in agent (Settings → Built-in agent), each registered
+   * as an agent of its own: a named patch over the built-in knobs, so one chat
+   * runs the thinking profile and the next the fast one.
+   */
+  builtinPresets: BuiltinPresetSpec[];
   cursorCommand: string;
   cursorArgs: string[];
   ompCommand: string;
@@ -1754,6 +1766,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recentModelsByProvider: {},
   favoriteModelsByProvider: {},
   customAgents: [],
+  builtinPresets: [],
   cursorCommand: "agent",
   cursorArgs: ["acp"],
   ompCommand: "omp",

@@ -1,4 +1,9 @@
 import {
+  BUILTIN_PRESET_MAX,
+  normalizeCustomAgentId,
+  type BuiltinPresetSpec,
+} from "./adapters.js";
+import {
   DEFAULT_CHAT_CHIP_OPTIONS,
   DEFAULT_SETTINGS,
   normalizeBuiltinProviders,
@@ -213,6 +218,61 @@ export function normalizeBuiltinContextMode(value: unknown): BuiltinContextMode 
     : DEFAULT_SETTINGS.builtinContextMode;
 }
 
+/**
+ * Heal the built-in agent's presets (Settings → Built-in agent): each row is a
+ * named patch over the built-in knobs and registers as an agent of its own.
+ * Malformed rows drop, ids dedupe and may not collide with a registered
+ * adapter ({@link reserved}), and a knob that carries no number is left absent
+ * — absent is what makes the preset inherit the global value.
+ */
+export function normalizeBuiltinPresets(
+  raw: unknown,
+  reserved: readonly string[] = [],
+): BuiltinPresetSpec[] {
+  if (!Array.isArray(raw)) return [];
+  const taken = new Set(reserved);
+  const out: BuiltinPresetSpec[] = [];
+  for (const entry of raw) {
+    if (out.length >= BUILTIN_PRESET_MAX) break;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+    const row = entry as Record<string, unknown>;
+    const slug = normalizeCustomAgentId(row.id);
+    if (!slug || taken.has(slug)) continue;
+    taken.add(slug);
+    const label = typeof row.label === "string" ? row.label.trim().slice(0, 80) : "";
+    const thinkingLimit =
+      typeof row.thinkingLimit === "number"
+        ? normalizeBuiltinThinkingLimit(row.thinkingLimit)
+        : undefined;
+    const maxOutputTokens =
+      typeof row.maxOutputTokens === "number"
+        ? normalizeBuiltinMaxOutputTokens(row.maxOutputTokens)
+        : undefined;
+    const turnRetryAttempts =
+      typeof row.turnRetryAttempts === "number"
+        ? normalizeBuiltinTurnRetryAttempts(row.turnRetryAttempts)
+        : undefined;
+    const extraInstructions = normalizeBuiltinExtraInstructions(row.extraInstructions);
+    const contextMode =
+      row.contextMode === "off" || row.contextMode === "prune" || row.contextMode === "summary"
+        ? row.contextMode
+        : undefined;
+    out.push({
+      id: slug,
+      label: label || slug,
+      ...(thinkingLimit !== undefined ? { thinkingLimit } : {}),
+      ...(maxOutputTokens !== undefined ? { maxOutputTokens } : {}),
+      ...(turnRetryAttempts !== undefined ? { turnRetryAttempts } : {}),
+      ...(contextMode ? { contextMode } : {}),
+      ...(extraInstructions ? { extraInstructions } : {}),
+      ...(typeof row.allowOutsideCwd === "boolean"
+        ? { allowOutsideCwd: row.allowOutsideCwd }
+        : {}),
+    });
+  }
+  return out;
+}
+
 /** Heal the trigger percent (finite number required). */
 export function normalizeBuiltinCompactionThresholdPercent(value: unknown): number {
   return normalizeBoundedPercent(
@@ -371,6 +431,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
     partial.builtinExtraInstructions,
   );
   merged.builtinSubagents = normalizeBuiltinSubagents(partial.builtinSubagents);
+  merged.builtinPresets = normalizeBuiltinPresets(partial.builtinPresets);
   if (typeof partial.builtinAllowOutsideCwd !== "boolean") {
     merged.builtinAllowOutsideCwd = DEFAULT_SETTINGS.builtinAllowOutsideCwd;
   }

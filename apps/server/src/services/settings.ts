@@ -11,6 +11,7 @@ import {
   normalizeBuiltinContextSettings,
   normalizeBuiltinExtraInstructions,
   normalizeBuiltinProviders,
+  normalizeBuiltinPresets,
   normalizeBuiltinSubagents,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
@@ -23,7 +24,12 @@ import {
 } from "@acpio/shared";
 import { db, REPO_ROOT } from "../db/client.js";
 import { settings } from "../db/schema.js";
-import { adapters, RESERVED_AGENT_IDS, setCustomAdapters } from "../adapters/registry.js";
+import {
+  adapters,
+  presetProviderIds,
+  RESERVED_AGENT_IDS,
+  setCustomAdapters,
+} from "../adapters/registry.js";
 import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
@@ -115,10 +121,20 @@ function mergeSettings(raw: unknown): AppSettings {
   ] as const) {
     delete (merged as Record<string, unknown>)[stale];
   }
+  // Built-in agent presets register as agents of their own, so their provider
+  // ids are taken before the user-defined agents are healed — a custom agent
+  // may not shadow "builtin-fast" any more than it may shadow "omp".
+  merged.builtinPresets = normalizeBuiltinPresets(
+    merged.builtinPresets,
+    RESERVED_AGENT_IDS,
+  );
   // User-defined agents must be in the registry before the provider fields
   // below are validated — otherwise a freshly added agent is healed away.
-  merged.customAgents = normalizeCustomAgents(merged.customAgents, RESERVED_AGENT_IDS);
-  setCustomAdapters(merged.customAgents);
+  merged.customAgents = normalizeCustomAgents(
+    merged.customAgents,
+    [...RESERVED_AGENT_IDS, ...presetProviderIds(merged.builtinPresets)],
+  );
+  setCustomAdapters(merged.customAgents, merged.builtinPresets);
   // Backward-compatible defaults for newly added fields
   if (!merged.ompCommand) merged.ompCommand = DEFAULT_SETTINGS.ompCommand;
   if (!Array.isArray(merged.ompArgs)) {

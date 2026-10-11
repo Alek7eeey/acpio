@@ -67,6 +67,33 @@ export function harnessShortLabel(provider: AgentProvider | string | null | unde
 }
 
 /**
+ * Harness an adapter belongs to: a preset of the built-in agent reports
+ * `"builtin"`, every other adapter is its own harness.
+ */
+export function adapterFamily(adapter: AdapterMetaDto): AgentProvider {
+  return adapter.family ?? adapter.id;
+}
+
+/** True for the built-in agent and every preset of it — one in-process harness. */
+export function isBuiltinFamilyAdapter(adapter: AdapterMetaDto): boolean {
+  return adapterFamily(adapter) === "builtin";
+}
+
+/**
+ * True when the provider is the built-in agent or a preset of it. A session can
+ * outlive the adapter that created it, so an unregistered id counts as its own
+ * harness and never as this family.
+ */
+export function isBuiltinFamilyProvider(
+  provider: AgentProvider | string | null | undefined,
+  adapters: AdapterMetaDto[],
+): boolean {
+  if (!provider) return false;
+  const adapter = adapters.find((a) => a.id === provider);
+  return Boolean(adapter && isBuiltinFamilyAdapter(adapter));
+}
+
+/**
  * Display label for a provider: the adapter's own label when the registry
  * knows it (user-defined agents included), the built-in short name otherwise
  * (a session can outlive the agent that created it).

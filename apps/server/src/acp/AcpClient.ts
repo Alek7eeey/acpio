@@ -643,6 +643,15 @@ export class AcpClient extends EventEmitter {
     return this.adapter.id;
   }
 
+  /**
+   * The boot snapshot under the adapter's own settings — a preset of the
+   * built-in agent boots on its overlay, so the model and the knobs read here
+   * are the preset's, not the global ones.
+   */
+  private get bootSettings(): AppSettings {
+    return this.adapter.settingsFor ? this.adapter.settingsFor(this.settings) : this.settings;
+  }
+
   /** Exact file paths (outside the cwd) the agent may READ — user-attached files. */
   private extraReadFiles = new Set<string>();
 
@@ -955,8 +964,8 @@ export class AcpClient extends EventEmitter {
       try {
         if (!opts?.catalogOnly) {
           await this.applyModelSelection(
-            opts?.model ?? this.settings.defaultModel,
-            opts?.modelParams ?? this.settings.defaultModelParams,
+            opts?.model ?? this.bootSettings.defaultModel,
+            opts?.modelParams ?? this.bootSettings.defaultModelParams,
           );
         }
       } catch (err) {
@@ -1288,18 +1297,19 @@ export class AcpClient extends EventEmitter {
 
   /** Settings as of right now, falling back to the boot snapshot. */
   private async liveSettings(): Promise<AppSettings> {
-    if (!this.settingsProvider) return this.settings;
-    try {
-      return await this.settingsProvider();
-    } catch {
-      return this.settings;
-    }
+    const raw = this.settingsProvider
+      ? await this.settingsProvider().catch(() => this.settings)
+      : this.settings;
+    // A preset of the built-in agent runs with its own overlay; every reader
+    // below asks here, so the preset's knobs win over the global ones.
+    return this.adapter.settingsFor ? this.adapter.settingsFor(raw) : raw;
   }
 
   private async refreshOutsideCwd(): Promise<void> {
-    // Only the built-in agent has the switch: a spawned CLI keeps the workspace
-    // boundary whatever a built-in setting says.
-    if (this.adapter.id !== "builtin") {
+    // Only the in-process built-in agent has the switch: a spawned CLI keeps the
+    // workspace boundary whatever a built-in setting says. A preset of it is the
+    // same agent, so the family — not the provider id — decides.
+    if ((this.adapter.family ?? this.adapter.id) !== "builtin") {
       this.outsideCwdAllowed = false;
       return;
     }

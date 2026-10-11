@@ -7,7 +7,7 @@
  * built-ins and third parties add their own packages to the registry.
  */
 
-import type { AppSettings } from "./index.js";
+import type { AppSettings, BuiltinContextMode } from "./index.js";
 
 /** Provider id — built-ins plus any registered adapter id. */
 export type AgentProvider = "cursor" | "omp" | (string & {});
@@ -72,6 +72,49 @@ export interface CustomAgentSpec {
 
 /** Upper bound on user-defined agents — keeps the registry and UI sane. */
 export const CUSTOM_AGENT_MAX = 20;
+
+/**
+ * A preset of a harness that runs in-process (Settings → Built-in agent): a
+ * named patch over the built-in agent's knobs that is registered as an agent of
+ * its own — "Built-in" and "Built-in (Fast)" sit side by side in every picker,
+ * including the board's new-task form.
+ *
+ * Every knob is optional and `undefined` means "inherit the global value", so a
+ * preset only ever pins what it is about.
+ */
+export interface BuiltinPresetSpec {
+  /** Slug; the provider id is {@link builtinPresetProviderId} of it. */
+  id: string;
+  /** Display label ("Built-in (Fast)"). */
+  label: string;
+  /** Mid-think fuse cap of this preset, in chars of one step's reasoning. */
+  thinkingLimit?: number;
+  /** Output ceiling of one model call, in tokens. */
+  maxOutputTokens?: number;
+  /** Attempts one turn may run. */
+  turnRetryAttempts?: number;
+  /** What the preset does when the history outgrows the window. */
+  contextMode?: BuiltinContextMode;
+  /** Instructions appended to the system prompt ("" = inherit). */
+  extraInstructions?: string;
+  /** Whether this preset's tools may leave the session cwd. */
+  allowOutsideCwd?: boolean;
+}
+
+/** Upper bound on built-in presets — keeps the registry and UI sane. */
+export const BUILTIN_PRESET_MAX = 10;
+
+/** Provider ids of presets carry this prefix (`builtin-fast`). */
+export const BUILTIN_PRESET_PROVIDER_PREFIX = "builtin-";
+
+/**
+ * Provider id of a preset. Custom agents share the id charset, so the prefix
+ * is what keeps a user-defined agent from taking a preset's slot: the id is
+ * reserved while the preset exists.
+ */
+export function builtinPresetProviderId(slug: string): string {
+  return `${BUILTIN_PRESET_PROVIDER_PREFIX}${slug}`;
+}
 
 /** Legal provider id for a custom agent: lowercase slug, 1–32 chars. */
 export const CUSTOM_AGENT_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -308,6 +351,20 @@ export interface HarnessAdapter {
   description?: string;
   /** True for user-defined agents from Settings → Connect. */
   custom?: boolean;
+  /**
+   * Harness this adapter derives from (a preset of the built-in agent reports
+   * `"builtin"`), so the core can ask "is this the built-in family?" without
+   * listing provider ids. Absent = the adapter is its own harness.
+   */
+  family?: AgentProvider;
+  /** True for a preset of another harness (Settings → Built-in agent). */
+  preset?: boolean;
+  /**
+   * Settings this adapter actually runs with. A preset returns its own overlay,
+   * so every reader — the transport, the outside-cwd switch, the model
+   * resolution — sees the preset's knobs instead of the global ones.
+   */
+  settingsFor?: (settings: AppSettings) => AppSettings;
 
   // ── CLI & config ─────────────────────────────────────────────────────────
   /** Settings field holding the executable command ("" for custom agents). */
@@ -429,6 +486,12 @@ export interface AdapterMetaDto {
   description?: string;
   /** True for user-defined agents — their fields live in `customAgents`. */
   custom?: boolean;
+  /** Harness a preset derives from (see {@link HarnessAdapter.family}). */
+  family?: AgentProvider;
+  /** True for a preset of another harness. */
+  preset?: boolean;
+  /** True when the agent runs inside the server instead of as a child process. */
+  inProcess?: boolean;
   commandField: string;
   argsField: string;
   apiKeyField?: string;

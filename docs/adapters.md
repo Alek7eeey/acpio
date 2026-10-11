@@ -52,6 +52,15 @@ interface HarnessAdapter {
   label: string;                 // "Cursor", "OMP", …
   descriptionKey: string;        // i18n key for the settings description
 
+  // Provenance
+  custom?: boolean;              // user-defined agent (Settings → Connect)
+  family?: string;               // harness this adapter derives from (a preset
+                                 // of the built-in agent reports "builtin")
+  preset?: boolean;              // a preset of another harness
+  settingsFor?: (settings: AppSettings) => AppSettings; // settings it runs with
+  createTransport?: (opts: InProcessAgentOptions) => InProcessAgentTransport;
+                                 // in-process agent: no command, no child process
+
   // CLI & config
   commandField: string;          // settings field holding the command
   argsField: string;             // settings field holding the args array
@@ -86,6 +95,14 @@ interface HarnessAdapter {
   readSubagentTranscript?: (client, agentId, fromByte) => Promise<SubagentTranscriptPage | undefined>;
 }
 ```
+
+### Adapters that derive from another one
+
+The built-in agent ships presets (`BuiltinPresetSpec` in Settings → Built-in agent): a named
+patch over its knobs, registered as an agent of its own. `builtinPresetAdapter(preset)`
+builds one — it copies the base adapter and sets `family: "builtin"`, `preset: true` and
+`settingsFor`, which is how the core, and every other reader of settings, tells "this is the
+in-process built-in agent under another name" without listing provider ids.
 
 ### Session lifecycle
 

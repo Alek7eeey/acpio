@@ -50,6 +50,15 @@ interface HarnessAdapter {
   label: string;                 // «Cursor», «OMP», …
   descriptionKey: string;        // i18n-ключ описания в настройках
 
+  // Происхождение
+  custom?: boolean;              // агент пользователя (Настройки → Подключение)
+  family?: string;               // харнесс, от которого адаптер произведён
+                                 // (пресет встроенного агента отдаёт "builtin")
+  preset?: boolean;              // пресет другого харнесса
+  settingsFor?: (settings: AppSettings) => AppSettings; // настройки, с которыми он работает
+  createTransport?: (opts: InProcessAgentOptions) => InProcessAgentTransport;
+                                 // агент внутри сервера: без команды и процесса
+
   // CLI и конфиг
   commandField: string;          // поле настроек с командой (например "myHarnessCommand")
   argsField: string;             // поле настроек с массивом аргументов
@@ -83,6 +92,14 @@ interface HarnessAdapter {
   readSubagentTranscript?: (client, agentId, fromByte) => Promise<SubagentTranscriptPage | undefined>;
 }
 ```
+
+### Адаптеры, произведённые от другого
+
+У встроенного агента есть пресеты (`BuiltinPresetSpec` в Настройках → Встроенный агент):
+именованный набор его же настроек, зарегистрированный как отдельный агент.
+`builtinPresetAdapter(preset)` собирает такой адаптер: он копирует базовый и ставит
+`family: "builtin"`, `preset: true` и `settingsFor` — по ним ядро и все читатели настроек
+понимают «это тот же встроенный агент под другим именем», не сверяясь со списком id.
 
 ### Жизненный цикл сессии
 

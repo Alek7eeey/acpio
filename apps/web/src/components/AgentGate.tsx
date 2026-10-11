@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useT } from "../lib/i18n";
-import { harnessLabel } from "../lib/harness";
+import { harnessLabel, isBuiltinFamilyAdapter, isBuiltinFamilyProvider } from "../lib/harness";
 import { useAppStore } from "../lib/store";
 import styles from "./AgentGate.module.css";
 
@@ -107,12 +107,13 @@ export function AgentGate() {
   const dismissAgentGate = useAppStore((s) => s.dismissAgentGate);
 
   // Enabled harnesses only, and nothing before /api/adapters answers: guessing
-  // here could name an agent the user switched off. The built-in agent runs
-  // inside the server — a startup status row about it carries no signal, so it
-  // is not listed and the gate does not wait on its probe.
+  // here could name an agent the user switched off. The built-in agent — and
+  // every preset of it — runs inside the server, where a startup status row
+  // carries no signal, so the family is not listed and the gate does not wait
+  // on its probe.
   const ids: readonly string[] = adapters
-    .map((a) => a.id)
-    .filter((id) => id !== "builtin");
+    .filter((a) => !isBuiltinFamilyAdapter(a))
+    .map((a) => a.id);
   // Every listable harness switched off — there is nothing to check, so no gate.
   if (!ids.length) return null;
   const started = Object.keys(probing).length > 0 || Object.keys(availability).length > 0;
@@ -152,8 +153,9 @@ export function AgentOfflineWarning() {
   const adapters = useAppStore((s) => s.adapters);
   const wentOffline = useAppStore((s) => s.agentOfflineWarning);
   const dismiss = useAppStore((s) => s.dismissAgentOfflineWarning);
-  // Same rule as the gate: the built-in agent's own status is noise.
-  const ids = wentOffline.filter((id) => id !== "builtin");
+  // Same rule as the gate: the built-in agent's own status is noise — and a
+  // preset of it is the same in-process agent under another name.
+  const ids = wentOffline.filter((id) => !isBuiltinFamilyProvider(id, adapters));
   if (!ids.length) return null;
 
   return (

@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   addTaskAttachments,
@@ -127,7 +127,7 @@ import {
 } from "./services/git.js";
 import { buildChatsExport, buildExport, defaultExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
-import { adapters } from "./adapters/registry.js";
+import { adapters, RESERVED_AGENT_IDS } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
 import {
   isLoopbackClient,
@@ -190,6 +190,9 @@ const settingsSchema = z.object({
   defaultProvider: z.string().max(64).optional(),
   disabledProviders: z.array(z.string().max(64)).optional(),
   customAgents: z.array(z.unknown()).max(CUSTOM_AGENT_MAX * 2).optional(),
+  // Presets of the built-in agent — healed by the settings merge like custom
+  // agents, so the registry rebuild in the same request sees them.
+  builtinPresets: z.array(z.unknown()).max(BUILTIN_PRESET_MAX * 2).optional(),
   defaultMode: z.enum(["agent", "plan", "ask"]).optional(),
   defaultCwd: z.string().optional(),
   defaultModel: z.string().optional(),
@@ -555,6 +558,9 @@ export async function registerRoutes(app: FastifyInstance) {
       descriptionKey: a.descriptionKey,
       description: a.description,
       custom: a.custom === true,
+      family: a.family,
+      preset: a.preset === true,
+      inProcess: a.createTransport !== undefined,
       commandField: a.commandField,
       argsField: a.argsField,
       apiKeyField: a.apiKeyField,
@@ -727,6 +733,17 @@ export async function registerRoutes(app: FastifyInstance) {
       // The transport reads providers per turn, but a live chat may be pinned
       // to a model the edit removed — restart live built-in chats so the new
       // endpoints/model list apply immediately.
+      void restartSessionsForBuiltinChange();
+    }
+    if (
+      patch.builtinPresets !== undefined &&
+      JSON.stringify(normalizeBuiltinPresets(patch.builtinPresets, RESERVED_AGENT_IDS)) !==
+        JSON.stringify(current.builtinPresets)
+    ) {
+      // A preset is a registered agent, and its model is read when the
+      // transport boots — restart live built-in chats so an edited preset (or
+      // a new one) applies instead of waiting for the next boot. Both sides
+      // are compared normalized so client key order cannot force a restart.
       void restartSessionsForBuiltinChange();
     }
     if (

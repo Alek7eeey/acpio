@@ -79,3 +79,14 @@ export const builtinAdapter: HarnessAdapter = {
     "session/request_permission": "permission",
   },
 };
+
+/**
+ * Presets of the built-in agent: the same agent, registered once per named
+ * patch over its knobs (Settings → Built-in agent). Exported after the base
+ * adapter so the preset module can read it without a pending definition.
+ */
+export {
+  applyBuiltinPreset,
+  builtinPresetAdapter,
+  presetTransportOptions,
+} from "./preset.js";

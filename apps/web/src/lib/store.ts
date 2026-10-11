@@ -4125,10 +4125,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     ) {
       void get().refreshProjectMcp();
     }
-    if (nextPatch.disabledProviders !== undefined || nextPatch.customAgents !== undefined) {
+    if (
+      nextPatch.disabledProviders !== undefined ||
+      nextPatch.customAgents !== undefined ||
+      nextPatch.builtinPresets !== undefined
+    ) {
       // A switched-off harness keeps no probe state and leaves the registry
       // list, so nothing (pickers, gate, header) can mention it any more.
-      // Custom agents enter/leave the same registry list.
+      // Custom agents and the built-in agent's presets enter/leave the same
+      // registry list.
       const disabled = new Set(nextPatch.disabledProviders ?? current.disabledProviders);
       const agentAvailability = { ...get().agentAvailability };
       const agentProbing = { ...get().agentProbing };

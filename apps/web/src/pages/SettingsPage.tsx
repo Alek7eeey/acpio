@@ -50,6 +50,9 @@ import {
   normalizeBuiltinMaxSummaryTokens,
   normalizeBuiltinOffloadToolResultTokens,
   normalizeBuiltinPruneToolResultsKeepLast,
+  BUILTIN_PRESET_MAX,
+  builtinPresetProviderId,
+  type BuiltinPresetSpec,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -914,6 +917,331 @@ function BuiltinContextRows({
         }
       />
     </SettingTable>
+  );
+}
+
+/**
+ * Presets of the built-in agent (Settings → Built-in agent): named patches over
+ * its knobs, each registered as an agent of its own — "Built-in" and
+ * "Built-in (Fast)" stand side by side in every picker, the board's new-task
+ * form included. A knob left empty inherits the value set above, so a preset
+ * only says what it is about. The model is the ordinary per-harness default of
+ * its provider id, which is why it lives in `defaultModelByProvider`.
+ */
+function BuiltinPresetsRows({
+  form,
+  patch,
+}: {
+  form: AppSettings;
+  patch: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+}) {
+  const t = useT();
+  const saveSettings = useAppStore((s) => s.saveSettings);
+  const adapters = useAppStore((s) => s.adapters);
+  const presets = form.builtinPresets ?? [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  /** Raw text of the number fields while the user types (a half-erased value
+   *  must not be force-corrected under the cursor). */
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  const commitPresets = (next: BuiltinPresetSpec[]) => {
+    patch("builtinPresets", next);
+    void saveSettings({ builtinPresets: next });
+  };
+
+  const saveModel = (provider: AgentProvider, value: string) => {
+    const next = { ...(form.defaultModelByProvider ?? {}) };
+    if (value) next[provider] = value;
+    else delete next[provider];
+    patch("defaultModelByProvider", next);
+    void saveSettings({ defaultModelByProvider: next });
+  };
+
+  const update = (id: string, change: Partial<BuiltinPresetSpec>) =>
+    commitPresets(presets.map((p) => (p.id === id ? { ...p, ...change } : p)));
+
+  const setNumber = (
+    preset: BuiltinPresetSpec,
+    key: "thinkingLimit" | "maxOutputTokens" | "turnRetryAttempts",
+    raw: string,
+  ) => {
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      // Undefined is "inherit": the row saves back as absent, not as zero.
+      update(preset.id, { [key]: undefined } as Partial<BuiltinPresetSpec>);
+      return;
+    }
+    const value = Number(trimmed);
+    if (!Number.isFinite(value)) return;
+    update(preset.id, { [key]: value } as Partial<BuiltinPresetSpec>);
+  };
+
+  const addPreset = () => {
+    if (presets.length >= BUILTIN_PRESET_MAX) return;
+    const taken = new Set([...presets.map((p) => p.id), ...adapters.map((a) => a.id)]);
+    let n = presets.length + 1;
+    let slug = `preset-${n}`;
+    while (taken.has(slug) || taken.has(builtinPresetProviderId(slug))) {
+      slug = `preset-${++n}`;
+    }
+    const id = normalizeCustomAgentId(slug);
+    commitPresets([
+      ...presets,
+      { id, label: t("settings.builtinPresetDefaultLabel", { id }) } as BuiltinPresetSpec,
+    ]);
+    setOpenId(id);
+  };
+
+  const removePreset = (id: string) => {
+    commitPresets(presets.filter((p) => p.id !== id));
+    const provider = builtinPresetProviderId(id);
+    if ((form.defaultModelByProvider ?? {})[provider]) saveModel(provider, "");
+  };
+
+  // Models the presets may pin, read the way the chat picker reads them.
+  const modelOptions = form.builtinProviders.flatMap((provider) =>
+    provider.enabled !== false && provider.url
+      ? provider.models
+          .filter((m) => m.enabled !== false)
+          .map((m) => ({
+            value: builtinModelValue(provider.id, m.id),
+            label: m.label,
+            hint: form.builtinProviders.length > 1 ? provider.name : undefined,
+          }))
+      : [],
+  );
+
+  /**
+   * One bounded number field; an empty box means "inherit", not "zero". The
+   * placeholder is the value being inherited — the field is 88px wide (the
+   * number control of every other settings row), so a word would be cut off
+   * there and the number also answers "what does this preset run with".
+   */
+  const numberRow = (
+    preset: BuiltinPresetSpec,
+    key: "thinkingLimit" | "maxOutputTokens" | "turnRetryAttempts",
+    label: string,
+    hint: string,
+    max: number,
+    inherited: number,
+  ) => {
+    const draftKey = `${preset.id}.${key}`;
+    const value = drafts[draftKey] ?? (preset[key] === undefined ? "" : String(preset[key]));
+    return (
+      <SettingRow label={label} hint={hint}>
+        <input
+          type="number"
+          className={styles.numberInput}
+          min={0}
+          max={max}
+          inputMode="numeric"
+          value={value}
+          placeholder={String(inherited)}
+          aria-label={label}
+          onChange={(e) => {
+            setDrafts((prev) => ({ ...prev, [draftKey]: e.target.value }));
+            setNumber(preset, key, e.target.value);
+          }}
+          onBlur={() => setDrafts((prev) => ({ ...prev, [draftKey]: value }))}
+        />
+      </SettingRow>
+    );
+  };
+
+  /** Tri-state: inherit, allow, block. */
+  const booleanRow = (
+    preset: BuiltinPresetSpec,
+    key: "allowOutsideCwd",
+    label: string,
+    hint: string,
+  ) => (
+    <SettingRow label={label} hint={hint}>
+      <div className={styles.actionChips}>
+        {(
+          [
+            ["", t("settings.builtinPresetInherit")],
+            ["on", t("settings.builtinPresetOn")],
+            ["off", t("settings.builtinPresetOff")],
+          ] as const
+        ).map(([id, chipLabel]) => {
+          const on =
+            id === "" ? preset[key] === undefined : preset[key] === (id === "on");
+          return (
+            <button
+              key={id || "inherit"}
+              type="button"
+              className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+              aria-pressed={on}
+              onClick={() =>
+                update(preset.id, {
+                  [key]: id === "" ? undefined : id === "on",
+                } as Partial<BuiltinPresetSpec>)
+              }
+            >
+              {chipLabel}
+            </button>
+          );
+        })}
+      </div>
+    </SettingRow>
+  );
+
+  return (
+    <>
+      <p className={styles.hint}>{t("settings.builtinPresetsHint")}</p>
+      <div className={styles.providerList}>
+        {presets.map((preset) => {
+          const provider = builtinPresetProviderId(preset.id);
+          const open = openId === preset.id;
+          const model = form.defaultModelByProvider?.[provider] ?? "";
+          const nameLabel = t("settings.builtinPresetName");
+          return (
+            <details
+              key={preset.id}
+              className={styles.providerCard}
+              open={open}
+              onToggle={(e) => setOpenId(e.currentTarget.open ? preset.id : null)}
+            >
+              <summary className={styles.providerCardSummary}>
+                <span className={styles.providerCardName}>{preset.label}</span>
+                <span className={styles.providerCardUrl}>{provider}</span>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removePreset(preset.id);
+                  }}
+                  aria-label={`${t("common.delete")} · ${preset.label}`}
+                >
+                  {t("common.delete")}
+                </button>
+              </summary>
+              <div className={styles.providerCardBody}>
+                <SettingTable>
+                  <SettingRow layout="stack" label={nameLabel} hint={t("settings.builtinPresetNameHint")}>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      value={preset.label}
+                      onChange={(e) => update(preset.id, { label: e.target.value })}
+                      aria-label={nameLabel}
+                    />
+                  </SettingRow>
+                  <SettingRow
+                    label={t("settings.builtinPresetModel")}
+                    hint={t("settings.builtinPresetModelHint")}
+                  >
+                    <OptionPicker
+                      variant="block"
+                      placement="down"
+                      menuTitle={t("settings.builtinPresetModel")}
+                      value={model}
+                      onChange={(v) => saveModel(provider, v)}
+                      options={[
+                        { value: "", label: t("settings.builtinPresetModelInherit") },
+                        ...modelOptions,
+                      ]}
+                    />
+                  </SettingRow>
+                  {numberRow(
+                    preset,
+                    "thinkingLimit",
+                    t("settings.builtinPresetThinkingLimit"),
+                    t("settings.builtinPresetThinkingLimitHint"),
+                    BUILTIN_THINKING_LIMIT_MAX,
+                    form.builtinThinkingLimit ?? 0,
+                  )}
+                  {numberRow(
+                    preset,
+                    "maxOutputTokens",
+                    t("settings.builtinPresetMaxOutputTokens"),
+                    t("settings.builtinPresetMaxOutputTokensHint"),
+                    BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+                    form.builtinMaxOutputTokens ?? 0,
+                  )}
+                  {numberRow(
+                    preset,
+                    "turnRetryAttempts",
+                    t("settings.builtinPresetTurnRetries"),
+                    t("settings.builtinPresetTurnRetriesHint"),
+                    BUILTIN_TURN_RETRY_ATTEMPTS_MAX,
+                    form.builtinTurnRetryAttempts ?? 0,
+                  )}
+                  <SettingRow
+                    label={t("settings.builtinPresetContextMode")}
+                    hint={t("settings.builtinPresetContextModeHint")}
+                  >
+                    <div className={styles.actionChips}>
+                      {(
+                        [
+                          ["", t("settings.builtinPresetInherit")],
+                          ["summary", t("settings.builtinContextModeSummary")],
+                          ["prune", t("settings.builtinContextModePrune")],
+                          ["off", t("settings.builtinContextModeOff")],
+                        ] as const
+                      ).map(([id, chipLabel]) => {
+                        const on =
+                          id === ""
+                            ? preset.contextMode === undefined
+                            : preset.contextMode === id;
+                        return (
+                          <button
+                            key={id || "inherit"}
+                            type="button"
+                            className={`${styles.actionChip}${on ? ` ${styles.actionChipOn}` : ""}`}
+                            aria-pressed={on}
+                            onClick={() =>
+                              update(preset.id, {
+                                contextMode: id === "" ? undefined : id,
+                              } as Partial<BuiltinPresetSpec>)
+                            }
+                          >
+                            {chipLabel}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </SettingRow>
+                  {booleanRow(
+                    preset,
+                    "allowOutsideCwd",
+                    t("settings.builtinPresetOutsideCwd"),
+                    t("settings.builtinPresetOutsideCwdHint"),
+                  )}
+                  <SettingRow
+                    layout="stack"
+                    label={t("settings.builtinPresetExtraInstructions")}
+                    hint={t("settings.builtinPresetExtraInstructionsHint")}
+                  >
+                    <textarea
+                      className={styles.mcpFilesInput}
+                      rows={3}
+                      value={preset.extraInstructions ?? ""}
+                      placeholder={form.builtinExtraInstructions}
+                      aria-label={t("settings.builtinPresetExtraInstructions")}
+                      onChange={(e) =>
+                        update(preset.id, { extraInstructions: e.target.value })
+                      }
+                    />
+                  </SettingRow>
+                </SettingTable>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+      {presets.length ? null : <p className={styles.hint}>{t("settings.builtinPresetsEmpty")}</p>}
+      <button
+        type="button"
+        className={styles.secondaryBtn}
+        onClick={addPreset}
+        disabled={presets.length >= BUILTIN_PRESET_MAX}
+      >
+        {t("settings.builtinPresetsAdd")}
+      </button>
+    </>
   );
 }
 
@@ -2732,6 +3060,12 @@ export function SettingsPage() {
         {section === "agent" && leaf === "builtin" && (
           <>
             <p className={styles.hint}>{t("settings.builtinDesc")}</p>
+            {/* Presets come first: they are what an agent picker shows, so a
+                chat runs the profile its name promises. */}
+            <div className={styles.sectionBlock}>
+              <h2 className={styles.sectionHeading}>{t("settings.builtinPresetsTitle")}</h2>
+              <BuiltinPresetsRows form={form} patch={patch} />
+            </div>
             <SettingTable>
               <SettingRow
                 label={t("settings.builtinMaxOutputTokens")}
