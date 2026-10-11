@@ -577,6 +577,9 @@ export const en = {
     builtinAllowOutsideCwd: "Work outside the working folder",
     builtinAllowOutsideCwdHint:
       "Let the agent's tools leave the chat folder: read and search by absolute path (global skills in ~/.agents/skills, for instance), write outside it, and run a command in another folder. Off — the chat folder stays the boundary and a path outside it is rejected.",
+    builtinMarkdownImages: "Markdown pictures",
+    builtinMarkdownImagesHint:
+      "Tell the agent that this chat draws a picture out of markdown — `![shot](path)`, a path inside the working folder or an absolute one. Without the hint the model answers that it cannot show an image.",
     agentAdvancedTitle: "Advanced",
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",

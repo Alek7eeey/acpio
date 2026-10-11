@@ -1742,6 +1742,13 @@ export interface AppSettings {
    */
   builtinAllowOutsideCwd: boolean;
   /**
+   * Tell the built-in agent that this chat draws a picture out of markdown
+   * (`![shot](shot.png)`), so it shows a screenshot it saved instead of
+   * answering that it cannot display images. On by default — the hint is one
+   * line, and without it the feature is invisible to the model.
+   */
+  builtinMarkdownImages: boolean;
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent.
@@ -1860,6 +1867,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   builtinAllowOutsideCwd: false,
+  builtinMarkdownImages: true,
   composerDrafts: {},
 };
 

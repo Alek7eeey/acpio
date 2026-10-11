@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
@@ -289,6 +289,8 @@ type MarkdownContentProps = {
   text: string;
   streaming?: boolean;
   className?: string;
+  /** The chat whose folder a local image path is resolved against. */
+  sessionId?: string | null;
 };
 
 function childrenToPlainText(children: ReactNode): string {
@@ -322,6 +324,101 @@ function expandSourceCitations(text: string): string {
     .replace(/\[Ъ\]\((https?:\/\/[^)\s]+)\)/g, "[Коммерсантъ]($1)")
     .replace(/\[ъ\]\((https?:\/\/[^)\s]+)\)/g, "[Коммерсантъ]($1)")
     .replace(/(^|[\s(])Ъ(?=\))/g, "$1Коммерсантъ");
+}
+
+/**
+ * Keep a markdown image's own `src` intact.
+ *
+ * The agent points at bytes it saved itself, so an image URL is usually a plain
+ * path: `C:\work\shot.png`, or one relative to the chat folder. The default
+ * transform drops exactly those (a Windows drive reads as an unknown protocol)
+ * before any renderer sees them, so `src` passes through and is vetted where it
+ * turns into an element. Links keep the default treatment.
+ */
+const transformUrl: UrlTransform = (url, key) =>
+  key === "src" ? url : defaultUrlTransform(url);
+
+/** The markdown pipeline percent-escapes a destination — a Windows path reaches
+ *  us as `C:%5Ctmp%5Cshot.png` — and the route wants the plain path. */
+function decodePath(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** A path on this machine, as an agent writes one — `file:///C:/shot.png` too. */
+function localPath(url: string): string | null {
+  const fileUrl = /^file:\/\/(.*)$/i.exec(url);
+  if (fileUrl) {
+    const rest = decodePath(fileUrl[1] ?? "");
+    // `file:///C:/x.png` — the slash before a drive letter is not a path part.
+    return /^\/[A-Za-z]:/.test(rest) ? rest.slice(1) : rest;
+  }
+  // A Windows drive is not a scheme, however much `C:` looks like one.
+  if (/^[A-Za-z]:[\\/]/.test(url)) return decodePath(url);
+  // Any other scheme (data:, https:, javascript:, …) is not a path.
+  return /^[a-z][a-z0-9+.-]+:/i.test(url) ? null : decodePath(url);
+}
+
+/** Where an image's bytes are: a URL the browser fetches as it stands, or a file
+ *  served by this chat's own route (see `/api/sessions/:id/file`). */
+function imageTarget(raw: string, sessionId: string | null): { src: string; remote: boolean } | null {
+  const url = raw.trim();
+  if (!url) return null;
+  if (/^data:image\//i.test(url) || /^https?:\/\//i.test(url)) return { src: url, remote: true };
+  const filePath = localPath(url);
+  if (!filePath || !sessionId) return null;
+  const query = `path=${encodeURIComponent(filePath)}&inline=1`;
+  return { src: `/api/sessions/${encodeURIComponent(sessionId)}/file?${query}`, remote: false };
+}
+
+/**
+ * One picture in agent text. A file on this machine goes through the chat's own
+ * route and is clickable — the reader opens the image itself, not a download. A
+ * source that cannot be shown (no chat around the renderer, a path that 404s)
+ * leaves its caption behind instead of a broken box.
+ */
+export function MarkdownImage({
+  src,
+  alt,
+  sessionId = null,
+}: {
+  src: string;
+  alt?: string;
+  sessionId?: string | null;
+}) {
+  const [broken, setBroken] = useState(false);
+  const target = imageTarget(src, sessionId ?? null);
+  const caption = (alt ?? "").trim() || src.trim();
+  if (!target) {
+    return caption ? <span className={styles.imageMissing}>{caption}</span> : null;
+  }
+  if (broken) {
+    return (
+      <span className={styles.imageMissing} title={src}>
+        {caption}
+      </span>
+    );
+  }
+  const image = (
+    <img
+      className={styles.image}
+      src={target.src}
+      alt={caption}
+      title={caption}
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  );
+  return target.remote ? (
+    image
+  ) : (
+    <a className={styles.imageLink} href={target.src} target="_blank" rel="noreferrer">
+      {image}
+    </a>
+  );
 }
 
 // Stable identity — a fresh `components` object every render remounts the whole tree.
@@ -369,10 +466,23 @@ export const MarkdownContent = memo(function MarkdownContent({
   text,
   streaming = false,
   className,
+  sessionId = null,
 }: MarkdownContentProps) {
   // Render the server buffer directly. Each incoming chunk becomes visible
   // immediately; no synthetic typing or delayed catch-up animation.
   const rendered = useMemo(() => expandSourceCitations(text), [text]);
+  // `img` closes over this chat's id, so a path in the text becomes a URL on the
+  // chat's own file route. One object per id — a fresh one on every render
+  // remounts the whole tree (see the note above markdownComponents).
+  const components = useMemo<Components>(
+    () => ({
+      ...markdownComponents,
+      img: ({ src, alt }) => (
+        <MarkdownImage src={typeof src === "string" ? src : ""} alt={alt} sessionId={sessionId} />
+      ),
+    }),
+    [sessionId],
+  );
   if (!text.trim()) return null;
 
   return (
@@ -380,7 +490,11 @@ export const MarkdownContent = memo(function MarkdownContent({
       className={`${styles.root}${streaming ? ` ${styles.streaming}` : ""}${className ? ` ${className}` : ""}`}
     >
       <div className={styles.body}>
-        <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        <ReactMarkdown
+          remarkPlugins={remarkPlugins}
+          urlTransform={transformUrl}
+          components={components}
+        >
           {rendered}
         </ReactMarkdown>
       </div>

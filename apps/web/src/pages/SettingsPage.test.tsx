@@ -203,6 +203,30 @@ describe("SettingsPage form state", () => {
     );
     expect(toggle.checked).toBe(true);
   });
+
+  // The picture hint is one line of the built-in agent's system prompt; the
+  // switch reaches a running chat on its next turn, so it saves at once too.
+  it("saves the markdown-pictures switch as soon as it is flipped", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByLabelText("Markdown pictures") as HTMLInputElement;
+    // On by default: the chat renders the picture either way, the line only
+    // tells the agent so.
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ builtinMarkdownImages: false }),
+    );
+    expect(toggle.checked).toBe(false);
+  });
 });
 
 describe("Built-in providers", () => {

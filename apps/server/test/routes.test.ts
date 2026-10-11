@@ -1282,6 +1282,87 @@ describe("attachment upload", () => {
   });
 });
 
+// A picture in the agent's own text: the attachment route serves only blobs the
+// composer uploaded, so a file the agent saved itself had no route at all — the
+// reader got a broken image instead of the screenshot the agent had just taken.
+describe("agent files in a chat", () => {
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  /** Session whose cwd is a fresh temp dir — the agent's own folder. */
+  async function seedAgentFileSession() {
+    const cwd = await newTempDir("acp-agentfile-");
+    const row = await seedSession({ cwd });
+    return { id: row.id, cwd };
+  }
+
+  it("serves a path relative to the chat folder as an inline image", async () => {
+    const session = await seedAgentFileSession();
+    await fsp.mkdir(path.join(session.cwd, "tmp"), { recursive: true });
+    await fsp.writeFile(path.join(session.cwd, "tmp", "shot.png"), PNG);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/file?path=${encodeURIComponent("tmp/shot.png")}&inline=1`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/png");
+    expect(res.rawPayload).toEqual(PNG);
+  });
+
+  it("reads an absolute path in place and downloads it without ?inline=1", async () => {
+    const session = await seedAgentFileSession();
+    const elsewhere = await newTempDir("acp-agentout-");
+    const abs = path.join(elsewhere, "report.bin");
+    await fsp.writeFile(abs, Buffer.from([1, 2, 3]));
+
+    const inline = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/file?path=${encodeURIComponent(abs)}&inline=1`,
+    });
+    // Not an image: no inline preview even when asked for one.
+    expect(inline.statusCode).toBe(200);
+    expect(inline.headers["content-type"]).toBe("application/octet-stream");
+    expect(inline.headers["content-disposition"]).toContain("report.bin");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/file?path=${encodeURIComponent(abs)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload).toEqual(Buffer.from([1, 2, 3]));
+  });
+
+  it("404s for a missing file, a directory and an unknown chat", async () => {
+    const session = await seedAgentFileSession();
+    const missing = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/file?path=${encodeURIComponent("nope.png")}`,
+    });
+    expect(missing.statusCode).toBe(404);
+
+    const dir = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${session.id}/file?path=${encodeURIComponent(".")}`,
+    });
+    expect(dir.statusCode).toBe(404);
+
+    const unknown = await app.inject({
+      method: "GET",
+      url: `/api/sessions/${UNKNOWN_UUID}/file?path=x.png`,
+    });
+    expect(unknown.statusCode).toBe(404);
+  });
+
+  it("rejects a request without a path with 400", async () => {
+    const session = await seedAgentFileSession();
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${session.id}/file` });
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe("diagnostics", () => {
   async function setupDiagDir(): Promise<string> {
     const dir = await newTempDir("acp-diag-");

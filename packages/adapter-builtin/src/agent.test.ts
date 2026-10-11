@@ -2356,6 +2356,37 @@ describe("builtin subagents wiring", () => {
     }
   });
 
+  // The chat draws a picture out of markdown, but the model cannot know that on
+  // its own: asked to show a saved screenshot it answered that it cannot display
+  // images at all, writing `![shot](shot.png)` only inside that refusal. Hence a
+  // switch, on by default.
+  it("tells the agent that a picture on disk reaches the reader as markdown", async () => {
+    const stub = await startRecordingStub();
+    try {
+      const { call } = boot({ builtinProviders: provider(stub.url) });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits[0]!.system).toContain("![shot](shot.png)");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("leaves the picture line out when the switch is off", async () => {
+    const stub = await startRecordingStub();
+    try {
+      const { call } = boot({
+        builtinProviders: provider(stub.url),
+        builtinMarkdownImages: false,
+      });
+      await call("session/new", { cwd: "/w" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(stub.hits[0]!.system).not.toContain("![shot](shot.png)");
+    } finally {
+      await stub.close();
+    }
+  });
+
   /** Request #1 spawns `explore`, #2 is the child's own call, #3 closes the turn. */
   const SPAWN_SCRIPT: StubReply[] = [
     {

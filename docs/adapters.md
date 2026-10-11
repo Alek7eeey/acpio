@@ -119,7 +119,7 @@ in-process built-in agent under another name" without listing provider ids.
 | `subagent_task` | "subagent started" request (one call) | subagent card, dedup by `toolCallId` |
 | `subagent_roster` | full subagent snapshot | upsert cards by `agentId`, spawn only for `running` |
 | `subagent_progress` | live work update of a subagent | upsert card, body = intent/tool/output |
-| `image` | image generation result | `status` part with image type |
+| `image` | image generation result | `status` part with image type, drawn as a picture beside the answer |
 
 **Subagent cards.** The hook receives a raw entry of your harness and returns a normalized
 `SubagentCardUpdate` (`agentId`, `status: "running"|"completed"|"failed"`, `title`,

@@ -387,6 +387,7 @@ const settingsSchema = z.object({
     })
     .optional(),
   builtinAllowOutsideCwd: z.boolean().optional(),
+  builtinMarkdownImages: z.boolean().optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only
@@ -1740,6 +1741,44 @@ export async function registerRoutes(app: FastifyInstance) {
     reply.header(
       "Content-Disposition",
       `attachment; filename*=UTF-8''${encodeURIComponent(fileId)}`,
+    );
+    return reply.type("application/octet-stream").send(await fsp.readFile(filePath));
+  });
+
+  /** A file the agent's own text points at — `![shot](path)` in an answer, or
+   *  the picture behind a generated-image event. The route above can only serve
+   *  a blob the composer uploaded (it looks the id up among the `file` parts),
+   *  so a picture the agent saved itself had no way to reach the reader: a local
+   *  path in markdown is dropped by the browser's URL rules and no route served
+   *  those bytes. Relative paths resolve against the chat folder, which is the
+   *  agent's own cwd; absolute ones are read in place, exactly like an
+   *  attachment's stored path (and the agent can already print any local file
+   *  into the chat, so this reaches no further than the chat itself). */
+  app.get("/api/sessions/:id/file", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { path?: string; inline?: string };
+    const raw = (q.path ?? "").trim();
+    if (!raw || raw.length > 4096) {
+      return reply.code(400).send({ error: "Invalid path" });
+    }
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const filePath = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(detail.cwd, raw);
+    try {
+      if (!(await fsp.stat(filePath)).isFile()) throw new Error("not a file");
+    } catch {
+      return reply.code(404).send({ error: "Not found" });
+    }
+    // Same split the attachment route makes: ?inline=1 renders known image
+    // types in the browser, everything else downloads.
+    const ext = path.extname(filePath).slice(1).toLowerCase();
+    const imageMime = IMAGE_MIME[ext];
+    if (q.inline === "1" && imageMime) {
+      return reply.type(imageMime).send(await fsp.readFile(filePath));
+    }
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`,
     );
     return reply.type("application/octet-stream").send(await fsp.readFile(filePath));
   });

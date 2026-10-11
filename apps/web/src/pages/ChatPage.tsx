@@ -100,7 +100,7 @@ import {
   collectRecentCwds,
   CreateSessionFolderPicker,
 } from "../components/CreateSessionFolderPicker";
-import { MarkdownContent } from "../components/MarkdownContent";
+import { MarkdownContent, MarkdownImage } from "../components/MarkdownContent";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
@@ -1234,9 +1234,11 @@ function SubagentForkIcon() {
 function SubagentPartView({
   part,
   streaming,
+  sessionId,
 }: {
   part: MessagePartDto;
   streaming?: boolean;
+  sessionId: string | null;
 }) {
   const t = useT();
   const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
@@ -1332,7 +1334,7 @@ function SubagentPartView({
             </div>
           ) : null}
           {body.trim() ? (
-            <MarkdownContent text={body} className={styles.subagentMarkdown} />
+            <MarkdownContent text={body} className={styles.subagentMarkdown} sessionId={sessionId} />
           ) : null}
         </div>
       ) : null}
@@ -1344,10 +1346,13 @@ function PartView({
   part,
   streaming,
   embedded = false,
+  sessionId = null,
 }: {
   part: MessagePartDto;
   streaming?: boolean;
   embedded?: boolean;
+  /** The chat the part belongs to — a local image path is resolved against it. */
+  sessionId?: string | null;
 }) {
   const t = useT();
   const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
@@ -1373,6 +1378,7 @@ function PartView({
       <MarkdownContent
         text={text}
         streaming={streaming}
+        sessionId={sessionId}
         className={embedded ? styles.textEmbedded : streaming ? styles.streaming : undefined}
       />
     );
@@ -1407,7 +1413,7 @@ function PartView({
   }
 
   if (part.type === "subagent") {
-    return <SubagentPartView part={part} streaming={streaming} />;
+    return <SubagentPartView part={part} streaming={streaming} sessionId={sessionId} />;
   }
 
   // Question parts render inside StepsSpoiler / AgentTurnTimeline, not here.
@@ -1460,9 +1466,9 @@ function QuestionBucketView({
       {item.preamble.map((part) => (
         <div key={part.id} className={styles.questionPreamble}>
           {part.type === "text" ? (
-            <MarkdownContent text={String(part.payload.text ?? "")} />
+            <MarkdownContent text={String(part.payload.text ?? "")} sessionId={sessionId} />
           ) : (
-            renderTimelinePart(part, false, false)
+            renderTimelinePart(part, false, false, sessionId)
           )}
         </div>
       ))}
@@ -1487,7 +1493,7 @@ function QuestionBucketView({
  * the digest itself behind the toggle, where it can be read back, quoted and
  * checked against what the agent later does.
  */
-function CompactionRow({ part }: { part: MessagePartDto }) {
+function CompactionRow({ part, sessionId }: { part: MessagePartDto; sessionId?: string | null }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const manual = part.payload.manual === true;
@@ -1532,9 +1538,31 @@ function CompactionRow({ part }: { part: MessagePartDto }) {
       </div>
       {open && summary ? (
         <div className={styles.compactionBody}>
-          <MarkdownContent text={summary} />
+          <MarkdownContent text={summary} sessionId={sessionId} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** A status part carrying a generated image — the core's normalized `image`
+ *  event (`{kind:"image", filePath}`). It renders as a picture, never as text. */
+function isGeneratedImagePart(part: MessagePartDto): boolean {
+  return part.type === "status" && String(part.payload.kind ?? "") === "image";
+}
+
+/** The picture a harness image event produced. Nothing read that part before, so
+ *  a generation finished as silence; it takes its own row outside the work block
+ *  — inside a collapsed "Работал" spoiler the reader would never find it. */
+function GeneratedImageRow({ part, sessionId }: { part: MessagePartDto; sessionId: string }) {
+  const prompt = String(part.payload.prompt ?? part.payload.description ?? "").trim();
+  const file = String(
+    part.payload.filePath ?? part.payload.path ?? part.payload.file ?? part.payload.url ?? "",
+  ).trim();
+  if (!file) return null;
+  return (
+    <div className={styles.agentImageRow} data-agent-image-id={part.id}>
+      <MarkdownImage src={file} alt={prompt} sessionId={sessionId} />
     </div>
   );
 }
@@ -2309,7 +2337,7 @@ function StepsSpoiler({
         durationMs={durations?.get(part.id)}
       />
     ) : (
-      <PartView key={part.id} part={part} embedded streaming={live} />
+      <PartView key={part.id} part={part} embedded streaming={live} sessionId={sessionId} />
     );
   };
 
@@ -2364,6 +2392,7 @@ function StepsSpoiler({
 function renderTimelineAction(
   part: MessagePartDto,
   streaming: boolean,
+  sessionId: string | null,
   durationMs?: number,
 ) {
   const status = String(part.payload.status ?? "").toLowerCase();
@@ -2371,7 +2400,7 @@ function renderTimelineAction(
     status === "in_progress" || status === "pending" || status === "running";
   const live = streaming && toolLive;
   if (part.type === "subagent") {
-    return <SubagentPartView part={part} streaming={live} />;
+    return <SubagentPartView part={part} streaming={live} sessionId={sessionId} />;
   }
   return <ToolCallRow part={part} streaming={live} durationMs={durationMs} />;
 }
@@ -2441,6 +2470,7 @@ function renderTimelinePart(
   part: MessagePartDto,
   streaming: boolean,
   autoExpand: boolean,
+  sessionId: string | null,
   durationMs?: number,
 ) {
   return part.type === "thought" ? (
@@ -2451,7 +2481,7 @@ function renderTimelinePart(
       durationMs={durationMs}
     />
   ) : (
-    renderTimelineAction(part, streaming, durationMs)
+    renderTimelineAction(part, streaming, sessionId, durationMs)
   );
 }
 
@@ -2467,6 +2497,7 @@ function ActivityRunBlock({
   paused = false,
   autoExpand,
   runKey,
+  sessionId,
   durationMs,
   durations,
   stepsGlobalTick,
@@ -2480,6 +2511,8 @@ function ActivityRunBlock({
   paused?: boolean;
   autoExpand: boolean;
   runKey: string;
+  /** The chat a local image path in these parts is resolved against. */
+  sessionId: string | null;
   durationMs: number;
   durations: Map<string, number>;
   stepsGlobalTick: number;
@@ -2540,6 +2573,7 @@ function ActivityRunBlock({
                   part,
                   streaming && isLast,
                   autoExpand,
+                  sessionId,
                   durations.get(part.id),
                 )}
               </Fragment>
@@ -2600,6 +2634,7 @@ function AgentTimelineItems({
               paused={paused}
               autoExpand={autoExpand}
               runKey={runKey}
+              sessionId={sessionId}
               durationMs={sumDurations(item.parts, durations)}
               durations={durations}
               stepsGlobalTick={stepsGlobalTick}
@@ -2610,7 +2645,13 @@ function AgentTimelineItems({
         }
         if (item.kind === "text") {
           return (
-            <PartView key={item.key} part={item.part} embedded streaming={streaming && isLast} />
+            <PartView
+              key={item.key}
+              part={item.part}
+              embedded
+              streaming={streaming && isLast}
+              sessionId={sessionId}
+            />
           );
         }
 
@@ -2695,6 +2736,8 @@ function hasRenderableAssistantContent(parts: MessagePartDto[]) {
       const text = String(p.payload.text ?? "");
       return Boolean(text.trim()) && !isProtocolPlaceholder(text);
     }
+    // A picture is the whole content of a generation turn.
+    if (isGeneratedImagePart(p)) return true;
     if (p.type === "thought") {
       return Boolean(String(p.payload.text ?? "").trim());
     }
@@ -3652,12 +3695,19 @@ function AssistantParts({
         // A compaction row is status for the whole window, not work of this
         // turn: folded into "Работал" it is a squeeze nobody can look up later.
         p.type !== "compaction" &&
+        // A generated picture is the turn's result, not a step of it — inside
+        // the spoiler the reader would have to open it to see what was made.
+        !isGeneratedImagePart(p) &&
         !parkedQuestions.includes(p) &&
         !parkedPreambleParts.has(p.id),
     );
   }, [parts, stepsStreaming, parkedQuestions, parkedPreambleParts]);
   const compactionParts = useMemo(
     () => parts.filter((p) => p.type === "compaction"),
+    [parts],
+  );
+  const generatedImages = useMemo(
+    () => parts.filter(isGeneratedImagePart),
     [parts],
   );
   const stepsLive = useMemo(
@@ -3728,7 +3778,7 @@ function AssistantParts({
       }}
     >
       {compactionParts.map((part) => (
-        <CompactionRow key={part.id} part={part} />
+        <CompactionRow key={part.id} part={part} sessionId={message.sessionId} />
       ))}
       {agentTurnTimeline && turnActive ? (
         <AgentTurnTimeline
@@ -3777,6 +3827,9 @@ function AssistantParts({
           stepsGlobalTick={stepsGlobalTick}
         />
       ) : null}
+      {generatedImages.map((part) => (
+        <GeneratedImageRow key={part.id} part={part} sessionId={message.sessionId} />
+      ))}
       {parkedBuckets.map((item) => (
         <QuestionBucketView key={item.key} item={item} sessionId={message.sessionId} />
       ))}
@@ -3786,6 +3839,7 @@ function AssistantParts({
           <PartView
             key={part.id}
             part={part}
+            sessionId={message.sessionId}
             streaming={
               paintStreaming && isLast && part.type === "text"
             }

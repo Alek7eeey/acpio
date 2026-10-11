@@ -111,6 +111,8 @@ function systemPrompt(
   skills: readonly BuiltinSkill[],
   /** Settings → Built-in agent let the tools leave the working directory. */
   outsideCwd: boolean,
+  /** Settings → Built-in agent: say that the chat draws markdown pictures. */
+  markdownImages: boolean,
   /** Settings → Built-in agent: the user's own instructions, appended last. */
   extraInstructions: string,
 ): string {
@@ -132,6 +134,18 @@ function systemPrompt(
         ]
       : []),
     `Reply in ${locale === "ru" ? "Русский" : "English"}. Use Markdown; keep answers short and concrete.`,
+    // A picture on disk is one line of markdown away from the reader: the chat
+    // serves it through the session's own file route. Unsaid, a model answers
+    // that it cannot show an image at all — measured on the default model, which
+    // wrote `![shot](shot.png)` only inside a refusal to use it. Hence the
+    // switch in Settings → Built-in agent, on by default.
+    ...(markdownImages
+      ? [
+          "A picture on disk reaches the reader as markdown — `![shot](shot.png)`, a path " +
+            "inside the working directory or an absolute one. The chat renders it, so never " +
+            "answer that you cannot show an image.",
+        ]
+      : []),
     "",
     "Rules:",
     "- Read a file before changing it; make the smallest change that fully solves the task.",
@@ -1365,6 +1379,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         },
         skills,
         live.builtinAllowOutsideCwd === true,
+        live.builtinMarkdownImages === true,
         [
           live.builtinExtraInstructions ?? "",
           THINKING_INSTRUCTIONS[this.thinking],

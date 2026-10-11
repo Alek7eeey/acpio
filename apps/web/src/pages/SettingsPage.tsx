@@ -3506,6 +3506,27 @@ export function SettingsPage() {
                   label={t("settings.builtinAllowOutsideCwd")}
                 />
               </SettingRow>
+              <SettingRow
+                label={t("settings.builtinMarkdownImages")}
+                hint={t("settings.builtinMarkdownImagesHint")}
+                terms={[
+                  t("settings.builtinMarkdownImages"),
+                  t("settings.builtinMarkdownImagesHint"),
+                  "markdown",
+                  "![shot](shot.png)",
+                ]}
+              >
+                <Toggle
+                  checked={form.builtinMarkdownImages !== false}
+                  onChange={(v) => {
+                    patch("builtinMarkdownImages", v);
+                    // Applies at once, like the neighbouring switch: the next
+                    // turn of a running chat is built with the new prompt.
+                    void saveSettings({ builtinMarkdownImages: v });
+                  }}
+                  label={t("settings.builtinMarkdownImages")}
+                />
+              </SettingRow>
             </SettingTable>
           </>
         )}

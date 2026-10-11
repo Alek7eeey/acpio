@@ -939,6 +939,13 @@
    the reader opened a spoiler, and then it read as one more tool of the turn.
    The accent rail marks it as something that happened to the conversation
    itself, not to the task. */
+/* A picture the agent generated: its own row, above the answer it belongs to. */
+.agentImageRow {
+  max-width: 100%;
+  min-width: 0;
+  margin: 4px 0 6px;
+}
+
 .compactionRow {
   display: flex;
   flex-direction: column;

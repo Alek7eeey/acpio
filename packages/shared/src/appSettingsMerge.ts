@@ -435,6 +435,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   if (typeof partial.builtinAllowOutsideCwd !== "boolean") {
     merged.builtinAllowOutsideCwd = DEFAULT_SETTINGS.builtinAllowOutsideCwd;
   }
+  if (typeof partial.builtinMarkdownImages !== "boolean") {
+    merged.builtinMarkdownImages = DEFAULT_SETTINGS.builtinMarkdownImages;
+  }
   if (typeof partial.chatAutoTitle !== "boolean") {
     merged.chatAutoTitle = DEFAULT_SETTINGS.chatAutoTitle;
   }

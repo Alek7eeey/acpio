@@ -145,6 +145,101 @@ describe("finished turn reasoning headers", () => {
   });
 });
 
+// A picture in an agent answer is a file it saved itself: a path in its own text
+// and, for a harness that generates images, a `status` part with `kind: "image"`
+// (the core's normalized event). Neither had a way to the reader — no route
+// served those bytes and nothing read the status part at all.
+describe("pictures in an agent answer", () => {
+  const pictured: SessionDetailDto = {
+    ...detail,
+    messages: [
+      detail.messages[0]!,
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        createdAt: "2026-09-30T10:00:01.000Z",
+        parts: [
+          part("t1", "thought", 0, "Сначала проверю интерфейс"),
+          {
+            id: "c1",
+            messageId: "m1",
+            type: "tool_call",
+            order: 1,
+            payload: { toolCallId: "call_shell", title: "Shell", status: "completed" },
+            createdAt: "2026-09-30T10:00:02.000Z",
+          },
+          {
+            id: "x1",
+            messageId: "m1",
+            type: "text",
+            order: 2,
+            payload: { text: "Скриншот: ![shot](.acpio-attachments/s1/shot.png)" },
+            createdAt: "2026-09-30T10:00:02.000Z",
+          },
+          {
+            id: "g1",
+            messageId: "m1",
+            type: "status",
+            order: 3,
+            payload: { kind: "image", filePath: "C:\\tmp\\generated.png", prompt: "кот в шляпе" },
+            createdAt: "2026-09-30T10:00:03.000Z",
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      sessions: [pictured],
+      activeSession: pictured,
+      sessionDetails: { s1: pictured },
+    });
+  });
+
+  function renderPictured() {
+    return render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  /** The URL the chat's own file route is addressed with, for a raw path. */
+  function fileUrl(path: string): string {
+    return `/api/sessions/s1/file?path=${encodeURIComponent(path)}&inline=1`;
+  }
+
+  it("serves the path in the answer and the generated picture through the chat's file route", async () => {
+    const { container } = renderPictured();
+    await screen.findByText(/Скриншот:/);
+
+    const srcs = Array.from(container.querySelectorAll("img")).map((img) =>
+      img.getAttribute("src"),
+    );
+    expect(srcs).toContain(fileUrl("C:\\tmp\\generated.png"));
+    expect(srcs.some((src) => src?.includes(encodeURIComponent(".acpio-attachments/s1/shot.png")))).toBe(
+      true,
+    );
+  });
+
+  // The picture is the turn's result, not one of its steps: inside the collapsed
+  // "Работал" transcript the reader would never find what the agent made.
+  it("keeps the generated picture out of the work block", async () => {
+    const { container } = renderPictured();
+    await screen.findByText(/Скриншот:/);
+
+    const row = container.querySelector<HTMLElement>(`.${styles.agentImageRow}`);
+    expect(row).toBeTruthy();
+    expect(row!.querySelector("img")?.getAttribute("alt")).toBe("кот в шляпе");
+    expect(row!.closest(`.${styles.agentPhase}`)).toBeNull();
+    expect(row!.closest(`.${styles.steps}`)).toBeNull();
+  });
+});
+
 describe("parked question", () => {
   // The reported layout: the model narrates, asks, and parks on the reader.
   // The turn must read as finished — one run block above, then the lead-in
