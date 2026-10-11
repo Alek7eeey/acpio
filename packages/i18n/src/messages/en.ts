@@ -171,6 +171,8 @@ export const en = {
     durationSec: "{{value}}s",
     durationMin: "{{value}}m",
     durationMinSec: "{{value}}m {{seconds}}s",
+    ttftBadge: "ttft {{value}}",
+    ttftHint: "ttft: {{value}} from the tool result to the model's first token",
     working: "Working…",
     worked: "Worked",
     reasoning: "Reasoning",

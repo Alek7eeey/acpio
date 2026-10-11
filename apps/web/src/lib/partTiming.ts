@@ -61,6 +61,34 @@ export function sumDurations(
 }
 
 /**
+ * Tool → time-to-first-token after it: for every part carrying
+ * `payload.ttftMs` (server-stamped: terminal status of a tool → the first
+ * streamed token of the assistant), the value is attributed to the nearest
+ * preceding tool/subagent part — that is the call the reader blames for the
+ * wait. Older transcripts have no stamp → empty map. A parked question is a
+ * hard boundary: nothing is attributed across it.
+ */
+export function partTtfts(parts: MessagePartDto[]): Map<string, number> {
+  const sorted = [...parts].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const ttfts = new Map<string, number>();
+  for (let i = 0; i < sorted.length; i += 1) {
+    const part = sorted[i]!;
+    const ttft = part.payload?.ttftMs;
+    if (typeof ttft !== "number" || !Number.isFinite(ttft) || ttft < 0) continue;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const prev = sorted[j]!;
+      if (prev.type === "question") break;
+      if (prev.type === "tool_call" || prev.type === "subagent") {
+        // One tool owns at most one mark — the first token consumed it.
+        if (!ttfts.has(prev.id)) ttfts.set(prev.id, ttft);
+        break;
+      }
+    }
+  }
+  return ttfts;
+}
+
+/**
  * Compact span for a spoiler header: `0,4 с`, `3,7 с`, `42 с`, `1 мин 12 с`.
  * Sub-10-second spans keep one decimal — most tool calls live there, and
  * rounding them all to "1 с" would flatten the difference between a 200 ms read

@@ -191,6 +191,8 @@ export const ru = {
     durationSec: "{{value}} с",
     durationMin: "{{value}} мин",
     durationMinSec: "{{value}} мин {{seconds}} с",
+    ttftBadge: "ttft {{value}}",
+    ttftHint: "ttft — {{value}} от результата тулы до первого токена модели",
     reasoning: "Рассуждение",
     collapseThinking: "Свернуть размышления",
     tools: "Инструменты",

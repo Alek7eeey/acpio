@@ -60,7 +60,7 @@ import {
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
-import { formatDuration, partDurations, sumDurations } from "../lib/partTiming.js";
+import { formatDuration, partDurations, partTtfts, sumDurations } from "../lib/partTiming.js";
 import { messagePlainText } from "../lib/messageText.js";
 import { buildPromptRailItems } from "../lib/promptRail.js";
 import { readDismissedPlanIds, rememberDismissedPlan } from "../lib/dismissedPlans.js";
@@ -1241,6 +1241,7 @@ function SubagentPartView({
   sessionId: string | null;
 }) {
   const t = useT();
+  const locale = useLocale();
   const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
   const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
     setOpenState((prev) => {
@@ -1252,6 +1253,10 @@ function SubagentPartView({
 
   const body = resolveSubagentBody(part);
   const title = resolveSubagentTitle(part, body);
+  // Wall time the core stamped when the spawn tool closed — opencode reports
+  // no metrics, this is the one duration every harness shares.
+  const durationMs = typeof part.payload.durationMs === "number" ? part.payload.durationMs : 0;
+  const timeText = formatDuration(durationMs, locale, t);
   const tools = Array.isArray(part.payload.tools)
     ? (part.payload.tools as Array<{ name?: string; args?: string; status?: string }>)
     : [];
@@ -1295,6 +1300,7 @@ function SubagentPartView({
             {t("common.subagentFailed").replace(/^\s*·\s*/, "")}
           </span>
         ) : null}
+        {timeText ? <span className={styles.subagentTime}>{timeText}</span> : null}
         <svg
           className={`${styles.subagentChevron} ${open ? styles.subagentChevronOpen : ""}`}
           width="11"
@@ -1861,7 +1867,7 @@ function estimateMessageRowHeight(msg: MessageDto | undefined): number {
   return Math.min(720, Math.max(56, 56 + parts * 22 + chars * 0.35));
 }
 
-function ToolCallRow({ part, streaming, durationMs }: { part: MessagePartDto; streaming?: boolean; durationMs?: number }) {
+function ToolCallRow({ part, streaming, durationMs, ttftMs }: { part: MessagePartDto; streaming?: boolean; durationMs?: number; ttftMs?: number }) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpenState] = useState(() => expandedPartIds.get(part.id) ?? false);
@@ -1890,7 +1896,14 @@ function ToolCallRow({ part, streaming, durationMs }: { part: MessagePartDto; st
   const statusActive =
     status === "in_progress" || status === "pending" || status === "running";
   const busy = Boolean(streaming && statusActive);
-  const shownDuration = formatDuration(durationMs ?? 0, locale, t);
+  // Precise execution stamped by the server at the tool's terminal status beats
+  // the span fallback: the span runs until the *next* part, so it also covers
+  // the model's silence before its first token. Live rows keep ticking on the
+  // span until the terminal status lands; old transcripts carry no stamp.
+  const preciseMs =
+    typeof part.payload.durationMs === "number" ? part.payload.durationMs : undefined;
+  const shownDuration = formatDuration(preciseMs ?? durationMs ?? 0, locale, t);
+  const shownTtft = formatDuration(ttftMs ?? 0, locale, t);
   const detail = busy ? "" : toolOutputDetail(part);
   const output = busy ? "" : toolOutputText(part);
   const errorText = busy ? "" : toolErrorText(part);
@@ -1964,6 +1977,11 @@ function ToolCallRow({ part, streaming, durationMs }: { part: MessagePartDto; st
           </span>
         </span>
         {shownDuration ? <span className={styles.thoughtTime}>{shownDuration}</span> : null}
+        {shownTtft ? (
+          <span className={styles.thoughtTime} title={t("common.ttftHint", { value: shownTtft })}>
+            {t("common.ttftBadge", { value: shownTtft })}
+          </span>
+        ) : null}
         {expandable ? (
           <span className={styles.thoughtChevron} aria-hidden>
             {open ? "\u25be" : "\u25b8"}
@@ -2308,6 +2326,7 @@ function StepsSpoiler({
   if (skipOuter && body) return <div className={styles.steps}>{body}</div>;
 
   const stepsLength = parts.length;
+  const ttfts = partTtfts(parts);
   const subagentParts = parts.filter((p) => p.type === "subagent");
   const showSubagentsOutside = !open && subagentParts.length > 0;
 
@@ -2335,6 +2354,7 @@ function StepsSpoiler({
         part={part}
         streaming={live}
         durationMs={durations?.get(part.id)}
+        ttftMs={ttfts.get(part.id)}
       />
     ) : (
       <PartView key={part.id} part={part} embedded streaming={live} sessionId={sessionId} />
@@ -2394,6 +2414,7 @@ function renderTimelineAction(
   streaming: boolean,
   sessionId: string | null,
   durationMs?: number,
+  ttftMs?: number,
 ) {
   const status = String(part.payload.status ?? "").toLowerCase();
   const toolLive =
@@ -2402,7 +2423,7 @@ function renderTimelineAction(
   if (part.type === "subagent") {
     return <SubagentPartView part={part} streaming={live} sessionId={sessionId} />;
   }
-  return <ToolCallRow part={part} streaming={live} durationMs={durationMs} />;
+  return <ToolCallRow part={part} streaming={live} durationMs={durationMs} ttftMs={ttftMs} />;
 }
 
 /** A single thought block: its own spoiler, because a reasoning block is often
@@ -2472,6 +2493,7 @@ function renderTimelinePart(
   autoExpand: boolean,
   sessionId: string | null,
   durationMs?: number,
+  ttftMs?: number,
 ) {
   return part.type === "thought" ? (
     <ThoughtBlock
@@ -2481,7 +2503,7 @@ function renderTimelinePart(
       durationMs={durationMs}
     />
   ) : (
-    renderTimelineAction(part, streaming, sessionId, durationMs)
+    renderTimelineAction(part, streaming, sessionId, durationMs, ttftMs)
   );
 }
 
@@ -2552,6 +2574,7 @@ function ActivityRunBlock({
   }, [stepsGlobalTick, autoExpand, setOpen]);
 
   const label = streaming && !paused ? t("common.working") : t("common.worked");
+  const ttfts = partTtfts(parts);
 
   return (
     <div className={styles.agentPhase} ref={blockRef}>
@@ -2575,6 +2598,7 @@ function ActivityRunBlock({
                   autoExpand,
                   sessionId,
                   durations.get(part.id),
+                  ttfts.get(part.id),
                 )}
               </Fragment>
             );

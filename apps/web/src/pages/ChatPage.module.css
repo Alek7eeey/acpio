@@ -1782,6 +1782,14 @@ button.userSlashCmd:focus-visible {
   white-space: nowrap;
 }
 
+.subagentTime {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--text) 48%, transparent);
+  white-space: nowrap;
+}
+
 .subagentChevron {
   color: var(--text-secondary);
   transition: transform 140ms ease;
