@@ -10,6 +10,14 @@ import { hasBuiltinEndpoint } from "./config.js";
 export { offloadDir } from "./offload.js";
 
 /**
+ * Skill discovery outside a chat. The board's new-task form lists the skills a
+ * folder offers while no session exists yet, and a skill is nothing but a
+ * `SKILL.md` on disk — the scan this agent runs at attach is the same one, so
+ * the form asks for it here instead of inventing a second listing.
+ */
+export { discoverSkills, type BuiltinSkill } from "./skills.js";
+
+/**
  * Model resolution over the Settings → Built-in agent rows. The server needs it
  * outside the agent too: a title generated for a chat picks its model the same
  * way the agent picks its own — a stored value, then the default, then the

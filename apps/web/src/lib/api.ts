@@ -17,6 +17,7 @@ import type {
   ModelParamDto,
   ProjectMcpInfo,
   PromptDelivery,
+  BuiltinSkillDto,
   SessionDetailDto,
   SessionDto,
   HarnessSessionDto,
@@ -77,6 +78,15 @@ export const api = {
     return request<{ folders: Record<string, ProjectMcpInfo> }>(`/api/mcp/project${qs}`).then(
       (r) => r.folders,
     );
+  },
+  /**
+   * Skills the built-in agent would find in a folder. The board's new-task form
+   * asks for them before anything is attached: the skill a task invokes is the
+   * `/name` its first message starts with.
+   */
+  listSkills: (cwd?: string | null) => {
+    const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
+    return request<BuiltinSkillDto[]>(`/api/skills${qs}`);
   },
   searchMessages: (q: string, limit?: number) => {
     const qs = new URLSearchParams({ q });

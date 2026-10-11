@@ -2266,6 +2266,17 @@ export interface SlashCommandDto {
   local?: boolean;
 }
 
+/**
+ * A skill the built-in agent found in a folder's skill paths. The board's
+ * new-task form lists these while nothing is attached yet: the task's first
+ * message is what later invokes one, so the form only needs the name and what
+ * the skill is for.
+ */
+export interface BuiltinSkillDto {
+  name: string;
+  description: string;
+}
+
 /** Later lists win on the same name; empty lists are ignored so a stale GET cannot shrink the menu. */
 export function mergeSlashCommandLists(
   ...lists: Array<SlashCommandDto[] | undefined>

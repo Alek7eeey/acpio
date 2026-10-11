@@ -17,6 +17,7 @@ import {
   type AttachSource,
   type BoardColumn,
   type SessionDto,
+  type SlashCommandDto,
 } from "@acpio/shared";
 import { AttachDialog } from "../components/AttachDialog";
 import { BoardTaskPeek } from "../components/BoardTaskPeek";
@@ -25,9 +26,12 @@ import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
+import { SlashCommandMenu } from "../components/SlashCommandMenu";
+import { api } from "../lib/api";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
+import { buildSlashInsertion, filterSlashCommands, getSlashContext } from "../lib/slashCommands";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
-import { harnessLabel, pickCreateProvider } from "../lib/harness";
+import { harnessLabel, isBuiltinFamilyProvider, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore, type PendingAttachment } from "../lib/store";
@@ -167,7 +171,98 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** The server's filesystem picker, open while its source is the one chosen. */
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
+  /** Caret in the description — where a skill picked from the menu lands. */
+  const [caret, setCaret] = useState(0);
+  /** Skills the folder offers, listed while nothing is attached yet. */
+  const [skills, setSkills] = useState<SlashCommandDto[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillIndex, setSkillIndex] = useState(0);
+  const [skillKeyboardNav, setSkillKeyboardNav] = useState(false);
+  /** Escape closes the menu for the token it was open on. */
+  const [skillMenuDismissed, setSkillMenuDismissed] = useState(false);
   const createAutoStart = useBoardAutoStart("create");
+
+  const provider = draftProvider || defaultProvider;
+  /** Registry view: it is what says whether the picked agent is the in-process
+   *  built-in one (or a preset of it). */
+  const adapters = useAppStore((s) => s.adapters);
+  /** Only the built-in agent keeps its skills as `SKILL.md` files the server
+   *  can read ahead of time — its presets included, they are the same agent.
+   *  Cursor and OMP hold theirs inside their own CLI, which does not exist
+   *  until the task does — so the menu stays away there. */
+  const skillsOffered = isBuiltinFamilyProvider(provider, adapters);
+
+  // A task's skill is the `/name` its first message opens with, so the list is
+  // the folder's skills — read from disk, no agent attached.
+  useEffect(() => {
+    if (!skillsOffered || !cwd) {
+      setSkills([]);
+      setSkillsLoading(false);
+      return;
+    }
+    let live = true;
+    setSkillsLoading(true);
+    void api
+      .listSkills(cwd)
+      .then((found) => {
+        if (!live) return;
+        setSkills(found.map((skill) => ({ ...skill, kind: "skill" })));
+      })
+      .catch(() => {
+        if (live) setSkills([]);
+      })
+      .finally(() => {
+        if (live) setSkillsLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [skillsOffered, cwd]);
+
+  // The agent expands `/name` only as the message's first token, so the menu
+  // offers itself at the opening of the description and nowhere else.
+  const slashCtx = useMemo(() => {
+    const ctx = getSlashContext(draft, caret);
+    return ctx && ctx.start === 0 ? ctx : null;
+  }, [draft, caret]);
+  const matchingSkills = useMemo(
+    () => (slashCtx ? filterSlashCommands(skills, slashCtx.query) : []),
+    [skills, slashCtx],
+  );
+  const skillMenuOpen =
+    skillsOffered &&
+    !skillMenuDismissed &&
+    slashCtx !== null &&
+    (skillsLoading || matchingSkills.length > 0);
+
+  // Every new query starts the highlight over; leaving the token re-arms the
+  // menu an Escape had closed.
+  useEffect(() => {
+    setSkillIndex(0);
+    setSkillKeyboardNav(false);
+  }, [slashCtx?.query]);
+  useEffect(() => {
+    if (!slashCtx) setSkillMenuDismissed(false);
+  }, [slashCtx]);
+
+  /** Put `/name ` in place of the half-written token and keep the caret after it. */
+  const insertSkill = (skill: SlashCommandDto) => {
+    const insertion = buildSlashInsertion(skill);
+    const start = slashCtx?.start ?? 0;
+    const end = Math.max(start, caret);
+    const caretAfter = start + insertion.length;
+    setDraft(draft.slice(0, start) + insertion + draft.slice(end));
+    setCaret(caretAfter);
+    setSkillMenuDismissed(true);
+    const input = inputRef.current;
+    if (input) {
+      // The new value lands with the next paint; the caret follows it.
+      requestAnimationFrame(() => {
+        input.focus();
+        input.setSelectionRange(caretAfter, caretAfter);
+      });
+    }
+  };
 
   // The form is opened by a "+", so the caret belongs in it.
   useEffect(() => {
@@ -300,13 +395,19 @@ const NewTaskComposer = memo(function NewTaskComposer({
 
   return (
     <div ref={boxRef} className={styles.composer}>
+      {/* Skills the folder offers, offered before the task exists: the pick
+          hands the first message its `/name` and the agent expands it there. */}
       <textarea
         ref={inputRef}
         className={styles.composerInput}
         value={draft}
         placeholder={t("chat.boardTaskPlaceholder")}
         aria-label={t("chat.boardTaskPlaceholder")}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setCaret(e.target.selectionStart ?? e.target.value.length);
+        }}
+        onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
         onPaste={(e) => {
           const pasted = clipboardFiles(e.clipboardData);
           if (!pasted.length) return;
@@ -314,11 +415,50 @@ const NewTaskComposer = memo(function NewTaskComposer({
           addFiles(pasted);
         }}
         onKeyDown={(e) => {
+          // The menu holds the arrows, Enter and Escape while it is open, the
+          // way the chat composer's does — those keys would otherwise send or
+          // dismiss the task under a list the user is reading.
+          if (skillMenuOpen && !skillsLoading && matchingSkills.length > 0) {
+            const active = Math.min(skillIndex, matchingSkills.length - 1);
+            if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+              e.preventDefault();
+              const step = e.key === "ArrowDown" ? 1 : -1;
+              setSkillKeyboardNav(true);
+              setSkillIndex(
+                (active + step + matchingSkills.length) % matchingSkills.length,
+              );
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              insertSkill(matchingSkills[active]);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setSkillMenuDismissed(true);
+              return;
+            }
+          }
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             submit();
           }
           if (e.key === "Escape") onCancel();
+        }}
+      />
+      <SlashCommandMenu
+        open={skillMenuOpen}
+        commands={matchingSkills}
+        activeIndex={Math.min(skillIndex, Math.max(0, matchingSkills.length - 1))}
+        scrollActiveIntoView={skillKeyboardNav}
+        anchorRef={inputRef}
+        loading={skillsLoading}
+        loadingLabel={t("common.slashCommandsLoading")}
+        onSelect={insertSkill}
+        onActiveIndexChange={(index) => {
+          setSkillKeyboardNav(false);
+          setSkillIndex(index);
         }}
       />
       <div className={styles.composerFiles}>

@@ -81,6 +81,7 @@ import {
 } from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
+import { discoverSkills } from "@acpio/adapter-builtin";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -697,6 +698,20 @@ export async function registerRoutes(app: FastifyInstance) {
       ),
     );
     return { folders: Object.fromEntries(entries.filter(([key]) => key)) };
+  });
+
+  // Skills the built-in agent would find for a folder, keyed by the same paths
+  // its attach-time announce uses. The board's new-task form needs the list
+  // before any session exists, and a skill is only a `SKILL.md` on disk, so the
+  // scan runs right here instead of waiting for a harness to announce it. A
+  // missing cwd falls back to the settings' default folder, which is what a
+  // task created without one would run in.
+  app.get("/api/skills", async (req) => {
+    const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
+    const settings = await getSettings();
+    const cwd = query.cwd?.trim() || settings.defaultCwd;
+    const skills = await discoverSkills(settings.builtinSkillPaths, cwd);
+    return skills.map((skill) => ({ name: skill.name, description: skill.description }));
   });
 
   app.get("/api/search", async (req) => {
