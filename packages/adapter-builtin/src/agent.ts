@@ -26,11 +26,13 @@ import {
   compactHistory,
   digestMessage,
   estimateTokens,
+  foldInjected,
   hasReasoning,
   MAX_TURN_ATTEMPTS,
   maskToolResults,
   pruneMessages,
   promptView,
+  repairToolPairs,
   runTurn,
   runTurnWithRetry,
   type CompactionState,
@@ -601,7 +603,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     if (storedModel) {
       this.modelId = resolveBuiltinModel(this.opts.settings, storedModel)?.value ?? storedModel;
     }
-    this.messages = stored?.messages ?? [];
+    this.messages = repairToolPairs(stored?.messages ?? []);
     this.compaction = stored?.compaction;
     // A fresh conversation has no measured window and no unreported pass.
     this.pendingUsage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
@@ -1468,9 +1470,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // attempt is folded the same way: the retry then continues from what the
       // dead call had already produced instead of repeating that work.
       const keepResponse = (partial: TurnOutcome) => {
-        const response = [...partial.response];
-        for (const { at, message } of partial.injected ?? []) response.splice(at, 0, message);
-        this.messages = [...this.messages, ...response];
+        this.messages = [...this.messages, ...foldInjected(partial.response, partial.injected)];
         this.persist();
       };
       // A stream that dies mid-flight throws before any response message

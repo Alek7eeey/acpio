@@ -10,6 +10,13 @@ import { hasBuiltinEndpoint } from "./config.js";
 export { offloadDir } from "./offload.js";
 
 /**
+ * The shell the agent's `bash` tool talks to. The server's own background
+ * runner spawns through the same helper, so a command behaves the same whether
+ * the model runs it in the foreground or in the background.
+ */
+export { shellCommand } from "./tools.js";
+
+/**
  * Skill discovery outside a chat. The board's new-task form lists the skills a
  * folder offers while no session exists yet, and a skill is nothing but a
  * `SKILL.md` on disk — the scan this agent runs at attach is the same one, so

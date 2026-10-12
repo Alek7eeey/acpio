@@ -238,6 +238,36 @@ describe("runSubagent", () => {
     expect(report).toContain("Step budget exhausted");
   });
 
+  it("announces the child's budget in a prefix both runs share, and spends it across them", async () => {
+    const budget = EXPLORE_SUBAGENT.maxTurns;
+    // Run one: a reasoning cut with all but one step spent. Run two: a single
+    // step, which is exactly what is left of the announced budget.
+    vi.mocked(streamText)
+      .mockReturnValueOnce(
+        outcome({
+          fullStream: streamOf([{ type: "reasoning-delta", text: "thinking far too long" }]),
+          steps: Promise.resolve(
+            Array.from({ length: budget - 1 }, () => ({ usage: { totalTokens: 0 } })),
+          ),
+        }) as never,
+      )
+      .mockReturnValueOnce(
+        outcome({ steps: Promise.resolve([{ usage: { totalTokens: 0 } }]) }) as never,
+      );
+    const { bridge } = testBridge({ reasoningLimitChars: 5 });
+    const report = await runSubagent(bridge, "p1", { agent: "explore", prompt: "x" });
+
+    const calls = vi.mocked(streamText).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(String(calls[0]![0].system)).toContain(`at most ${budget} steps`);
+    // The provider's cache key covers the prefix: a system prompt that moved
+    // between the runs would re-bill the whole child transcript.
+    expect(calls[1]![0].system).toBe(calls[0]![0].system);
+    // The remainder really bound the second run: one step hit it. Without the
+    // accounting the run would have had its full budget again and not hit it.
+    expect(report).toContain("Step budget exhausted");
+  });
+
   it("caps concurrent children at three", async () => {
     let inFlight = 0;
     let peak = 0;

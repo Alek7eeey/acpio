@@ -62,6 +62,10 @@ export interface TurnOutcome {
   /** The turn ended on the caller's step ceiling, not the model stopping —
    * the work is still in flight. See {@link WRAP_UP_STEPS}. */
   stepBudgetHit?: boolean;
+  /** Model calls this turn made. A caller that hands the turn a fixed budget
+   * across several runs (a child's continuation) subtracts this from it —
+   * otherwise every run gets the full budget and the announced number lies. */
+  steps?: number;
   /** The step's reasoning crossed {@link TurnOptions.reasoningLimitChars}:
    * the model call was cut mid-think and `response` ends with the partial
    * reasoning. Not an answer — the caller continues the turn with a reminder
@@ -242,6 +246,75 @@ export function maskToolResults(
     return message;
   });
   return changed ? out : messages;
+}
+
+/** True for an assistant message that called at least one tool. */
+function callsTools(message: ModelMessage | undefined): boolean {
+  return (
+    !!message &&
+    message.role === "assistant" &&
+    Array.isArray(message.content) &&
+    message.content.some((part) => part.type === "tool-call")
+  );
+}
+
+/**
+ * Fold mid-turn messages into the response they were taken from, at the place
+ * the model read them — but never between a call and the result answering it.
+ *
+ * `at` is counted from the step list the SDK had built when the message was
+ * taken, and a result that had not joined that list yet makes the index land one
+ * message early: the stored history then answers a tool call a message too late,
+ * and every later turn of the session dies on the provider's own validation —
+ * `Tool result is missing for tool call <id>` — while the transcript looks fine.
+ * An index inside such a pair is moved past it instead.
+ *
+ * `injected` is applied newest-first, so an inserted message never shifts the
+ * recorded index of the next one.
+ */
+export function foldInjected(
+  response: ModelMessage[],
+  injected: ReadonlyArray<{ at: number; message: ModelMessage }> | undefined,
+): ModelMessage[] {
+  const out = [...response];
+  if (!injected?.length) return out;
+  /** Does a message at `index` land in front of the results answering a call? */
+  const splitsAPair = (index: number): boolean => {
+    if (index <= 0 || index >= out.length || out[index].role !== "tool") return false;
+    // A step may answer several calls at once: the pair starts at the first of
+    // the run, not at the one before `index`.
+    let start = index;
+    while (start > 0 && out[start - 1].role === "tool") start -= 1;
+    return callsTools(out[start - 1]);
+  };
+  // Newest first: an inserted message would shift the index of every later one.
+  for (const { at, message } of [...injected].reverse()) {
+    let index = Math.max(0, Math.min(at, out.length));
+    while (splitsAPair(index)) index += 1;
+    out.splice(index, 0, message);
+  }
+  return out;
+}
+
+/**
+ * A stored history a fold split before this guard existed: pull each host
+ * message back out of the call/result pair it landed in, so reopening the chat
+ * heals it instead of resending a request the provider rejects.
+ */
+export function repairToolPairs(messages: ModelMessage[]): ModelMessage[] {
+  let out: ModelMessage[] | null = null;
+  for (let i = 1; i < messages.length; i++) {
+    if (messages[i].role !== "user" || !callsTools(messages[i - 1])) continue;
+    let end = i + 1;
+    while (end < messages.length && messages[end].role === "tool") end += 1;
+    // Nothing answering the call: this is a message that arrived after it, not
+    // one wedged into a pair.
+    if (end === i + 1) continue;
+    out ??= [...messages];
+    const [moved] = out.splice(i, 1);
+    out.splice(end - 1, 0, moved!);
+  }
+  return out ?? messages;
 }
 
 /** Digest of an already-covered prefix of the stored history — outlives a turn. */
@@ -781,6 +854,7 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     response,
     stopReason,
     ...(reasoningCut ? { reasoningLimitHit: true } : {}),
+    steps: stepCount,
     ...(stepCount >= maxSteps && !opts.abortSignal.aborted ? { stepBudgetHit: true } : {}),
     // A reasoning cut always ends on a reasoning-only tail, but its remedy is
     // the reminder-continuation, not the generic "continue" — no double flag.

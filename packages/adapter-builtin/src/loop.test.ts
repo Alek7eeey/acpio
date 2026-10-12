@@ -4,8 +4,10 @@ import {
   compactHistory,
   compactMessages,
   estimateTokens,
+  foldInjected,
   pruneMessages,
   renderTranscript,
+  repairToolPairs,
   runTurn,
   runTurnWithRetry,
 } from "./loop.js";
@@ -257,6 +259,96 @@ describe("compactHistory with a carried digest", () => {
     expect(result.messages).toHaveLength(messages.length - state.covered + 1);
     expect(text(result.messages[0]!)).toContain("старый конспект");
     expect(estimateTokens(result.messages)).toBeLessThanOrEqual(1_000 * 0.8);
+  });
+});
+
+describe("folding a mid-turn message into the produced response", () => {
+  const call: ModelMessage = {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} }],
+  };
+  const result: ModelMessage = {
+    role: "tool",
+    content: [{ type: "tool-result", toolCallId: "c1", toolName: "bash", output: { type: "text", value: "ok" } }],
+  };
+  const note: ModelMessage = { role: "user", content: [{ type: "text", text: "job done" }] };
+
+  it("keeps a call and its result together when the recorded index lands between them", () => {
+    // The incident: the steer was recorded at the index the result was not yet
+    // counted at, and the folded history answered a call one message too late —
+    // `400 Tool result is missing for tool call chatcmpl-tool-abfbd174fc17b092`
+    // on every later turn of the session.
+    const response: ModelMessage[] = [call, result, { role: "assistant", content: [{ type: "text", text: "done" }] }];
+    const folded = foldInjected(response, [{ at: 1, message: note }]);
+    expect(folded.map((m) => m.role)).toEqual(["assistant", "tool", "user", "assistant"]);
+    expect(folded[2]).toBe(note);
+    expect(folded).not.toEqual(response);
+  });
+
+  it("moves a message out of a run of results answering one call", () => {
+    // The shape the incident had next to it: one step, two calls, one tool
+    // message carrying both results.
+    const twoCalls: ModelMessage = {
+      role: "assistant",
+      content: [
+        { type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} },
+        { type: "tool-call", toolCallId: "c2", toolName: "read", input: {} },
+      ],
+    };
+    const both: ModelMessage = {
+      role: "tool",
+      content: [
+        { type: "tool-result", toolCallId: "c1", toolName: "bash", output: { type: "text", value: "ok" } },
+        { type: "tool-result", toolCallId: "c2", toolName: "read", output: { type: "text", value: "ok" } },
+      ],
+    };
+    expect(foldInjected([twoCalls, both], [{ at: 1, message: note }])).toEqual([twoCalls, both, note]);
+    expect(repairToolPairs([twoCalls, note, both])).toEqual([twoCalls, both, note]);
+  });
+
+  it("leaves a message that already sits after the pair where it is", () => {
+    const response: ModelMessage[] = [call, result];
+    expect(foldInjected(response, [{ at: 2, message: note }])).toEqual([call, result, note]);
+    // Nothing injected: the response is copied, never aliased.
+    const copied = foldInjected(response, []);
+    expect(copied).toEqual(response);
+    expect(copied).not.toBe(response);
+  });
+
+  it("moves several messages past the pair in the order they arrived", () => {
+    const second: ModelMessage = { role: "user", content: [{ type: "text", text: "second" }] };
+    const folded = foldInjected([call, result], [
+      { at: 1, message: note },
+      { at: 1, message: second },
+    ]);
+    expect(folded).toEqual([call, result, note, second]);
+  });
+});
+
+describe("repairToolPairs", () => {
+  const call: ModelMessage = {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: "c1", toolName: "bash", input: {} }],
+  };
+  const result: ModelMessage = {
+    role: "tool",
+    content: [{ type: "tool-result", toolCallId: "c1", toolName: "bash", output: { type: "text", value: "ok" } }],
+  };
+  const note: ModelMessage = { role: "user", content: [{ type: "text", text: "job done" }] };
+
+  it("pulls a host message out of a stored call/result pair", () => {
+    const stored = [call, note, result];
+    expect(repairToolPairs(stored)).toEqual([call, result, note]);
+    // A healthy history comes back as the very same array.
+    const healthy = [call, result, note];
+    expect(repairToolPairs(healthy)).toBe(healthy);
+  });
+
+  it("keeps a plain user turn after a call alone untouched", () => {
+    // No result follows: this is not the split a provider rejects, and moving
+    // the message would rewrite a transcript the model already answered.
+    const stored = [call, note];
+    expect(repairToolPairs(stored)).toBe(stored);
   });
 });
 

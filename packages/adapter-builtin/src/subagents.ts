@@ -55,6 +55,18 @@ const REPORT_CONTRACT = [
   "- Stop and report as soon as you can answer; a partial true answer beats a late complete one.",
 ].join("\n");
 
+/**
+ * The child's deadline, stated in its own prefix. The number is the child's
+ * whole budget, so it stays true however the runs are split — and being a
+ * constant per child it never rewrites the cached prefix (see {@link runSubagent}).
+ */
+function budgetContract(budget: number): string {
+  return (
+    `Step budget: at most ${budget} steps for this run, counting every model call. ` +
+    "Spend them on evidence; once you are a few steps short, stop searching and write the report."
+  );
+}
+
 /** Tool names a child may hold in the parent's current mode. */
 function availableTools(mode: AgentMode): readonly string[] {
   return mode === "agent" ? BUILTIN_TOOL_NAMES : ["read", "glob", "grep"];
@@ -302,21 +314,33 @@ export async function runSubagent(
     const childMessages: ModelMessage[] = [
       { role: "user", content: [{ type: "text", text: input.prompt }] },
     ];
+    const budget = Math.min(def.maxTurns, BUILTIN_SUBAGENT_MAX_TURNS_CAP);
+    // Built once and reused verbatim by every run of this child: this string is
+    // the head of the prefix the provider caches, so recomputing it per run
+    // (with, say, the steps left) would re-bill the whole transcript. What each
+    // run actually gets lives in `maxSteps` — an SDK-side loop bound that never
+    // reaches the wire — and the honest accounting below keeps it true.
+    const system = [
+      def.systemPrompt.trim(),
+      `Working directory: ${bridge.cwd}`,
+      bridge.extraSystem.trim(),
+      REPORT_CONTRACT,
+      budgetContract(budget),
+    ]
+      .filter((part) => part)
+      .join("\n\n");
+    // Steps already spent by this child's earlier run(s): a reasoning cut hands
+    // the turn on for a second run, and without this the announced budget would
+    // be spent twice over.
+    let spent = 0;
     const outcome = await runTurn({
       model: bridge.model,
-      system: [
-        def.systemPrompt.trim(),
-        `Working directory: ${bridge.cwd}`,
-        bridge.extraSystem.trim(),
-        REPORT_CONTRACT,
-      ]
-        .filter((part) => part)
-        .join("\n\n"),
+      system,
       messages: childMessages,
       tools: picked,
       abortSignal: bridge.signal,
       contextWindow: bridge.contextWindow,
-      maxSteps: Math.min(def.maxTurns, BUILTIN_SUBAGENT_MAX_TURNS_CAP),
+      maxSteps: budget,
       reasoningLimitChars: bridge.reasoningLimitChars,
       emit: childEmit,
     });
@@ -324,6 +348,7 @@ export async function runSubagent(
     // same turn runs on with the reminder — the parent's fuse, the parent's
     // remedy. Bounded like the parent's (one rerun per cut, two cuts max).
     if (outcome.reasoningLimitHit && !bridge.signal.aborted) {
+      spent += outcome.steps ?? 0;
       childMessages.push(...outcome.response);
       childMessages.push({
         role: "user",
@@ -339,19 +364,14 @@ export async function runSubagent(
       });
       const continued = await runTurn({
         model: bridge.model,
-        system: [
-          def.systemPrompt.trim(),
-          `Working directory: ${bridge.cwd}`,
-          bridge.extraSystem.trim(),
-          REPORT_CONTRACT,
-        ]
-          .filter((part) => part)
-          .join("\n\n"),
+        system,
         messages: childMessages,
         tools: picked,
         abortSignal: bridge.signal,
         contextWindow: bridge.contextWindow,
-        maxSteps: Math.min(def.maxTurns, BUILTIN_SUBAGENT_MAX_TURNS_CAP),
+        // What is left of the announced budget; never zero, so a child that
+        // spent it all can still spend one call writing the report.
+        maxSteps: Math.max(1, budget - spent),
         reasoningLimitChars: bridge.reasoningLimitChars,
         emit: childEmit,
       });
