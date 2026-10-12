@@ -12,8 +12,17 @@ import { appendFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, s
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentArgs, ensureOmpModel, ensurePiModel, ompProfile } from "./lib/cli-agent.mjs";
-import { summarizeAgentStream } from "./lib/jsonl.mjs";
+import { builtinModelValue } from "@acpio/shared";
+import { builtinVariantKnobs, builtinVariantWarnings, parseAgents } from "./lib/agents.mjs";
+import {
+  agentArgs,
+  ensureOmpModel,
+  ensureOpenCodeConfig,
+  ensurePiModel,
+  ompProfile,
+  opencodeEnv,
+} from "./lib/cli-agent.mjs";
+import { summarizeAgentOutput } from "./lib/jsonl.mjs";
 import { applyFaults } from "./lib/faults.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
 import { runProcess } from "./lib/util.mjs";
@@ -35,17 +44,19 @@ function providerDefaults() {
 }
 
 /** Each CLI turns its native session header on by provider name. */
-const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen" };
+const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen", opencode: "opencode-zen" };
 /** Where each CLI's bundle entry lives inside the sandbox. */
 const CONTAINER_AGENT = {
   pi: { cmd: "/bundle/node/bin/node", entry: "/bundle/agents/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" },
   omp: { cmd: "/bundle/bun", entry: "/bundle/agents/omp/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js" },
+  // opencode ships a compiled binary: no interpreter, no entry script.
+  opencode: { cmd: "/bundle/agents/opencode/node_modules/@opencode/cli/bin/opencode.exe", entry: null },
 };
 
 function parseArgs(argv) {
   const defaults = providerDefaults();
   const out = {
-    agents: ["builtin", "pi", "omp"],
+    agents: ["builtin", "pi", "omp", "opencode"],
     tasks: null,
     tasksRoot: [path.join(REPO, "bench", "tasks")],
     family: null,
@@ -58,6 +69,8 @@ function parseArgs(argv) {
     timeoutMs: 300_000,
     concurrency: 4,
     keep: false,
+    plan: false,
+    sessionHeader: process.env.BENCH_SESSION_HEADER || "x-opencode-session",
     proxy: true,
     proxyDump: false,
     proxyVerbose: false,
@@ -85,6 +98,8 @@ function parseArgs(argv) {
       case "--timeout": out.timeoutMs = Number(take()); break;
       case "--concurrency": out.concurrency = Math.max(1, Number(take())); break;
       case "--keep": out.keep = true; break;
+      case "--plan": out.plan = true; break;
+      case "--session-header": out.sessionHeader = take(); break;
       case "--proxy": out.proxy = true; break;
       case "--no-proxy": out.proxy = false; break;
       case "--proxy-dump": out.proxyDump = true; break;
@@ -102,12 +117,21 @@ function usage() {
     [
       "Daily-bench tasks in the SWE-style sandbox (bundle + containers).",
       "",
-      "  node bench/run-docker.mjs [--agents builtin,pi,omp] [--tasks a,b] [--repeats N]",
-      "                            [--concurrency N] [--model p/m] [--timeout ms]",
+      "  node bench/run-docker.mjs [--agents builtin,pi,omp,opencode] [--tasks a,b] [--repeats N]",
+      "                            [--concurrency N] [--model p/m] [--timeout ms] [--plan]",
+      "                            [--session-header <name>] (default x-opencode-session)",
+      "",
+      "--plan resolves the agent grammar and prints what each pair would run,",
+      "       starting nothing (no image, no container, no proxy).",
       "",
       "Same proxy rules and session headers as bench/swe/run-swe.mjs; only the",
       "tasks and their hidden verify.mjs differ. Requires the agent bundle:",
       "  node bench/swe/prepare-agent-bundle.mjs",
+      "",
+      "Agents: pi, omp, opencode, and built-in variants — builtin, builtin-low,",
+      "        builtin-extra-low, ...-with-thinking-limit-<chars>,",
+      "        ...-with-reasoning-effort-<low|medium|high>: the same grammar as",
+      "        bench/run.mjs, applied inside the sandbox.",
     ].join("\n"),
   );
 }
@@ -140,9 +164,25 @@ async function dockerExec(container, cmd, timeoutMs) {
   return docker(["exec", container, "/bin/bash", "-c", cmd], { timeoutMs });
 }
 
+/** The image is built FROM the bundle, so its identity is the bundle's. */
+const bundleFingerprint = () => {
+  const s = statSync(BUNDLE_TGZ);
+  return `${s.size}-${Math.round(s.mtimeMs)}`;
+};
+
 async function ensureSandboxImage() {
   const have = await docker(["image", "inspect", SANDBOX_IMAGE], { timeoutMs: 30_000 });
-  if (have.code === 0) return;
+  if (have.code === 0) {
+    // A stamp from an older bundle means an older image: one built before a
+    // harness was added to the bundle (opencode) fails every pair of that
+    // harness inside the container with "executable file not found", so compare
+    // instead of trusting the tag.
+    const stampOf = await docker(["image", "inspect", "-f", '{{index .Config.Labels "acpio.bundle"}}', SANDBOX_IMAGE], { timeoutMs: 30_000 });
+    const want = exists(BUNDLE_TGZ) ? bundleFingerprint() : null;
+    if (want && (stampOf.stdout || "").trim() === want) return;
+    console.log(`sandbox image ${SANDBOX_IMAGE} does not match the bundle — rebuilding`);
+    await docker(["rmi", "-f", SANDBOX_IMAGE], { timeoutMs: 120_000 });
+  }
   if (!exists(BUNDLE_TGZ)) throw new Error(`missing ${BUNDLE_TGZ} — run: node bench/swe/prepare-agent-bundle.mjs`);
   console.log(`building sandbox image ${SANDBOX_IMAGE} (node:22-bookworm + bundle)…`);
   const dockerfile = path.join(CACHE, "swe-sandbox.Dockerfile");
@@ -150,7 +190,10 @@ async function ensureSandboxImage() {
     dockerfile,
     ["FROM node:22-bookworm", `ADD ${path.basename(BUNDLE_TGZ)} /`, 'ENV PATH="/bundle/node/bin:${PATH}"', ""].join("\n"),
   );
-  const res = await docker(["build", "-f", dockerfile, "-t", SANDBOX_IMAGE, CACHE], { timeoutMs: 900_000 });
+  const res = await docker(
+    ["build", "--label", `acpio.bundle=${bundleFingerprint()}`, "-f", dockerfile, "-t", SANDBOX_IMAGE, CACHE],
+    { timeoutMs: 900_000 },
+  );
   if (res.code !== 0) throw new Error(`sandbox image build failed: ${(res.stderr || "").slice(-500)}`);
 }
 
@@ -310,12 +353,19 @@ async function runCliAgentInContainer(container, agent, { prompt, taskDir, timeo
   // The label must carry the pair's real repeat: two repeats sharing one
   // label would merge their wire calls under a single key.
   const url = labeledUrl(modelUrl, agent, taskDir, rep);
+  const cfg = {
+    provider,
+    baseUrl: url,
+    apiKey: opts.builtinKey,
+    modelId: opts.modelId,
+    contextWindow: opts.contextWindow,
+  };
   let envFlags = ["-w", "/workspace"];
   if (agent === "pi") {
     // Per-slot dirs: parallel slots would race on a shared config's rmSync.
     const dir = path.join(CACHE, `daily-pi-config-s${slotIdx}`);
     rmSync(dir, { recursive: true, force: true });
-    ensurePiModel(dir, { provider, baseUrl: url, apiKey: opts.builtinKey, modelId: opts.modelId, contextWindow: opts.contextWindow });
+    ensurePiModel(dir, cfg);
     await dockerOk(["exec", container, "mkdir", "-p", "/opt/pi-agent"], { timeoutMs: 30_000 });
     await dockerOk(["cp", path.join(dir, "models.json").replace(/\\/g, "/"), `${container}:/opt/pi-agent/models.json`], { timeoutMs: 60_000 });
     // ensurePiModel also wrote extensions/bash-timeout.js (default per-command
@@ -325,18 +375,42 @@ async function runCliAgentInContainer(container, agent, { prompt, taskDir, timeo
   } else if (agent === "omp") {
     const home = path.join(CACHE, `daily-omp-home-s${slotIdx}`);
     rmSync(path.join(home, ".omp"), { recursive: true, force: true });
-    ensureOmpModel(ompProfile(), { provider, baseUrl: url, apiKey: opts.builtinKey, modelId: opts.modelId, contextWindow: opts.contextWindow }, path.join(home, ".omp", "profiles"));
+    ensureOmpModel(ompProfile(), cfg, path.join(home, ".omp", "profiles"));
     // docker cp of a directory onto an existing one nests the copy
     // (/root/.omp/.omp/...) instead of replacing it — the stale models.yml
     // from the first pair on this slot would keep winning. Remove first.
     await dockerOk(["exec", container, "/bin/bash", "-c", "rm -rf /root/.omp"], { timeoutMs: 30_000 });
     await dockerOk(["cp", path.join(home, ".omp").replace(/\\/g, "/"), `${container}:/root/.omp`], { timeoutMs: 60_000 });
+  } else if (agent === "opencode") {
+    // Per-slot dir: parallel slots would race on a shared config's rmSync.
+    const dir = path.join(CACHE, `daily-opencode-config-s${slotIdx}`);
+    rmSync(dir, { recursive: true, force: true });
+    // The gateway keys routing/cache on the session header and answers without
+    // it with MissingSessionID, so the config carries a stable per-pair id —
+    // the same role `acpio-{{sessionId}}` plays for the builtin agent.
+    ensureOpenCodeConfig(dir, { ...cfg, sessionId: `daily-${taskDir}-r${rep}` });
+    // opencode roots a session at its worktree and runs its shell in PWD, not in
+    // the cwd docker exec sets; a wrong root would have it edit outside
+    // /workspace (on the host loop it wrote a rollout's file into the repo).
+    const env = { ...opencodeEnv("/opt/opencode", "/workspace"), PWD: "/workspace" };
+    await dockerOk(
+      ["exec", container, "mkdir", "-p", "/opt/opencode/data", "/opt/opencode/state", "/opt/opencode/cache", "/opt/opencode/run"],
+      { timeoutMs: 30_000 },
+    );
+    await dockerOk(["cp", path.join(dir, "opencode.json").replace(/\\/g, "/"), `${container}:/opt/opencode/opencode.json`], { timeoutMs: 60_000 });
+    envFlags.push(...Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]));
   }
   const { cmd, entry } = CONTAINER_AGENT[agent];
-  const argv = [cmd, entry, ...agentArgs(agent, { prompt, provider, modelId: opts.modelId })];
+  const argv = [
+    ...(entry ? [cmd, entry] : [cmd]),
+    ...agentArgs(agent, { prompt, provider, modelId: opts.modelId }),
+  ];
   const res = await runProcess("docker", ["exec", ...envFlags, container, ...argv], { timeoutMs, maxStdout: 16_000_000 });
   return {
-    ...summarizeAgentStream(res.stdout),
+    // Per-agent parser: pi/omp print the pi event stream, opencode its own
+    // `run --format json` envelope — feeding opencode's to the pi parser yields
+    // a session with no tools and no text.
+    ...summarizeAgentOutput(agent, res.stdout),
     wallMs: res.wallMs,
     exitCode: res.code,
     timedOut: res.timedOut,
@@ -353,6 +427,40 @@ function exists(p) {
   }
 }
 
+/**
+ * What a sweep would run, pair by pair, without starting anything: the resolved
+ * grammar (labels, knobs), the provider each harness talks to and the argv it
+ * would be exec'd with. `--plan` is how a change to the agent set is checked
+ * before a dozen containers come up — and how a harness that only exists inside
+ * the sandbox can be inspected without a run.
+ */
+function printPlan(agents, tasks, opts) {
+  console.log(
+    `plan: ${tasks.length} task(s) × ${agents.length} agent(s) × ${opts.repeats} repeat(s) = ${tasks.length * agents.length * opts.repeats} pair(s)\n`,
+  );
+  for (const agent of agents) {
+    if (agent.base === "builtin") {
+      const knobs = builtinVariantKnobs(agent, { modelValue: builtinModelValue("builtin", opts.modelId) });
+      console.log(
+        `${pad(agent.name, 48)} builtin  thinking=${agent.thinking ?? "default"} thinkingLimit=${agent.thinkingLimit ?? 0} ` +
+          `body=${knobs.providerBody ?? "-"}`,
+      );
+      continue;
+    }
+    const { cmd, entry } = CONTAINER_AGENT[agent.base];
+    const provider = AGENT_PROVIDER_ALIAS[agent.base] ?? opts.provider;
+    const argv = [
+      ...(entry ? [cmd, entry] : [cmd]),
+      ...agentArgs(agent.base, { prompt: "<task prompt>", provider, modelId: opts.modelId }),
+    ];
+    console.log(`${pad(agent.name, 48)} ${pad(agent.base, 8)} ${provider}/${opts.modelId}`);
+    console.log(`${pad("", 48)} ${argv.join(" ")}`);
+  }
+  const sample = agents[agents.length - 1];
+  console.log(`\nwire label example: ${labeledUrl(opts.builtinUrl, sample.name, tasks[0].id, 1)}`);
+  console.log(`tasks: ${tasks.map((t) => t.id).join(", ")}`);
+}
+
 function renderSummary(rows, opts, diagnostics = [], runWallMs = 0) {
   const byAgent = new Map();
   for (const d of diagnostics) {
@@ -366,12 +474,12 @@ function renderSummary(rows, opts, diagnostics = [], runWallMs = 0) {
   const lines = [
     `# Daily bench (docker sandbox) — ${new Date().toISOString()}`,
     "",
-    `Model: \`${opts.model}\`. Agents: ${opts.agents.join(", ")}. Same sandbox machinery as the SWE circuit.`,
+    `Model: \`${opts.model}\`. Agents: ${opts.agentLabels.join(", ")}. Same sandbox machinery as the SWE circuit.`,
     "",
     "| agent | pass/runs | wall total | tok in (wire) | cache hit % | uncached | tok out | calls |",
     "|---|---|---|---|---|---|---|---|",
   ];
-  for (const agent of opts.agents) {
+  for (const agent of opts.agentLabels) {
     const rs = rows.filter((r) => r.agent === agent);
     if (!rs.length) continue;
     const w = byAgent.get(agent) || {};
@@ -412,13 +520,39 @@ async function main() {
   else if (!opts.tasks) tasks = tasks.filter((t) => !["m", "l"].includes(t.horizon)); // long tasks opt in (see README)
   tasks.sort((a, b) => a.id.localeCompare(b.id));
   if (!tasks.length) throw new Error("no tasks selected");
+  // Validated before anything starts: a typo must fail here, not after a dozen
+  // containers are up (same grammar and same error as bench/run.mjs).
+  const agents = parseAgents(opts.agents);
+  const agentLabels = agents.map((a) => a.name);
+  // Variant labels are long (`builtin-extra-low-with-thinking-limit-3000`) and
+  // a fixed 8 would print two different variants as the same `builtin-`.
+  const agentCol = Math.max(8, ...agentLabels.map((l) => l.length));
+  // The report and the ledger name agents by label; the records stay local to
+  // the pair queue (a variant's label is what the wire and the table show).
+  opts.agentLabels = agentLabels;
+
+  if (opts.plan) {
+    printPlan(agents, tasks, opts);
+    return;
+  }
 
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   mkdirSync(opts.out, { recursive: true });
 
   let proxy = null;
   if (opts.proxy) {
-    proxy = new LlmProxy({ upstream: opts.builtinUrl, outDir: opts.out, stamp: `docker-${stamp}`, dump: opts.proxyDump, verbose: opts.proxyVerbose });
+    proxy = new LlmProxy({
+      upstream: opts.builtinUrl,
+      outDir: opts.out,
+      stamp: `docker-${stamp}`,
+      dump: opts.proxyDump,
+      verbose: opts.proxyVerbose,
+      // The gateway keys routing and cache on this header, and the ledger
+      // records who sent it: without the name the proxy cannot say, and the
+      // daily circuit stops being comparable with the SWE one (same proxy
+      // rules is what the usage line promises).
+      sessionHeader: opts.sessionHeader,
+    });
     await proxy.start();
     console.log(`proxy: ${proxy.base} -> ${opts.builtinUrl}`);
   }
@@ -427,18 +561,18 @@ async function main() {
   await ensureSandboxImage();
   writeServerScripts();
 
-  console.log(`daily bench (docker): ${tasks.length} task(s) × ${opts.agents.join("+")} × ${opts.provider}/${opts.modelId}  concurrency=${opts.concurrency}\n`);
+  console.log(`daily bench (docker): ${tasks.length} task(s) × ${agentLabels.join("+")} × ${opts.provider}/${opts.modelId}  concurrency=${opts.concurrency}\n`);
 
   const resultsFile = path.join(opts.out, `docker-${stamp}.jsonl`);
   const rows = [];
   let done = 0;
-  const total = opts.agents.length * tasks.length * opts.repeats;
+  const total = agents.length * tasks.length * opts.repeats;
   const runStart = Date.now();
 
   // Build the pair queue, then C slot containers; each slot runs its pairs
   // sequentially in its own container (clean /workspace per pair).
   const pairs = [];
-  for (const agent of opts.agents) {
+  for (const agent of agents) {
     for (const task of tasks) {
       for (let rep = 1; rep <= opts.repeats; rep++) pairs.push({ agent, task, rep });
     }
@@ -467,7 +601,8 @@ async function main() {
     const base = `http://127.0.0.1:${slot.port}`;
     const timeoutMs = task.timeoutMs ?? opts.timeoutMs;
     const t0 = Date.now();
-    const row = { agent, task: task.id, repeat: rep, ...(opts.faults.length ? { faults: opts.faults } : {}) };
+    const label = agent.name;
+    const row = { agent: label, task: task.id, repeat: rep, ...(opts.faults.length ? { faults: opts.faults } : {}) };
     try {
       await dockerOk(["exec", container, "/bin/bash", "-c", "rm -rf /workspace"], { timeoutMs: 30_000 });
       // Forward slashes: docker cp chokes on mixed Windows separators. Tasks
@@ -478,7 +613,7 @@ async function main() {
       if (exists(fixture)) {
         let copyFrom = fixture;
         if (opts.faults.length) {
-          const staging = path.join(CACHE, "fault-staging", `${task.id}-${agent}-r${rep}`);
+          const staging = path.join(CACHE, "fault-staging", `${task.id}-${label}-r${rep}`);
           rmSync(staging, { recursive: true, force: true });
           cpSync(fixture, staging, { recursive: true });
           await applyFaults(task.dir, staging, opts.faults);
@@ -489,13 +624,17 @@ async function main() {
         await dockerOk(["exec", container, "/bin/bash", "-c", "mkdir -p /workspace"], { timeoutMs: 30_000 });
       }
 
-      if (agent === "builtin") {
+      if (agent.base === "builtin") {
         await startServer(container);
         if (!(await waitForHealth(base, 60_000))) {
           const log = await dockerExec(container, "tail -c 1500 /tmp/acpio-daily.log 2>/dev/null", 15_000).catch(() => ({ stdout: "" }));
           throw new Error(`server did not start: ${log.stdout || "(no log)"}`);
         }
-        await api(base, "PUT", "/api/settings", {
+        // Variant knobs (thinking mode, reasoning fuse, provider body) come from
+        // the shared grammar, so a `builtin-extra-low` here means exactly what it
+        // means in bench/run.mjs and in the SWE runner.
+        const knobs = builtinVariantKnobs(agent, { modelValue: builtinModelValue("builtin", opts.modelId) });
+        const applied = await api(base, "PUT", "/api/settings", {
           locale: "en",
           defaultProvider: "builtin",
           defaultMode: "agent",
@@ -504,19 +643,24 @@ async function main() {
             {
               id: "builtin",
               name: "builtin",
-              url: labeledUrl(modelUrl, agent, task.id, rep),
+              url: labeledUrl(modelUrl, label, task.id, rep),
               apiKey: opts.builtinKey,
               headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
+              ...(knobs.providerBody ? { body: knobs.providerBody } : {}),
               models: [{ id: opts.modelId, label: opts.modelId, contextWindow: opts.contextWindow, enabled: true }],
             },
           ],
+          ...knobs.settings,
         });
+        for (const warning of builtinVariantWarnings(agent, applied)) {
+          console.warn(`  ${label} ${task.id}: ${warning}`);
+        }
         const probe = await api(base, "POST", "/api/agent/probe", { provider: "builtin" });
         if (!probe?.ok) throw new Error(`probe failed: ${probe?.message ?? "unknown"}`);
         row.metrics = await driveSession(base, task.prompt, timeoutMs);
         await stopServer(container);
-      } else if (CONTAINER_AGENT[agent]) {
-        row.metrics = await runCliAgentInContainer(container, agent, {
+      } else if (CONTAINER_AGENT[agent.base]) {
+        row.metrics = await runCliAgentInContainer(container, agent.base, {
           prompt: task.prompt,
           taskDir: task.id,
           timeoutMs,
@@ -531,7 +675,7 @@ async function main() {
 
       // Token fields come from the wire, not the session self-report (see
       // wireMetrics); wall/tools/session fields stay as measured.
-      const wire = wireMetrics(proxy, agent, task.id, rep);
+      const wire = wireMetrics(proxy, label, task.id, rep);
       if (wire && row.metrics) Object.assign(row.metrics, wire);
 
       // Hidden verify, exec'd in the same environment the agent worked in.
@@ -560,7 +704,7 @@ async function main() {
         done += 1;
         appendFileSync(resultsFile, JSON.stringify(row) + "\n");
         console.log(
-          `[${done}/${total}] ${row.ok ? "PASS" : "FAIL"}  ${pad(row.agent, 8)} ${pad(row.task, 22)} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${num(row.metrics?.toolCalls)}  ${row.error ? "ERR " + row.error.slice(0, 90) : ""}`,
+          `[${done}/${total}] ${row.ok ? "PASS" : "FAIL"}  ${pad(row.agent, agentCol)} ${pad(row.task, 22)} ${String(Math.round(row.wallMs / 1000)).padStart(4)}s  tools=${num(row.metrics?.toolCalls)}  ${row.error ? "ERR " + row.error.slice(0, 90) : ""}`,
         );
       }
     })(),
@@ -579,9 +723,9 @@ async function main() {
   const summaryFile = path.join(opts.out, `docker-${stamp}.md`);
   writeFileSync(summaryFile, summary);
   console.log(`\n${resultsFile}\n${summaryFile}\n`);
-  for (const agent of opts.agents) {
+  for (const agent of opts.agentLabels) {
     const rs = rows.filter((r) => r.agent === agent);
-    if (rs.length) console.log(`  ${pad(agent, 8)} ${rs.filter((r) => r.ok).length}/${rs.length}`);
+    if (rs.length) console.log(`  ${pad(agent, agentCol)} ${rs.filter((r) => r.ok).length}/${rs.length}`);
   }
   console.log(`\ntotal run time: ${Math.round(runWallMs / 1000)}s (incl sandbox image, ${C} slot containers)`);
   appendLedger(opts, stamp, rows, diagnostics, runWallMs);
@@ -602,7 +746,7 @@ function appendLedger(opts, stamp, rows, diagnostics, runWallMs) {
       ts: new Date().toISOString(),
       stamp,
       model: opts.model,
-      agents: opts.agents,
+      agents: opts.agentLabels,
       pairs: rows.length,
       resolved: rows.filter((r) => r.ok).length,
       runWallMs,

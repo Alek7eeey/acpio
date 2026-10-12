@@ -1,6 +1,7 @@
 // Drives the in-process builtin agent the way a user does: the real acpio
 // server, its HTTP API, `permissionPolicy=always`, a per-run temp database.
 import { builtinModelValue } from "@acpio/shared";
+import { builtinVariantKnobs, builtinVariantWarnings } from "./agents.mjs";
 import { spawn } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -144,8 +145,21 @@ export class BenchServer {
    * and the fuse is its global setting, re-read on every turn. Both are always
    * written — a slot serves several variants in turn, so "no knob" must reset
    * the slot instead of inheriting the previous pair's mode.
+   *
+   * `reasoningEffort` pins `...-with-reasoning-effort-<level>`: the provider's
+   * *extra request body*, the one door in this app for a field the
+   * OpenAI-compatible schema has no slot for — the same `reasoning_effort` a
+   * CLI harness sends on its own. Conditional, like the body it writes: a pair
+   * without the knob must not inherit the previous variant's request body.
    */
-  async configure(url = this.provider.baseUrl, { thinking = null, thinkingLimit = null } = {}) {
+  async configure(url = this.provider.baseUrl, variant = {}) {
+    // The knobs and the model pin come from the shared grammar
+    // (bench/lib/agents.mjs), so a variant means the same thing here, in the
+    // daily docker runner and in the SWE runner.
+    const v = { thinking: null, thinkingLimit: null, reasoningEffort: null, ...variant };
+    const knobs = builtinVariantKnobs(v, {
+      modelValue: builtinModelValue(this.provider.provider, this.provider.modelId),
+    });
     this.provider.baseUrl = url;
     const applied = await this.api("PUT", "/api/settings", {
       locale: "en",
@@ -164,6 +178,7 @@ export class BenchServer {
           url: this.provider.baseUrl,
           apiKey: this.provider.apiKey,
           headers: this.headers,
+          ...(knobs.providerBody ? { body: knobs.providerBody } : {}),
           models: [
             {
               id: this.provider.modelId,
@@ -179,23 +194,13 @@ export class BenchServer {
       ...(process.env.BENCH_SUBAGENTS === "on"
         ? { builtinSubagents: { enabled: true, allowAdhoc: true, agents: [] } }
         : {}),
-      // The session has to be pinned to a real model value: the server only
-      // hands `modelParams` to the agent alongside a model, so without this
-      // the variant's thinking mode would never reach the wire (an empty
-      // default makes the boot's model step bail out before the params).
-      defaultModelByProvider: {
-        builtin: builtinModelValue(this.provider.provider, this.provider.modelId),
-      },
-      defaultModelParamsByProvider: { builtin: { thinking: thinking ?? "default" } },
-      builtinThinkingLimit: thinkingLimit ?? 0,
+      // The model pin and the two knobs, written together and always: see
+      // builtinVariantKnobs.
+      ...knobs.settings,
     });
     // A knob the server quietly dropped would make the variant a lie in the
     // results table, so say so on the spot instead of at analysis time.
-    if (thinkingLimit !== null && applied?.builtinThinkingLimit !== thinkingLimit) {
-      console.warn(
-        `thinking limit ${thinkingLimit} did not stick (server reports ${applied?.builtinThinkingLimit})`,
-      );
-    }
+    for (const warning of builtinVariantWarnings(v, applied)) console.warn(warning);
   }
 
   stop() {

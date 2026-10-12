@@ -15,8 +15,10 @@ import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { agentArgs, ensureOmpModel, ensurePiModel, ompProfile } from "../lib/cli-agent.mjs";
-import { summarizeAgentStream } from "../lib/jsonl.mjs";
+import { builtinModelValue } from "@acpio/shared";
+import { builtinVariantKnobs, builtinVariantWarnings, parseAgents } from "../lib/agents.mjs";
+import { agentArgs, ensureOmpModel, ensureOpenCodeConfig, ensurePiModel, ompProfile, opencodeEnv } from "../lib/cli-agent.mjs";
+import { summarizeAgentOutput } from "../lib/jsonl.mjs";
 import { loadFromCache, saveToCache } from "./image-cache.mjs";
 import { LlmProxy } from "../lib/proxy.mjs";
 import { runProcess } from "../lib/util.mjs";
@@ -106,14 +108,15 @@ function parseArgs(argv) {
 function usage() {
   console.log(
     [
-      "SWE-bench Verified runner for the builtin agent (and, in the same containers, pi / omp).",
+      "SWE-bench Verified runner for the builtin agent (and, in the same containers, pi / omp / opencode).",
       "",
       "  node bench/swe/run-swe.mjs --instances pallets__flask-5014",
-      "  node bench/swe/run-swe.mjs --agents builtin,pi,omp --instances pallets__flask-5014",
+      "  node bench/swe/run-swe.mjs --agents builtin,pi,omp,opencode --instances pallets__flask-5014",
       "  node bench/swe/run-swe.mjs --instances sympy --limit 5 --concurrency 2",
       "  node bench/swe/run-swe.mjs --instances pallets__flask-5014 --gold",
       "",
-      "--agents a,b      builtin | pi | omp; each gets a fresh container per instance",
+      "--agents a,b      pi | omp | opencode | builtin[-low|-extra-low][-with-thinking-limit-N];",
+      "                  each gets a fresh container per instance",
       "--instances a,b   instance_id substrings; empty = all 500 (think twice)",
       "--timeout ms      rollout budget per instance (default 45 min)",
       "--eval-timeout ms budget for the official eval script (default 40 min)",
@@ -409,10 +412,13 @@ async function resetTestPatchPaths(container, row) {
   if (lines) console.log(`  ${row.instance_id}: test-patch paths reset to base\n${lines.split("\n").map((l) => `    ${l}`).join("\n")}`);
 }
 
-/** Where each CLI agent lives inside the container (see prepare-agent-bundle.mjs). */
+/** Where each CLI agent lives inside the container (see prepare-agent-bundle.mjs).
+ * `entry` is the script a runtime has to interpret; opencode is a
+ * self-contained native binary and needs no interpreter in front of it. */
 const CONTAINER_AGENT = {
   pi: { cmd: "/bundle/node/bin/node", entry: "/bundle/agents/pi/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js" },
   omp: { cmd: "/bundle/bun", entry: "/bundle/agents/omp/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js" },
+  opencode: { cmd: "/bundle/agents/opencode/node_modules/@opencode/cli/bin/opencode.exe", entry: null },
 };
 
 /**
@@ -443,6 +449,23 @@ async function stageCliAgentConfig(container, agent, runDir, modelUrl, opts, ins
     await dockerOk(["cp", path.join(home, ".omp"), `${container}:/root/.omp`], { timeoutMs: 60_000 });
     return [];
   }
+  if (agent === "opencode") {
+    const dir = path.join(runDir, "agents", "opencode");
+    // The gateway keys routing/cache on the session header and answers without
+    // it with MissingSessionID, so the config carries a stable per-instance id
+    // (the same role `acpio-{{sessionId}}` plays for the builtin agent).
+    ensureOpenCodeConfig(dir, { ...cfg, sessionId: `swe-${instanceId}` });
+    // Both pins matter for the same reason: opencode resolves a session against
+    // its worktree (and its shell against PWD), not against the cwd docker exec
+    // sets, and a wrong root would have it edit outside the rollout's tree.
+    // Inside the container that root is /testbed (the instance checkout).
+    const env = { ...opencodeEnv("/opt/opencode", "/testbed"), PWD: "/testbed" };
+    await dockerOk([
+      "exec", container, "mkdir", "-p", "/opt/opencode/data", "/opt/opencode/state", "/opt/opencode/cache", "/opt/opencode/run",
+    ], { timeoutMs: 30_000 });
+    await dockerOk(["cp", path.join(dir, "opencode.json"), `${container}:/opt/opencode/opencode.json`], { timeoutMs: 60_000 });
+    return Object.entries(env).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+  }
   throw new Error(`not a cli agent: ${agent}`);
 }
 
@@ -450,7 +473,10 @@ async function stageCliAgentConfig(container, agent, runDir, modelUrl, opts, ins
 async function runCliAgentInContainer(container, agent, { prompt, runDir, timeoutMs, modelUrl, opts, tag, instanceId }) {
   const envFlags = await stageCliAgentConfig(container, agent, runDir, modelUrl, opts, instanceId);
   const { cmd, entry } = CONTAINER_AGENT[agent];
-  const argv = [cmd, entry, ...agentArgs(agent, { prompt, provider: AGENT_PROVIDER_ALIAS[agent] ?? opts.provider, modelId: opts.modelId })];
+  const argv = [
+    ...(entry ? [cmd, entry] : [cmd]),
+    ...agentArgs(agent, { prompt, provider: AGENT_PROVIDER_ALIAS[agent] ?? opts.provider, modelId: opts.modelId }),
+  ];
   const res = await runProcess("docker", ["exec", "-w", "/testbed", ...envFlags, container, ...argv], { timeoutMs, maxStdout: 16_000_000 });
   // Raw event stream: every tool call and message the harness printed, one
   // JSON object per line — the action history for later analysis.
@@ -459,7 +485,10 @@ async function runCliAgentInContainer(container, agent, { prompt, runDir, timeou
     writeFileSync(path.join(runDir, "transcripts", `${tag}.events.jsonl`), res.stdout || "");
   } catch {}
   return {
-    ...summarizeAgentStream(res.stdout),
+    // Per-agent parser: pi/omp print the pi event stream, opencode its own
+    // `run --format json` envelope — feeding opencode's to the pi parser
+    // yields a session with no tools and no text.
+    ...summarizeAgentOutput(agent, res.stdout),
     wallMs: res.wallMs,
     exitCode: res.code,
     timedOut: res.timedOut,
@@ -508,7 +537,7 @@ async function runInstance(row, idx, stamp, runDir, opts, modelUrl, proxy) {
     await ensureImage(image);
   } catch (err) {
     return opts.agents.map((agent) => ({
-      agent,
+      agent: agent.name,
       instanceId: row.instance_id,
       repo: row.repo,
       version: row.version,
@@ -530,13 +559,18 @@ async function runInstance(row, idx, stamp, runDir, opts, modelUrl, proxy) {
 
 async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, image, proxy) {
   const id = row.instance_id;
-  const tag = `${agent}-${id}`;
-  const container = `swe-${stamp}-${idx}-${agent}`;
+  // `agent` is the parsed entry: `name` is the harness as the table and the
+  // wire label know it (a built-in variant keeps its own name), `driver` is
+  // what actually runs it (every variant is the builtin driver).
+  const name = agent.name;
+  const driver = agent.base;
+  const tag = `${name}-${id}`;
+  const container = `swe-${stamp}-${idx}-${name}`;
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const t0 = Date.now();
-  const rec = { agent, instanceId: id, repo: row.repo, version: row.version, image };
-  proxy?.setLabel({ agent, task: id, repeat: 1 });
+  const rec = { agent: name, instanceId: id, repo: row.repo, version: row.version, image };
+  proxy?.setLabel({ agent: name, task: id, repeat: 1 });
   let cleanup = async () => {};
   try {
     await dockerOk(
@@ -563,13 +597,17 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
       await dockerOk(["cp", goldFile, `${container}:/tmp/gold.patch`], { timeoutMs: 60_000 });
       const apply = await dockerExec(container, "cd /testbed && git apply /tmp/gold.patch", 60_000);
       if (apply.code !== 0) throw new Error(`gold patch failed to apply: ${(apply.stderr || "").slice(-300)}`);
-    } else if (agent === "builtin") {
+    } else if (driver === "builtin") {
       await startServer(container);
       if (!(await waitForHealth(base, 90_000))) {
         const log = await dockerExec(container, "tail -c 2000 /tmp/acpio-server.log 2>/dev/null", 15_000).catch(() => ({ stdout: "" }));
         throw new Error(`acpio server did not start: ${log.stdout || "(no log)"}`);
       }
-      await api(base, "PUT", "/api/settings", {
+      // Variant knobs (thinking mode, reasoning fuse, provider body) come from
+      // the shared grammar: a `builtin-extra-low` here is the same variant as in
+      // bench/run.mjs and in bench/run-docker.mjs.
+      const knobs = builtinVariantKnobs(agent, { modelValue: builtinModelValue("builtin", opts.modelId) });
+      const applied = await api(base, "PUT", "/api/settings", {
         locale: "en",
         defaultProvider: "builtin",
         defaultMode: "agent",
@@ -578,21 +616,28 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
           {
             id: "builtin",
             name: "builtin",
-            url: labeledModelUrl(modelUrl, agent, id),
+            url: labeledModelUrl(modelUrl, name, id),
             apiKey: opts.builtinKey,
             // The agent stamps its own chat id — one task, one stable session
             // key for the provider's routing/cache (the proxy only backfills
             // the header for CLIs that don't send it).
             headers: [{ name: "x-opencode-session", value: "acpio-{{sessionId}}" }],
+            ...(knobs.providerBody ? { body: knobs.providerBody } : {}),
             models: [{ id: opts.modelId, label: opts.modelId, contextWindow: opts.contextWindow, enabled: true }],
           },
         ],
+        ...knobs.settings,
       });
+      // A knob the container's server quietly dropped would make the variant a
+      // lie in the results table — say so on the spot, not at analysis time.
+      for (const warning of builtinVariantWarnings(agent, applied)) {
+        console.warn(`  ${tag}: ${warning}`);
+      }
       const probe = await api(base, "POST", "/api/agent/probe", { provider: "builtin" });
       if (!probe?.ok) throw new Error(`builtin probe failed: ${probe?.message ?? "unknown"}`);
       rec.metrics = await driveSession(base, opts.prompt(row), opts.timeoutMs, path.join(runDir, "transcripts", `${tag}.json`));
-    } else if (CONTAINER_AGENT[agent]) {
-      rec.metrics = await runCliAgentInContainer(container, agent, {
+    } else if (CONTAINER_AGENT[driver]) {
+      rec.metrics = await runCliAgentInContainer(container, driver, {
         prompt: opts.prompt(row),
         runDir,
         timeoutMs: opts.timeoutMs,
@@ -609,7 +654,7 @@ async function runAgentInstance(agent, row, idx, stamp, runDir, opts, modelUrl, 
     // wireMetrics): modelCalls/tokensIn/tokensOut/tokensCached are replaced
     // in place when the proxy captured the pair, wall/tools/session fields
     // stay as measured.
-    const wire = wireMetrics(proxy, agent, id);
+    const wire = wireMetrics(proxy, name, id);
     if (wire && rec.metrics) Object.assign(rec.metrics, wire);
 
     await resetTestPatchPaths(container, row);
@@ -662,9 +707,9 @@ async function main() {
 
   const instances = loadInstances(opts.instances, opts.limit);
   if (!instances.length) throw new Error("no instances matched — check --instances / dataset (bench/swe/fetch-dataset.mjs)");
-  const knownAgents = ["builtin", ...Object.keys(CONTAINER_AGENT)];
-  const bad = opts.agents.filter((a) => !knownAgents.includes(a));
-  if (bad.length) throw new Error(`unknown --agents: ${bad.join(", ")} (known: ${knownAgents.join(", ")})`);
+  // Same grammar as bench/run.mjs, and it throws on an unknown name before any
+  // container starts — a typo must not cost a rollout.
+  opts.agents = parseAgents(opts.agents);
   if (!opts.gold && !exists(BUNDLE)) {
     throw new Error(`missing ${BUNDLE}\nbuild it first: node bench/swe/prepare-agent-bundle.mjs`);
   }
@@ -686,7 +731,7 @@ async function main() {
   const modelUrl = proxy ? proxy.base : opts.builtinUrl;
 
   console.log(
-    `swe-bench verified: ${instances.length} instance(s) × ${opts.agents.join("+")} × ${opts.provider}/${opts.modelId}  concurrency=${opts.concurrency}${opts.gold ? "  [GOLD self-test]" : ""}${opts.noEval ? "  [no eval]" : ""}\n`,
+    `swe-bench verified: ${instances.length} instance(s) × ${opts.agents.map((a) => a.name).join("+")} × ${opts.provider}/${opts.modelId}  concurrency=${opts.concurrency}${opts.gold ? "  [GOLD self-test]" : ""}${opts.noEval ? "  [no eval]" : ""}\n`,
   );
 
   const resultsFile = path.join(opts.out, `swe-${stamp}.jsonl`);
@@ -728,9 +773,9 @@ async function main() {
   const graded = rows.filter((r) => r.resolved !== null && r.resolved !== undefined).length;
   console.log(`\nRESOLVED ${resolved}/${graded || rows.length}${rows.some((r) => r.error) ? `  (${rows.filter((r) => r.error).length} errored)` : ""}`);
   for (const agent of opts.agents) {
-    const rs = rows.filter((r) => r.agent === agent);
+    const rs = rows.filter((r) => r.agent === agent.name);
     if (!rs.length) continue;
-    console.log(`  ${pad(agent, 8)} ${rs.filter((r) => r.ok).length}/${rs.length}`);
+    console.log(`  ${pad(agent.name, 8)} ${rs.filter((r) => r.ok).length}/${rs.length}`);
   }
   console.log(`\ntotal run time: ${fmtDur(runWallMs)} (incl image pulls, rollouts, eval, grading)`);
   for (const [agent, t] of Object.entries(timingStats(rows))) {
@@ -786,7 +831,9 @@ function appendRunIndex(opts, stamp, rows, diagnostics, runWallMs) {
       ts: new Date().toISOString(),
       stamp,
       model: opts.model,
-      agents: opts.agents,
+      // Names only: the ledger is read by baseline.mjs / corpus-summary.mjs,
+      // which compare harness names across runs.
+      agents: opts.agents.map((a) => a.name),
       gold: opts.gold || undefined,
       noEval: opts.noEval || undefined,
       concurrency: opts.concurrency,
@@ -847,7 +894,7 @@ function renderSummary(opts, instances, rows, stamp, diagnostics = [], runWallMs
   const lines = [
     `# SWE-bench Verified — ${new Date().toISOString()}`,
     "",
-    `Model: \`${opts.model}\`. Instances: ${instances.length} × agents: ${opts.agents.join(", ")}${opts.gold ? " (GOLD self-test)" : ""}. ` +
+    `Model: \`${opts.model}\`. Instances: ${instances.length} × agents: ${opts.agents.map((a) => a.name).join(", ")}${opts.gold ? " (GOLD self-test)" : ""}. ` +
       `Rollout: the agent runs inside the official swebench container; eval: dataset eval script graded by the swebench package.`,
     "",
     "| instance | agent | resolved | wall s | rollout s | eval s | model calls | tools | tok in (wire) | cached | uncached | tok out (wire) | patch B | files | note |",

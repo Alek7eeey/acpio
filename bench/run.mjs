@@ -9,6 +9,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFile
 import { execSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseAgents } from "./lib/agents.mjs";
 import { BenchServer, runBuiltinAgent, sessionTranscriptHasNul } from "./lib/builtin-agent.mjs";
 import { ensureOmpModel, ensureOpenCodeConfig, ensurePiModel, ompProfile, runCliAgent } from "./lib/cli-agent.mjs";
 import { LlmProxy } from "./lib/proxy.mjs";
@@ -32,40 +33,11 @@ function providerDefaults() {
 /** Each CLI turns its native provider session header on by provider name. */
 const AGENT_PROVIDER_ALIAS = { pi: "opencode", omp: "opencode-zen" };
 
-/**
- * Built-in variants: the same shipped agent with one of its own thinking knobs
- * pinned, so a run compares configurations of one harness instead of its
- * average. `-low` / `-extra-low` is the ⋯ menu's per-chat "Thinking" mode (a
- * model param, pinned per provider in settings); `-with-thinking-limit-N` adds
- * the fuse that cuts one step's overlong reasoning (`builtinThinkingLimit`).
- */
-const BUILTIN_VARIANT_RE = /^builtin(?:-(low|extra-low))?(?:-with-thinking-limit-(\d+))?$/;
-
-/** `--agents` entries → { name (label and wire), base (driver), knobs }. */
-function parseAgents(names) {
-  return names.map((name) => {
-    const variant = BUILTIN_VARIANT_RE.exec(name);
-    if (variant) {
-      return {
-        name,
-        base: "builtin",
-        thinking: variant[1] ?? null,
-        thinkingLimit: variant[2] ? Number(variant[2]) : null,
-      };
-    }
-    if (name === "pi" || name === "omp" || name === "opencode") {
-      return { name, base: name, thinking: null, thinkingLimit: null };
-    }
-    throw new Error(
-      `unknown agent "${name}" — known: pi, omp, opencode, builtin[-low|-extra-low][-with-thinking-limit-<chars>]`,
-    );
-  });
-}
-
 function parseArgs(argv) {
   const defaults = providerDefaults();
   const out = {
     agents: ["pi", "omp", "builtin", "opencode"],
+    hostDev: false,
     tasks: null,
     tasksRoot: [path.join(REPO, "bench", "tasks")],
     family: null,
@@ -109,6 +81,7 @@ function parseArgs(argv) {
       case "--timeout-scale": out.timeoutScale = Number(take()); break;
       case "--concurrency": out.concurrency = Math.max(1, Number(take())); break;
       case "--out": out.out = path.resolve(take()); break;
+      case "--host-dev": out.hostDev = true; break;
       case "--keep": out.keep = true; break;
       case "--proxy": out.proxy = true; break;
       case "--no-proxy": out.proxy = false; break;
@@ -168,6 +141,9 @@ async function main() {
         "                     [--timeout-scale N]  (multiplies every task's own budget)",
         "                     [--concurrency N] [--builtin-url <url>] [--builtin-key <key>]",
         "                     [--context-window N] [--out <dir>] [--keep]",
+        "                     [--host-dev]  (dev contour: runs the harnesses in the",
+        "                                   checkout; benchmarks themselves run in",
+        "                                   Docker — node bench/run-docker.mjs)",
         "                     [--no-proxy] [--proxy-dump] [--proxy-verbose]",
         "",
         "Pairs (agent × task × repeat) run on N parallel slots; every pair's",
@@ -184,11 +160,34 @@ async function main() {
         "         <stamp>.calls.jsonl - every model call as seen by the proxy",
         "",
         "Agents: pi, omp, opencode, and built-in variants — builtin, builtin-low,",
-        "        builtin-extra-low, ...-with-thinking-limit-<chars>: the shipped",
-        "        agent re-run with its per-chat Thinking mode and its reasoning",
-        "        fuse pinned, so one run compares configurations of a harness.",
+        "        builtin-extra-low, ...-with-thinking-limit-<chars>,",
+        "        ...-with-reasoning-effort-<low|medium|high>: the shipped agent re-run",
+        "        with its per-chat Thinking mode, its reasoning fuse and its provider's",
+        "        extra request body pinned, so one run compares configurations of a",
+        "        harness (and of its wire) instead of its average.",
       ].join("\n"),
     );
+    return;
+  }
+
+  // Benchmarks run in Docker, always (rule 2026-10-11 — see bench/README.md).
+  // This loop spawns the harnesses in the checkout, so their workspaces sit
+  // inside the repo: opencode reads the enclosing git root as the project root
+  // and wrote a rollout's file into the repo root, a build here rewrites the
+  // gitignored dist artifacts, and nothing contains an escaping agent. It stays
+  // for iterating on the runner itself — that has to be asked for out loud.
+  if (!opts.hostDev) {
+    console.error(
+      [
+        "benchmarks run in Docker — this host loop runs them inside the checkout.",
+        "",
+        "  node bench/run-docker.mjs [--agents pi,omp,builtin] [--tasks ...]   # the run",
+        "",
+        "bench/run.mjs remains the dev contour for iterating on the runner itself and",
+        "for express checks; opt in with --host-dev when that is what you mean.",
+      ].join("\n"),
+    );
+    process.exitCode = 2;
     return;
   }
 
@@ -289,7 +288,11 @@ async function main() {
           // Same server, next pair: relabel so the wire attribution follows,
           // and pin this variant's knobs — the server's settings are per slot,
           // so a pair must never inherit the previous variant's thinking mode.
-          await slot.server.configure(url, { thinking: agent.thinking, thinkingLimit: agent.thinkingLimit });
+          await slot.server.configure(url, {
+            thinking: agent.thinking,
+            thinkingLimit: agent.thinkingLimit,
+            reasoningEffort: agent.reasoningEffort,
+          });
           result = await runBuiltinAgent(slot.server, { task, ws, timeoutMs, prompts });
         } else {
           const providerSlug = AGENT_PROVIDER_ALIAS[base] ?? provider;

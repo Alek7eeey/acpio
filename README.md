@@ -3,7 +3,7 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP / OpenCode), with a built-in agent that runs inside the server — no external CLI needed.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.34
+**Current version:** 0.1.35
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -121,6 +121,23 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -ZipPath .\dist-app\a
 
 Production env vars: `PORT` (default 18741), `HOST` (default `0.0.0.0`),
 `DATABASE_PATH` (default `<app dir>/data/acpio.db`).
+
+### `ACPIO_TAKEOVER=1` — force claim a locked database (humans only)
+
+One acpio per database file: a start against a locked database normally refuses
+and names the holder's pid. Set `ACPIO_TAKEOVER=1` and that refusal is replaced
+by kill-and-claim: the server verifies the holder really is an acpio process
+(its command line must name this repo), kills the holder's **whole process
+tree** (a watch parent would otherwise respawn it), waits for the lock to free,
+then claims it. Useful as the start argument of a supervised command — after a
+stray `npm run dev` or a stopped-and-restarted instance grabs `data/acpio.db`,
+this start wins.
+
+**Only a person may use this.** Agents and CI must never set it: it force-kills
+whichever process holds the lock, and starting a second live server on one
+database is precisely the corruption the lock exists to prevent. If an agent
+hits `acpio is already running`, the correct answer is to report the holder's
+pid, not to take over. Without the variable the old behavior stands: refuse.
 
 ## Phone and VPN
 

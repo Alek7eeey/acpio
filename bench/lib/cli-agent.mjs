@@ -81,14 +81,33 @@ export function ensureOpenCodeConfig(dir, { provider, baseUrl, apiKey, modelId, 
  * cache/runtime (sessions, db, logs) and no project config from the fixture —
  * a run must not depend on, or mutate, the machine's real opencode setup.
  */
-export function opencodeEnv(dir) {
+/**
+ * Join under `dir` the way `dir` is written. The container's config dir is a
+ * POSIX path while the bench itself may run on Windows: `path.join` would hand
+ * a Linux container `\opt\opencode\opencode.json`, which works only as long as
+ * the CLI happens to normalize separators — and stops working the day it does
+ * not. A POSIX dir stays POSIX; anything else is a host path and is joined by
+ * the host's rules.
+ */
+const under = (dir, ...parts) => (dir.startsWith("/") ? [dir, ...parts].join("/") : path.join(dir, ...parts));
+
+export function opencodeEnv(dir, worktree) {
   return {
-    OPENCODE_CONFIG: path.join(dir, "opencode.json"),
+    OPENCODE_CONFIG: under(dir, "opencode.json"),
+    // opencode roots a session at the enclosing git worktree, not at the cwd
+    // it was spawned in: driven from a bench workspace (bench/.work/<stamp>/<pair>,
+    // inside the checkout) it told the model the project root was the acpio
+    // checkout, and the model wrote fizzbuzz.mjs there with an absolute path —
+    // the workspace stayed empty and the verifier failed on a missing module.
+    // The CLI's positional `directory` argument only sets the session directory
+    // (visible in opencode.db), which is not what the file tools resolve
+    // against; OPENCODE_WORKTREE_PATH is.
+    ...(worktree ? { OPENCODE_WORKTREE_PATH: worktree } : {}),
     OPENCODE_CONFIG_DIR: dir,
-    XDG_DATA_HOME: path.join(dir, "data"),
-    XDG_STATE_HOME: path.join(dir, "state"),
-    XDG_CACHE_HOME: path.join(dir, "cache"),
-    XDG_RUNTIME_DIR: path.join(dir, "run"),
+    XDG_DATA_HOME: under(dir, "data"),
+    XDG_STATE_HOME: under(dir, "state"),
+    XDG_CACHE_HOME: under(dir, "cache"),
+    XDG_RUNTIME_DIR: under(dir, "run"),
     OPENCODE_DISABLE_AUTOUPDATE: "1",
     OPENCODE_DISABLE_MODELS_FETCH: "1",
     OPENCODE_DISABLE_FILEWATCHER: "1",
@@ -230,6 +249,12 @@ export function agentArgs(agent, { prompt, provider, modelId, ompProfileName }) 
       "-m",
       `${provider}/${modelId}`,
       prompt,
+      // NOTE: no positional `directory` here. `run`'s only positional is
+      // `message...`, so a directory argument silently becomes part of the
+      // prompt — and the model then reads the workspace path out of its own
+      // instructions and walks up to the checkout. The session root is pinned
+      // through the environment instead (OPENCODE_WORKTREE_PATH + PWD in
+      // runCliAgent); see opencodeEnv.
     ];
   }
   throw new Error(`unknown cli agent: ${agent}`);
@@ -248,12 +273,21 @@ export async function runCliAgent(agent, { task, ws, provider, modelId, timeoutM
     ...prefix,
     ...agentArgs(agent, { prompt: task.prompt, provider, modelId, ompProfileName }),
   ];
-  const env =
-    agent === "pi" && piConfigDir
+  const env = {
+    ...(agent === "pi" && piConfigDir
       ? { PI_CODING_AGENT_DIR: piConfigDir, PI_OFFLINE: "1" }
       : agent === "opencode" && opencodeConfigDir
-        ? opencodeEnv(opencodeConfigDir)
-        : undefined;
+        ? opencodeEnv(opencodeConfigDir, ws)
+        : {}),
+    // The harness is spawned with cwd=<workspace>, but opencode's shell tool
+    // takes its working directory from PWD rather than from the spawn cwd — and
+    // the bench itself runs from the repo root, so the inherited PWD aimed
+    // every opencode rollout at the checkout instead of its workspace:
+    // fizzbuzz-r1 wrote fizzbuzz.mjs into the repo root, its own workspace
+    // stayed empty and the verifier failed on a missing module. PWD has to say
+    // what the spawn cwd says. pi/omp read the real cwd and are unaffected.
+    PWD: ws,
+  };
   const res = await runProcess(cmd, args, { cwd: ws, timeoutMs, env });
   const summary = summarizeAgentOutput(agent, res.stdout);
   return {

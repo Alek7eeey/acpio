@@ -37,20 +37,29 @@ Why the bench exists, in the order that decides arguments:
 
 ## Run
 
-**By default benchmarks run in Docker** (decision 2026-10-01). `bench/run-docker.mjs`
+**Every benchmark run goes through Docker — no exceptions** (rule 2026-10-11,
+after the 2026-10-01 "docker by default" decision). `bench/run-docker.mjs`
 executes the same tasks and agents inside the SWE-style sandbox: the
 `acpio-daily-sandbox` image (node + the unpacked agent bundle, rebuilt by
 `bench/swe/prepare-agent-bundle.mjs` into `bench/.cache/`), a pool container per
 slot, a clean `/workspace` per pair, and the hidden verify exec'd inside the
-container. The host loop `bench/run.mjs` is the fast dev contour for iterating
-on the runner itself and for express checks — it is not the default.
+container.
+
+The host loop `bench/run.mjs` is the dev contour for iterating on the runner
+itself and for express checks, and it now refuses to start without `--host-dev`.
+It runs the harnesses in the checkout, so their workspaces sit inside the repo
+and nothing contains an escaping agent: opencode takes the enclosing git root
+for its project root and wrote a rollout's `fizzbuzz.mjs` into the repo root,
+and a build there rewrites the gitignored `dist` artifacts. Say `--host-dev` when
+that is what you mean — never for a run whose numbers you intend to keep.
 
 ```bash
-node bench/run-docker.mjs                           # default: all agents × all tasks (docker)
+node bench/run-docker.mjs                           # the run: all agents × all tasks (docker)
 node bench/run-docker.mjs --agents builtin --concurrency 8
-node bench/run.mjs                                  # host fast loop (dev only)
+node bench/run.mjs --host-dev                       # host fast loop (dev only)
 node bench/run.mjs --agents builtin --repeats 3     # one agent, averaged
 node bench/run.mjs --tasks fix-sum --turns 2        # multi-prompt: prompt as 2 user turns
+# every bench/run.mjs line below is the dev contour too — it needs --host-dev
 node bench/run.mjs --agents pi,omp --tasks fix-sum  # a subset
 node bench/run.mjs --family long                    # the long-horizon family (20 min/task)
 node bench/run.mjs --tasks fix-sum --faults junk-context  # A/B: same task, obstructed
@@ -76,12 +85,19 @@ agent never saw. `PASS` means the verifier exited 0. Results are written to
 A built-in **variant** is that same shipped agent with one of its own thinking
 knobs pinned, so one run compares configurations of a harness instead of one
 agent against another: `builtin-low` / `builtin-extra-low` set the ⋯ menu's
-per-chat Thinking mode, and a `-with-thinking-limit-<chars>` suffix adds the
-fuse that cuts one step's overlong reasoning. Both are the app's own knobs —
-the per-provider model param (`defaultModelParamsByProvider`) and
-`builtinThinkingLimit` — written to the slot's settings before each pair, so a
-pair never inherits the previous variant's mode. `--timeout-scale N` multiplies
-each task's own budget (its `task.json` `timeoutMs`).
+per-chat Thinking mode, and a `-with-reasoning-effort-<level>` suffix pins the
+provider's *extra request body* (`{"reasoning_effort":"<level>"}`) — the wire
+knob a CLI harness sets from its own config, which the prompt-level Thinking
+mode never reaches. A `-with-thinking-limit-<chars>` suffix — the fuse that cuts
+one step's overlong reasoning — still parses, but is **not part of the run set**
+(dropped 2026-10-11: it never engaged on tasks short enough to be worth its
+extra calls). The mode and the fuse are the app's own knobs — the per-provider
+model param (`defaultModelParamsByProvider`) and `builtinThinkingLimit`, both
+written to the slot's settings before each pair, so a pair never inherits the
+previous variant's mode (a variant naming no fuse writes 0, i.e. off); the
+request body is written the same way, and dropped again for a pair whose variant
+names none. `--timeout-scale N` multiplies each task's own
+budget (its `task.json` `timeoutMs`).
 
 ## How each agent is driven
 
@@ -89,9 +105,10 @@ each task's own budget (its `task.json` `timeoutMs`).
 |---|---|---|---|
 | `pi` | `node <pi>/dist/bundle/cli.js -p --mode json` | non-interactive, auto-approved | `--no-session --no-context-files --no-extensions --no-skills --no-prompt-templates --offline` + own config dir |
 | `omp` | `omp --mode=json -p` | `--auto-approve` | `--no-extensions --no-skills --no-rules` |
+| `opencode` | `opencode run --standalone --auto --format json` | `--auto` | own config dir; `OPENCODE_WORKTREE_PATH` and `PWD` pin the workspace as its project root |
 | `builtin` | real `acpio` server, `POST /api/sessions/:id/prompt` | `permissionPolicy=always` | per-run temp SQLite DB, own port |
 | `builtin-clm` | the same server, sessions created with `provider: builtin-clm` | `permissionPolicy=always` | same as `builtin`; the CLM variant keeps its memory in a context file |
-| `builtin-<variant>` | the same server, its settings pinned per pair | `permissionPolicy=always` | same as `builtin`; the variant is the `thinking` model param (plus `builtinThinkingLimit` when the name names one) |
+| `builtin-<variant>` | the same server, its settings pinned per pair | `permissionPolicy=always` | same as `builtin`; the variant is the `thinking` model param, `builtinThinkingLimit` and the provider's extra request body when the name names one |
 
 Custom providers are written per run, never inherited from daily-use config:
 `omp` gets `~/.omp/profiles/omp-bench-s<slot>/agent/models.yml` and runs with
@@ -99,7 +116,13 @@ Custom providers are written per run, never inherited from daily-use config:
 `<run>/pi-agent/models.json` with `PI_CODING_AGENT_DIR` pointing at it,
 `builtin` gets `PUT /api/settings`. omp's config is per slot because the profile
 file carries the pair's labelled URL: a shared profile would serialise every
-omp pair onto one chain.
+omp pair onto one chain. opencode gets its own `opencode.json` (provider,
+labelled URL, key, the `x-opencode-session` header the gateway keys on) plus the
+XDG dirs it writes into — `/opt/opencode` inside a container, a per-slot dir on
+the host. Its root is pinned explicitly: without
+`OPENCODE_WORKTREE_PATH`/`PWD` it takes the enclosing git worktree for the
+project root, and a workspace inside the checkout would send its writes into the
+repo instead of the workspace.
 
 ## Metrics
 
@@ -162,7 +185,7 @@ What it settled on the reference endpoint:
 
 Improving the builtin agent is an iteration loop, not a one-off comparison:
 
-1. **One change per iteration**, then `node bench/run.mjs --agents builtin --proxy-dump`.
+1. **One change per iteration**, then `node bench/run-docker.mjs --agents builtin --proxy-dump`.
 2. Compare against the **frozen baseline** — `node bench/baseline.mjs` prints the
    best passing run per agent/task across every recorded stamp. pi and omp do
    not change between iterations: their reference is their best observed run,

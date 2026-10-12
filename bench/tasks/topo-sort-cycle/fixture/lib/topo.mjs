@@ -14,15 +14,23 @@ export function topoSort(nodes, edges = []) {
     indegree.set(to, indegree.get(to) + 1);
   }
   const ready = [...indegree].filter(([, d]) => d === 0).map(([n]) => n);
+  const settled = new Set();
   const out = [];
   while (ready.length > 0) {
     const n = ready.shift();
     out.push(n);
+    settled.add(n);
     for (const m of next.get(n)) {
       indegree.set(m, indegree.get(m) - 1);
       if (indegree.get(m) === 0) ready.push(m);
     }
   }
-  // leftover nodes mean a cycle; return the partial order for now (PROD-4203)
+  if (out.length !== nodeSet.size) {
+    // Anything that never reached indegree 0 is stuck on a cycle (or on a node
+    // that is). Handing back only `out` would silently truncate the plan, so
+    // the caller has to hear about it — name the stuck nodes.
+    const stuck = [...nodeSet].filter((n) => !settled.has(n));
+    throw new Error("cycle among: " + stuck.join(", "));
+  }
   return out;
 }

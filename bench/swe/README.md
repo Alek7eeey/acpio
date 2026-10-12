@@ -1,5 +1,9 @@
 # SWE-bench Verified (`bench/swe/`)
 
+Runs in Docker by construction, like every benchmark (rule 2026-10-11 — see
+[`../README.md`](../README.md)): one container per instance, the agent driven
+inside it, nothing touching the host checkout.
+
 The real benchmark — 500 human-validated GitHub issues across 12 Python
 repositories — run against the acpio builtin agent and, in the same containers,
 the `pi` and `omp` CLIs, in **our runner**: the official per-instance Docker
@@ -22,9 +26,17 @@ python3 -m pip install swebench         # 5.x; used only for eval-script normali
 ```
 
 The bundle also carries the CLI agents so all harnesses run inside the same
-kind of container: pi (under the bundled node) and omp (under a bundled bun),
-pinned to the exact versions installed on this machine. It is ~450 MB and
-docker-cp'd into every rollout container.
+kind of container: pi (under the bundled node), omp (under a bundled bun) and
+opencode (a self-contained native binary; npm pulls the linux build of
+`@opencode/cli` inside the prep container), pinned to the exact versions
+installed on this machine. It is ~660 MB and docker-cp'd into every rollout
+container.
+
+A rollout container needs the bundle even when only the builtin agent runs:
+the acpio server the builtin agent is driven through comes from it. That server
+is whatever `apps/server/dist` held when the bundle was built — with the tree
+mid-merge and unbuildable, `prepare-agent-bundle.mjs --no-build` still builds a
+bundle from the last good dist.
 
 The dataset is the SWE-bench org's current copy of Verified (not the original
 `princeton-nlp` upload): it ships the per-instance eval script and the `_1776_`
@@ -38,7 +50,7 @@ rewritten to `host.docker.internal` automatically).
 
 ```bash
 node bench/swe/run-swe.mjs --instances pallets__flask-5014          # builtin only
-node bench/swe/run-swe.mjs --agents builtin,pi,omp --instances pallets__flask-5014
+node bench/swe/run-swe.mjs --agents builtin,pi,omp,opencode --instances pallets__flask-5014
 node bench/swe/run-swe.mjs --instances psf__requests --limit 3      # repo substring
 node bench/swe/run-swe.mjs --gold --instances pallets__flask-5014   # harness self-test
 node bench/swe/run-swe.mjs --no-eval --instances sympy --limit 1    # rollout only
@@ -53,8 +65,20 @@ the `BENCH_BASE_URL` / `BENCH_API_KEY` env vars. The zen gateway requires the
 
 `--instances` matches substrings of `instance_id` (empty = all 500 — a
 multi-day, multi-dollar run; think twice). `--agents` picks the harnesses —
-each gets its **own container per instance** so every agent starts from the
-untouched base commit. Useful flags: `--timeout` (rollout budget, default
+`pi`, `omp`, `opencode`, and the built-in variants (`builtin`, `builtin-low`,
+`builtin-extra-low`, `...-with-reasoning-effort-<level>`) — the same grammar
+`bench/run.mjs` and `bench/run-docker.mjs` use, so the three tables line up. A
+built-in variant is the shipped agent with one of its own thinking knobs pinned:
+the mode is the per-chat model param (`defaultModelParamsByProvider`, which the
+server only hands over alongside a pinned model — hence `defaultModelByProvider`
+too) and the reasoning effort is the provider's extra request body. Both come
+from `bench/lib/agents.mjs`, so a variant cannot mean one thing here and another
+in the daily runner. `...-with-thinking-limit-<chars>` — the fuse that cuts one
+step's overlong reasoning — still parses, but is not part of the run set
+(dropped 2026-10-11: it never engaged on tasks short enough to be worth its
+extra calls; the setting itself is still written as 0, i.e. off). Each harness
+gets its **own container per instance** so every agent starts from the untouched
+base commit. Useful flags: `--timeout` (rollout budget, default
 45 min), `--eval-timeout` (official eval script, default 40 min),
 `--concurrency N`, `--keep-images` (skip re-pulls on repeat runs), `--keep`
 (keep containers for debugging), `--model`, `--proxy-dump`, `--prompt-file`

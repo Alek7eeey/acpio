@@ -27,13 +27,18 @@ const NODE_IMAGE = `node:${NODE_VERSION.split(".").slice(0, 2).join(".")}-bookwo
 const PREP_CONTAINER = "swe-agent-prep";
 // The server resolves @acpio/* and registry deps through these; adapter-builtin
 // must be listed even though scripts/package-dist.mjs omits it (latent).
-const PACKAGES = ["shared", "i18n", "adapter-builtin", "adapter-cursor", "adapter-omp"];
+// Every workspace package the server's dist imports at boot has to be in the
+// bundle: a missing one does not degrade anything, it stops the container's
+// server with ERR_MODULE_NOT_FOUND before the first rollout (adapters/registry
+// imports all four adapters, so the list has to follow the registry).
+const PACKAGES = ["shared", "i18n", "adapter-builtin", "adapter-cursor", "adapter-omp", "adapter-opencode"];
 const BUILD_CHAIN = [
   "@acpio/shared",
   "@acpio/i18n",
   "@acpio/adapter-cursor",
   "@acpio/adapter-omp",
   "@acpio/adapter-builtin",
+  "@acpio/adapter-opencode",
   "@acpio/server",
 ];
 
@@ -41,16 +46,21 @@ const noBuild = process.argv.includes("--no-build");
 const mb = (p) => (statSync(p).size / 1e6).toFixed(1);
 
 /**
- * The CLI agents ride in the same bundle so pi/omp can run inside the SWE
- * containers exactly like the builtin agent does. Versions are pinned to what
- * this machine actually runs — the bundle tests those builds, not npm latest.
+ * The CLI agents ride in the same bundle so pi/omp/opencode can run inside the
+ * SWE containers exactly like the builtin agent does. Versions are pinned to
+ * what this machine actually runs — the bundle tests those builds, not npm
+ * latest. opencode is the one whose install is platform-specific: npm pulls the
+ * linux binary of the package inside the prep container (on Windows the same
+ * package installs the .exe the host runs), so the bundled copy is a linux ELF
+ * at bin/opencode.exe, exactly where the npm shim points.
  */
 function hostAgentVersions() {
   const read = (p) => JSON.parse(readFileSync(p, "utf8")).version;
   const piPkg = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@earendil-works", "pi-coding-agent", "package.json");
   const ompPkg = path.join(os.homedir(), ".bun", "install", "global", "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json");
-  for (const p of [piPkg, ompPkg]) {
-    if (!existsSync(p)) throw new Error(`CLI agent not found: ${p} — install pi/omp or drop them from the bundle`);
+  const opencodePkg = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "npm", "node_modules", "@opencode", "cli", "package.json");
+  for (const p of [piPkg, ompPkg, opencodePkg]) {
+    if (!existsSync(p)) throw new Error(`CLI agent not found: ${p} — install pi/omp/opencode or drop them from the bundle`);
   }
   // Precedence: SWE_PI_VERSION / SWE_OMP_VERSION env, then the versions pinned
   // in swe-provider.json (the zen gateway needs omp >= 18.4.5 for its native
@@ -65,6 +75,7 @@ function hostAgentVersions() {
   return {
     pi: process.env.SWE_PI_VERSION || pinned.piVersion || read(piPkg),
     omp: process.env.SWE_OMP_VERSION || pinned.ompVersion || read(ompPkg),
+    opencode: process.env.SWE_OPENCODE_VERSION || pinned.opencodeVersion || read(opencodePkg),
   };
 }
 
@@ -170,6 +181,7 @@ function prepInDocker(nodeTarball, versions, bunVersion) {
           `npm install -g --loglevel=error bun@${bunVersion}`,
           `mkdir -p /bundle/agents/pi && cd /bundle/agents/pi && echo '{"name":"pi-agent","private":true}' > package.json && npm install --no-audit --no-fund --loglevel=error @earendil-works/pi-coding-agent@${versions.pi}`,
           `mkdir -p /bundle/agents/omp && cd /bundle/agents/omp && echo '{"name":"omp-agent","private":true}' > package.json && bun add @oh-my-pi/pi-coding-agent@${versions.omp}`,
+          `mkdir -p /bundle/agents/opencode && cd /bundle/agents/opencode && echo '{"name":"opencode-agent","private":true}' > package.json && npm install --no-audit --no-fund --loglevel=error @opencode/cli@${versions.opencode}`,
           'cp "$(command -v bun)" /bundle/bun',
           "cd /bundle",
           "tar -czf /bundle.tgz -C / bundle",
@@ -202,7 +214,7 @@ await (async () => {
   const nodeTarball = await downloadNode();
   const versions = hostAgentVersions();
   const bunVersion = hostBunVersion();
-  console.log(`agents in bundle: pi ${versions.pi} (node), omp ${versions.omp} (bun ${bunVersion})`);
+  console.log(`agents in bundle: pi ${versions.pi} (node), omp ${versions.omp} (bun ${bunVersion}), opencode ${versions.opencode}`);
   console.log(`preparing linux deps in docker (${NODE_IMAGE})…`);
   prepInDocker(nodeTarball, versions, bunVersion);
   let git = "";
@@ -211,9 +223,9 @@ await (async () => {
   } catch {}
   writeFileSync(
     path.join(CACHE, "swe-agent-bundle.json"),
-    JSON.stringify({ git, node: NODE_VERSION, pi: versions.pi, omp: versions.omp, bun: bunVersion, builtAt: new Date().toISOString(), bytes: statSync(TARBALL).size }, null, 2) + "\n",
+    JSON.stringify({ git, node: NODE_VERSION, pi: versions.pi, omp: versions.omp, opencode: versions.opencode, bun: bunVersion, builtAt: new Date().toISOString(), bytes: statSync(TARBALL).size }, null, 2) + "\n",
   );
-  console.log(`\n${TARBALL} (${mb(TARBALL)} MB) — bundle git ${git}, node v${NODE_VERSION}, pi ${versions.pi}, omp ${versions.omp}`);
+  console.log(`\n${TARBALL} (${mb(TARBALL)} MB) — bundle git ${git}, node v${NODE_VERSION}, pi ${versions.pi}, omp ${versions.omp}, opencode ${versions.opencode}`);
 })().catch((err) => {
   console.error(err);
   process.exit(1);

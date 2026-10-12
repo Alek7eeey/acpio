@@ -377,7 +377,14 @@ export class LlmProxy {
     if (this.dump) {
       const dir = path.join(this.outDir, `${this.stamp}.calls`);
       mkdirSync(dir, { recursive: true });
-      const name = `${String(call.n).padStart(3, "0")}-${call.label.agent ?? "?"}-${call.request?.model ?? "?"}.json`;
+      // The model slot falls back to "?" for auxiliary requests (a GET /models
+      // probe has no parsed body), and `?` is not a legal filename character on
+      // Windows — an un-sanitized name made writeFileSync throw ENOENT and took
+      // the whole run down with it.
+      const name = `${String(call.n).padStart(3, "0")}-${call.label.agent ?? "?"}-${call.request?.model ?? "?"}.json`.replace(
+        /[^A-Za-z0-9._-]/g,
+        "_",
+      );
       writeFileSync(path.join(dir, name), JSON.stringify({ meta: call, body: JSON.parse(rawBody.toString("utf8").slice(0, MAX_REQUEST_DUMP) || "null") }, null, 2));
     }
     if (this.verbose) {
