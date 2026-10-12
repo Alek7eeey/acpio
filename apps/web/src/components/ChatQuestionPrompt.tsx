@@ -110,6 +110,24 @@ export function ChatQuestionPrompt({
     [questions],
   );
 
+  /**
+   * A single-choice question carries either a pick or its own words in the
+   * "Other" field — the answer is one of the two. A checkbox group keeps them
+   * apart, so only a radio group makes the two exclusive.
+   */
+  const ownAnswerIsTheAnswer = (q: InlineQuestion) =>
+    Boolean(q.freeTextField) && !q.allowMultiple && q.options.length > 0;
+
+  const clearOwnAnswer = (questionId: string) => {
+    setFreeText((prev) => (prev[questionId] ? { ...prev, [questionId]: "" } : prev));
+  };
+
+  const changeOwnAnswer = (q: InlineQuestion, value: string) => {
+    setFreeText((prev) => ({ ...prev, [q.id]: value }));
+    if (!ownAnswerIsTheAnswer(q)) return;
+    setSelected((prev) => ((prev[q.id] ?? []).length ? { ...prev, [q.id]: [] } : prev));
+  };
+
   const buildAnswers = () =>
     questions.map((q) => ({
       questionId: q.id,
@@ -130,6 +148,7 @@ export function ChatQuestionPrompt({
     (item: NavItem, opts?: { toggle?: boolean }) => {
       const q = questionById.get(item.questionId);
       if (!q) return;
+      if (ownAnswerIsTheAnswer(q)) clearOwnAnswer(q.id);
       setSelected((prev) => {
         const cur = prev[item.questionId] ?? [];
         if (q.allowMultiple) {
@@ -222,6 +241,7 @@ export function ChatQuestionPrompt({
   const selectOption = (q: InlineQuestion, optId: string, allowMultiple: boolean) => {
     const idx = navIndexFor(q.id, optId);
     if (idx >= 0) setActiveNavIndex(idx);
+    if (ownAnswerIsTheAnswer(q)) clearOwnAnswer(q.id);
     setSelected((prev) => {
       const cur = prev[q.id] ?? [];
       if (allowMultiple) {
@@ -343,7 +363,7 @@ export function ChatQuestionPrompt({
                       value={freeText[q.id] ?? ""}
                       placeholder={q.freeTextLabel ?? t("question.other")}
                       onMouseDown={(e) => e.stopPropagation()}
-                      onChange={(e) => setFreeText((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                      onChange={(e) => changeOwnAnswer(q, e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.shiftKey) {
                           e.preventDefault();
