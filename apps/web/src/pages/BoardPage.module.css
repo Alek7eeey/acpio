@@ -823,6 +823,24 @@
   }
 }
 
+/* A card the agent parked on a question: the same still-dot "Ожидание ввода"
+   the chat shows under its unanswered question card. */
+.waitRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.waitDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning, #b45309);
+  flex: none;
+}
+
 .doneToggle {
   display: inline-flex;
   align-items: center;

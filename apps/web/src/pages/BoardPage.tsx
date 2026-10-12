@@ -1497,6 +1497,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             {t("chat.colProgress")}
           </span>
         ) : null}
+        {column === "wait" && task.status === "waiting" ? (
+          /* The agent asked and is standing still. Without this mark a card
+             parked on a question reads exactly like one whose turn merely
+             ended — both sit in Wait until the user acts. */
+          <span className={styles.waitRow} title={t("common.waitingInput")}>
+            <span className={styles.waitDot} aria-hidden />
+            {t("common.waitingInput")}
+          </span>
+        ) : null}
         {column === "wait" ? (
           <button
             type="button"
