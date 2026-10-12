@@ -19,6 +19,7 @@ import {
   type SessionDto,
 } from "@acpio/shared";
 import { AttachDialog } from "../components/AttachDialog";
+import { BoardTaskPeek } from "../components/BoardTaskPeek";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
@@ -545,6 +546,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     null,
   );
   const [taskMenuPos, setTaskMenuPos] = useState<{ x: number; y: number } | null>(null);
+  /** The task whose chat is being peeked at, and where its menu stood. */
+  const [peek, setPeek] = useState<{ task: SessionDto; x: number; y: number } | null>(null);
   /** A folder's context menu (rail row, board lane head, folders dialog row). */
   const [folderMenu, setFolderMenu] = useState<
     ({ cwd: string; where: FolderSpot } & { x: number; y: number }) | null
@@ -1052,6 +1055,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     e.preventDefault();
     e.stopPropagation();
     setTaskMenu({ task, x: e.clientX, y: e.clientY });
+  };
+
+  /**
+   * Read a task's chat without leaving the board: the card's menu hands over to
+   * the floating peek, hung by the place the menu stood — the same press the
+   * board reads as "what is this task doing" stays on the board.
+   */
+  const openTaskPeek = (task: SessionDto) => {
+    const at = taskMenuPos ?? { x: taskMenu?.x ?? 12, y: taskMenu?.y ?? 12 };
+    setTaskMenu(null);
+    setPeek({ task, x: at.x, y: at.y });
   };
 
   /**
@@ -1884,6 +1898,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             }}
             role="menu"
           >
+            {/* A task that has run has a dialogue worth glancing at, so the
+                card's menu opens with the peek; a Todo card has none yet. */}
+            {boardColumn(taskMenu.task) !== "todo" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => openTaskPeek(taskMenu.task)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v8a1.5 1.5 0 0 1-1.5 1.5H12l-4.5 3.5V16H5.5A1.5 1.5 0 0 1 4 14.5v-8Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {t("chat.boardPeekCard")}
+              </button>
+            ) : null}
             {/* A task that has not started is still only a description, so it
                 stays rewritable; once it runs, the text is what was sent. */}
             {boardColumn(taskMenu.task) === "todo" ? (
@@ -1951,6 +1986,19 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </div>,
           document.body,
         )}
+
+      {peek ? (
+        <BoardTaskPeek
+          task={peek.task}
+          anchor={{ x: peek.x, y: peek.y }}
+          onOpen={() => {
+            const task = peek.task;
+            setPeek(null);
+            void openTask(task);
+          }}
+          onClose={() => setPeek(null)}
+        />
+      ) : null}
 
       {folderMenu &&
         createPortal(

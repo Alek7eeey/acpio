@@ -503,6 +503,86 @@ describe("BoardPage card context menu", () => {
   });
 });
 
+describe("BoardPage card chat peek", () => {
+  /** A task that has run: it sits in Wait, so its chat exists to be read. */
+  const ran: SessionDto = {
+    ...task,
+    startedAt: "2026-09-20T11:00:00.000Z",
+  };
+  const part = (id: string, messageId: string, text: string) => ({
+    id,
+    messageId,
+    type: "text" as const,
+    order: 0,
+    payload: { text },
+    createdAt: "2026-09-20T11:01:00.000Z",
+  });
+  const detailWith = (messages: Array<{ id: string; role: "user" | "assistant"; text: string }>) => ({
+    ...ran,
+    messages: messages.map((m) => ({
+      id: m.id,
+      sessionId: ran.id,
+      role: m.role,
+      createdAt: "2026-09-20T11:01:00.000Z",
+      parts: [part(`${m.id}-p`, m.id, m.text)],
+    })),
+  });
+
+  // The report: reading what a running or finished task actually said meant
+  // leaving the board for its chat. The card's menu now hands the last turns
+  // over to a floating peek, and the board stays where it was.
+  it("shows the last turns of a started task without leaving the board", async () => {
+    useAppStore.setState({ boardSessions: [ran] });
+    apiMock.getSession.mockResolvedValue(
+      detailWith([
+        { id: "m1", role: "user", text: "Fix the login form" },
+        { id: "m2", role: "assistant", text: "Patched the validator" },
+      ]),
+    );
+    renderBoard();
+
+    fireEvent.contextMenu(await screen.findByText("Fix the login bug"));
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Peek at the chat" }),
+    );
+
+    const peek = await screen.findByRole("dialog", { name: "Peek at the chat" });
+    await waitFor(() => expect(within(peek).getByText("Patched the validator")).toBeTruthy());
+    expect(within(peek).getByText("Fix the login form")).toBeTruthy();
+    // The chat was read behind the board, not opened on it.
+    expect(apiMock.getSession).toHaveBeenCalledWith("t1");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(useAppStore.getState().activeSessionId).toBeNull();
+  });
+
+  // A card that has not started has no dialogue to look at.
+  it("offers no peek for a task still in Todo", async () => {
+    renderBoard();
+
+    fireEvent.contextMenu(await screen.findByText("Fix the login bug"));
+
+    expect(
+      within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Peek at the chat" }),
+    ).toBeNull();
+  });
+
+  it("dismisses the peek on a press outside it", async () => {
+    useAppStore.setState({ boardSessions: [ran] });
+    apiMock.getSession.mockResolvedValue(detailWith([]));
+    renderBoard();
+
+    fireEvent.contextMenu(await screen.findByText("Fix the login bug"));
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Peek at the chat" }),
+    );
+    await screen.findByRole("dialog", { name: "Peek at the chat" });
+
+    fireEvent.mouseDown(document.body);
+
+    expect(screen.queryByRole("dialog", { name: "Peek at the chat" })).toBeNull();
+  });
+});
+
 describe("BoardPage add-task placeholder style", () => {
   // The placeholder is a settings-driven look: the card-shaped block stays the
   // default, a slim row and "off" are the opt-outs for people who read six
