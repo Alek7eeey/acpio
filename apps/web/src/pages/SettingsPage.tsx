@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  CHAT_TITLE_MAX_LEN_MAX,
+  CHAT_TITLE_MAX_LEN_MIN,
   CHAT_TREE_RECENT_LIMIT_MAX,
   CUSTOM_AGENT_ID_RE,
   DEFAULT_CHAT_CHIP_OPTIONS,
   migrateModelParamValues,
   mergeChatChipOptions,
+  normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
   normalizeCustomAgentId,
   normalizeCustomAgents,
@@ -53,6 +56,7 @@ import {
   BUILTIN_PRESET_MAX,
   builtinPresetProviderId,
   type BuiltinPresetSpec,
+  builtinMcpServers,
   mcpServerEndpoint,
   pushRecentModel,
 } from "@acpio/shared";
@@ -122,6 +126,7 @@ const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "mcp",
   "context",
   "console",
+  "bgJobs",
 ];
 import { isChatSearchEnabled, toggleChatTreeElement } from "../lib/chatTreeSearch";
 const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
@@ -257,6 +262,7 @@ function ChatInteractiveConfigRows({
               ["mcp", t("settings.chatMetaChipMcp")],
               ["context", t("settings.chatMetaChipContext")],
               ["console", t("settings.chatMetaChipConsole")],
+              ["bgJobs", t("settings.chatMetaChipBgJobs")],
             ] as Array<[ChatMetaChipId, string]>
           ).map(([id, label]) => {
             const on = (form.chatMetaChips ?? []).includes(id);
@@ -715,6 +721,15 @@ function ChatTitleConfigRows({
           ]}
         />
       </SettingRow>
+      <ContextNumberRow
+        label={t("settings.chatTitleMaxLen")}
+        hint={t("settings.chatTitleMaxLenHint")}
+        disabled={!builtinReady}
+        value={normalizeChatTitleMaxLen(form.chatTitleMaxLen)}
+        min={CHAT_TITLE_MAX_LEN_MIN}
+        max={CHAT_TITLE_MAX_LEN_MAX}
+        onCommit={(v) => patch("chatTitleMaxLen", normalizeChatTitleMaxLen(v))}
+      />
       {!builtinReady ? (
         <div className={styles.hint}>
           <p>{t("settings.chatAutoTitleNeedsBuiltin")}</p>
@@ -740,6 +755,7 @@ function ContextNumberRow({
   value,
   min,
   max,
+  disabled,
   onCommit,
 }: {
   label: string;
@@ -747,6 +763,7 @@ function ContextNumberRow({
   value: number;
   min: number;
   max: number;
+  disabled?: boolean;
   onCommit: (value: number) => void;
 }) {
   const [raw, setRaw] = useState(String(value));
@@ -763,6 +780,7 @@ function ContextNumberRow({
         step={1}
         inputMode="numeric"
         value={raw}
+        disabled={disabled}
         aria-label={label}
         onChange={(e) => {
           const text = e.target.value;
@@ -3816,6 +3834,36 @@ export function SettingsPage() {
               </div>
             </SearchGate>
             <SettingTable>
+              {/* acpio's own servers: no endpoint to edit, no row to delete —
+                  the same switch every other server has. */}
+              {builtinMcpServers(form).map((server) => (
+                <SettingRow
+                  key={server.id}
+                  terms={[server.name, t("settings.mcpBuiltin"), mcpServerEndpoint(server)]}
+                  label={
+                    <span className={styles.mcpRowMetaInline}>
+                      <strong>{server.name}</strong>
+                      <span className={styles.mcpRowType}>{t("settings.mcpBuiltin")}</span>
+                    </span>
+                  }
+                  hint={
+                    <span className={styles.mcpRowDetail}>{t("settings.mcpBuiltinHint")}</span>
+                  }
+                >
+                  <Toggle
+                    checked={Boolean(server.enabled)}
+                    onChange={(v) =>
+                      patch(
+                        "mcpBuiltinDisabledIds",
+                        v
+                          ? (form.mcpBuiltinDisabledIds ?? []).filter((id) => id !== server.id)
+                          : [...(form.mcpBuiltinDisabledIds ?? []), server.id],
+                      )
+                    }
+                    label={server.enabled ? t("settings.enabled") : t("settings.disabled")}
+                  />
+                </SettingRow>
+              ))}
               {mcpServers.map((server) => (
                 <SettingRow
                   key={server.id}

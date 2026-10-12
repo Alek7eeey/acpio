@@ -17,6 +17,7 @@ import type {
   ModelParamDto,
   ProjectMcpInfo,
   PromptDelivery,
+  BackgroundJobDto,
   BuiltinSkillDto,
   SessionDetailDto,
   SessionDto,
@@ -72,6 +73,29 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
   mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
+  /**
+   * Background jobs the agent started through acpio's own MCP server. The
+   * server keeps them in memory, so the list is whatever is live right now.
+   */
+  backgroundJobs: () => request<{ jobs: BackgroundJobDto[] }>("/api/bg").then((r) => r.jobs),
+  backgroundJobOutput: (id: string, tailLines?: number) => {
+    const qs = tailLines ? `?tailLines=${tailLines}` : "";
+    return request<{
+      job: BackgroundJobDto;
+      text: string;
+      from: number;
+      to: number;
+      dropped: boolean;
+    }>(`/api/bg/${encodeURIComponent(id)}/output${qs}`);
+  },
+  stopBackgroundJob: (id: string) =>
+    request<{ job: BackgroundJobDto }>(`/api/bg/${encodeURIComponent(id)}/stop`, {
+      method: "POST",
+    }),
+  forgetBackgroundJob: (id: string) =>
+    request<{ ok: boolean }>(`/api/bg/${encodeURIComponent(id)}/forget`, { method: "POST" }),
+  clearFinishedBackgroundJobs: () =>
+    request<{ removed: string[] }>("/api/bg/clear", { method: "POST" }),
   /** Servers found in each folder's own MCP files, keyed by canonical cwd. */
   projectMcp: (cwd?: string | null) => {
     const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
@@ -476,6 +500,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ format, ...(dir ? { dir } : {}) }),
     }),
+  /**
+   * Export a chat into the server's reference folder: the file a "chat based
+   * on this chat" links to, kept out of the project folders it may discuss.
+   */
+  exportChatReference: (id: string) =>
+    request<{ ok: boolean; path: string; fileName: string; size: number }>(
+      `/api/sessions/${id}/export/reference`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
   /**
    * Download the whole chat history of one provider (default: the built-in
    * agent) as a single JSON bundle, ready to attach to a report.

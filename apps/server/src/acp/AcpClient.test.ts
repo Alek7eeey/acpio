@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { DEFAULT_SETTINGS, customAgentAdapter, type AcpUsage, type AgentMode, type AppSettings, type HarnessAdapter } from "@acpio/shared";
 import { getAdapter } from "../adapters/registry.js";
+import { backgroundJobLogDir, backgroundJobLogPath } from "../services/bgLogs.js";
 import {
   AcpClient,
   splitInlineThinking,
@@ -766,6 +767,7 @@ describe("path guards", () => {
     ) as unknown as {
       assertInsideCwd: (p: string) => string;
       assertReadablePath: (p: string) => string;
+      assertSearchableDir: (p: string) => string;
       allowReadFile: (p: string) => void;
     };
   }
@@ -795,6 +797,23 @@ describe("path guards", () => {
     const attached = path.resolve("elsewhere", "attached.pdf");
     acp.allowReadFile(attached);
     expect(acp.assertReadablePath(attached)).toBe(attached);
+  });
+
+  // A background job's output is a file the agent reads with `read`/`grep`; the
+  // folder sits outside the cwd, so the gate has to open it — for this chat's
+  // logs only.
+  it("opens this chat's own job logs for reading and searching", () => {
+    const acp = guardClient(path.resolve("workspaces", "demo"));
+    acp.sessionId = "chat-1";
+    const log = backgroundJobLogPath("chat-1", "bg-1");
+    const dir = backgroundJobLogDir("chat-1");
+    expect(acp.assertReadablePath(log)).toBe(log);
+    expect(acp.assertSearchableDir(dir)).toBe(dir);
+    const other = backgroundJobLogPath("chat-2", "bg-1");
+    expect(() => acp.assertReadablePath(other)).toThrow(/^Path outside session cwd:/);
+    expect(() => acp.assertSearchableDir(backgroundJobLogDir("chat-2"))).toThrow(
+      /^Path outside session cwd:/,
+    );
   });
 });
 

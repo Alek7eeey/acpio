@@ -3,7 +3,7 @@
 // task title. Nothing here blocks the turn — a failed or slow call just leaves
 // the message-derived title in place.
 import type { AppSettings } from "@acpio/shared";
-import { builtinProviderHeaders, truncateSessionTitle } from "@acpio/shared";
+import { builtinProviderHeaders, normalizeChatTitleMaxLen, truncateSessionTitle } from "@acpio/shared";
 import {
   builtinModelOptions,
   initialModelId,
@@ -31,6 +31,16 @@ const SYSTEM_PROMPT = {
 } as const;
 
 /**
+ * The cap travels with the instruction: the model aims at the length the user
+ * asked for, and `cleanTitle` enforces it on whatever comes back.
+ */
+function systemPrompt(locale: "ru" | "en", maxLen: number): string {
+  return locale === "ru"
+    ? `${SYSTEM_PROMPT.ru} Не длиннее ${maxLen} символов.`
+    : `${SYSTEM_PROMPT.en} No longer than ${maxLen} characters.`;
+}
+
+/**
  * Which model writes the titles: the configured `chatTitleModel` when it still
  * exists, else the default builtin model, else the first row that has an
  * endpoint. Rows without a URL can serve nothing and are skipped — a title
@@ -49,8 +59,8 @@ function pickTitleModel(settings: AppSettings): BuiltinModelSelection | null {
   return enabled.find((s) => s.value === auto) ?? enabled[0];
 }
 
-/** First non-empty line of a model answer, unwrapped and length-capped. */
-function cleanTitle(raw: string): string {
+/** First non-empty line of a model answer, unwrapped and capped at `max`. */
+function cleanTitle(raw: string, max: number): string {
   const line = raw.split(/\r?\n/).map((part) => part.trim()).find(Boolean) ?? "";
   const unwrapped = line
     .replace(/^["'«»„“”`*_#\-\s]+/, "")
@@ -58,7 +68,7 @@ function cleanTitle(raw: string): string {
     .trim();
   // truncateSessionTitle, not titleFromUserText: a generated title may start
   // with a path-like "/api" that the message sanitizer would eat.
-  return unwrapped ? truncateSessionTitle(unwrapped) : "";
+  return unwrapped ? truncateSessionTitle(unwrapped, max) : "";
 }
 
 /**
@@ -114,11 +124,12 @@ export async function generateChatTitle(
   Object.assign(headers, builtinProviderHeaders(selection.provider.headers, sessionId));
 
   const locale = settings.locale === "en" ? "en" : "ru";
+  const maxLen = normalizeChatTitleMaxLen(settings.chatTitleMaxLen);
   const payload = JSON.stringify({
     model: selection.modelId,
     stream: false,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT[locale] },
+      { role: "system", content: systemPrompt(locale, maxLen) },
       {
         // Framed as a quoted block: a source like "look at chat X, why did
         // it stop" must read as data to title, never as a turn to act on.
@@ -158,7 +169,7 @@ export async function generateChatTitle(
     await new Promise((resolve) => setTimeout(resolve, timing?.retryDelayMs ?? TITLE_RETRY_DELAY_MS));
     attempt = await ask();
   }
-  const title = attempt.answer ? cleanTitle(attempt.answer) : "";
+  const title = attempt.answer ? cleanTitle(attempt.answer, maxLen) : "";
   return title && !looksLikeReply(title) ? title : null;
 }
 

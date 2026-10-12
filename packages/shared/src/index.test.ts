@@ -18,6 +18,8 @@ import {
   estimateContextUsage,
   extractSubagentLiveContent,
   effectiveMcpServers,
+  builtinMcpServers,
+  BG_MCP_SERVER_ID,
   expandMcpVars,
   normalizeMcpProjectFiles,
   normalizeSkillPaths,
@@ -495,7 +497,7 @@ describe("DEFAULT_SETTINGS", () => {
     darkSurface: "",
     ttsVoiceGender: "",
     chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-    chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"],
+    chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console", "bgJobs"],
     thoughtsChipStyle: "full",
     consoleChipStyle: "full",
     terminalShell: "cmd",
@@ -513,6 +515,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatSplit: true,
     chatAutoTitle: true,
     chatTitleModel: "auto",
+    chatTitleMaxLen: 80,
     chatToolbarStyle: "classic",
     boardAddCardStyle: "card",
     boardTaskAgentPicker: true,
@@ -526,6 +529,7 @@ describe("DEFAULT_SETTINGS", () => {
     },
     remoteAccessKey: "",
     mcpServers: [],
+    mcpBuiltinDisabledIds: [],
     mcpFolderConfigs: {},
     mcpProjectFiles: [".omp/mcp.json", ".cursor/mcp.json", ".agents/mcp.json"],
     builtinSkillPaths: [".agents/skills", "~/.agents/skills"],
@@ -699,22 +703,70 @@ describe("effectiveMcpServers", () => {
     ...DEFAULT_SETTINGS,
     mcpServers: [mcp("a"), mcp("b"), mcp("c", false)],
   };
+  // acpio's own server closes every effective list, so the expectations below
+  // name it once instead of repeating the id in every row.
+  const ids = (...expected: string[]) => [...expected, BG_MCP_SERVER_ID];
+  const builtinServers = builtinMcpServers(DEFAULT_SETTINGS);
 
   it.each([
-    ["no disabled ids → all enabled servers", undefined, ["a", "b"]],
-    ["empty disabled list", [], ["a", "b"]],
-    ["one disabled", ["a"], ["b"]],
-    ["all disabled", ["a", "b"], []],
-    ["unknown ids ignored", ["nope"], ["a", "b"]],
-    ["disabled applies to disabled server too (no-op)", ["c"], ["a", "b"]],
-  ] as const)("%s", (_name, disabledIds, expected) => {
+    ["no disabled ids → all enabled servers", undefined, ids("a", "b")],
+    ["empty disabled list", [], ids("a", "b")],
+    ["one disabled", ["a"], ids("b")],
+    ["all disabled", ["a", "b"], ids()],
+    ["unknown ids ignored", ["nope"], ids("a", "b")],
+    ["disabled applies to disabled server too (no-op)", ["c"], ids("a", "b")],
+  ])("%s", (_name, disabledIds, expected) => {
     const result = effectiveMcpServers(base, disabledIds);
     expect(result.map((s) => s.id)).toEqual(expected);
   });
 
   it("filters by enabled and url regardless of disabled list", () => {
     const withEmptyUrl = { ...base, mcpServers: [{ ...mcp("x"), url: "  " }] };
-    expect(effectiveMcpServers(withEmptyUrl, [])).toEqual([]);
+    expect(effectiveMcpServers(withEmptyUrl, [])).toEqual(builtinServers);
+  });
+
+  it("carries acpio's own server last, and switches it off by id", () => {
+    const builtin = builtinMcpServers(DEFAULT_SETTINGS)[0];
+    expect(effectiveMcpServers(base, [])).toEqual([mcp("a"), mcp("b"), builtin]);
+    expect(builtin.id).toBe(BG_MCP_SERVER_ID);
+    expect(builtin.enabled).toBe(true);
+    expect(
+      effectiveMcpServers({ ...base, mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID] }, []).map(
+        (s) => s.id,
+      ),
+    ).toEqual(["a", "b"]);
+    // An id that is not one of the built-in servers changes nothing.
+    expect(
+      effectiveMcpServers({ ...base, mcpBuiltinDisabledIds: ["nope"] }, []).map((s) => s.id),
+    ).toEqual(ids("a", "b"));
+  });
+
+  it("lets the folder and the chat switch acpio's own server", () => {
+    const offGlobally = { ...base, mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID] };
+    const offInFolder = {
+      ...base,
+      mcpFolderConfigs: { "E:/proj": { overrides: { [BG_MCP_SERVER_ID]: false }, servers: [] } },
+    };
+    const onForFolder = {
+      ...offGlobally,
+      mcpFolderConfigs: { "E:/proj": { overrides: { [BG_MCP_SERVER_ID]: true }, servers: [] } },
+    };
+    expect(effectiveMcpServers(offGlobally, undefined, "E:/proj").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(effectiveMcpServers(offInFolder, undefined, "E:/proj").map((s) => s.id)).toEqual([
+      "a",
+      "b",
+    ]);
+    expect(effectiveMcpServers(offInFolder, undefined, "E:/other").map((s) => s.id)).toEqual(ids("a", "b"));
+    expect(effectiveMcpServers(onForFolder, undefined, "E:/proj").map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
+    // The chat's own switch wins over the folder's.
+    expect(effectiveMcpServers(onForFolder, [BG_MCP_SERVER_ID], "E:/proj").map((s) => s.id)).toEqual(
+      ["a", "b"],
+    );
   });
 
   it("includes enabled stdio servers that have a command", () => {
@@ -730,8 +782,8 @@ describe("effectiveMcpServers", () => {
       ...base,
       mcpServers: [mcp("a"), stdio, { ...stdio, id: "off", enabled: false }],
     };
-    expect(effectiveMcpServers(mixed, [])).toEqual([mcp("a"), stdio]);
-    expect(effectiveMcpServers(mixed, ["fs"]).map((s) => s.id)).toEqual(["a"]);
+    expect(effectiveMcpServers(mixed, [])).toEqual([mcp("a"), stdio, ...builtinServers]);
+    expect(effectiveMcpServers(mixed, ["fs"]).map((s) => s.id)).toEqual(ids("a"));
   });
 
   it("drops servers the folder switched off", () => {
@@ -739,12 +791,11 @@ describe("effectiveMcpServers", () => {
       ...base,
       mcpFolderConfigs: { "E:/proj": { overrides: { a: false }, servers: [] } },
     };
-    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(["b"]);
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(ids("b"));
     // An unrelated folder keeps the global list untouched.
-    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual([
-      "a",
-      "b",
-    ]);
+    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
   });
 
   it("attaches a server the folder switched on even though it is off globally", () => {
@@ -752,17 +803,14 @@ describe("effectiveMcpServers", () => {
       ...base,
       mcpFolderConfigs: { "E:/proj": { overrides: { c: true }, servers: [] } },
     };
-    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual([
-      "a",
-      "b",
-      "c",
-    ]);
-    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual([
-      "a",
-      "b",
-    ]);
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(
+      ids("a", "b", "c"),
+    );
+    expect(effectiveMcpServers(settings, undefined, "E:/other").map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
     // The chat's own switch still wins over the folder's.
-    expect(effectiveMcpServers(settings, ["c"], "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(settings, ["c"], "E:/proj").map((s) => s.id)).toEqual(ids("a", "b"));
   });
 
   it("matches a folder regardless of slash style and trailing separators", () => {
@@ -770,7 +818,7 @@ describe("effectiveMcpServers", () => {
       ...base,
       mcpFolderConfigs: { "E:/proj": { overrides: { a: false }, servers: [] } },
     };
-    expect(effectiveMcpServers(settings, undefined, "E:\\proj\\").map((s) => s.id)).toEqual(["b"]);
+    expect(effectiveMcpServers(settings, undefined, "E:\\proj\\").map((s) => s.id)).toEqual(ids("b"));
   });
 
   it("appends the folder's own servers after the globals", () => {
@@ -780,11 +828,9 @@ describe("effectiveMcpServers", () => {
         "E:/proj": { overrides: {}, servers: [folderServer, { ...mcp("off", false) }] },
       },
     };
-    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual([
-      "a",
-      "b",
-      "own",
-    ]);
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(
+      ids("a", "b", "own"),
+    );
   });
 
   it("drops a folder server that has no usable endpoint", () => {
@@ -794,7 +840,9 @@ describe("effectiveMcpServers", () => {
         "E:/proj": { overrides: {}, servers: [{ ...folderServer, url: "  " }] },
       },
     };
-    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(settings, undefined, "E:/proj").map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
   });
 
   it("lets the chat disable a folder server, same as a global one", () => {
@@ -802,8 +850,12 @@ describe("effectiveMcpServers", () => {
       ...base,
       mcpFolderConfigs: { "E:/proj": { overrides: {}, servers: [folderServer] } },
     };
-    expect(effectiveMcpServers(settings, ["own"], "E:/proj").map((s) => s.id)).toEqual(["a", "b"]);
-    expect(effectiveMcpServers(settings, ["a"], "E:/proj").map((s) => s.id)).toEqual(["b", "own"]);
+    expect(effectiveMcpServers(settings, ["own"], "E:/proj").map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
+    expect(effectiveMcpServers(settings, ["a"], "E:/proj").map((s) => s.id)).toEqual(
+      ids("b", "own"),
+    );
   });
 
   it("resolves a folder config only for a non-empty cwd", () => {
@@ -822,22 +874,24 @@ describe("effectiveMcpServers", () => {
 
   it("appends servers from the folder's own MCP files", () => {
     const fileServer = { ...mcp("file:.omp/mcp.json:fs"), name: "fs" };
-    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer]).map((s) => s.id)).toEqual([
-      "a",
-      "b",
-      "file:.omp/mcp.json:fs",
-    ]);
-    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer, mcp("off", false)]).length).toBe(3);
+    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer]).map((s) => s.id)).toEqual(
+      ids("a", "b", "file:.omp/mcp.json:fs"),
+    );
+    expect(effectiveMcpServers(base, [], "E:/proj", [fileServer, mcp("off", false)]).length).toBe(4);
   });
 
   it("keeps an app-configured server when a file reuses its name", () => {
     const shadow = { ...mcp("file:.cursor/mcp.json:a"), name: "a" };
-    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
   });
 
   it("reserves the name of a server that is off globally", () => {
     const shadow = { ...mcp("file:.cursor/mcp.json:c"), name: "c" };
-    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(base, [], "E:/proj", [shadow]).map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
   });
 
   it("lets the folder and the chat switch a file server by id", () => {
@@ -851,14 +905,16 @@ describe("effectiveMcpServers", () => {
     );
     // Off in the file it came from, but this folder switches it on.
     const off = { ...fileServer, enabled: false };
-    expect(effectiveMcpServers(base, [], "E:/proj", [off]).map((s) => s.id)).toEqual(["a", "b"]);
+    expect(effectiveMcpServers(base, [], "E:/proj", [off]).map((s) => s.id)).toEqual(
+      ids("a", "b"),
+    );
     const onForFolder = {
       ...base,
       mcpFolderConfigs: { "E:/proj": { overrides: { [off.id]: true }, servers: [] } },
     };
     expect(
       effectiveMcpServers(onForFolder, [], "E:/proj", [off]).map((s) => s.id),
-    ).toEqual(["a", "b", "file:.omp/mcp.json:fs"]);
+    ).toEqual(ids("a", "b", "file:.omp/mcp.json:fs"));
   });
 });
 

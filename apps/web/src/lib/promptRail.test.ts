@@ -59,6 +59,23 @@ describe("buildPromptRailItems", () => {
     expect(items[1]!.reply).toBe("");
   });
 
+  // A settled background job reaches the chat as a prompt — that is how the
+  // agent is woken — so it sits in the transcript as a user message. It is not
+  // a prompt the reader wrote, and the rail lists their prompts.
+  it("keeps a background job's note out of the rail", () => {
+    const note = [
+      "[Фоновая задача] «wait10» завершилась: код 0, длительность 10s (id bg-6).",
+      "Команда: sleep 10",
+      "Последние строки вывода:",
+      "готово",
+    ].join("\n");
+    const messages = [message("u1", "user", ["собери проект"]), message("u2", "user", [note])];
+
+    const items = buildPromptRailItems(messages);
+
+    expect(items.map((i) => i.id)).toEqual(["u1"]);
+  });
+
   it("keeps the rail free of attachment-only prompts and empty chats", () => {
     const attachmentOnly = message("u1", "user", []);
     attachmentOnly.parts = [

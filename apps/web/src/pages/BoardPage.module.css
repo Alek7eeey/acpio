@@ -981,6 +981,20 @@
   gap: 8px;
 }
 
+/* "New chat based on this chat": the error of the export/create attempt —
+   stays inside the dialog so the chosen folder survives the retry. */
+.modalError {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--danger, #c0392b);
+}
+
+/* The folder-choice dialog: browse pinned left, the decisions right. */
+.folderSpacer {
+  flex: 1;
+}
+
 .folderList {
   display: flex;
   flex-direction: column;

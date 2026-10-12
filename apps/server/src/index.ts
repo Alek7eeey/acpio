@@ -9,7 +9,9 @@ import cookie from "@fastify/cookie";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
 import { pinResolvedSessionModels, reconcileStaleSessions, repairStoredCwds } from "./services/sessions.js";
-import { resumeInterruptedTurns } from "./acp/sessionManager.js";
+import { notifyBackgroundJobDone, resumeInterruptedTurns } from "./acp/sessionManager.js";
+import { setBackgroundJobDoneHandler } from "./services/backgroundJobs.js";
+import { resetBackgroundJobLogs } from "./services/bgLogs.js";
 import { registerRoutes } from "./routes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { ensureSchema } from "./db/ensureSchema.js";
@@ -41,13 +43,28 @@ async function main() {
   // Two servers on one database wreck each other: the rows are shared, the
   // agent runtimes are not, so the second boot steals live chats and its turn
   // ends overwrite the first one's status. Claim the file before anything else.
+  // ACPIO_TAKEOVER=1 inverts the refusal into kill-and-claim — a human-only
+  // switch (see instanceLock.ts); agents must never start the server with it.
+  const takeover = process.env.ACPIO_TAKEOVER === "1";
+  if (takeover) {
+    console.warn(
+      "[db] ACPIO_TAKEOVER=1: a live instance holding this database will be KILLED at startup. " +
+        "For human use only — never set it for agents or CI.",
+    );
+  }
   try {
-    await acquireInstanceLock(DB_PATH);
+    await acquireInstanceLock(DB_PATH, { takeover });
   } catch (err) {
     console.error(err instanceof Error ? err.message : err);
     process.exit(1);
   }
   await ensureSchema();
+  // A finished background job wakes its chat through the session manager, which
+  // owns the turns it injects into — wired here so the job runner (imported by
+  // that manager for the built-in MCP entry) does not import it back.
+  setBackgroundJobDoneHandler((job) => void notifyBackgroundJobDone(job));
+  // Background jobs do not survive a restart either, so neither do their logs.
+  resetBackgroundJobLogs();
   const app = Fastify({
     logger: true,
     trustProxy: true,

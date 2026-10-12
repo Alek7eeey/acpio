@@ -9,7 +9,7 @@ import {
   type SessionDetailDto,
 } from "@acpio/shared";
 import { t } from "@acpio/i18n";
-import { REPO_ROOT } from "../db/client.js";
+import { DATA_DIR, REPO_ROOT } from "../db/client.js";
 import { getSettings } from "./settings.js";
 import { getSessionDetail, listSessionsByProvider } from "./sessions.js";
 
@@ -18,6 +18,15 @@ export type ExportFormat = "md" | "json";
 /** Folder on the server where chat exports land unless settings.exportDir is set. */
 export function defaultExportDir(): string {
   return path.join(REPO_ROOT, "exports");
+}
+
+/**
+ * Folder for the exports a "chat based on another chat" links to: acpio's own
+ * data dir, never a project folder the chat may discuss. Files accumulate here
+ * like in the exports dir — saveExportToDisk never overwrites a name.
+ */
+export function referenceExportDir(): string {
+  return path.join(DATA_DIR, "chat-refs");
 }
 
 export async function resolveExportDir(settings?: AppSettings): Promise<string> {

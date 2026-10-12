@@ -282,6 +282,22 @@ describe("buildAgentTimeline", () => {
     expect(shape(parts)).toEqual(["run(2)"]);
   });
 
+  // A settled background job is written into the answer as a `note` part, and a
+  // squeeze of the window as a `compaction` part: both are things the turn
+  // crossed, not steps of it. Kept inside a run they would read as one more
+  // tool row; the run has to close so the reader sees them between the work.
+  it("breaks the run where a note or a compaction row landed", () => {
+    const parts = [
+      part("thought", 0, { text: "Сначала запущу прогон." }),
+      part("tool_call", 1, { title: "Shell", status: "completed" }),
+      part("note", 2, { text: "[Background task] «tests» finished" }),
+      part("text", 3, { text: "Прогон завершён." }),
+      part("compaction", 4, { summary: "digest", coveredBefore: 1, coveredAfter: 314 }),
+      part("tool_call", 5, { title: "Read a.ts", status: "completed" }),
+    ];
+    expect(shape(parts)).toEqual(["run(2)", "note", "text", "compaction", "run(1)"]);
+  });
+
   it("keeps questions out of runs so an interactive prompt is never buried", () => {
     const parts = [
       part("tool_call", 0, { title: "Read a.ts", status: "completed" }),

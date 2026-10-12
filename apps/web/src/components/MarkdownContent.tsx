@@ -1,7 +1,9 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
+import { ImageViewer, type ViewerPicture } from "./ImageViewer";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
 import hljs from "highlight.js/lib/core";
 import bash from "highlight.js/lib/languages/bash";
@@ -31,6 +33,10 @@ import swift from "highlight.js/lib/languages/swift";
 import typescript from "highlight.js/lib/languages/typescript";
 import yaml from "highlight.js/lib/languages/yaml";
 import styles from "./MarkdownContent.module.css";
+
+/** Marks the <img> of a picture in agent text, so a click can gather the rest
+ *  of the message's pictures (see `pictureGroup`). */
+const PICTURE_ATTR = "data-md-picture";
 
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("sh", bash);
@@ -364,21 +370,43 @@ function localPath(url: string): string | null {
 
 /** Where an image's bytes are: a URL the browser fetches as it stands, or a file
  *  served by this chat's own route (see `/api/sessions/:id/file`). */
-function imageTarget(raw: string, sessionId: string | null): { src: string; remote: boolean } | null {
+function imageTarget(raw: string, sessionId: string | null): string | null {
   const url = raw.trim();
   if (!url) return null;
-  if (/^data:image\//i.test(url) || /^https?:\/\//i.test(url)) return { src: url, remote: true };
+  if (/^data:image\//i.test(url) || /^https?:\/\//i.test(url)) return url;
   const filePath = localPath(url);
   if (!filePath || !sessionId) return null;
   const query = `path=${encodeURIComponent(filePath)}&inline=1`;
-  return { src: `/api/sessions/${encodeURIComponent(sessionId)}/file?${query}`, remote: false };
+  return `/api/sessions/${encodeURIComponent(sessionId)}/file?${query}`;
 }
 
 /**
- * One picture in agent text. A file on this machine goes through the chat's own
- * route and is clickable — the reader opens the image itself, not a download. A
- * source that cannot be shown (no chat around the renderer, a path that 404s)
- * leaves its caption behind instead of a broken box.
+ * The pictures a click started from: the ones the same message already shows,
+ * in the order the reader meets them, so ← / → walk that message's pictures
+ * instead of the whole chat. A picture outside a message (a plan dialog, a bare
+ * render) is its own group of one.
+ */
+function pictureGroup(node: HTMLImageElement): { pictures: ViewerPicture[]; index: number } {
+  const root = node.closest("[data-msg-hotkey]") ?? node.parentElement;
+  const nodes = root
+    ? Array.from(root.querySelectorAll<HTMLImageElement>(`img[${PICTURE_ATTR}]`))
+    : [];
+  const list = nodes.length > 0 ? nodes : [node];
+  return {
+    index: Math.max(0, list.indexOf(node)),
+    pictures: list.map((img) => ({
+      src: img.getAttribute("src") ?? "",
+      alt: img.getAttribute("alt") ?? "",
+    })),
+  };
+}
+
+/**
+ * One picture in agent text. A file on this machine is served through the chat's
+ * own route; either way the picture is clickable and opens the viewer (see
+ * ImageViewer) rather than a bare tab. A source that cannot be shown (no chat
+ * around the renderer, a path that 404s) leaves its caption behind instead of a
+ * broken box.
  */
 export function MarkdownImage({
   src,
@@ -389,7 +417,10 @@ export function MarkdownImage({
   alt?: string;
   sessionId?: string | null;
 }) {
+  const t = useT();
   const [broken, setBroken] = useState(false);
+  const [viewing, setViewing] = useState<{ pictures: ViewerPicture[]; index: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
   const target = imageTarget(src, sessionId ?? null);
   const caption = (alt ?? "").trim() || src.trim();
   if (!target) {
@@ -402,22 +433,41 @@ export function MarkdownImage({
       </span>
     );
   }
-  const image = (
-    <img
-      className={styles.image}
-      src={target.src}
-      alt={caption}
-      title={caption}
-      loading="lazy"
-      onError={() => setBroken(true)}
-    />
-  );
-  return target.remote ? (
-    image
-  ) : (
-    <a className={styles.imageLink} href={target.src} target="_blank" rel="noreferrer">
-      {image}
-    </a>
+  return (
+    <>
+      <button
+        type="button"
+        className={styles.imageButton}
+        title={t("imageViewer.open")}
+        aria-label={caption ? `${t("imageViewer.open")}: ${caption}` : t("imageViewer.open")}
+        onClick={() => {
+          const node = imgRef.current;
+          if (node) setViewing(pictureGroup(node));
+        }}
+      >
+        <img
+          ref={imgRef}
+          // Marks the picture for `pictureGroup`; the value carries nothing.
+          data-md-picture=""
+          className={styles.image}
+          src={target}
+          alt={caption}
+          title={caption}
+          loading="lazy"
+          onError={() => setBroken(true)}
+        />
+      </button>
+      {viewing
+        ? createPortal(
+            <ImageViewer
+              pictures={viewing.pictures}
+              startIndex={viewing.index}
+              onClose={() => setViewing(null)}
+            />,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 

@@ -18,9 +18,10 @@ import type {
   SessionDetailDto,
   GitStatusDto,
 } from "@acpio/shared";
-import { isShellSession } from "@acpio/shared";
+import { backgroundJobsForSession, isShellSession } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { useT } from "../lib/i18n";
+import { formatDuration } from "../lib/partTiming";
 import { showToast } from "../lib/toast";
 import { OptionPicker } from "./OptionPicker";
 import {
@@ -251,6 +252,20 @@ export function ComposerMetaChips({
   const contextPanelRef = useRef<HTMLDivElement | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
   const [contextPanelReady, setContextPanelReady] = useState(false);
+  const bgChipRef = useRef<HTMLButtonElement | null>(null);
+  const bgPanelRef = useRef<HTMLDivElement | null>(null);
+  const [bgOpen, setBgOpen] = useState(false);
+  const [bgPanelReady, setBgPanelReady] = useState(false);
+
+  // The chip lists this chat's jobs only: the tasks page is where the others
+  // live, and a popover that mixed chats would be a second, worse page.
+  const bgJobs = useAppStore((s) => s.bgJobs);
+  const stopBackgroundJob = useAppStore((s) => s.stopBackgroundJob);
+  const chatBgJobs = useMemo(
+    () => backgroundJobsForSession(bgJobs, activeSession?.id),
+    [bgJobs, activeSession?.id],
+  );
+  const chatBgRunning = chatBgJobs.reduce((sum, job) => sum + (job.status === "running" ? 1 : 0), 0);
 
   const chipOptions = settings.chatChipOptions;
 
@@ -518,6 +533,47 @@ export function ComposerMetaChips({
         );
       }
 
+      if (id === "bgJobs" && chatBgJobs.length > 0) {
+        node = (
+          <button
+            ref={bgChipRef}
+            type="button"
+            className={`${styles.metaChip}${bgOpen ? ` ${styles.metaChipActive}` : ""}`}
+            aria-pressed={bgOpen}
+            aria-haspopup="dialog"
+            aria-expanded={bgOpen}
+            aria-label={t("bg.chipHint")}
+            title={t("bg.chipHint")}
+            onClick={() => {
+              setBgPanelReady(false);
+              setBgOpen((open) => !open);
+            }}
+          >
+            <span className={styles.metaChipIcon} aria-hidden>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M12 7.6V12l3 2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <path
+                  d="M12 3.6a8.4 8.4 0 1 1-8.2 10.2"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <span className={styles.metaChipLabel}>
+              {chatBgRunning > 0 ? chatBgRunning : chatBgJobs.length}
+            </span>
+            {chatBgRunning > 0 ? <span className={styles.metaChipLiveDot} aria-hidden /> : null}
+          </button>
+        );
+      }
+
       if (node) items.push({ id, node });
     }
 
@@ -532,6 +588,9 @@ export function ComposerMetaChips({
     chipOptions.gitChanges.metrics,
     compressing,
     consoleOpen,
+    bgOpen,
+    chatBgJobs,
+    chatBgRunning,
     contextDisplay?.label,
     contextDisplay?.title,
     contextDisplay?.rows,
@@ -765,6 +824,54 @@ export function ComposerMetaChips({
       window.removeEventListener("keydown", onKey);
     };
   }, [overflowOpen]);
+
+  // The job list rides above its chip the same way the token panel does:
+  // placed on open, re-placed when a job lands while it is being read.
+  useLayoutEffect(() => {
+    if (!bgOpen) return;
+    const place = () => {
+      const panel = bgPanelRef.current;
+      const chip = bgChipRef.current;
+      if (!panel || !chip) return;
+      placeContextPanel(panel, chip.getBoundingClientRect());
+      setBgPanelReady(true);
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.visualViewport?.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.visualViewport?.removeEventListener("resize", place);
+    };
+  }, [bgOpen, chatBgJobs]);
+
+  useEffect(() => {
+    if (!bgOpen) {
+      setBgPanelReady(false);
+      return;
+    }
+    const close = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && bgPanelRef.current?.contains(target)) return;
+      if (target && bgChipRef.current?.contains(target)) return;
+      setBgOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBgOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [bgOpen]);
+
+  // A chat with no jobs left (stopped and forgotten elsewhere) has nothing to
+  // show — and its chip is gone too, so the panel must not linger.
+  useEffect(() => {
+    if (!chatBgJobs.length) setBgOpen(false);
+  }, [chatBgJobs.length]);
 
   const openOverflowMenu = (anchor: HTMLElement) => {
     menuAnchorRef.current = anchor.getBoundingClientRect();
@@ -1006,6 +1113,84 @@ export function ComposerMetaChips({
                   </div>
                 ))}
               </dl>
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {bgOpen && chatBgJobs.length > 0
+        ? createPortal(
+            <div
+              ref={bgPanelRef}
+              className={`${styles.contextTokenPanel} ${styles.bgPanel}`}
+              style={{ visibility: bgPanelReady ? "visible" : "hidden" }}
+              role="dialog"
+              aria-label={t("bg.chipHint")}
+            >
+              <div className={styles.contextTokenHead}>{t("bg.title")}</div>
+              <ul className={styles.bgList}>
+                {chatBgJobs.map((job) => (
+                  <li key={job.id} className={styles.bgItem}>
+                    <span
+                      className={`${styles.bgDot}${
+                        job.status === "running"
+                          ? ` ${styles.bgDotRunning}`
+                          : job.status === "failed"
+                            ? ` ${styles.bgDotFailed}`
+                            : ""
+                      }`}
+                      aria-hidden
+                    />
+                    <span className={styles.bgItemText} title={job.script}>
+                      {job.label}
+                    </span>
+                    <span className={styles.bgItemTime}>
+                      {formatDuration(
+                        (job.endedAt ?? Date.now()) - job.startedAt,
+                        settings.locale ?? "en",
+                        t,
+                      )}
+                    </span>
+                    {job.status === "running" ? (
+                      <button
+                        type="button"
+                        className={styles.bgStop}
+                        title={t("bg.stop")}
+                        aria-label={`${t("bg.stop")}: ${job.label}`}
+                        onClick={() => {
+                          void stopBackgroundJob(job.id).catch((err: unknown) =>
+                            showToast(
+                              t("bg.stopFailed", {
+                                error: err instanceof Error ? err.message : String(err),
+                              }),
+                              { tone: "danger" },
+                            ),
+                          );
+                        }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                          <path
+                            d="M7 7l10 10M17 7 7 17"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                className={styles.bgAll}
+                onClick={() => {
+                  setBgOpen(false);
+                  navigate("/tasks");
+                }}
+              >
+                {t("bg.allTasks")}
+              </button>
             </div>,
             document.body,
           )

@@ -58,6 +58,8 @@ export {
   BUILTIN_MAX_SUMMARY_TOKENS_MAX,
   BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX,
   BUILTIN_EXTRA_INSTRUCTIONS_MAX,
+  CHAT_TITLE_MAX_LEN_MIN,
+  CHAT_TITLE_MAX_LEN_MAX,
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
@@ -78,6 +80,7 @@ export {
   BUILTIN_THINKING_LIMIT_MAX,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
+  normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
@@ -97,6 +100,12 @@ export {
   type ElicitationUiAnswer,
 } from "./elicitationForm.js";
 export { summarizeQuestionAnswer, type QuestionAnswerPayload } from "./questionAnswer.js";
+export {
+  isBackgroundJobNote,
+  parseBackgroundJobNote,
+  type BackgroundJobNote,
+  type BackgroundJobNoteStatus,
+} from "./backgroundNote.js";
 export {
   SESSION_TITLE_MAX_LEN,
   sanitizeTitleSource,
@@ -780,7 +789,8 @@ export function parseMcpProjectFile(
  * attach a server that is off globally), then the folder's own servers, then
  * servers found in the folder's own MCP files, minus the ids the chat itself
  * disabled. Folder-specific servers are ordinary ids, so a chat can disable one
- * exactly like a global server.
+ * exactly like a global server. The servers acpio provides itself
+ * ({@link builtinMcpServers}) ride the same switches and come last.
  */
 export function effectiveMcpServers(
   settings: AppSettings,
@@ -811,6 +821,9 @@ export function effectiveMcpServers(
     names.add(s.name);
     out.push(s);
   }
+  for (const s of builtinMcpServers(settings)) {
+    if (mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) out.push(s);
+  }
   return out;
 }
 
@@ -837,7 +850,8 @@ export type ChatMetaChipId =
   | "thoughts"
   | "mcp"
   | "context"
-  | "console";
+  | "console"
+  | "bgJobs";
 
 /** Optional controls in the chat tree. Core actions (new chat, folder add)
  *  are always visible and cannot be hidden. */
@@ -915,7 +929,9 @@ export type MessagePartType =
   | "error"
   | "status"
   | "file"
-  | "compaction";
+  | "compaction"
+  /** A settled background job, written into the turn that took its note. */
+  | "note";
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
@@ -1679,6 +1695,12 @@ export interface AppSettings {
    * first configured one.
    */
   chatTitleModel: string;
+  /**
+   * How long that generated title may be, in characters. The model is told the
+   * cap and anything longer is cut at it; the message-derived title of the
+   * first message keeps its own fixed length.
+   */
+  chatTitleMaxLen: number;
   /** New chat + search controls in the tree sidebar. */
   chatToolbarStyle: ChatToolbarStyle;
   /** Look of the "Add task" placeholder in empty board groups. */
@@ -1707,6 +1729,13 @@ export interface AppSettings {
   remoteAccessKey: string;
   /** MCP servers attached to the agent (HTTP local/remote + stdio). */
   mcpServers: McpServerConfig[];
+  /**
+   * Built-in MCP servers (Settings → MCP) acpio provides itself, switched off
+   * by id — the one in `BUILTIN_MCP_SERVERS` here means no chat's agent gets
+   * those tools. An absent id inherits the server's own `enabled` (on), so the
+   * list stays sparse and a folder or a chat can still turn one on for itself.
+   */
+  mcpBuiltinDisabledIds: string[];
   /**
    * Per-folder MCP overrides, keyed by canonical cwd: which servers a folder
    * switches on or off (a globally disabled one included), plus servers that
@@ -1836,7 +1865,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   darkSurface: "",
   ttsVoiceGender: "",
   chatActions: ["copy", "edit", "like", "dislike", "share", "regenerate", "readAloud"],
-  chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console"],
+  chatMetaChips: ["folder", "board", "gitBranch", "gitChanges", "thoughts", "mcp", "context", "console", "bgJobs"],
   thoughtsChipStyle: "full",
   consoleChipStyle: "full",
   terminalShell: "cmd",
@@ -1854,6 +1883,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatSplit: true,
   chatAutoTitle: true,
   chatTitleModel: "auto",
+  chatTitleMaxLen: 80,
   chatToolbarStyle: "classic",
   boardAddCardStyle: "card",
   boardTaskAgentPicker: true,
@@ -1862,6 +1892,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
   remoteAccessKey: "",
   mcpServers: [],
+  mcpBuiltinDisabledIds: [],
   mcpFolderConfigs: {},
   mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
@@ -2470,6 +2501,113 @@ export interface GitCommitDetailDto {
   deletedCount: number;
 }
 
+/**
+ * A command the agent started in the background through acpio's own MCP server
+ * (`apps/server/src/services/backgroundJobs.ts`). Jobs live in the server's
+ * memory: a restart drops the rows, the output they captured included.
+ */
+export type BackgroundJobStatus = "running" | "exited" | "killed" | "failed";
+
+export interface BackgroundJobDto {
+  id: string;
+  /** Chat that started the job — the composer chip filters on it. */
+  sessionId: string;
+  /** Title of that chat at the time it is listed, so a row needs no join. */
+  sessionTitle: string;
+  cwd: string;
+  label: string;
+  script: string;
+  /**
+   * File the job's stdout+stderr is appended to. The agent reads it with the
+   * ordinary `read` (windows) and `grep`, so the job output is not trapped in
+   * an MCP call — the folder is per chat and readable outside the cwd.
+   */
+  logPath: string;
+  /** Shell process id while it runs; null once it is reaped. */
+  pid: number | null;
+  status: BackgroundJobStatus;
+  exitCode: number | null;
+  startedAt: number;
+  endedAt: number | null;
+  /** Bytes captured so far; the reader asks for the text itself. */
+  outputBytes: number;
+}
+
+/** MCP server acpio hands every chat: the agent's own background runner. */
+export const BG_MCP_SERVER_NAME = "acpio_bg";
+/**
+ * Path of the in-process MCP endpoint that serves it. It sits under `/api` so
+ * the server's remote-access gate covers it like every other API route.
+ */
+export const BG_MCP_PATH = "/api/mcp/bg";
+/**
+ * Id of the background runner in the app's own MCP lists. Built-in servers have
+ * no user-editable endpoint: the registry below carries the path, and the
+ * server rewrites the url with the live port and this boot's token right before
+ * `session/new` (`resolveBackgroundMcp` in `services/backgroundJobs.ts`).
+ */
+export const BG_MCP_SERVER_ID = "builtin:acpio_bg";
+
+/** Every MCP server acpio provides itself, in the order the lists show them. */
+const BUILTIN_MCP_SERVERS: McpServerConfig[] = [
+  {
+    id: BG_MCP_SERVER_ID,
+    name: BG_MCP_SERVER_NAME,
+    enabled: true,
+    type: "remote",
+    url: `http://127.0.0.1${BG_MCP_PATH}`,
+  },
+];
+
+/**
+ * The built-in servers with the global switch applied: an id listed in
+ * `mcpBuiltinDisabledIds` is off, an absent one inherits `enabled` (on). They
+ * are ordinary `McpServerConfig`s, so a folder override or a chat's own
+ * `mcpDisabledIds` reaches them exactly like a user-configured server.
+ */
+export function builtinMcpServers(
+  settings: { mcpBuiltinDisabledIds?: string[] } | null | undefined,
+): McpServerConfig[] {
+  const off = new Set(settings?.mcpBuiltinDisabledIds ?? []);
+  return BUILTIN_MCP_SERVERS.map((s) => ({ ...s, enabled: !off.has(s.id) }));
+}
+
+/** Tool names as the endpoint publishes them. */
+export const BG_MCP_TOOLS = ["run", "list", "output", "stop"] as const;
+export type BgMcpTool = (typeof BG_MCP_TOOLS)[number];
+
+/**
+ * Name of an `acpio_bg` tool as the model reads it. Both MCP clients acpio
+ * talks to spell it `mcp__<server>_<tool>`, and the completion note names the
+ * tools the agent should call, so the spelling is built in one place.
+ */
+export function bgMcpToolName(tool: BgMcpTool): string {
+  return `mcp__${BG_MCP_SERVER_NAME}_${tool}`;
+}
+
+export function isBackgroundJobRunning(job: BackgroundJobDto): boolean {
+  return job.status === "running";
+}
+
+/** One chat's jobs, newest first — what the composer chip lists. */
+export function backgroundJobsForSession(
+  jobs: BackgroundJobDto[],
+  sessionId: string | null | undefined,
+): BackgroundJobDto[] {
+  if (!sessionId) return [];
+  return jobs
+    .filter((job) => job.sessionId === sessionId)
+    .sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** Running jobs first, newest first inside each group — the tasks page order. */
+export function sortBackgroundJobs(jobs: BackgroundJobDto[]): BackgroundJobDto[] {
+  return jobs.slice().sort((a, b) => {
+    const running = Number(isBackgroundJobRunning(b)) - Number(isBackgroundJobRunning(a));
+    return running !== 0 ? running : b.startedAt - a.startedAt;
+  });
+}
+
 export interface MessagePartDto {
   id: string;
   messageId: string;
@@ -2544,6 +2682,9 @@ export type WsServerEvent =
   | { type: "error"; sessionId?: string; message: string }
   | { type: "process.output"; sessionId: string; text: string; source?: "agent" | "shell" }
   | { type: "process.cleared"; sessionId: string }
+  /** A background job appeared, changed status or was forgotten. */
+  | { type: "bg.updated"; job: BackgroundJobDto }
+  | { type: "bg.removed"; jobIds: string[] }
   | { type: "pong" };
 
 export type WsClientEvent =

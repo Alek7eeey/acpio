@@ -40,7 +40,11 @@ import {
   isShellSession,
   effectiveMcpServers,
   isProtocolPlaceholder,
+  isBackgroundJobNote,
+  parseBackgroundJobNote,
   type AttachSource,
+  type BackgroundJobNote,
+  type BackgroundJobNoteStatus,
 } from "@acpio/shared";
 import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
@@ -118,6 +122,7 @@ import {
 } from "../lib/messageHotkeys";
 import { isTouchUi } from "../lib/pointerUi";
 import { showToast } from "../lib/toast";
+import { takeComposerAttachments } from "../lib/pendingComposerAttachments";
 import {
   buildSlashInsertion,
   filterSlashCommands,
@@ -203,7 +208,9 @@ function userMessageHistory(messages: MessageDto[]): Array<{ id: string; text: s
   for (const msg of messages) {
     if (msg.role !== "user") continue;
     const text = messagePlainText(msg);
-    if (text) out.push({ id: msg.id, text });
+    // A background job's note is machine output that only travels as a prompt;
+    // ↑ in the composer recalls what the reader wrote, never that.
+    if (text && !isBackgroundJobNote(text)) out.push({ id: msg.id, text });
   }
   return out;
 }
@@ -497,11 +504,15 @@ function MessageArticle({
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   onSlashCommandClick?: (command: string) => void;
 }) {
+  // A settled background job reaches the chat as a prompt — the agent has to be
+  // woken with it — so it is a user message on the wire. It is not the reader's
+  // own text, and it does not read as one: see {@link BackgroundNoteMessage}.
+  const note = msg.role === "user" ? parseBackgroundJobNote(messagePlainText(msg)) : null;
   return (
     <article
       key={msg.id}
       data-message-id={msg.id}
-      className={`${styles.msg} ${styles[msg.role]} ${isLiveAssistant ? styles.live : ""}`}
+      className={`${styles.msg} ${styles[msg.role]} ${note ? styles.note : ""} ${isLiveAssistant ? styles.live : ""}`}
       onMouseEnter={() => setMessageHotkeyHover(msg.id)}
       onMouseLeave={() => setMessageHotkeyHover(null)}
       onMouseDown={(e) => {
@@ -518,7 +529,11 @@ function MessageArticle({
       }}
     >
       {msg.role === "user" ? (
-        <UserMessage message={msg} onEdit={onEditUser} onSlashCommandClick={onSlashCommandClick} />
+        note ? (
+          <BackgroundNoteMessage message={msg} note={note} />
+        ) : (
+          <UserMessage message={msg} onEdit={onEditUser} onSlashCommandClick={onSlashCommandClick} />
+        )
       ) : (
         <AssistantParts
           message={msg}
@@ -627,6 +642,149 @@ function UserMessage({
         text={text}
         createdAt={message.createdAt}
         onEdit={() => onEdit(message.id, text)}
+        ctxRef={ctxRef}
+      />
+    </div>
+  );
+}
+
+/** Status chip of a note block: the colour says whether the job is worth a look. */
+const NOTE_STATUS_TONE: Record<BackgroundJobNoteStatus, string> = {
+  exited: "noteChipOk",
+  failed: "noteChipBad",
+  killed: "noteChipMuted",
+  running: "noteChipLive",
+  unknown: "noteChipMuted",
+};
+
+/**
+ * A completed background job, as the runner handed it to the chat: a header
+ * line («task, how it ended, what ran») that opens into the command, the log
+ * path and the output tail. Machine output, so it is left-aligned with the
+ * answers rather than shaped like the reader's own bubble.
+ *
+ * The same card is drawn wherever a note can appear: inside the turn that took
+ * it (a `note` part, the common case) and as a message of its own, which is
+ * what a note that had to start a turn of its own becomes.
+ */
+function BackgroundNoteCard({ note }: { note: BackgroundJobNote }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const statusLabel =
+    note.status === "exited"
+      ? t("bg.statusExited")
+      : note.status === "failed"
+        ? t("bg.statusFailed")
+        : note.status === "killed"
+          ? t("bg.statusKilled")
+          : note.status === "running"
+            ? t("bg.statusRunning")
+            : "";
+
+  return (
+    <div className={`${styles.noteCard} ${open ? styles.noteCardOpen : ""}`}>
+      <button
+        type="button"
+        className={styles.noteHead}
+        aria-expanded={open}
+        title={open ? t("common.toolCollapse") : t("common.toolExpand")}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className={styles.noteChevron} data-open={open ? "true" : undefined}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <path
+              d="M9 6l6 6-6 6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className={styles.noteIcon} aria-hidden>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <rect x="3" y="4" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+            <path
+              d="M7 9l2.5 2.5L7 14M12 15h5"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+        <span className={styles.noteTitle}>{t("bg.noteTitle")}</span>
+        {note.label ? <span className={styles.noteLabel}>«{note.label}»</span> : null}
+        {statusLabel ? (
+          <span className={`${styles.noteChip} ${styles[NOTE_STATUS_TONE[note.status]]}`}>
+            {statusLabel}
+          </span>
+        ) : null}
+        <span className={styles.noteSpacer} />
+        {note.exitCode ? (
+          <span className={styles.noteMeta}>
+            {t("bg.exitCode")} {note.exitCode}
+          </span>
+        ) : null}
+        {note.elapsed ? <span className={styles.noteMeta}>{note.elapsed}</span> : null}
+        {note.id ? <span className={styles.noteMeta}>{note.id}</span> : null}
+      </button>
+      {open ? (
+        <div className={styles.noteBody}>
+          {note.command ? (
+            <div className={styles.noteField}>
+              <span className={styles.noteFieldLabel}>{t("bg.noteCommand")}</span>
+              <code className={styles.noteCode}>{note.command}</code>
+            </div>
+          ) : null}
+          {note.logPath ? (
+            <div className={styles.noteField}>
+              <span className={styles.noteFieldLabel}>{t("bg.logPath")}</span>
+              <code className={styles.noteCodeMuted}>{note.logPath}</code>
+            </div>
+          ) : null}
+          <div className={styles.noteField}>
+            <span className={styles.noteFieldLabel}>{t("bg.noteOutput")}</span>
+            {note.output ? (
+              <pre className={styles.noteOutput}>{note.output}</pre>
+            ) : (
+              <span className={styles.noteEmpty}>{t("bg.noteNoOutput")}</span>
+            )}
+          </div>
+          {note.rest.length > 0 ? (
+            <pre className={styles.noteOutput}>{note.rest.join("\n")}</pre>
+          ) : null}
+          {note.hint ? <div className={styles.noteHint}>{note.hint}</div> : null}
+        </div>
+      ) : null}
+      </div>
+  );
+}
+
+/** A note the chat had to deliver as a prompt: it is a message of its own, so
+ *  it carries the message's own affordances (copy, time) around the card. */
+function BackgroundNoteMessage({ message, note }: { message: MessageDto; note: BackgroundJobNote }) {
+  const ctxRef = useRef<MessageCtxHandle | null>(null);
+  const text = messagePlainText(message);
+  return (
+    <div
+      className={styles.noteMsg}
+      data-msg-hotkey={message.id}
+      onContextMenu={(e) => {
+        if (isTouchUi()) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("a, button, input, textarea")) return;
+        e.preventDefault();
+        ctxRef.current?.openAt(e.clientX, e.clientY);
+      }}
+    >
+      <BackgroundNoteCard note={note} />
+      <UserMessageActions
+        messageId={message.id}
+        text={text}
+        createdAt={message.createdAt}
+        onEdit={() => {}}
+        allowEdit={false}
         ctxRef={ctxRef}
       />
     </div>
@@ -808,12 +966,15 @@ function UserMessageActions({
   createdAt,
   onEdit,
   ctxRef,
+  allowEdit = true,
 }: {
   messageId: string;
   text: string;
   createdAt: string;
   onEdit: () => void;
   ctxRef?: RefObject<MessageCtxHandle | null>;
+  /** A note the runner wrote is not the reader's text: no "edit and resend". */
+  allowEdit?: boolean;
 }) {
   const t = useT();
   const settings = useAppStore((s) => s.settings);
@@ -848,8 +1009,11 @@ function UserMessageActions({
 
   const chatActions = settings.chatActions ?? [];
   const menuActions = useMemo(
-    () => chatActions.filter((a) => a === "copy" || a === "edit"),
-    [chatActions],
+    () =>
+      chatActions.filter(
+        (a) => allowEdit ? a === "copy" || a === "edit" : a === "copy",
+      ),
+    [chatActions, allowEdit],
   );
   const shortcuts = messageCtxShortcuts();
   const showCtxMenu = Boolean(ctxPos && (menuActions.length > 0 || ctxSelection));
@@ -958,6 +1122,7 @@ function UserMessageActions({
               );
             }
             if (id === "edit") {
+              if (!allowEdit) return null;
               return (
                 <button
                   key={id}
@@ -1422,6 +1587,18 @@ function PartView({
     return <SubagentPartView part={part} streaming={streaming} sessionId={sessionId} />;
   }
 
+  // A settled background job written into this turn. The phased timeline draws
+  // it in place; this is the same card for chats that render parts flat.
+  if (part.type === "compaction") {
+    return <CompactionRow part={part} sessionId={sessionId} />;
+  }
+
+  if (part.type === "note") {
+    const text = String(part.payload.text ?? "").trim();
+    const note = parseBackgroundJobNote(text);
+    return note ? <BackgroundNoteCard note={note} /> : null;
+  }
+
   // Question parts render inside StepsSpoiler / AgentTurnTimeline, not here.
   // Errors are shown only in the composer banner (store.error), never in-thread.
   if (part.type === "tool_call" || part.type === "error") {
@@ -1694,6 +1871,9 @@ function toolMetaExtra(part: MessagePartDto): string {
   return bits.join(" · ");
 }
 
+/** How far the pointer may travel and still count as a click, not a selection drag. */
+const CLICK_SLOP_PX = 4;
+
 /** Clickable local path — opens folder in explorer, URLs in browser. */
 function PathLink({
   path,
@@ -1705,6 +1885,9 @@ function PathLink({
   className?: string;
 }) {
   const isUrl = /^https?:\/\//i.test(path);
+  // Where the press started: a press that travelled was dragging to select the
+  // path, and the mouseup click that ends it is not a click on the link.
+  const pressedAt = useRef<{ x: number; y: number } | null>(null);
   const open = () => {
     if (isUrl) {
       window.open(path, "_blank", "noopener,noreferrer");
@@ -1724,12 +1907,23 @@ function PathLink({
       title={path}
       role="link"
       tabIndex={0}
+      onMouseDown={(e) => {
+        pressedAt.current = { x: e.clientX, y: e.clientY };
+      }}
       onClick={(e) => {
         e.stopPropagation();
+        const from = pressedAt.current;
+        pressedAt.current = null;
+        // A drag that selected the path also ends in a click here; launching
+        // Explorer for it is how Documents windows opened "by themselves"
+        // while the reader was only copying text out of a tool output.
+        if (from && Math.hypot(e.clientX - from.x, e.clientY - from.y) > CLICK_SLOP_PX) return;
         open();
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        // Enter only: Space is how the reader scrolls the transcript, and the
+        // link keeps focus after a click, so it re-opened Explorer unasked.
+        if (e.key === "Enter") {
           e.preventDefault();
           e.stopPropagation();
           open();
@@ -2679,6 +2873,28 @@ function AgentTimelineItems({
           );
         }
 
+        if (item.kind === "compaction") {
+          // Where the agent's window was squeezed, in place: the work above it
+          // is what filled the context, the work below already ran on the
+          // digest. Sits on its own row for the same reason a note does.
+          return <CompactionRow key={item.key} part={item.part} sessionId={sessionId} />;
+        }
+
+        if (item.kind === "note") {
+          // A settled background job, written into this turn where it arrived:
+          // it belongs to the work above and to the answer below it alike, so it
+          // is drawn between them rather than appended to the turn's tail.
+          const text = String(item.part.payload.text ?? "").trim();
+          const note = parseBackgroundJobNote(text);
+          return note ? (
+            <BackgroundNoteCard key={item.key} note={note} />
+          ) : (
+            <pre key={item.key} className={styles.noteOutput}>
+              {text}
+            </pre>
+          );
+        }
+
         if (item.kind === "question") {
           return <QuestionBucketView key={item.key} item={item} sessionId={sessionId} />;
         }
@@ -2755,6 +2971,8 @@ function AgentTurnTimeline({
 function hasRenderableAssistantContent(parts: MessagePartDto[]) {
   return parts.some((p) => {
     if (p.type === "question") return true;
+    // A turn that only took a note still happened, and the note says so.
+    if (p.type === "note") return true;
     // Harness filler for empty model messages renders as nothing.
     if (p.type === "text") {
       const text = String(p.payload.text ?? "");
@@ -3707,6 +3925,11 @@ function AssistantParts({
     for (const list of preamblesByQuestion.values()) for (const p of list) ids.add(p.id);
     return ids;
   }, [preamblesByQuestion]);
+  /** A turn that is nothing but the squeeze: the `/compact` request itself. */
+  const onlySqueeze = useMemo(
+    () => parts.length > 0 && parts.every((p) => p.type === "compaction" || p.type === "error"),
+    [parts],
+  );
   // The final answer (last text part in emission order) stays outside the
   // steps block; intermediate texts, tools, and subagents interleave inside
   // it in emission order — same nesting as Cursor's thinking transcript.
@@ -3716,19 +3939,22 @@ function AssistantParts({
       (p) =>
         p !== finalText &&
         p.type !== "error" &&
-        // A compaction row is status for the whole window, not work of this
-        // turn: folded into "Работал" it is a squeeze nobody can look up later.
-        p.type !== "compaction" &&
+        // A compaction row is a thing that happened inside the turn — the very
+        // line where the agent's window was squeezed — so it is drawn in place,
+        // breaking the work the way a note does. A turn that is nothing but the
+        // squeeze (a manual `/compact`) would then hide behind a closed "Работал"
+        // header, so that one keeps the row on the surface (see `compactionParts`).
+        (!onlySqueeze || p.type !== "compaction") &&
         // A generated picture is the turn's result, not a step of it — inside
         // the spoiler the reader would have to open it to see what was made.
         !isGeneratedImagePart(p) &&
         !parkedQuestions.includes(p) &&
         !parkedPreambleParts.has(p.id),
     );
-  }, [parts, stepsStreaming, parkedQuestions, parkedPreambleParts]);
+  }, [parts, stepsStreaming, onlySqueeze, parkedQuestions, parkedPreambleParts]);
   const compactionParts = useMemo(
-    () => parts.filter((p) => p.type === "compaction"),
-    [parts],
+    () => (onlySqueeze ? parts.filter((p) => p.type === "compaction") : []),
+    [onlySqueeze, parts],
   );
   const generatedImages = useMemo(
     () => parts.filter(isGeneratedImagePart),
@@ -4518,6 +4744,27 @@ function ChatThread() {
       el.setSelectionRange(next.length, next.length);
       syncComposerSize(el);
     });
+  }, [composerSessionId]);
+
+  // A chat opened "based on another chat" carries the exported transcript as
+  // a file already staged on the server: land it as a ready chip (path known,
+  // no upload). Taken once — the registry entry dies with this read.
+  useEffect(() => {
+    if (!composerSessionId) return;
+    const staged = takeComposerAttachments(composerSessionId);
+    if (!staged.length) return;
+    setPendingFiles((prev) =>
+      [
+        ...prev,
+        ...staged.map((f) => ({
+          id: nextComposerAttachmentId(),
+          name: f.name,
+          path: f.path,
+          size: f.size ?? 0,
+          status: "ready" as const,
+        })),
+      ].slice(0, MAX_ATTACH_COUNT),
+    );
   }, [composerSessionId]);
 
   // Live, not on switch: the reload guard reads the registry at unload time, so

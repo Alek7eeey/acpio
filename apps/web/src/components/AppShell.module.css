@@ -4259,6 +4259,30 @@
   color: var(--accent) !important;
 }
 
+/* The tasks button carries how many jobs run right now, so the count is
+   readable without leaving the chat. */
+.toolClusterTasks {
+  position: relative !important;
+}
+
+.toolClusterBadge {
+  position: absolute !important;
+  top: -4px;
+  right: -4px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  display: block !important;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
 .header .iconBtn {
   width: var(--header-tool-size);
   height: var(--header-tool-size);

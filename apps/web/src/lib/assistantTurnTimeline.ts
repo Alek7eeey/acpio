@@ -212,6 +212,10 @@ export type AgentQuestionItem = {
 export type AgentTimelineItem =
   | { kind: "run"; parts: MessagePartDto[] }
   | { kind: "text"; part: MessagePartDto; key: string }
+  /** A settled background job, written into the turn that took its note. */
+  | { kind: "note"; part: MessagePartDto; key: string }
+  /** A squeeze of the agent's window: a line the turn crossed, not a step of it. */
+  | { kind: "compaction"; part: MessagePartDto; key: string }
   | AgentQuestionItem;
 
 /**
@@ -375,6 +379,17 @@ export function buildAgentTimeline(parts: MessagePartDto[]): AgentTimelineItem[]
       runBuf.push(part);
       continue;
     }
+    if (part.type === "compaction" || part.type === "note") {
+      // The note closes the run it landed in and stands on its own: the work
+      // above it is what made the job finish, the work below is the answer to
+      // it. A compaction row is the same shape for a different event: the model
+      // lost the context above it and kept working below. Both are things that
+      // happened *between* two stretches of work, not steps of either.
+      flushRun();
+      items.push({ kind: part.type, part, key: part.id });
+      continue;
+    }
+
     if (part.type === "text" && visibleText(part)) {
       flushRun();
       items.push({ kind: "text", part, key: part.id });

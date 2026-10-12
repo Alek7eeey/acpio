@@ -39,6 +39,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { BoardPage } from "../pages/BoardPage";
 import { ChatPage } from "../pages/ChatPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { TasksPage } from "../pages/TasksPage";
 import styles from "./AppShell.module.css";
 
 const SIDEBAR_WIDTH_KEY = "acpio.sidebarWidth.v2";
@@ -92,6 +93,7 @@ function ShellPage({ pathname }: { pathname: string }) {
   if (pathname === "/" || pathname === "") return <ChatPage />;
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
+  if (pathname.startsWith("/tasks")) return <TasksPage />;
   if (pathname.startsWith("/board/")) {
     return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
   }
@@ -231,6 +233,7 @@ export function AppShell() {
   const isChat = pathname === "/" || pathname.startsWith("/chat");
   const isSettings = pathname.startsWith("/settings");
   const isBoard = pathname.startsWith("/board/");
+  const isTasks = pathname.startsWith("/tasks");
   /**
    * The board open in the view. Its name takes the header's context slot while
    * its page is on screen — that slot would otherwise keep showing the chat
@@ -286,6 +289,9 @@ export function AppShell() {
     },
     [sheetSnaps],
   );
+
+  const bgJobs = useAppStore((s) => s.bgJobs);
+  const bgRunningCount = bgJobs.reduce((sum, job) => sum + (job.status === "running" ? 1 : 0), 0);
 
   const settingsNav = useMemo(() => parseSettingsSearch(search), [search]);
   const [openBranches, setOpenBranches] = useState<Record<string, boolean>>({
@@ -1897,6 +1903,41 @@ export function AppShell() {
                   onToggle={() => void setTheme(theme === "light" ? "dark" : "light")}
                 />
               )}
+              <button
+                type="button"
+                className={`${styles.toolClusterBtn} ${styles.toolClusterTasks}${isTasks ? ` ${styles.toolClusterBtnActive}` : ""}`}
+                aria-label={t("bg.title")}
+                title={t("bg.title")}
+                onClick={() => navigate("/tasks")}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M12 7.5V12l3.2 2"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M12 3.2a8.8 8.8 0 1 1-8.6 10.7"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d="M3 9.6 3.4 14l4.3-1.1"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {bgRunningCount > 0 ? (
+                  <span className={styles.toolClusterBadge} aria-hidden>
+                    {bgRunningCount}
+                  </span>
+                ) : null}
+              </button>
               <button
                 type="button"
                 className={`${styles.toolClusterBtn} ${styles.toolClusterSettings}${isSettings ? ` ${styles.toolClusterBtnActive}` : ""}`}

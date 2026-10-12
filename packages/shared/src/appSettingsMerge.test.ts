@@ -54,6 +54,7 @@ describe("normalizeChatMetaChips", () => {
       "mcp",
       "context",
       "console",
+      "bgJobs",
     ]);
   });
 
@@ -68,6 +69,7 @@ describe("normalizeChatMetaChips", () => {
       "mcp",
       "context",
       "console",
+      "bgJobs",
     ]);
   });
 
@@ -82,6 +84,7 @@ describe("normalizeChatMetaChips", () => {
       "mcp",
       "context",
       "console",
+      "bgJobs",
     ]);
   });
 
@@ -93,7 +96,20 @@ describe("normalizeChatMetaChips", () => {
       "gitBranch",
       "gitChanges",
       "console",
+      "bgJobs",
     ]);
+  });
+
+  // The background-task chip is the newest default: settings saved before it
+  // pick it up at the end of their list, and a list that already has it keeps
+  // its place.
+  it("appends the background-task chip to settings saved before it", () => {
+    expect(normalizeChatMetaChips(["folder", "console"], 6)).toEqual([
+      "folder",
+      "console",
+      "bgJobs",
+    ]);
+    expect(normalizeChatMetaChips(["bgJobs", "folder"], 6)).toEqual(["bgJobs", "folder"]);
   });
 });
 
@@ -177,6 +193,19 @@ describe("mergeClientAppSettings", () => {
       gitChanges: { compress: true, metrics: "linesAndFiles" },
       context: { format: "percent" },
     });
+  });
+
+  it("keeps the built-in MCP switch list and heals a malformed one", () => {
+    expect(mergeClientAppSettings({}).mcpBuiltinDisabledIds).toEqual([]);
+    expect(
+      mergeClientAppSettings({ mcpBuiltinDisabledIds: ["builtin:acpio_bg"] }).mcpBuiltinDisabledIds,
+    ).toEqual(["builtin:acpio_bg"]);
+    expect(mergeClientAppSettings({ mcpBuiltinDisabledIds: "nope" }).mcpBuiltinDisabledIds).toEqual(
+      [],
+    );
+    expect(
+      mergeClientAppSettings({ mcpBuiltinDisabledIds: ["ok", 7, null] }).mcpBuiltinDisabledIds,
+    ).toEqual(["ok"]);
   });
 
   it("defaults deep logging to off", () => {

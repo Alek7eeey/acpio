@@ -12,6 +12,7 @@ import { ToastHost } from "./components/ToastHost";
 import { BoardPage } from "./pages/BoardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TasksPage } from "./pages/TasksPage";
 import { RemoteKeyGate } from "./components/RemoteKeyGate";
 import { api } from "./lib/api";
 import { hasUnsavedComposerAttachments } from "./lib/composerDrafts";
@@ -98,6 +99,7 @@ export function App() {
           <Route path="chat" element={<ChatPage />} />
           <Route path="board/:boardId" element={<BoardPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="tasks" element={<TasksPage />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Route>
       </Routes>

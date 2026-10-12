@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { WsClientEvent, WsServerEvent } from "@acpio/shared";
+import type { BackgroundJobDto, WsClientEvent, WsServerEvent } from "@acpio/shared";
 import { createTranslator } from "./translator";
 import { showToast } from "./toast";
 import { dispatchShellConsole } from "./shellConsole";
@@ -15,6 +15,24 @@ function routeShellConsoleWsEvent(event: WsServerEvent): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * A background job ended. The chip and the tasks page turn over by themselves,
+ * but the reader may be in another chat — or in another tab entirely — so the
+ * settle is announced once, on the running → settled edge.
+ */
+function notifyBackgroundJobSettled(job: BackgroundJobDto) {
+  if (job.status === "running") return;
+  const previous = useAppStore.getState().bgJobs.find((known) => known.id === job.id);
+  if (previous && previous.status !== "running") return;
+  const locale = useAppStore.getState().settings.locale ?? "en";
+  const t = createTranslator(locale);
+  const key =
+    job.status === "exited" ? "bg.toastExited" : job.status === "killed" ? "bg.toastKilled" : "bg.toastFailed";
+  showToast(t(key, { label: job.label }), {
+    tone: job.status === "exited" ? "success" : job.status === "killed" ? "info" : "danger",
+  });
 }
 
 function wsUrl() {
@@ -133,6 +151,7 @@ export function useSessionSocket(sessionId: string | null, enabled = true) {
         try {
           const data = JSON.parse(String(ev.data)) as WsServerEvent;
           if (routeShellConsoleWsEvent(data)) return;
+          if (data.type === "bg.updated") notifyBackgroundJobSettled(data.job);
           handleWsEventRef.current(data);
         } catch {
           // ignore

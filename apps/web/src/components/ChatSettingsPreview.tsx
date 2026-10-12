@@ -24,6 +24,7 @@ const CHIP_ORDER: ChatMetaChipId[] = [
   "mcp",
   "context",
   "console",
+  "bgJobs",
 ];
 const ALL_META_CHIPS: ChatMetaChipId[] = [...CHIP_ORDER];
 
@@ -36,6 +37,7 @@ const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
   mcp: "settings.chatMetaChipMcp",
   context: "settings.chatMetaChipContext",
   console: "settings.chatMetaChipConsole",
+  bgJobs: "settings.chatMetaChipBgJobs",
 };
 const TREE_ORDER: ChatTreeElementId[] = ["search", "pin", "archive", "more"];
 const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "model", "mode", "mic"];

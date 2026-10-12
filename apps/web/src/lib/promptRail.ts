@@ -1,4 +1,4 @@
-import type { MessageDto } from "@acpio/shared";
+import { isBackgroundJobNote, type MessageDto } from "@acpio/shared";
 import { messagePlainText } from "./messageText";
 
 /** Prompt text kept for one rail row: a row is a reminder, and a pasted
@@ -61,14 +61,15 @@ function clip(text: string, limit: number): string {
 /**
  * One row per user prompt: its text and the head of the answer that followed.
  * Attachment-only prompts (no text) get no row — a pill that names nothing is
- * not worth a click.
+ * not worth a click. Nor does a background job's note: it is a user message on
+ * the wire (that is how the agent is woken), not a prompt the reader wrote.
  */
 export function buildPromptRailItems(messages: MessageDto[]): PromptRailItem[] {
   const rows = messages.map((msg) => ({ msg, text: messagePlainText(msg) }));
   const items: PromptRailItem[] = [];
   for (let i = 0; i < rows.length; i += 1) {
     const row = rows[i]!;
-    if (row.msg.role !== "user" || !row.text) continue;
+    if (row.msg.role !== "user" || !row.text || isBackgroundJobNote(row.text)) continue;
     // The turn runs until the next prompt; narration, tool rows and the answer
     // all belong to it, but only text parts carry the answer itself.
     const reply: string[] = [];

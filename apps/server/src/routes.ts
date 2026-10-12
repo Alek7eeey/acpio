@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   addTaskAttachments,
@@ -16,9 +16,19 @@ import {
   getSessionDetail,
   listBoardSessions,
   listSessions,
+  listSessionsByIds,
   reorderSessions,
   updateSession,
 } from "./services/sessions.js";
+import {
+  clearFinishedBackgroundJobs,
+  forgetBackgroundJob,
+  listBackgroundJobs,
+  readBackgroundJobOutput,
+  stopBackgroundJob,
+  backgroundMcpTokenMatches,
+} from "./services/backgroundJobs.js";
+import { handleBackgroundMcpRequest } from "./services/bgMcp.js";
 import {
   createTheme,
   deleteTheme,
@@ -126,7 +136,7 @@ import {
   stashGit,
   syncGit,
 } from "./services/git.js";
-import { buildChatsExport, buildExport, defaultExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
+import { buildChatsExport, buildExport, defaultExportDir, referenceExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
 import { adapters, RESERVED_AGENT_IDS } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
@@ -241,6 +251,11 @@ const settingsSchema = z.object({
           )
           .max(50)
           .optional(),
+        // The extra JSON merged into every request body this provider sends —
+        // the door for a knob the OpenAI-compatible schema has no field for
+        // (`reasoning_effort` and friends). Same ceiling the settings heal
+        // applies, so a body the API accepted can never be stored truncated.
+        body: z.string().max(4000).optional(),
       }),
     )
     .max(50)
@@ -347,10 +362,17 @@ const settingsSchema = z.object({
   chatSplit: z.boolean().optional(),
   chatAutoTitle: z.boolean().optional(),
   chatTitleModel: z.string().max(200).optional(),
+  chatTitleMaxLen: z
+    .number()
+    .int()
+    .min(CHAT_TITLE_MAX_LEN_MIN)
+    .max(CHAT_TITLE_MAX_LEN_MAX)
+    .optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
   composerDrafts: z.record(z.string().max(20_000)).optional(),
   mcpServers: z.array(mcpServerSchema).max(100).optional(),
+  mcpBuiltinDisabledIds: z.array(z.string().min(1).max(200)).max(50).optional(),
   mcpFolderConfigs: z
     .record(
       z.string().max(4096),
@@ -681,6 +703,64 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/mcp/status", async () => getMcpStatus());
 
+  // acpio's own MCP server: the background runner every chat is handed at
+  // `session/new` (see services/bgMcp.ts). It lives under /api so the
+  // remote-access gate already covers it — a phone on the LAN needs the key,
+  // loopback (where the agent runs) does not. The per-boot token stays as the
+  // second lock: CORS is open, so without it any web page could POST here and
+  // start a shell on this machine.
+  app.post("/api/mcp/bg", async (req, reply) => {
+    const query = z
+      .object({
+        session: z.string().min(1).max(200),
+        token: z.string().max(200).optional(),
+      })
+      .parse(req.query ?? {});
+    if (!backgroundMcpTokenMatches(query.token)) {
+      return reply.code(403).send({ error: "invalid_token" });
+    }
+    if (!(await listSessionsByIds([query.session])).length) {
+      return reply.code(404).send({ error: "unknown_session" });
+    }
+    const answer = await handleBackgroundMcpRequest(req.body, query.session);
+    // A notification (no id) is answered with an empty 202 — the MCP client
+    // only reads the reply of a request it sent.
+    if (answer.body === null) return reply.code(answer.status).send();
+    return reply.code(answer.status).send(answer.body);
+  });
+
+  // Background jobs for the tasks page and the composer chip. The runner is
+  // in-memory, so this list is what the server currently has — a restart
+  // empties it, exactly as it empties the agent runtimes behind it.
+  app.get("/api/bg", async () => ({ jobs: listBackgroundJobs() }));
+
+  app.get("/api/bg/:id/output", async (req, reply) => {
+    const params = z.object({ id: z.string().min(1).max(200) }).parse(req.params);
+    const query = z.object({ tailLines: z.coerce.number().int().min(1).max(5_000).optional() }).parse(req.query ?? {});
+    const read = readBackgroundJobOutput(params.id, { tailLines: query.tailLines });
+    if (!read) return reply.code(404).send({ error: "Unknown job" });
+    return { job: read.job, text: read.text, from: read.from, to: read.to, dropped: read.dropped };
+  });
+
+  // Stopped from the UI, so the agent is told: the note it gets names the job
+  // and says it was cancelled — a model waiting on that job must not wait on.
+  app.post("/api/bg/:id/stop", async (req, reply) => {
+    const params = z.object({ id: z.string().min(1).max(200) }).parse(req.params);
+    const job = stopBackgroundJob(params.id, "user");
+    if (!job) return reply.code(404).send({ error: "Unknown job" });
+    return { job };
+  });
+
+  app.post("/api/bg/:id/forget", async (req, reply) => {
+    const params = z.object({ id: z.string().min(1).max(200) }).parse(req.params);
+    if (!forgetBackgroundJob(params.id)) {
+      return reply.code(409).send({ error: "Job is unknown or still running" });
+    }
+    return { ok: true };
+  });
+
+  app.post("/api/bg/clear", async () => ({ removed: clearFinishedBackgroundJobs() }));
+
   // Servers found in each folder's own MCP files, keyed by canonical cwd. The
   // web reads this to show what a folder brings in and to size the MCP chip.
   app.get("/api/mcp/project", async (req) => {
@@ -732,7 +812,12 @@ export async function registerRoutes(app: FastifyInstance) {
       clearModelsCache();
     }
     const next = await updateSettings(patch as Partial<AppSettings>);
-    if (patch.mcpServers || patch.mcpFolderConfigs || patch.mcpProjectFiles) {
+    if (
+      patch.mcpServers ||
+      patch.mcpFolderConfigs ||
+      patch.mcpProjectFiles ||
+      patch.mcpBuiltinDisabledIds
+    ) {
       // The agent protocol snapshots MCP servers at session/new — restart live
       // sessions so a disabled/edited server stops being visible in the chat.
       // Fires only AFTER the write: the sweep re-reads settings, and the driver
@@ -1146,6 +1231,23 @@ export async function registerRoutes(app: FastifyInstance) {
     try {
       const saved = await saveExportToDisk(id, body.format, body.dir);
       return { ok: true, ...saved };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(err instanceof Error && err.message === "Session not found" ? 404 : 500).send({ error: message });
+    }
+  });
+
+  /**
+   * Export a chat into acpio's own reference folder: the file a "chat based on
+   * this chat" links to as its attachment, kept out of the project folders the
+   * chat may discuss. The size rides along so the composer chip can show it.
+   */
+  app.post("/api/sessions/:id/export/reference", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    try {
+      const saved = await saveExportToDisk(id, "md", referenceExportDir());
+      const stat = await fsp.stat(saved.path);
+      return { ok: true, ...saved, size: stat.size };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.code(err instanceof Error && err.message === "Session not found" ? 404 : 500).send({ error: message });

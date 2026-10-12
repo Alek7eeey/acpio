@@ -3,6 +3,7 @@ import type {
   AgentProvider,
   AppLocale,
   AppSettings,
+  BackgroundJobDto,
   BoardDto,
   ChatThemeDto,
   MessageDto,
@@ -453,6 +454,15 @@ type AppState = {
   ) => Promise<ModelsCatalog | null>;
   /** Load a harness catalog without blocking the UI when a cache already exists. */
   fetchProviderModels: (provider: AgentProvider) => Promise<ModelsCatalog | null>;
+  /**
+   * Background jobs started through acpio's own MCP server, every chat's
+   * together — the composer chip filters by chat, the tasks page shows all.
+   */
+  bgJobs: BackgroundJobDto[];
+  refreshBackgroundJobs: () => Promise<void>;
+  stopBackgroundJob: (id: string) => Promise<void>;
+  forgetBackgroundJob: (id: string) => Promise<void>;
+  clearFinishedBackgroundJobs: () => Promise<void>;
   /** Session shell console panel open state. */
   consoleOpen: boolean;
   setConsoleOpen: (open: boolean) => void;
@@ -462,6 +472,15 @@ type AppState = {
   setGitPanelOpen: (open: boolean) => void;
   toggleGitPanelOpen: () => void;
 };
+
+/** Replace one job in the list, or append it — the only mutation the WS frames need. */
+function upsertBackgroundJob(jobs: BackgroundJobDto[], job: BackgroundJobDto): BackgroundJobDto[] {
+  const at = jobs.findIndex((existing) => existing.id === job.id);
+  if (at < 0) return [...jobs, job];
+  const next = jobs.slice();
+  next[at] = job;
+  return next;
+}
 
 function normalizeCatalog(parsed: Partial<ModelsCatalog> | null | undefined): ModelsCatalog | null {
   if (!parsed?.provider || !Array.isArray(parsed.models)) return null;
@@ -1750,6 +1769,45 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
+  bgJobs: [],
+  refreshBackgroundJobs: async () => {
+    try {
+      set({ bgJobs: await api.backgroundJobs() });
+    } catch {
+      // server offline — keep the current list
+    }
+  },
+  stopBackgroundJob: async (id) => {
+    try {
+      const { job } = await api.stopBackgroundJob(id);
+      set((s) => ({ bgJobs: upsertBackgroundJob(s.bgJobs, job) }));
+    } catch (err) {
+      // The caller owns the message (a toast), so the failure is re-thrown
+      // after the list is put back in step with the server — the only thing
+      // that knows whether the kill landed.
+      console.error("stop background job failed", err);
+      void get().refreshBackgroundJobs();
+      throw err;
+    }
+  },
+  forgetBackgroundJob: async (id) => {
+    try {
+      await api.forgetBackgroundJob(id);
+      set((s) => ({ bgJobs: s.bgJobs.filter((job) => job.id !== id) }));
+    } catch (err) {
+      console.error("forget background job failed", err);
+      void get().refreshBackgroundJobs();
+    }
+  },
+  clearFinishedBackgroundJobs: async () => {
+    try {
+      const { removed } = await api.clearFinishedBackgroundJobs();
+      const gone = new Set(removed);
+      set((s) => ({ bgJobs: s.bgJobs.filter((job) => !gone.has(job.id)) }));
+    } catch (err) {
+      console.error("clear background jobs failed", err);
+    }
+  },
   boards: [],
   refreshBoards: async () => {
     try {
@@ -2329,6 +2387,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       void get().loadAdapters();
       void get().refreshFolders();
       void get().refreshBoards();
+      void get().refreshBackgroundJobs();
       await loadAppData(set, get);
     } catch (err) {
       set({
@@ -3526,6 +3585,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     const state = get();
+
+    if (event.type === "bg.updated") {
+      set({ bgJobs: upsertBackgroundJob(state.bgJobs, event.job) });
+      return;
+    }
+    if (event.type === "bg.removed") {
+      const gone = new Set(event.jobIds);
+      set({ bgJobs: state.bgJobs.filter((job) => !gone.has(job.id)) });
+      return;
+    }
 
     if (event.type === "session.updated") {
       // Board tasks live in their own list — mirror the authoritative row there.

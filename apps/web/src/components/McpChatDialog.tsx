@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { effectiveMcpServers, mcpServerEndpoint, type McpServerConfig } from "@acpio/shared";
+import {
+  BG_MCP_SERVER_ID,
+  effectiveMcpServers,
+  mcpServerEndpoint,
+  type McpServerConfig,
+} from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../lib/store";
 import { settingsPath } from "../lib/settingsNav";
@@ -82,7 +87,7 @@ export function McpChatDialog({
                   {s.name}
                 </span>
                 <span className={styles.rowType}>
-                  {t(mcpTypeMessageKey(s.type))}
+                  {s.id === BG_MCP_SERVER_ID ? t("settings.mcpBuiltin") : t(mcpTypeMessageKey(s.type))}
                 </span>
                 <button
                   type="button"

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import {
+  BG_MCP_SERVER_ID,
+  builtinMcpServers,
   isMcpServerConfigured,
   mcpFolderConfig,
   mcpServerEndpoint,
@@ -57,8 +59,12 @@ export function McpFolderDialog({
   const config = mcpFolderConfig(settings, key);
   const overrides = config?.overrides ?? {};
   // Every app-configured server is listed, including the ones switched off
-  // globally: a folder may turn one on for itself.
-  const globals = (settings.mcpServers ?? []).filter(isMcpServerConfigured);
+  // globally: a folder may turn one on for itself. acpio's own servers come
+  // first — they are switched off here the same way, by override.
+  const globals = [
+    ...builtinMcpServers(settings),
+    ...(settings.mcpServers ?? []).filter(isMcpServerConfigured),
+  ];
   const own = config?.servers ?? [];
   // Discovered servers already named by an app-configured one never attach
   // (see effectiveMcpServers), so they are not offered here either.
@@ -144,7 +150,9 @@ export function McpFolderDialog({
               {s.enabled ? null : (
                 <span className={styles.rowOff}>{t("chat.mcpFolderGlobalOff")}</span>
               )}
-              <span className={styles.rowType}>{t(mcpTypeMessageKey(s.type))}</span>
+              <span className={styles.rowType}>
+                {s.id === BG_MCP_SERVER_ID ? t("settings.mcpBuiltin") : t(mcpTypeMessageKey(s.type))}
+              </span>
               <Toggle
                 checked={mcpServerInFolder(config, s)}
                 onChange={(v) => setServerOn(s, v)}

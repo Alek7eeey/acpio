@@ -29,6 +29,7 @@ import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
+import { stageComposerAttachments } from "../lib/pendingComposerAttachments";
 import { buildSlashInsertion, filterSlashCommands, getSlashContext } from "../lib/slashCommands";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
 import { harnessLabel, isBuiltinFamilyProvider, pickCreateProvider } from "../lib/harness";
@@ -78,6 +79,15 @@ const MAX_TASK_FILES = 8;
  *  a phone has no right button to open it with. */
 const ATTACH_HOLD_MS = 500;
 
+/**
+ * Folders the "new chat based on this chat" dialog offers: the board's own
+ * folders in rail order — the new chat is a card of this board — falling back
+ * to the source chat's folder only when the board has none yet.
+ */
+function deriveFolderOptions(task: SessionDto, folders: string[]): string[] {
+  if (folders.length) return folders;
+  return [task.cwd];
+}
 /** One file picked for the task being written: a file the browser holds — up to
  *  be uploaded with the task — or one already on the server's disk, plus a
  *  preview when a picture is the thing the browser holds (an <img> pointed at a
@@ -698,6 +708,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** The tag as typed — committed on Enter or on blur, dropped on Escape. */
   const [tagDraft, setTagDraft] = useState("");
   const [exportTaskId, setExportTaskId] = useState<string | null>(null);
+  /** The chat "based on this chat" is being born from: source + chosen folder. */
+  const [deriveTask, setDeriveTask] = useState<SessionDto | null>(null);
+  const [deriveFolder, setDeriveFolder] = useState<string | null>(null);
+  /** Agent the derived chat is created for; empty = the settings default. */
+  const [deriveProvider, setDeriveProvider] = useState<AgentProvider | "">("");
+  const [deriveBusy, setDeriveBusy] = useState(false);
+  const [deriveError, setDeriveError] = useState<string | null>(null);
+  const [deriveBrowse, setDeriveBrowse] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
@@ -2132,6 +2150,34 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               </svg>
               {t("chat.exportChat")}
             </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                const task = taskMenu.task;
+                setTaskMenu(null);
+                setDeriveError(null);
+                // The chat lives on this board, so its folder comes from the
+                // board's own set; the source folder wins as the default
+                // when it is in it.
+                const options = deriveFolderOptions(task, board?.folders ?? []);
+                setDeriveFolder(options.includes(task.cwd) ? task.cwd : (options[0] ?? task.cwd));
+                setDeriveProvider("");
+                setDeriveTask(task);
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M7 5v6a4 4 0 0 0 4 4h6m0 0-3-3m3 3-3 3"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("chat.boardDeriveChat")}
+            </button>
           </div>,
           document.body,
         )}
@@ -2360,6 +2406,120 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </div>,
           document.body,
         )}
+
+      {deriveTask &&
+        createPortal(
+          <div className={styles.backdrop} onClick={() => setDeriveTask(null)}>
+            <div
+              className={styles.modal}
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("chat.deriveChatTitle")}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className={styles.modalTitle}>{t("chat.deriveChatTitle")}</div>
+              <p className={styles.modalText}>{t("chat.deriveChatHint")}</p>
+              <div className={styles.folderList}>
+                {deriveFolderOptions(deriveTask, board?.folders ?? []).map((cwd) => (
+                  <label key={cwd} className={styles.folderRow}>
+                    <input
+                      type="radio"
+                      name="derive-chat-folder"
+                      checked={deriveFolder === cwd}
+                      onChange={() => setDeriveFolder(cwd)}
+                    />
+                    <span className={styles.folderPath} title={cwd}>
+                      {folderLabel(cwd, cwd)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {/* The agent the derived chat goes to: the default one from
+                  settings unless another is picked here — the same row the
+                  board's new-task form carries. */}
+              <div className={styles.composerField}>
+                <span className={styles.composerFieldLabel}>{t("chat.boardTaskAgent")}</span>
+                <OptionPicker
+                  variant="compact"
+                  placement="down"
+                  menuTitle={t("chat.boardTaskAgent")}
+                  placeholder={t("common.pickAgent")}
+                  value={deriveProvider || defaultTaskProvider || deriveTask.provider}
+                  options={agentOptions.map((agent) => ({ value: agent.id, label: agent.label }))}
+                  onChange={(value) => setDeriveProvider(value as AgentProvider)}
+                />
+              </div>
+              <div className={styles.modalActions}>
+                <button type="button" className={styles.ghostBtn} onClick={() => setDeriveBrowse(true)}>
+                  {t("chat.boardDeriveBrowse")}
+                </button>
+                <span className={styles.folderSpacer} />
+                <button
+                  type="button"
+                  className={styles.ghostBtn}
+                  onClick={() => setDeriveTask(null)}
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={!deriveFolder || deriveBusy}
+                  onClick={() => {
+                    const task = deriveTask;
+                    const cwd = deriveFolder;
+                    if (!task || !cwd || deriveBusy) return;
+                    // No pick here means the default agent of the settings —
+                    // the source chat's own agent only when nothing is online.
+                    const provider = deriveProvider || defaultTaskProvider || task.provider;
+                    setDeriveBusy(true);
+                    setDeriveError(null);
+                    void (async () => {
+                      try {
+                        const ref = await api.exportChatReference(task.id);
+                        const created = await createBoardTask({
+                          boardId,
+                          cwd,
+                          description: "",
+                          provider,
+                        });
+                        if (!created) {
+                          setDeriveError(t("chat.deriveChatFailed"));
+                          return;
+                        }
+                        stageComposerAttachments(created.id, [
+                          { name: ref.fileName, path: ref.path, size: ref.size },
+                        ]);
+                        setDeriveTask(null);
+                        await openTask(created);
+                      } catch (err) {
+                        setDeriveError(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setDeriveBusy(false);
+                      }
+                    })();
+                  }}
+                >
+                  {deriveBusy ? t("chat.deriveChatWorking") : t("common.create")}
+                </button>
+              </div>
+              {deriveError && <p className={styles.modalError}>{deriveError}</p>}
+            </div>
+          </div>,
+          document.body,
+        )}
+
+      {deriveBrowse && (
+        <ServerFolderBrowseDialog
+          open
+          initialPath={deriveFolder ?? defaultCwd}
+          onClose={() => setDeriveBrowse(false)}
+          onSelect={(path) => {
+            setDeriveBrowse(false);
+            setDeriveFolder(path);
+          }}
+        />
+      )}
 
       {mcpCwd &&
         createPortal(

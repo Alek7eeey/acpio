@@ -15,6 +15,7 @@ import {
   normalizeBuiltinSubagents,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
+  normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
   normalizeCustomAgents,
   canonicalCwd,
@@ -307,6 +308,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (typeof merged.chatTitleModel !== "string") {
     merged.chatTitleModel = DEFAULT_SETTINGS.chatTitleModel;
   }
+  merged.chatTitleMaxLen = normalizeChatTitleMaxLen(merged.chatTitleMaxLen);
   merged.chatToolbarStyle =
     merged.chatToolbarStyle === "minimal" ? "minimal" : DEFAULT_SETTINGS.chatToolbarStyle;
   if (merged.attachDefaultSource !== "server") {

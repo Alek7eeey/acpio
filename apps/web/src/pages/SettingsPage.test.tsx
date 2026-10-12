@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
@@ -91,7 +91,10 @@ describe("SettingsPage form state", () => {
       </MemoryRouter>,
     );
 
-    const toggle = screen.getByRole("checkbox", { name: "Enabled" }) as HTMLInputElement;
+    // acpio's own server sits in the same table with the same switch, so the
+    // row is addressed by its server name.
+    const row = screen.getByText("Alpha").closest("div")!.parentElement as HTMLElement;
+    const toggle = within(row).getByRole("checkbox") as HTMLInputElement;
     expect(toggle.checked).toBe(true);
     await user.click(toggle);
     expect(toggle.checked).toBe(false);
@@ -103,6 +106,33 @@ describe("SettingsPage form state", () => {
     });
 
     expect(toggle.checked).toBe(false);
+  });
+
+  // acpio's own MCP server is a row like any other in Settings → MCP: the user
+  // sees it there and switches it off, which is the point of listing it.
+  it("lists acpio's own MCP server and saves its switch", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=mcp"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const row = screen.getByText("acpio_bg").closest("div")!.parentElement as HTMLElement;
+    const toggle = within(row).getByRole("checkbox") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    expect(toggle.checked).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ mcpBuiltinDisabledIds: ["builtin:acpio_bg"] }),
+      ),
+    );
   });
 
   // Regression: an unconditional `setForm(settings)` sync reverted the form on

@@ -39,6 +39,7 @@ import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registr
 import { globFiles, searchFiles, splitGlobScope } from "./agentFs.js";
 import { DATA_DIR } from "../db/client.js";
 import { offloadDir } from "@acpio/adapter-builtin";
+import { isBackgroundJobLogPath } from "../services/bgLogs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1354,9 +1355,20 @@ export class AcpClient extends EventEmitter {
     if (archived && !archived.startsWith("..") && !path.isAbsolute(archived)) {
       return resolved;
     }
+    // A background job's output is a file this chat owns (see bgLogs.ts): the
+    // agent reads it with `read` like any other file, so that folder is open
+    // for reading — this session's own, never another chat's.
+    if (isBackgroundJobLogPath(this.sessionId, resolved)) return resolved;
     throw new Error(
       `Path outside session cwd: ${resolved}. The session cwd is ${this.rootCwd()} — keep files, including scratch scripts, inside it.`,
     );
+  }
+
+  /** Directories a read-only search may scope to: the cwd, plus this chat's job logs. */
+  private assertSearchableDir(targetPath: string) {
+    const resolved = path.resolve(this.rootCwd(), targetPath);
+    if (!this.outsideCwdAllowed && isBackgroundJobLogPath(this.sessionId, resolved)) return resolved;
+    return this.assertInsideCwd(targetPath);
   }
 
   private killTerminalEntry(entry: TerminalEntry) {
@@ -1430,7 +1442,7 @@ export class AcpClient extends EventEmitter {
     const scope = String(params.path ?? "").trim();
     return searchFiles({
       root: this.rootCwd(),
-      ...(scope ? { dir: this.assertInsideCwd(scope) } : {}),
+      ...(scope ? { dir: this.assertSearchableDir(scope) } : {}),
       pattern: String(params.pattern ?? ""),
       ...(params.glob == null ? {} : { glob: String(params.glob) }),
       ignoreCase: params.ignore_case === true,

@@ -21,7 +21,7 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 6;
+export const SETTINGS_SCHEMA_VERSION = 7;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "folder",
@@ -32,6 +32,7 @@ const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "mcp",
   "context",
   "console",
+  "bgJobs",
 ];
 const DEFAULT_CHAT_META_CHIPS: ChatMetaChipId[] = [...CHAT_META_CHIP_IDS];
 
@@ -88,6 +89,11 @@ export function normalizeChatMetaChips(
         ? [...next.slice(0, folderIdx + 1), "board", ...next.slice(folderIdx + 1)]
         : ["board", ...next];
   }
+  // The background-task chip arrived last, so it joins saved lists at the end
+  // — where the default list keeps it.
+  if (schemaVersion < 7 && !next.includes("bgJobs")) {
+    next = [...next, "bgJobs"];
+  }
 
   const seen = new Set<ChatMetaChipId>();
   return next.filter((chip) => {
@@ -114,6 +120,22 @@ export function normalizeBoardTaskAgentPicker(value: unknown): boolean {
 
 export function normalizeChatGitBranchPosition(value: unknown): "below" | "above" {
   return value === "above" ? "above" : "below";
+}
+
+/** Bounds for the model-written chat title length, in characters. */
+export const CHAT_TITLE_MAX_LEN_MIN = 20;
+export const CHAT_TITLE_MAX_LEN_MAX = 200;
+
+/**
+ * Heal the model-written chat title length. Anything not a finite number falls
+ * back to the default; the value clamps to a range where a title is still a
+ * title and still fits the chat list.
+ */
+export function normalizeChatTitleMaxLen(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.chatTitleMaxLen;
+  }
+  return Math.min(CHAT_TITLE_MAX_LEN_MAX, Math.max(CHAT_TITLE_MAX_LEN_MIN, Math.round(value)));
 }
 
 /** Upper bound for the chat-tree "newest chats per folder" cap. */
@@ -424,8 +446,12 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.attachDefaultSource = partial.attachDefaultSource === "server" ? "server" : "device";
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
+  merged.chatTitleMaxLen = normalizeChatTitleMaxLen(partial.chatTitleMaxLen);
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
   merged.mcpProjectFiles = normalizeMcpProjectFiles(partial.mcpProjectFiles);
+  merged.mcpBuiltinDisabledIds = Array.isArray(partial.mcpBuiltinDisabledIds)
+    ? partial.mcpBuiltinDisabledIds.filter((id): id is string => typeof id === "string")
+    : [...DEFAULT_SETTINGS.mcpBuiltinDisabledIds];
   merged.builtinSkillPaths = normalizeSkillPaths(partial.builtinSkillPaths);
   merged.builtinExtraInstructions = normalizeBuiltinExtraInstructions(
     partial.builtinExtraInstructions,

@@ -1,0 +1,265 @@
+.page {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.head {
+  max-width: 980px;
+  margin: 0 auto 14px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.headText {
+  min-width: 0;
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.hint {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.counter {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+}
+
+.button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 6px 11px;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--bg-secondary);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.danger {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.empty {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  text-align: center;
+}
+
+.emptyTitle {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.emptyHint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 980px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+.dot_running {
+  background: var(--accent);
+  animation: bgPulse 1.4s ease-in-out infinite;
+}
+
+.dot_exited {
+  background: var(--success);
+}
+
+.dot_killed {
+  background: var(--text-secondary);
+}
+
+.dot_failed {
+  background: var(--danger);
+}
+
+@keyframes bgPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rowHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.label {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+.status {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.status_running {
+  color: var(--accent);
+}
+
+.status_failed {
+  color: var(--danger);
+}
+
+.status_exited {
+  color: var(--success);
+}
+
+.script {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.metaItem {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46ch;
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: none;
+}
+
+.output {
+  margin: 0;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 700px) {
+  .row {
+    flex-wrap: wrap;
+  }
+
+  .rowActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

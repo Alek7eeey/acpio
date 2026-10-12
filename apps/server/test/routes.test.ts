@@ -29,6 +29,7 @@ import {
   createMessage,
   reconcileStaleSessions,
 } from "../src/services/sessions.js";
+import { BG_MCP_SERVER_ID, BG_MCP_SERVER_NAME } from "@acpio/shared";
 import type { GitCommitDetailDto, GitCommitDto, GitStatusDto, MessagePartDto, SessionDetailDto } from "@acpio/shared";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
@@ -353,6 +354,30 @@ describe("health & settings", () => {
         },
       ],
     });
+  });
+
+  it("PUT /api/settings keeps a provider's extra request body", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: "http://127.0.0.1:1/v1",
+            apiKey: "",
+            models: [{ id: "m1" }],
+            body: '{"reasoning_effort":"high"}',
+          },
+        ],
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    // The adapter merges this object into every request, so a schema that
+    // drops it turns the field into a dead switch in the UI.
+    expect(body.builtinProviders[0].body).toBe('{"reasoning_effort":"high"}');
   });
 
   it("heals stored builtin subagents saved before the row rules", async () => {
@@ -1130,6 +1155,29 @@ describe("export", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toContain("Invalid enum value");
   });
+
+  it("POST export/reference saves into acpio's own chat-refs folder and reports size; unknown session → 404", async () => {
+    const session = await seedExportSession();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/export/reference`,
+    });
+    expect(res.statusCode).toBe(200);
+    const b = res.json();
+    expect(b.ok).toBe(true);
+    expect(b.fileName).toMatch(/\.md$/);
+    // The link file must live in acpio's data dir, never in a project folder.
+    expect(path.basename(path.dirname(b.path))).toBe("chat-refs");
+    const stat = await fsp.stat(b.path);
+    expect(b.size).toBe(stat.size);
+    expect(b.size).toBeGreaterThan(0);
+
+    const missing = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${UNKNOWN_UUID}/export/reference`,
+    });
+    expect(missing.statusCode).toBe(404);
+  });
 });
 
 describe("bulk export", () => {
@@ -1555,7 +1603,85 @@ describe("folder MCP files reach the agent", () => {
     const detail = await waitForDetail(session.id, (d) =>
       textParts(d).some((text) => text.startsWith("mcp=")),
     );
-    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe("mcp=folder-fs");
+    // acpio's own background runner rides along with every chat, so it is part
+    // of the list the agent reports.
+    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe(
+      `mcp=folder-fs,${BG_MCP_SERVER_NAME}`,
+    );
+  });
+
+  it("leaves acpio's own runner out when it is switched off globally", async () => {
+    const cwd = await newTempDir("acpio-mcp-builtin-off-");
+    await connectAgent();
+    const saved = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID] },
+    });
+    expect(saved.statusCode).toBe(200);
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "MCP-LIST" },
+    });
+    const detail = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => text.startsWith("mcp=")),
+    );
+    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe("mcp=");
+  });
+
+  it("leaves acpio's own runner out when the chat switches it off", async () => {
+    const cwd = await newTempDir("acpio-mcp-builtin-chat-off-");
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    // The chat's agent starts with acpio's runner attached...
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "MCP-LIST" },
+    });
+    const before = await waitForDetail(session.id, (d) =>
+      textParts(d).some((text) => text.startsWith("mcp=")),
+    );
+    expect(textParts(before).find((text) => text.startsWith("mcp="))).toBe(
+      `mcp=${BG_MCP_SERVER_NAME}`,
+    );
+
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${session.id}`,
+      payload: { mcpDisabledIds: [BG_MCP_SERVER_ID] },
+    });
+    expect(patched.statusCode).toBe(200);
+
+    // ...and the switch restarts it: keep asking until the new list arrives.
+    const deadline = Date.now() + 10_000;
+    let dropped = false;
+    while (!dropped && Date.now() < deadline) {
+      await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "MCP-LIST" },
+      });
+      try {
+        await waitForDetail(session.id, (d) => textParts(d).some((text) => text === "mcp="), 3_000);
+        dropped = true;
+      } catch {
+        // restart still pending — ask again
+      }
+    }
+    expect(dropped).toBe(true);
   });
 
   it("attaches a globally disabled server the chat's folder switched on", async () => {
@@ -1592,7 +1718,9 @@ describe("folder MCP files reach the agent", () => {
     );
     // The folder's switch decides, in both directions: the globally off server
     // attaches, the globally on one does not.
-    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe("mcp=folder-on");
+    expect(textParts(detail).find((text) => text.startsWith("mcp="))).toBe(
+      `mcp=folder-on,${BG_MCP_SERVER_NAME}`,
+    );
   });
 });
 
@@ -1629,7 +1757,9 @@ describe("folder MCP settings reach live board tasks", () => {
     const before = await waitForDetail(session.id, (d) =>
       textParts(d).some((text) => text.startsWith("mcp=")),
     );
-    expect(textParts(before).find((text) => text.startsWith("mcp="))).toBe("mcp=");
+    expect(textParts(before).find((text) => text.startsWith("mcp="))).toBe(
+      `mcp=${BG_MCP_SERVER_NAME}`,
+    );
 
     // The folder gains a server while that agent is alive: the settings route
     // fires the restart sweep, which must reach board tasks too.
@@ -1669,7 +1799,7 @@ describe("folder MCP settings reach live board tasks", () => {
       try {
         await waitForDetail(
           session.id,
-          (d) => textParts(d).some((text) => text === "mcp=folder-own"),
+          (d) => textParts(d).some((text) => text === `mcp=folder-own,${BG_MCP_SERVER_NAME}`),
           3_000,
         );
         pickedUp = true;

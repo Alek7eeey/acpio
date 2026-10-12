@@ -27,6 +27,7 @@ import {
   type AgentMode,
   type AgentProvider,
   type AppSettings,
+  type BackgroundJobDto,
   type HarnessAdapter,
   type HarnessSessionDto,
   type ModelOption,
@@ -71,6 +72,11 @@ import {
 } from "../services/sessions.js";
 import { refineSessionTitle } from "../services/chatTitle.js";
 import { broadcastToSession } from "../services/wsHub.js";
+import {
+  backgroundJobNoteTail,
+  formatBackgroundJobNote,
+  resolveBackgroundMcp,
+} from "../services/backgroundJobs.js";
 import {
   adapterCommand,
   adapters,
@@ -466,6 +472,16 @@ type TurnOpts = {
    * every prompt that came through the wire before this existed.
    */
   delivery?: PromptDelivery;
+  /**
+   * This text is a settled background job's note, not something a reader typed.
+   * When it can fold into the running turn, it is written into that turn as a
+   * `note` part: the work it caused belongs to the same answer, so the note
+   * belongs in that answer's transcript, not in a message of its own. A note
+   * nothing can fold into (idle chat, a harness that cannot steer) is a prompt
+   * like any other and gets a user message — which is, in that case, also the
+   * only place the reader sees the result.
+   */
+  backgroundJobNote?: boolean;
 };
 
 /** Attachment chosen from the server machine — referenced or staged into the cwd. */
@@ -902,10 +918,16 @@ async function bootAcp(
   );
   // This chat's MCP list: global (minus folder-disabled ids, plus the
   // folder's own servers and the servers its MCP files declare) minus ids
-  // disabled for this chat.
-  const mcpServers = effectiveMcpServers(settings, detail?.mcpDisabledIds, opts.cwd, [
-    ...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers,
-  ]);
+  // disabled for this chat — acpio's own background runner included, since it
+  // is an ordinary entry in that list (Settings → MCP, a folder override or
+  // the chat's dialog can switch it off). All that is left is to give it this
+  // boot's endpoint.
+  const mcpServers = resolveBackgroundMcp(
+    effectiveMcpServers(settings, detail?.mcpDisabledIds, opts.cwd, [
+      ...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers,
+    ]),
+    sessionId,
+  );
   appliedMcpFingerprints.set(sessionId, mcpServersFingerprint(mcpServers));
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
@@ -2618,8 +2640,9 @@ export async function runPrompt(
       () => {},
     );
   };
-  try {
-  if (!opts.editMessageId) {
+  /** The user message this prompt is recorded as. Written on demand: a note
+   *  that folds into the running turn is not a prompt at all. */
+  const writeUserMessage = async () => {
     const userMsg = await createMessage(sessionId, "user");
     userMessageId = userMsg.id;
     const trimmed = text.trim();
@@ -2673,8 +2696,13 @@ export async function runPrompt(
         embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
       }]`;
     }
-  } else {
+  };
+
+  try {
+  if (opts.editMessageId) {
     userMessageId = opts.editMessageId;
+  } else if (!opts.backgroundJobNote) {
+    await writeUserMessage();
   }
 
   if (opts.titleHint) {
@@ -2738,6 +2766,10 @@ export async function runPrompt(
       const folded = await steerUntilFolded(rt, promptUserText);
       if (folded) {
         rt.startingTurn = false;
+        // The note never becomes a message of its own: it is written into the
+        // turn that took it, where the reader sees it between the work that
+        // caused it and the work it set off.
+        if (opts.backgroundJobNote) await appendNotePart(rt, text);
         await updateSession(sessionId, { status: "running" }).catch(() => {});
         return { queued: false, steered: true };
       }
@@ -2748,6 +2780,9 @@ export async function runPrompt(
     // busy flag now — ours arrives later via dequeueTurn. If the chat was
     // parked on a question, restore that status: our early write said
     // "running", but the visible state is still "waiting".
+    // A note that nothing could take is a prompt after all — and has to be in
+    // the transcript, since that is where the reader finds the result.
+    if (!userMessageId) await writeUserMessage();
     settlePreTurnClaim();
     rt.turnQueue.push({ userMessageId: userMessageId!, text: promptUserText, images: promptImages, opts });
     if (!rt.running && rt.pending.size > 0) {
@@ -2756,6 +2791,7 @@ export async function runPrompt(
     return { queued: true };
   }
 
+  if (!userMessageId) await writeUserMessage();
   try {
     return await runTurn(
       rt,
@@ -2769,6 +2805,27 @@ export async function runPrompt(
     );
   } finally {
     rt.startingTurn = false;
+  }
+}
+
+/**
+ * Write a settled job's note into the turn that took it.
+ *
+ * The note is a line of that turn's own transcript: it is handed over as a
+ * `note` part, appended at the end of the message's parts — which is exactly
+ * where it arrived, since everything the agent writes next comes after it. The
+ * chat draws it as a background-job card between the two stretches of work,
+ * and it needs no message of its own (the text reached the model through the
+ * steer that folded it in).
+ */
+async function appendNotePart(rt: SessionRuntime, text: string): Promise<void> {
+  try {
+    const messageId = rt.assistantMessageId ?? (await ensureAssistantMessage(rt));
+    await appendPart(rt.sessionId, messageId, "note", { text });
+  } catch (err) {
+    // The turn already took the text and is acting on it; the part is the
+    // transcript's record of that. Failing to write it must not kill the job.
+    console.error(`[bg] could not record a note in chat ${rt.sessionId}`, err);
   }
 }
 
@@ -2810,6 +2867,37 @@ export async function steerUntilFolded(
     }
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, retryMs));
+  }
+}
+
+/**
+ * A background job settled: wake the chat with the note that names it.
+ *
+ * The note rides the delivery every mid-turn message already uses — `afterStep`
+ * folds it into the running turn when the harness can fold (the built-in agent
+ * does), and otherwise it becomes a queued turn of its own, which is exactly
+ * what an idle chat needs: the model wakes up, reads the output tail and
+ * carries on. That is the behaviour omp gives its own async jobs; the job here
+ * was started through acpio's MCP server, so acpio has to deliver it.
+ */
+export async function notifyBackgroundJobDone(job: BackgroundJobDto): Promise<void> {
+  try {
+    const detail = await getSessionDetail(job.sessionId);
+    if (!detail) return;
+    const settings = await getSettings();
+    const note = formatBackgroundJobNote(job, backgroundJobNoteTail(job.id), settings.locale ?? "en");
+    await runPrompt(job.sessionId, note, {
+      provider: detail.provider,
+      cwd: detail.cwd,
+      mode: detail.mode,
+      delivery: "afterStep",
+      backgroundJobNote: true,
+    });
+  } catch (err) {
+    // A chat that cannot take the note (agent offline, session mid-teardown)
+    // must not take the server down with it: the job row still holds the
+    // result, and the user sees it in the tasks page.
+    console.error(`[bg] could not deliver job ${job.id} to chat ${job.sessionId}`, err);
   }
 }
 
@@ -3827,9 +3915,12 @@ export async function restartSessionsForMcpChange(): Promise<void> {
     // Only sessions whose OWN effective list changed (a folder edit must not
     // respawn agents opened in other folders).
     const desired = mcpServersFingerprint(
-      effectiveMcpServers(settings, row.mcpDisabledIds, row.cwd, [
-        ...(await discoverProjectMcp(row.cwd, settings.mcpProjectFiles)).servers,
-      ]),
+      resolveBackgroundMcp(
+        effectiveMcpServers(settings, row.mcpDisabledIds, row.cwd, [
+          ...(await discoverProjectMcp(row.cwd, settings.mcpProjectFiles)).servers,
+        ]),
+        sessionId,
+      ),
     );
     if (appliedMcpFingerprints.get(sessionId) === desired) continue;
     if (await restartSessionMcp(sessionId)) restarted += 1;

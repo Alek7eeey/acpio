@@ -375,11 +375,12 @@ describe("compaction row", () => {
         role: "assistant",
         createdAt: "2026-09-30T10:00:01.000Z",
         parts: [
+          part("t1", "thought", 0, "Сначала посмотрю файлы"),
           {
             id: "c1",
             messageId: "m1",
             type: "compaction",
-            order: 0,
+            order: 1,
             payload: {
               manual: false,
               coveredBefore: 0,
@@ -390,9 +391,9 @@ describe("compaction row", () => {
             },
             createdAt: "2026-09-30T10:00:01.000Z",
           },
-          // Two phases, so the turn really does fold into a "Работал" spoiler:
-          // a row asserted outside a spoiler that never rendered proves nothing.
-          part("t1", "thought", 1, "Сначала посмотрю файлы"),
+          // Work on both sides of the squeeze, so the turn really does fold into
+          // a "Работал" spoiler and the row has something to stand between: a row
+          // asserted inside a body that never rendered proves nothing.
           part("x1", "text", 2, "Проверил папку"),
           part("t2", "thought", 3, "Теперь читаю файлы"),
           part("x2", "text", 4, "Готово: два файла"),
@@ -425,19 +426,28 @@ describe("compaction row", () => {
       </MemoryRouter>,
     );
 
-  it("stands on the surface of the thread: sizes, turns and the digest behind the toggle", async () => {
+  it("stands inside the turn it squeezed, in place: sizes, turns, digest behind the toggle", async () => {
     const { container } = renderThread();
     await screen.findByText("Контекст сжат");
 
-    // The turn itself is folded, as always — and the squeeze is not inside it.
+    // The turn is folded, as always — and the squeeze is a line of it: the work
+    // the window held stands above the row, the work that ran on the digest
+    // below it, exactly where the agent crossed that line.
     const spoiler = container.querySelector<HTMLElement>(`.${styles.steps}`);
     expect(spoiler).toBeTruthy();
     expect(spoiler?.textContent).toContain("Сначала посмотрю файлы");
 
     const row = container.querySelector<HTMLElement>("[data-compaction-id]");
     expect(row).toBeTruthy();
-    expect(row?.closest(`.${styles.steps}`)).toBeNull();
-    expect(row?.closest(`.${styles.stepsBody}`)).toBeNull();
+    expect(row?.closest(`.${styles.stepsBody}`)).not.toBeNull();
+    const body = row?.closest(`.${styles.stepsBody}`) as HTMLElement;
+    const rows = [...body.children];
+    const at = rows.indexOf(row!);
+    expect(rows[at - 1]?.textContent).toContain("Сначала посмотрю файлы");
+    expect(rows[at + 1]?.textContent).toContain("Проверил папку");
+    expect(rows.slice(at + 1).map((el) => el.textContent ?? "").join(" ")).toContain(
+      "Теперь читаю файлы",
+    );
 
     expect(row?.textContent).toContain("ходы 1–6");
     expect(row?.textContent).toContain("9k → 2.5k токенов");

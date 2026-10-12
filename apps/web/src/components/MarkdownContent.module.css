@@ -87,11 +87,15 @@
 }
 
 /* A picture the agent put in its own text (see MarkdownImage): the file on
-   disk behind a path, or a remote URL. */
-.imageLink {
+   disk behind a path, or a remote URL. Clicking it opens the viewer. */
+.imageButton {
   display: inline-block;
   max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
   line-height: 0;
+  cursor: zoom-in;
 }
 
 .image {
@@ -104,7 +108,7 @@
   object-fit: contain;
 }
 
-.imageLink:hover .image {
+.imageButton:hover .image {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
