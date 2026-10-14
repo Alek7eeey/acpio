@@ -2,12 +2,26 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MessageDto, SessionDto } from "@acpio/shared";
 import { api } from "../lib/api";
+import { finalAnswerPart } from "../lib/assistantTurnTimeline";
 import { useT } from "../lib/i18n";
 import { messagePlainText } from "../lib/messageText";
 import styles from "./BoardTaskPeek.module.css";
 
 /** How much of a chat the peek shows: the last turns, not the whole log. */
 const PEEK_MESSAGES = 8;
+
+/**
+ * What one message reads as here. An assistant message holds the whole turn:
+ * the narration it wrote before its tool calls, then the answer. That lead-in
+ * is no answer of its own — the chat page keeps it inside the steps block —
+ * and quoting it would show the beginning of the turn where the peek was
+ * opened for what the agent said.
+ */
+function peekText(message: MessageDto): string {
+  if (message.role !== "assistant") return messagePlainText(message);
+  const answer = finalAnswerPart(message.parts);
+  return String(answer?.payload.text ?? "").trim();
+}
 
 /** i18n key of each role's label in the peek — the exporter's own names. */
 const ROLE_LABEL_KEY = {
@@ -63,7 +77,7 @@ export function BoardTaskPeek({
   // A chat reads bottom-up: the peek opens on the last turn, and only the
   // turns that carry text are shown — a tool call is nothing to read here.
   const turns = (messages ?? [])
-    .map((message) => ({ message, text: messagePlainText(message) }))
+    .map((message) => ({ message, text: peekText(message) }))
     .filter((entry) => entry.text)
     .slice(-PEEK_MESSAGES);
 
