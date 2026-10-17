@@ -231,29 +231,34 @@ The version is derived from git history — patch +1 per calendar day that has a
 
 ### Releasing
 
-Pushing a `v<version>` tag publishes the npm package
-(`.github/workflows/release.yml`; publishes over npm trusted publishing, so no
-token or one-time password is involved — the package's Settings → Trusted
-publishing names this repo and `release.yml`):
+A release is one tag, and it can be made either way round — from the terminal:
 
 ```bash
 git tag v0.1.39 && git push origin v0.1.39
 ```
 
+or from the UI: **Actions → release → Run workflow**, which publishes the version
+the checkout derives and pushes the tag itself. The manual run takes three
+switches:
+
+- `publish` (off by default) — off builds and checks the package, on publishes it;
+- `tag` (on by default) — push `v<version>` once the publish went through, unless
+  that tag already exists;
+- `notes` — what changed: it becomes the GitHub Release body. Left empty, the body
+  comes from the annotated tag (`git tag -a v0.1.39 -m "…"`) or, for a lightweight
+  one, from the commits since the previous release.
+
+Both doors end the same way: the package on npm (over trusted publishing, so no
+token and no one-time password — the package's Settings → Trusted publishing
+names this repo and `release.yml`) and a GitHub Release at `v<version>` that says
+what changed.
+
 The tag must equal the version git derives (the top row of `VERSIONS.md`) — the
 workflow packs with `--expect-tag` and refuses otherwise, so what npm serves can
 never disagree with the number the app itself reports. The patch bumps once per
-commit day, and that is also the release cadence: a tag for a version already on
-npm is skipped, and code committed after the tag needs the next day's bump.
-
-The same workflow can be started from the GitHub UI (**Actions → release → Run
-workflow**) — handy for checking a build or a fresh trusted publishing
-configuration without cutting a release:
-
-- `dry_run` (on by default) — build and validate the package, publish nothing;
-- `prerelease` — publish `<version>-rc.<run number>` under the `next` dist-tag: a
-  build installable from the registry while `latest` stays untouched, so the
-  release number itself is not spent.
+commit day, and that is also the release cadence: a run whose version is already
+on npm publishes nothing and releases nothing, and code committed after a tag
+needs the next day's bump.
 
 ## License
 

@@ -1,22 +1,21 @@
-# Publishes the npm package `acpio`.
+# Publishes the npm package `acpio` and cuts a GitHub Release for it.
 #
 # Two ways in:
 #
-#   git tag v0.1.39 && git push origin v0.1.39      # a release
-#   Actions → release → Run workflow                # a manual run (this file's
-#                                                   # workflow_dispatch inputs)
+#   git tag v0.1.39 && git push origin v0.1.39   # a release from a tag you made
+#   Actions → release → Run workflow             # the same from the UI: this
+#                                                # workflow publishes and pushes
+#                                                # the tag itself
 #
-# A tag release takes the version from git history (scripts/versionHistory.mjs,
-# the number stamped into VERSIONS.md) and refuses to continue unless the tag
-# equals it, so what npm serves can never disagree with the number the app
-# itself reports.
+# The version is never an input — it is a function of git history
+# (scripts/versionHistory.mjs, the number stamped into VERSIONS.md). A tag release
+# refuses to continue unless its tag equals that number; a manual run publishes
+# exactly what the checkout derives. So what npm serves cannot disagree with the
+# number the app itself reports, whichever door was used.
 #
-# A manual run has no tag to match: with no input it packs the version of the
-# checked-out revision and stops there. `dry_run: false` publishes that version
-# (which is a no-op if it is already on npm), and `prerelease: true` publishes
-# `<version>-rc.<run number>` under the `next` dist-tag instead. That last one is
-# the way to verify a build on the registry — and to validate a trusted
-# publishing configuration — without claiming the release number itself.
+# The tag a manual run pushes goes out with GITHUB_TOKEN, and events caused by
+# that token do not start workflows — so tagging here cannot re-trigger this
+# workflow and publish twice.
 #
 # Authentication is npm trusted publishing (OIDC): no secret, no one-time
 # password. The package's Settings → Trusted publishing names this repo and
@@ -34,18 +33,22 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Only build the package, publish nothing (ignored when prerelease is on)"
-        type: boolean
-        default: true
-      prerelease:
-        description: "Publish <version>-rc.<run> under the `next` dist-tag (publishes even with dry_run on)"
+      publish:
+        description: "Publish the derived version to npm (off = only build the package)"
         type: boolean
         default: false
+      tag:
+        description: "Push v<version> after a successful publish (an existing tag is left alone)"
+        type: boolean
+        default: true
+      notes:
+        description: "What changed — the GitHub Release body (empty = the tagged message, else the commits)"
+        type: string
+        required: false
 
 permissions:
-  contents: read
-  id-token: write
+  contents: write # push the release tag and write the GitHub Release
+  id-token: write # npm trusted publishing (OIDC)
 
 jobs:
   npm:
@@ -53,8 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The version comes from the whole history — a shallow clone would
-          # derive a smaller patch number and fail the tag check.
+          # Both the version and the notes are functions of the whole history —
+          # a shallow clone would derive a smaller patch number and fail the tag
+          # check.
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
@@ -67,23 +71,54 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             npm run pack:npm -- --expect-tag "$GITHUB_REF_NAME"
-          elif [ "${{ inputs.prerelease }}" = "true" ]; then
-            npm run pack:npm -- --version-suffix "-rc.${{ github.run_number }}"
           else
             npm run pack:npm
           fi
 
       - name: Publish (trusted publishing)
-        if: github.event_name == 'push' || inputs.prerelease == true || inputs.dry_run == false
+        id: publish
+        if: github.event_name == 'push' || inputs.publish == true
         run: |
+          echo "published=false" >> "$GITHUB_OUTPUT"
           spec=$(node -p "const p = require('./dist-npm/package.json'); p.name + '@' + p.version")
           if npm view "$spec" version >/dev/null 2>&1; then
-            echo "$spec is already on npm — nothing to publish."
+            echo "$spec is already on npm — nothing to publish, nothing to release."
             exit 0
           fi
           npm install -g npm@latest
-          tag=""
-          if [ "${{ inputs.prerelease }}" = "true" ]; then
-            tag="--tag next"
+          npm publish ./dist-npm --provenance --access public
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tag the release
+        if: steps.publish.outputs.published == 'true' && inputs.tag == true
+        run: |
+          version=$(node -p "require('./dist-npm/package.json').version")
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version already exists — left as it is."
+            exit 0
           fi
-          npm publish ./dist-npm --provenance --access public $tag
+          git tag "v$version"
+          git push origin "v$version"
+
+      - name: Release notes
+        if: steps.publish.outputs.published == 'true'
+        run: |
+          version=$(node -p "require('./dist-npm/package.json').version")
+          if [ "${{ github.event_name }}" = "push" ]; then
+            node scripts/release-notes.mjs --version "$version" > notes.md
+          else
+            node scripts/release-notes.mjs --version "$version" --extra "${{ inputs.notes }}" > notes.md
+          fi
+          cat notes.md
+
+      - name: GitHub Release
+        if: steps.publish.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./dist-npm/package.json').version")
+          if gh release view "v$version" >/dev/null 2>&1; then
+            gh release edit "v$version" --notes-file notes.md
+          else
+            gh release create "v$version" --title "acpio $version" --notes-file notes.md
+          fi
