@@ -16,6 +16,20 @@ Chat with streamed reasoning, tool calls and subagents, settings, META-style lig
 
 ## Quick start
 
+**From npm (any OS, no build step)** — the fastest way:
+
+```bash
+npx acpio          # run without installing
+npm i -g acpio     # global → `acpio`
+```
+
+Opens http://localhost:18741; `acpio --help` and `acpio --version` answer without
+starting anything.
+
+> **npm 12+** skips install-time scripts unless the package is allowed, and they
+> are what builds the native modules — add
+> `--allow-scripts=acpio,better-sqlite3,node-pty` to the commands above.
+
 **One-click install (Windows)** — Node 20+ is required and installed
 automatically on the first run:
 
@@ -48,7 +62,8 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 
 - Prod: [http://localhost:18741](http://localhost:18741) — UI + API + WebSocket
 - Dev: UI [http://localhost:18751](http://localhost:18751), API [http://localhost:18741](http://localhost:18741)
-- DB file: `data/acpio.db` (override with `DATABASE_PATH` in `.env`)
+- DB file: `data/acpio.db` (override with `DATABASE_PATH` in `.env`); the npm
+  CLI keeps it in a per-user directory (`%LOCALAPPDATA%\acpio\data`)
 
 ## Screenshots
 
@@ -88,32 +103,23 @@ npm run build
 npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
-### From npm
+### npm package
 
-```bash
-npm i -g acpio     # global → `acpio`
-npx acpio          # run without installing
-```
+`npm run pack:npm` builds the publishable package into `dist-npm/`: the compiled
+server, the web UI, the bundled workspace packages, `bin/acpio.mjs` (the CLI) and
+the postinstall node-pty patch. Registry dependencies are left to the consumer's
+install, so the artifact holds no platform-specific binary and any machine can
+build it. Publish it with `npm publish ./dist-npm` — a release tag does that by
+itself over npm trusted publishing (see "Releasing").
 
-The package carries the compiled server, the web UI and the workspace packages;
-Node >= 20 is required.
-
-> **npm 12+** skips install-time lifecycle scripts unless a package is allowed,
-> and those scripts are what builds/downloads the native modules
-> (`better-sqlite3`, `node-pty`) and applies the node-pty ConPTY patch. Add
-> `--allow-scripts=acpio,better-sqlite3,node-pty` to the command above, or the
-> app stops on a missing-bindings error.
-
-`acpio` opens http://localhost:18741 (`acpio --help`, `acpio --version`).
-
-Its SQLite file lives in a per-user directory — `%LOCALAPPDATA%\acpio\data`,
-`$XDG_DATA_HOME`/`~/.local/share/acpio/data` or
+The installed CLI keeps its SQLite file in a per-user directory —
+`%LOCALAPPDATA%\acpio\data`, `$XDG_DATA_HOME`/`~/.local/share/acpio/data` or
 `~/Library/Application Support/acpio/data` — so `npm i -g acpio@latest` never
 touches your chats (`DATABASE_PATH` overrides it; `PORT` / `ACPIO_PORT` / `HOST`
-work as in the source build).
-
-Build the tarball locally with `npm run pack:npm` → `dist-npm/`, publish it with
-`npm publish ./dist-npm` (a release tag does both — see "Releasing").
+work as in the source build). npm 12 skips install-time scripts unless the
+package is allowed, and those scripts build/download `better-sqlite3` and
+`node-pty` and apply the ConPTY patch — hence
+`npm i -g acpio --allow-scripts=acpio,better-sqlite3,node-pty`.
 
 ### Portable bundle (Windows)
 

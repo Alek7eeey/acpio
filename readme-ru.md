@@ -16,6 +16,20 @@
 
 ## Быстрый старт
 
+**Из npm-пакета (любая ОС, без сборки)** — самый быстрый способ:
+
+```bash
+npx acpio          # запустить без установки
+npm i -g acpio     # глобально → `acpio`
+```
+
+Открывает http://localhost:18741; `acpio --help` и `acpio --version` отвечают,
+ничего не запуская.
+
+> **npm 12+** не запускает install-скрипты пакета, пока его не разрешат, а
+> именно они собирают нативные модули — добавьте к командам выше
+> `--allow-scripts=acpio,better-sqlite3,node-pty`.
+
 **Установка в один клик (Windows)** — нужен Node 20+ (ставится автоматически
 при первом запуске):
 
@@ -48,7 +62,8 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 
 - Прод: [http://localhost:18741](http://localhost:18741) — UI + API + WebSocket
 - Dev: UI [http://localhost:18751](http://localhost:18751), API [http://localhost:18741](http://localhost:18741)
-- Файл БД: `data/acpio.db` (переопределяется через `DATABASE_PATH` в `.env`)
+- Файл БД: `data/acpio.db` (переопределяется через `DATABASE_PATH` в `.env`);
+  npm-версия держит его в пользовательском каталоге (`%LOCALAPPDATA%\acpio\data`)
 
 ## Скриншоты
 
@@ -88,32 +103,23 @@ npm run build
 npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
 
-### Из npm
+### npm-пакет
 
-```bash
-npm i -g acpio     # глобально → `acpio`
-npx acpio          # запустить без установки
-```
+`npm run pack:npm` собирает публикуемый пакет в `dist-npm/`: скомпилированный
+сервер, веб-UI, пакеты воркспейсов, `bin/acpio.mjs` (CLI) и postinstall-патч
+node-pty. Зависимости из реестра ставит уже потребитель, поэтому в артефакте нет
+платформенных бинарников и собрать его может любая машина. Публикация —
+`npm publish ./dist-npm` (тег релиза делает это сам по npm trusted publishing,
+см. «Релиз»).
 
-В пакете — скомпилированный сервер, веб-UI и пакеты воркспейсов; нужен
-Node >= 20.
-
-> **npm 12+** не запускает install-скрипты пакета, пока его не разрешат, а
-> именно они собирают/скачивают нативные модули (`better-sqlite3`, `node-pty`) и
-> накатывают патч ConPTY для node-pty. Добавьте к команде выше
-> `--allow-scripts=acpio,better-sqlite3,node-pty`, иначе приложение падает на
-> «missing bindings».
-
-`acpio` открывает http://localhost:18741 (`acpio --help`, `acpio --version`).
-
-Файл SQLite лежит в пользовательском каталоге — `%LOCALAPPDATA%\acpio\data`,
-`$XDG_DATA_HOME`/`~/.local/share/acpio/data` или
+Установленный CLI держит файл SQLite в пользовательском каталоге —
+`%LOCALAPPDATA%\acpio\data`, `$XDG_DATA_HOME`/`~/.local/share/acpio/data` или
 `~/Library/Application Support/acpio/data` — поэтому `npm i -g acpio@latest` не
 трогает ваши чаты (`DATABASE_PATH` перекрывает это; `PORT` / `ACPIO_PORT` / `HOST`
-работают как в сборке из исходников).
-
-Собрать архив локально — `npm run pack:npm` → `dist-npm/`, опубликовать —
-`npm publish ./dist-npm` (тег релиза делает и то и другое — см. «Релиз»).
+работают как в сборке из исходников). npm 12 не запускает install-скрипты
+пакета, пока его не разрешат, а именно они собирают/скачивают `better-sqlite3` и
+`node-pty` и накатывают патч ConPTY — отсюда
+`npm i -g acpio --allow-scripts=acpio,better-sqlite3,node-pty`.
 
 ### Портативный дистрибутив (Windows)
 
