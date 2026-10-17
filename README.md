@@ -237,7 +237,7 @@ token or one-time password is involved — the package's Settings → Trusted
 publishing names this repo and `release.yml`):
 
 ```bash
-git tag v0.1.37 && git push origin v0.1.37
+git tag v0.1.39 && git push origin v0.1.39
 ```
 
 The tag must equal the version git derives (the top row of `VERSIONS.md`) — the
@@ -245,6 +245,15 @@ workflow packs with `--expect-tag` and refuses otherwise, so what npm serves can
 never disagree with the number the app itself reports. The patch bumps once per
 commit day, and that is also the release cadence: a tag for a version already on
 npm is skipped, and code committed after the tag needs the next day's bump.
+
+The same workflow can be started from the GitHub UI (**Actions → release → Run
+workflow**) — handy for checking a build or a fresh trusted publishing
+configuration without cutting a release:
+
+- `dry_run` (on by default) — build and validate the package, publish nothing;
+- `prerelease` — publish `<version>-rc.<run number>` under the `next` dist-tag: a
+  build installable from the registry while `latest` stays untouched, so the
+  release number itself is not spent.
 
 ## License
 

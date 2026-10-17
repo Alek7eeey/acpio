@@ -1,11 +1,22 @@
-# Publishes the npm package `acpio` from a release tag:
+# Publishes the npm package `acpio`.
 #
-#   git tag v0.1.37 && git push origin v0.1.37
+# Two ways in:
 #
-# The version is not invented here — it is a function of git history
-# (scripts/versionHistory.mjs, the number stamped into VERSIONS.md), so the tag
-# has to equal it. The pack step refuses to continue otherwise, and a build can
-# never disagree with the version the app itself reports.
+#   git tag v0.1.39 && git push origin v0.1.39      # a release
+#   Actions → release → Run workflow                # a manual run (this file's
+#                                                   # workflow_dispatch inputs)
+#
+# A tag release takes the version from git history (scripts/versionHistory.mjs,
+# the number stamped into VERSIONS.md) and refuses to continue unless the tag
+# equals it, so what npm serves can never disagree with the number the app
+# itself reports.
+#
+# A manual run has no tag to match: with no input it packs the version of the
+# checked-out revision and stops there. `dry_run: false` publishes that version
+# (which is a no-op if it is already on npm), and `prerelease: true` publishes
+# `<version>-rc.<run number>` under the `next` dist-tag instead. That last one is
+# the way to verify a build on the registry — and to validate a trusted
+# publishing configuration — without claiming the release number itself.
 #
 # Authentication is npm trusted publishing (OIDC): no secret, no one-time
 # password. The package's Settings → Trusted publishing names this repo and
@@ -16,15 +27,21 @@
 # A token cannot replace it: npm now demands a one-time password for direct
 # publishing with credentials (and is retiring 2FA-bypassing tokens in 2027), and
 # a CI job has no authenticator. Do not add NODE_AUTH_TOKEN back.
-#
-# The patch bumps once per commit day, so a tag whose version is already on npm
-# is a no-op here: re-running a failed job cannot republish, and the same code
-# is never shipped twice under one number.
 name: release
 
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only build the package, publish nothing (ignored when prerelease is on)"
+        type: boolean
+        default: true
+      prerelease:
+        description: "Publish <version>-rc.<run> under the `next` dist-tag (publishes even with dry_run on)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,10 +63,18 @@ jobs:
 
       - run: npm ci
 
-      - name: Pack (the version must match the tag)
-        run: npm run pack:npm -- --expect-tag "$GITHUB_REF_NAME"
+      - name: Pack (a tag must match the version git derives)
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            npm run pack:npm -- --expect-tag "$GITHUB_REF_NAME"
+          elif [ "${{ inputs.prerelease }}" = "true" ]; then
+            npm run pack:npm -- --version-suffix "-rc.${{ github.run_number }}"
+          else
+            npm run pack:npm
+          fi
 
       - name: Publish (trusted publishing)
+        if: github.event_name == 'push' || inputs.prerelease == true || inputs.dry_run == false
         run: |
           spec=$(node -p "const p = require('./dist-npm/package.json'); p.name + '@' + p.version")
           if npm view "$spec" version >/dev/null 2>&1; then
@@ -57,4 +82,8 @@ jobs:
             exit 0
           fi
           npm install -g npm@latest
-          npm publish ./dist-npm --provenance --access public
+          tag=""
+          if [ "${{ inputs.prerelease }}" = "true" ]; then
+            tag="--tag next"
+          fi
+          npm publish ./dist-npm --provenance --access public $tag

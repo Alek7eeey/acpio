@@ -23,9 +23,15 @@
  * Registry dependencies are left to the consumer's install: better-sqlite3 and
  * node-pty then match their OS/arch, and this build stays platform-independent.
  *
- * Usage: npm run pack:npm [-- --expect-tag v0.1.37]
- *   --expect-tag <tag>  fail unless the tag (leading "v" ignored) equals the
- *                       version git derives — the guard the release workflow runs.
+ * Usage: npm run pack:npm [-- --expect-tag v0.1.37 | --version-suffix -rc.1]
+ *   --expect-tag <tag>      fail unless the tag (leading "v" ignored) equals the
+ *                           version git derives — the guard a tag release runs.
+ *   --version-suffix <sfx>  publish as <derived><sfx>, e.g. 0.1.38-rc.7: a
+ *                           prerelease of the current revision. It takes the
+ *                           prerelease path because a new number cannot exist
+ *                           twice in one commit day — this is how a build gets
+ *                           verified on the registry without claiming the
+ *                           release number (publish it under another dist-tag).
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
@@ -132,18 +138,34 @@ function registryDependencies() {
 
 const expectTagIndex = process.argv.indexOf("--expect-tag");
 const expectTag = expectTagIndex === -1 ? null : (process.argv[expectTagIndex + 1] ?? "");
+const suffixIndex = process.argv.indexOf("--version-suffix");
+const versionSuffix = suffixIndex === -1 ? "" : (process.argv[suffixIndex + 1] ?? "");
 
-const { version, uniqueDays } = appVersion();
-if (expectTag !== null && expectTag.replace(/^v/, "") !== version) {
+if (expectTag !== null && versionSuffix) {
+  console.error("Use either --expect-tag or --version-suffix, not both.");
+  process.exit(1);
+}
+if (versionSuffix && !/^-[0-9A-Za-z][0-9A-Za-z.-]*$/.test(versionSuffix)) {
+  console.error(`--version-suffix ${versionSuffix} is not a semver prerelease suffix (expected e.g. -rc.1).`);
+  process.exit(1);
+}
+
+const { version: derivedVersion, uniqueDays } = appVersion();
+if (expectTag !== null && expectTag.replace(/^v/, "") !== derivedVersion) {
   console.error(
-    `Tag ${expectTag} does not match the version git derives (${version}, ${uniqueDays} commit day(s) since the epoch).`,
+    `Tag ${expectTag} does not match the version git derives (${derivedVersion}, ${uniqueDays} commit day(s) since the epoch).`,
   );
   console.error(
     "The version is a function of git history — see VERSIONS.md for the number this revision carries.",
   );
   process.exit(1);
 }
-console.log(`Packaging ${PKG_NAME}@${version} for npm${expectTag ? ` (tag ${expectTag})` : ""}…`);
+const version = `${derivedVersion}${versionSuffix}`;
+console.log(
+  `Packaging ${PKG_NAME}@${version} for npm` +
+    (expectTag ? ` (tag ${expectTag})` : versionSuffix ? ` (prerelease of ${derivedVersion})` : "") +
+    "…",
+);
 
 // Fresh build of everything: workspaces depend on each other, and the server
 // imports the compiled packages, not their sources.
