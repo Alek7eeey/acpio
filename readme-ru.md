@@ -227,7 +227,9 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 ### Релиз
 
 Пуш тега `v<версия>` публикует npm-пакет (`.github/workflows/release.yml`;
-нужен секрет `NPM_TOKEN` в репозитории):
+публикация идёт по npm trusted publishing, без токена и одноразовых кодов —
+в настройках пакета (Settings → Trusted publishing) указаны этот репозиторий и
+`release.yml`):
 
 ```bash
 git tag v0.1.37 && git push origin v0.1.37

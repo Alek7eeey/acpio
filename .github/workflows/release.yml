@@ -7,9 +7,15 @@
 # has to equal it. The pack step refuses to continue otherwise, and a build can
 # never disagree with the version the app itself reports.
 #
-# Needs the NPM_TOKEN repository secret (an npm "Automation" token with publish
-# rights on `acpio`). With npm trusted publishing configured for this repo the
-# token can be dropped — the id-token permission below is what it uses.
+# Authentication is npm trusted publishing (OIDC): no secret, no one-time
+# password. The package's Settings → Trusted publishing names this repo and
+# `release.yml`, and the id-token permission below is what the exchange uses.
+# npm only allows that exchange from npm 11.5.1 on, so the publish step upgrades
+# the CLI first — `npm ci` above stays on the runner's own npm.
+#
+# A token cannot replace it: npm now demands a one-time password for direct
+# publishing with credentials (and is retiring 2FA-bypassing tokens in 2027), and
+# a CI job has no authenticator. Do not add NODE_AUTH_TOKEN back.
 #
 # The patch bumps once per commit day, so a tag whose version is already on npm
 # is a no-op here: re-running a failed job cannot republish, and the same code
@@ -37,20 +43,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
 
       - run: npm ci
 
       - name: Pack (the version must match the tag)
         run: npm run pack:npm -- --expect-tag "$GITHUB_REF_NAME"
 
-      - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish (trusted publishing)
         run: |
           spec=$(node -p "const p = require('./dist-npm/package.json'); p.name + '@' + p.version")
           if npm view "$spec" version >/dev/null 2>&1; then
             echo "$spec is already on npm — nothing to publish."
             exit 0
           fi
+          npm install -g npm@latest
           npm publish ./dist-npm --provenance --access public

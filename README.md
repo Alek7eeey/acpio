@@ -226,7 +226,9 @@ The version is derived from git history — patch +1 per calendar day that has a
 ### Releasing
 
 Pushing a `v<version>` tag publishes the npm package
-(`.github/workflows/release.yml`; needs the `NPM_TOKEN` repository secret):
+(`.github/workflows/release.yml`; publishes over npm trusted publishing, so no
+token or one-time password is involved — the package's Settings → Trusted
+publishing names this repo and `release.yml`):
 
 ```bash
 git tag v0.1.37 && git push origin v0.1.37
