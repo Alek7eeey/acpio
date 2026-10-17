@@ -3,7 +3,7 @@
 Самостоятельно размещаемый веб-харнесс для агентов по [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP / OpenCode).
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
-**Актуальная версия:** 0.1.37
+**Актуальная версия:** 0.1.38
 
 > **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -87,6 +87,33 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 npm run build
 npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
+
+### Из npm
+
+```bash
+npm i -g acpio     # глобально → `acpio`
+npx acpio          # запустить без установки
+```
+
+В пакете — скомпилированный сервер, веб-UI и пакеты воркспейсов; нужен
+Node >= 20.
+
+> **npm 12+** не запускает install-скрипты пакета, пока его не разрешат, а
+> именно они собирают/скачивают нативные модули (`better-sqlite3`, `node-pty`) и
+> накатывают патч ConPTY для node-pty. Добавьте к команде выше
+> `--allow-scripts=acpio,better-sqlite3,node-pty`, иначе приложение падает на
+> «missing bindings».
+
+`acpio` открывает http://localhost:18741 (`acpio --help`, `acpio --version`).
+
+Файл SQLite лежит в пользовательском каталоге — `%LOCALAPPDATA%\acpio\data`,
+`$XDG_DATA_HOME`/`~/.local/share/acpio/data` или
+`~/Library/Application Support/acpio/data` — поэтому `npm i -g acpio@latest` не
+трогает ваши чаты (`DATABASE_PATH` перекрывает это; `PORT` / `ACPIO_PORT` / `HOST`
+работают как в сборке из исходников).
+
+Собрать архив локально — `npm run pack:npm` → `dist-npm/`, опубликовать —
+`npm publish ./dist-npm` (тег релиза делает и то и другое — см. «Релиз»).
 
 ### Портативный дистрибутив (Windows)
 
@@ -196,6 +223,22 @@ Dev-сервер слушает все интерфейсы (`0.0.0.0`), поэ�
 ## Версионирование
 
 Версия выводится из истории git — патч +1 за каждый календарный день с коммитами начиная с `versionEpoch` (`package.json`), — поэтому одна и та же ревизия показывает одну и ту же версию на любой машине. Накручивает её сам git: хук `pre-commit` (`scripts/stamp-version.mjs`, ставится при `npm install` через `core.hooksPath=.githooks`, повторно — `npm run hooks:install`) вписывает номер в `README.md`, `readme-ru.md`, `VERSIONS.md` и `packages/shared/src/buildInfo.ts` и добавляет их в индекс, так что первый коммит дня несёт свою версию сам. Пропустить штамп для одного коммита — `git commit --no-verify`.
+
+### Релиз
+
+Пуш тега `v<версия>` публикует npm-пакет (`.github/workflows/release.yml`;
+нужен секрет `NPM_TOKEN` в репозитории):
+
+```bash
+git tag v0.1.37 && git push origin v0.1.37
+```
+
+Тег обязан совпасть с версией из истории git (верхняя строка `VERSIONS.md`) —
+воркфлоу собирает пакет с `--expect-tag` и иначе отказывается публиковать, так
+что то, что отдаёт npm, не может разойтись с номером, который показывает само
+приложение. Патч растёт раз в день с коммитами — это же и темп релизов: тег для
+версии, уже лежащей на npm, пропускается, а код, закоммиченный после тега,
+попадёт в следующий дневной бамп.
 
 ## Лицензия
 

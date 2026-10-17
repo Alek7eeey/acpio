@@ -3,7 +3,7 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP / OpenCode), with a built-in agent that runs inside the server — no external CLI needed.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.37
+**Current version:** 0.1.38
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -87,6 +87,33 @@ so production is a **single port**:
 npm run build
 npm run start     # → http://localhost:18741 (UI + API + WebSocket)
 ```
+
+### From npm
+
+```bash
+npm i -g acpio     # global → `acpio`
+npx acpio          # run without installing
+```
+
+The package carries the compiled server, the web UI and the workspace packages;
+Node >= 20 is required.
+
+> **npm 12+** skips install-time lifecycle scripts unless a package is allowed,
+> and those scripts are what builds/downloads the native modules
+> (`better-sqlite3`, `node-pty`) and applies the node-pty ConPTY patch. Add
+> `--allow-scripts=acpio,better-sqlite3,node-pty` to the command above, or the
+> app stops on a missing-bindings error.
+
+`acpio` opens http://localhost:18741 (`acpio --help`, `acpio --version`).
+
+Its SQLite file lives in a per-user directory — `%LOCALAPPDATA%\acpio\data`,
+`$XDG_DATA_HOME`/`~/.local/share/acpio/data` or
+`~/Library/Application Support/acpio/data` — so `npm i -g acpio@latest` never
+touches your chats (`DATABASE_PATH` overrides it; `PORT` / `ACPIO_PORT` / `HOST`
+work as in the source build).
+
+Build the tarball locally with `npm run pack:npm` → `dist-npm/`, publish it with
+`npm publish ./dist-npm` (a release tag does both — see "Releasing").
 
 ### Portable bundle (Windows)
 
@@ -195,6 +222,21 @@ Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent 
 ## Versioning
 
 The version is derived from git history — patch +1 per calendar day that has a commit since `versionEpoch` (`package.json`) — so the same revision reports the same version on every machine. Git bumps it by itself: the `pre-commit` hook (`scripts/stamp-version.mjs`, installed by `npm install` via `core.hooksPath=.githooks`; re-run with `npm run hooks:install`) writes the number into `README.md`, `readme-ru.md`, `VERSIONS.md` and `packages/shared/src/buildInfo.ts` and stages them, so a day's first commit carries its own bump. `git commit --no-verify` skips the stamp for one commit.
+
+### Releasing
+
+Pushing a `v<version>` tag publishes the npm package
+(`.github/workflows/release.yml`; needs the `NPM_TOKEN` repository secret):
+
+```bash
+git tag v0.1.37 && git push origin v0.1.37
+```
+
+The tag must equal the version git derives (the top row of `VERSIONS.md`) — the
+workflow packs with `--expect-tag` and refuses otherwise, so what npm serves can
+never disagree with the number the app itself reports. The patch bumps once per
+commit day, and that is also the release cadence: a tag for a version already on
+npm is skipped, and code committed after the tag needs the next day's bump.
 
 ## License
 

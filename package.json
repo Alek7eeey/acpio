@@ -23,6 +23,7 @@
     "prestart": "node scripts/ensure-built.mjs",
     "start": "npm run start -w @acpio/server",
     "dist": "node scripts/package-dist.mjs",
+    "pack:npm": "node scripts/package-npm.mjs",
     "db:generate": "npm run db:generate -w @acpio/server",
     "db:migrate": "npm run db:migrate -w @acpio/server",
     "db:push": "npm run db:push -w @acpio/server",

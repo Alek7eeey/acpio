@@ -16,11 +16,30 @@
  * when node-pty changes underneath us and the patterns no longer match.
  */
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const libDir = path.join(root, "node_modules", "node-pty", "lib");
+
+/**
+ * node-pty's lib dir. Next to the repo it sits in `node_modules` right here; in
+ * an installed package (the npm CLI's postinstall) npm hoists it to the
+ * consumer's `node_modules`, so resolve it through the require graph instead of
+ * assuming the layout. Missing entirely → the loop below warns and skips.
+ */
+function resolveLibDir() {
+  const local = path.join(root, "node_modules", "node-pty", "lib");
+  if (fs.existsSync(local)) return local;
+  try {
+    const require = createRequire(import.meta.url);
+    return path.join(path.dirname(require.resolve("node-pty/package.json")), "lib");
+  } catch {
+    return local;
+  }
+}
+
+const libDir = resolveLibDir();
 const MARKER = "acpio-patch:";
 
 const patches = [

@@ -1,0 +1,56 @@
+# Publishes the npm package `acpio` from a release tag:
+#
+#   git tag v0.1.37 && git push origin v0.1.37
+#
+# The version is not invented here — it is a function of git history
+# (scripts/versionHistory.mjs, the number stamped into VERSIONS.md), so the tag
+# has to equal it. The pack step refuses to continue otherwise, and a build can
+# never disagree with the version the app itself reports.
+#
+# Needs the NPM_TOKEN repository secret (an npm "Automation" token with publish
+# rights on `acpio`). With npm trusted publishing configured for this repo the
+# token can be dropped — the id-token permission below is what it uses.
+#
+# The patch bumps once per commit day, so a tag whose version is already on npm
+# is a no-op here: re-running a failed job cannot republish, and the same code
+# is never shipped twice under one number.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version comes from the whole history — a shallow clone would
+          # derive a smaller patch number and fail the tag check.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      - name: Pack (the version must match the tag)
+        run: npm run pack:npm -- --expect-tag "$GITHUB_REF_NAME"
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          spec=$(node -p "const p = require('./dist-npm/package.json'); p.name + '@' + p.version")
+          if npm view "$spec" version >/dev/null 2>&1; then
+            echo "$spec is already on npm — nothing to publish."
+            exit 0
+          fi
+          npm publish ./dist-npm --provenance --access public

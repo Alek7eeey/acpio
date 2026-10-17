@@ -15,6 +15,7 @@ dev-dist/
 _temp/
 data/
 dist-app/
+dist-npm/
 /.playwright-mcp/
 /.tmp-perf/
 /.acpio-attachments/
