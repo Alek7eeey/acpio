@@ -3,7 +3,7 @@
 Self-hosted web harness for agents speaking [ACP](https://agentclientprotocol.com/) (Cursor CLI / OMP / OpenCode), with a built-in agent that runs inside the server — no external CLI needed.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.38
+**Current version:** 0.1.39
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 
@@ -227,7 +227,15 @@ Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent 
 
 ## Versioning
 
-The version is derived from git history — patch +1 per calendar day that has a commit since `versionEpoch` (`package.json`) — so the same revision reports the same version on every machine. Git bumps it by itself: the `pre-commit` hook (`scripts/stamp-version.mjs`, installed by `npm install` via `core.hooksPath=.githooks`; re-run with `npm run hooks:install`) writes the number into `README.md`, `readme-ru.md`, `VERSIONS.md` and `packages/shared/src/buildInfo.ts` and stages them, so a day's first commit carries its own bump. `git commit --no-verify` skips the stamp for one commit.
+A release is a `v<major>.<minor>.<patch>` **git tag**, and the version a revision reports is derived from those tags (`scripts/releaseTags.mjs`):
+
+- a tagged revision reports its own tag — the number it was published under;
+- any other revision reports one patch above the highest tag reachable from it — the number it is about to be released as;
+- before the first release, the base version from `package.json`.
+
+Tags are part of git, so the same revision reports the same number on every machine, with no registry or network involved. The cadence is yours: a week of commits is still one bump, ten releases a day are ten numbers, and the published numbers follow in order because they follow the releases.
+
+The number is written into `README.md`, `readme-ru.md`, `VERSIONS.md` (one row per release) and `packages/shared/src/buildInfo.ts` by `scripts/generate-version.mjs` — at build time and from the `pre-commit` hook (`scripts/stamp-version.mjs`, installed by `npm install` via `core.hooksPath=.githooks`; re-run with `npm run hooks:install`). The hook stages the files it changed, so a checkout that pulled after a release carries that bump into its next commit. `git commit --no-verify` skips the stamp for one commit.
 
 ### Releasing
 
@@ -252,12 +260,12 @@ token and no one-time password — the package's Settings → Trusted publishing
 names this repo and `release.yml`) and a GitHub Release at `v<version>` that says
 what changed.
 
-The tag must equal the version git derives (the top row of `VERSIONS.md`) — the
-workflow packs with `--expect-tag` and refuses otherwise, so what npm serves can
-never disagree with the number the app itself reports. The patch bumps once per
-commit day, and that is also the release cadence: a run whose version is already
-on npm publishes nothing and releases nothing, and code committed after a tag
-needs the next day's bump.
+A tag you push yourself must equal the version the release tags derive (one patch
+above the highest one reachable) — the workflow packs with `--expect-tag` and
+refuses otherwise, so what npm serves can never disagree with the number the app
+itself reports. A run whose version is already on npm publishes nothing and
+releases nothing, and the version only moves when a release happened — commit as
+often as you like, the numbers stay in order.
 
 ## License
 

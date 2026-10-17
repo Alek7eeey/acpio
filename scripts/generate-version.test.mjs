@@ -1,122 +1,88 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeAppVersion,
-  formatReleaseDate,
-  localDateKey,
+  bumpPatch,
+  compareVersions,
+  formatReleaseDay,
+  latestVersion,
+  nextVersion,
+  parseReleaseVersion,
   parseVersionsMarkdown,
-  releaseEntriesFromCommitDates,
   renderVersionsMarkdown,
-  uniqueCommitDays,
-  upsertReleaseEntry,
-  withPendingCommitDay,
 } from "./versionHistory.mjs";
 
-describe("uniqueCommitDays", () => {
-  it("keeps unique days on or after the epoch", () => {
-    expect(
-      uniqueCommitDays(["2026-08-27", "2026-08-27", "2026-08-26", "2026-08-25"], "2026-08-26"),
-    ).toEqual(["2026-08-26", "2026-08-27"]);
+describe("parseReleaseVersion", () => {
+  it("accepts a release tag with or without the leading v", () => {
+    expect(parseReleaseVersion("v0.1.38")).toBe("0.1.38");
+    expect(parseReleaseVersion("0.1.38")).toBe("0.1.38");
+  });
+
+  it("refuses anything that is not a release", () => {
+    expect(parseReleaseVersion("v0.1.39-rc.1")).toBeNull();
+    expect(parseReleaseVersion("v0.1.39+ci.7")).toBeNull();
+    expect(parseReleaseVersion("release-0.1.39")).toBeNull();
+    expect(parseReleaseVersion("")).toBeNull();
+    expect(parseReleaseVersion(undefined)).toBeNull();
   });
 });
 
-describe("computeAppVersion", () => {
-  it("keeps base version on the first git day", () => {
-    const result = computeAppVersion({
-      baseVersion: "0.1.0",
-      epochDate: "2026-08-26",
-      commitDates: ["2026-08-26", "2026-08-26"],
-    });
-    expect(result.version).toBe("0.1.0");
-    expect(result.uniqueDays).toBe(1);
-  });
-
-  it("bumps patch once per later git day, not per commit", () => {
-    const result = computeAppVersion({
-      baseVersion: "0.1.0",
-      epochDate: "2026-08-26",
-      commitDates: ["2026-08-27", "2026-08-27", "2026-08-26"],
-    });
-    expect(result.version).toBe("0.1.1");
-    expect(result.uniqueDays).toBe(2);
-  });
-
-  it("does not bump for a local calendar day with no git commits", () => {
-    const result = computeAppVersion({
-      baseVersion: "0.1.0",
-      epochDate: "2026-08-26",
-      commitDates: ["2026-08-26"],
-    });
-    expect(result.version).toBe("0.1.0");
+describe("compareVersions", () => {
+  it("compares part by part, not as strings", () => {
+    expect(compareVersions("0.1.10", "0.1.9")).toBeGreaterThan(0);
+    expect(compareVersions("0.2.0", "0.1.99")).toBeGreaterThan(0);
+    expect(compareVersions("1.0.0", "0.9.9")).toBeGreaterThan(0);
+    expect(compareVersions("0.1.38", "0.1.38")).toBe(0);
   });
 });
 
-describe("releaseEntriesFromCommitDates", () => {
-  it("lists newest git day first", () => {
-    expect(
-      releaseEntriesFromCommitDates({
-        baseVersion: "0.1.0",
-        epochDate: "2026-08-26",
-        commitDates: ["2026-08-27", "2026-08-26", "2026-08-26"],
-      }),
-    ).toEqual([
-      { version: "0.1.1", released: "27.08.26" },
-      { version: "0.1.0", released: "26.08.26" },
-    ]);
+describe("nextVersion", () => {
+  it("keeps the base version while nothing is released", () => {
+    expect(nextVersion({ baseVersion: "0.1.0", releases: [] })).toBe("0.1.0");
+  });
+
+  it("bumps one patch above the highest release, whatever the commit count", () => {
+    expect(nextVersion({ baseVersion: "0.1.0", releases: ["0.1.38"] })).toBe("0.1.39");
+    expect(nextVersion({ baseVersion: "0.1.0", releases: ["0.1.9", "0.1.38", "0.1.30"] })).toBe("0.1.39");
+  });
+
+  it("moves major and minor only when a tag says so", () => {
+    expect(nextVersion({ baseVersion: "0.1.0", releases: ["0.2.7"] })).toBe("0.2.8");
+    expect(nextVersion({ baseVersion: "0.1.0", releases: ["1.0.0"] })).toBe("1.0.1");
   });
 });
 
-describe("withPendingCommitDay", () => {
-  it("counts the day of the commit being created, so its bump lands in it", () => {
-    const history = ["2026-08-26"];
-    expect(computeAppVersion({ baseVersion: "0.1.0", epochDate: "2026-08-26", commitDates: history }).version).toBe(
-      "0.1.0",
-    );
-    expect(
-      computeAppVersion({
-        baseVersion: "0.1.0",
-        epochDate: "2026-08-26",
-        commitDates: withPendingCommitDay(history, "2026-08-27"),
-      }).version,
-    ).toBe("0.1.1");
-  });
-
-  it("does not bump twice when the day already has commits", () => {
-    expect(
-      computeAppVersion({
-        baseVersion: "0.1.0",
-        epochDate: "2026-08-26",
-        commitDates: withPendingCommitDay(["2026-08-26", "2026-08-27"], "2026-08-27"),
-      }).version,
-    ).toBe("0.1.1");
+describe("bumpPatch", () => {
+  it("adds one to the patch", () => {
+    expect(bumpPatch("0.1.38")).toBe("0.1.39");
   });
 });
 
-describe("localDateKey", () => {
-  it("formats the local calendar day as git's %as does", () => {
-    expect(localDateKey(new Date(2026, 7, 26, 23, 59))).toBe("2026-08-26");
+describe("latestVersion", () => {
+  it("is null without releases and the highest one otherwise", () => {
+    expect(latestVersion([])).toBeNull();
+    expect(latestVersion(["0.1.9", "0.1.10", "0.1.2"])).toBe("0.1.10");
   });
 });
 
-describe("formatReleaseDate", () => {
-  it("formats dates as DD.MM.YY", () => {
-    expect(formatReleaseDate(new Date(2026, 7, 26, 15, 30))).toBe("26.08.26");
+describe("formatReleaseDay", () => {
+  it("formats git's author day as DD.MM.YY", () => {
+    expect(formatReleaseDay("2026-08-26")).toBe("26.08.26");
+    expect(formatReleaseDay("2026-10-17")).toBe("17.10.26");
   });
 });
 
 describe("version history markdown", () => {
   it("parses and renders release rows", () => {
     const raw = renderVersionsMarkdown([
-      { version: "0.1.1", released: "27.08.26" },
-      { version: "0.1.0", released: "26.08.26" },
+      { version: "0.1.39", released: "18.10.26" },
+      { version: "0.1.38", released: "17.10.26" },
     ]);
     expect(parseVersionsMarkdown(raw)).toEqual([
-      { version: "0.1.1", released: "27.08.26" },
-      { version: "0.1.0", released: "26.08.26" },
+      { version: "0.1.39", released: "18.10.26" },
+      { version: "0.1.38", released: "17.10.26" },
     ]);
   });
 
-  it("does not duplicate an existing version", () => {
-    const entries = upsertReleaseEntry([{ version: "0.1.1", released: "27.08.26" }], "0.1.1", "27.08.26");
-    expect(entries).toEqual([{ version: "0.1.1", released: "27.08.26" }]);
+  it("renders just the header while nothing is released", () => {
+    expect(parseVersionsMarkdown(renderVersionsMarkdown([]))).toEqual([]);
   });
 });

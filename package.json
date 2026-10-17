@@ -2,7 +2,6 @@
   "name": "acpio",
   "private": true,
   "version": "0.1.0",
-  "versionEpoch": "2026-08-26",
   "license": "MIT",
   "workspaces": [
     "apps/*",

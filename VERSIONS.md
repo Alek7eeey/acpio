@@ -1,49 +1,16 @@
 # Release history
 
-Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (`versionEpoch` in `package.json`, default `2026-08-26`).
+One row per release, newest first. A release is a `v<major>.<minor>.<patch>` git
+tag — the release run pushes it (`.github/workflows/release.yml`) and npm holds
+these same numbers, so this table lists the versions that were actually published
+instead of every commit day.
 
-The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. The `pre-commit` hook (`scripts/stamp-version.mjs`) writes this table, both README version lines and `buildInfo.ts` into the commit being created, so a day's first commit bumps the patch by itself; `npm run dev` / `npm run build` derive the same values again.
+The next release is one patch above the highest tag reachable from the revision;
+a tagged revision reports its own tag (`scripts/releaseTags.mjs`). Tags live in
+git, so the number needs no network and reads the same on every machine.
 
-Release dates use `DD.MM.YY` (author date of that day's commits).
+Release dates use `DD.MM.YY` (author date of the tagged commit).
 
 | Version | Released |
 |---------|----------|
 | 0.1.38 | 17.10.26 |
-| 0.1.37 | 14.10.26 |
-| 0.1.36 | 12.10.26 |
-| 0.1.35 | 11.10.26 |
-| 0.1.34 | 10.10.26 |
-| 0.1.33 | 09.10.26 |
-| 0.1.32 | 08.10.26 |
-| 0.1.31 | 07.10.26 |
-| 0.1.30 | 06.10.26 |
-| 0.1.29 | 05.10.26 |
-| 0.1.28 | 04.10.26 |
-| 0.1.27 | 03.10.26 |
-| 0.1.26 | 02.10.26 |
-| 0.1.25 | 01.10.26 |
-| 0.1.24 | 30.09.26 |
-| 0.1.23 | 29.09.26 |
-| 0.1.22 | 28.09.26 |
-| 0.1.21 | 25.09.26 |
-| 0.1.20 | 24.09.26 |
-| 0.1.19 | 23.09.26 |
-| 0.1.18 | 22.09.26 |
-| 0.1.17 | 21.09.26 |
-| 0.1.16 | 20.09.26 |
-| 0.1.15 | 18.09.26 |
-| 0.1.14 | 17.09.26 |
-| 0.1.13 | 16.09.26 |
-| 0.1.12 | 15.09.26 |
-| 0.1.11 | 14.09.26 |
-| 0.1.10 | 13.09.26 |
-| 0.1.9 | 12.09.26 |
-| 0.1.8 | 11.09.26 |
-| 0.1.7 | 10.09.26 |
-| 0.1.6 | 04.09.26 |
-| 0.1.5 | 03.09.26 |
-| 0.1.4 | 01.09.26 |
-| 0.1.3 | 29.08.26 |
-| 0.1.2 | 28.08.26 |
-| 0.1.1 | 27.08.26 |
-| 0.1.0 | 26.08.26 |

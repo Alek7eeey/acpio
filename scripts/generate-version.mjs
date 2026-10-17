@@ -1,67 +1,38 @@
 /**
- * App version from git history: +0.0.1 per calendar day that has a commit (since versionEpoch).
- * Same revision ⇒ same version on every machine. Local calendar days without commits do not bump.
- * Always rewrites VERSIONS.md from git so the table matches the computed version.
+ * Writes the version stamp: the number this revision is released as.
  *
- * `--pending-commit` also counts the current day, for the pre-commit hook
- * (scripts/stamp-version.mjs): it runs before the commit exists in history, and the
- * commit must carry the version its own history will derive.
+ * A release is a `v<version>` tag (scripts/releaseTags.mjs decides the number), so
+ * the stamp changes when a release appears, not on every commit — a week of
+ * commits is still one bump, and a tagged revision reports the tag itself.
  *
- * Everything written here is a function of git history alone, so a commit that
- * stamps these files leaves a clean working tree.
+ * Rewritten here: `VERSIONS.md` (one row per release tag), both README version
+ * lines and `packages/shared/src/buildInfo.ts`. Everything is a function of the
+ * tags, so a checkout that pulled after a release re-stamps itself on the next
+ * build and ends up with a clean tree again.
+ *
+ * `--pending-commit` is for the pre-commit hook: it stamps the number the commit
+ * being created will derive, which is one above the tag sitting on HEAD (that tag
+ * belongs to the *released* history, not to the commit about to exist).
  */
-import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { deriveVersion } from "./releaseTags.mjs";
 import {
-  computeAppVersion,
-  DEFAULT_VERSION_EPOCH,
-  localDateKey,
-  releaseEntriesFromCommitDates,
+  formatReleaseDay,
   renderVersionsMarkdown,
   VERSION_STAMP,
-  withPendingCommitDay,
 } from "./versionHistory.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VERSIONS_FILE = path.join(repoRoot, VERSION_STAMP.versions);
 const BUILD_INFO_FILE = path.join(repoRoot, VERSION_STAMP.buildInfo);
+
 const pendingCommit = process.argv.includes("--pending-commit");
-
-function git(cmd) {
-  try {
-    return execSync(cmd, {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
-const baseVersion = pkg.version;
-const versionEpoch =
-  typeof pkg.versionEpoch === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pkg.versionEpoch)
-    ? pkg.versionEpoch
-    : DEFAULT_VERSION_EPOCH;
+const { version, releases, releasedTag } = deriveVersion(repoRoot, pkg.version, { pendingCommit });
 
-const now = new Date();
-const since = `${localDateKey(now)} 00:00:00`;
-
-const commitsToday = parseInt(git(`git rev-list --count --since="${since}" HEAD`) || "0", 10);
-const historyDates = git("git log --format=%as HEAD").split("\n").filter(Boolean);
-const commitDates = pendingCommit ? withPendingCommitDay(historyDates, localDateKey(now)) : historyDates;
-const { version, uniqueDays } = computeAppVersion({
-  baseVersion,
-  commitDates,
-  epochDate: versionEpoch,
-});
-const sha = (git("git rev-parse --short HEAD") || "unknown").slice(0, 7);
-
-const buildInfo = { version, baseVersion, versionEpoch, uniqueDays };
+const buildInfo = { version, baseVersion: pkg.version, releases: releases.length };
 
 fs.mkdirSync(path.dirname(BUILD_INFO_FILE), { recursive: true });
 fs.writeFileSync(
@@ -89,18 +60,17 @@ updateReadmeVersion(
   `**Актуальная версия:** ${version}`,
 );
 
-const entries = releaseEntriesFromCommitDates({
-  baseVersion,
-  commitDates,
-  epochDate: versionEpoch,
-});
-const nextVersions = renderVersionsMarkdown(entries);
+const nextVersions = renderVersionsMarkdown(
+  releases.map((release) => ({ version: release.version, released: formatReleaseDay(release.day) })),
+);
 const prevVersions = fs.existsSync(VERSIONS_FILE) ? fs.readFileSync(VERSIONS_FILE, "utf8") : "";
 if (nextVersions !== prevVersions) {
   fs.writeFileSync(VERSIONS_FILE, nextVersions);
-  console.log(`Updated VERSIONS.md (${entries[0]?.version ?? version})`);
+  console.log(`Updated VERSIONS.md (${releases.length} release(s))`);
 }
 
 console.log(
-  `Version: ${version} (${uniqueDays} git day(s) since ${versionEpoch}, ${commitsToday} commit(s) today, ${sha})${pendingCommit ? " — stamping the pending commit" : ""}`,
+  `Version: ${version} ` +
+    (releasedTag ? `(released as ${releasedTag})` : `(next after ${releases[0]?.tag ?? "nothing"})`) +
+    (pendingCommit ? " — stamping the pending commit" : ""),
 );

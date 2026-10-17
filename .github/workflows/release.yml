@@ -7,11 +7,12 @@
 #                                                # workflow publishes and pushes
 #                                                # the tag itself
 #
-# The version is never an input — it is a function of git history
-# (scripts/versionHistory.mjs, the number stamped into VERSIONS.md). A tag release
-# refuses to continue unless its tag equals that number; a manual run publishes
-# exactly what the checkout derives. So what npm serves cannot disagree with the
-# number the app itself reports, whichever door was used.
+# The version is never an input — it is a function of the release tags
+# (scripts/releaseTags.mjs: one patch above the highest tag reachable, or the tag
+# itself on a tagged revision). A tag release refuses to continue unless its tag
+# equals that number; a manual run publishes exactly what the checkout derives, and
+# then pushes the tag that makes it a release. So what npm serves cannot disagree
+# with the number the app itself reports, whichever door was used.
 #
 # The tag a manual run pushes goes out with GITHUB_TOKEN, and events caused by
 # that token do not start workflows — so tagging here cannot re-trigger this

@@ -1,9 +1,11 @@
 /**
  * Commit-time version stamp, run by the pre-commit hook (.githooks/pre-commit).
  *
- * The version is derived from git history (one patch per commit day), so nothing
- * has to be bumped by hand: this refreshes the stamp and stages it, and the commit
- * being created carries its own version. `git commit --no-verify` skips it.
+ * The version follows the release tags, so a normal commit changes nothing here;
+ * what this catches is a checkout that learned about a release (a `git pull`
+ * fetching the tag the release run pushed) — its `VERSIONS.md`, README lines and
+ * `buildInfo.ts` are restamped and staged, so the bump rides the next commit
+ * instead of sitting in the working tree. `git commit --no-verify` skips it.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";

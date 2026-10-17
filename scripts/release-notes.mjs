@@ -3,9 +3,8 @@
  * plus whatever the maintainer chose to say about it.
  *
  * Written to stdout, so the release job redirects it into `gh release create
- * --notes-file`. The version scheme here is day-based (see versionHistory.mjs),
- * so notes are keyed by tag, not by a changelog file: the tag is what a release
- * is.
+ * --notes-file`. A release is a tag (see versionHistory.mjs), so notes are keyed
+ * by tag rather than kept in a changelog file: the tag is what a release is.
  *
  * Usage: node scripts/release-notes.mjs --version 0.1.39 [--extra "text"] [--extra-file f]
  *

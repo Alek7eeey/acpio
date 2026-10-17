@@ -1,10 +1,31 @@
+/**
+ * The version rule, as pure functions: no git, no filesystem (git is
+ * scripts/releaseTags.mjs, the stamping is scripts/generate-version.mjs).
+ *
+ * A release is a `v<major>.<minor>.<patch>` git tag. The version a revision is
+ * released as is therefore:
+ *
+ *   - its own tag, when the revision is tagged (a release commit reports the
+ *     number it was published under), else
+ *   - one patch above the highest release tag reachable from it, else
+ *   - the base version, when nothing has been released yet.
+ *
+ * Tags are part of git, so every machine derives the same number offline, and the
+ * release cadence is the maintainer's: a week of commits is still one bump, and
+ * the numbers follow in order because they follow the releases.
+ */
 export const VERSIONS_HEADER = `# Release history
 
-Patch version increases by 1 for each calendar day that has at least one git commit since the epoch (\`versionEpoch\` in \`package.json\`, default \`2026-08-26\`).
+One row per release, newest first. A release is a \`v<major>.<minor>.<patch>\` git
+tag — the release run pushes it (\`.github/workflows/release.yml\`) and npm holds
+these same numbers, so this table lists the versions that were actually published
+instead of every commit day.
 
-The number is taken from git history, so clones and local builds of the same revision show the same version. Local calendar days without commits do not bump it. The \`pre-commit\` hook (\`scripts/stamp-version.mjs\`) writes this table, both README version lines and \`buildInfo.ts\` into the commit being created, so a day's first commit bumps the patch by itself; \`npm run dev\` / \`npm run build\` derive the same values again.
+The next release is one patch above the highest tag reachable from the revision;
+a tagged revision reports its own tag (\`scripts/releaseTags.mjs\`). Tags live in
+git, so the number needs no network and reads the same on every machine.
 
-Release dates use \`DD.MM.YY\` (author date of that day's commits).
+Release dates use \`DD.MM.YY\` (author date of the tagged commit).
 
 | Version | Released |
 |---------|----------|
@@ -19,28 +40,46 @@ export const VERSION_STAMP = {
 };
 export const VERSION_STAMP_FILES = Object.values(VERSION_STAMP);
 
-/** Local calendar day as `YYYY-MM-DD` — the key `git log --format=%as` reports. */
-export function localDateKey(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+/** Released versions only: a tag carrying a prerelease or build part is not one. */
+const RELEASE_TAG = /^v?(\d+)\.(\d+)\.(\d+)$/;
+
+/** `v0.1.38` (or `0.1.38`) → `0.1.38`; anything else (rc, build metadata) → null. */
+export function parseReleaseVersion(tag) {
+  const match = RELEASE_TAG.exec(tag ?? "");
+  return match ? `${match[1]}.${match[2]}.${match[3]}` : null;
 }
 
-/**
- * Commit days plus the day of the commit that is being created right now: it is
- * not in history yet, but it will count as a commit day the moment it exists, so
- * its own bump belongs in it.
- */
-export function withPendingCommitDay(commitDates, pendingDay = localDateKey()) {
-  return [...commitDates, pendingDay];
+/** Numeric, part by part — string ordering would put 0.1.9 above 0.1.10. */
+export function compareVersions(a, b) {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (left[i] !== right[i]) return left[i] - right[i];
+  }
+  return 0;
 }
 
-export function formatReleaseDate(date) {
-  const d = String(date.getDate()).padStart(2, "0");
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const y = String(date.getFullYear()).slice(-2);
-  return `${d}.${m}.${y}`;
+/** Highest of the given released versions, or null for none. */
+export function latestVersion(versions) {
+  return versions.length === 0 ? null : versions.slice().sort(compareVersions).at(-1);
+}
+
+/** `0.1.38` → `0.1.39`; major and minor move only when a tag says so. */
+export function bumpPatch(version) {
+  const [major, minor, patch] = parseReleaseVersion(version).split(".").map(Number);
+  return `${major}.${minor}.${patch + 1}`;
+}
+
+/** The version this revision releases as — see the rule at the top of this file. */
+export function nextVersion({ baseVersion, releases = [] }) {
+  const latest = latestVersion(releases);
+  return latest === null ? baseVersion : bumpPatch(latest);
+}
+
+/** Author day `2026-08-26` (git's `%as`) as the table's `26.08.26`. */
+export function formatReleaseDay(day) {
+  const [year, month, date] = day.split("-");
+  return `${date}.${month}.${year.slice(-2)}`;
 }
 
 export function parseVersionsMarkdown(raw) {
@@ -56,55 +95,4 @@ export function renderVersionsMarkdown(entries) {
   if (entries.length === 0) return `${VERSIONS_HEADER}\n`;
   const rows = entries.map((entry) => `| ${entry.version} | ${entry.released} |`).join("\n");
   return `${VERSIONS_HEADER}${rows}\n`;
-}
-
-export function upsertReleaseEntry(entries, version, released) {
-  if (entries.some((entry) => entry.version === version)) return entries;
-  return [{ version, released }, ...entries];
-}
-
-/** Default epoch for daily release numbering (versioning feature introduction). */
-export const DEFAULT_VERSION_EPOCH = "2026-08-26";
-
-export function parseLocalDateKey(key) {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-export function uniqueCommitDays(commitDates, epochDate = DEFAULT_VERSION_EPOCH) {
-  return [...new Set(commitDates.filter((date) => date && date >= epochDate))].sort();
-}
-
-/**
- * Patch = unique git author-days since epoch, minus one so the epoch day stays at base (0.1.0).
- * Same git history ⇒ same version on every machine.
- */
-export function computeAppVersion({
-  baseVersion,
-  commitDates,
-  epochDate = DEFAULT_VERSION_EPOCH,
-}) {
-  const days = uniqueCommitDays(commitDates, epochDate);
-  const uniqueDays = days.length;
-  const [major, minor, patch = "0"] = baseVersion.split(".");
-  const bump = Math.max(0, uniqueDays - 1);
-  const version = `${major}.${minor}.${parseInt(patch, 10) + bump}`;
-  return { version, uniqueDays, epochDate, days };
-}
-
-/** Newest-first history rows derived from git commit days (for VERSIONS.md). */
-export function releaseEntriesFromCommitDates({
-  baseVersion,
-  commitDates,
-  epochDate = DEFAULT_VERSION_EPOCH,
-}) {
-  const days = uniqueCommitDays(commitDates, epochDate);
-  const [major, minor, patch = "0"] = baseVersion.split(".");
-  const basePatch = parseInt(patch, 10);
-  return days
-    .map((day, index) => ({
-      version: `${major}.${minor}.${basePatch + index}`,
-      released: formatReleaseDate(parseLocalDateKey(day)),
-    }))
-    .reverse();
 }

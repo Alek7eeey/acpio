@@ -26,18 +26,17 @@
  * Usage: npm run pack:npm [-- --expect-tag v0.1.37 | --version-suffix -rc.1]
  *   --expect-tag <tag>      fail unless the tag (leading "v" ignored) equals the
  *                           version git derives — the guard a tag release runs.
- *   --version-suffix <sfx>  publish as <derived><sfx>, e.g. 0.1.38-rc.7: a
- *                           prerelease of the current revision. It takes the
- *                           prerelease path because a new number cannot exist
- *                           twice in one commit day — this is how a build gets
- *                           verified on the registry without claiming the
- *                           release number (publish it under another dist-tag).
+ *   --version-suffix <sfx>  publish as <derived><sfx>, e.g. 0.1.39-rc.1: a
+ *                           prerelease, which is not a release and so is not a
+ *                           release tag — the way to put a build on the registry
+ *                           without spending the next number (publish it under a
+ *                           dist-tag other than `latest`).
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { computeAppVersion, DEFAULT_VERSION_EPOCH } from "./versionHistory.mjs";
+import { deriveVersion } from "./releaseTags.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outRoot = path.join(repoRoot, "dist-npm");
@@ -63,18 +62,6 @@ function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
 }
 
-function git(cmd) {
-  try {
-    return execSync(cmd, {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
 /** Copy a directory tree, leaving out what must not travel (default: nothing extra). */
 function copyDir(src, dest, skip = []) {
   fs.mkdirSync(dest, { recursive: true });
@@ -87,20 +74,9 @@ function copyDir(src, dest, skip = []) {
   }
 }
 
-/** The same number git stamps into the repo (see scripts/versionHistory.mjs). */
+/** The number this revision is released as — the same one git stamps into the repo. */
 function appVersion() {
-  const pkg = readJson(path.join(repoRoot, "package.json"));
-  const epochDate =
-    typeof pkg.versionEpoch === "string" && /^\d{4}-\d{2}-\d{2}$/.test(pkg.versionEpoch)
-      ? pkg.versionEpoch
-      : DEFAULT_VERSION_EPOCH;
-  const commitDates = git("git log --format=%as HEAD").split("\n").filter(Boolean);
-  if (commitDates.length === 0) {
-    throw new Error(
-      "Cannot derive the version: no git history here. Run `npm run pack:npm` inside the git checkout.",
-    );
-  }
-  return computeAppVersion({ baseVersion: pkg.version, commitDates, epochDate });
+  return deriveVersion(repoRoot, readJson(path.join(repoRoot, "package.json")).version);
 }
 
 /** Manifest of one bundled workspace package: dist only, pinned to the release version. */
@@ -150,13 +126,17 @@ if (versionSuffix && !/^-[0-9A-Za-z][0-9A-Za-z.-]*$/.test(versionSuffix)) {
   process.exit(1);
 }
 
-const { version: derivedVersion, uniqueDays } = appVersion();
+const { version: derivedVersion, releases, releasedTag } = appVersion();
 if (expectTag !== null && expectTag.replace(/^v/, "") !== derivedVersion) {
   console.error(
-    `Tag ${expectTag} does not match the version git derives (${derivedVersion}, ${uniqueDays} commit day(s) since the epoch).`,
+    `Tag ${expectTag} does not match the version these release tags derive (${derivedVersion}` +
+      (releasedTag
+        ? `, released as ${releasedTag})`
+        : `, next after ${releases[0]?.tag ?? "no release"})`) +
+      ".",
   );
   console.error(
-    "The version is a function of git history — see VERSIONS.md for the number this revision carries.",
+    "The version is a function of the release tags — see VERSIONS.md for the numbers that exist.",
   );
   process.exit(1);
 }
