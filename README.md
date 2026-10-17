@@ -238,12 +238,11 @@ git tag v0.1.39 && git push origin v0.1.39
 ```
 
 or from the UI: **Actions → release → Run workflow**, which publishes the version
-the checkout derives and pushes the tag itself. The manual run takes three
-switches:
+the checkout derives, tags it and writes the GitHub Release. The manual run takes
+two fields:
 
-- `publish` (off by default) — off builds and checks the package, on publishes it;
-- `tag` (on by default) — push `v<version>` once the publish went through, unless
-  that tag already exists;
+- `publish` (off by default) — off builds and checks the package, on publishes it
+  and follows through with the tag and the release;
 - `notes` — what changed: it becomes the GitHub Release body. Left empty, the body
   comes from the annotated tag (`git tag -a v0.1.39 -m "…"`) or, for a lightweight
   one, from the commits since the previous release.

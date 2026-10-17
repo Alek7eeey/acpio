@@ -34,13 +34,9 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publish the derived version to npm (off = only build the package)"
+        description: "Publish the derived version to npm, tag it and write the GitHub Release (off = only build the package)"
         type: boolean
         default: false
-      tag:
-        description: "Push v<version> after a successful publish (an existing tag is left alone)"
-        type: boolean
-        default: true
       notes:
         description: "What changed — the GitHub Release body (empty = the tagged message, else the commits)"
         type: string
@@ -90,7 +86,7 @@ jobs:
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Tag the release
-        if: steps.publish.outputs.published == 'true' && inputs.tag == true
+        if: steps.publish.outputs.published == 'true'
         run: |
           version=$(node -p "require('./dist-npm/package.json').version")
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
