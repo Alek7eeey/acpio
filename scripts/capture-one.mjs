@@ -8,15 +8,16 @@ import { fileURLToPath } from "node:url";
 const [, , name, locale = "en", theme = "dark", action = "chat"] = process.argv;
 if (!name) {
   console.error(
-    "Usage: node scripts/capture-one.mjs <file.webp> [locale] [theme] [chat|settings|slash|search|split|mobile|remote|settings-agents]",
+    "Usage: node scripts/capture-one.mjs <file.webp> [locale] [theme] [chat|settings|slash|search|split|mobile|remote|settings-agents|board]",
   );
   process.exit(1);
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "docs", "screens");
-const BASE = "http://localhost:18751";
 const API = "http://127.0.0.1:18741";
+/** UI address: the dev server by default, the prod single port with SCREEN_BASE_URL. */
+const BASE = (process.env.SCREEN_BASE_URL ?? "http://localhost:18751").trim().replace(/\/$/, "");
 
 async function api(pathname, init) {
   const res = await fetch(`${API}${pathname}`, {
@@ -132,6 +133,23 @@ async function pickRichSessions(locale) {
     }
   }
 
+  // A machine that works from boards keeps its conversations there: board tasks
+  // are chats too, and they stay out of `/api/sessions`.
+  if (!scored.length) {
+    const boards = await api("/api/boards").catch(() => []);
+    for (const board of boards) {
+      const tasks = await api(`/api/sessions?boardId=${encodeURIComponent(board.id)}`).catch(() => []);
+      for (const summary of tasks.slice(0, 30)) {
+        try {
+          const row = await scoreSession(summary);
+          if ((row.detail.messages?.length ?? 0) >= 4) scored.push(row);
+        } catch {
+          /* skip */
+        }
+      }
+    }
+  }
+
   const wantedLang = locale === "ru" ? "ru" : "en";
   const matching = scored.filter((s) => s.lang === wantedLang);
   const pool = matching.length ? matching : scored;
@@ -171,6 +189,68 @@ async function pickRichSessions(locale) {
   };
 }
 
+/** Card lane of a board task — the rule the board page itself derives cards from. */
+function laneOf(task) {
+  if (task.doneAt) return "done";
+  if (task.status === "running") return "progress";
+  if (task.status !== "idle") return "wait";
+  return task.startedAt ? "wait" : "todo";
+}
+
+/**
+ * Board to photograph: the one whose cards are spread over the most lanes, so the
+ * shot shows a board being worked on rather than an empty one.
+ */
+async function pickBoard() {
+  const override = process.env.SCREEN_BOARD_ID?.trim();
+  if (override) {
+    const boards = await api("/api/boards");
+    const board = boards.find((b) => b.id === override);
+    if (!board) throw new Error(`SCREEN_BOARD_ID=${override} is not a board`);
+    const tasks = await api(`/api/sessions?boardId=${encodeURIComponent(board.id)}`).catch(() => []);
+    console.log(`  board: ${board.name} (${tasks.length} tasks) — SCREEN_BOARD_ID`);
+    return { id: board.id, name: board.name };
+  }
+  const boards = await api("/api/boards");
+  let best = null;
+  for (const board of boards) {
+    const tasks = await api(`/api/sessions?boardId=${encodeURIComponent(board.id)}`).catch(() => []);
+    const lanes = new Set(tasks.map(laneOf)).size;
+    if (!best || lanes > best.lanes || (lanes === best.lanes && tasks.length > best.tasks)) {
+      best = { id: board.id, name: board.name, lanes, tasks: tasks.length };
+    }
+  }
+  if (best) console.log(`  board: ${best.name} (${best.tasks} tasks, ${best.lanes} lanes)`);
+  return best;
+}
+
+/**
+ * A `slash` shot types `/` into a composer, and the text is mirrored into
+ * settings as a draft — left behind, it reopens the menu on the next page load
+ * and blocks the shots that follow. Put the composer back the way it was found
+ * (usually empty, which drops the draft) and give the client a moment to save it.
+ */
+async function restoreComposer(composer, text, sessionId) {
+  if (composer) await composer.fill(text).catch(() => {});
+  // The client debounces its own save of the draft, so wait it out and then make
+  // sure the `/` this shot typed is gone from settings even if that save was late.
+  if (text) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return;
+  }
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const settings = await api("/api/settings");
+    const drafts = { ...(settings.composerDrafts ?? {}) };
+    if (drafts[sessionId] !== "/") return;
+    delete drafts[sessionId];
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ composerDrafts: drafts }),
+    });
+  }
+}
+
 async function scrollToMessage(page, messageId) {
   if (!messageId) return;
   const el = page.locator(`[data-message-id="${messageId}"]`);
@@ -194,10 +274,15 @@ async function main() {
     }),
   });
 
+  /** What the slash shot found in the composer, put back once the shot is taken. */
+  let typedBefore = "";
+  let slashComposer = null;
   const mobile = action === "mobile";
   const needsChat =
     action === "chat" || action === "slash" || action === "search" || action === "split" || mobile;
   const picked = needsChat ? await pickRichSessions(locale) : null;
+  // A board shot shows the lanes; the busiest board is the one with cards in them.
+  const board = action === "board" ? await pickBoard() : null;
   const session = picked?.primary ?? null;
   const splitSecond = action === "split" ? picked?.secondary ?? null : null;
 
@@ -240,7 +325,9 @@ async function main() {
           ? `${BASE}/settings?section=agent&leaf=connect`
           : action === "remote"
             ? `${BASE}/settings?section=agent&leaf=remote`
-            : `${BASE}/chat`;
+            : board
+              ? `${BASE}/board/${board.id}`
+              : `${BASE}/chat`;
     await page.goto(url, { waitUntil: "networkidle", timeout: 90_000 });
     await page.waitForFunction(() => (document.getElementById("root")?.childElementCount ?? 0) > 0, {
       timeout: 30_000,
@@ -267,8 +354,10 @@ async function main() {
     if (action === "slash") {
       const c = page.getByPlaceholder(/Message or \/command|Сообщение или/i);
       await c.click({ timeout: 15_000 });
+      typedBefore = await c.inputValue();
       await c.fill("/");
       await page.waitForTimeout(500);
+      slashComposer = c;
     } else if (action === "search") {
       await page
         .getByRole("button", { name: locale === "ru" ? /^Поиск$/ : /^Search$/ })
@@ -292,6 +381,8 @@ async function main() {
       await page.waitForTimeout(400);
     } else if (action === "settings") {
       await page.waitForTimeout(500);
+    } else if (board) {
+      await page.waitForTimeout(1200);
     }
 
     const tmp = path.join(OUT, name.replace(/\.webp$/i, ".png"));
@@ -299,6 +390,7 @@ async function main() {
     await page.screenshot({ path: tmp, type: "png" });
     await sharp(tmp).webp({ quality: 90 }).toFile(out);
     await unlink(tmp).catch(() => {});
+    if (action === "slash") await restoreComposer(slashComposer, typedBefore, session?.id);
     console.log("✓", out);
   } finally {
     await browser.close();
