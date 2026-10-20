@@ -12,10 +12,11 @@
  * — an annotated tag is the natural place to say what a release is about
  * (`git tag -a v0.1.39 -m "…"`), and a lightweight tag simply has nothing to add.
  */
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { compareVersions } from "./versionHistory.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -24,10 +25,21 @@ function arg(name) {
   return index === -1 ? null : (process.argv[index + 1] ?? "");
 }
 
-/** Null when git cannot answer (no tags yet, not a repository) — notes are best-effort. */
-function git(cmd) {
+/**
+ * Null when git cannot answer (no tags yet, not a repository) — notes are
+ * best-effort. Arguments go to git verbatim: this file used a command string,
+ * and on the Linux release runner the shell expanded the `v*.*.*` tag pattern
+ * into the repo's own `vitest.config.ts`, so git listed no tags at all and the
+ * release body quietly fell back to the last 30 commits. No shell, no patterns
+ * for it to eat.
+ */
+function git(args) {
   try {
-    return execSync(cmd, { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return execFileSync("git", args, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
     return null;
   }
@@ -49,14 +61,26 @@ const extra = (
 
 /** Free-form text: the maintainer's input, else the message of an *annotated* tag. */
 function tagMessage() {
-  if (git(`git cat-file -t ${tag}`) !== "tag") return "";
-  return (git(`git tag -l --format=%(contents) ${tag}`) ?? "").replace(/\n{3,}/g, "\n\n").trim();
+  if (git(["cat-file", "-t", tag]) !== "tag") return "";
+  return (git(["tag", "-l", "--format=%(contents)", tag]) ?? "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** The last released version before this one — the commits it is missing. */
+/**
+ * The last released version *below* this one — the commits it is missing. Both
+ * conditions matter: reachable from HEAD (a tag on an unmerged branch is not
+ * released history) and lower than the version being noted (notes for an older
+ * release must not start from a newer tag).
+ */
 function previousTag() {
-  const tags = (git("git tag --list v*.*.* --sort=-v:refname") ?? "").split("\n").filter(Boolean);
-  return tags.find((candidate) => candidate !== tag && git(`git merge-base --is-ancestor ${candidate} HEAD`) !== null) ?? null;
+  const tags = (git(["tag", "--list", "v*.*.*", "--sort=-v:refname"]) ?? "").split("\n").filter(Boolean);
+  return (
+    tags.find(
+      (candidate) =>
+        candidate !== tag &&
+        compareVersions(candidate.replace(/^v/, ""), version) < 0 &&
+        git(["merge-base", "--is-ancestor", candidate, "HEAD"]) !== null,
+    ) ?? null
+  );
 }
 
 /**
@@ -72,8 +96,13 @@ function oneLine(subject) {
 }
 
 const previous = previousTag();
+if (previous === null) {
+  // Loud on purpose: a release with tags in history but no previous release found
+  // means the notes below are the fallback, not "what changed since last time".
+  console.error(`release-notes: no previous release tag found above HEAD for ${tag} — listing the last commits.`);
+}
 const subjects = (
-  git(previous ? `git log ${previous}..HEAD --format=%s` : "git log -n 30 --format=%s") ?? ""
+  git(previous ? ["log", `${previous}..HEAD`, "--format=%s"] : ["log", "-n", "30", "--format=%s"]) ?? ""
 )
   .split("\n")
   .filter(Boolean)
