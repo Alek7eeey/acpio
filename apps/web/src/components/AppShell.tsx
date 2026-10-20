@@ -19,6 +19,7 @@ import {
   getSettingsTree,
   parseSettingsSearch,
   settingsPath,
+  settingsSectionTerms,
   defaultLeafFor,
   type SettingsSection,
   type SettingsLeaf,
@@ -159,6 +160,8 @@ export function AppShell() {
     );
   }, [activeSession, headerSession, sessionDetails, t]);
   const settingsTree = useMemo(() => getSettingsTree(t), [t]);
+  /** Terms of a whole section, so its branch is findable by what it is about. */
+  const settingsSectionWords = useMemo(() => settingsSectionTerms(t), [t]);
   const settingsQuery = useAppStore((s) => s.settingsQuery);
   const setSettingsQuery = useAppStore((s) => s.setSettingsQuery);
   const searchIndex = useMemo(
@@ -179,14 +182,17 @@ export function AppShell() {
         const children = branch.children.filter((leaf) =>
           matchAny([leaf.label, ...(searchIndex[leaf.id] ?? [])], q),
         );
-        const branchHits = matchAny([branch.label], q);
+        const branchHits = matchAny(
+          [branch.label, ...(settingsSectionWords[branch.id] ?? [])],
+          q,
+        );
         if (children.length === 0 && !branchHits) return null;
         matches += children.length;
         return children.length > 0 ? { ...branch, children } : branch;
       })
       .filter((b): b is NonNullable<typeof b> => b !== null);
     return { branches, matches };
-  }, [settingsTree, settingsQuery, searchIndex]);
+  }, [settingsTree, settingsQuery, searchIndex, settingsSectionWords]);
 
   const harnessIds = adapters.map((a) => a.id);
   const onlineHarnessCount = harnessIds.filter((id) => agentAvailability[id] === true).length;
@@ -1210,6 +1216,26 @@ export function AppShell() {
                       <circle cx="14.5" cy="12" r="1.3" fill="currentColor" />
                       <path
                         d="M9.5 15.5h5"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  ) : branch.id === "builtin" ? (
+                    // The in-process agent: a chip, against the robot that spawns
+                    // a harness.
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <rect
+                        x="7"
+                        y="7"
+                        width="10"
+                        height="10"
+                        rx="2.5"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                      <path
+                        d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"
                         stroke="currentColor"
                         strokeWidth="1.7"
                         strokeLinecap="round"

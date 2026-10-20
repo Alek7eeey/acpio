@@ -424,6 +424,12 @@ export const en = {
       "Agent that runs inside the server — no CLI to install. Add one or more OpenAI-compatible endpoints and tick the models the agent may use.",
     builtinHint:
       "Works out of the box: reads and edits files in the chat folder, runs commands and asks for permission like any other harness.",
+    builtinBlockGeneration: "Generation",
+    builtinBlockContext: "Context",
+    builtinBlockProviders: "Providers and models",
+    builtinBlockPrompt: "Prompt and skills",
+    builtinBlockSubagents: "Subagents",
+    builtinBlockAccess: "File access",
     builtinPresetsTitle: "Agent presets",
     builtinPresetsHint:
       "Your own cuts of the built-in agent for a specific kind of work: say “Chat (Fast)” for the same model with less thinking and no turn retries, and “Chat (Think)” for the one with room to reason. Every preset joins the agent picker — when a chat or a board task is created — exactly like the built-in agent. An empty field means “as set above”, so a preset overrides only what it fills in.",
@@ -676,7 +682,7 @@ export const en = {
     chatAutoTitleModelHint: "Which model writes the titles of new chats.",
     chatAutoTitleModelAuto: "Automatic",
     chatAutoTitleNeedsBuiltin:
-      "The built-in agent is not configured: add an endpoint and a model under Agents → Built-in agent — until then, titles come from the first message only.",
+      "The built-in agent is not configured: add an endpoint and a model under Built-in agent — until then, titles come from the first message only.",
     chatAutoTitleOpenBuiltin: "Open built-in agent settings",
     customScheme: "Custom palette",
     customAccent: "Accent",

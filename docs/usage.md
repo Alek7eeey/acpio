@@ -170,7 +170,7 @@ The **builtin** provider needs no CLI: its agent runs inside the server process,
 nothing to `npm i -g` and no separate login — the only requirement is an OpenAI-compatible
 endpoint it can reach.
 
-- **Settings → Agents → Built-in agent** — the providers: add as many OpenAI-compatible
+- **Settings → Built-in agent** — the providers: add as many OpenAI-compatible
   endpoints as you like (name + URL + API key), each with its own models. The model editor
   per provider pulls that endpoint's `GET /models` list, so you tick the models the agent
   may use, rename one or set its context window, search a long catalog, and add by hand

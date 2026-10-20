@@ -25,6 +25,8 @@ vi.mock("../lib/api", () => ({ api: apiMock }));
 /** The chat leaf renders the row twice (mobile block + "Advanced" details). */
 const limitField = () => screen.getAllByLabelText("Chats per folder")[0] as HTMLInputElement;
 
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+
 beforeEach(() => {
   // jsdom has no ResizeObserver; the settings preview and the layout rows use it.
   vi.stubGlobal(
@@ -35,6 +37,9 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  // ...and no scrollIntoView, which the built-in agent's section opens a group
+  // with. The spy also records which element it was asked to bring into view.
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false });
 });
 
@@ -43,8 +48,61 @@ afterEach(() => {
   // The search query lives in the store: leaving it set would open the next
   // test on the result list instead of the leaf it deep-links to.
   useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false, settingsQuery: "" });
+  HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+/** Element the last scrollIntoView call was made on. */
+const scrolledTo = () => {
+  const spy = HTMLElement.prototype.scrollIntoView as unknown as { mock: { contexts: unknown[] } };
+  return spy.mock.contexts[0] as HTMLElement | undefined;
+};
+
+describe("Built-in agent section", () => {
+  const renderBuiltin = (search: string) => {
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    return render(
+      <MemoryRouter initialEntries={[`/settings${search}`]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  // The section is one page of groups: the tree entry names the group to open
+  // it on, and the page scrolls there instead of painting the whole run of
+  // tables from the top.
+  it("opens the page on the group named by its leaf", () => {
+    const { container } = renderBuiltin("?section=builtin&leaf=context");
+    expect(scrolledTo()?.id).toBe("settings-group-context");
+    // One page, so the other groups are on it too — the anchor is a position,
+    // not a filter.
+    expect(container.querySelector("#settings-group-access")).not.toBeNull();
+  });
+
+  it("lists every group of the page as a heading", () => {
+    const { container } = renderBuiltin("?section=builtin&leaf=presets");
+    const headings = Array.from(container.querySelectorAll("h2[id^='settings-group-']"));
+    expect(headings.map((h) => h.id)).toEqual([
+      "settings-group-presets",
+      "settings-group-generation",
+      "settings-group-context",
+      "settings-group-providers",
+      "settings-group-prompt",
+      "settings-group-subagents",
+      "settings-group-access",
+    ]);
+  });
+
+  // The walk down the tree that used to reach it: a link naming the leaf it was
+  // is answered by the section, on its first group.
+  it("opens the section from a link to the leaf it used to be", () => {
+    renderBuiltin("?section=agent&leaf=builtin");
+    expect(scrolledTo()?.id).toBe("settings-group-presets");
+    expect(screen.getByLabelText("Skill folders")).toBeTruthy();
+  });
 });
 
 describe("SettingsPage form state", () => {
@@ -371,9 +429,10 @@ describe("Built-in providers", () => {
     const { container } = renderProviders();
 
     await user.type(screen.getAllByLabelText("Search settings…")[0]!, "providers");
+    // A hit names the group of the built-in agent's page the rows live in.
     const hit = screen
       .getAllByRole("button")
-      .find((button) => button.textContent?.includes("Built-in agent"));
+      .find((button) => button.textContent?.includes("Providers and models"));
     expect(hit).toBeTruthy();
     await user.click(hit!);
 

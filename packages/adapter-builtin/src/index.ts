@@ -67,8 +67,8 @@ export const builtinAdapter: HarnessAdapter = {
     hasBuiltinEndpoint(settings)
       ? null
       : settings.locale === "ru"
-        ? "Укажите endpoint в Settings → Agents → Built-in agent — агенту не к чему подключиться."
-        : "Set an endpoint in Settings → Agents → Built-in agent — there is nothing to connect to.",
+        ? "Укажите endpoint в Settings → Built-in agent → Провайдеры и модели — агенту не к чему подключиться."
+        : "Set an endpoint under Settings → Built-in agent → Providers and models — there is nothing to connect to.",
 
   restoreMode: "load",
   suppressReplayOnLoad: true,

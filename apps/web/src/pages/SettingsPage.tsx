@@ -63,8 +63,17 @@ import {
 import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
 import { SubagentsEditor } from "../components/SubagentsEditor";
-import { getSettingsTree, parseSettingsSearch, settingsPath, type SettingsSection, type SettingsLeaf } from "../lib/settingsNav";
-import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex } from "../lib/settingsSearch";
+import {
+  builtinLeafAnchor,
+  builtinLeafLabel,
+  getSettingsTree,
+  parseSettingsSearch,
+  settingsPath,
+  type SettingsBuiltinLeaf,
+  type SettingsSection,
+  type SettingsLeaf,
+} from "../lib/settingsNav";
+import { highlightText, matchAny, SearchGate, SettingsSearchProvider, settingsSearchIndex, useSettingsSearch } from "../lib/settingsSearch";
 import { useT } from "../lib/i18n";
 import { cachedModelsFor, useAppStore } from "../lib/store";
 import { ModelPicker } from "../components/ModelPicker";
@@ -736,7 +745,8 @@ function ChatTitleConfigRows({
           <button
             type="button"
             className={styles.secondaryBtn}
-            onClick={() => navigate(settingsPath("agent", "builtin"))}
+            // The missing piece is an endpoint and its models: open that group.
+            onClick={() => navigate(settingsPath("builtin", "providers"))}
           >
             {t("settings.chatAutoTitleOpenBuiltin")}
           </button>
@@ -793,6 +803,26 @@ function ContextNumberRow({
         onBlur={() => setRaw(String(value))}
       />
     </SettingRow>
+  );
+}
+
+/**
+ * Heading that opens one group of the built-in agent's page. The page is a long
+ * run of tables whose rows used to run together with nothing to scan by, so
+ * each group of rows is introduced by its own heading and a rule — and each
+ * heading carries the group's id, the anchor the section's tree entries open
+ * the page on (`/settings?section=builtin&leaf=<group>`).
+ */
+function BuiltinGroupHeading({ group }: { group: SettingsBuiltinLeaf }) {
+  const t = useT();
+  const { highlight } = useSettingsSearch();
+  return (
+    <h2
+      id={builtinLeafAnchor(group)}
+      className={`${styles.sectionHeading} ${styles.settingsGroupHeading}`}
+    >
+      {highlight(builtinLeafLabel(t, group))}
+    </h2>
   );
 }
 
@@ -1489,6 +1519,17 @@ export function SettingsPage() {
       setViewingResults(false);
     }
   }, [section, leaf]);
+  /**
+   * The built-in agent's section keeps its whole page in one form, and its tree
+   * entries name the group to open it on: the panel is scrolled to that group's
+   * heading once the page has painted it. Re-clicking the group already open
+   * moves nothing, as it should.
+   */
+  useEffect(() => {
+    if (section !== "builtin") return;
+    document.getElementById(builtinLeafAnchor(leaf))?.scrollIntoView({ block: "start" });
+  }, [section, leaf]);
+
   // When query changes (typing), show results panel — but only if we didn't
   // just navigate (the section/leaf effect already handled that frame).
   const prevQueryRef = useRef(settingsQuery);
@@ -2159,21 +2200,23 @@ export function SettingsPage() {
             : leaf === "board"
               ? t("settings.boardTitle")
               : t("settings.appearance")
-      : section === "agent"
-        ? leaf === "connect"
-          ? t("settings.agentConnectTitle")
-          : leaf === "model"
-            ? t("settings.agentModelTitle")
-            : leaf === "builtin"
-              ? t("settings.builtinTitle")
+      : section === "builtin"
+        ? // One page, opened on the group the tree entry named: the section is
+          // what it is about, the heading under it says which part.
+          t("settings.builtinTitle")
+        : section === "agent"
+          ? leaf === "connect"
+            ? t("settings.agentConnectTitle")
+            : leaf === "model"
+              ? t("settings.agentModelTitle")
               : leaf === "remote"
-              ? t("settings.remoteAccessTitle")
-              : leaf === "diagnostics"
-                ? t("settings.diagnosticsTitle")
-                : leaf === "mcp"
-                  ? t("settings.mcpTitle")
-                  : t("settings.agentAdvancedTitle")
-        : t("settings.agentConnectTitle");
+                ? t("settings.remoteAccessTitle")
+                : leaf === "diagnostics"
+                  ? t("settings.diagnosticsTitle")
+                  : leaf === "mcp"
+                    ? t("settings.mcpTitle")
+                    : t("settings.agentAdvancedTitle")
+          : t("settings.agentConnectTitle");
 
   const subtitle =
     section === "interface"
@@ -2186,17 +2229,17 @@ export function SettingsPage() {
             : leaf === "board"
               ? t("settings.boardDesc")
               : t("settings.sidebarCollapseHint")
-      : section === "agent" && leaf === "mcp"
-        ? t("settings.mcpHint")
-    : section === "agent" && leaf === "advanced"
-      ? t("settings.agentAdvancedDesc")
-      : section === "agent" && leaf === "builtin"
+      : section === "builtin"
         ? t("settings.builtinHint")
-        : section === "agent" && leaf === "remote"
-          ? t("settings.remoteAccessDesc")
-          : section === "agent" && leaf === "diagnostics"
-            ? t("settings.diagnosticsDesc")
-            : t("settings.agentConnectDesc");
+        : section === "agent" && leaf === "mcp"
+          ? t("settings.mcpHint")
+          : section === "agent" && leaf === "advanced"
+            ? t("settings.agentAdvancedDesc")
+            : section === "agent" && leaf === "remote"
+              ? t("settings.remoteAccessDesc")
+              : section === "agent" && leaf === "diagnostics"
+                ? t("settings.diagnosticsDesc")
+                : t("settings.agentConnectDesc");
 
   const eyebrow = section === "interface" ? t("settings.interface") : t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -3075,15 +3118,14 @@ export function SettingsPage() {
           )
         )}
 
-        {section === "agent" && leaf === "builtin" && (
+        {section === "builtin" && (
           <>
             <p className={styles.hint}>{t("settings.builtinDesc")}</p>
             {/* Presets come first: they are what an agent picker shows, so a
                 chat runs the profile its name promises. */}
-            <div className={styles.sectionBlock}>
-              <h2 className={styles.sectionHeading}>{t("settings.builtinPresetsTitle")}</h2>
-              <BuiltinPresetsRows form={form} patch={patch} />
-            </div>
+            <BuiltinGroupHeading group="presets" />
+            <BuiltinPresetsRows form={form} patch={patch} />
+            <BuiltinGroupHeading group="generation" />
             <SettingTable>
               <SettingRow
                 label={t("settings.builtinMaxOutputTokens")}
@@ -3138,7 +3180,9 @@ export function SettingsPage() {
                 }}
               />
             </SettingTable>
+            <BuiltinGroupHeading group="context" />
             <BuiltinContextRows form={form} patch={patch} />
+            <BuiltinGroupHeading group="providers" />
             {/* Cards, not table rows: each provider is its own box, folded to
                 a single header until the user opens it. */}
             <div className={styles.providerList}>
@@ -3353,6 +3397,7 @@ export function SettingsPage() {
               </SettingRow>
             </SettingTable>
 
+            <BuiltinGroupHeading group="prompt" />
             <SettingTable>
               <SettingRow
                 layout="stack"
@@ -3412,8 +3457,32 @@ export function SettingsPage() {
                   {t("settings.builtinSkillPathsReset")}
                 </button>
               </SettingRow>
+              {/* The picture line is one sentence of the same system prompt the
+                  instructions above extend, so it lives in this group. */}
+              <SettingRow
+                label={t("settings.builtinMarkdownImages")}
+                hint={t("settings.builtinMarkdownImagesHint")}
+                terms={[
+                  t("settings.builtinMarkdownImages"),
+                  t("settings.builtinMarkdownImagesHint"),
+                  "markdown",
+                  "![shot](shot.png)",
+                ]}
+              >
+                <Toggle
+                  checked={form.builtinMarkdownImages !== false}
+                  onChange={(v) => {
+                    patch("builtinMarkdownImages", v);
+                    // Applies at once, like the neighbouring switch: the next
+                    // turn of a running chat is built with the new prompt.
+                    void saveSettings({ builtinMarkdownImages: v });
+                  }}
+                  label={t("settings.builtinMarkdownImages")}
+                />
+              </SettingRow>
             </SettingTable>
 
+            <BuiltinGroupHeading group="subagents" />
             <SettingTable>
               <SettingRow
                 label={t("settings.subagentsEnabled")}
@@ -3503,6 +3572,10 @@ export function SettingsPage() {
                   </SettingRow>
                 </>
               ) : null}
+            </SettingTable>
+
+            <BuiltinGroupHeading group="access" />
+            <SettingTable>
               <SettingRow
                 label={t("settings.builtinAllowOutsideCwd")}
                 hint={t("settings.builtinAllowOutsideCwdHint")}
@@ -3522,27 +3595,6 @@ export function SettingsPage() {
                     void saveSettings({ builtinAllowOutsideCwd: v });
                   }}
                   label={t("settings.builtinAllowOutsideCwd")}
-                />
-              </SettingRow>
-              <SettingRow
-                label={t("settings.builtinMarkdownImages")}
-                hint={t("settings.builtinMarkdownImagesHint")}
-                terms={[
-                  t("settings.builtinMarkdownImages"),
-                  t("settings.builtinMarkdownImagesHint"),
-                  "markdown",
-                  "![shot](shot.png)",
-                ]}
-              >
-                <Toggle
-                  checked={form.builtinMarkdownImages !== false}
-                  onChange={(v) => {
-                    patch("builtinMarkdownImages", v);
-                    // Applies at once, like the neighbouring switch: the next
-                    // turn of a running chat is built with the new prompt.
-                    void saveSettings({ builtinMarkdownImages: v });
-                  }}
-                  label={t("settings.builtinMarkdownImages")}
                 />
               </SettingRow>
             </SettingTable>
@@ -4378,6 +4430,7 @@ export function SettingsPage() {
         )}
 
         {(section === "interface" ||
+          section === "builtin" ||
           (section === "agent" && leaf !== "connect" && leaf !== "remote")) && (
           <div className={styles.footerBar}>
             <button type="submit">{t("common.save")}</button>

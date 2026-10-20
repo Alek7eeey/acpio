@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  builtinLeafAnchor,
+  builtinSettingsLeaves,
   defaultLeafFor,
   getSettingsTree,
   parseSettingsSearch,
   settingsPath,
+  settingsSectionTerms,
 } from "./settingsNav";
 import type { SettingsSection } from "./settingsNav";
 
@@ -11,7 +14,7 @@ import type { SettingsSection } from "./settingsNav";
 const t = (key: string) => key;
 
 describe("parseSettingsSearch", () => {
-  it.each(["connect", "model", "builtin", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
     "parses the agent leaf %j",
     (leaf) => {
       expect(parseSettingsSearch(`?section=agent&leaf=${leaf}`)).toEqual({
@@ -20,6 +23,56 @@ describe("parseSettingsSearch", () => {
       });
     },
   );
+
+  it.each([
+    "presets",
+    "generation",
+    "context",
+    "providers",
+    "prompt",
+    "subagents",
+    "access",
+  ] as const)("parses the built-in agent leaf %j", (leaf) => {
+    expect(parseSettingsSearch(`?section=builtin&leaf=${leaf}`)).toEqual({
+      section: "builtin",
+      leaf,
+    });
+  });
+
+  it("defaults an unknown built-in leaf to the first group", () => {
+    expect(parseSettingsSearch("?section=builtin&leaf=wat")).toEqual({
+      section: "builtin",
+      leaf: "presets",
+    });
+    expect(parseSettingsSearch("?section=builtin")).toEqual({
+      section: "builtin",
+      leaf: "presets",
+    });
+  });
+
+  // The section used to be a leaf of the agent section: links from back then
+  // still open it, on its first group.
+  it("maps the leaf the built-in agent used to be to its own section", () => {
+    expect(parseSettingsSearch("?section=agent&leaf=builtin")).toEqual({
+      section: "builtin",
+      leaf: "presets",
+    });
+    expect(parseSettingsSearch("?leaf=builtin")).toEqual({
+      section: "builtin",
+      leaf: "presets",
+    });
+  });
+
+  it("defaults a built-in-only leaf under another section to that section", () => {
+    expect(parseSettingsSearch("?section=agent&leaf=providers")).toEqual({
+      section: "agent",
+      leaf: "connect",
+    });
+    expect(parseSettingsSearch("?section=interface&leaf=providers")).toEqual({
+      section: "interface",
+      leaf: "appearance",
+    });
+  });
 
   it.each(["appearance", "colors", "voice", "chat", "board"] as const)(
     "parses the interface leaf %j",
@@ -42,6 +95,13 @@ describe("parseSettingsSearch", () => {
     expect(parseSettingsSearch("?section=agent&leaf=colors")).toEqual({
       section: "agent",
       leaf: "connect",
+    });
+  });
+
+  it("defaults an interface-only leaf under section=builtin to the first group", () => {
+    expect(parseSettingsSearch("?section=builtin&leaf=colors")).toEqual({
+      section: "builtin",
+      leaf: "presets",
     });
   });
 
@@ -131,12 +191,33 @@ describe("settingsPath", () => {
     expect(settingsPath("interface", "voice")).toBe("/settings?section=interface&leaf=voice");
   });
 
-  it.each(["connect", "model", "builtin", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it("defaults the built-in agent leaf to its first group", () => {
+    expect(settingsPath("builtin")).toBe("/settings?section=builtin&leaf=presets");
+  });
+
+  it("uses the given built-in agent leaf", () => {
+    expect(settingsPath("builtin", "context")).toBe(
+      "/settings?section=builtin&leaf=context",
+    );
+  });
+
+  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
     "round-trips the agent leaf %j",
     (leaf) => {
       const path = settingsPath("agent", leaf);
       expect(parseSettingsSearch(path.slice(path.indexOf("?")))).toEqual({
         section: "agent",
+        leaf,
+      });
+    },
+  );
+
+  it.each(["presets", "context", "subagents", "access"] as const)(
+    "round-trips the built-in agent leaf %j",
+    (leaf) => {
+      const path = settingsPath("builtin", leaf);
+      expect(parseSettingsSearch(path.slice(path.indexOf("?")))).toEqual({
+        section: "builtin",
         leaf,
       });
     },
@@ -157,6 +238,10 @@ describe("settingsPath", () => {
 describe("defaultLeafFor", () => {
   it("returns connect for the agent section", () => {
     expect(defaultLeafFor("agent")).toBe("connect");
+  });
+
+  it("returns the first group for the built-in agent section", () => {
+    expect(defaultLeafFor("builtin")).toBe("presets");
   });
 
   it("returns appearance for the interface section", () => {
@@ -180,7 +265,6 @@ describe("getSettingsTree", () => {
     expect(tree[0].children.map((c) => c.id)).toEqual([
       "connect",
       "model",
-      "builtin",
       "advanced",
       "mcp",
       "diagnostics",
@@ -189,7 +273,6 @@ describe("getSettingsTree", () => {
     expect(tree[0].children.map((c) => c.label)).toEqual([
       "settings.connection",
       "settings.modelSection",
-      "settings.builtinTitle",
       "settings.advanced",
       "settings.mcpTitle",
       "settings.diagnostics",
@@ -197,18 +280,33 @@ describe("getSettingsTree", () => {
     ]);
   });
 
+  it("builds the built-in agent's branch beside the other two", () => {
+    const tree = getSettingsTree(t);
+    expect(tree[1].id).toBe("builtin");
+    expect(tree[1].label).toBe("settings.builtinTitle");
+    expect(tree[1].children.map((c) => c.id)).toEqual([
+      "presets",
+      "generation",
+      "context",
+      "providers",
+      "prompt",
+      "subagents",
+      "access",
+    ]);
+  });
+
   it("builds the interface branch with its id and translated labels", () => {
     const tree = getSettingsTree(t);
-    expect(tree[1].id).toBe("interface");
-    expect(tree[1].label).toBe("settings.interface");
-    expect(tree[1].children.map((c) => c.id)).toEqual([
+    expect(tree[2].id).toBe("interface");
+    expect(tree[2].label).toBe("settings.interface");
+    expect(tree[2].children.map((c) => c.id)).toEqual([
       "appearance",
       "colors",
       "voice",
       "chat",
       "board",
     ]);
-    expect(tree[1].children.map((c) => c.label)).toEqual([
+    expect(tree[2].children.map((c) => c.label)).toEqual([
       "settings.appearance",
       "settings.colors",
       "settings.voice",
@@ -220,19 +318,34 @@ describe("getSettingsTree", () => {
   it("translates every node label through the given t function", () => {
     const spy = vi.fn((key: string) => key);
     const tree = getSettingsTree(spy);
-    const allLabels = [
-      tree[0].label,
-      ...tree[0].children.map((c) => c.label),
-      tree[1].label,
-      ...tree[1].children.map((c) => c.label),
-    ];
+    const allLabels = tree.flatMap((branch) => [
+      branch.label,
+      ...branch.children.map((c) => c.label),
+    ]);
     expect(spy).toHaveBeenCalledTimes(allLabels.length);
     for (const key of allLabels) {
       expect(spy).toHaveBeenCalledWith(key);
     }
   });
 
-  it("returns exactly two branches", () => {
-    expect(getSettingsTree(t)).toHaveLength(2);
+  it("returns the three branches in tree order", () => {
+    expect(getSettingsTree(t).map((b) => b.id)).toEqual(["agent", "builtin", "interface"]);
+  });
+});
+
+describe("the built-in agent's groups", () => {
+  it("names a group the same way its heading on the page is named", () => {
+    const leaves = builtinSettingsLeaves(t);
+    expect(leaves[0].label).toBe("settings.builtinPresetsTitle");
+    expect(leaves[1].label).toBe("settings.builtinBlockGeneration");
+  });
+
+  it("anchors a group by an id of its own", () => {
+    expect(builtinLeafAnchor("subagents")).toBe("settings-group-subagents");
+  });
+
+  it("indexes the section for the tree's search", () => {
+    expect(settingsSectionTerms(t).builtin).toContain("settings.builtinTitle");
+    expect(settingsSectionTerms(t).agent).toEqual([]);
   });
 });
