@@ -170,8 +170,9 @@ chat feed via normalized adapter events.
 
 ## Versioning
 
-Versions are released from time to time. Each release is a `v<major>.<minor>.<patch>` git tag,
-and the same number goes to npm. `VERSIONS.md` lists the releases, newest first.
+A release is cut once a batch of changes has accumulated. Each release is a
+`v<major>.<minor>.<patch>` git tag, and the same number is published to npm. `VERSIONS.md`
+lists the releases, newest first.
 
 ### `ACPIO_TAKEOVER=1` — force claim a locked database (humans only)
 
