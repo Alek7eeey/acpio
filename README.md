@@ -170,8 +170,8 @@ chat feed via normalized adapter events.
 
 ## Versioning
 
-The version under the title is the release the build belongs to: the same number npm serves,
-the same one tagged in git. `VERSIONS.md` lists them, newest first.
+Versions are released from time to time. Each release is a `v<major>.<minor>.<patch>` git tag,
+and the same number goes to npm. `VERSIONS.md` lists the releases, newest first.
 
 ### `ACPIO_TAKEOVER=1` — force claim a locked database (humans only)
 
