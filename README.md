@@ -168,21 +168,13 @@ Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent 
 `session/update` events, permissions, questions, plans and subagent cards are rendered in the
 chat feed via normalized adapter events.
 
-## Versioning and releases
+## Versioning
 
-A release is a `v<major>.<minor>.<patch>` **git tag**, and the version a revision reports is
-derived from those tags (`scripts/releaseTags.mjs`): a tagged revision reports its own tag,
-any other one patch above the highest tag reachable from it. Tags are part of git, so the
-number reads the same on every machine without a registry.
-
-The number is written into `README.md`, `readme-ru.md`, `VERSIONS.md` (one row per release)
-and `packages/shared/src/buildInfo.ts` by `scripts/generate-version.mjs` — at build time and
-from the `pre-commit` hook (`npm run hooks:install`, installed by `npm install`).
-
-Release from the terminal (`git tag v0.1.39 && git push origin v0.1.39`) or from the UI
-(**Actions → release → Run workflow**, whose `notes` field becomes the GitHub Release body).
-Both doors end the same way: the package on npm over trusted publishing and a GitHub Release
-at `v<version>`.
+The version the app reports is derived from the release tags: a tagged revision reports its
+own tag, any other one patch above the highest tag reachable from it. Tags are part of git, so
+the number reads the same on every machine without a registry — and the number under the
+title in the UI is always the one npm serves for that build. `VERSIONS.md` lists the released
+versions, newest first.
 
 ### `ACPIO_TAKEOVER=1` — force claim a locked database (humans only)
 
