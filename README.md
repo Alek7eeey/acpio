@@ -170,11 +170,8 @@ chat feed via normalized adapter events.
 
 ## Versioning
 
-The version the app reports is derived from the release tags: a tagged revision reports its
-own tag, any other one patch above the highest tag reachable from it. Tags are part of git, so
-the number reads the same on every machine without a registry — and the number under the
-title in the UI is always the one npm serves for that build. `VERSIONS.md` lists the released
-versions, newest first.
+The version under the title is the release the build belongs to: the same number npm serves,
+the same one tagged in git. `VERSIONS.md` lists them, newest first.
 
 ### `ACPIO_TAKEOVER=1` — force claim a locked database (humans only)
 
