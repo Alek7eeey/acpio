@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { followsThreadBottom, showsJumpToLatest, type ThreadScrollMetrics } from "./chatScroll.js";
+import {
+  STICK_ECHO_MS,
+  followsThreadBottom,
+  showsJumpToLatest,
+  threadScrollRearmsBottom,
+  type ThreadScrollMetrics,
+} from "./chatScroll.js";
 
 /** A 900px scrollport over a 5000px thread, scrolled to the very bottom. */
 function atBottom(overrides: Partial<ThreadScrollMetrics> = {}): ThreadScrollMetrics {
@@ -63,6 +69,44 @@ describe("followsThreadBottom", () => {
         prevScrollTop: bottom.scrollTop - 500,
       }),
     ).toBe(false);
+  });
+});
+
+describe("threadScrollRearmsBottom", () => {
+  it("discards a bottom-landing scroll inside the echo window", () => {
+    // The reader left the bottom by wheel while the reply was streaming: the
+    // token that followed pulled the viewport down and left a scroll event at
+    // the bottom. The plain rule re-arms the pin on it (that is the unfixed
+    // behavior) and the reader is dragged back mid-drag.
+    const bottom = atBottom();
+    expect(followsThreadBottom(bottom)).toBe(true);
+    expect(threadScrollRearmsBottom(bottom, 1000, 1000 + STICK_ECHO_MS)).toBe(false);
+    expect(threadScrollRearmsBottom(bottom, 1000 + STICK_ECHO_MS - 1, 1000 + STICK_ECHO_MS)).toBe(false);
+  });
+
+  it("holds through a drag longer than one window", () => {
+    // A reader dragging slowly upward sends an upward step every ~200ms. The
+    // window is re-armed by each step, so the growth never gets the pin back in
+    // the middle of the drag — no matter how long the drag lasts.
+    const bottom = atBottom();
+    let echoUntil = 0;
+    for (let at = 0; at < 3000; at += 200) {
+      echoUntil = at + STICK_ECHO_MS;
+      expect(threadScrollRearmsBottom(bottom, at + 199, echoUntil)).toBe(false);
+    }
+    // The drag ends: the pin is handed back only once the reader stops.
+    expect(threadScrollRearmsBottom(bottom, echoUntil, echoUntil)).toBe(true);
+  });
+
+  it("re-arms on any scroll once the window has passed", () => {
+    const bottom = atBottom();
+    const echoUntil = 1000 + STICK_ECHO_MS;
+    expect(threadScrollRearmsBottom(bottom, echoUntil, echoUntil)).toBe(true);
+    expect(threadScrollRearmsBottom(withHidden(300), echoUntil, echoUntil)).toBe(false);
+  });
+
+  it("stays released on scroll events with no window to hold", () => {
+    expect(threadScrollRearmsBottom(withHidden(400), 1000, 0)).toBe(false);
   });
 });
 

@@ -37,8 +37,45 @@ const JUMP_LATEST_MIN_HIDDEN_RATIO = 1 / 3;
  */
 export function followsThreadBottom(metrics: ThreadScrollMetrics) {
   const hiddenPx = Math.max(0, metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight);
-  const scrolledUp = metrics.scrollTop < metrics.prevScrollTop - SCROLLED_UP_MIN_PX;
-  return !scrolledUp && hiddenPx < FOLLOW_MAX_HIDDEN_PX;
+  return !scrollHandsThreadToReader(metrics) && hiddenPx < FOLLOW_MAX_HIDDEN_PX;
+}
+
+/**
+ * Whether this scroll step is the reader taking the thread over. It is the one
+ * moment the pin yields, and the one moment the echo window is armed — every
+ * further step of the same drag re-arms it, so a slow drag stays covered for its
+ * whole length rather than for its first half second.
+ */
+export function scrollHandsThreadToReader(metrics: ThreadScrollMetrics) {
+  return metrics.scrollTop < metrics.prevScrollTop - SCROLLED_UP_MIN_PX;
+}
+
+/**
+ * How long a scroll back to the bottom counts as the pin's own echo rather than
+ * the reader returning. A wheel notch is reported before the scroll it causes,
+ * and the thread keeps growing in between: the token that pulls the viewport
+ * down leaves a scroll event sitting at the bottom, and re-arming the pin on it
+ * is what makes the thread stick and jitter while the model answers. The window
+ * is re-armed by each upward step, so it measures the pause at the end of a drag
+ * and not the length of the drag itself.
+ */
+export const STICK_ECHO_MS = 500;
+
+/**
+ * Whether a scroll event hands the pin back to the bottom. Inside the echo
+ * window after the reader's last upward step, a scroll that lands at the bottom
+ * is that echo — the plain rule re-engages the pin on the pin's own output, and
+ * the reader is dragged back mid-drag. The reader's own wheel down never comes
+ * through here: it is read off the intent as it is made, so returning to the
+ * bottom re-arms at once instead of waiting the window out.
+ */
+export function threadScrollRearmsBottom(
+  metrics: ThreadScrollMetrics,
+  now: number,
+  echoUntil: number,
+) {
+  if (now < echoUntil) return false;
+  return followsThreadBottom(metrics);
 }
 
 /**

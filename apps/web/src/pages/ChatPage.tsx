@@ -50,7 +50,13 @@ import { api } from "../lib/api";
 import { harnessNamesForCopy } from "../lib/harness";
 import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
 import { composerCaretOnFirstLine, composerCaretOnLastLine } from "../lib/composerCaretLines";
-import { followsThreadBottom, showsJumpToLatest } from "../lib/chatScroll";
+import {
+  STICK_ECHO_MS,
+  followsThreadBottom,
+  scrollHandsThreadToReader,
+  showsJumpToLatest,
+  threadScrollRearmsBottom,
+} from "../lib/chatScroll";
 import { useLocale, useT } from "../lib/i18n";
 import { useBrowserLocation } from "../lib/usePathname";
 import { FALLBACK_CHAT_PANES } from "../lib/chatPanes";
@@ -6185,6 +6191,11 @@ function ChatThread() {
   const suppressScrollWatchRef = useRef(false);
   /** Last observed scrollTop, for telling a reader's upward drag from growth. */
   const lastScrollTopRef = useRef(0);
+  /**
+   * Until this timestamp a scroll landing at the bottom is the pin's own echo,
+   * not the reader arriving there — see `threadScrollRearmsBottom`.
+   */
+  const stickEchoUntilRef = useRef(0);
   /** Pin to bottom across skeleton → first paint of an unloaded chat. */
   const pendingBottomPinRef = useRef(false);
   const [scrolledAway, setScrolledAway] = useState(false);
@@ -6204,6 +6215,17 @@ function ChatThread() {
       suppressScrollWatchRef.current = false;
       stickToBottomRef.current = true;
     });
+  };
+
+  /**
+   * The reader taking the thread away, latched on the intent rather than on the
+   * scroll it causes: the wheel is reported first, so the pin yields before the
+   * next token's growth can pull the viewport back down. Every step of the drag
+   * latches it again, which is what keeps the window open the whole way.
+   */
+  const releaseStickToBottom = () => {
+    stickToBottomRef.current = false;
+    stickEchoUntilRef.current = Date.now() + STICK_ECHO_MS;
   };
 
   // Which prompt's turn the reader is in: the last rail prompt whose message
@@ -6289,8 +6311,35 @@ function ChatThread() {
         return;
       }
       const next = metrics(prevTop);
-      stickToBottomRef.current = followsThreadBottom(next);
+      if (scrollHandsThreadToReader(next)) {
+        // Not only the wheel: a slow drag delivers a long run of these, and each
+        // one has to re-arm the window, or the growth gets the pin back in the
+        // middle of the drag and pulls the reader down with it.
+        releaseStickToBottom();
+      } else {
+        stickToBottomRef.current = threadScrollRearmsBottom(
+          next,
+          Date.now(),
+          stickEchoUntilRef.current,
+        );
+      }
       setScrolledAway(showsJumpToLatest(next));
+    };
+    /**
+     * The wheel is the one input that reports the reader's intent before the
+     * movement it makes, so the pin is read here: up hands the thread over at
+     * once, down at the bottom takes it back. Without this the listener only
+     * hears the echo of a wheel the pin already answered.
+     */
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY > 0) {
+        if (followsThreadBottom(metrics(thread.scrollTop))) {
+          stickEchoUntilRef.current = 0;
+          stickToBottomRef.current = true;
+        }
+        return;
+      }
+      if (e.deltaY < 0) releaseStickToBottom();
     };
     // Opening a block is the reader choosing what to read: stop following the
     // stream, or the growth re-pins to the bottom and the block's first line
@@ -6303,13 +6352,15 @@ function ChatThread() {
         `.${styles.stepsToggle}, .${styles.partToggle}, .${styles.subagentToggle}`,
       );
       if (!onBlockHeader) return;
-      stickToBottomRef.current = false;
+      releaseStickToBottom();
     };
     thread.addEventListener("scroll", onScroll, { passive: true });
     thread.addEventListener("pointerdown", onPointerDown);
+    thread.addEventListener("wheel", onWheel, { passive: true });
     return () => {
       thread.removeEventListener("scroll", onScroll);
       thread.removeEventListener("pointerdown", onPointerDown);
+      thread.removeEventListener("wheel", onWheel);
     };
   }, [storeActiveSessionId]);
 
