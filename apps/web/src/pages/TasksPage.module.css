@@ -41,6 +41,36 @@
   flex-wrap: wrap;
 }
 
+.filters {
+  max-width: 980px;
+  margin: 0 auto 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 11px;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background var(--motion), border-color var(--motion), color var(--motion);
+}
+
+.filter:hover {
+  background: var(--bg-secondary);
+}
+
+.filterOn {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 .counter {
   font-size: 0.8rem;
   color: var(--text-secondary);

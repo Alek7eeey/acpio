@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { sortBackgroundJobs, type BackgroundJobDto, type BackgroundJobStatus } from "@acpio/shared";
 import { AppDialog } from "../components/AppDialog";
 import { api } from "../lib/api";
@@ -27,6 +28,21 @@ function statusMessageKey(status: BackgroundJobStatus): string {
 
 type OutputView = { job: BackgroundJobDto; text: string; dropped: boolean };
 
+/** Which slice of the list the page shows; counts come from the live rows. */
+type JobFilter = "all" | "running" | "finished";
+
+const FILTERS: { id: JobFilter; labelKey: string }[] = [
+  { id: "all", labelKey: "bg.filterAll" },
+  { id: "running", labelKey: "bg.filterRunning" },
+  { id: "finished", labelKey: "bg.filterFinished" },
+];
+
+function matchesFilter(job: BackgroundJobDto, filter: JobFilter): boolean {
+  if (filter === "running") return job.status === "running";
+  if (filter === "finished") return job.status !== "running";
+  return true;
+}
+
 /**
  * Every background task the agent has started, across all chats — the page the
  * composer chip links to. It is the only place a job from a chat that is not
@@ -35,12 +51,16 @@ type OutputView = { job: BackgroundJobDto; text: string; dropped: boolean };
  */
 export function TasksPage() {
   const t = useT();
+  const navigate = useNavigate();
   const locale = useAppStore((s) => s.settings.locale);
   const jobs = useAppStore((s) => s.bgJobs);
   const refresh = useAppStore((s) => s.refreshBackgroundJobs);
   const stopJob = useAppStore((s) => s.stopBackgroundJob);
   const forgetJob = useAppStore((s) => s.forgetBackgroundJob);
   const clearFinished = useAppStore((s) => s.clearFinishedBackgroundJobs);
+  const selectSession = useAppStore((s) => s.selectSession);
+  const [filter, setFilter] = useState<JobFilter>("all");
+  const [stopping, setStopping] = useState(false);
   const [output, setOutput] = useState<OutputView | null>(null);
   const [outputLoading, setOutputLoading] = useState(false);
 
@@ -51,6 +71,11 @@ export function TasksPage() {
   const rows = useMemo(() => sortBackgroundJobs(jobs), [jobs]);
   const running = rows.filter((job) => job.status === "running").length;
   const finished = rows.length - running;
+  const counts: Record<JobFilter, number> = { all: rows.length, running, finished };
+  const visible = useMemo(
+    () => rows.filter((job) => matchesFilter(job, filter)),
+    [rows, filter],
+  );
 
   const loadOutput = useCallback(
     async (job: BackgroundJobDto) => {
@@ -95,6 +120,25 @@ export function TasksPage() {
     }
   };
 
+  // The chat the job was started from — the page is the only place a job of a
+  // closed chat is reachable, so it has to be able to open that chat too.
+  const onOpenChat = (job: BackgroundJobDto) => {
+    void selectSession(job.sessionId);
+    navigate("/chat");
+  };
+
+  // Bulk operation: every active row in one go, whatever the filter shows.
+  const onStopAll = async () => {
+    setStopping(true);
+    try {
+      for (const job of rows.filter((row) => row.status === "running")) {
+        await onStop(job);
+      }
+    } finally {
+      setStopping(false);
+    }
+  };
+
   return (
     <div className={styles.page}>
       <header className={styles.head}>
@@ -115,17 +159,44 @@ export function TasksPage() {
           >
             {t("bg.clearFinished")}
           </button>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.danger}`}
+            disabled={running === 0 || stopping}
+            onClick={() => void onStopAll()}
+          >
+            {t("bg.stopRunningAll")}
+          </button>
         </div>
       </header>
+
+      <div className={styles.filters} role="group" aria-label={t("bg.filterLabel")}>
+        {FILTERS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            aria-pressed={filter === item.id}
+            className={`${styles.filter} ${filter === item.id ? styles.filterOn : ""}`}
+            onClick={() => setFilter(item.id)}
+          >
+            {t(item.labelKey, { count: counts[item.id] })}
+          </button>
+        ))}
+      </div>
 
       {rows.length === 0 ? (
         <div className={styles.empty}>
           <p className={styles.emptyTitle}>{t("bg.empty")}</p>
           <p className={styles.emptyHint}>{t("bg.emptyHint")}</p>
         </div>
+      ) : visible.length === 0 ? (
+        <div className={styles.empty}>
+          <p className={styles.emptyTitle}>{t("bg.filterEmpty")}</p>
+          <p className={styles.emptyHint}>{t("bg.filterEmptyHint")}</p>
+        </div>
       ) : (
         <ul className={styles.list}>
-          {rows.map((job) => (
+          {visible.map((job) => (
             <li key={job.id} className={styles.row}>
               <span
                 className={`${styles.dot} ${styles[`dot_${job.status}`]}`}
@@ -168,6 +239,14 @@ export function TasksPage() {
                 </div>
               </div>
               <div className={styles.rowActions}>
+                <button
+                  type="button"
+                  className={styles.button}
+                  title={job.sessionId}
+                  onClick={() => onOpenChat(job)}
+                >
+                  {t("bg.openChat")}
+                </button>
                 <button
                   type="button"
                   className={styles.button}
