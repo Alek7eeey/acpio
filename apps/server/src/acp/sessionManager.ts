@@ -68,7 +68,7 @@ import {
   updatePart,
   updateSession,
   saveSessionUsage,
-  markBoardTaskStarted,
+  claimBoardTaskTurn,
 } from "../services/sessions.js";
 import { refineSessionTitle } from "../services/chatTitle.js";
 import { broadcastToSession } from "../services/wsHub.js";
@@ -77,6 +77,7 @@ import {
   formatBackgroundJobNote,
   resolveBackgroundMcp,
 } from "../services/backgroundJobs.js";
+import { pluginMcpServers } from "../services/plugins.js";
 import {
   adapterCommand,
   adapters,
@@ -923,9 +924,15 @@ async function bootAcp(
   // the chat's dialog can switch it off). All that is left is to give it this
   // boot's endpoint.
   const mcpServers = resolveBackgroundMcp(
-    effectiveMcpServers(settings, detail?.mcpDisabledIds, opts.cwd, [
-      ...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers,
-    ]),
+    effectiveMcpServers(
+      settings,
+      detail?.mcpDisabledIds,
+      opts.cwd,
+      [...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers],
+      // Plugin servers ride the same switches; their url already carries this
+      // boot's port and token, so they need no rewrite per session.
+      pluginMcpServers(settings),
+    ),
     sessionId,
   );
   appliedMcpFingerprints.set(sessionId, mcpServersFingerprint(mcpServers));
@@ -2573,11 +2580,15 @@ export async function runPrompt(
   // restores "working" from the list/detail fetch alone, not only from a later
   // WS frame. runTurn's own running=true takes over; every early exit clears it.
   rt.startingTurn = true;
+  // Board task: the first claimed turn stamps the Todo ⇄ Wait "work began" mark,
+  // and any claimed turn reopens a card the user had closed. Both writes land
+  // before the "running" row below, so the broadcast that moves the card already
+  // carries the dropped Done mark — a Done task the user wrote into stands in
+  // "in progress" while the agent works, and falls back to Wait when it ends.
+  await claimBoardTaskTurn(sessionId).catch(() => {});
   // Persist the busy state too (not just in memory): a reload reads the list and
   // the detail row, and both must already say "running".
   await updateSession(sessionId, { status: "running" }).catch(() => {});
-  // Board task: the first claimed turn stamps the Todo ⇄ Wait "work began" mark.
-  await markBoardTaskStarted(sessionId).catch(() => {});
   let promptUserText = text;
   /** Images that ride with this prompt (built-in agent only). */
   const promptImages: PromptImageBlock[] = [];
@@ -2636,6 +2647,13 @@ export async function runPrompt(
   const settlePreTurnClaim = () => {
     if (!rt.startingTurn) return;
     rt.startingTurn = false;
+    // A turn already lives on this runtime: the prompt this claim was taken for
+    // is queued behind it, and that turn owns the status until it finalizes.
+    // Writing "idle" here dropped the chat out of "running" for the whole rest
+    // of the live turn — the board card left Progress and read as finished work
+    // — and status only broadcasts on change, so nothing took it back before
+    // the turn's own final write.
+    if (rt.running) return;
     void updateSession(sessionId, { status: rt.pending.size > 0 ? "waiting" : "idle" }).catch(
       () => {},
     );
@@ -2689,8 +2707,11 @@ export async function runPrompt(
       // The agent-facing text gets the file hint; the UI text part stays raw
       // (files render as separate chips). Embedded images are named as already
       // attached so the model does not waste a tool call reading them as text.
+      // Keep the path even for an embedded image: a model whose endpoint drops
+      // image blocks (text-only model behind a proxy) then still knows which
+      // file on disk the user means instead of hunting for a bare file name.
       const listed = saved.map((f) =>
-        embedded.has(f.fileId) ? `${f.name} (изображение приложено)` : f.relPath,
+        embedded.has(f.fileId) ? `${f.relPath} (изображение приложено)` : f.relPath,
       );
       const hint = `[Прикреплённые файлы: ${listed.join(", ")}${
         embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
@@ -2905,23 +2926,39 @@ export async function notifyBackgroundJobDone(job: BackgroundJobDto): Promise<vo
 }
 
 /**
+ * Tool-call statuses a Stop must leave alone: the call already ended, and the
+ * transcript it left is what the reader watched happen.
+ */
+const TERMINAL_TOOL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+/**
  * Stop the live turn: cancel the agent, close the parts it had open and answer
  * whatever it was waiting on with "cancelled". `keepTurnQueue` separates the
- * two callers — Stop drops every queued prompt (the user asked to halt work),
- * while a steer keeps them: it only borrows the runtime for its own turn.
+ * two callers — Stop drops the queued prompts (the user asked to halt work) but
+ * keeps the settled jobs' notes, which are a result to read, not work to stop,
+ * while a steer keeps everything: it only borrows the runtime for its own turn.
  */
 async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
   const sessionId = rt.sessionId;
   rt.acceptingStream = false;
   rt.running = false;
   rt.lastStopAt = Date.now();
-  if (!keepTurnQueue) rt.turnQueue = [];
+  // A settled job's note is not a request of the reader's to drop: its card is
+  // already in the transcript, and the model is the only reader left to hear
+  // the result. Stop halts the queued prompts, the notes still wake the chat.
+  if (!keepTurnQueue) {
+    rt.turnQueue = rt.turnQueue.filter((queued) => queued.opts.backgroundJobNote);
+  }
   rt.openTextPartId = null;
   rt.openThoughtPartId = null;
   // Mark in-flight tool/subagent calls as cancelled so their spinners stop
   // (the agent won't send final statuses for calls it was interrupted on).
+  // The map holds every call the turn opened, terminal ones included — those
+  // keep the status they earned, or Stop rewrites finished work as halted.
   for (const [, partId] of rt.toolPartByCallId) {
     try {
+      const status = String(((await getPartPayload(partId)) ?? {}).status ?? "");
+      if (TERMINAL_TOOL_STATUSES.has(status)) continue;
       await updatePart(sessionId, partId, { status: "cancelled", interrupted: true });
     } catch {
       // ignore secondary failures
@@ -2962,18 +2999,31 @@ async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
     // its `finally` resets `running`/`acceptingStream` — landing on the turn we
     // are about to start. Wait it out (`steerWaiting` holds the queue until
     // then) so the new turn owns the runtime uncontested.
-    if (rt.turnSettled) {
-      const wedged = new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, TURN_SETTLE_WAIT_MS);
-        (timer as { unref?: () => void }).unref?.();
-      });
-      await Promise.race([rt.turnSettled.catch(() => {}), wedged]);
-    }
+    await waitTurnSettled(rt);
     return;
   }
+  // The note Stop kept starts its turn here, so it has to wait out the turn
+  // being stopped for the same reason the steer path does: that turn's own
+  // `finally` resets `running` and bumps the stream generation, and a turn
+  // starting in that window comes up empty and idle — the note is lost anyway.
+  if (rt.turnQueue.length > 0) await waitTurnSettled(rt);
   // A deferred MCP restart (restartOnIdle) still needs to run even though the
   // queue was cleared — otherwise the old MCP list survives Stop.
   void dequeueTurn(rt);
+}
+
+/**
+ * Wait out the turn being interrupted: its `finally` resets `running` and
+ * `acceptingStream`, so a turn started before it lands is torn down behind it.
+ * Bounded — a turn that never settles must not hold the queue forever.
+ */
+async function waitTurnSettled(rt: SessionRuntime): Promise<void> {
+  if (!rt.turnSettled) return;
+  const wedged = new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, TURN_SETTLE_WAIT_MS);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  await Promise.race([rt.turnSettled.catch(() => {}), wedged]);
 }
 
 const STREAM_SETTLE_QUIET_MS = 450;
@@ -3919,9 +3969,13 @@ export async function restartSessionsForMcpChange(): Promise<void> {
     // respawn agents opened in other folders).
     const desired = mcpServersFingerprint(
       resolveBackgroundMcp(
-        effectiveMcpServers(settings, row.mcpDisabledIds, row.cwd, [
-          ...(await discoverProjectMcp(row.cwd, settings.mcpProjectFiles)).servers,
-        ]),
+        effectiveMcpServers(
+          settings,
+          row.mcpDisabledIds,
+          row.cwd,
+          [...(await discoverProjectMcp(row.cwd, settings.mcpProjectFiles)).servers],
+          pluginMcpServers(settings),
+        ),
         sessionId,
       ),
     );
@@ -4167,6 +4221,17 @@ export function clearModelsCache(provider?: AgentProvider) {
   }
   for (const key of modelParamsInflight.keys()) {
     if (key.startsWith(`${provider}:`)) modelParamsInflight.delete(key);
+  }
+}
+
+/**
+ * Drop the cached catalogs of the built-in harness. The agent and every preset
+ * of it read the same provider list, so one edited endpoint/model list makes
+ * all of their cached catalogs stale at once.
+ */
+export function clearBuiltinModelsCache() {
+  for (const id of adapters.ids()) {
+    if (isBuiltinFamily(id)) clearModelsCache(id as AgentProvider);
   }
 }
 
