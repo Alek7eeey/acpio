@@ -899,7 +899,7 @@ export function AppShell() {
       className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
       onClick={goChat}
       title={t("common.goToChat")}
-      aria-label={`Acpio ${BUILD_INFO.version}`}
+      aria-label={`Acpio ${BUILD_INFO.released}`}
     >
       <span className={styles.brandLetters} aria-hidden>
         {"Acpio".split("").map((ch, i) => (
@@ -912,7 +912,7 @@ export function AppShell() {
         ))}
       </span>
       <span className={styles.brandVersion} aria-hidden>
-        {BUILD_INFO.version}
+        {BUILD_INFO.released}
       </span>
     </button>
   );

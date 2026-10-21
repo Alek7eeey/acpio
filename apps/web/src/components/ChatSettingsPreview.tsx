@@ -1037,7 +1037,7 @@ export function ChatSettingsPreview({
                 </span>
               ))}
             </span>
-            <span className={styles.brandVersion}>{BUILD_INFO.version}</span>
+            <span className={styles.brandVersion}>{BUILD_INFO.released}</span>
           </span>
           <span className={styles.headerChatCtx} aria-hidden>
             <span className={styles.headerChatFolder}>acpio</span>

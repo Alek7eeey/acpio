@@ -20,6 +20,7 @@ import { fileURLToPath } from "node:url";
 import { deriveVersion } from "./releaseTags.mjs";
 import {
   formatReleaseDay,
+  latestVersion,
   renderVersionsMarkdown,
   VERSION_STAMP,
 } from "./versionHistory.mjs";
@@ -32,7 +33,15 @@ const pendingCommit = process.argv.includes("--pending-commit");
 const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 const { version, releases, releasedTag } = deriveVersion(repoRoot, pkg.version, { pendingCommit });
 
-const buildInfo = { version, baseVersion: pkg.version, releases: releases.length };
+/**
+ * The number the app reports as its own: the highest release tag reachable from
+ * this revision, not the one the next release will take. A build made between
+ * releases therefore names the release it came from, and `version` keeps saying
+ * what this revision will be published as.
+ */
+const released = latestVersion(releases.map((release) => release.version)) ?? pkg.version;
+
+const buildInfo = { version, released, baseVersion: pkg.version, releases: releases.length };
 
 fs.mkdirSync(path.dirname(BUILD_INFO_FILE), { recursive: true });
 fs.writeFileSync(
