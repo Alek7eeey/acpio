@@ -12,10 +12,15 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   boardColumn,
+  modelDisplayName,
+  modelParamFamily,
+  modelParamLabel,
   titleFromTaskDescription,
   type AgentProvider,
   type AttachSource,
   type BoardColumn,
+  type ModelOption,
+  type ModelParamDto,
   type SessionDto,
   type SlashCommandDto,
 } from "@acpio/shared";
@@ -124,6 +129,40 @@ function clipboardFiles(data: DataTransfer | null): File[] {
 }
 
 /**
+ * Models a new task may start on, per agent — asked once per visit and kept
+ * for the next opening of the form. A failed probe is dropped so a later
+ * opening retries instead of pinning an empty list.
+ */
+const taskCatalogCache = new Map<
+  AgentProvider,
+  Promise<{ models: ModelOption[]; params: ModelParamDto[] }>
+>();
+
+function loadTaskCatalog(provider: AgentProvider) {
+  const cached = taskCatalogCache.get(provider);
+  if (cached) return cached;
+  const pending = api
+    .listModels(provider)
+    .then((res) => ({ models: res.models ?? [], params: res.modelParams ?? [] }));
+  taskCatalogCache.set(provider, pending);
+  pending.catch(() => taskCatalogCache.delete(provider));
+  return pending;
+}
+
+/** One model's own params (its effort values), cached the same way. */
+const taskParamsCache = new Map<string, Promise<ModelParamDto[]>>();
+
+function loadTaskModelParams(provider: AgentProvider, model: string) {
+  const key = `${provider}::${model}`;
+  const cached = taskParamsCache.get(key);
+  if (cached) return cached;
+  const pending = api.getModelParams(provider, model).then((res) => res.modelParams ?? []);
+  taskParamsCache.set(key, pending);
+  pending.catch(() => taskParamsCache.delete(key));
+  return pending;
+}
+
+/**
  * The board's inline new-task form. What is being written — the description
  * and the pictures — lives here rather than on the page: a keystroke or a
  * pasted screenshot then repaints this form alone, while the rail, the lanes
@@ -139,6 +178,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
   dirtyRef,
   agentOptions,
   showAgentPicker,
+  showModelPicker,
+  showEffortPicker,
   defaultProvider,
   attachSource,
   onSubmit,
@@ -157,6 +198,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
   agentOptions: Array<{ id: string; label: string; online: boolean }>;
   /** Settings switch: whether the form offers its agent picker at all. */
   showAgentPicker: boolean;
+  /** Settings switches: the model a task starts on, and its effort. */
+  showModelPicker: boolean;
+  showEffortPicker: boolean;
   /** The agent the form opens on — the settings default while it is online. */
   defaultProvider: AgentProvider | null;
   /** Which source a plain click opens — the setting the chat composer obeys. */
@@ -168,6 +212,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
     /** Server picks: nothing to upload, only paths to carry into the task. */
     attachments: PendingAttachment[],
     provider: AgentProvider | null,
+    /** Model the task boots on (empty = the agent's default) and its params. */
+    model: string,
+    modelParams: Record<string, string>,
   ) => void;
   onCancel: () => void;
 }) {
@@ -177,6 +224,13 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [files, setFiles] = useState<DraftFile[]>([]);
   /** Agent this task is created for; empty = the default the form opened on. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
+  /** Model this task starts on; empty = whatever the agent defaults to. */
+  const [draftModel, setDraftModel] = useState("");
+  /** Effort picked for that model; empty = the model's own default. */
+  const [draftEffort, setDraftEffort] = useState("");
+  const [taskModels, setTaskModels] = useState<ModelOption[]>([]);
+  /** The effort param the chosen model exposes — nothing to pick without one. */
+  const [effortParam, setEffortParam] = useState<ModelParamDto | null>(null);
   const fileSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** The server's filesystem picker, open while its source is the one chosen. */
@@ -216,7 +270,11 @@ const NewTaskComposer = memo(function NewTaskComposer({
       .listSkills(cwd)
       .then((found) => {
         if (!live) return;
-        setSkills(found.map((skill) => ({ ...skill, kind: "skill" })));
+        // Only `off` is out: a hidden skill is still a slash command, it just
+        // never makes it into the agent's system prompt.
+        setSkills(
+          found.filter((skill) => skill.mode !== "off").map((skill) => ({ ...skill, kind: "skill" })),
+        );
       })
       .catch(() => {
         if (live) setSkills([]);
@@ -228,6 +286,53 @@ const NewTaskComposer = memo(function NewTaskComposer({
       live = false;
     };
   }, [skillsOffered, cwd]);
+
+  // Another agent offers another set of models: a pick made for one of them
+  // means nothing on the next, so the form starts over with the agent default.
+  useEffect(() => {
+    setDraftModel("");
+    setDraftEffort("");
+    setTaskModels([]);
+    setEffortParam(null);
+    if (!provider || (!showModelPicker && !showEffortPicker)) return;
+    let live = true;
+    void loadTaskCatalog(provider)
+      .then((catalog) => {
+        if (live) setTaskModels(catalog.models);
+      })
+      .catch(() => {
+        if (live) setTaskModels([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [provider, showModelPicker, showEffortPicker]);
+
+  // Effort belongs to a model: it is read from the schema the agent reports for
+  // the model the task will start on, not from a fixed list of words.
+  useEffect(() => {
+    if (!provider || !showEffortPicker) {
+      setEffortParam(null);
+      return;
+    }
+    let live = true;
+    setDraftEffort("");
+    setEffortParam(null);
+    void loadTaskCatalog(provider)
+      .then((catalog) => (draftModel ? loadTaskModelParams(provider, draftModel) : catalog.params))
+      .then((params) => {
+        if (!live) return;
+        setEffortParam(
+          params.find((p) => modelParamFamily(p.id) === "effort" && p.options.length > 0) ?? null,
+        );
+      })
+      .catch(() => {
+        if (live) setEffortParam(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [provider, draftModel, showEffortPicker]);
 
   // The agent expands `/name` only as the message's first token, so the menu
   // offers itself at the opening of the description and nowhere else.
@@ -352,6 +457,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
       files.flatMap((entry) => (entry.file ? [entry.file] : [])),
       files.flatMap((entry) => (entry.path ? [{ name: entry.name, path: entry.path }] : [])),
       draftProvider || defaultProvider,
+      showModelPicker ? draftModel : "",
+      showEffortPicker && effortParam && draftEffort ? { [effortParam.id]: draftEffort } : {},
     );
   };
 
@@ -579,6 +686,48 @@ const NewTaskComposer = memo(function NewTaskComposer({
           />
         </div>
       ) : null}
+      {/* The model the task starts on, and the effort it runs with — both read
+          from the agent picked above. */}
+      {showModelPicker && taskModels.length ? (
+        <div className={styles.composerField}>
+          <span className={styles.composerFieldLabel}>{t("chat.boardTaskModel")}</span>
+          <OptionPicker
+            variant="compact"
+            placement="up"
+            menuTitle={t("chat.boardTaskModel")}
+            placeholder={t("models.default")}
+            value={draftModel}
+            options={[
+              { value: "", label: t("models.default") },
+              ...taskModels.map((option) => ({
+                value: option.value,
+                label: modelDisplayName(option.value, option.name, t("models.auto")),
+              })),
+            ]}
+            onChange={setDraftModel}
+          />
+        </div>
+      ) : null}
+      {showEffortPicker && effortParam ? (
+        <div className={styles.composerField}>
+          <span className={styles.composerFieldLabel}>{t("models.effort")}</span>
+          <OptionPicker
+            variant="compact"
+            placement="up"
+            menuTitle={t("models.effort")}
+            placeholder={t("models.default")}
+            value={draftEffort}
+            options={[
+              { value: "", label: t("models.default") },
+              ...effortParam.options.map((option) => ({
+                value: option.value,
+                label: modelParamLabel(effortParam.id, option.value, option.name),
+              })),
+            ]}
+            onChange={setDraftEffort}
+          />
+        </div>
+      ) : null}
       <div className={styles.composerActions}>
         <button
           type="button"
@@ -632,6 +781,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const boardAddCardStyle = useAppStore((s) => s.settings.boardAddCardStyle ?? "card");
   /** Whether the new-task form offers its agent picker (on unless switched off). */
   const taskAgentPicker = useAppStore((s) => s.settings.boardTaskAgentPicker !== false);
+  /** The same switch, for the form's model and effort pickers. */
+  const taskModelPicker = useAppStore((s) => s.settings.boardTaskModelPicker !== false);
+  const taskEffortPicker = useAppStore((s) => s.settings.boardTaskEffortPicker !== false);
   /** First-message preview under a model-written card title (settings). */
   const boardShowFirstMessage = useAppStore((s) => s.settings.boardShowFirstMessage ?? true);
   /** Which source the new-task form's paperclip opens on a plain click. */
@@ -656,6 +808,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   // opens this page's folders dialog.
   const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
   const setFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
+  const boardFilterCwd = useAppStore((s) => s.boardFilterCwd);
+  const setBoardFilterCwd = useAppStore((s) => s.setBoardFilterCwd);
 
   /** Agents for the task picker — the same shape the chat tree's picker takes. */
   const agentOptions = useMemo(
@@ -678,7 +832,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     null,
   );
 
-  const [filterCwd, setFilterCwd] = useState<string | null>(null);
+  const [filterCwd, setFilterCwdState] = useState<string | null>(() =>
+    boardId ? boardFilterCwd[boardId] ?? null : null,
+  );
+  /** Narrowing the rail outlives a trip to a task's chat and back. */
+  const setFilterCwd = (cwd: string | null) => {
+    setFilterCwdState(cwd);
+    if (boardId) setBoardFilterCwd(boardId, cwd);
+  };
   const [addingCwd, setAddingCwd] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /** Agent the form's picker shows; empty = the default agent of the settings. */
@@ -1082,6 +1243,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       files: File[],
       attachments: PendingAttachment[],
       rawProvider: AgentProvider | null,
+      rawModel: string,
+      modelParams: Record<string, string>,
     ) => {
             const description = rawDescription.trim();
       if (!description || creating) return;
@@ -1091,6 +1254,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       setCreating(true);
       const created = await createBoardTask({ boardId, cwd, description,
         ...(provider ? { provider } : {}),
+        ...(taskModelPicker && rawModel ? { model: rawModel } : {}),
+        ...(taskEffortPicker && Object.keys(modelParams).length ? { modelParams } : {}),
         files,
         attachments,
       });
@@ -1106,7 +1271,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         void startTask(created);
       }
     },
-    [boardId, closeNewTask, createAutoStart, createBoardTask, creating, defaultTaskProvider, taskAgentPicker],
+    [
+      boardId,
+      closeNewTask,
+      createAutoStart,
+      createBoardTask,
+      creating,
+      defaultTaskProvider,
+      taskAgentPicker,
+      taskEffortPicker,
+      taskModelPicker,
+    ],
   );
 
   /**
@@ -1933,6 +2108,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               onSubmit={submitNewTask}
                               agentOptions={agentOptions}
                               showAgentPicker={taskAgentPicker}
+                              showModelPicker={taskModelPicker}
+                              showEffortPicker={taskEffortPicker}
                               defaultProvider={defaultTaskProvider}
                               attachSource={attachDefaultSource}
                               onCancel={closeNewTask}

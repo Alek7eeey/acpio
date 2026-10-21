@@ -36,6 +36,9 @@ const apiMock = vi.hoisted(() => {
     })),
     // The export dialog probes the server export dir when it opens.
     getExportDefaultDir: vi.fn(async () => ({ path: "/srv/exports" })),
+    // The new-task form's model picker asks the agent what it can run.
+    listModels: vi.fn(async () => ({ ok: true, models: [], modelParams: [] })),
+    getModelParams: vi.fn(async () => ({ ok: true, modelParams: [] })),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -94,6 +97,8 @@ beforeEach(() => {
     activeSessionId: null,
     activeSession: null,
     sessionLoading: false,
+    // A rail narrowing outlives the page on purpose; each test starts wide.
+    boardFilterCwd: {},
   });
 });
 
@@ -311,6 +316,40 @@ describe("Board reading position", () => {
     expect(rail().scrollTop).toBe(40);
     // The trip's origin card: nearest means "already on screen — stay put".
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+  });
+});
+
+describe("Board rail folder filter", () => {
+  // Same trip as above, and the same loss: a narrowed rail is a view state the
+  // unmounting board has to remember, or coming back shows every project again.
+  it("keeps the chosen folder after a task's chat and back", async () => {
+    // Two visits again: the one that narrows the rail, the return.
+    apiMock.listBoardSessions.mockResolvedValueOnce([task]).mockResolvedValueOnce([task]);
+
+    const { container } = render(
+      <MemoryRouter initialEntries={["/board/b1"]}>
+        <I18nProvider>
+          <Routes>
+            <Route path="/board/:boardId" element={<BoardPage />} />
+            <Route path="/chat" element={<ChatStub />} />
+          </Routes>
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Fix the login bug");
+    const railRow = () =>
+      container.querySelector('[data-rail-cwd="/projects/app"]') as HTMLElement;
+    const railBtn = () => railRow().querySelector("button") as HTMLElement;
+
+    await userEvent.click(railBtn());
+    expect(railRow().className).toContain(styles.railRowOn);
+
+    await userEvent.click(screen.getByText("Fix the login bug"));
+    await userEvent.click(await screen.findByRole("button", { name: "back to board" }));
+    await screen.findByText("Fix the login bug");
+
+    await waitFor(() => expect(railRow().className).toContain(styles.railRowOn));
   });
 });
 
