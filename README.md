@@ -110,7 +110,7 @@ production build). English shots (`*-en.webp`) use the English UI; Russian shots
 
 | Harness | Command | Args | What it needs |
 |---|---|---|---|
-| Cursor CLI | `agent` | `acp` | `CURSOR_API_KEY` |
+| Cursor CLI | `agent` | `acp` | — |
 | OMP | `omp` | `acp` | — |
 | OpenCode | `opencode` | `acp` | — |
 | Built-in agent | — | — | one OpenAI-compatible endpoint (URL + key) |

@@ -110,7 +110,7 @@ npm run dev       # UI http://localhost:18751, API http://localhost:18741
 
 | Харнесс | Команда | Аргументы | Что нужно |
 |---|---|---|---|
-| Cursor CLI | `agent` | `acp` | `CURSOR_API_KEY` |
+| Cursor CLI | `agent` | `acp` | — |
 | OMP | `omp` | `acp` | — |
 | OpenCode | `opencode` | `acp` | — |
 | Встроенный агент | — | — | один OpenAI-совместимый endpoint (URL + ключ) |
