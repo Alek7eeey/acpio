@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  builtinLeafAnchor,
   builtinSettingsLeaves,
   defaultLeafFor,
   getSettingsTree,
@@ -24,22 +23,29 @@ describe("parseSettingsSearch", () => {
     },
   );
 
+  it.each(["presets", "generation", "providers", "prompt", "subagents"] as const)(
+    "parses the built-in agent leaf %j",
+    (leaf) => {
+      expect(parseSettingsSearch(`?section=builtin&leaf=${leaf}`)).toEqual({
+        section: "builtin",
+        leaf,
+      });
+    },
+  );
+
+  // Context and file access are no longer pages of their own: their rows sit on
+  // the generation and the prompt page, and a link from back then opens it.
   it.each([
-    "presets",
-    "generation",
-    "context",
-    "providers",
-    "prompt",
-    "subagents",
-    "access",
-  ] as const)("parses the built-in agent leaf %j", (leaf) => {
-    expect(parseSettingsSearch(`?section=builtin&leaf=${leaf}`)).toEqual({
+    ["context", "generation"],
+    ["access", "prompt"],
+  ] as const)("maps the old built-in leaf %j to the page %j", (old, page) => {
+    expect(parseSettingsSearch(`?section=builtin&leaf=${old}`)).toEqual({
       section: "builtin",
-      leaf,
+      leaf: page,
     });
   });
 
-  it("defaults an unknown built-in leaf to the first group", () => {
+  it("defaults an unknown built-in leaf to the first page", () => {
     expect(parseSettingsSearch("?section=builtin&leaf=wat")).toEqual({
       section: "builtin",
       leaf: "presets",
@@ -191,13 +197,13 @@ describe("settingsPath", () => {
     expect(settingsPath("interface", "voice")).toBe("/settings?section=interface&leaf=voice");
   });
 
-  it("defaults the built-in agent leaf to its first group", () => {
+  it("defaults the built-in agent leaf to its first page", () => {
     expect(settingsPath("builtin")).toBe("/settings?section=builtin&leaf=presets");
   });
 
   it("uses the given built-in agent leaf", () => {
-    expect(settingsPath("builtin", "context")).toBe(
-      "/settings?section=builtin&leaf=context",
+    expect(settingsPath("builtin", "generation")).toBe(
+      "/settings?section=builtin&leaf=generation",
     );
   });
 
@@ -212,7 +218,7 @@ describe("settingsPath", () => {
     },
   );
 
-  it.each(["presets", "context", "subagents", "access"] as const)(
+  it.each(["presets", "generation", "subagents", "prompt"] as const)(
     "round-trips the built-in agent leaf %j",
     (leaf) => {
       const path = settingsPath("builtin", leaf);
@@ -287,11 +293,9 @@ describe("getSettingsTree", () => {
     expect(tree[1].children.map((c) => c.id)).toEqual([
       "presets",
       "generation",
-      "context",
       "providers",
       "prompt",
       "subagents",
-      "access",
     ]);
   });
 
@@ -333,15 +337,11 @@ describe("getSettingsTree", () => {
   });
 });
 
-describe("the built-in agent's groups", () => {
-  it("names a group the same way its heading on the page is named", () => {
+describe("the built-in agent's pages", () => {
+  it("names a page the same way its title is named", () => {
     const leaves = builtinSettingsLeaves(t);
     expect(leaves[0].label).toBe("settings.builtinPresetsTitle");
-    expect(leaves[1].label).toBe("settings.builtinBlockGeneration");
-  });
-
-  it("anchors a group by an id of its own", () => {
-    expect(builtinLeafAnchor("subagents")).toBe("settings-group-subagents");
+    expect(leaves[1].label).toBe("settings.builtinBlockGenerationContext");
   });
 
   it("indexes the section for the tree's search", () => {

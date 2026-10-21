@@ -8,15 +8,13 @@ export type SettingsAgentLeaf =
   | "remote"
   | "diagnostics"
   | "mcp";
-/** The built-in agent is a section of its own: one leaf per group of its page. */
+/** The built-in agent is a section of its own: one leaf per page of it. */
 export type SettingsBuiltinLeaf =
   | "presets"
   | "generation"
-  | "context"
   | "providers"
   | "prompt"
-  | "subagents"
-  | "access";
+  | "subagents";
 export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice" | "chat" | "board";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsBuiltinLeaf | SettingsInterfaceLeaf;
 
@@ -44,19 +42,19 @@ type TreeBranch =
     };
 
 /**
- * The built-in agent's page is a long run of tables, so it is cut into groups —
- * one tree entry each, one heading each. This list names them: the tree's
- * children and the page's headings are read from the same entries, and a
- * group's id is also the id of its heading, the anchor the section opens on.
+ * The built-in agent's settings are cut into pages — one tree entry each, one
+ * page each, so a group is opened instead of scrolled to. This list names
+ * them: the tree's children and the pages' titles are read from the same
+ * entries. Closely related knobs share a page (the context limits sit with the
+ * generation knobs, the outside-the-folder switch with the skill paths it
+ * governs) rather than getting a page of a row or two.
  */
 const BUILTIN_LEAVES: ReadonlyArray<{ id: SettingsBuiltinLeaf; key: string }> = [
   { id: "presets", key: "settings.builtinPresetsTitle" },
-  { id: "generation", key: "settings.builtinBlockGeneration" },
-  { id: "context", key: "settings.builtinBlockContext" },
+  { id: "generation", key: "settings.builtinBlockGenerationContext" },
   { id: "providers", key: "settings.builtinBlockProviders" },
   { id: "prompt", key: "settings.builtinBlockPrompt" },
   { id: "subagents", key: "settings.builtinBlockSubagents" },
-  { id: "access", key: "settings.builtinBlockAccess" },
 ];
 
 export function builtinSettingsLeaves(
@@ -65,16 +63,20 @@ export function builtinSettingsLeaves(
   return BUILTIN_LEAVES.map(({ id, key }) => ({ id, label: t(key) }));
 }
 
-/** Heading of one group of the built-in agent's page. */
+/** Title of one page of the built-in agent's section. */
 export function builtinLeafLabel(t: TranslateFn, leaf: SettingsBuiltinLeaf): string {
   const entry = BUILTIN_LEAVES.find((l) => l.id === leaf);
   return entry ? t(entry.key) : leaf;
 }
 
-/** Id of a group's heading on that page — where the section opens. */
-export function builtinLeafAnchor(leaf: SettingsBuiltinLeaf) {
-  return `settings-group-${leaf}`;
-}
+/**
+ * Group ids the section used while its groups were headings of one page: a
+ * link from back then opens the page the rows live on now.
+ */
+const BUILTIN_FOLDED_LEAVES: Record<string, SettingsBuiltinLeaf> = {
+  context: "generation",
+  access: "prompt",
+};
 
 export function getSettingsTree(t: TranslateFn): TreeBranch[] {
   const agentChildren: Array<{ id: SettingsAgentLeaf; label: string }> = [
@@ -149,14 +151,17 @@ export function parseSettingsSearch(search: string): SettingsLocation {
     return { section: "interface", leaf };
   }
   if (rawSection === "builtin") {
-    const leaf = BUILTIN_LEAVES.find((l) => l.id === rawLeaf)?.id ?? "presets";
+    const leaf =
+      BUILTIN_LEAVES.find((l) => l.id === rawLeaf)?.id ??
+      (rawLeaf ? BUILTIN_FOLDED_LEAVES[rawLeaf] : undefined) ??
+      "presets";
     return { section: "builtin", leaf };
   }
   if (rawSection === "account" || rawSection === "appearance") {
     return { section: "agent", leaf: "connect" };
   }
   // The built-in agent used to be a leaf of the agent section: a link from back
-  // then opens its first group instead — the same way the section params above
+  // then opens its first page instead — the same way the section params above
   // outlive the sections they named.
   if (rawLeaf === "builtin") return { section: "builtin", leaf: "presets" };
 

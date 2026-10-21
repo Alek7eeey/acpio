@@ -64,12 +64,10 @@ import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/arg
 import { api } from "../lib/api";
 import { SubagentsEditor } from "../components/SubagentsEditor";
 import {
-  builtinLeafAnchor,
   builtinLeafLabel,
   getSettingsTree,
   parseSettingsSearch,
   settingsPath,
-  type SettingsBuiltinLeaf,
   type SettingsSection,
   type SettingsLeaf,
 } from "../lib/settingsNav";
@@ -806,26 +804,6 @@ function ContextNumberRow({
   );
 }
 
-/**
- * Heading that opens one group of the built-in agent's page. The page is a long
- * run of tables whose rows used to run together with nothing to scan by, so
- * each group of rows is introduced by its own heading and a rule — and each
- * heading carries the group's id, the anchor the section's tree entries open
- * the page on (`/settings?section=builtin&leaf=<group>`).
- */
-function BuiltinGroupHeading({ group }: { group: SettingsBuiltinLeaf }) {
-  const t = useT();
-  const { highlight } = useSettingsSearch();
-  return (
-    <h2
-      id={builtinLeafAnchor(group)}
-      className={`${styles.sectionHeading} ${styles.settingsGroupHeading}`}
-    >
-      {highlight(builtinLeafLabel(t, group))}
-    </h2>
-  );
-}
-
 /** Context-window knobs of the built-in agent: what a pass does, when it fires,
  *  how much stays verbatim, how long a digest may be, and how much `read`/`grep`
  *  output is masked before any of that. */
@@ -1519,17 +1497,6 @@ export function SettingsPage() {
       setViewingResults(false);
     }
   }, [section, leaf]);
-  /**
-   * The built-in agent's section keeps its whole page in one form, and its tree
-   * entries name the group to open it on: the panel is scrolled to that group's
-   * heading once the page has painted it. Re-clicking the group already open
-   * moves nothing, as it should.
-   */
-  useEffect(() => {
-    if (section !== "builtin") return;
-    document.getElementById(builtinLeafAnchor(leaf))?.scrollIntoView({ block: "start" });
-  }, [section, leaf]);
-
   // When query changes (typing), show results panel — but only if we didn't
   // just navigate (the section/leaf effect already handled that frame).
   const prevQueryRef = useRef(settingsQuery);
@@ -2201,9 +2168,8 @@ export function SettingsPage() {
               ? t("settings.boardTitle")
               : t("settings.appearance")
       : section === "builtin"
-        ? // One page, opened on the group the tree entry named: the section is
-          // what it is about, the heading under it says which part.
-          t("settings.builtinTitle")
+        ? // Each tree entry is a page of its own: its name is the page's title.
+          builtinLeafLabel(t, leaf)
         : section === "agent"
           ? leaf === "connect"
             ? t("settings.agentConnectTitle")
@@ -2241,7 +2207,12 @@ export function SettingsPage() {
                 ? t("settings.diagnosticsDesc")
                 : t("settings.agentConnectDesc");
 
-  const eyebrow = section === "interface" ? t("settings.interface") : t("settings.agents");
+  const eyebrow =
+    section === "interface"
+      ? t("settings.interface")
+      : section === "builtin"
+        ? t("settings.builtinTitle")
+        : t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const copyUrl = async () => {
@@ -3118,14 +3089,17 @@ export function SettingsPage() {
           )
         )}
 
-        {section === "builtin" && (
+        {section === "builtin" && leaf === "presets" && (
           <>
             <p className={styles.hint}>{t("settings.builtinDesc")}</p>
             {/* Presets come first: they are what an agent picker shows, so a
                 chat runs the profile its name promises. */}
-            <BuiltinGroupHeading group="presets" />
             <BuiltinPresetsRows form={form} patch={patch} />
-            <BuiltinGroupHeading group="generation" />
+          </>
+        )}
+
+        {section === "builtin" && leaf === "generation" && (
+          <>
             <SettingTable>
               <SettingRow
                 label={t("settings.builtinMaxOutputTokens")}
@@ -3180,9 +3154,14 @@ export function SettingsPage() {
                 }}
               />
             </SettingTable>
-            <BuiltinGroupHeading group="context" />
+            {/* The context knobs share the page: both bound what one pass may
+                spend — how much it thinks, and how much history it keeps. */}
             <BuiltinContextRows form={form} patch={patch} />
-            <BuiltinGroupHeading group="providers" />
+          </>
+        )}
+
+        {section === "builtin" && leaf === "providers" && (
+          <>
             {/* Cards, not table rows: each provider is its own box, folded to
                 a single header until the user opens it. */}
             <div className={styles.providerList}>
@@ -3396,8 +3375,11 @@ export function SettingsPage() {
                 </button>
               </SettingRow>
             </SettingTable>
+          </>
+        )}
 
-            <BuiltinGroupHeading group="prompt" />
+        {section === "builtin" && leaf === "prompt" && (
+          <>
             <SettingTable>
               <SettingRow
                 layout="stack"
@@ -3482,7 +3464,36 @@ export function SettingsPage() {
               </SettingRow>
             </SettingTable>
 
-            <BuiltinGroupHeading group="subagents" />
+            {/* File access shares the page with the prompt: the switch is what
+                lets the agent open a skill folder kept outside the chat one. */}
+            <SettingTable>
+              <SettingRow
+                label={t("settings.builtinAllowOutsideCwd")}
+                hint={t("settings.builtinAllowOutsideCwdHint")}
+                terms={[
+                  t("settings.builtinAllowOutsideCwd"),
+                  t("settings.builtinAllowOutsideCwdHint"),
+                  "cwd",
+                  "~/.agents/skills",
+                ]}
+              >
+                <Toggle
+                  checked={form.builtinAllowOutsideCwd === true}
+                  onChange={(v) => {
+                    patch("builtinAllowOutsideCwd", v);
+                    // A switch applies at once, like the other built-in knobs:
+                    // the agent reads it on its next tool call.
+                    void saveSettings({ builtinAllowOutsideCwd: v });
+                  }}
+                  label={t("settings.builtinAllowOutsideCwd")}
+                />
+              </SettingRow>
+            </SettingTable>
+          </>
+        )}
+
+        {section === "builtin" && leaf === "subagents" && (
+          <>
             <SettingTable>
               <SettingRow
                 label={t("settings.subagentsEnabled")}
@@ -3572,31 +3583,6 @@ export function SettingsPage() {
                   </SettingRow>
                 </>
               ) : null}
-            </SettingTable>
-
-            <BuiltinGroupHeading group="access" />
-            <SettingTable>
-              <SettingRow
-                label={t("settings.builtinAllowOutsideCwd")}
-                hint={t("settings.builtinAllowOutsideCwdHint")}
-                terms={[
-                  t("settings.builtinAllowOutsideCwd"),
-                  t("settings.builtinAllowOutsideCwdHint"),
-                  "cwd",
-                  "~/.agents/skills",
-                ]}
-              >
-                <Toggle
-                  checked={form.builtinAllowOutsideCwd === true}
-                  onChange={(v) => {
-                    patch("builtinAllowOutsideCwd", v);
-                    // A switch applies at once, like the other built-in knobs:
-                    // the agent reads it on its next tool call.
-                    void saveSettings({ builtinAllowOutsideCwd: v });
-                  }}
-                  label={t("settings.builtinAllowOutsideCwd")}
-                />
-              </SettingRow>
             </SettingTable>
           </>
         )}

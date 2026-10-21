@@ -143,8 +143,8 @@ export function settingsSearchIndex(
       t("common.noAgentsOnline"),
       t("settings.auto"),
     ],
-    // The built-in agent's section: one index per group of its page, so a hit
-    // names the group to open rather than the whole page.
+    // The built-in agent's section: one index per page of it, so a hit names
+    // the page to open rather than a heading of one long page.
     presets: [
       t("settings.builtinPresetsTitle"),
       t("settings.builtinPresetsAdd"),
@@ -155,13 +155,10 @@ export function settingsSearchIndex(
       "preset",
     ],
     generation: [
-      t("settings.builtinBlockGeneration"),
+      t("settings.builtinBlockGenerationContext"),
       t("settings.builtinMaxOutputTokens"),
       t("settings.builtinThinkingLimit"),
       t("settings.builtinTurnRetryAttempts"),
-    ],
-    context: [
-      t("settings.builtinBlockContext"),
       t("settings.builtinContextMode"),
       t("settings.builtinContextModeSummary"),
       t("settings.builtinContextModePrune"),
@@ -210,6 +207,8 @@ export function settingsSearchIndex(
       t("settings.builtinSkillPathsHint"),
       t("settings.builtinMarkdownImages"),
       t("settings.builtinMarkdownImagesHint"),
+      t("settings.builtinAllowOutsideCwd"),
+      t("settings.builtinAllowOutsideCwdHint"),
       "system prompt",
       "промпт",
       "размышления",
@@ -217,6 +216,8 @@ export function settingsSearchIndex(
       ".agents/skills",
       "markdown",
       "![shot](shot.png)",
+      "cwd",
+      "~/.agents/skills",
     ],
     subagents: [
       t("settings.builtinBlockSubagents"),
@@ -231,13 +232,6 @@ export function settingsSearchIndex(
       "субагенты",
       "task",
       "explore",
-    ],
-    access: [
-      t("settings.builtinBlockAccess"),
-      t("settings.builtinAllowOutsideCwd"),
-      t("settings.builtinAllowOutsideCwdHint"),
-      "cwd",
-      "~/.agents/skills",
     ],
     advanced: [
       t("settings.advanced"),
@@ -401,8 +395,6 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.builtinMaxOutputTokensHint"),
       t("settings.builtinThinkingLimitHint"),
       t("settings.builtinTurnRetryAttemptsHint"),
-    ],
-    context: [
       t("settings.builtinContextModeHint"),
       t("settings.builtinCompactionThresholdPercentHint"),
       t("settings.builtinKeepRecentPercentHint"),
@@ -425,6 +417,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.builtinExtraInstructionsHint"),
       t("settings.builtinSkillPathsHint"),
       t("settings.builtinMarkdownImagesHint"),
+      t("settings.builtinAllowOutsideCwdHint"),
     ],
     subagents: [
       t("settings.subagentsEnabledHint"),
@@ -432,7 +425,6 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.subagentsModelHint"),
       t("settings.subagentsRosterHint"),
     ],
-    access: [t("settings.builtinAllowOutsideCwdHint")],
     advanced: [
       t("settings.exportDirHint", { path: "…" }),
       t("settings.resumeAgentContextHint"),

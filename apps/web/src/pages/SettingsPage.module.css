@@ -410,25 +410,6 @@
   line-height: 1.35;
 }
 
-/* Heading of one group on the built-in agent's page (a section of its own):
-   the rows sit in named groups so the page can be scanned by heading instead
-   of read top to bottom. The rule and the extra room above mark where one
-   group ends and the next begins; the group right under the page's lead text
-   needs neither. The heading carries the group's id — the anchor the section's
-   tree entries open the page on. */
-.settingsGroupHeading {
-  margin: 6px 0 -4px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-soft);
-  scroll-margin-top: 12px;
-}
-
-.hint + .settingsGroupHeading {
-  margin-top: 0;
-  padding-top: 0;
-  border-top: none;
-}
-
 .schemeGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));

@@ -71,37 +71,41 @@ describe("Built-in agent section", () => {
     );
   };
 
-  // The section is one page of groups: the tree entry names the group to open
-  // it on, and the page scrolls there instead of painting the whole run of
-  // tables from the top.
-  it("opens the page on the group named by its leaf", () => {
-    const { container } = renderBuiltin("?section=builtin&leaf=context");
-    expect(scrolledTo()?.id).toBe("settings-group-context");
-    // One page, so the other groups are on it too — the anchor is a position,
-    // not a filter.
-    expect(container.querySelector("#settings-group-access")).not.toBeNull();
+  // Every tree entry is a page of its own: the panel paints that page's rows
+  // and nothing else, so nothing is scrolled to.
+  it("paints only the page its leaf names", () => {
+    renderBuiltin("?section=builtin&leaf=providers");
+    expect(screen.getByRole("button", { name: /\+ Add provider/ })).toBeTruthy();
+    expect(screen.queryByLabelText("Skill folders")).toBeNull();
+    expect(HTMLElement.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
-  it("lists every group of the page as a heading", () => {
-    const { container } = renderBuiltin("?section=builtin&leaf=presets");
-    const headings = Array.from(container.querySelectorAll("h2[id^='settings-group-']"));
-    expect(headings.map((h) => h.id)).toEqual([
-      "settings-group-presets",
-      "settings-group-generation",
-      "settings-group-context",
-      "settings-group-providers",
-      "settings-group-prompt",
-      "settings-group-subagents",
-      "settings-group-access",
-    ]);
+  it("gives the page the title of its leaf", () => {
+    renderBuiltin("?section=builtin&leaf=subagents");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Subagents");
+  });
+
+  // Context and file access lost their own pages: the rows live on the
+  // generation and the prompt page, and a link from back then opens it.
+  it("opens the context rows on the generation page", () => {
+    const { container } = renderBuiltin("?section=builtin&leaf=context");
+    expect(screen.getByText("What to do with a long conversation")).toBeTruthy();
+    expect(screen.getByLabelText("Cut overlong reasoning, chars (0 = off)")).toBeTruthy();
+    // One page of the section, not the whole run of its tables.
+    expect(container.querySelector("details[class*=providerCard]")).toBeNull();
+  });
+
+  it("opens the outside-the-folder switch on the prompt page", () => {
+    renderBuiltin("?section=builtin&leaf=access");
+    expect(screen.getByLabelText("Work outside the working folder")).toBeTruthy();
+    expect(screen.getByLabelText("Skill folders")).toBeTruthy();
   });
 
   // The walk down the tree that used to reach it: a link naming the leaf it was
-  // is answered by the section, on its first group.
+  // is answered by the section, on its first page.
   it("opens the section from a link to the leaf it used to be", () => {
     renderBuiltin("?section=agent&leaf=builtin");
-    expect(scrolledTo()?.id).toBe("settings-group-presets");
-    expect(screen.getByLabelText("Skill folders")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Agent presets");
   });
 });
 
@@ -237,7 +241,7 @@ describe("SettingsPage form state", () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>
@@ -276,7 +280,7 @@ describe("SettingsPage form state", () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>
@@ -298,7 +302,7 @@ describe("SettingsPage form state", () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>
@@ -347,7 +351,7 @@ describe("Built-in providers", () => {
       bootstrapped: true,
     });
     return render(
-      <MemoryRouter initialEntries={["/settings?section=agent&leaf=builtin"]}>
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=providers"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>
