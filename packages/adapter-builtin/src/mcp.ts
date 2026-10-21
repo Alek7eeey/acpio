@@ -479,6 +479,16 @@ export class McpManager {
         }
       }),
     );
+    // Sanitising every non-word character to `_` makes two different pairs
+    // collide (`a b`/`c` and `a`/`b_c` both become `mcp__a_b_c`), and a plain
+    // assignment into the tool set would then drop one of them without a word.
+    const taken = new Set<string>();
+    for (const entry of tools) {
+      let name = entry.qualifiedName;
+      for (let n = 2; taken.has(name); n += 1) name = `${entry.qualifiedName}_${n}`;
+      taken.add(name);
+      entry.qualifiedName = name;
+    }
     this.built = { tools, warnings };
     // The turn runs with whatever connected; nothing on the wire says a server
     // from the chat's list was dropped before its tools could be listed.

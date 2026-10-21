@@ -2,7 +2,11 @@
 // tool, plus the initialize / tools/list handshake.
 import { createInterface } from "node:readline";
 
-const TOOLS = [
+// FIXTURE_TOOLS renames the same shapes, so a test can build a tool name that
+// collides with another server's after sanitising (`a b`+`echo` vs `a`+`b_echo`).
+const NAMES = process.env.FIXTURE_TOOLS?.split(",").filter(Boolean);
+
+const BASE = [
   {
     name: "echo",
     description: "Echo the text back",
@@ -15,6 +19,8 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
 ];
+
+const TOOLS = NAMES ? NAMES.map((name, i) => ({ ...BASE[i % BASE.length], name })) : BASE;
 
 const send = (frame) => process.stdout.write(`${JSON.stringify(frame)}\n`);
 

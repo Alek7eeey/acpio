@@ -57,6 +57,25 @@ describe("McpManager", () => {
     expect(tools[1]!.readOnly).toBe(false);
   });
 
+  it("keeps both tools when two servers' names collide after sanitising", async () => {
+    const { tools } = await manager([
+      {
+        name: "a b",
+        command: process.execPath,
+        args: [FIXTURE],
+        env: [{ name: "FIXTURE_TOOLS", value: "echo" }],
+      },
+      {
+        name: "a",
+        command: process.execPath,
+        args: [FIXTURE],
+        env: [{ name: "FIXTURE_TOOLS", value: "b_echo" }],
+      },
+    ]).ensure();
+    expect(tools.map((t) => t.qualifiedName).sort()).toEqual(["mcp__a_b_echo", "mcp__a_b_echo_2"]);
+    expect(Object.keys(mcpToolSet(tools, { ask }))).toHaveLength(2);
+  });
+
   it("calls a tool and returns its text content", async () => {
     const { tools } = await manager([stdioSpec]).ensure();
     await expect(tools[0]!.call({ text: "hi" })).resolves.toEqual({ text: "<hi>", images: [] });
