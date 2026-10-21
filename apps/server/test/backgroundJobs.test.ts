@@ -687,6 +687,37 @@ describe("the runner's own bookkeeping", () => {
     ).rejects.toThrow(/Chat not found/);
   });
 
+  it("does not hand npm's own run to the shell it spawns", async () => {
+    // `npm start` exports npm's invocation (`npm_config_*`, `npm_lifecycle_*`,
+    // …) to everything the server spawns, and npm reads those back as its own
+    // state: a nested `npm install` dies on EALLOWSCRIPTS because the leaked
+    // `npm_config_allow_scripts` looks like a flag of that command.
+    expect(Object.keys(process.env).some((key) => key.toLowerCase().startsWith("npm_"))).toBe(true);
+    const chat = await seedChat();
+    const job = await startBackgroundJob({
+      sessionId: chat.id,
+      cwd: chat.cwd,
+      script:
+        `node -e "console.log(Object.keys(process.env)` +
+        `.filter(k=>k.toLowerCase().startsWith('npm_')).join(',')||'clean')"`,
+    });
+    await waitForJob(job.id, "exited");
+    expect(readBackgroundJobOutput(job.id)!.text.trim()).toBe("clean");
+  });
+
+  it.skipIf(process.platform !== "win32")("writes the shell's OEM output as the text it is", async () => {
+    const chat = await seedChat();
+    // CP866 «Привет»: MSBuild, PowerShell errors and .cmd shims print this way,
+    // and read as UTF-8 that is the mojibake the agent cannot act on.
+    const job = await startBackgroundJob({
+      sessionId: chat.id,
+      cwd: chat.cwd,
+      script: `printf '\\x8f\\xe0\\xa8\\xa2\\xa5\\xe2\\n'`,
+    });
+    await waitForJob(job.id, "exited");
+    expect(readBackgroundJobOutput(job.id)!.text.trim()).toBe("Привет");
+  });
+
   it("removes a chat's row from the list when the job is forgotten", async () => {
     const chat = await seedChat();
     const job = await startBackgroundJob({

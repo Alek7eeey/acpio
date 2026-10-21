@@ -25,6 +25,7 @@ import {
   type AppSettings,
   type HarnessAdapter,
   type McpServerConfig,
+  childProcessEnv,
   isMcpServerAttached,
   isMcpServerConfigured,
   mcpCommandNeedsAbsolute,
@@ -38,8 +39,9 @@ import {
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 import { globFiles, searchFiles, splitGlobScope } from "./agentFs.js";
 import { DATA_DIR } from "../db/client.js";
-import { offloadDir } from "@acpio/adapter-builtin";
+import { BUILTIN_SKILLS_DIR, offloadDir } from "@acpio/adapter-builtin";
 import { isBackgroundJobLogPath } from "../services/bgLogs.js";
+import { ProcessTextDecoder } from "../services/processText.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,6 +75,8 @@ interface Pending {
 type TerminalEntry = {
   id: string;
   proc: ChildProcess;
+  /** The shell's own code page, decided by its first non-ASCII chunk. */
+  decoder: ProcessTextDecoder;
   output: string;
   truncated: boolean;
   exitCode: number | null;
@@ -397,18 +401,6 @@ export async function resolveMcpStdioCommands(
   return out;
 }
 
-function decodeProcessText(buf: Buffer): string {
-  const asUtf8 = buf.toString("utf8");
-  if (process.platform !== "win32") return asUtf8;
-  // Windows cmd often prints OEM CP866; UTF-8 decode becomes mojibake.
-  if (!/[^\u0000-\u007f]/.test(asUtf8) || !/�/.test(asUtf8)) return asUtf8;
-  try {
-    return new TextDecoder("ibm866").decode(buf);
-  } catch {
-    return asUtf8;
-  }
-}
-
 /** Render a harness's install hint with the missing command interpolated. */
 function installHintFor(adapter: HarnessAdapter, command: string): string {
   return adapter.installHint.replaceAll("{command}", command);
@@ -427,7 +419,7 @@ function looksLikeCommandNotFound(text: string): boolean {
 }
 
 export function buildAgentEnv(adapter: HarnessAdapter, settings: AppSettings): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+  const env: NodeJS.ProcessEnv = { ...childProcessEnv(), NO_COLOR: "1" };
   // User-defined agents carry their own env (Settings → Connect).
   if (adapter.env) {
     for (const [key, value] of Object.entries(adapter.env)) {
@@ -696,8 +688,9 @@ export class AcpClient extends EventEmitter {
       this.emit("log", `stdin write failed: ${err.code ?? err.message}`);
     });
 
+    const stderrDecoder = new ProcessTextDecoder();
     child.stderr.on("data", (buf: Buffer) => {
-      const text = decodeProcessText(buf);
+      const text = stderrDecoder.decode(buf);
       this.stderrBuf += text;
       // Debug/diagnostic traffic only — user-visible output comes from ACP terminals.
       this.emit("log", text);
@@ -1296,6 +1289,13 @@ export class AcpClient extends EventEmitter {
    */
   private outsideCwdAllowed = false;
 
+  /**
+   * Skill folders plugins ship (see plugin-api's `skillPath`): also outside
+   * every chat's cwd, also applied by reading the SKILL.md. Read on the same
+   * per-request pass as the switch below.
+   */
+  private pluginSkillDirs: string[] = [];
+
   /** Settings as of right now, falling back to the boot snapshot. */
   private async liveSettings(): Promise<AppSettings> {
     const raw = this.settingsProvider
@@ -1312,10 +1312,12 @@ export class AcpClient extends EventEmitter {
     // same agent, so the family — not the provider id — decides.
     if ((this.adapter.family ?? this.adapter.id) !== "builtin") {
       this.outsideCwdAllowed = false;
+      this.pluginSkillDirs = [];
       return;
     }
     const settings = await this.liveSettings();
     this.outsideCwdAllowed = settings.builtinAllowOutsideCwd === true;
+    this.pluginSkillDirs = (settings.pluginSkills ?? []).map((folder) => folder.path);
   }
 
   private assertInsideCwd(targetPath: string) {
@@ -1354,6 +1356,18 @@ export class AcpClient extends EventEmitter {
       : "";
     if (archived && !archived.startsWith("..") && !path.isAbsolute(archived)) {
       return resolved;
+    }
+    // The skills the app ships live outside every chat's cwd, and a listed one
+    // is applied by reading its SKILL.md with the ordinary `read` (see
+    // adapter-builtin/skills.ts) — without this they are announced but
+    // unreachable. Static files of the app itself, no project data.
+    const shipped = path.relative(BUILTIN_SKILLS_DIR, resolved);
+    if (shipped && !shipped.startsWith("..") && !path.isAbsolute(shipped)) return resolved;
+    // The same for a skill a plugin ships: its folder is part of the app, not
+    // of the project, and a listed one is applied by reading its SKILL.md.
+    for (const dir of this.pluginSkillDirs) {
+      const rel = path.relative(dir, resolved);
+      if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
     }
     // A background job's output is a file this chat owns (see bgLogs.ts): the
     // agent reads it with `read` like any other file, so that folder is open
@@ -1459,7 +1473,7 @@ export class AcpClient extends EventEmitter {
         : this.rootCwd();
     const byteLimit = Math.max(1024, Number(params.outputByteLimit ?? 1024 * 1024));
     const envList = Array.isArray(params.env) ? params.env : [];
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    const env: NodeJS.ProcessEnv = { ...childProcessEnv() };
     for (const item of envList) {
       if (item && typeof item === "object") {
         const row = item as { name?: string; value?: string };
@@ -1479,6 +1493,7 @@ export class AcpClient extends EventEmitter {
     const entry: TerminalEntry = {
       id,
       proc: child,
+      decoder: new ProcessTextDecoder(),
       output: "",
       truncated: false,
       exitCode: null,
@@ -1491,10 +1506,10 @@ export class AcpClient extends EventEmitter {
     this.emit("log", `terminal/create ${id} ${command} ${args.join(" ")}`.trim());
 
     child.stdout?.on("data", (buf: Buffer) =>
-      this.appendTerminalOutput(entry, buf.toString("utf8")),
+      this.appendTerminalOutput(entry, entry.decoder.decode(buf)),
     );
     child.stderr?.on("data", (buf: Buffer) =>
-      this.appendTerminalOutput(entry, buf.toString("utf8")),
+      this.appendTerminalOutput(entry, entry.decoder.decode(buf)),
     );
     child.on("error", (err) =>
       this.appendTerminalOutput(entry, `\n[spawn error] ${err.message}\n`),

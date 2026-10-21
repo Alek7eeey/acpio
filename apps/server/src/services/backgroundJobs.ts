@@ -17,6 +17,7 @@ import {
   BG_MCP_SERVER_ID,
   BG_MCP_SERVER_NAME,
   bgMcpToolName,
+  childProcessEnv,
   resolveServerPort,
   type AppLocale,
   type BackgroundJobDto,
@@ -25,6 +26,7 @@ import {
 } from "@acpio/shared";
 import { shellCommand } from "@acpio/adapter-builtin";
 import { backgroundJobLogDir, backgroundJobLogPath } from "./bgLogs.js";
+import { ProcessTextDecoder } from "./processText.js";
 import { listSessionsByIds } from "./sessions.js";
 import { broadcast } from "./wsHub.js";
 
@@ -81,6 +83,8 @@ type BackgroundJobRecord = {
   startedAt: number;
   endedAt: number | null;
   child: ChildProcess | null;
+  /** Code page of the shell's output, decided by its first non-ASCII chunk. */
+  decoder: ProcessTextDecoder;
   /** File stdout+stderr is appended to; deleted with the job row. */
   logPath: string;
   /** Open descriptor of `logPath` while the job writes to it. */
@@ -188,9 +192,12 @@ function defaultLabel(script: string): string {
  * look at a running job's log at any moment and must see what the shell has
  * already printed, not what a stream buffer has not flushed yet.
  */
-function appendOutput(record: BackgroundJobRecord, chunk: string) {
+function appendOutput(record: BackgroundJobRecord, chunk: Buffer | string) {
   if (record.logFull || record.logFd == null) return;
-  const bytes = Buffer.byteLength(chunk);
+  // A Windows tool prints in its OEM code page (CP866 for Russian messages):
+  // the log is text the agent has to read, so decode it here, once.
+  const text = typeof chunk === "string" ? chunk : record.decoder.decode(chunk);
+  const bytes = Buffer.byteLength(text);
   if (record.logBytes + bytes > MAX_LOG_BYTES) {
     const mark = LOG_FULL_MARK;
     try {
@@ -203,7 +210,7 @@ function appendOutput(record: BackgroundJobRecord, chunk: string) {
     return;
   }
   try {
-    writeSync(record.logFd, chunk);
+    writeSync(record.logFd, text);
     record.logBytes += bytes;
   } catch {
     /* same: a log that cannot be written must not kill the job */
@@ -295,7 +302,7 @@ export async function startBackgroundJob(input: StartBackgroundJobInput): Promis
   const { command, args } = shellCommand(script);
   const child = spawn(command, args, {
     cwd,
-    env: process.env,
+    env: childProcessEnv(),
     windowsHide: true,
     // POSIX: its own process group, so stopping the job stops its children too.
     detached: process.platform !== "win32",
@@ -318,6 +325,7 @@ export async function startBackgroundJob(input: StartBackgroundJobInput): Promis
     sessionId: input.sessionId,
     sessionTitle: session.title,
     cwd,
+    decoder: new ProcessTextDecoder(),
     label: (input.label ?? "").trim().slice(0, MAX_LABEL_CHARS) || defaultLabel(script),
     script,
     logPath,
@@ -334,8 +342,8 @@ export async function startBackgroundJob(input: StartBackgroundJobInput): Promis
   };
   jobs.set(record.id, record);
 
-  child.stdout?.on("data", (chunk: Buffer | string) => appendOutput(record, String(chunk)));
-  child.stderr?.on("data", (chunk: Buffer | string) => appendOutput(record, String(chunk)));
+  child.stdout?.on("data", (chunk: Buffer | string) => appendOutput(record, chunk));
+  child.stderr?.on("data", (chunk: Buffer | string) => appendOutput(record, chunk));
   child.on("error", (err) => {
     appendOutput(record, `\n[job error] ${err.message}\n`);
     if (record.status === "running") settle(record, "failed", null);

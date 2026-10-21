@@ -953,6 +953,48 @@ describe("built-in agent outside the session cwd", () => {
     expect(await glob(`${cwd.split(path.sep).join("/")}/src/*.ts`)).toEqual(["src/a.ts"]);
   });
 
+  it("gives the agent's shell a clean environment, not npm's own run", async () => {
+    // The builtin agent's `bash` tool lands in `terminal/create`, and the server
+    // is normally started by `npm start`: npm exports its invocation to us, and
+    // a nested `npm install` in a project dies on the leaked
+    // `npm_config_allow_scripts` (EALLOWSCRIPTS).
+    const { cwd } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({}));
+    const script =
+      "console.log('npmvars=' + Object.keys(process.env)" +
+      ".filter(k=>k.toLowerCase().startsWith('npm_')).length)";
+    const { terminalId } = (await acp.handleClientMethod("terminal/create", {
+      command: process.execPath,
+      args: ["-e", script],
+      cwd,
+    })) as { terminalId: string };
+    await acp.handleClientMethod("terminal/wait_for_exit", { terminalId });
+    const out = (await acp.handleClientMethod("terminal/output", { terminalId })) as {
+      output: string;
+    };
+    expect(out.output).toContain("npmvars=0");
+    await acp.handleClientMethod("terminal/release", { terminalId });
+  });
+
+  it.skipIf(process.platform !== "win32")("reads the terminal's OEM output as the text it is", async () => {
+    // CP866 «Привет»: PowerShell errors and .cmd shims print this way, and read
+    // as UTF-8 that becomes mojibake the agent cannot act on.
+    const { cwd } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({}));
+    const script = "process.stdout.write(Buffer.from([143,224,168,162,165,226]))";
+    const { terminalId } = (await acp.handleClientMethod("terminal/create", {
+      command: process.execPath,
+      args: ["-e", script],
+      cwd,
+    })) as { terminalId: string };
+    await acp.handleClientMethod("terminal/wait_for_exit", { terminalId });
+    const out = (await acp.handleClientMethod("terminal/output", { terminalId })) as {
+      output: string;
+    };
+    expect(out.output).toContain("Привет");
+    await acp.handleClientMethod("terminal/release", { terminalId });
+  });
+
   it("takes a foreign command cwd only with the switch on", async () => {
     const { cwd, outsideDir } = await room();
     const create = { command: "acpio-no-such-utility", args: [], cwd: outsideDir };
