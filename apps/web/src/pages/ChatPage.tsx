@@ -2528,6 +2528,23 @@ function StepsSpoiler({
     setOpen(autoExpand);
   }, [stepsGlobalTick, autoExpand, setOpen]);
 
+  // A parked question renders joined to its lead-in text; every other part keeps
+  // the flat emission-order body. The lead-in is claimed here (and filtered out
+  // of `parts` by the caller), so it is never rendered twice.
+  //
+  // Folded above the two early returns below, unconditionally: a hook cannot be
+  // skipped, and a block that goes from "no parts" (or from a `skipOuter` body)
+  // to a real transcript renders one hook more than the render before it. React
+  // answers that by tearing the whole tree down — a blank page, not a warning.
+  const parkedPreambles = useMemo(() => {
+    if (!unansweredQuestionParts(parts).length) return null;
+    return new Map(
+      buildAgentTimeline(parts)
+        .filter((item): item is AgentQuestionItem => item.kind === "question")
+        .map((item) => [item.key, item] as const),
+    );
+  }, [parts]);
+
   const liveHeader = streaming || holdEmptyLive || (Boolean(turnActive) && parts.length === 0);
 
   if (parts.length === 0 && !liveHeader) return null;
@@ -2573,18 +2590,6 @@ function StepsSpoiler({
       <PartView key={part.id} part={part} embedded streaming={live} sessionId={sessionId} />
     );
   };
-
-  // A parked question renders joined to its lead-in text; every other part keeps
-  // the flat emission-order body. The lead-in is claimed here (and filtered out
-  // of `parts` by the caller), so it is never rendered twice.
-  const parkedPreambles = useMemo(() => {
-    if (!unansweredQuestionParts(parts).length) return null;
-    return new Map(
-      buildAgentTimeline(parts)
-        .filter((item): item is AgentQuestionItem => item.kind === "question")
-        .map((item) => [item.key, item] as const),
-    );
-  }, [parts]);
 
   const renderFlatPart = (part: MessagePartDto, idx: number) => {
     const bucket = parkedPreambles?.get(part.id);
@@ -4907,9 +4912,11 @@ function ChatThread() {
     });
   }, [slashCommands, slashCtx]);
   const slashLoading = slashListStillLoading(activeSession?.slashCommands);
+  // A parked question is not a running turn: the agent is not reading the
+  // composer, so the menu belongs to the reader choosing a skill to answer with.
   const slashMenuOpen =
     !slashMenuDismissed &&
-    !turnBusy &&
+    (!turnBusy || questionParked) &&
     slashCtx != null &&
     (slashLoading || filteredSlashCommands.length > 0);
 
