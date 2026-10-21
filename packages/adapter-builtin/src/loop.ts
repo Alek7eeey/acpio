@@ -44,6 +44,13 @@ export interface TurnOptions {
    * shrink it.
    */
   heartbeatMs?: number;
+  /**
+   * Pictures a tool handed back this turn, keyed by the call that returned them.
+   * {@link attachToolImages} puts each one into a user message right after its
+   * tool result — both for the calls the SDK makes next (the turn reads its own
+   * render) and for the response the caller stores.
+   */
+  toolImages?: Map<string, ToolImagePart[]>;
 }
 
 export interface TurnOutcome {
@@ -180,6 +187,56 @@ const RE_READABLE_TOOLS: Record<string, true> = { read: true, grep: true, glob: 
 
 /** What a masked result leaves behind: a note, not content the model may trust. */
 export const MASKED_RESULT_NOTE = "[output dropped to free room — call the tool again if you need it]";
+
+/** A picture a tool returned: bytes plus media type, never a placeholder. */
+export interface ToolImagePart {
+  data: string;
+  mimeType: string;
+}
+
+/** What the user message carrying tool pictures says above them. */
+export const TOOL_IMAGES_NOTE = "Attached image(s) from the tool result(s) above:";
+
+/**
+ * Tool pictures → one user message per tool result that carried them.
+ *
+ * The wire cannot hold an image inside a tool result — an OpenAI-compatible
+ * endpoint only accepts a string there — so the picture rides beside it, right
+ * after the call it belongs to. Same shape omp (`Attached image(s) from tool
+ * result:`) and opencode (a `role:"user"` flush of the collected attachments)
+ * arrived at independently.
+ *
+ * Matched by `toolCallId`, so a step with several calls keeps each picture next
+ * to its own result. Nothing is consumed: every step builds its own request from
+ * the same result messages, and each of them needs the picture present.
+ */
+export function attachToolImages(
+  response: ModelMessage[],
+  images: Map<string, ToolImagePart[]> | undefined,
+): ModelMessage[] {
+  if (!images?.size) return response;
+  const out: ModelMessage[] = [];
+  for (const message of response) {
+    out.push(message);
+    if (message.role !== "tool" || !Array.isArray(message.content)) continue;
+    const files = message.content.flatMap((part) => {
+      if (part.type !== "tool-result") return [];
+      const taken = images.get(part.toolCallId);
+      if (!taken?.length) return [];
+      return taken.map((image) => ({
+        type: "file" as const,
+        mediaType: image.mimeType,
+        data: image.data,
+      }));
+    });
+    if (files.length) {
+      out.push(
+        { role: "user", content: [{ type: "text", text: TOOL_IMAGES_NOTE }, ...files] } as ModelMessage,
+      );
+    }
+  }
+  return out;
+}
 
 /** How much of the model's own reasoning the view keeps. */
 export type ReasoningPolicy = "keep" | "before-last-message" | "drop";
@@ -481,6 +538,35 @@ function toolTitle(toolName: string, input: Record<string, unknown>): string {
   return `${toolName} ${oneLine.length > 80 ? `${oneLine.slice(0, 77)}…` : oneLine}`;
 }
 
+/**
+ * What a finished tool handed back, as prose. The tools here return strings,
+ * but a declared or dynamic output arrives as `{ type: "text", value }` or
+ * plain JSON — the wire carries one text either way.
+ */
+function toolResultText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (value === null || value === undefined) return "";
+  const row = value as { type?: unknown; value?: unknown };
+  if (row.type === "text" && typeof row.value === "string") return row.value.trim();
+  if (row.type === "json") return JSON.stringify(row.value ?? null, null, 2);
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+/**
+ * ACP tool-call output: the harness stores it as the row's body, so without it
+ * the row can only restate its own truncated title and expanding shows nothing.
+ */
+function toolOutputPatch(text: string): { content?: Array<Record<string, unknown>> } {
+  return text.trim() ? { content: [{ type: "content", content: { type: "text", text } }] } : {};
+}
+
 function toError(value: unknown): Error {
   if (value instanceof Error) return value;
   if (typeof value === "string") return new Error(value);
@@ -619,23 +705,24 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     // 0 = the provider's own ceiling: the key must not go out at all.
     ...(outputCap > 0 ? { maxOutputTokens: outputCap } : {}),
     maxRetries: 2,
-    // `afterStep` arrives here: a message the host sent mid-turn is appended to
-    // the next model call. `responseMessages` counts what the turn has produced
-    // so far, so `at` is exactly where the folded message belongs in history.
-    ...(opts.takeSteer
-      ? {
-          prepareStep: (step: { messages: ModelMessage[]; responseMessages: readonly unknown[] }) => {
-            const taken = opts.takeSteer!();
-            if (!taken.length) return {};
-            const at = step.responseMessages.length;
-            taken.forEach((entry, i) => {
-              injected.push({ at: at + i, message: entry.message });
-              entry.ack();
-            });
-            return { messages: [...step.messages, ...taken.map((entry) => entry.message)] };
-          },
-        }
-      : {}),
+    // Between steps two things join the next call: a message the host sent
+    // mid-turn, and a tool's pictures, which cannot sit inside the tool result
+    // (an OpenAI-compatible endpoint takes a string there). `responseMessages`
+    // counts what the turn has produced so far, so `at` is exactly where a
+    // folded message belongs in history.
+    prepareStep: (step: { messages: ModelMessage[]; responseMessages: readonly unknown[] }) => {
+      const taken = opts.takeSteer?.() ?? [];
+      const at = step.responseMessages.length;
+      taken.forEach((entry, i) => {
+        injected.push({ at: at + i, message: entry.message });
+        entry.ack();
+      });
+      const withSteers = taken.length
+        ? [...step.messages, ...taken.map((entry) => entry.message)]
+        : step.messages;
+      const messages = attachToolImages(withSteers, opts.toolImages);
+      return messages === step.messages ? {} : { messages };
+    },
   });
 
   let failure: Error | undefined;
@@ -721,13 +808,25 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
           break;
         }
         case "tool-result":
-          opts.emit({ sessionUpdate: "tool_call_update", toolCallId: part.toolCallId, status: "completed" });
+          opts.emit({
+            sessionUpdate: "tool_call_update",
+            toolCallId: part.toolCallId,
+            status: "completed",
+            ...toolOutputPatch(toolResultText(part.output)),
+          });
           inFlightTools.delete(part.toolCallId);
           syncHeartbeat();
           break;
         case "tool-error":
           // A failing tool is information for the model, not a failed turn.
-          opts.emit({ sessionUpdate: "tool_call_update", toolCallId: part.toolCallId, status: "failed" });
+          opts.emit({
+            sessionUpdate: "tool_call_update",
+            toolCallId: part.toolCallId,
+            status: "failed",
+            ...toolOutputPatch(
+              part.error instanceof Error ? part.error.message : toolResultText(part.error),
+            ),
+          });
           inFlightTools.delete(part.toolCallId);
           syncHeartbeat();
           break;
@@ -821,6 +920,10 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     // real cause: the streamed error part captured above reaches the user.
     if (!opts.abortSignal.aborted && !reasoningCut) throw failure ?? err;
   }
+
+  // A tool that returned pictures: each rides as its own user message after the
+  // call it answers, since the wire allows nothing but text in a tool result.
+  response = attachToolImages(response, opts.toolImages);
 
   if (reasoningCut && stepReasoning.trim()) {
     // The cut step never reached a recorded message — its thinking lives only

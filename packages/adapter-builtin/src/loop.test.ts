@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { NoOutputGeneratedError, streamText, type ModelMessage } from "ai";
 import {
+  attachToolImages,
   compactHistory,
   compactMessages,
   estimateTokens,
@@ -10,6 +11,7 @@ import {
   repairToolPairs,
   runTurn,
   runTurnWithRetry,
+  TOOL_IMAGES_NOTE,
 } from "./loop.js";
 
 vi.mock("ai", async (importOriginal) => ({
@@ -325,6 +327,46 @@ describe("folding a mid-turn message into the produced response", () => {
   });
 });
 
+describe("tool pictures beside their tool result", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+  const call: ModelMessage = {
+    role: "assistant",
+    content: [{ type: "tool-call", toolCallId: "c1", toolName: "mcp__cad_shot", input: {} }],
+  };
+  const result: ModelMessage = {
+    role: "tool",
+    content: [
+      { type: "tool-result", toolCallId: "c1", toolName: "mcp__cad_shot", output: { type: "text", value: "rendered" } },
+    ],
+  };
+
+  it("rides as its own user message right after the call it belongs to", () => {
+    const images = new Map([["c1", [{ data: PNG, mimeType: "image/png" }]]]);
+    const out = attachToolImages([call, result], images);
+    expect(out.map((m) => m.role)).toEqual(["assistant", "tool", "user"]);
+    expect(out[2]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: TOOL_IMAGES_NOTE },
+        { type: "file", mediaType: "image/png", data: PNG },
+      ],
+    });
+    // Nothing is consumed: the next step's request is built from the same
+    // result messages and needs the picture too.
+    expect(attachToolImages([call, result], images)).toEqual(out);
+  });
+
+  it("leaves a response without pictures untouched", () => {
+    const response = [call, result];
+    expect(attachToolImages(response, undefined)).toBe(response);
+    expect(attachToolImages(response, new Map())).toBe(response);
+    // A map keyed to another call inserts nothing.
+    expect(attachToolImages(response, new Map([["other", [{ data: PNG, mimeType: "image/png" }]]]))).toEqual(
+      response,
+    );
+  });
+});
+
 describe("repairToolPairs", () => {
   const call: ModelMessage = {
     role: "assistant",
@@ -479,6 +521,47 @@ describe("runTurn failure handling", () => {
     await runTurn(turnOpts({ emit: (update) => updates.push(update) }));
     const usage = updates.find((u) => u.sessionUpdate === "usage_update");
     expect(usage).toMatchObject({ used: 1500, inputTokens: 3300, outputTokens: 300 });
+  });
+
+  it("attaches a tool's picture to the turn's response, after its result", async () => {
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const call: ModelMessage = {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "c1", toolName: "mcp__cad_shot", input: {} }],
+    };
+    const result: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "mcp__cad_shot",
+          output: { type: "text", value: "rendered" },
+        },
+      ],
+    };
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([call, result]),
+      finishReason: Promise.resolve("stop"),
+      usage: Promise.resolve({ totalTokens: 10, inputTokens: 5, outputTokens: 5 }),
+      steps: Promise.resolve([]),
+    });
+    const toolImages = new Map([["c1", [{ data: PNG, mimeType: "image/png" }]]]);
+
+    const outcome = await runTurn(turnOpts({ toolImages }));
+
+    // What lands in the stored history is the picture itself — not the text
+    // placeholder `[image image/png]` the tool result used to carry.
+    expect(outcome.response.map((m) => m.role)).toEqual(["assistant", "tool", "user"]);
+    expect(outcome.response[2]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: TOOL_IMAGES_NOTE },
+        { type: "file", mediaType: "image/png", data: PNG },
+      ],
+    });
   });
 
   it("reports the live window while the turn is still running", async () => {
