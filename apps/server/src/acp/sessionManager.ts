@@ -2692,9 +2692,12 @@ export async function runPrompt(
       const listed = saved.map((f) =>
         embedded.has(f.fileId) ? `${f.name} (изображение приложено)` : f.relPath,
       );
-      promptUserText += `\n\n[Прикреплённые файлы: ${listed.join(", ")}${
+      const hint = `[Прикреплённые файлы: ${listed.join(", ")}${
         embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
       }]`;
+      // A picture sent without words has no text of its own: the hint must not
+      // start with the blank lines that separated it from a prompt.
+      promptUserText = promptUserText ? `${promptUserText}\n\n${hint}` : hint;
     }
   };
 

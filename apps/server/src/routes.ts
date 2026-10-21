@@ -1718,7 +1718,9 @@ export async function registerRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
     const body = z
       .object({
-        text: z.string().min(1),
+        // Empty text is allowed when files ride along: pictures without a
+        // caption are a prompt of their own.
+        text: z.string(),
         editMessageId: z.string().uuid().optional(),
         // How to reach an agent that is already working. `queue` (the default,
         // and what an older client always meant) waits for the whole turn;
@@ -1733,6 +1735,10 @@ export async function registerRoutes(app: FastifyInstance) {
           )
           .max(8)
           .optional(),
+      })
+      .refine((v) => v.text.trim().length > 0 || (v.attachments?.length ?? 0) > 0, {
+        message: "text or attachments required",
+        path: ["text"],
       })
       .parse(req.body);
     const detail = await getSessionDetail(id);

@@ -4419,6 +4419,12 @@ function ChatThread() {
   const modelRef = useRef(model);
   modelRef.current = model;
   const [pendingFiles, setPendingFiles] = useState<ComposerAttachment[]>([]);
+  /** Staged files that would go with this prompt—a picture is a message on its
+   *  own, so a chip is enough to send. Editing keeps the file out: an edit only
+   *  rewrites the text of a message that is already there. */
+  const hasSendableAttachments =
+    !editingMessageId && pendingFiles.some((f) => f.status === "ready" && f.path);
+  const canSend = hasText || hasSendableAttachments;
   /** A drag carrying files is over the composer right now. */
   const [fileDropActive, setFileDropActive] = useState(false);
   /** Object URLs behind the composer previews, keyed by attachment id: revoked
@@ -4428,6 +4434,10 @@ function ChatThread() {
   /** A pasted block waiting for the reader's answer: keep it as a file (link in
    *  the text, the file as an attachment) or paste it as text after all. */
   const [pasteOffer, setPasteOffer] = useState<string | null>(null);
+  /** Where the offered block would have landed: the caret range the paste
+   *  replaced. The block is not in the composer while the offer waits, so the
+   *  range is kept aside and the text goes back in exactly there. */
+  const pasteOfferAtRef = useRef<{ start: number; end: number } | null>(null);
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Native picker for files on the device the browser runs on. */
   const deviceFileInputRef = useRef<HTMLInputElement>(null);
@@ -5052,11 +5062,14 @@ function ChatThread() {
    * have done itself had the paste not been intercepted to offer a file.
    */
   const insertComposerText = useCallback(
-    (insertion: string) => {
+    (insertion: string, at?: { start: number; end: number } | null) => {
       const el = textareaRef.current;
       const current = el ? el.value : text;
-      const start = el?.selectionStart ?? current.length;
-      const end = el?.selectionEnd ?? start;
+      const caretNow = el?.selectionStart ?? current.length;
+      const start = at ? Math.min(Math.max(at.start, 0), current.length) : caretNow;
+      const end = at
+        ? Math.min(Math.max(at.end, start), current.length)
+        : (el?.selectionEnd ?? start);
       const next = current.slice(0, start) + insertion + current.slice(end);
       const caret = start + insertion.length;
       // A programmatic insert is a fresh edit: the composer history cursor has
@@ -5081,7 +5094,8 @@ function ChatThread() {
   const pasteOfferAsText = useCallback(() => {
     if (pasteOffer === null) return;
     setPasteOffer(null);
-    insertComposerText(pasteOffer);
+    insertComposerText(pasteOffer, pasteOfferAtRef.current);
+    pasteOfferAtRef.current = null;
   }, [insertComposerText, pasteOffer]);
 
   /**
@@ -5202,8 +5216,13 @@ function ChatThread() {
   const attachmentsUploading = pendingFiles.some((f) => f.status === "uploading");
 
   const submitMessage = (raw: string) => {
-    const value = raw.trim();
-    if (!value || composerLocked || attachmentsUploading) return;
+    // A big paste still waiting for its answer must not be lost: sending
+    // without a choice means «paste as text».
+    const value =
+      pasteOffer === null
+        ? raw.trim()
+        : (raw ? `${raw}\n${pasteOffer}` : pasteOffer).trim();
+    if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
@@ -5220,6 +5239,7 @@ function ChatThread() {
     previewUrlsRef.current.clear();
     resetComposerHistory();
     setText("");
+    setPasteOffer(null);
     setEditingMessageId(null);
     setCursorPos(0);
     setComposerMultilineIfNeeded(false);
@@ -7316,7 +7336,7 @@ function ChatThread() {
                     <button
                       type="button"
                       className={`${styles.micBtn} ${
-                        hasText ? styles.micBtnGhost : styles.micBtnSendSlot
+                        canSend ? styles.micBtnGhost : styles.micBtnSendSlot
                       }${listening ? ` ${styles.micBtnActive}` : ""}`}
                       title={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
                       aria-label={listening ? t("chat.voiceListening") : t("chat.voiceInput")}
@@ -7350,11 +7370,11 @@ function ChatThread() {
                       </svg>
                     </button>
                     )}
-                    {hasText && (
+                    {canSend && (
                       <button
                         type="submit"
                         className={styles.sendBtn}
-                        disabled={composerLocked || attachmentsUploading || !text.trim()}
+                        disabled={composerLocked || attachmentsUploading || !canSend}
                         title={
                           agentMissing
                             ? t("common.noAgentsOnline")
