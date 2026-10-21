@@ -454,6 +454,19 @@ function isLargePastedText(text: string): boolean {
   return text.length >= PASTE_AS_FILE_MIN_CHARS || text.split("\n").length >= PASTE_AS_FILE_MIN_LINES;
 }
 
+/** Put a block back into the composer text over the caret range the paste
+ *  replaced. A range known to be gone (no offer recorded) appends instead. */
+function spliceComposerText(
+  base: string,
+  insertion: string,
+  at: { start: number; end: number } | null,
+): string {
+  if (!at) return base + insertion;
+  const start = Math.min(Math.max(at.start, 0), base.length);
+  const end = Math.min(Math.max(at.end, start), base.length);
+  return base.slice(0, start) + insertion + base.slice(end);
+}
+
 /**
  * Name of the file a pasted block becomes. Millisecond precision on purpose:
  * the link written into the composer carries this name, so a second paste in
@@ -5107,10 +5120,12 @@ function ChatThread() {
   const pasteOfferAsFile = useCallback(() => {
     if (pasteOffer === null) return;
     const block = pasteOffer;
+    const at = pasteOfferAtRef.current;
     setPasteOffer(null);
+    pasteOfferAtRef.current = null;
     const sessionId = activeSession?.id;
     if (!sessionId) {
-      insertComposerText(block);
+      insertComposerText(block, at);
       return;
     }
     const name = pastedTextFileName();
@@ -5133,17 +5148,32 @@ function ChatThread() {
     );
     // No room (or nothing stageable): the paste itself must not be dropped.
     if (staged.length === 0) {
-      insertComposerText(block);
+      insertComposerText(block, at);
       return;
     }
-    insertComposerText(link);
+    insertComposerText(link, at);
   }, [activeSession?.id, insertComposerText, pasteOffer, stageDeviceFiles]);
 
   /** A big paste waits for the answer; a second one does not replace (and so
-   *  lose) the first — that one goes in as text and the new block is offered. */
+   *  lose) the first — that one goes in where it was pasted, and the new block
+   *  is offered for the range this paste replaced. */
   const offerPasteAsFile = useCallback(
-    (pasted: string) => {
-      if (pasteOffer !== null) insertComposerText(pasteOffer);
+    (pasted: string, at: { start: number; end: number }) => {
+      let next = at;
+      if (pasteOffer !== null) {
+        const prev = pasteOffer;
+        const prevAt = pasteOfferAtRef.current ?? { start: next.start, end: next.start };
+        insertComposerText(prev, prevAt);
+        // The previous block now occupies the composer, so the range of this
+        // paste shifts by its length — the same coordinates, one insert later.
+        const shift = prev.length;
+        const prevStart = Math.min(prevAt.start, prevAt.end);
+        const prevEnd = Math.max(prevAt.start, prevAt.end);
+        const move = (pos: number) =>
+          pos >= prevEnd ? pos + shift : pos >= prevStart ? prevStart + shift : pos;
+        next = { start: move(at.start), end: move(at.end) };
+      }
+      pasteOfferAtRef.current = next;
       setPasteOffer(pasted);
     },
     [insertComposerText, pasteOffer],
@@ -5217,11 +5247,12 @@ function ChatThread() {
 
   const submitMessage = (raw: string) => {
     // A big paste still waiting for its answer must not be lost: sending
-    // without a choice means «paste as text».
+    // without a choice means «paste as text», and the block goes back into the
+    // very range the paste replaced — not onto the end of what is typed.
     const value =
       pasteOffer === null
         ? raw.trim()
-        : (raw ? `${raw}\n${pasteOffer}` : pasteOffer).trim();
+        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
@@ -5240,6 +5271,7 @@ function ChatThread() {
     resetComposerHistory();
     setText("");
     setPasteOffer(null);
+    pasteOfferAtRef.current = null;
     setEditingMessageId(null);
     setCursorPos(0);
     setComposerMultilineIfNeeded(false);
@@ -7146,7 +7178,9 @@ function ChatThread() {
                 const pasted = e.clipboardData?.getData("text/plain") ?? "";
                 if (!isLargePastedText(pasted)) return;
                 e.preventDefault();
-                offerPasteAsFile(pasted);
+                const start = e.currentTarget.selectionStart ?? text.length;
+                const end = e.currentTarget.selectionEnd ?? start;
+                offerPasteAsFile(pasted, { start, end });
               }}
               placeholder={
                 slashInputHint ??
