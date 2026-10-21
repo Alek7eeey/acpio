@@ -17,8 +17,21 @@ const apiMock = vi.hoisted(() => ({
   }),
   // The MCP leaf polls the live probe status while it is open.
   mcpStatus: vi.fn(async () => ({})),
+  // The MCP and Plugins leaves read the plugin host's boot snapshot.
+  pluginsState: vi.fn(async () => ({
+    source: null,
+    sourceLabel: "",
+    dir: "/tmp/plugins",
+    loadedAt: null,
+    pendingRestart: false,
+    warnings: [],
+    plugins: [],
+    mcpServers: [],
+  })),
   // Each provider's models editor fetches its endpoint's /models list.
   builtinModels: vi.fn(async () => ({ ok: true, models: [] })),
+  // The built-in-skill rows are named by the skills the build ships.
+  listSkills: vi.fn(async () => [] as Array<{ name: string; description: string; mode: string }>),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
@@ -172,6 +185,51 @@ describe("SettingsPage form state", () => {
 
   // acpio's own MCP server is a row like any other in Settings → MCP: the user
   // sees it there and switches it off, which is the point of listing it.
+  it("adds a plugin by hand and saves its row with the config as JSON", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({
+      settings: {
+        ...DEFAULT_SETTINGS,
+        pluginEntries: [{ id: "hand", server: "/tmp/hand/dist/server.js" }],
+      },
+      bootstrapped: true,
+    });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=plugins"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const id = screen.getByLabelText(/^id —/) as HTMLInputElement;
+    const server = screen.getByLabelText(/^path or URL of the bundle/) as HTMLInputElement;
+    const config = screen.getByLabelText(/^config JSON/) as HTMLInputElement;
+    expect([id.value, server.value, config.value]).toEqual([
+      "hand",
+      "/tmp/hand/dist/server.js",
+      "",
+    ]);
+
+    await user.clear(server);
+    await user.type(server, "/tmp/hand/dist/next.js");
+    // Doubled braces: userEvent reads a single one as the start of a key descriptor.
+    await user.type(config, '{{"token":"t1"}}');
+    // A new row starts empty and is kept while it is being typed.
+    await user.click(screen.getByRole("button", { name: /\+ Add plugin/ }));
+    expect(screen.getByText("New plugin")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(apiMock.updateSettings).toHaveBeenCalled());
+    const patch = apiMock.updateSettings.mock.calls.at(-1)?.[0] as {
+      pluginEntries?: Array<{ id: string; server: string; config?: unknown }>;
+    };
+    expect(patch.pluginEntries).toEqual([
+      { id: "hand", server: "/tmp/hand/dist/next.js", config: { token: "t1" } },
+      { id: "", server: "" },
+    ]);
+  });
+
   it("lists acpio's own MCP server and saves its switch", async () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });

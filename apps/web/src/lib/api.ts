@@ -15,6 +15,7 @@ import type {
   GitCommitDetailDto,
   ModelOption,
   ModelParamDto,
+  PluginsStateDto,
   ProjectMcpInfo,
   PromptDelivery,
   BackgroundJobDto,
@@ -73,6 +74,8 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
   mcpStatus: () => request<Record<string, boolean>>("/api/mcp/status"),
+  /** Plugin host state: the config source, what loaded at boot, what waits for a restart. */
+  pluginsState: () => request<PluginsStateDto>("/api/plugins"),
   /**
    * Background jobs the agent started through acpio's own MCP server. The
    * server keeps them in memory, so the list is whatever is live right now.

@@ -51,7 +51,6 @@ function testBridge(overrides: Partial<Parameters<typeof createSubagentsBridge>[
 } {
   const childAsks: AskPermission[] = [];
   const bridge = createSubagentsBridge({
-    mode: "agent",
     ask: vi.fn(async () => {}),
     model: {} as Parameters<typeof runSubagent> extends never ? never : never,
     contextWindow: 100_000,
@@ -143,7 +142,7 @@ describe("runSubagent", () => {
     });
   });
 
-  it("intersects requested ad-hoc tools with the parent mode", async () => {
+  it("intersects requested ad-hoc tools with the agent's own", async () => {
     vi.mocked(streamText).mockReturnValue(outcome() as never);
     const { bridge: agentBridge } = testBridge();
     await runSubagent(agentBridge, "p1", {
@@ -156,12 +155,12 @@ describe("runSubagent", () => {
       "write",
     ]);
 
-    // Plan mode has no mutating tools to give, so the request falls back to
-    // the read-only default.
-    const { bridge: planBridge } = testBridge({ mode: "plan" });
-    await runSubagent(planBridge, "p2", {
+    // A name the parent does not have is dropped, and a request with nothing
+    // left falls back to the child's own default set.
+    const { bridge: second } = testBridge();
+    await runSubagent(second, "p2", {
       system_prompt: "Runner.",
-      tools: ["bash"],
+      tools: ["mcp__nope"],
       prompt: "x",
     });
     expect(Object.keys(lastCall().tools as Record<string, unknown>)).toEqual([

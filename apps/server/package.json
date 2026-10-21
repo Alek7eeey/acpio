@@ -17,6 +17,8 @@
     "@acpio/adapter-omp": "*",
     "@acpio/adapter-opencode": "*",
     "@acpio/i18n": "*",
+    "@acpio/plugin-api": "*",
+    "@acpio/plugin-ponytail": "*",
     "@acpio/shared": "*",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.0.1",

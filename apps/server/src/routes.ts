@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
 import {
   addTaskAttachments,
@@ -30,6 +30,12 @@ import {
 } from "./services/backgroundJobs.js";
 import { handleBackgroundMcpRequest } from "./services/bgMcp.js";
 import {
+  findPluginMcpServer,
+  handlePluginMcpRequest,
+  pluginsState,
+} from "./services/plugins.js";
+import { mcpTokenMatches } from "./services/mcpToken.js";
+import {
   createTheme,
   deleteTheme,
   listThemes,
@@ -45,6 +51,7 @@ import {
   getSessionSlashCommands,
   listModels,
   clearModelsCache,
+  clearBuiltinModelsCache,
   probeAgent,
   resolveModelParams,
   warmModelParamsProbe,
@@ -91,7 +98,7 @@ import {
 } from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
-import { discoverSkills } from "@acpio/adapter-builtin";
+import { discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -312,6 +319,8 @@ const settingsSchema = z.object({
   sidebarCollapse: z.enum(["full", "rail"]).optional(),
   boardAddCardStyle: z.enum(["card", "compact", "hidden"]).optional(),
   boardTaskAgentPicker: z.boolean().optional(),
+  boardTaskModelPicker: z.boolean().optional(),
+  boardTaskEffortPicker: z.boolean().optional(),
   boardShowFirstMessage: z.boolean().optional(),
   showBootSplash: z.boolean().optional(),
   fontFamily: z.string().optional(),
@@ -388,7 +397,45 @@ const settingsSchema = z.object({
     )
     .optional(),
   mcpProjectFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
+  pluginsConfig: z.string().max(2_000).optional(),
+  /** Plugins added by hand — the config source stays the way to point at several. */
+  pluginEntries: z
+    .array(
+      z.object({
+        // A half-typed row is kept: the loader reports it, the form must not lose it.
+        id: z.string().max(64),
+        server: z.string().max(2_000),
+        version: z.string().max(64).optional(),
+        enabled: z.boolean().optional(),
+        config: z.record(z.unknown()).optional(),
+      }),
+    )
+    .max(200)
+    .optional(),
+  /** The user's half of the providers plugins ship (a key, mostly). */
+  pluginProviders: z
+    .record(
+      z.object({
+        apiKey: z.string().max(500).optional(),
+        enabled: z.boolean().optional(),
+        urlOverride: z.string().max(500).optional(),
+        models: z
+          .array(
+            z.object({
+              id: z.string().min(1).max(200),
+              label: z.string().max(120).optional(),
+              contextWindow: z.number().int().min(1).max(10_000_000).optional(),
+              enabled: z.boolean().optional(),
+              contextWindowEdited: z.boolean().optional(),
+            }),
+          )
+          .max(1000)
+          .optional(),
+      }),
+    )
+    .optional(),
   builtinSkillPaths: z.array(z.string().min(1).max(512)).max(50).optional(),
+  builtinSkillModes: z.record(z.enum(["off", "hidden", "listed", "active"])).optional(),
   builtinSubagents: z
     .object({
       enabled: z.boolean().optional(),
@@ -703,6 +750,31 @@ export async function registerRoutes(app: FastifyInstance) {
 
   app.get("/api/mcp/status", async () => getMcpStatus());
 
+  // Plugin host state: what the config source holds, what loaded at boot, and
+  // whether the setting changed since — that one applies on the next restart.
+  app.get("/api/plugins", async () => pluginsState());
+
+  // MCP endpoint of one plugin server: the same JSON-RPC a harness speaks to
+  // `acpio_bg`, with the tools the plugin returned from `create()`. The token
+  // is this boot's, and the url carrying it is built in `pluginMcpServers` —
+  // only the agent acpio hands that url to can reach it.
+  app.post("/api/mcp/plugin/:pluginId/:serverId", async (req, reply) => {
+    const params = z
+      .object({ pluginId: z.string().min(1).max(64), serverId: z.string().min(1).max(64) })
+      .parse(req.params);
+    const query = z.object({ token: z.string().max(200).optional() }).parse(req.query ?? {});
+    if (!mcpTokenMatches(query.token)) {
+      return reply.code(403).send({ error: "invalid_token" });
+    }
+    const server = findPluginMcpServer(params.pluginId, params.serverId);
+    if (!server || !server.configured || server.error) {
+      return reply.code(404).send({ error: "unknown_server" });
+    }
+    const answer = await handlePluginMcpRequest(req.body, server);
+    if (answer.body === null) return reply.code(answer.status).send();
+    return reply.code(answer.status).send(answer.body);
+  });
+
   // acpio's own MCP server: the background runner every chat is handed at
   // `session/new` (see services/bgMcp.ts). It lives under /api so the
   // remote-access gate already covers it — a phone on the LAN needs the key,
@@ -790,8 +862,15 @@ export async function registerRoutes(app: FastifyInstance) {
     const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
     const settings = await getSettings();
     const cwd = query.cwd?.trim() || settings.defaultCwd;
-    const skills = await discoverSkills(settings.builtinSkillPaths, cwd);
-    return skills.map((skill) => ({ name: skill.name, description: skill.description }));
+    const skills = await discoverSettingsSkills(settings, cwd);
+    // Every skill, hidden ones included: the settings page needs to show what it
+    // switched off, while the board filters them out of its slash menu.
+    return skills.map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+      mode: skillMode(settings.builtinSkillModes, skill.name),
+      ...(skill.builtin ? { builtin: true } : {}),
+    }));
   });
 
   app.get("/api/search", async (req) => {
@@ -833,7 +912,11 @@ export async function registerRoutes(app: FastifyInstance) {
     ) {
       // The transport reads providers per turn, but a live chat may be pinned
       // to a model the edit removed — restart live built-in chats so the new
-      // endpoints/model list apply immediately.
+      // endpoints/model list apply immediately. The catalog itself is cached
+      // per provider for the pickers, so it has to go as well: a model added,
+      // renamed or unticked here would otherwise stay invisible (or offered)
+      // until that cache expired.
+      clearBuiltinModelsCache();
       void restartSessionsForBuiltinChange();
     }
     if (
@@ -853,6 +936,16 @@ export async function registerRoutes(app: FastifyInstance) {
     ) {
       // Skills are discovered from the settings snapshot the transport holds,
       // so a path edit needs the same restart as an endpoint edit.
+      void restartSessionsForBuiltinChange();
+    }
+    if (
+      patch.builtinSkillModes !== undefined &&
+      JSON.stringify(normalizeSkillModes(patch.builtinSkillModes)) !==
+        JSON.stringify(current.builtinSkillModes)
+    ) {
+      // The slash menu is announced once, at session/new: a skill switched to
+      // `hidden` would otherwise stay offered in a live chat until the next
+      // boot. The prompt itself is rebuilt per turn and needs no restart.
       void restartSessionsForBuiltinChange();
     }
     if (
@@ -1093,6 +1186,8 @@ export async function registerRoutes(app: FastifyInstance) {
         mode: z.enum(["agent", "plan", "ask"]).optional(),
         themeId: z.string().uuid().nullable().optional(),
         model: z.string().max(200).optional(),
+        /** Params the model boots with (the new-task form's effort pick). */
+        modelParams: z.record(z.string()).optional(),
         /** Board task: partition id + description; created without a live turn. */
         boardId: z.string().uuid().optional(),
         taskDescription: z.string().max(20000).optional(),
@@ -1136,6 +1231,7 @@ export async function registerRoutes(app: FastifyInstance) {
       mode: body.mode ?? settings.defaultMode,
       themeId: body.themeId,
       model: body.model,
+      modelParams: body.modelParams,
       boardId: body.boardId ?? null,
       taskDescription: body.taskDescription ?? null,
       // Files picked from the server's own filesystem ride the same way

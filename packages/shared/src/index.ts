@@ -7,6 +7,7 @@ import type {
   ModelOption,
   PromptDelivery,
 } from "./adapters.js";
+import type { PluginEntryConfig, PluginSkillFolder } from "./pluginSource.js";
 
 export type {
   AdapterExtensionKind,
@@ -41,9 +42,20 @@ export {
   normalizeCustomAgents,
   SHELL_SESSION_PROVIDER,
 } from "./adapters.js";
+export { childProcessEnv } from "./childEnv.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
 export { isProtocolPlaceholder } from "./protocolPlaceholder.js";
 export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./ports.js";
+export {
+  pluginSourceKind,
+  resolvePluginSource,
+  type LoadedPluginDto,
+  type PluginEntryConfig,
+  type PluginMcpServerDto,
+  type PluginSkillFolder,
+  type PluginsStateDto,
+  type ResolvedPluginSource,
+} from "./pluginSource.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
@@ -654,6 +666,39 @@ export function normalizeSkillPaths(paths: unknown): string[] {
   return out;
 }
 
+/**
+ * How a skill is offered to the built-in agent (Settings → Built-in agent):
+ * `off` — the skill does not exist for the chat at all, `/name` included;
+ * `hidden` — the system prompt never mentions it, while the `/` menu and a
+ * typed `/name` still reach it; `listed` — the model is told the skill exists
+ * and reads its SKILL.md when a task matches; `active` — the SKILL.md body
+ * rides along in every turn, so the skill is in effect from the start. See
+ * `builtinSkillModes`.
+ */
+export type SkillMode = "off" | "hidden" | "listed" | "active";
+
+export const SKILL_MODES: readonly SkillMode[] = ["off", "hidden", "listed", "active"];
+
+/** Mode of a skill nobody configured — what every skill did before the setting. */
+export const DEFAULT_SKILL_MODE: SkillMode = "listed";
+
+/**
+ * Configured per-skill modes: names lower-cased (a skill name matches
+ * case-insensitively) and only known modes kept, so a hand-edited settings file
+ * cannot put a skill into a state the agent has no behavior for.
+ */
+export function normalizeSkillModes(modes: unknown): Record<string, SkillMode> {
+  const out: Record<string, SkillMode> = {};
+  if (!modes || typeof modes !== "object" || Array.isArray(modes)) return out;
+  for (const [raw, mode] of Object.entries(modes as Record<string, unknown>)) {
+    const name = raw.trim().toLowerCase();
+    if (!name || !SKILL_MODES.includes(mode as SkillMode)) continue;
+    out[name] = mode as SkillMode;
+    if (Object.keys(out).length >= 100) break;
+  }
+  return out;
+}
+
 const MCP_VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
 /**
@@ -797,6 +842,8 @@ export function effectiveMcpServers(
   disabledIds: string[] | null | undefined,
   cwd?: string | null,
   projectServers: McpServerConfig[] = [],
+  /** Servers plugins contribute; they ride the same switches as the built-in ones. */
+  pluginServers: McpServerConfig[] = [],
 ): McpServerConfig[] {
   const folder = mcpFolderConfig(settings, cwd);
   const disabledInChat = new Set(disabledIds ?? []);
@@ -821,7 +868,7 @@ export function effectiveMcpServers(
     names.add(s.name);
     out.push(s);
   }
-  for (const s of builtinMcpServers(settings)) {
+  for (const s of [...builtinMcpServers(settings), ...pluginServers]) {
     if (mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) out.push(s);
   }
   return out;
@@ -1128,7 +1175,28 @@ export interface BuiltinProviderConfig {
    * `{"reasoning_effort":"low"}`, and so on. Empty or unparsable = no change.
    */
   body?: string;
+  /**
+   * Set on a row a plugin ships (Settings → Built-in agent): the endpoint and
+   * the model list come from the plugin, only the key is the user's half
+   * ({@link AppSettings.pluginProviders}). Such a row is never stored — it is
+   * merged in on read and stripped on write.
+   */
+  pluginId?: string;
+  /** Where the user gets a key for a plugin's provider. */
+  apiKeyHint?: string;
 }
+
+/** What the user changed in a provider a plugin ships, keyed `<pluginId>:<providerId>`. */
+export type PluginProviderOverride = {
+  /** The point of the row: the key for the plugin's endpoint. */
+  apiKey?: string;
+  /** The user's own switch; absent = on as soon as a key is there. */
+  enabled?: boolean;
+  /** Replaces the plugin's base URL. */
+  urlOverride?: string;
+  /** Edits of the recommended models plus the user's own additions, by model id. */
+  models?: BuiltinModelConfig[];
+};
 
 /**
  * Context-window policy of the built-in agent — what it does when the stored
@@ -1273,6 +1341,13 @@ export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
       // Conditional: settings written before headers existed keep their shape.
       ...(headers.length ? { headers } : {}),
       ...(body ? { body } : {}),
+      // Conditional: only a provider a plugin contributed carries these.
+      ...(typeof r.pluginId === "string" && r.pluginId.trim()
+        ? { pluginId: r.pluginId.trim().slice(0, 128) }
+        : {}),
+      ...(typeof r.apiKeyHint === "string" && r.apiKeyHint.trim()
+        ? { apiKeyHint: r.apiKeyHint.trim().slice(0, 300) }
+        : {}),
     });
   }
   return out;
@@ -1523,6 +1598,19 @@ export interface AppSettings {
    */
   builtinProviders: BuiltinProviderConfig[];
   /**
+   * Plugins added by hand in Settings → Plugins: one bundle each, no config
+   * file. The config source stays the way to point at several at once; an id
+   * listed in both resolves to the entry here (the most explicit wins).
+   */
+  pluginEntries: PluginEntryConfig[];
+  /**
+   * The user's half of the providers plugins ship (Settings → Built-in agent),
+   * keyed `<pluginId>:<providerId>`: the key, an optional switch, a URL of their
+   * own and their edits of the model list. The plugin's half stays in the
+   * plugin, so updating it never fights these rows.
+   */
+  pluginProviders: Record<string, PluginProviderOverride>;
+  /**
    * Output ceiling for one built-in model call, in tokens (Settings →
    * Built-in agent). Default 16 384 — the number pi and omp send. 0 = no
    * ceiling: nothing goes out as `max_tokens`, so the provider default (the
@@ -1711,6 +1799,14 @@ export interface AppSettings {
    */
   boardTaskAgentPicker: boolean;
   /**
+   * Model picker in the board's new-task form — the model the task's first
+   * turn boots on. Off hides the control: the task follows the agent's default.
+   */
+  boardTaskModelPicker: boolean;
+  /** Effort picker next to it, offering the chosen model's own reasoning-effort
+   *  values. Off hides the control: the model keeps its default effort. */
+  boardTaskEffortPicker: boolean;
+  /**
    * Board card under a model-written (or renamed) title: show the first
    * message as the card's preview text. On = today's look; off keeps only the
    * title. Untitled cards (the title *is* the first message) always show it.
@@ -1750,12 +1846,35 @@ export interface AppSettings {
    */
   mcpProjectFiles: string[];
   /**
+   * Where plugins come from (Settings → Plugins): a URL or a local path to the
+   * config file that lists them. Empty = the app's own
+   * `<data dir>/plugins/config.json`, which is the folder to drop one into.
+   * Read once at server start — a new version, or a new source, applies after a
+   * restart.
+   */
+  pluginsConfig: string;
+  /**
    * Folders the built-in agent scans for skills (`DEFAULT_BUILTIN_SKILL_PATHS`
    * unless changed): each subfolder carrying a `SKILL.md` becomes a skill the
    * agent announces and follows. Relative paths resolve per chat cwd, absolute
    * ones are global; an empty list disables skills.
    */
   builtinSkillPaths: string[];
+  /**
+   * Mode of each skill of the built-in agent (`hidden`/`listed`/`active`, see
+   * {@link SkillMode}), keyed by skill name in lower case. Applies to the
+   * skills shipped with the app and to the ones found in
+   * {@link builtinSkillPaths} alike; a name that is not here runs `listed`.
+   */
+  builtinSkillModes: Record<string, SkillMode>;
+  /**
+   * Skill folders plugins ship, filled by the plugin host at boot and never
+   * stored — like the providers a plugin contributes, they ride in on read so
+   * every reader of the settings sees them without a restart-order dance. An
+   * absolute folder per loaded `skillPath` contribution, plus the base rules
+   * its skills word themselves.
+   */
+  pluginSkills: PluginSkillFolder[];
   /**
    * Built-in agent subagents: the master switch plus user-defined named agents
    * for the `task` tool (the built-in `explore` agent is not stored here).
@@ -1813,6 +1932,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   anthropicApiKey: "",
   openaiApiKey: "",
   builtinProviders: [],
+  pluginEntries: [],
+  pluginProviders: {},
   builtinMaxOutputTokens: 16_384,
   // Five attempts: one bad answer from a flaky gateway (a 400 from its own
   // upstream, a dropped stream) is worth re-issuing, and the messages the dead
@@ -1887,6 +2008,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatToolbarStyle: "classic",
   boardAddCardStyle: "card",
   boardTaskAgentPicker: true,
+  boardTaskModelPicker: true,
+  boardTaskEffortPicker: true,
   boardShowFirstMessage: true,
   chatGitBranchPosition: "below",
   chatChipOptions: DEFAULT_CHAT_CHIP_OPTIONS,
@@ -1895,7 +2018,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpBuiltinDisabledIds: [],
   mcpFolderConfigs: {},
   mcpProjectFiles: [...DEFAULT_MCP_PROJECT_FILES],
+  pluginsConfig: "",
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
+  builtinSkillModes: {},
+  pluginSkills: [],
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   builtinAllowOutsideCwd: false,
   builtinMarkdownImages: true,
@@ -2298,14 +2424,19 @@ export interface SlashCommandDto {
 }
 
 /**
- * A skill the built-in agent found in a folder's skill paths. The board's
+ * A skill the built-in agent found for a folder: one shipped with the app
+ * (`builtin`) or one sitting in a configured skill folder. The board's
  * new-task form lists these while nothing is attached yet: the task's first
- * message is what later invokes one, so the form only needs the name and what
- * the skill is for.
+ * message is what later invokes one, so the form needs the name, what the skill
+ * is for, and the mode it runs in — a `hidden` one is no slash command.
  */
 export interface BuiltinSkillDto {
   name: string;
   description: string;
+  /** Effective mode (`listSkills` reports the configured one, default `listed`). */
+  mode: SkillMode;
+  /** Shipped with the app instead of found on disk. */
+  builtin?: boolean;
 }
 
 /** Later lists win on the same name; empty lists are ignored so a stale GET cannot shrink the menu. */

@@ -7,6 +7,7 @@ import { EventEmitter, once } from "node:events";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { Agent, request as httpsRequest } from "node:https";
 import { tool, jsonSchema, type ToolSet } from "ai";
+import { childProcessEnv } from "@acpio/shared";
 import type { AskPermission } from "./tools.js";
 
 /** One ACP `mcpServers` entry, normalized. */
@@ -84,18 +85,38 @@ function clipResult(text: string): string {
   return `${text.slice(0, head)}\n...[truncated]...\n${text.slice(-head)}`;
 }
 
-/** MCP `tools/call` content blocks → the text the model reads. */
-function renderCallResult(result: unknown): string {
-  if (!result || typeof result !== "object") return "(no result)";
+/** A picture a tool handed back, kept as bytes until the request is built. */
+export interface McpImage {
+  data: string;
+  mimeType: string;
+}
+
+/** What one `tools/call` yielded: the prose the model reads, plus its pictures. */
+export interface McpCallResult {
+  text: string;
+  images: McpImage[];
+}
+
+/** MCP `tools/call` content blocks → the text the model reads and the images
+ *  it must SEE. An image block stays bytes: the wire has no place for it inside
+ *  a tool result (OpenAI chat allows a string there), so the turn loop carries
+ *  it to the prompt as its own user message — the shape omp and opencode use. */
+function renderCallResult(result: unknown): McpCallResult {
+  if (!result || typeof result !== "object") return { text: "(no result)", images: [] };
   const row = result as { content?: unknown; structuredContent?: unknown; isError?: boolean };
   const parts: string[] = [];
+  const images: McpImage[] = [];
   if (Array.isArray(row.content)) {
     for (const item of row.content) {
       if (!item || typeof item !== "object") continue;
       const block = item as Record<string, unknown>;
       if (block.type === "text" && typeof block.text === "string") parts.push(block.text);
-      else if (block.type === "image") parts.push(`[image ${String(block.mimeType ?? "")}]`);
-      else if (block.type === "resource") {
+      else if (block.type === "image") {
+        const data = typeof block.data === "string" ? block.data : "";
+        if (data) images.push({ data, mimeType: String(block.mimeType ?? "image/png") });
+        // No bytes to attach: say so instead of dropping the block silently.
+        else parts.push(`[image ${String(block.mimeType ?? "")} unavailable]`);
+      } else if (block.type === "resource") {
         const uri = (block.resource as { uri?: unknown } | undefined)?.uri;
         parts.push(`[resource ${String(uri ?? "")}]`);
       } else parts.push(`[${String(block.type ?? "content")}]`);
@@ -104,8 +125,9 @@ function renderCallResult(result: unknown): string {
   if (!parts.length && row.structuredContent !== undefined) {
     parts.push(JSON.stringify(row.structuredContent));
   }
-  const body = clipResult(parts.join("\n") || "(empty result)");
-  return row.isError ? `error: ${body}` : body;
+  // An image-only result still needs a body: the tool message itself stays text.
+  const body = clipResult(parts.join("\n") || (images.length ? "(see attached image)" : "(empty result)"));
+  return { text: row.isError ? `error: ${body}` : body, images };
 }
 
 /** A streamable-HTTP answer is either raw JSON or an SSE stream of `data:` frames. */
@@ -180,7 +202,7 @@ class McpConnection {
     return tools;
   }
 
-  async call(name: string, args: Record<string, unknown>): Promise<string> {
+  async call(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
     const result = await this.request("tools/call", { name, arguments: args }, CALL_TIMEOUT_MS);
     return renderCallResult(result);
   }
@@ -279,7 +301,7 @@ class McpConnection {
     // npm ships CLI servers as `.cmd` shims, which spawn without a shell refuses
     // to execute on Windows.
     const child = spawn(command, args, {
-      env: { ...process.env, ...(this.spec.env ?? {}) },
+      env: { ...childProcessEnv(), ...(this.spec.env ?? {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: /\.(cmd|bat)$/i.test(command),
@@ -387,7 +409,7 @@ export interface McpToolEntry extends McpToolDef {
   /** Name the model calls, `mcp__<server>_<tool>`. */
   qualifiedName: string;
   server: string;
-  call: (args: Record<string, unknown>) => Promise<string>;
+  call: (args: Record<string, unknown>) => Promise<McpCallResult>;
 }
 
 /** Connects every configured server and collects its tools; failures degrade. */
@@ -436,21 +458,24 @@ export class McpManager {
   }
 }
 
-/**
- * Wrap MCP tools as AI SDK tools. Only read-only ones survive plan/ask mode —
- * the same rule the builtin's own write/edit/bash obey.
- */
+/** Wrap MCP tools as AI SDK tools; a non-read-only call asks the same user. */
 export function mcpToolSet(
   entries: McpToolEntry[],
-  opts: { readOnlyOnly: boolean; ask: AskPermission },
+  opts: {
+    ask: AskPermission;
+    /** Where an image a tool returned goes: the turn loop turns it into a user
+     *  message right after the tool result, keyed by the call it belongs to. */
+    onImages?: (toolCallId: string, images: McpImage[]) => void;
+  },
 ): ToolSet {
   const set: ToolSet = {};
   for (const entry of entries) {
-    if (opts.readOnlyOnly && !entry.readOnly) continue;
     set[entry.qualifiedName] = tool({
-      description: `${entry.description || entry.name} (MCP server: ${entry.server})`,
+      // No "(MCP server: …)" suffix: the qualified name already starts with the
+      // server (`mcp__<server>_<tool>`), and this text rides every request.
+      description: entry.description || entry.name,
       inputSchema: jsonSchema(entry.inputSchema as Parameters<typeof jsonSchema>[0]),
-      execute: async (args) => {
+      execute: async (args, options) => {
         if (!entry.readOnly) {
           await opts.ask({
             title: `mcp ${entry.server}: ${entry.name}`,
@@ -458,7 +483,9 @@ export function mcpToolSet(
             input: { server: entry.server, tool: entry.name, arguments: args },
           });
         }
-        return entry.call((args ?? {}) as Record<string, unknown>);
+        const result = await entry.call((args ?? {}) as Record<string, unknown>);
+        if (result.images.length) opts.onImages?.(options.toolCallId, result.images);
+        return result.text;
       },
     });
   }

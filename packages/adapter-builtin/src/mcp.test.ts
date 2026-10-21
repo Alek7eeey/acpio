@@ -59,7 +59,7 @@ describe("McpManager", () => {
 
   it("calls a tool and returns its text content", async () => {
     const { tools } = await manager([stdioSpec]).ensure();
-    await expect(tools[0]!.call({ text: "hi" })).resolves.toBe("<hi>");
+    await expect(tools[0]!.call({ text: "hi" })).resolves.toEqual({ text: "<hi>", images: [] });
   });
 
   it("reports an unreachable server as a warning instead of failing", async () => {
@@ -121,7 +121,40 @@ describe("McpManager", () => {
     ]).ensure();
     expect(warnings).toEqual([]);
     expect(tools.map((t) => t.qualifiedName)).toEqual(["mcp__web_lookup"]);
-    await expect(tools[0]!.call({})).resolves.toBe("found");
+    await expect(tools[0]!.call({})).resolves.toEqual({ text: "found", images: [] });
+  });
+
+  it("keeps an image block as bytes instead of a placeholder", async () => {
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: number; method: string };
+        const results: Record<string, unknown> = {
+          initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+          "tools/list": { tools: [{ name: "shot", inputSchema: { type: "object" } }] },
+          "tools/call": {
+            content: [
+              { type: "text", text: "rendered" },
+              { type: "image", data: PNG, mimeType: "image/png" },
+            ],
+          },
+        };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+
+    const { tools } = await manager([{ name: "cad", url: `http://127.0.0.1:${port}/mcp` }]).ensure();
+    await expect(tools[0]!.call({})).resolves.toEqual({
+      text: "rendered",
+      images: [{ data: PNG, mimeType: "image/png" }],
+    });
   });
 
   it("connects to a self-signed HTTPS endpoint when insecureTls is set", async () => {
@@ -157,12 +190,35 @@ describe("McpManager", () => {
 });
 
 describe("mcpToolSet", () => {
-  it("offers read-only tools in plan mode and asks before a mutating one", async () => {
-    const { tools } = await manager([stdioSpec]).ensure();
-    const readOnly = mcpToolSet(tools, { readOnlyOnly: true, ask });
-    expect(Object.keys(readOnly)).toEqual(["mcp__fixture_echo"]);
+  it("hands a tool's images to the turn loop and returns only text to the model", async () => {
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const images: Array<[string, unknown]> = [];
+    const set = mcpToolSet(
+      [
+        {
+          name: "shot",
+          description: "render",
+          inputSchema: { type: "object" },
+          readOnly: true,
+          qualifiedName: "mcp__cad_shot",
+          server: "cad",
+          call: async () => ({ text: "rendered", images: [{ data: PNG, mimeType: "image/png" }] }),
+        },
+      ],
+      { ask, onImages: (toolCallId, imgs) => images.push([toolCallId, imgs]) },
+    );
+    const execute = (
+      set["mcp__cad_shot"] as { execute: (i: unknown, o: unknown) => Promise<unknown> }
+    ).execute;
+    await expect(execute({}, { toolCallId: "call-7" })).resolves.toBe("rendered");
+    expect(images).toEqual([["call-7", [{ data: PNG, mimeType: "image/png" }]]]);
+  });
 
-    const all = mcpToolSet(tools, { readOnlyOnly: false, ask });
+  it("offers every tool and asks before a mutating one", async () => {
+    const { tools } = await manager([stdioSpec]).ensure();
+    const all = mcpToolSet(tools, { ask });
+    expect(Object.keys(all)).toEqual(["mcp__fixture_echo", "mcp__fixture_commit"]);
     await (all["mcp__fixture_commit"] as { execute: (i: unknown, o: unknown) => Promise<unknown> })
       .execute({}, { abortSignal: new AbortController().signal });
     expect(ask).toHaveBeenCalledWith({

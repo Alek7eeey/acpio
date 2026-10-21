@@ -7,7 +7,8 @@ export type SettingsAgentLeaf =
   | "advanced"
   | "remote"
   | "diagnostics"
-  | "mcp";
+  | "mcp"
+  | "plugins";
 /** The built-in agent is a section of its own: one leaf per page of it. */
 export type SettingsBuiltinLeaf =
   | "presets"
@@ -84,6 +85,7 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
     { id: "model", label: t("settings.modelSection") },
     { id: "advanced", label: t("settings.advanced") },
     { id: "mcp", label: t("settings.mcpTitle") },
+    { id: "plugins", label: t("settings.pluginsTitle") },
     { id: "diagnostics", label: t("settings.diagnostics") },
     { id: "remote", label: t("settings.remoteAccess") },
   ];
@@ -171,7 +173,8 @@ export function parseSettingsSearch(search: string): SettingsLocation {
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||
     rawLeaf === "diagnostics" ||
-    rawLeaf === "mcp"
+    rawLeaf === "mcp" ||
+    rawLeaf === "plugins"
       ? rawLeaf
       : "connect";
   return { section: "agent", leaf };

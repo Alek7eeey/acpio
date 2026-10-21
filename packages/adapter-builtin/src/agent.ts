@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type {
-  AgentMode,
   AppSettings,
   BuiltinProviderConfig,
   InProcessAgentOptions,
@@ -36,15 +35,17 @@ import {
   runTurn,
   runTurnWithRetry,
   type CompactionState,
+  type ToolImagePart,
   type TurnModel,
   type TurnOutcome,
 } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
 import {
-  discoverSkills,
+  discoverSettingsSkills,
+  enabledSkills,
   expandSkillInvocation,
   renderSkillsSection,
-  type BuiltinSkill,
+  supersededRules,
 } from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 import { createBuiltinTools } from "./tools.js";
@@ -54,8 +55,6 @@ import {
 } from "./subagents.js";
 
 const AGENT_INFO = { name: "acpio-builtin", title: "Built-in agent", version: "0.1.0" };
-const MODES: readonly string[] = ["agent", "plan", "ask"];
-
 /** First text part of a prompt's content blocks — what `/skill` matching sees. */
 function promptText(parts: unknown): string {
   if (!Array.isArray(parts)) return "";
@@ -104,147 +103,144 @@ function userContent(parts: unknown): ModelMessage {
   return { role: "user", content };
 }
 
-/** Mode is enforced by the tool set; the prompt only tells the model about it. */
-function systemPrompt(
+/**
+ * The laws that hold whatever the task is, each under an id so a skill can
+ * replace the very one it words itself (frontmatter `supersedes`, see
+ * `skills.ts`'s `supersededRules`): a skill that is in effect from the first
+ * turn carries its own take on a step, and saying that step twice — once here,
+ * once in the skill, at two different strictnesses — is what makes a model spend
+ * reasoning on which one wins. An id nothing supersedes is simply kept.
+ */
+const RULES: ReadonlyArray<{ id: string; text: string }> = [
+  // Merged with `tools`: measured with the prompt's rules removed, the model
+  // reads first and keeps its edits in the tools, but reaches for `sed -i` when
+  // nothing says not to. Everything else it does unprompted.
+  {
+    id: "edit",
+    text:
+      "Read a file before changing it, and change it with `edit`/`write` — never `sed`, `perl` " +
+      "or a heredoc through `bash`. One `edit` call per file, however many `edits` it carries; " +
+      "a new file the task asks for is written, not surveyed first. Use `read`/`glob`/`grep` " +
+      "rather than `cat`/`find`, and one direct command over a helper script.",
+  },
+  { id: "smallest-change", text: "Make the smallest change that fully solves the task." },
+  {
+    id: "batch",
+    text:
+      "Batch independent calls in one step (several reads, searches or unrelated commands); " +
+      "run a command only after the call it depends on has finished.",
+  },
+  // The measurement behind the shorter line: with no rules at all the model ran
+  // `npm test` and the real script unprompted, so only the norm it broke where
+  // it had a rule — fixing the code, not the check — is worth saying.
+  {
+    id: "verify",
+    text:
+      "When a check fails, fix the code, never the check — unless the check itself is wrong, " +
+      "then fix it and say why in a line. Stop as soon as it passes — no extra listings, " +
+      "re-reads or cleanup beyond what the task or a skill asks.",
+  },
+];
+
+/** Ids of {@link RULES} — the vocabulary a skill's `supersedes` frontmatter names. */
+export const RULE_IDS: readonly string[] = RULES.map((rule) => rule.id);
+
+export function systemPrompt(
   locale: string,
   cwd: string,
-  mode: AgentMode,
-  mcp: { servers: string[]; tools: string[] },
-  skills: readonly BuiltinSkill[],
+  mcp: { servers: string[] },
+  /** Skills the model may call, already rendered into its prompt block. */
+  skillsSection: string,
+  /** Base rules an active skill words itself: theirs, not ours, in the prompt. */
+  supersededRules: ReadonlySet<string>,
   /** Settings → Built-in agent let the tools leave the working directory. */
   outsideCwd: boolean,
   /** Settings → Built-in agent: say that the chat draws markdown pictures. */
   markdownImages: boolean,
   /** Settings → Built-in agent: the user's own instructions, appended last. */
   extraInstructions: string,
+  /** The harness's own rider (the thinking knob) — not the user's words. */
+  thinkingInstructions: string,
 ): string {
-  const scope =
-    mode === "agent"
-      ? "You may edit files and run commands. Verify changes with a build or a test run when the project offers one."
-      : mode === "plan"
-        ? "Plan mode: you have read-only access. Investigate and propose — never claim an edit was made."
-        : "Answer mode: answer the question directly; read files when they are needed.";
   return [
     "You are the built-in coding agent of the Acpio chat harness.",
-    `Working directory: ${cwd}`,
+    `Working directory: ${cwd} (platform: ${process.platform})`,
     ...(outsideCwd
       ? [
-          "Paths outside the working directory work too (the user allowed it in settings): " +
-            "absolute paths such as a global skill folder are readable, and `grep`/`glob` may " +
-            "scope to one. Keep new files inside the working directory unless the user points " +
-            "you elsewhere.",
+          "Paths outside the working directory work too: absolute paths such as a global skill " +
+            "folder are readable, and `grep`/`glob` may scope to one. Keep new files inside the " +
+            "working directory unless the user points you elsewhere.",
         ]
       : []),
     `Reply in ${locale === "ru" ? "Русский" : "English"}. Use Markdown; keep answers short and concrete.`,
     // A picture on disk is one line of markdown away from the reader: the chat
-    // serves it through the session's own file route. Unsaid, a model answers
-    // that it cannot show an image at all — measured on the default model, which
-    // wrote `![shot](shot.png)` only inside a refusal to use it. Hence the
-    // switch in Settings → Built-in agent, on by default.
+    // serves it through the session's own file route. Said as a fact, not as a ban
+    // on one sentence: measured on the default model, the markdown is pasted
+    // either way and the prohibition only added a clause to argue with — the
+    // answer still hedged about the rendering. Hence the switch in
+    // Settings → Built-in agent, on by default.
     ...(markdownImages
       ? [
           "A picture on disk reaches the reader as markdown — `![shot](shot.png)`, a path " +
-            "inside the working directory or an absolute one. The chat renders it, so never " +
-            "answer that you cannot show an image.",
+            "inside the working directory or an absolute one. The chat renders it.",
         ]
       : []),
     "",
+    // Four laws that hold whatever the task is: everything narrower belongs to
+    // a skill, so a skill can never argue with a rule that already answered its
+    // case. A rule an active skill words itself is not repeated here.
     "Rules:",
-    "- Read a file before changing it; make the smallest change that fully solves the task.",
-    "- A bug report is also a spec: every behavior it states must hold after the fix the way it " +
-      "held before. Where the wording is ambiguous, mirror what the unfixed code already did on " +
-      "that path — only the reported defect changes.",
-    "- Fix the cause, not the site where the symptom shows. When the issue's wording settles " +
-      "the expected behavior ('instead of'), that is a replacement, not an addition. Before " +
-      "finishing, exercise the changed function itself on every case the task names or " +
-      "enumerates — such a list is a checklist for your verification, not a suggestion.",
-    "- When the task asks for a new file, write it — the workspace is usually empty, " +
-      "so do not survey it first; a listing tells you nothing you need.",
-    "- Never invent paths, flags or APIs — read the directory or the file first.",
-    "- Use `read` to examine a file, not `cat`/`sed`/`tail` through `bash`; use `glob`/`grep` " +
-      "to find things, not `find`/`grep` through `bash`.",
-    "- Use `edit` for changes to an existing file and `write` only for a new file or a complete " +
-      "rewrite. Put every change to one file in a single `edit` call: each `old_string` is matched " +
-      "against the file as it is now, so entries must not overlap or nest.",
-    "- Batch independent calls in one step (several reads, searches or unrelated commands); " +
-      "run a command only after the call it depends on has finished.",
-    "- After running a command, check its exit code before believing the output.",
-    "- If a failing check encodes the old behavior the task asks to change, do not guess the " +
-      "replacement from the task wording: implement through the canonical mechanism the " +
-      "environment already provides (an installed library, a platform standard) instead of " +
-      "hand-rolling a path or format. When that means importing a third-party library the " +
-      "project does not depend on yet, add it to the dependency manifest (setup.cfg / " +
-      "pyproject.toml / package.json) — a clean install must keep working.",
-    "- When the project is a public repository, check its actual history for the canonical fix " +
-      "(`git log -S` in the checkout, a released version from the registry) instead of " +
-      "reconstructing it from memory; adapt what you find to this checkout — a couple of " +
-      "targeted lookups, not a survey. Port the canonical fix's whole change set, not just the " +
-      "hunk nearest the symptom: when the fix moves work between sites (a helper stops " +
-      "converting, a caller must), update every site that consumed the old behavior. Its " +
-      "breadth is the upstream's to define too: when the canonical change is broader than the " +
-      "symptom suggests (a global flag, a looser grammar), keep that breadth and adapt the " +
-      "neighboring code it affects — do not narrow the fix to look safe.",
-    "- Verify with the check the task names, once: if it fails, fix the code, never the check. " +
-      "Stop as soon as it passes — no extra listings, re-reads or cleanup unless asked. One green " +
-      "run settles it: no suite re-runs, no `git stash` baseline comparisons, and failures " +
-      "unrelated to the change are out of scope.",
-    "- Derive a self-written verification from the contract, not from the patch: every clause " +
-      "the task states becomes an assertion, including the edge case that separates fixed from " +
-      "unfixed (a read after expiry, an entry at a stale index). Assert through the door the " +
-      "report used: the function the report shows misbehaving sits inside the assertions " +
-      "themselves, queried past the fixed-vs-unfixed boundary — before the fix and after it. " +
-      "An observer that already agreed before the fix (`has`, `size`, a log line) cannot see " +
-      "this defect and proves nothing. Give the check its negative control: run it against the " +
-      "unfixed code first and watch it fail. If your script and the code " +
-      "disagree, the contract decides which one lies — never relax the check to go green.",
-    "- If you wrote throwaway tests or fixtures to verify your work, delete them before " +
-      "finishing unless the task asked for tests: a clean diff carries only the fix, and " +
-      "scratch files left under the project's test tree break any patch applied on top of it.",
-    "- `bash` is a POSIX shell on every platform (Git Bash on Windows): pipes, `&&` and " +
-      "single/double quotes behave like bash, and paths may use `/`. Prefer one direct command " +
-      "(`sed`, `perl -pi`, a short `node -e` rewrite) over writing a helper script and debugging " +
-      "it — every debug round is a wasted step.",
-    `- ${scope}`,
+    ...RULES.filter((rule) => !supersededRules.has(rule.id)).map((rule) => `- ${rule.text}`),
+    // Stable to volatile, top to bottom: the rules and the frozen skills block
+    // come first so a MCP server coming online or the thinking knob turning mid
+    // chat rewrites only the tail, never the head the provider has cached.
+    skillsSection,
+    ...(mcp.servers.length
+      ? [
+          "",
+          `MCP servers connected: ${mcp.servers.join(", ")} — their tools are prefixed \`mcp__\`.`,
+        ]
+      : []),
     ...(extraInstructions.trim()
       ? ["", "Additional instructions from the user (follow them):", extraInstructions.trim()]
       : []),
-    ...(mcp.tools.length
-      ? [
-          "",
-          `MCP servers connected: ${mcp.servers.join(", ")}. Their tools are prefixed \`mcp__\`:`,
-          mcp.tools.join(", "),
-        ]
-      : []),
-    renderSkillsSection(skills),
+    // The harness's rider goes in bare: under the header above it would read as
+    // the user's own words, and a user who writes instructions of their own
+    // would have no way to tell the two apart.
+    ...(thinkingInstructions.trim() ? ["", thinkingInstructions.trim()] : []),
   ].join("\n");
 }
 
 /**
  * A relay in front of a thinking model demands its own reasoning back: an
- * assistant message that carries tool calls and no `reasoning_content` makes
- * the whole request fail with `400 … The reasoning_content in the thinking
- * mode must be passed back to the API`. A relay can answer a step with bare
- * tool calls — it then rejects the very history it produced, and which upstream
- * instance handles the next request decides whether the turn survives. An
- * empty echo satisfies the check (measured against the endpoint), so the gap
- * is filled rather than left to chance.
+ * assistant message without a `reasoning_content` string makes the whole
+ * request fail with `400 … The reasoning_content in the thinking mode must be
+ * passed back to the API`. It checks every assistant message of the history it
+ * produced — an acting step that thought nothing as much as an answer that did
+ * — and which upstream instance handles the next request decides whether the
+ * turn survives. An empty echo satisfies the check (measured against the
+ * endpoint), so the gap is filled rather than left to chance.
  *
- * Only a body that already carries some reasoning is touched: an endpoint that
- * never thinks keeps exactly the messages it built, so no provider is handed a
- * field it did not ask for.
+ * `thinking` says the conversation is in thinking mode even when this body
+ * carries no reasoning: a view whose reasoning was pruned (the
+ * `builtinPruneReasoning` policies, a digest standing in for the covered
+ * prefix) is sendable only if the echo is decided by the history, not by the
+ * bytes of one request. `false` leaves a body that never thought exactly as it
+ * was built, so no endpoint is handed a field it did not ask for.
  */
-export function fillReasoningEcho(messages: unknown): unknown {
+export function fillReasoningEcho(messages: unknown, thinking = false): unknown {
   if (!Array.isArray(messages)) return messages;
-  const thinking = messages.some((message) => {
-    const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
-    return row?.role === "assistant" && typeof row.reasoning_content === "string";
-  });
-  if (!thinking) return messages;
+  const thinks =
+    thinking ||
+    messages.some((message) => {
+      const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
+      return row?.role === "assistant" && typeof row.reasoning_content === "string";
+    });
+  if (!thinks) return messages;
   let changed = false;
   const filled = messages.map((message) => {
-    const row = message as { role?: unknown; tool_calls?: unknown; reasoning_content?: unknown } | undefined;
+    const row = message as { role?: unknown; reasoning_content?: unknown } | undefined;
     if (row?.role !== "assistant") return message;
-    if (!Array.isArray(row.tool_calls) || row.tool_calls.length === 0) return message;
     if (typeof row.reasoning_content === "string") return message;
     changed = true;
     return { ...row, reasoning_content: "" };
@@ -264,6 +260,8 @@ function builtinEndpoint(
   provider: BuiltinProviderConfig,
   sessionId: string,
   extraBody?: Record<string, unknown>,
+  /** The conversation has reasoned before — see `fillReasoningEcho`. */
+  thinking = false,
 ) {
   // Provider body first, the per-turn override on top: the turn's pick (the
   // `thinking` the user chose in the ⋯ menu) is the more specific intent.
@@ -279,19 +277,20 @@ function builtinEndpoint(
     // endpoint enforces on the history the agent hands back.
     transformRequestBody: (args: Record<string, any>) => {
       const body = Object.keys(extra).length > 0 ? { ...args, ...extra } : args;
-      const messages = fillReasoningEcho(body.messages);
+      const messages = fillReasoningEcho(body.messages, thinking);
       return messages === body.messages ? body : { ...body, messages };
     },
   });
 }
 
 /**
- * Reasoning modes the ⋯ menu offers per model, in chip order. They shape the
- * prompt only: "Low" asks for a short private-reasoning budget, "Default"
- * leaves the prompt alone. Whether the endpoint thinks at all is a separate,
- * session-level wire switch — `/thinking` (see `thinkingOff`).
+ * Reasoning modes the ⋯ menu offers per model, in chip order (most thinking
+ * first). They shape the prompt only: "High" asks for the thinking that
+ * decides the design, "Low"/"Extra low" cap the private-reasoning budget,
+ * "Default" leaves the prompt alone. Whether the endpoint thinks at all is a
+ * separate, session-level wire switch — `/thinking` (see `thinkingOff`).
  */
-const THINKING_MODES = ["default", "low", "extra-low"] as const;
+const THINKING_MODES = ["high", "default", "low", "extra-low"] as const;
 
 type ThinkingMode = (typeof THINKING_MODES)[number];
 
@@ -310,6 +309,24 @@ const THINKING_LIMIT_COMMAND_RE = /^\/thinking-limit(?:\s+(\S+))?\s*$/i;
 
 /** The fuse's default line: one step's thinking past this is cut. */
 const THINKING_LIMIT_DEFAULT_CHARS = 3_000;
+
+/**
+ * What "High" appends: the opposite failure to Extra low's — a model that
+ * settles for the first idea that compiles and meets the hard case after
+ * shipping it. It asks for the thinking Extra low leaves out (the decision, the
+ * fork, the case that parts working from broken) and keeps Extra low's ban on
+ * rumination, so depth is spent on the problem, never on narration. With the
+ * fuse armed (3000 chars by default) that pre-action thinking is what gets cut:
+ * High pays off with `/thinking-limit off` or a raised cap.
+ */
+const THINKING_HIGH_INSTRUCTION =
+  "Hard rule: before your first action, think the problem through — name the " +
+  "goal, the constraint that decides the design, and the case that will part a " +
+  "working change from a broken one. Two designs that both fit: pick one and say " +
+  "why in a sentence; never leave a real fork unexamined. Depth is the hard case " +
+  "covered, not length: no recaps of what you just read, no options you will not " +
+  "try, no \"now let me\" narration. A second paragraph about what is already on " +
+  "screen is a failure, not diligence.";
 
 /**
  * What "Low" appends to the system prompt: a budget rule, which is the only
@@ -339,7 +356,9 @@ const THINKING_EXTRA_LOW_INSTRUCTION =
   "second paragraph, stop mid-sentence and emit the tool call or the answer.";
 
 /** The per-mode system-prompt rider; "default" leaves the prompt alone. */
-const THINKING_INSTRUCTIONS: Record<ThinkingMode, string> = {
+/** What the "thinking" knob appends to the user instructions (the prompt lab reads it). */
+export const THINKING_INSTRUCTIONS: Record<ThinkingMode, string> = {
+  high: THINKING_HIGH_INSTRUCTION,
   default: "",
   low: THINKING_LOW_INSTRUCTION,
   "extra-low": THINKING_EXTRA_LOW_INSTRUCTION,
@@ -362,7 +381,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
 
   private sessionId = "";
   private cwd: string;
-  private mode: AgentMode;
   private modelId: string;
   /** Per-model reasoning mode picked in the composer (see `configOptions`). */
   private thinking: ThinkingMode = "default";
@@ -405,6 +423,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * are part of the cached prefix — the summariser reuses them verbatim.
    */
   private lastTools: ToolSet | undefined;
+  /**
+   * The skills half of the system prompt, fixed on the session's first turn: an
+   * inlined skill body and the rules it replaces must sit still while the
+   * prefix is warm. A mode flipped in Settings mid-chat therefore arrives with
+   * the next session, not with the next turn — the alternative rewrites the
+   * prompt at the head of every later request and pays a cold prefix for it.
+   * A `/name` invocation never changes it either: the body rides in the user
+   * message (see `expandSkillInvocation`).
+   */
+  private frozenSkills: { section: string; supersedes: Set<string> } | null = null;
   /** Archive of bulky tool results for this session, when offloading is on. */
   private offload: OffloadStore | undefined;
   private abort: AbortController | null = null;
@@ -455,7 +483,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
   constructor(opts: InProcessAgentOptions) {
     this.opts = opts;
     this.cwd = opts.cwd;
-    this.mode = opts.mode;
     this.modelId = initialModelId(opts.settings);
   }
 
@@ -556,11 +583,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
       case "session/cancel":
         this.abort?.abort();
         return {};
-      case "session/set_mode": {
-        const modeId = String(params.modeId ?? "");
-        if (MODES.includes(modeId)) this.mode = modeId as AgentMode;
+      // One mode: the harness may still announce a mode, and the only answer is
+      // the one it already runs in.
+      case "session/set_mode":
         return {};
-      }
       case "session/set_config_option": {
         const configId = String(params.configId ?? "");
         const value = String(params.value ?? "").trim();
@@ -629,10 +655,18 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // send the noted results back verbatim and recompute the cut for nothing.
     this.maskUpTo = stored?.maskUpTo ?? 0;
     this.prunedFrom = stored?.prunedFrom ?? 0;
+    // A transport rebuilt mid-chat resumes on the prompt bytes the first turn
+    // fixed, instead of inlining (or dropping) a skill body it read again.
+    this.frozenSkills = stored?.promptSkills
+      ? {
+          section: stored.promptSkills.section,
+          supersedes: new Set(stored.promptSkills.supersedes),
+        }
+      : null;
     this.offload = OffloadStore.forSession(this.opts.stateDir, sessionId);
     // Announce discovered skills before the boot reply: the harness merges them
     // into the composer's slash menu, exactly like a CLI agent's own list.
-    const skills = await discoverSkills(this.opts.settings.builtinSkillPaths, this.cwd);
+    const skills = await discoverSettingsSkills(this.opts.settings, this.cwd);
     const ru = this.opts.settings.locale === "ru";
     // The manual pass is offered next to the skills: the composer merges this
     // list into its slash menu, so `/compact` is discoverable without docs.
@@ -667,7 +701,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         manual,
         wireThinking,
         thinkingLimit,
-        ...skills.map((s) => ({
+        // A `hidden` skill is still offered here — hidden means "out of the
+        // system prompt", not "gone". Only `off` takes the command away.
+        ...enabledSkills(skills, this.opts.settings.builtinSkillModes).map((s) => ({
           name: s.name,
           description: s.description || s.name,
           kind: "skill",
@@ -699,6 +735,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         type: "select",
         currentValue: this.thinking,
         options: [
+          { value: "high", name: "High" },
           { value: "default", name: "Default" },
           { value: "low", name: "Low" },
           { value: "extra-low", name: "Extra low" },
@@ -719,6 +756,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
       ...(this.compaction ? { compaction: this.compaction } : {}),
       ...(this.maskUpTo > 0 ? { maskUpTo: this.maskUpTo } : {}),
       ...(this.prunedFrom > 0 ? { prunedFrom: this.prunedFrom } : {}),
+      ...(this.frozenSkills
+        ? {
+            promptSkills: {
+              section: this.frozenSkills.section,
+              supersedes: [...this.frozenSkills.supersedes],
+            },
+          }
+        : {}),
       // The spend rows ride along: a restart must resume the session's totals,
       // not restart them from zero and make the panel's first update after the
       // reboot hand back what the session had already spent.
@@ -862,6 +907,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
       selection.provider,
       this.sessionId,
       this.thinkingOff ? THINKING_DISABLED_BODY : undefined,
+      // The stored transcript, not the view: a pruned view is still a thinking
+      // conversation, and the echo must survive the pruning.
+      hasReasoning(this.messages),
     );
   }
 
@@ -1323,12 +1371,16 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // `/thinking-limit [on|off|<chars>]` arms or disarms the mid-think fuse.
     const limitArg = THINKING_LIMIT_COMMAND_RE.exec(promptText(params.prompt).trim());
     if (limitArg) return this.setThinkingLimit(limitArg[1] ?? "");
-    const skills = await discoverSkills(this.opts.settings.builtinSkillPaths, this.cwd);
+    const skills = await discoverSettingsSkills(this.opts.settings, this.cwd);
     // An explicit `/name` message is rewritten into the skill's body plus the
     // request before it is recorded, so the stored history carries what the
     // model actually saw and a re-run expands identically.
     const promptParts = params.prompt;
-    const expanded = await expandSkillInvocation(promptText(promptParts), skills);
+    const expanded = await expandSkillInvocation(
+      promptText(promptParts),
+      skills,
+      this.opts.settings.builtinSkillModes,
+    );
     this.messages.push(userContent(expanded ? [{ type: "text", text: expanded }] : promptParts));
     this.persist();
     // A steer aimed at an earlier turn must not ride into this one.
@@ -1350,7 +1402,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
     }) => this.askPermission(toolCall);
     try {
       const endpoint = this.endpointFor(selection);
-      const offered = mcpEntries.filter((entry) => this.mode === "agent" || entry.readOnly);
+      const offered = mcpEntries;
       // One bridge per prompt: slots and the usage accumulator must span the
       // turn and its wrap-up continuation.
       // Children run on their own model when one is configured — a fresh
@@ -1374,7 +1426,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
             ).chatModel(childChoice.selection.modelId);
       const subagents = subagentsEnabled
         ? createSubagentsBridge({
-            mode: this.mode,
             ask,
             model: childModel,
             extraSystem: THINKING_INSTRUCTIONS[this.thinking],
@@ -1388,7 +1439,6 @@ export class BuiltinAgent implements InProcessAgentTransport {
             buildChildTools: (childAsk) =>
               createBuiltinTools({
                 host: this.rpc,
-                mode: this.mode,
                 sessionId: this.sessionId,
                 ask: childAsk,
               }),
@@ -1403,26 +1453,34 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // The new bridge's counter starts at zero, so the totals it feeds have
       // nothing counted yet.
       this.bridgeReported = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
+      // Frozen once per session (see `frozenSkills`): the skills block is the
+      // one part of the prompt that depends on skill settings, and those are
+      // read live on every turn.
+      if (!this.frozenSkills) {
+        this.frozenSkills = {
+          section: await renderSkillsSection(skills, live.builtinSkillModes),
+          supersedes: supersededRules(skills, live.builtinSkillModes),
+        };
+        this.persist();
+      }
+      const skillsPrompt = this.frozenSkills;
       // Built once for the whole turn: the summariser borrows this exact string
       // so its request starts where this turn's did (see `ask`), and a retried
       // attempt must not drift the prefix the first attempt already warmed.
       const system = systemPrompt(
         live.locale,
         this.cwd,
-        this.mode,
         {
-          servers: [...new Set(offered.map((entry) => entry.server))],
-          tools: offered.map((entry) => entry.qualifiedName),
+          // Sorted: the manager hands the entries back in connect order, which
+          // is not stable between turns — an unsorted list rewrites the prompt.
+          servers: [...new Set(offered.map((entry) => entry.server))].sort(),
         },
-        skills,
+        skillsPrompt.section,
+        skillsPrompt.supersedes,
         live.builtinAllowOutsideCwd === true,
         live.builtinMarkdownImages === true,
-        [
-          live.builtinExtraInstructions ?? "",
-          THINKING_INSTRUCTIONS[this.thinking],
-        ]
-          .filter((part) => part.trim())
-          .join("\n\n"),
+        live.builtinExtraInstructions ?? "",
+        THINKING_INSTRUCTIONS[this.thinking],
       );
       this.lastSystem = system;
       // Built before the prompt for the same reason as the system prompt: the
@@ -1430,16 +1488,22 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // summariser has to send the very same ones or its request stops being a
       // prefix of this turn's (measured: without them 0% of the head comes from
       // the provider's cache, with them 98%).
+      // Tool pictures are collected out of band, per call: the tool result
+      // stays text (the wire takes nothing else there) and `runTurn` inserts
+      // each picture as a user message right after its own result.
+      const toolImages = new Map<string, ToolImagePart[]>();
       const tools = {
         ...createBuiltinTools({
           host: this.rpc,
-          mode: this.mode,
           sessionId: this.sessionId,
           ask,
           outsideCwd: live.builtinAllowOutsideCwd === true,
           subagents: subagents ?? undefined,
         }),
-        ...mcpToolSet(offered, { readOnlyOnly: false, ask }),
+        ...mcpToolSet(offered, {
+          ask,
+          onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
+        }),
       };
       this.lastTools = tools;
       const turn = async () =>
@@ -1464,6 +1528,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           // `afterStep`: the host's mid-turn messages join the next model call
           // instead of waiting for this turn to end.
           takeSteer: () => this.takeSteers(),
+          toolImages,
         });
       // The folded messages sit where the model read them — mid-step, not at
       // the tail — so the stored history stays a truthful transcript. A failed

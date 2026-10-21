@@ -39,6 +39,13 @@ export interface BuiltinStoredSession {
    * a smaller number than the session has already spent.
    */
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens: number };
+  /**
+   * The skills half of the system prompt as this chat's first turn fixed it: the
+   * inlined bodies of the active skills and the rules they stand in for. Stored
+   * so a transport built again mid-chat — a settings change, a restart — resumes
+   * on the same bytes instead of rewriting the head of every later request.
+   */
+  promptSkills?: { section: string; supersedes: string[] };
 }
 
 /** Session ids become file names, so never trust one blindly. */
@@ -74,6 +81,14 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       thinkingLimitRaw <= 1_000_000
         ? thinkingLimitRaw
         : undefined;
+    const skills = parsed.promptSkills;
+    const promptSkills =
+      skills &&
+      typeof skills.section === "string" &&
+      Array.isArray(skills.supersedes) &&
+      skills.supersedes.every((id) => typeof id === "string")
+        ? { section: skills.section, supersedes: skills.supersedes as string[] }
+        : undefined;
     const stored = parsed.usage;
     const count = (value: unknown) =>
       typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
@@ -104,6 +119,7 @@ export function loadBuiltinSession(stateDir: string, sessionId: string): Builtin
       ...(usageInput !== undefined && usageOutput !== undefined && usageCached !== undefined
         ? { usage: { inputTokens: usageInput, outputTokens: usageOutput, cachedInputTokens: usageCached } }
         : {}),
+      ...(promptSkills ? { promptSkills } : {}),
     };
   } catch {
     // Missing or corrupt file: start fresh instead of bricking the session.

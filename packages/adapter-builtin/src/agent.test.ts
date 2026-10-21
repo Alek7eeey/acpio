@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS, type AppSettings } from "@acpio/shared";
-import { createBuiltinTransport, fillReasoningEcho } from "./agent.js";
-import { estimateTokens, promptView } from "./loop.js";
+import { createBuiltinTransport, fillReasoningEcho, RULE_IDS, systemPrompt } from "./agent.js";
+import { estimateTokens, promptView, TOOL_IMAGES_NOTE } from "./loop.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
 
 const created: string[] = [];
@@ -119,6 +119,44 @@ function boot(
     closes: () => closes,
   };
 }
+
+describe("system prompt rules", () => {
+  const build = (superseded: string[], skillsSection = "") =>
+    systemPrompt(
+      "en",
+      "/work",
+      { servers: [] },
+      skillsSection,
+      new Set(superseded),
+      false,
+      false,
+      "",
+      "",
+    );
+
+  it("carries every rule when no active skill claims one", () => {
+    const prompt = build([]);
+    expect(prompt).toContain("Make the smallest change that fully solves the task.");
+    expect(prompt).toContain("When a check fails, fix the code, never the check — unless the check itself is wrong,");
+    expect(prompt).toContain("Read a file before changing it,");
+  });
+
+  it("drops the rule an active skill words itself and keeps the rest", () => {
+    const prompt = build(["smallest-change"]);
+    expect(prompt).not.toContain("Make the smallest change that fully solves the task.");
+    expect(prompt).toContain("Read a file before changing it,");
+    expect(prompt).toContain("When a check fails, fix the code, never the check — unless the check itself is wrong,");
+  });
+
+  it("is untouched by an id no rule carries", () => {
+    expect(build(["no-such-rule"])).toBe(build([]));
+  });
+
+  it("names rules a skill's `supersedes` may refer to", () => {
+    expect(RULE_IDS).toContain("smallest-change");
+    expect(new Set(RULE_IDS).size).toBe(RULE_IDS.length);
+  });
+});
 
 describe("BuiltinAgent ACP surface", () => {
   it("initialize reports the agent and session restore capability", async () => {
@@ -480,7 +518,7 @@ describe("builtin provider routing", () => {
     }
   });
 
-  it("offers Default/Low/Extra low per model and keeps the wire switch on /thinking", async () => {
+  it("offers High/Default/Low/Extra low per model and keeps the wire switch on /thinking", async () => {
     const stub = await startStub();
     const dir = tempDir();
     try {
@@ -501,7 +539,7 @@ describe("builtin provider routing", () => {
       const session = await call<SessionResult>("session/new", { cwd: "/w" });
       const thinking = session.configOptions.find((o) => o.id === "thinking");
       // The ⋯ menu shapes the prompt only — Off is not a mode any more.
-      expect(thinking?.options?.map((o) => o.value)).toEqual(["default", "low", "extra-low"]);
+      expect(thinking?.options?.map((o) => o.value)).toEqual(["high", "default", "low", "extra-low"]);
 
       // The wire switch is a chat command, and the slash menu announces it.
       const commands = frames
@@ -533,6 +571,17 @@ describe("builtin provider routing", () => {
         "capped at 3 sentences per step",
       );
       expect(String((extra?.messages as Array<Record<string, unknown>>)[0]?.content)).not.toContain(
+        "private reasoning budget is 150 words",
+      );
+      // High: the other direction — the design decision rides the same slot.
+      await call("session/set_config_option", { configId: "thinking", value: "high" });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      const high = stub.bodies.at(-1);
+      expect(high?.thinking).toBeUndefined();
+      expect(String((high?.messages as Array<Record<string, unknown>>)[0]?.content)).toContain(
+        "the case that will part a working change from a broken one",
+      );
+      expect(String((high?.messages as Array<Record<string, unknown>>)[0]?.content)).not.toContain(
         "private reasoning budget is 150 words",
       );
       // Back to default: the prompt is clean of budget rules again.
@@ -1739,6 +1788,93 @@ describe("builtin provider routing", () => {
     }
   });
 
+  it("echoes the reasoning of a thinking chat whose view lost it", async () => {
+    // The incident this guards: the first turn of a chat ran fine, its second
+    // one died — `400 … The reasoning_content in the thinking mode must be
+    // passed back to the API`. A relay checks every assistant message it
+    // produced, so an answer that thought nothing needs the empty echo as much
+    // as a bare tool step; and when the view's reasoning was pruned (a
+    // `builtinPruneReasoning` policy with the reasoning history left alone),
+    // only the stored transcript still says the chat is a thinking one.
+    let requests = 0;
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        requests += 1;
+        const messages = (JSON.parse(body) as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+        if (messages.some((message) => message.role === "assistant" && typeof message.reasoning_content !== "string")) {
+          res.statusCode = 400;
+          res.setHeader("content-type", "application/json");
+          res.end(
+            JSON.stringify({
+              error: {
+                type: "invalid_request_error",
+                message: "The `reasoning_content` in the thinking mode must be passed back to the API.",
+              },
+            }),
+          );
+          return;
+        }
+        res.setHeader("content-type", "text/event-stream");
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        if (requests === 1) {
+          res.write(chunk({ id: "c1", object: "chat.completion.chunk", created: 0, model: "stub", choices: [{ index: 0, delta: { role: "assistant", reasoning_content: "думаю" }, finish_reason: null }] }));
+          res.write(chunk({ id: "c1", object: "chat.completion.chunk", created: 0, model: "stub", choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "bash", arguments: '{"command":"echo hi"}' } }] }, finish_reason: null }] }));
+          res.write(chunk({ id: "c1", object: "chat.completion.chunk", created: 0, model: "stub", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }));
+        } else {
+          // The answer thinks nothing — the shape whose next request used to be
+          // rejected, and the one a pruned view leaves behind entirely.
+          res.write(chunk({ id: "c1", object: "chat.completion.chunk", created: 0, model: "stub", choices: [{ index: 0, delta: { role: "assistant", content: "готово" }, finish_reason: null }] }));
+          res.write(chunk({ id: "c1", object: "chat.completion.chunk", created: 0, model: "stub", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }));
+        }
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("stub did not bind a port");
+    const dir = tempDir();
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "Relay",
+              url: `http://127.0.0.1:${address.port}/v1`,
+              apiKey: "",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+          builtinPruneReasoning: "drop",
+          builtinRespectReasoningHistory: false,
+        },
+        dir,
+        (method) => {
+          if (method === "terminal/create") return { terminalId: "t1" };
+          if (method === "terminal/output") return { output: "hi\n" };
+          return {};
+        },
+      );
+      await call<{ sessionId: string }>("session/new", { cwd: dir });
+      const first = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "hi" }],
+      });
+      expect(first.stopReason).toBe("end_turn");
+      requests = 0;
+      const second = await call<{ stopReason: string }>("session/prompt", {
+        prompt: [{ type: "text", text: "ещё" }],
+      });
+      expect(second.stopReason).toBe("end_turn");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("asks the user through the harness and carries the answer into the turn", async () => {
     const asked: Array<{ method: string; params: Record<string, unknown> }> = [];
     let requests = 0;
@@ -1934,6 +2070,153 @@ describe("builtin provider routing", () => {
       ]);
     } finally {
       await stub.close();
+    }
+  });
+
+  it("hands a tool's render to the model as a picture, not a placeholder", async () => {
+    const PNG =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    // The MCP server: one read-only tool that answers with text plus a render.
+    const mcp = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        const msg = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { id: number; method: string };
+        const results: Record<string, unknown> = {
+          initialize: { protocolVersion: "2024-11-05", capabilities: {} },
+          "tools/list": {
+            tools: [
+              {
+                name: "get_screenshot",
+                description: "Render the model",
+                inputSchema: { type: "object", properties: {} },
+                annotations: { readOnlyHint: true },
+              },
+            ],
+          },
+          "tools/call": {
+            content: [
+              { type: "text", text: "rendered" },
+              { type: "image", data: PNG, mimeType: "image/png" },
+            ],
+          },
+        };
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: results[msg.method] }));
+      });
+    });
+    await new Promise<void>((resolve) => mcp.listen(0, "127.0.0.1", resolve));
+    const mcpPort = (mcp.address() as { port: number }).port;
+    // The provider: step one asks for the tool, step two answers.
+    const bodies: Array<Record<string, unknown>> = [];
+    const model = createServer((req, res) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        bodies.push(JSON.parse(body) as Record<string, unknown>);
+        const chunk = (payload: Record<string, unknown>) => `data: ${JSON.stringify(payload)}\n\n`;
+        res.setHeader("content-type", "text/event-stream");
+        if (bodies.length === 1) {
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    role: "assistant",
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: "call-1",
+                        type: "function",
+                        function: { name: "mcp__cad_get_screenshot", arguments: "{}" },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            }),
+          );
+          res.write(
+            chunk({
+              id: "c1",
+              object: "chat.completion.chunk",
+              created: 0,
+              model: "stub",
+              choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+            }),
+          );
+          res.write("data: [DONE]\n\n");
+          res.end();
+          return;
+        }
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [
+              { index: 0, delta: { role: "assistant", content: "вижу" }, finish_reason: null },
+            ],
+          }),
+        );
+        res.write(
+          chunk({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "stub",
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        );
+        res.write("data: [DONE]\n\n");
+        res.end();
+      });
+    });
+    await new Promise<void>((resolve) => model.listen(0, "127.0.0.1", resolve));
+    const modelPort = (model.address() as { port: number }).port;
+    try {
+      const { call } = boot({
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: `http://127.0.0.1:${modelPort}/v1`,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      });
+      await call("session/new", {
+        cwd: "/w",
+        mcpServers: [{ name: "cad", url: `http://127.0.0.1:${mcpPort}/mcp` }],
+      });
+      await call("session/prompt", { prompt: [{ type: "text", text: "посмотри рендер" }] });
+
+      const messages = (bodies[1]?.messages ?? []) as Array<Record<string, unknown>>;
+      const tool = messages.findIndex((m) => m.role === "tool");
+      // The tool result itself stays text — the wire takes nothing else there.
+      expect(messages[tool]?.content).toBe("rendered");
+      // The render follows it as the model's own message, as a real picture.
+      expect(messages[tool + 1]).toEqual({
+        role: "user",
+        content: [
+          { type: "text", text: TOOL_IMAGES_NOTE },
+          { type: "image_url", image_url: { url: `data:image/png;base64,${PNG}` } },
+        ],
+      });
+    } finally {
+      await new Promise<void>((resolve) => mcp.close(() => resolve()));
+      await new Promise<void>((resolve) => model.close(() => resolve()));
     }
   });
 });
@@ -2446,6 +2729,23 @@ describe("builtin session store", () => {
     expect(loadBuiltinSession(dir, "s-1")).toEqual(sample);
   });
 
+  it("keeps the skills half of the prompt a chat started with", () => {
+    const dir = tempDir();
+    const withSkills = {
+      ...sample,
+      promptSkills: { section: "\nSkills active by default:\n--- lazy ---\nbody", supersedes: ["smallest-change"] },
+    };
+    saveBuiltinSession(dir, "s-skills", withSkills);
+    expect(loadBuiltinSession(dir, "s-skills")).toEqual(withSkills);
+
+    // A half-written block reads as none: the transport then freezes a fresh one.
+    saveBuiltinSession(dir, "s-broken", {
+      ...sample,
+      promptSkills: { section: 1, supersedes: "smallest-change" } as never,
+    });
+    expect(loadBuiltinSession(dir, "s-broken")?.promptSkills).toBeUndefined();
+  });
+
   it("starts fresh on a corrupt file instead of throwing", () => {
     const dir = tempDir();
     saveBuiltinSession(dir, "s-1", sample);
@@ -2792,12 +3092,22 @@ describe("reasoning echo", () => {
     expect(fillReasoningEcho(messages)).toBe(messages);
   });
 
-  it("touches neither a plain answer nor a body that is not a message list", () => {
-    const quiet = { role: "assistant", content: "ок" };
+  it("echoes a plain answer too, and leaves a body that is not a message list", () => {
+    // The relay checks every assistant message it produced, not only the ones
+    // that acted: an answer that thought nothing still owes the field.
     const messages = [{ role: "user", content: "hi" }, acting("думаю"), { role: "assistant", content: "ок" }];
     const filled = fillReasoningEcho(messages) as Array<Record<string, unknown>>;
-    expect(filled[2]).toEqual(quiet);
-    expect(filled[2]).not.toHaveProperty("reasoning_content");
+    expect(filled[2]).toHaveProperty("reasoning_content");
+    expect(filled[2]?.reasoning_content).toBe("");
     expect(fillReasoningEcho(undefined)).toBeUndefined();
+  });
+
+  it("echoes a pruned view once the conversation is known to think", () => {
+    // A view whose reasoning was pruned carries none: the history says the chat
+    // thinks, so the echo cannot be decided by this body alone.
+    const messages = [{ role: "user", content: "hi" }, acting(), tool];
+    expect(fillReasoningEcho(messages)).toBe(messages);
+    const filled = fillReasoningEcho(messages, true) as Array<Record<string, unknown>>;
+    expect(filled[1]?.reasoning_content).toBe("");
   });
 });

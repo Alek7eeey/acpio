@@ -22,7 +22,16 @@ export { shellCommand } from "./tools.js";
  * `SKILL.md` on disk — the scan this agent runs at attach is the same one, so
  * the form asks for it here instead of inventing a second listing.
  */
-export { discoverSkills, type BuiltinSkill } from "./skills.js";
+export {
+  BUILTIN_SKILLS_DIR,
+  discoverAgentSkills,
+  discoverSettingsSkills,
+  discoverSkills,
+  enabledSkills,
+  renderSkillsSection,
+  skillMode,
+  type BuiltinSkill,
+} from "./skills.js";
 
 /**
  * Model resolution over the Settings → Built-in agent rows. The server needs it
@@ -82,11 +91,9 @@ export const builtinAdapter: HarnessAdapter = {
   // The loop is ours: `prepareStep` folds a mid-turn message into the next
   // model call, so this harness is the one that honours `afterStep`.
   midTurnSteering: true,
-  defaultModes: [
-    { value: "agent", name: "Agent" },
-    { value: "plan", name: "Plan" },
-    { value: "ask", name: "Ask" },
-  ],
+  // One mode: the agent always may edit and run commands. A list of one is what
+  // the composer needs to hide its mode chip (see `isSwitchableModeList`).
+  defaultModes: [{ value: "agent", name: "Agent" }],
   subagentToolKinds: [],
   extensionKinds: {},
 

@@ -9,6 +9,7 @@ import {
   normalizeBuiltinProviders,
   normalizeBuiltinSubagents,
   normalizeMcpProjectFiles,
+  normalizeSkillModes,
   normalizeSkillPaths,
   type AgentProvider,
   type AppSettings,
@@ -116,6 +117,14 @@ export function normalizeBoardAddCardStyle(value: unknown): AppSettings["boardAd
 /** The board's task agent picker is on unless it was explicitly switched off. */
 export function normalizeBoardTaskAgentPicker(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_SETTINGS.boardTaskAgentPicker;
+}
+
+export function normalizeBoardTaskModelPicker(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.boardTaskModelPicker;
+}
+
+export function normalizeBoardTaskEffortPicker(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.boardTaskEffortPicker;
 }
 
 export function normalizeChatGitBranchPosition(value: unknown): "below" | "above" {
@@ -439,6 +448,8 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.boardAddCardStyle = normalizeBoardAddCardStyle(partial.boardAddCardStyle);
   merged.boardTaskAgentPicker = normalizeBoardTaskAgentPicker(partial.boardTaskAgentPicker);
+  merged.boardTaskModelPicker = normalizeBoardTaskModelPicker(partial.boardTaskModelPicker);
+  merged.boardTaskEffortPicker = normalizeBoardTaskEffortPicker(partial.boardTaskEffortPicker);
   if (typeof partial.boardShowFirstMessage !== "boolean") {
     merged.boardShowFirstMessage = DEFAULT_SETTINGS.boardShowFirstMessage;
   }
@@ -453,6 +464,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
     ? partial.mcpBuiltinDisabledIds.filter((id): id is string => typeof id === "string")
     : [...DEFAULT_SETTINGS.mcpBuiltinDisabledIds];
   merged.builtinSkillPaths = normalizeSkillPaths(partial.builtinSkillPaths);
+  merged.builtinSkillModes = normalizeSkillModes(partial.builtinSkillModes);
   merged.builtinExtraInstructions = normalizeBuiltinExtraInstructions(
     partial.builtinExtraInstructions,
   );

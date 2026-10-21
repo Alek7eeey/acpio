@@ -14,6 +14,7 @@ import { setBackgroundJobDoneHandler } from "./services/backgroundJobs.js";
 import { resetBackgroundJobLogs } from "./services/bgLogs.js";
 import { registerRoutes } from "./routes.js";
 import { resolveServerPort } from "@acpio/shared";
+import { loadPlugins } from "./services/plugins.js";
 import { ensureSchema } from "./db/ensureSchema.js";
 import { DB_PATH } from "./db/client.js";
 import { acquireInstanceLock } from "./db/instanceLock.js";
@@ -59,6 +60,9 @@ async function main() {
     process.exit(1);
   }
   await ensureSchema();
+  // Plugins are read once, here: the registry never changes while the process
+  // lives, so a new plugin version applies after a restart (see docs/plugins-plan.md).
+  await loadPlugins();
   // A finished background job wakes its chat through the session manager, which
   // owns the turns it injects into — wired here so the job runner (imported by
   // that manager for the built-in MCP entry) does not import it back.

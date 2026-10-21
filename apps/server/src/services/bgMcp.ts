@@ -15,34 +15,19 @@ import {
   stopBackgroundJob,
 } from "./backgroundJobs.js";
 import { listSessionsByIds } from "./sessions.js";
+import {
+  handleServedMcpRequest,
+  type ServedMcpResponse,
+  type ServedMcpTool,
+  type ServedToolResult,
+} from "./servedMcp.js";
 
 /**
  * The MCP server acpio is for its own chats: `run` starts a shell command in
  * the background, `list` / `output` / `stop` manage the ones this chat started.
- *
- * It is spoken over HTTP (see `POST /mcp/bg` in routes.ts) because every
- * harness acpio drives already knows how to talk to an HTTP MCP server — the
- * built-in agent has its own client in `@acpio/adapter-builtin`, omp and cursor
- * take the same `session/new` entry — so one endpoint serves them all, and no
- * harness needs code of its own.
+ * The JSON-RPC plumbing it answers with lives in `servedMcp.ts`, shared with
+ * the endpoint plugins get.
  */
-
-const PROTOCOL_VERSION = "2024-11-05";
-const SERVER_VERSION = "0.1.0";
-
-type JsonRpcId = string | number | null;
-
-interface JsonRpcMessage {
-  jsonrpc?: string;
-  id?: JsonRpcId;
-  method?: string;
-  params?: Record<string, unknown>;
-}
-
-interface ToolResult {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-}
 
 interface ToolDef {
   name: BgMcpTool;
@@ -57,7 +42,7 @@ interface ToolDef {
 // when to reach for it, and the argument meanings that are not obvious from the
 // name. The tool names, the note a settled job delivers and every result name
 // the tools that read more, so the list itself does not have to.
-const TOOLS: ToolDef[] = [
+const TOOL_DEFS: ToolDef[] = [
   {
     name: "run",
     readOnly: false,
@@ -66,7 +51,12 @@ const TOOLS: ToolDef[] = [
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string", description: "Shell command line (bash, or cmd.exe on Windows)." },
+        command: {
+          type: "string",
+          description:
+            "Shell command line, run through the same shell as the `bash` tool (on Windows Git Bash: `./x` for a " +
+            "relative path, `//c` for a native CLI flag).",
+        },
         label: { type: "string", description: "Short name shown in the UI." },
         cwd: { type: "string", description: "Working folder, relative to the chat folder." },
       },
@@ -109,8 +99,8 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
-function textResult(text: string, isError = false): ToolResult {
-  return { content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) };
+function result(text: string, isError = false): ServedToolResult {
+  return { text, ...(isError ? { isError: true } : {}) };
 }
 
 function asString(value: unknown): string {
@@ -144,23 +134,17 @@ function ownedJob(jobId: string, sessionId: string): BackgroundJobDto | null {
 }
 
 async function callTool(
-  name: string,
+  name: BgMcpTool,
   args: Record<string, unknown>,
   sessionId: string,
-): Promise<ToolResult> {
-  const tool = TOOLS.find((t) => t.name === name);
-  if (!tool) {
-    const names = TOOLS.map((t) => t.name).join(", ");
-    return textResult(`Unknown tool "${name}". Available tools: ${names}.`, true);
-  }
-
+): Promise<ServedToolResult> {
   try {
-    switch (tool.name) {
+    switch (name) {
       case "run": {
         const command = asString(args.command).trim();
-        if (!command) return textResult("`command` is required.", true);
+        if (!command) return result("`command` is required.", true);
         const session = (await listSessionsByIds([sessionId]))[0];
-        if (!session) return textResult("This chat no longer exists.", true);
+        if (!session) return result("This chat no longer exists.", true);
         const cwdArg = asString(args.cwd).trim();
         const cwd = cwdArg ? path.resolve(session.cwd || process.cwd(), cwdArg) : session.cwd;
         const job = await startBackgroundJob({
@@ -169,7 +153,7 @@ async function callTool(
           script: command,
           label: asString(args.label),
         });
-        return textResult(
+        return result(
           [
             `Started background job ${job.id} (${job.label}) in ${job.cwd}.`,
             `Output goes to ${job.logPath} — read it with read (windows) or grep.`,
@@ -181,26 +165,26 @@ async function callTool(
       case "list": {
         const jobs = listBackgroundJobs().filter((job) => job.sessionId === sessionId);
         if (!jobs.length) {
-          return textResult(
+          return result(
             `This chat has no background jobs. Start one with ${bgMcpToolName("run")}({ command: "…" }).`,
           );
         }
-        return textResult(["Background jobs of this chat:", ...jobs.map(jobLine)].join("\n"));
+        return result(["Background jobs of this chat:", ...jobs.map(jobLine)].join("\n"));
       }
       case "output": {
         const jobId = asString(args.jobId).trim();
-        if (!jobId) return textResult("`jobId` is required.", true);
-        if (!ownedJob(jobId, sessionId)) return textResult(`Unknown job "${jobId}" in this chat.`, true);
+        if (!jobId) return result("`jobId` is required.", true);
+        if (!ownedJob(jobId, sessionId)) return result(`Unknown job "${jobId}" in this chat.`, true);
         const read = readBackgroundJobOutput(jobId, {
           tailLines: asInt(args.tailLines) ?? DEFAULT_OUTPUT_TAIL_LINES,
           since: asInt(args.since),
           maxChars: DEFAULT_OUTPUT_MAX_CHARS,
         });
-        if (!read) return textResult(`Unknown job "${jobId}" in this chat.`, true);
+        if (!read) return result(`Unknown job "${jobId}" in this chat.`, true);
         const { job, text, to, dropped } = read;
         const exit = job.exitCode == null ? "" : ` exit ${job.exitCode}`;
         const body = text.trim() ? text.replace(/\s+$/, "") : "(no output yet)";
-        return textResult(
+        return result(
           [
             `${job.id} [${job.status}${exit}] ${elapsedText(job)} — «${job.label}»`,
             `Log: ${job.logPath}`,
@@ -214,97 +198,32 @@ async function callTool(
       }
       case "stop": {
         const jobId = asString(args.jobId).trim();
-        if (!jobId) return textResult("`jobId` is required.", true);
+        if (!jobId) return result("`jobId` is required.", true);
         const job = ownedJob(jobId, sessionId);
-        if (!job) return textResult(`Unknown job "${jobId}" in this chat.`, true);
+        if (!job) return result(`Unknown job "${jobId}" in this chat.`, true);
         if (job.status !== "running") {
-          return textResult(`${job.id} is not running any more (${job.status}).`);
+          return result(`${job.id} is not running any more (${job.status}).`);
         }
         stopBackgroundJob(job.id, "agent");
-        return textResult(`${job.id} is stopping — its process tree is being killed.`);
+        return result(`${job.id} is stopping — its process tree is being killed.`);
       }
       default:
-        return textResult(`Tool "${name}" is not implemented.`, true);
+        return result(`Tool "${String(name)}" is not implemented.`, true);
     }
   } catch (err) {
-    return textResult(err instanceof Error ? err.message : String(err), true);
+    return result(err instanceof Error ? err.message : String(err), true);
   }
 }
 
-function ok(id: JsonRpcId, result: unknown) {
-  return { jsonrpc: "2.0", id: id ?? null, result };
-}
-
-function fail(id: JsonRpcId, code: number, message: string) {
-  return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
-}
-
-/** One JSON-RPC frame in, one answer (or none, for a notification) out. */
-async function handleMessage(message: JsonRpcMessage, sessionId: string): Promise<unknown | null> {
-  const method = typeof message.method === "string" ? message.method : "";
-  const id = message.id ?? null;
-  const isNotification = message.id === undefined;
-
-  if (method === "initialize") {
-    return ok(id, {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: BG_MCP_SERVER_NAME, version: SERVER_VERSION },
-    });
-  }
-  if (method === "ping") return isNotification ? null : ok(id, {});
-  if (method.startsWith("notifications/")) return null;
-  if (method === "tools/list") {
-    return ok(id, {
-      tools: TOOLS.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        inputSchema: tool.inputSchema,
-        // Only the read-only hint is sent: a client treats an absent one as
-        // "not read-only", and the built-in agent's plan mode reads exactly
-        // this field.
-        ...(tool.readOnly ? { annotations: { readOnlyHint: true } } : {}),
-      })),
-    });
-  }
-  if (method === "tools/call") {
-    const params = message.params ?? {};
-    const name = asString(params.name).trim();
-    const args =
-      params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
-        ? (params.arguments as Record<string, unknown>)
-        : {};
-    if (!name) return fail(id, -32602, "tools/call requires a tool name");
-    return ok(id, await callTool(name, args, sessionId));
-  }
-  if (!method) return fail(id, -32600, "Missing method");
-  return fail(id, -32601, `Unsupported method: ${method}`);
-}
-
-export interface BackgroundMcpResponse {
-  /** HTTP status the route answers with. */
-  status: number;
-  /** JSON body, or null for a notification (answered with an empty 202). */
-  body: unknown;
-}
+const TOOLS: Array<ServedMcpTool & { name: BgMcpTool }> = TOOL_DEFS.map((def) => ({
+  ...def,
+  call: (args, ctx) => callTool(def.name, args, ctx.sessionId),
+}));
 
 /** Serve one MCP request for the chat named in the endpoint's query. */
-export async function handleBackgroundMcpRequest(
+export function handleBackgroundMcpRequest(
   payload: unknown,
   sessionId: string,
-): Promise<BackgroundMcpResponse> {
-  if (Array.isArray(payload)) {
-    const answers: unknown[] = [];
-    for (const item of payload) {
-      if (!item || typeof item !== "object") continue;
-      const answer = await handleMessage(item as JsonRpcMessage, sessionId);
-      if (answer) answers.push(answer);
-    }
-    return answers.length ? { status: 200, body: answers } : { status: 202, body: null };
-  }
-  if (!payload || typeof payload !== "object") {
-    return { status: 200, body: fail(null, -32700, "Parse error: expected a JSON-RPC object") };
-  }
-  const answer = await handleMessage(payload as JsonRpcMessage, sessionId);
-  return answer ? { status: 200, body: answer } : { status: 202, body: null };
+): Promise<ServedMcpResponse> {
+  return handleServedMcpRequest(payload, { name: BG_MCP_SERVER_NAME, tools: TOOLS }, { sessionId });
 }

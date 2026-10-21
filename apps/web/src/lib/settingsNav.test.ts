@@ -13,7 +13,7 @@ import type { SettingsSection } from "./settingsNav";
 const t = (key: string) => key;
 
 describe("parseSettingsSearch", () => {
-  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp", "plugins"] as const)(
     "parses the agent leaf %j",
     (leaf) => {
       expect(parseSettingsSearch(`?section=agent&leaf=${leaf}`)).toEqual({
@@ -207,7 +207,7 @@ describe("settingsPath", () => {
     );
   });
 
-  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp"] as const)(
+  it.each(["connect", "model", "advanced", "remote", "diagnostics", "mcp", "plugins"] as const)(
     "round-trips the agent leaf %j",
     (leaf) => {
       const path = settingsPath("agent", leaf);
@@ -273,6 +273,7 @@ describe("getSettingsTree", () => {
       "model",
       "advanced",
       "mcp",
+      "plugins",
       "diagnostics",
       "remote",
     ]);
@@ -281,6 +282,7 @@ describe("getSettingsTree", () => {
       "settings.modelSection",
       "settings.advanced",
       "settings.mcpTitle",
+      "settings.pluginsTitle",
       "settings.diagnostics",
       "settings.remoteAccess",
     ]);

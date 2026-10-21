@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
+import { childProcessEnv } from "@acpio/shared";
 
 export type EnvMap = Record<string, string>;
 
@@ -67,7 +68,7 @@ export function mergeConsoleEnv(opts: {
   user?: EnvMap;
   platform?: NodeJS.Platform;
 }): EnvMap {
-  const processEnv = stringEnv(opts.processEnv);
+  const processEnv = stringEnv(childProcessEnv(opts.processEnv));
   const platform = opts.platform ?? process.platform;
   if (platform !== "win32") {
     return { ...processEnv, TERM: "xterm-256color", COLORTERM: "truecolor" };

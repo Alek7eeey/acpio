@@ -1,0 +1,16 @@
+{
+  "name": "@acpio/plugin-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@acpio/plugin-api": "*",
+    "typescript": "^5.8.2"
+  }
+}

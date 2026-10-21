@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi, type Mock } from "vitest";
-import type { AgentMode } from "@acpio/shared";
 import { createBuiltinTools, shellCommand, windowRead } from "./tools.js";
 
 /** Tool execution options the SDK passes; only abortSignal is used here. */
@@ -8,11 +7,11 @@ const CTX = { abortSignal: new AbortController().signal };
 
 type HostMock = { request: Mock };
 
-function setup(mode: AgentMode, host?: HostMock, ask?: Mock) {
+function setup(host?: HostMock, ask?: Mock) {
   const h: HostMock = host ?? { request: vi.fn(async () => ({})) };
   const a: Mock = ask ?? vi.fn(async () => undefined);
   return {
-    tools: createBuiltinTools({ host: h, mode, ask: a, sessionId: "S1" }),
+    tools: createBuiltinTools({ host: h, ask: a, sessionId: "S1" }),
     host: h,
     ask: a,
   };
@@ -22,16 +21,20 @@ const exec = (tools: Record<string, any>, name: string, input: unknown) =>
   tools[name].execute(input, CTX);
 
 describe("createBuiltinTools", () => {
-  it.each([
-    ["plan", ["read", "glob", "grep", "ask"]],
-    ["ask", ["read", "glob", "grep", "ask"]],
-    ["agent", ["read", "glob", "grep", "write", "edit", "bash", "ask"]],
-  ] as const)("mode %s exposes exactly %j", (mode, expected) => {
-    expect(Object.keys(setup(mode).tools)).toEqual([...expected]);
+  it("exposes exactly the editing tools", () => {
+    expect(Object.keys(setup().tools)).toEqual([
+      "read",
+      "glob",
+      "grep",
+      "write",
+      "edit",
+      "bash",
+      "ask",
+    ]);
   });
 
   it("read passes the window through to the host", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "line" });
     await expect(exec(tools, "read", { path: "f.txt", line: 2, limit: 3 })).resolves.toBe("line");
     expect(host.request).toHaveBeenCalledWith("fs/read_text_file", {
@@ -42,14 +45,14 @@ describe("createBuiltinTools", () => {
   });
 
   it("read without a window asks for the whole file", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "all of it" });
     await expect(exec(tools, "read", { path: "f.txt" })).resolves.toBe("all of it");
     expect(host.request).toHaveBeenCalledWith("fs/read_text_file", { path: "f.txt" });
   });
 
   it("write asks permission before the file is touched", async () => {
-    const { tools, host, ask } = setup("agent");
+    const { tools, host, ask } = setup();
     await exec(tools, "write", { path: "f.txt", content: "new" });
     expect(ask).toHaveBeenCalledWith({
       title: "write f.txt",
@@ -67,7 +70,7 @@ describe("createBuiltinTools", () => {
     const ask: Mock = vi.fn(async () => {
       throw new Error("Операция отклонена: write f.txt");
     });
-    const { tools, host } = setup("agent", undefined, ask);
+    const { tools, host } = setup(undefined, ask);
     await expect(exec(tools, "write", { path: "f.txt", content: "new" })).rejects.toThrow(
       /отклонена/,
     );
@@ -75,7 +78,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("glob lists what the host matched, with each file's size", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({
       files: [
         { path: "a.ts", bytes: 2048 },
@@ -90,18 +93,18 @@ describe("createBuiltinTools", () => {
   });
 
   it("glob survives a host that reports no size at all", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ files: [{ path: "a.ts" }], truncated: false });
     await expect(exec(tools, "glob", { pattern: "**/*.ts" })).resolves.toBe("       ?  a.ts");
   });
 
   it("glob says so when nothing matched", async () => {
-    const { tools } = setup("agent");
+    const { tools } = setup();
     await expect(exec(tools, "glob", { pattern: "*.rs" })).resolves.toContain("No files match");
   });
 
   it("grep heads each file once and lists its hits underneath", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({
       hits: [
         { path: "a.ts", line: 3, text: "calcTotal()" },
@@ -125,7 +128,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("grep marks a truncated result", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({
       hits: [{ path: "a.ts", line: 1, text: "x" }],
       files: [{ path: "a.ts", bytes: 512, lines: 8 }],
@@ -135,7 +138,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("edit applies every entry against the original text", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockImplementation(async (method: string) =>
       method === "fs/read_text_file" ? { content: "one two three" } : {},
     );
@@ -155,7 +158,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("edit replace_all rewrites every occurrence", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockImplementation(async (method: string) =>
       method === "fs/read_text_file" ? { content: "x x" } : {},
     );
@@ -169,7 +172,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("edit refuses an ambiguous match instead of guessing", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "x x" });
     await expect(
       exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "x", new_string: "y" }] }),
@@ -178,7 +181,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("edit refuses when the anchor is gone", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "abc" });
     await expect(
       exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "zz", new_string: "y" }] }),
@@ -187,7 +190,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("edit refuses overlapping entries before writing", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "abcdef" });
     await expect(
       exec(tools, "edit", {
@@ -202,7 +205,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("bash runs the command through the host terminal", async () => {
-    const { tools, host, ask } = setup("agent");
+    const { tools, host, ask } = setup();
     host.request.mockImplementation(async (method: string) => {
       if (method === "terminal/create") return { terminalId: "T1" };
       if (method === "terminal/wait_for_exit") return { exitCode: 0, signal: null };
@@ -225,13 +228,13 @@ describe("createBuiltinTools", () => {
     const ask: Mock = vi.fn(async () => {
       throw new Error("Операция отклонена: bash");
     });
-    const { tools, host } = setup("agent", undefined, ask);
+    const { tools, host } = setup(undefined, ask);
     await expect(exec(tools, "bash", { command: "echo hi" })).rejects.toThrow(/отклонена/);
     expect(host.request).not.toHaveBeenCalled();
   });
 
   it("ask shows the question card the CLI agents use", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "accept", content: { target: "src/api" } });
     await exec(tools, "ask", { questions: [{ id: "target", question: "Where to put it?" }] });
     expect(host.request).toHaveBeenCalledWith("elicitation/create", {
@@ -247,7 +250,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("ask maps options, multi-select and the Other field into the form", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "accept", content: {} });
     await exec(tools, "ask", {
       questions: [
@@ -294,7 +297,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("ask drops the Other field only when the model opts out", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "accept", content: {} });
     await exec(tools, "ask", {
       questions: [
@@ -318,7 +321,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("ask hands the model one line per answer, without repeating the question", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({
       action: "accept",
       content: {
@@ -339,7 +342,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("ask marks a question the user left empty", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "accept", content: { target: "" } });
     await expect(
       exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
@@ -347,7 +350,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("a declined question continues the turn instead of failing it", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "decline" });
     await expect(
       exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
@@ -355,7 +358,7 @@ describe("createBuiltinTools", () => {
   });
 
   it("a skipped question continues the turn instead of failing it", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "cancel" });
     await expect(
       exec(tools, "ask", { questions: [{ id: "target", question: "Where?" }] }),
@@ -372,14 +375,14 @@ describe("createBuiltinTools", () => {
     [{ questions: [{ id: "t", question: "Where?", options: "src/api" }] }, /`options` must be an array/],
     [{ questions: [{ id: "t", question: "Where?", options: [{ label: "src/api" }] }] }, /needs an `id`/],
   ])("ask answers a malformed call with a sentence: %j", async (input, expected) => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     await expect(exec(tools, "ask", input)).rejects.toThrow(expected);
     // Nothing reached the user: a broken call must not open a card.
     expect(host.request).not.toHaveBeenCalled();
   });
 
   it("ask reads a bare option as its own label and an empty list as free text", async () => {
-    const { tools, host } = setup("agent");
+    const { tools, host } = setup();
     host.request.mockResolvedValue({ action: "accept", content: {} });
     await exec(tools, "ask", {
       questions: [
@@ -472,16 +475,9 @@ describe("createBuiltinTools with subagents", () => {
     slots: { acquire: async () => () => {} },
   } as unknown as Parameters<typeof createBuiltinTools>[0]["subagents"];
 
-  it("adds the `task` tool only when the bridge is present, in both modes", () => {
-    expect(Object.keys(createBuiltinTools({ host, mode: "agent", ask }))).not.toContain("task");
-    expect(Object.keys(createBuiltinTools({ host, mode: "plan", ask, subagents: bridge }))).toEqual([
-      "read",
-      "glob",
-      "grep",
-      "ask",
-      "task",
-    ]);
-    expect(Object.keys(createBuiltinTools({ host, mode: "agent", ask, subagents: bridge }))).toEqual([
+  it("adds the `task` tool only when the bridge is present", () => {
+    expect(Object.keys(createBuiltinTools({ host, ask }))).not.toContain("task");
+    expect(Object.keys(createBuiltinTools({ host, ask, subagents: bridge }))).toEqual([
       "read",
       "glob",
       "grep",

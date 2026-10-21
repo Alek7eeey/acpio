@@ -1,8 +1,13 @@
 import { eq } from "drizzle-orm";
 import {
   AppSettings,
+  BuiltinProviderConfig,
   DEFAULT_SETTINGS,
   McpServerConfig,
+  PluginEntryConfig,
+  PluginProviderOverride,
+  PluginSkillFolder,
+  normalizeBuiltinModelRows,
   SETTINGS_SCHEMA_VERSION,
   mergeChatChipOptions,
   normalizeBuiltinMaxOutputTokens,
@@ -20,6 +25,7 @@ import {
   normalizeCustomAgents,
   canonicalCwd,
   normalizeMcpProjectFiles,
+  normalizeSkillModes,
   normalizeSkillPaths,
   readSettingsSchema,
 } from "@acpio/shared";
@@ -188,6 +194,12 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   if (typeof merged.boardTaskAgentPicker !== "boolean") {
     merged.boardTaskAgentPicker = DEFAULT_SETTINGS.boardTaskAgentPicker;
+  }
+  if (typeof merged.boardTaskModelPicker !== "boolean") {
+    merged.boardTaskModelPicker = DEFAULT_SETTINGS.boardTaskModelPicker;
+  }
+  if (typeof merged.boardTaskEffortPicker !== "boolean") {
+    merged.boardTaskEffortPicker = DEFAULT_SETTINGS.boardTaskEffortPicker;
   }
   for (const key of ["fontFamily", "fontSize", "lightScheme", "darkScheme"] as const) {
     if (typeof merged[key] !== "string") {
@@ -397,8 +409,19 @@ function mergeSettings(raw: unknown): AppSettings {
   }
   // Folder MCP files: relative paths inside the chat's own cwd only.
   merged.mcpProjectFiles = normalizeMcpProjectFiles(merged.mcpProjectFiles);
+  // Plugin config source: a URL or a local path; empty means the app's own
+  // plugins folder, which the loader resolves. Applied at the next server start.
+  merged.pluginsConfig =
+    typeof merged.pluginsConfig === "string" ? merged.pluginsConfig.trim().slice(0, 2_000) : "";
+  merged.pluginProviders = healPluginProviders(merged.pluginProviders);
+  merged.pluginEntries = healPluginEntries(merged.pluginEntries);
   // Built-in skill folders: relative to the chat cwd, absolute = global.
   merged.builtinSkillPaths = normalizeSkillPaths(merged.builtinSkillPaths);
+  // Per-skill modes: what the agent announces and what it follows from turn 1.
+  merged.builtinSkillModes = normalizeSkillModes(merged.builtinSkillModes);
+  // Skill folders plugins ship come from the loader on read, never from the
+  // database — a stored copy would freeze a plugin's own folder.
+  merged.pluginSkills = [];
   // User's own instructions appended to the built-in agent's system prompt.
   merged.builtinExtraInstructions = normalizeBuiltinExtraInstructions(
     merged.builtinExtraInstructions,
@@ -445,7 +468,88 @@ async function persistSettings(next: AppSettings): Promise<void> {
   syncDeepLoggingFromSettings(next);
 }
 
+/**
+ * Providers plugins contribute, registered at boot by the loader. The loader
+ * imports this module, so the dependency goes one way: settings never import it.
+ */
+let pluginProviderSource: ((settings: AppSettings) => BuiltinProviderConfig[]) | null = null;
+
+/** What the plugin loader calls once it has loaded its bundles. */
+export function setPluginProviderSource(
+  source: (settings: AppSettings) => BuiltinProviderConfig[],
+): void {
+  pluginProviderSource = source;
+}
+
+/** Skill folders plugins ship, registered at boot the same way as providers. */
+let pluginSkillSource: (() => PluginSkillFolder[]) | null = null;
+
+/** What the plugin loader calls with the folders its `skillPath` contributions name. */
+export function setPluginSkillSource(source: () => PluginSkillFolder[]): void {
+  pluginSkillSource = source;
+}
+
+/**
+ * Plugins added by hand. A row that still lacks its id or its path is kept —
+ * the loader is the one that reports it, and dropping it here would make a
+ * half-typed row vanish under the user's cursor on the next save.
+ */
+function healPluginEntries(raw: unknown): PluginEntryConfig[] {
+  const out: PluginEntryConfig[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const value of raw.slice(0, 200)) {
+    if (!value || typeof value !== "object") continue;
+    const row = value as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim().toLowerCase().slice(0, 64) : "";
+    const server = typeof row.server === "string" ? row.server.trim().slice(0, 2_000) : "";
+    if (!id && !server) continue;
+    out.push({
+      id,
+      server,
+      ...(typeof row.version === "string" && row.version.trim()
+        ? { version: row.version.trim().slice(0, 64) }
+        : {}),
+      ...(row.enabled === false ? { enabled: false as const } : {}),
+      ...(row.config && typeof row.config === "object" && !Array.isArray(row.config)
+        ? { config: row.config as Record<string, unknown> }
+        : {}),
+    });
+  }
+  return out;
+}
+
+/** Rows the user can edit about a provider a plugin ships, keyed `<plugin>:<id>`. */
+function healPluginProviders(raw: unknown): Record<string, PluginProviderOverride> {
+  const out: Record<string, PluginProviderOverride> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = key.trim().slice(0, 128);
+    if (!id || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    const row = value as Record<string, unknown>;
+    const models = normalizeBuiltinModelRows(row.models);
+    out[id] = {
+      ...(typeof row.apiKey === "string" ? { apiKey: row.apiKey.trim().slice(0, 500) } : {}),
+      ...(typeof row.enabled === "boolean" ? { enabled: row.enabled } : {}),
+      ...(typeof row.urlOverride === "string"
+        ? { urlOverride: row.urlOverride.trim().slice(0, 500) }
+        : {}),
+      ...(models.length ? { models } : {}),
+    };
+  }
+  return out;
+}
+
+/** Settings as the app reads them: the stored row plus what the plugins add. */
 export async function getSettings(): Promise<AppSettings> {
+  return withPluginSkills(withPluginProviders(await readStoredSettings()));
+}
+
+/**
+ * The stored settings alone. Write paths must use this: a settings object that
+ * went through `getSettings` carries plugin rows, and persisting it would store
+ * a stale copy of a plugin's own endpoint and models.
+ */
+async function readStoredSettings(): Promise<AppSettings> {
   const rows = await db.select().from(settings).where(eq(settings.key, SETTINGS_KEY)).limit(1);
   if (!rows[0]) {
     const seeded = mergeSettings({
@@ -483,11 +587,31 @@ export async function forgetMcpFolderConfig(cwd: string): Promise<void> {
   await updateSettings({ mcpFolderConfigs: next });
 }
 
+/** Providers a plugin contributes, ready for every reader of the settings. */
+function withPluginProviders(settings: AppSettings): AppSettings {
+  // The source reads the stored half (its own rows are `pluginProviders`), so it
+  // is handed these settings rather than asked to read them again.
+  const contributed = pluginProviderSource?.(settings) ?? [];
+  if (!contributed.length) return settings;
+  return { ...settings, builtinProviders: [...settings.builtinProviders, ...contributed] };
+}
+
+/** Skill folders a plugin ships, ready for every reader of the settings. */
+function withPluginSkills(settings: AppSettings): AppSettings {
+  const contributed = pluginSkillSource?.() ?? [];
+  return contributed.length ? { ...settings, pluginSkills: [...contributed] } : settings;
+}
+
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-  const current = await getSettings();
+  const current = await readStoredSettings();
   const next = mergeSettings({
     ...current,
     ...patch,
+    // A form submit carries the whole provider list, plugin rows included —
+    // those are merged in on read and must never reach the database.
+    builtinProviders: (patch.builtinProviders ?? current.builtinProviders).filter(
+      (p) => !p.pluginId,
+    ),
     // A patch may carry a single chip (the form saves one row at a time) —
     // deep-merge so the other chips keep their options.
     chatChipOptions: patch.chatChipOptions

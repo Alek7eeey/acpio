@@ -39,16 +39,6 @@ export async function fetchBuiltinModelCatalog(
   const base = rawUrl.trim().replace(/\/+$/, "");
   if (!base) return { ok: false, code: "noEndpoint" };
 
-  let url: URL;
-  try {
-    url = new URL(/\/models$/.test(base) ? base : `${base}/models`);
-  } catch {
-    return { ok: false, code: "badUrl", detail: base };
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    return { ok: false, code: "badUrl", detail: base };
-  }
-
   const headers: Record<string, string> = { Accept: "application/json" };
   const key = apiKey.trim();
   if (key) headers.Authorization = `Bearer ${key}`;
@@ -56,20 +46,48 @@ export async function fetchBuiltinModelCatalog(
   // sent half-resolved.
   Object.assign(headers, builtinProviderHeaders(opts.headers));
 
-  let res: Response;
-  try {
-    res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  } catch (err) {
-    return { ok: false, code: "unreachable", detail: err instanceof Error ? err.message : String(err) };
-  }
-  if (!res.ok) return { ok: false, code: "httpStatus", detail: String(res.status) };
-
   let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    return { ok: false, code: "notJson" };
+  let lastFailure: BuiltinCatalogResult & { ok: false } = { ok: false, code: "badUrl", detail: base };
+  for (const candidate of catalogUrls(base)) {
+    let url: URL;
+    try {
+      url = new URL(candidate);
+    } catch {
+      return { ok: false, code: "badUrl", detail: base };
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { ok: false, code: "badUrl", detail: base };
+    }
+
+    let res: Response;
+    try {
+      res = await fetch(url, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    } catch (err) {
+      return {
+        ok: false,
+        code: "unreachable",
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+    if (res.ok) {
+      try {
+        body = await res.json();
+      } catch {
+        return { ok: false, code: "notJson" };
+      }
+      break;
+    }
+    const failure: BuiltinCatalogResult & { ok: false } = {
+      ok: false,
+      code: "httpStatus",
+      detail: String(res.status),
+    };
+    // Only a missing route is worth another candidate; an auth or server error
+    // would fail the same way on the sibling URL.
+    if (res.status !== 404) return failure;
+    lastFailure = failure;
   }
+  if (body === undefined) return lastFailure;
 
   const rows = modelRows(body);
   if (!rows) return { ok: false, code: "notList" };
@@ -105,6 +123,27 @@ export async function fetchBuiltinModelCatalog(
     }
   }
   return { ok: true, models };
+}
+
+/**
+ * Where to look for the model list of a typed endpoint: its own `/models`,
+ * then — when the endpoint nests a vendor segment under `/v1` — the `/v1`
+ * sibling's list. opencode.ai/inference/go/openai/v1 serves chat but lists
+ * models at /inference/go/v1/models.
+ */
+function catalogUrls(base: string): string[] {
+  if (/\/models$/.test(base)) return [base];
+  const urls = [`${base}/models`];
+  const nested = /^(.+\/)[^/]+\/v1$/.exec(base);
+  // Skip the origin itself: api.openai.com/v1 has no sibling list.
+  if (nested) {
+    try {
+      if (nested[1].length > new URL(base).origin.length) urls.push(`${nested[1]}v1/models`);
+    } catch {
+      // Not a URL at all — the caller reports badUrl.
+    }
+  }
+  return urls;
 }
 
 /** The row array of an OpenAI (`data`), plain-array or `models` payload. */

@@ -1,7 +1,8 @@
 import https from "node:https";
 import { spawn } from "node:child_process";
 import type { McpServerConfig } from "@acpio/shared";
-import { isMcpServerAttached, mcpHttpHeaders, mcpStdioEnv } from "@acpio/shared";
+import { childProcessEnv, isMcpServerAttached, mcpHttpHeaders, mcpStdioEnv } from "@acpio/shared";
+import { pluginMcpServers } from "./plugins.js";
 import { getSettings } from "./settings.js";
 
 const OK_TTL_MS = 30_000;
@@ -15,7 +16,9 @@ const cache = new Map<string, { ok: boolean; at: number }>();
 let inflight: Promise<Map<string, boolean>> | null = null;
 
 function enabledServers(settings: Awaited<ReturnType<typeof getSettings>>) {
-  return (settings.mcpServers ?? []).filter(isMcpServerAttached);
+  // Plugin servers are ordinary configs with a url on this same port, so the
+  // same probe answers for them.
+  return [...(settings.mcpServers ?? []), ...pluginMcpServers(settings)].filter(isMcpServerAttached);
 }
 
 function looksLikeInitializeResult(text: string): boolean {
@@ -102,7 +105,7 @@ export function probeStdio(s: McpServerConfig): Promise<boolean> {
 
     const child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...extraEnv },
+      env: { ...childProcessEnv(), ...extraEnv },
       windowsHide: true,
       shell: winLooseCmd,
     });

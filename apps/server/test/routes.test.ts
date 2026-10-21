@@ -4,8 +4,23 @@
 // and agent status routes with real inject calls. resetDb() wipes all tables
 // between tests; every app instance is closed in afterEach.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
+
+// `POST /api/fs/open` runs `start "" explorer "<path>"` for real. On a Windows
+// dev machine that pops a folder window during the run, and because afterEach
+// deletes the temp dir first, Explorer falls back to the user's Documents.
+// Only the spawn is stubbed: openPath's own stat/validation stays under test.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    exec: vi.fn((_command: string, callback?: (error: Error | null) => void) => {
+      callback?.(null);
+      return {} as never;
+    }),
+  };
+});
 import http from "node:http";
 import path from "node:path";
 import os from "node:os";
@@ -1055,6 +1070,18 @@ describe("fs", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true, opened: base, kind: "directory" });
+  });
+
+  it("opens through the OS but never spawns a shell process in tests", async () => {
+    const base = await newTempDir("acp-open-spawn-");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/fs/open",
+      payload: { path: base },
+    });
+    expect(res.statusCode).toBe(200);
+    const { exec } = await import("node:child_process");
+    expect(vi.mocked(exec)).toHaveBeenCalled();
   });
 
   it("POST /api/fs/open with a missing path → 400", async () => {
@@ -2306,6 +2333,41 @@ describe("built-in agent probe", () => {
 });
 
 describe("built-in model catalog", () => {
+  /** Save one provider whose model list is exactly `ids`. */
+  const saveProvider = (ids: string[]) =>
+    app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: "http://127.0.0.1:1/v1",
+            apiKey: "",
+            models: ids.map((id) => ({ id, label: id, enabled: true })),
+          },
+        ],
+      },
+    });
+  const offeredModels = async () => {
+    const res = await app.inject({ method: "GET", url: "/api/agent/models?provider=builtin" });
+    return (res.json().models as Array<{ value: string }>).map((m) => m.value);
+  };
+
+  it("offers a model added to the provider's list, and drops one removed from it", async () => {
+    await saveProvider(["m1"]);
+    expect(await offeredModels()).toEqual(["p1::m1"]);
+
+    // The pickers read this catalog from a per-provider cache: an edit in
+    // Settings has to land in it at once, not after that cache expires.
+    await saveProvider(["m1", "m2"]);
+    expect(await offeredModels()).toEqual(["p1::m1", "p1::m2"]);
+
+    await saveProvider(["m2"]);
+    expect(await offeredModels()).toEqual(["p1::m2"]);
+  });
+
   it("fetches /models from the form's URL and explains a missing endpoint", async () => {
     const missing = await app.inject({
       method: "POST",

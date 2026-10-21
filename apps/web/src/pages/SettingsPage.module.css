@@ -162,6 +162,15 @@
   align-items: center;
 }
 
+/* The picker's block variant is width: 100%, which inside a row would take the
+   whole flex line and squeeze the skill name into a sliver. Two classes so this
+   beats .block no matter which stylesheet lands last. */
+.allowlistRow .skillModePicker {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 60%;
+}
+
 .allowlistInput {
   flex: 1;
   min-width: 0;

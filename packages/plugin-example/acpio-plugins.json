@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "plugins": [
+    {
+      "id": "example",
+      "version": "0.1.0",
+      "server": "./dist/server.js",
+      "config": {
+        "mcp": {
+          "demo": {
+            "greeting": "Привет"
+          }
+        }
+      }
+    }
+  ]
+}

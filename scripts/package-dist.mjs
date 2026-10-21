@@ -61,7 +61,7 @@ copyDir(
   path.join(pkgDir, "apps", "server", "dist"),
 );
 copyDir(path.join(repoRoot, "apps", "web", "dist"), path.join(pkgDir, "apps", "web", "dist"));
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor"]) {
+for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
   copyPackage(name);
 }
 
@@ -74,7 +74,7 @@ for (const [name, ver] of Object.entries(serverPkg.dependencies)) {
   if (name.startsWith("@acpio/")) continue;
   dependencies[name] = ver;
 }
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor"]) {
+for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
   dependencies[`@acpio/${name}`] = `file:packages/${name}`;
 }
 fs.writeFileSync(
@@ -101,7 +101,7 @@ execSync("npm install --omit=dev --no-audit --no-fund --loglevel=error", {
 });
 // npm installs `file:` workspace deps as symlinks — zip/expand would turn
 // them into empty dirs. Materialize them as real copies.
-for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor"]) {
+for (const name of ["shared", "i18n", "adapter-omp", "adapter-cursor", "plugin-ponytail"]) {
   const target = path.join(pkgDir, "node_modules", "@acpio", name);
   fs.rmSync(target, { recursive: true, force: true });
   fs.cpSync(path.join(pkgDir, "packages", name), target, { recursive: true });

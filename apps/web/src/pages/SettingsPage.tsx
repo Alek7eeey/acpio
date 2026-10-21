@@ -27,10 +27,15 @@ import {
   type ChatTreeElementId,
   type ChatTreeMenuId,
   type CustomAgentSpec,
+  type BuiltinSkillDto,
   type DiagnosticsDumpMeta,
+  type SkillMode,
   type McpServerConfig,
   type ModelOption,
   type ModelParamDto,
+  type PluginProviderOverride,
+  type PluginEntryConfig,
+  type PluginsStateDto,
   DEFAULT_MCP_PROJECT_FILES,
   DEFAULT_BUILTIN_SKILL_PATHS,
   DEFAULT_BUILTIN_SUBAGENTS,
@@ -91,6 +96,18 @@ import { truncateSessionTitle } from "../lib/sessionTitle";
 import { mcpEnvConfigDraft, mcpRemoteConfigDraft, mcpTypeMessageKey, normalizeMcpDraft } from "../lib/mcpUi";
 import { McpServerForm } from "../components/McpServerForm";
 import styles from "./SettingsPage.module.css";
+
+/** A JSON object from a form field, or null while the text is not one (yet). */
+function parseJsonObjectText(text: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Settings fields that hold an API key (adapter-declared + shared LLM keys). */
 type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
@@ -1578,8 +1595,14 @@ export function SettingsPage() {
   // just created and pin the caret, so typing continues against the draft and
   // the canonical join returns once the field loses focus.
   const [skillPathsDraft, setSkillPathsDraft] = useState<string | null>(null);
+  /** Skills the app ships, with the mode they currently run in. */
+  const [builtinSkills, setBuiltinSkills] = useState<BuiltinSkillDto[]>([]);
   const [mcpFilesDraft, setMcpFilesDraft] = useState<string | null>(null);
   const [mcpStatus, setMcpStatus] = useState<Record<string, boolean>>({});
+  /** Boot snapshot of the plugin host: the config source and what it loaded. */
+  const [pluginsState, setPluginsState] = useState<PluginsStateDto | null>(null);
+  /** Config JSON of a hand-added plugin, as typed — kept until it parses. */
+  const [pluginConfigTexts, setPluginConfigTexts] = useState<Record<number, string>>({});
   const [ttsHasNatural, setTtsHasNatural] = useState(false);
   const [ttsTestEngine, setTtsTestEngine] = useState<"idle" | "browser">("idle");
   const [modelsByProvider, setModelsByProvider] = useState<
@@ -1638,6 +1661,23 @@ export function SettingsPage() {
       return sessions[0]?.id ?? "";
     });
   }, [leaf, sessions, activeSessionId]);
+
+  // The shipped skills (the app's own and the ones plugins ship) are the same
+  // list every chat gets, so one call without a folder is enough — and it is the
+  // only way to name them: they are not in the settings file, they are in the
+  // build.
+  useEffect(() => {
+    let live = true;
+    void api
+      .listSkills()
+      .then((found) => {
+        if (live) setBuiltinSkills(found.filter((skill) => skill.builtin));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const refreshDiagnostics = async () => {
     setDiagLoading(true);
@@ -1772,6 +1812,36 @@ export function SettingsPage() {
   };
 
   const mcpServers = form.mcpServers ?? [];
+  // Providers plugins ship: read-only endpoint and models, a key of the user's.
+  const builtinPluginProviders = (form.builtinProviders ?? []).filter((p) => p.pluginId);
+  const setPluginProvider = (fullId: string, row: PluginProviderOverride) => {
+    patch("pluginProviders", {
+      ...(form.pluginProviders ?? {}),
+      [fullId]: { ...(form.pluginProviders?.[fullId] ?? {}), ...row },
+    });
+  };
+  const resetPluginProvider = (fullId: string) => {
+    const { [fullId]: _dropped, ...rest } = form.pluginProviders ?? {};
+    patch("pluginProviders", rest);
+  };
+  // Plugins added by hand. Their config is JSON text in the field and an object
+  // in the settings, so the text lives here until it parses.
+  const pluginEntries = form.pluginEntries ?? [];
+  const updatePluginEntry = (index: number, row: Partial<PluginEntryConfig>) =>
+    patch(
+      "pluginEntries",
+      pluginEntries.map((entry, i) => (i === index ? { ...entry, ...row } : entry)),
+    );
+  const removePluginEntry = (index: number) => {
+    setPluginConfigTexts((texts) => {
+      const { [index]: _dropped, ...rest } = texts;
+      return rest;
+    });
+    patch(
+      "pluginEntries",
+      pluginEntries.filter((_, i) => i !== index),
+    );
+  };
 
   // Live probe status for enabled MCP servers. Polled while the MCP section
   // is open: the server probes endpoints asynchronously and settings only
@@ -2128,6 +2198,33 @@ export function SettingsPage() {
     };
   }, [section, leaf, onlineHarnessKey]);
 
+  // Plugin state is a boot snapshot: read it when the section opens. An edited
+  // source is reported by the state itself (pendingRestart) — never applied here.
+  useEffect(() => {
+    // The MCP list shows the plugin servers too (they ride the same switch),
+    // so both leaves read the same boot snapshot.
+    if (leaf !== "plugins" && leaf !== "mcp") return;
+    let alive = true;
+    api
+      .pluginsState()
+      .then((s) => {
+        if (alive) setPluginsState(s);
+      })
+      .catch(() => {
+        if (alive) setPluginsState(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [leaf]);
+
+  const reloadPluginsState = () => {
+    api
+      .pluginsState()
+      .then(setPluginsState)
+      .catch(() => setPluginsState(null));
+  };
+
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
     // Never send defaultProvider, theme, or locale from the form submit — the
@@ -2181,7 +2278,9 @@ export function SettingsPage() {
                   ? t("settings.diagnosticsTitle")
                   : leaf === "mcp"
                     ? t("settings.mcpTitle")
-                    : t("settings.agentAdvancedTitle")
+                    : leaf === "plugins"
+                      ? t("settings.pluginsTitle")
+                      : t("settings.agentAdvancedTitle")
           : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -2199,13 +2298,15 @@ export function SettingsPage() {
         ? t("settings.builtinHint")
         : section === "agent" && leaf === "mcp"
           ? t("settings.mcpHint")
-          : section === "agent" && leaf === "advanced"
-            ? t("settings.agentAdvancedDesc")
-            : section === "agent" && leaf === "remote"
-              ? t("settings.remoteAccessDesc")
-              : section === "agent" && leaf === "diagnostics"
-                ? t("settings.diagnosticsDesc")
-                : t("settings.agentConnectDesc");
+          : section === "agent" && leaf === "plugins"
+            ? t("settings.pluginsHint")
+            : section === "agent" && leaf === "advanced"
+              ? t("settings.agentAdvancedDesc")
+              : section === "agent" && leaf === "remote"
+                ? t("settings.remoteAccessDesc")
+                : section === "agent" && leaf === "diagnostics"
+                  ? t("settings.diagnosticsDesc")
+                  : t("settings.agentConnectDesc");
 
   const eyebrow =
     section === "interface"
@@ -2647,6 +2748,28 @@ export function SettingsPage() {
                 checked={form.boardTaskAgentPicker !== false}
                 onChange={(v) => patch("boardTaskAgentPicker", v)}
                 label={t("settings.boardTaskAgentPicker")}
+              />
+            </SettingRow>
+
+            <SettingRow
+              label={t("settings.boardTaskModelPicker")}
+              hint={t("settings.boardTaskModelPickerHint")}
+            >
+              <Toggle
+                checked={form.boardTaskModelPicker !== false}
+                onChange={(v) => patch("boardTaskModelPicker", v)}
+                label={t("settings.boardTaskModelPicker")}
+              />
+            </SettingRow>
+
+            <SettingRow
+              label={t("settings.boardTaskEffortPicker")}
+              hint={t("settings.boardTaskEffortPickerHint")}
+            >
+              <Toggle
+                checked={form.boardTaskEffortPicker !== false}
+                onChange={(v) => patch("boardTaskEffortPicker", v)}
+                label={t("settings.boardTaskEffortPicker")}
               />
             </SettingRow>
 
@@ -3165,7 +3288,9 @@ export function SettingsPage() {
             {/* Cards, not table rows: each provider is its own box, folded to
                 a single header until the user opens it. */}
             <div className={styles.providerList}>
-              {form.builtinProviders.map((provider, index) => {
+              {/* Plugin rows are merged in on read and are not editable here —
+                  they get their own block below. */}
+              {form.builtinProviders.filter((provider) => !provider.pluginId).map((provider, index) => {
                 const displayName =
                   provider.name.trim() ||
                   `${t("settings.builtinProviderUntitled")} ${index + 1}`;
@@ -3342,6 +3467,66 @@ export function SettingsPage() {
                 );
               })}
             </div>
+            {/* Providers plugins ship (Settings → Plugins): the endpoint, the
+                headers and the recommended models are the plugin's, the key is
+                the user's — and a provider that needs a key stays out of the
+                pickers until it is there. */}
+            {builtinPluginProviders.length ? (
+              <SettingTable>
+                <SettingRow
+                  layout="stack"
+                  label={t("settings.pluginProvidersTitle")}
+                  hint={t("settings.pluginProvidersHint")}
+                  terms={[
+                    t("settings.pluginProvidersTitle"),
+                    t("settings.pluginProvidersHint"),
+                  ]}
+                >
+                  {builtinPluginProviders.map((provider) => {
+                    const fullId = provider.pluginId ?? "";
+                    const override = form.pluginProviders?.[fullId] ?? {};
+                    return (
+                      <div key={provider.id} className={styles.providerCard}>
+                        <div className={styles.providerCardSummary}>
+                          <span className={styles.providerCardName}>{provider.name}</span>
+                          <span className={styles.providerCardUrl}>{provider.url}</span>
+                        </div>
+                        <div className={styles.mcpRowDetail}>
+                          <input
+                            className={styles.mcpFilesInput}
+                            type="password"
+                            value={override.apiKey ?? ""}
+                            spellCheck={false}
+                            placeholder={t("settings.pluginProviderKey")}
+                            aria-label={t("settings.pluginProviderKey")}
+                            onChange={(e) => setPluginProvider(fullId, { apiKey: e.target.value })}
+                          />
+                        </div>
+                        <div className={styles.mcpRowDetail}>
+                          {provider.models.length} {t("settings.pluginsProvidersLabel")}
+                          {provider.apiKeyHint ? (
+                            <>
+                              {" · "}
+                              <a href={provider.apiKeyHint} target="_blank" rel="noreferrer">
+                                {provider.apiKeyHint}
+                              </a>
+                            </>
+                          ) : null}
+                          {" · "}
+                          <button
+                            type="button"
+                            className={styles.secondaryBtn}
+                            onClick={() => resetPluginProvider(fullId)}
+                          >
+                            {t("settings.pluginProviderReset")}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </SettingRow>
+              </SettingTable>
+            ) : null}
             <SettingTable>
               <SettingRow
                 layout="stack"
@@ -3494,6 +3679,59 @@ export function SettingsPage() {
 
         {section === "builtin" && leaf === "subagents" && (
           <>
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinSkillsTitle")}
+                hint={t("settings.builtinSkillsHint")}
+                terms={[
+                  t("settings.builtinSkillsTitle"),
+                  t("settings.builtinSkillsHint"),
+                  t("settings.builtinSkillModeOff"),
+                  t("settings.builtinSkillModeHidden"),
+                  t("settings.builtinSkillModeListed"),
+                  t("settings.builtinSkillModeActive"),
+                  "SKILL.md",
+                  "ponytail",
+                  "скилл",
+                ]}
+              >
+                {builtinSkills.length ? (
+                  <div className={styles.allowlistSection}>
+                    {builtinSkills.map((skill) => (
+                      <div key={skill.name} className={styles.allowlistRow}>
+                        <span className={styles.allowlistInput} title={skill.description}>
+                          {skill.name}
+                        </span>
+                        <OptionPicker
+                          variant="block"
+                          placement="down"
+                          className={styles.skillModePicker}
+                          menuTitle={`${skill.name} · ${t("settings.builtinSkillsModeLabel")}`}
+                          value={form.builtinSkillModes?.[skill.name.toLowerCase()] ?? skill.mode}
+                          onChange={(v) =>
+                            patch("builtinSkillModes", {
+                              ...(form.builtinSkillModes ?? {}),
+                              // Lower-cased: that is the key the agent looks up.
+                              [skill.name.toLowerCase()]: v as SkillMode,
+                            })
+                          }
+                          options={[
+                            { value: "off", label: t("settings.builtinSkillModeOff") },
+                            { value: "hidden", label: t("settings.builtinSkillModeHidden") },
+                            { value: "listed", label: t("settings.builtinSkillModeListed") },
+                            { value: "active", label: t("settings.builtinSkillModeActive") },
+                          ]}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span>{t("settings.builtinSkillsEmpty")}</span>
+                )}
+              </SettingRow>
+            </SettingTable>
+
             <SettingTable>
               <SettingRow
                 label={t("settings.subagentsEnabled")}
@@ -3864,6 +4102,187 @@ export function SettingsPage() {
           </>
         )}
 
+        {section === "agent" && leaf === "plugins" && (
+          <>
+            <SearchGate
+              terms={[
+                t("settings.pluginsTitle"),
+                t("settings.pluginsHint"),
+                t("settings.pluginsSourceTitle"),
+                "plugin",
+                "плагин",
+              ]}
+            >
+              <div className={styles.mcpApplyNote} role="note">
+                {t("settings.pluginsHint")}
+              </div>
+            </SearchGate>
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.pluginsSourceTitle")}
+                hint={t("settings.pluginsSourceHint", { dir: pluginsState?.dir ?? "" })}
+                terms={[t("settings.pluginsSourceTitle"), t("settings.pluginsSourceHint")]}
+              >
+                <input
+                  className={styles.mcpFilesInput}
+                  value={form.pluginsConfig ?? ""}
+                  placeholder={pluginsState?.dir ? `${pluginsState.dir}/config.json` : ""}
+                  spellCheck={false}
+                  aria-label={t("settings.pluginsSourceTitle")}
+                  onChange={(e) => patch("pluginsConfig", e.target.value)}
+                />
+              </SettingRow>
+            </SettingTable>
+            {/* One plugin, added right here: a bundle to point at, its id and its
+                config. The field above stays the way to bring several at once. */}
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.pluginsEntriesTitle")}
+                hint={t("settings.pluginsEntriesHint")}
+                terms={[t("settings.pluginsEntriesTitle"), t("settings.pluginsEntriesHint")]}
+              >
+                {pluginEntries.length === 0 ? (
+                  <div className={styles.mcpRowDetail}>{t("settings.pluginsEntriesEmpty")}</div>
+                ) : null}
+                {pluginEntries.map((entry, index) => {
+                  const loaded = (pluginsState?.plugins ?? []).find((p) => p.id === entry.id);
+                  const configText =
+                    pluginConfigTexts[index] ??
+                    (entry.config ? JSON.stringify(entry.config) : "");
+                  const configBroken = Boolean(
+                    configText.trim() && !parseJsonObjectText(configText),
+                  );
+                  return (
+                    <div key={index} className={styles.mcpRowDetail}>
+                      <div>
+                        <strong>{entry.id || t("settings.pluginsEntryNew")}</strong>{" · "}
+                        {!loaded
+                          ? t("settings.pluginsEntryPending")
+                          : `${t(
+                              loaded.status === "loaded"
+                                ? "settings.pluginsStatusLoaded"
+                                : loaded.status === "skipped"
+                                  ? "settings.pluginsStatusSkipped"
+                                  : "settings.pluginsStatusFailed",
+                            )}${loaded.error ? ` · ${loaded.error}` : ""}`}
+                      </div>
+                      <input
+                        className={styles.mcpFilesInput}
+                        value={entry.id}
+                        placeholder={t("settings.pluginsEntryId")}
+                        spellCheck={false}
+                        aria-label={t("settings.pluginsEntryId")}
+                        onChange={(e) => updatePluginEntry(index, { id: e.target.value })}
+                      />
+                      <input
+                        className={styles.mcpFilesInput}
+                        value={entry.server}
+                        placeholder={t("settings.pluginsEntryServer")}
+                        spellCheck={false}
+                        aria-label={t("settings.pluginsEntryServer")}
+                        onChange={(e) => updatePluginEntry(index, { server: e.target.value })}
+                      />
+                      <input
+                        className={styles.mcpFilesInput}
+                        value={configText}
+                        placeholder={t("settings.pluginsEntryConfig")}
+                        spellCheck={false}
+                        aria-label={t("settings.pluginsEntryConfig")}
+                        onChange={(e) => {
+                          const text = e.target.value;
+                          setPluginConfigTexts((texts) => ({ ...texts, [index]: text }));
+                          const parsed = parseJsonObjectText(text);
+                          if (parsed) updatePluginEntry(index, { config: parsed });
+                          else if (!text.trim()) updatePluginEntry(index, { config: undefined });
+                        }}
+                      />
+                      {configBroken ? (
+                        <div className={styles.mcpRowDetail}>
+                          {t("settings.pluginsEntryConfigInvalid")}
+                        </div>
+                      ) : null}
+                      <div>
+                        <Toggle
+                          checked={entry.enabled !== false}
+                          onChange={(v) => updatePluginEntry(index, { enabled: v })}
+                          label={entry.enabled !== false ? t("settings.enabled") : t("settings.disabled")}
+                        />
+                        <button
+                          type="button"
+                          className={styles.secondaryBtn}
+                          onClick={() => removePluginEntry(index)}
+                        >
+                          {t("common.delete")}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={() =>
+                      patch("pluginEntries", [...pluginEntries, { id: "", server: "" }])
+                    }
+                  >
+                    + {t("settings.pluginsEntryAdd")}
+                  </button>
+                </div>
+              </SettingRow>
+            </SettingTable>
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.pluginsLoadedTitle")}
+                terms={[t("settings.pluginsLoadedTitle"), t("settings.pluginsEmpty")]}
+              >
+                {pluginsState?.pendingRestart ? (
+                  <div className={styles.mcpApplyNote} role="note">
+                    {t("settings.pluginsRestartNote")}
+                  </div>
+                ) : null}
+                <div>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    onClick={reloadPluginsState}
+                  >
+                    {t("settings.pluginsCheck")}
+                  </button>
+                </div>
+                {(pluginsState?.plugins ?? []).length === 0 ? (
+                  <div className={styles.mcpRowDetail}>{t("settings.pluginsEmpty")}</div>
+                ) : (
+                  (pluginsState?.plugins ?? []).map((p) => (
+                    <div key={p.id} className={styles.mcpRowDetail}>
+                      <strong>{p.id}</strong> {p.version} ·{" "}
+                      {t(
+                        p.status === "loaded"
+                          ? "settings.pluginsStatusLoaded"
+                          : p.status === "skipped"
+                            ? "settings.pluginsStatusSkipped"
+                            : "settings.pluginsStatusFailed",
+                      )}{" "}
+                      · {t("settings.pluginsMcpLabel")}: {p.mcpServerCount} ·{" "}
+                      {t("settings.pluginsProvidersLabel")}: {p.modelProviderCount} ·{" "}
+                      {t("settings.pluginsSkillsLabel")}: {p.skillCount}
+                      {p.error ? ` · ${p.error}` : ""}
+                    </div>
+                  ))
+                )}
+                {(pluginsState?.warnings ?? []).map((w) => (
+                  <div key={w} className={styles.mcpRowDetail}>
+                    {w}
+                  </div>
+                ))}
+              </SettingRow>
+            </SettingTable>
+          </>
+        )}
+
         {section === "agent" && leaf === "mcp" && (
           <>
             <SearchGate terms={[t("settings.mcpApplyHint"), "mcp"]}>
@@ -3902,6 +4321,46 @@ export function SettingsPage() {
                   />
                 </SettingRow>
               ))}
+              {/* Plugin servers: same switch, no endpoint to edit — their url is
+                  built by the server for this boot. */}
+              {(pluginsState?.mcpServers ?? []).map((server) => {
+                const off = (form.mcpBuiltinDisabledIds ?? []).includes(server.id);
+                return (
+                  <SettingRow
+                    key={server.id}
+                    terms={[server.name, server.label, t("settings.pluginsTitle")]}
+                    label={
+                      <span className={styles.mcpRowMetaInline}>
+                        <strong>{server.name}</strong>
+                        <span className={styles.mcpRowType}>{t("settings.pluginsTitle")}</span>
+                      </span>
+                    }
+                    hint={
+                      <span className={styles.mcpRowDetail}>
+                        {server.label}
+                        {" · "}
+                        {t("settings.mcpPluginTools")}: {server.tools}
+                        {server.configured ? null : ` · ${t("settings.mcpPluginNotConfigured")}`}
+                        {server.error ? ` · ${server.error}` : ""}
+                      </span>
+                    }
+                  >
+                    <Toggle
+                      checked={!off}
+                      disabled={!server.configured}
+                      onChange={(v) =>
+                        patch(
+                          "mcpBuiltinDisabledIds",
+                          v
+                            ? (form.mcpBuiltinDisabledIds ?? []).filter((id) => id !== server.id)
+                            : [...(form.mcpBuiltinDisabledIds ?? []), server.id],
+                        )
+                      }
+                      label={off ? t("settings.disabled") : t("settings.enabled")}
+                    />
+                  </SettingRow>
+                );
+              })}
               {mcpServers.map((server) => (
                 <SettingRow
                   key={server.id}

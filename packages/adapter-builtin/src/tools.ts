@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { AgentMode, ElicitationRequestedSchema } from "@acpio/shared";
+import type { ElicitationRequestedSchema } from "@acpio/shared";
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { HostClient } from "./host.js";
@@ -15,7 +15,6 @@ export type AskPermission = (toolCall: {
 
 export interface BuiltinToolOptions {
   host: HostClient;
-  mode: AgentMode;
   ask: AskPermission;
   /**
    * Present only when the subagents feature is on: adds the `task` tool. The
@@ -478,11 +477,10 @@ export function renderAskAnswers(
 /**
  * The built-in agent's tool set. Mutating tools go through the harness's
  * `session/request_permission`, so `permissionPolicy` and the allowlist in
- * Settings behave exactly like they do for Cursor/OMP. Plan/ask modes get the
- * read-only tools only — enforced here, not by prompt text.
+ * Settings behave exactly like they do for Cursor/OMP.
  */
 export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
-  const { host, ask, mode, outsideCwd, sessionId } = opts;
+  const { host, ask, outsideCwd, sessionId } = opts;
   const taskTool: ToolSet = opts.subagents ? { task: makeTaskTool(opts.subagents) } : {};
 
   const read = tool({
@@ -654,12 +652,11 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
-  if (mode !== "agent") return { read, glob, grep, ask: askUser, ...taskTool };
-
   const write = tool({
     description:
-      "Create or overwrite a file; parents are created. Prefer `edit` for an existing file. " +
-      (outsideCwd ? "." : " — a path outside it is rejected."),
+      // The suffix hung off the previous sentence, where "it" named nothing.
+      "Create or overwrite a file; parents are created. Prefer `edit` for an existing file" +
+      (outsideCwd ? "." : " — a path outside the working directory is rejected."),
     inputSchema: z.object({
       path: z.string().describe("File path."),
       content: z.string().describe("Full new file content."),
@@ -674,7 +671,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   const edit = tool({
     description:
       "Replace exact text in a file; each `old_string` must match the file's current text exactly " +
-      "once unless `replace_all` — read the file first and copy verbatim, including indentation.",
+      "once unless `replace_all` — copy the text verbatim, indentation included.",
     inputSchema: z.object({
       path: z.string().describe("File path."),
       edits: z
@@ -714,7 +711,13 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       "Run a shell command in the working directory and wait for exit. Returns the exit code and output, " +
       "clipped to the first 4000 and last 2000 chars — pipe through `head`/`tail`/`grep` when the middle matters " +
       "instead of re-running it unchanged." +
-      (posixShell() ? "" : " On Windows the command runs through cmd.exe, so quote for cmd.exe."),
+      (posixShell()
+        ? process.platform === "win32"
+          ? " On Windows the shell is Git Bash: a relative path is `./build.ps1`, not `.\\build.ps1`; " +
+            "a native CLI flag keeps its leading slash only doubled (`cmd.exe //c …`, `MSBuild //t:Restore`), " +
+            "and a `powershell -Command \"…\"` body is expanded by bash first — single-quote it or escape `$`."
+          : ""
+        : " On Windows the command runs through cmd.exe, so quote for cmd.exe."),
     inputSchema: z.object({
       command: z.string().describe("Shell command."),
       timeout_ms: z

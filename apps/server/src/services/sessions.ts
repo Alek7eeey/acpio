@@ -393,10 +393,20 @@ export async function addTaskAttachments(
 }
 
 /**
- * Stamp the first turn start of a board task — the Todo ⇄ Wait split marker.
- * Idempotent: only fires while the task has never started.
+ * Claim a turn on a board task — the two row facts a turn start settles:
+ *
+ *  - the first claimed turn stamps `startedAt`, the Todo ⇄ Wait split marker.
+ *    Idempotent: only fires while the task has never started.
+ *  - a task the user had closed is reopened by writing into it: a claimed turn
+ *    drops the Done mark, so the card reads as work in progress while the agent
+ *    runs and parks in Wait when it ends. Done is a log of tasks the user
+ *    closed, not of tasks someone merely asked for another turn.
  */
-export async function markBoardTaskStarted(id: string): Promise<void> {
+export async function claimBoardTaskTurn(id: string): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ doneAt: null })
+    .where(and(eq(sessions.id, id), isNotNull(sessions.boardId), isNotNull(sessions.doneAt)));
   await db
     .update(sessions)
     .set({ startedAt: new Date() })

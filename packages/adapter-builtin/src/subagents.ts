@@ -1,5 +1,4 @@
 import type {
-  AgentMode,
   BuiltinSubagentDef,
   BuiltinSubagentsSetting,
   BuiltinToolName,
@@ -67,11 +66,6 @@ function budgetContract(budget: number): string {
   );
 }
 
-/** Tool names a child may hold in the parent's current mode. */
-function availableTools(mode: AgentMode): readonly string[] {
-  return mode === "agent" ? BUILTIN_TOOL_NAMES : ["read", "glob", "grep"];
-}
-
 /**
  * Bounds concurrent children and hands back a release function. `acquire`
  * rejects on the turn's abort signal so a cancelled turn never parks on a slot.
@@ -110,7 +104,6 @@ class Semaphore {
  * wrap-up continuation.
  */
 export interface SubagentsBridge {
-  mode: AgentMode;
   /** The parent's permission gate, so a child's mutating call asks the same user. */
   ask: AskPermission;
   /** The parent turn's model — children share the endpoint, model and signal. */
@@ -140,7 +133,6 @@ export interface SubagentsBridge {
 }
 
 export function createSubagentsBridge(parts: {
-  mode: AgentMode;
   ask: AskPermission;
   model: TurnModel;
   extraSystem?: string;
@@ -227,8 +219,8 @@ export function resolveSubagent(
     if (!bridge.settings.allowAdhoc) {
       throw new Error("Ad-hoc subagents are disabled — pass `agent` with a name from the roster.");
     }
-    const requested = (input.tools ?? []).filter((t): t is BuiltinToolName =>
-      (availableTools(bridge.mode) as readonly string[]).includes(t),
+    const requested = (input.tools ?? []).filter(
+      (t): t is BuiltinToolName => (BUILTIN_TOOL_NAMES as readonly string[]).includes(t),
     );
     return {
       id: "adhoc",
@@ -274,7 +266,7 @@ export async function runSubagent(
 ): Promise<string> {
   const def = resolveSubagent(bridge, input);
   const label = def.name;
-  const tools = def.tools.filter((t) => availableTools(bridge.mode).includes(t));
+  const tools = def.tools.filter((t) => BUILTIN_TOOL_NAMES.includes(t));
   // No bridge into the child toolset: `task` never appears twice.
   const childTools = bridge.buildChildTools((call) =>
     bridge.ask({ ...call, title: `[${label}] ${call.title}` }),

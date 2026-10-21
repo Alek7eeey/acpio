@@ -86,6 +86,10 @@ beforeAll(async () => {
       });
       return;
     }
+    if (url.startsWith("/gw/v1/models")) {
+      json({ object: "list", data: [{ id: "deepseek-v4-pro" }] });
+      return;
+    }
     if (url.startsWith("/boom/models")) {
       res.statusCode = 500;
       res.end("server exploded");
@@ -161,6 +165,14 @@ describe("fetchBuiltinModelCatalog", () => {
 
     const wrapped = await fetchBuiltinModelCatalog(`${base}/wrapped`, "");
     expect(wrapped).toEqual({ ok: true, models: [{ id: "m1", contextWindow: 1234 }] });
+  });
+
+  it("falls back to the /v1 sibling when the endpoint nests a vendor segment", async () => {
+    // opencode.ai/inference/go/openai/v1 serves chat but 404s on /models.
+    expect(await fetchBuiltinModelCatalog(`${base}/gw/openai/v1`, "", {})).toEqual({
+      ok: true,
+      models: [{ id: "deepseek-v4-pro" }],
+    });
   });
 
   it("reports why the endpoint could not be read", async () => {

@@ -45,7 +45,7 @@ import {
   writeStoredChatPanes,
   type ChatPaneSlot,
 } from "./chatPanes";
-import { pickCreateProvider, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
+import { pickCreateProvider, isBuiltinFamilyAdapter, isBuiltinFamilyProvider, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 import {
   hydrateSessionSlashCommands,
@@ -254,6 +254,10 @@ type AppState = {
     description: string;
     /** Pre-start agent pick — a board task may be created for a chosen agent. */
     provider?: AgentProvider;
+    /** Model the task's first turn boots on (the form's model pick). */
+    model?: string;
+    /** Params that model runs with — the form's effort pick. */
+    modelParams?: Record<string, string>;
     /** Files attached while writing the task — staged in acpio's own folder
      *  by the server and carried by the task's first turn. */
     files?: File[];
@@ -316,6 +320,12 @@ type AppState = {
    */
   openBoardId: string | null;
   setOpenBoardId: (id: string | null) => void;
+  /**
+   * The folder each board's rail was narrowed to. The board page unmounts on
+   * the way to a task's chat, so a trip there and back would lose the choice.
+   */
+  boardFilterCwd: Record<string, string | null>;
+  setBoardFilterCwd: (boardId: string, cwd: string | null) => void;
   connected: boolean;
   /** Fine-grained socket state for the toolbar chip; `connected` mirrors it. */
   connection: ConnectionState;
@@ -1927,7 +1937,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — keep the current list
     }
   },
-  createBoardTask: async ({ boardId, cwd, description, provider, files, attachments }) => {
+  createBoardTask: async ({ boardId, cwd, description, provider, model, modelParams, files, attachments }) => {
     try {
       const title = titleFromTaskDescription(description);
       const task = await api.createSession({
@@ -1935,6 +1945,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         cwd,
         taskDescription: description,
         ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        ...(modelParams && Object.keys(modelParams).length ? { modelParams } : {}),
         ...(title ? { title } : {}),
         // Files the server already holds are bound to the task as it is made:
         // there is nothing to upload, and nothing may start before they land.
@@ -2038,6 +2050,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarOpen: readStoredSidebarOpen("tree"),
   boardFoldersOpen: false,
   openBoardId: null,
+  boardFilterCwd: {},
   connected: false,
   connection: "connecting",
   agentAvailable: false,
@@ -3524,6 +3537,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ openBoardId: id });
   },
 
+  setBoardFilterCwd(boardId, cwd) {
+    set((state) => ({ boardFilterCwd: { ...state.boardFilterCwd, [boardId]: cwd } }));
+  },
+
   setConnection(connection) {
     set({ connection, connected: connection === "open" });
   },
@@ -4217,6 +4234,31 @@ export const useAppStore = create<AppState>((set, get) => ({
         agentOfflineWarning: get().agentOfflineWarning.filter((id) => !disabled.has(id)),
       });
       void get().loadAdapters();
+      // A harness just switched on has no probe state (that is what switched it
+      // off dropped), so its connect row and the chat gate would read
+      // "checking" until the next page load. Ask now.
+      for (const id of (current.disabledProviders ?? []).filter((p) => !disabled.has(p))) {
+        void api
+          .probeAgent(id)
+          .then((res) => get().setAgentAvailable(id, res.ok))
+          .catch(() => get().setAgentAvailable(id, false));
+      }
+    }
+    if (nextPatch.builtinProviders !== undefined) {
+      // The built-in agent's catalog *is* its provider list, and the pickers
+      // read it from a browser-side cache that outlives an edit by days. Drop
+      // the stored lists of that harness — otherwise a model just ticked or
+      // added stays missing from every picker, because nobody asks again.
+      const adapters = get().adapters;
+      for (const adapter of adapters) {
+        if (isBuiltinFamilyAdapter(adapter)) writeStoredModelsCatalog(null, adapter.id);
+      }
+      // The picker on screen reads the live catalog — reload it in place so
+      // the fresh list is there before the user looks at it.
+      const active = get().modelsCatalog;
+      if (active && isBuiltinFamilyProvider(active.provider, adapters)) {
+        void get().ensureModels(active.provider, { force: true });
+      }
     }
     if (nextPatch.chatSplit === false || nextSettings.chatSplit === false) {
       get().collapseToSinglePane();
