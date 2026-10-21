@@ -36,7 +36,11 @@ function dayLabel(key) {
 }
 
 function git(cwd, args, { env } = {}) {
-  return execFileSync("git", args, {
+  // Signing is off for these repos: a machine with `tag.gpgSign` on would stop
+  // at an editor instead of cutting the tag, and the test would fail for a
+  // setting that has nothing to do with what it checks.
+  const config = ["-c", "tag.gpgSign=false", "-c", "commit.gpgsign=false"];
+  return execFileSync("git", [...config, ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...env },
