@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prompt lab — системный промпт встроенного агента</title>
+    <style>
+      :root {
+        --bg: #14161a;
+        --panel: #1b1e24;
+        --line: #2a2f38;
+        --text: #d7dbe2;
+        --dim: #8b93a1;
+        --add: #1f3a24;
+        --add-text: #9ade9f;
+        --del: #3a2022;
+        --del-text: #f0a9a9;
+        --accent: #6ea8fe;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        height: 100vh;
+        overflow: hidden;
+      }
+      aside { border-right: 1px solid var(--line); overflow: auto; padding: 12px; background: var(--panel); }
+      h1 { font-size: 13px; margin: 0 0 4px; }
+      h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 16px 0 6px; }
+      label.row { display: flex; align-items: center; gap: 8px; margin: 3px 0; cursor: pointer; }
+      label.row span { flex: 1; }
+      select, input[type="text"], textarea {
+        background: #101318; color: var(--text); border: 1px solid var(--line);
+        border-radius: 4px; padding: 3px 6px; font: inherit; width: 100%;
+      }
+      textarea { resize: vertical; min-height: 56px; }
+      .skill { display: grid; grid-template-columns: 1fr 84px; gap: 6px; align-items: center; margin: 2px 0; }
+      .skill b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .skill.shipped b { color: var(--accent); }
+      .skill.silent b { color: var(--dim); }
+      main { display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+      header { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; }
+      header b { font-weight: 600; }
+      header .dim { color: var(--dim); }
+      header button {
+        background: #222832; color: var(--text); border: 1px solid var(--line);
+        border-radius: 4px; padding: 4px 10px; font: inherit; cursor: pointer;
+      }
+      header button:first-of-type { margin-left: auto; }
+      header button:hover { border-color: var(--accent); }
+      #apply { border-color: #3a4657; }
+      #apply.dirty { border-color: var(--accent); color: var(--accent); }
+      #prompt { overflow: auto; padding: 8px 0; white-space: pre-wrap; word-break: break-word; }
+      .l { padding: 0 14px 0 44px; position: relative; }
+      .l::before { position: absolute; left: 14px; width: 20px; text-align: center; }
+      .add { background: var(--add); color: var(--add-text); }
+      .add::before { content: "+"; }
+      .del { background: var(--del); color: var(--del-text); text-decoration: line-through; }
+      .del::before { content: "−"; }
+      .empty { padding: 20px 14px; color: var(--dim); }
+      #history { border-top: 1px solid var(--line); max-height: 34vh; overflow: auto; padding: 8px 14px; }
+      .step { display: flex; gap: 10px; padding: 2px 0; cursor: pointer; color: var(--dim); }
+      .step:hover, .step.on { color: var(--text); }
+      .step .delta { min-width: 74px; }
+      .step .delta i { font-style: normal; }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>Prompt lab</h1>
+      <div class="dim" id="source"></div>
+
+      <h2>Режим и язык</h2>
+      <label class="row"><span>Язык ответа</span><select id="locale"></select></label>
+      <label class="row"><span>Thinking</span><select id="thinking"></select></label>
+
+      <h2>Настройки промпта</h2>
+      <label class="row"><input type="checkbox" id="outsideCwd" /><span>пути вне рабочей папки</span></label>
+      <label class="row"><input type="checkbox" id="markdownImages" /><span>картинки в markdown</span></label>
+      <label class="row"><input type="checkbox" id="plugin" /><span>плагин ponytail (его папка скиллов)</span></label>
+
+      <h2>MCP-серверы</h2>
+      <div id="mcp"></div>
+
+      <h2>Скиллы</h2>
+      <div id="skills"></div>
+
+      <h2>Доп. инструкции</h2>
+      <textarea id="extra" placeholder="Settings → Built-in agent → Additional instructions"></textarea>
+    </aside>
+
+    <main>
+      <header>
+        <b id="title">системный промпт</b>
+        <span class="dim" id="size"></span>
+        <span class="dim" id="rules"></span>
+        <button id="apply">применить</button>
+        <button id="clean">чистый промпт</button>
+        <button id="copy">копировать</button>
+        <button id="reset">сброс</button>
+      </header>
+      <div id="prompt"></div>
+      <div id="history"></div>
+    </main>
+
+    <script type="module">
+      import { diffLines, diffStats } from "/diff.mjs";
+
+      const $ = (id) => document.getElementById(id);
+      const LOCALE_OPTIONS = [["ru", "Русский"], ["en", "English"]];
+      const THINKING_OPTIONS = [["default", "default"], ["low", "low"], ["high", "high"], ["extra-low", "extra-low"]];
+      const SKILL_MODES = ["active", "listed", "hidden", "off"];
+
+      let state = null;              // the knobs as sent to the server
+      let prompt = "";               // the prompt those knobs produced
+      let steps = [];                // every change: {label, rows, stats, prompt}
+      let viewing = -1;              // which step's delta is on screen
+      let seq = 0;                   // guards against out-of-order answers
+
+      const options = (el, pairs) => {
+        el.innerHTML = "";
+        for (const [value, label] of pairs) el.append(Object.assign(document.createElement("option"), { value, textContent: label }));
+      };
+
+      function renderKnobs(d) {
+        $("source").textContent = `настройки: ${d.source}`;
+        options($("locale"), LOCALE_OPTIONS);
+        options($("thinking"), THINKING_OPTIONS);
+        $("locale").value = d.locale;
+        $("thinking").value = d.thinking;
+        $("outsideCwd").checked = d.outsideCwd;
+        $("markdownImages").checked = d.markdownImages;
+        $("plugin").checked = d.plugin;
+        $("extra").value = d.extra;
+
+        $("mcp").innerHTML = "";
+        for (const row of d.mcp) {
+          const label = document.createElement("label");
+          label.className = "row";
+          const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: row.on });
+          box.dataset.mcp = row.name;
+          label.append(box, Object.assign(document.createElement("span"), { textContent: row.name }));
+          $("mcp").append(label);
+        }
+
+        $("skills").innerHTML = "";
+        for (const skill of d.skills) {
+          const row = document.createElement("div");
+          row.className = `skill${skill.builtin ? " shipped" : ""}${skill.advertised ? "" : " silent"}`;
+          row.append(
+            Object.assign(document.createElement("b"), {
+              textContent: skill.advertised ? skill.name : `${skill.name} ∅`,
+              title: skill.advertised
+                ? skill.builtin ? "шипнутый" : "пользовательский"
+                : "disable-model-invocation: в промпт не попадает при любом режиме, только по /name",
+            }),
+          );
+          const select = document.createElement("select");
+          options(select, SKILL_MODES.map((m) => [m, m]));
+          select.value = skill.mode;
+          select.dataset.skill = skill.name;
+          row.append(select);
+          $("skills").append(row);
+        }
+      }
+
+      function readState() {
+        return {
+          ...state,
+          locale: $("locale").value,
+          thinking: $("thinking").value,
+          outsideCwd: $("outsideCwd").checked,
+          markdownImages: $("markdownImages").checked,
+          plugin: $("plugin").checked,
+          extra: $("extra").value,
+          mcp: [...document.querySelectorAll("[data-mcp]")].map((box) => ({ name: box.dataset.mcp, on: box.checked })),
+          skills: Object.fromEntries([...document.querySelectorAll("[data-skill]")].map((s) => [s.dataset.skill, s.value])),
+        };
+      }
+
+      /** What the user turned, in one line: `mode → plan`, `skills.ponytail → listed`. */
+      function labelOf(before, after) {
+        const changes = [];
+        for (const key of Object.keys(after)) {
+          if (key === "skills") {
+            for (const [name, mode] of Object.entries(after.skills)) {
+              if (before.skills?.[name] !== mode) changes.push(`skill ${name} → ${mode}`);
+            }
+          } else if (key === "mcp") {
+            for (const row of after.mcp) {
+              const was = before.mcp?.find((r) => r.name === row.name)?.on;
+              if (was !== row.on) changes.push(`mcp ${row.name} ${row.on ? "вкл" : "выкл"}`);
+            }
+          } else if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) {
+            changes.push(`${key} → ${typeof after[key] === "boolean" ? (after[key] ? "вкл" : "выкл") : after[key] || "пусто"}`);
+          }
+        }
+        return changes.join(", ") || "без изменений";
+      }
+
+      function show(rows, meta) {
+        const box = $("prompt");
+        box.innerHTML = "";
+        if (!rows.length) {
+          box.append(Object.assign(document.createElement("div"), { className: "empty", textContent: "промпт пуст" }));
+          return;
+        }
+        for (const row of rows) {
+          const div = document.createElement("div");
+          div.className = row.op === "+" ? "l add" : row.op === "-" ? "l del" : "l";
+          div.textContent = row.text || " ";
+          box.append(div);
+        }
+        $("size").textContent = `${meta.chars} симв. · ≈${Math.round(meta.chars / 4)} токенов`;
+        $("rules").textContent = meta.superseded.length ? `вычтено: ${meta.superseded.join(", ")}` : "правила все";
+        $("title").textContent = steps[viewing]?.label ?? "как сейчас в настройках";
+      }
+
+      function renderHistory() {
+        const box = $("history");
+        box.innerHTML = "";
+        steps.forEach((step, index) => {
+          const row = document.createElement("div");
+          row.className = `step${index === viewing ? " on" : ""}`;
+          const delta = document.createElement("span");
+          delta.className = "delta";
+          delta.innerHTML = `<i style="color:var(--add-text)">+${step.stats.added}</i> <i style="color:var(--del-text)">−${step.stats.removed}</i>`;
+          row.append(delta, Object.assign(document.createElement("span"), { textContent: `${index + 1}. ${step.label}` }));
+          row.onclick = () => {
+            viewing = index;
+            show(step.rows, step.meta);
+            renderHistory();
+          };
+          box.append(row);
+        });
+      }
+
+      async function ask(next, label) {
+        const mine = ++seq;
+        const res = await fetch("/prompt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(next) });
+        const data = await res.json();
+        if (mine !== seq) return; // a newer change already answered
+        if (data.error) {
+          $("prompt").innerHTML = `<div class="empty">${data.error}</div>`;
+          return;
+        }
+        const rows = diffLines(prompt, data.prompt);
+        const stats = diffStats(rows);
+        const meta = { chars: data.prompt.length, superseded: data.superseded ?? [] };
+        steps.push({ label, rows, stats, meta, prompt: data.prompt });
+        viewing = steps.length - 1;
+        prompt = data.prompt;
+        show(rows, meta);
+        renderHistory();
+      }
+
+      async function start() {
+        const fresh = await (await fetch("/state")).json();
+        // Knobs arrive as rows for the panel; every comparison from here on wants
+        // the name→mode map, or the first change names every skill as touched.
+        state = { ...fresh, skills: Object.fromEntries(fresh.skills.map((s) => [s.name, s.mode])) };
+        prompt = "";
+        steps = [];
+        viewing = -1;
+        renderKnobs(fresh);
+        const first = await (await fetch("/prompt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(fresh) })).json();
+        prompt = first.prompt;
+        steps.push({
+          label: "как сейчас в настройках",
+          rows: first.prompt.split("\n").map((text) => ({ op: "=", text })),
+          stats: { added: 0, removed: 0 },
+          meta: { chars: first.prompt.length, superseded: first.superseded ?? [] },
+          prompt: first.prompt,
+        });
+        viewing = 0;
+        show(steps[0].rows, steps[0].meta);
+        renderHistory();
+      }
+
+      // Knobs wait for the button: turning five of them is one experiment, not five.
+      const markDirty = () => $("apply").classList.add("dirty");
+      document.addEventListener("change", (event) => {
+        if (event.target.matches("select, input")) markDirty();
+      });
+      document.addEventListener("input", (event) => {
+        if (event.target.id === "extra") markDirty();
+      });
+
+      $("apply").onclick = () => {
+        const next = readState();
+        const label = labelOf(state, next);
+        $("apply").classList.remove("dirty");
+        if (label === "без изменений") return;
+        ask(next, label).then(() => {
+          state = { ...state, ...next };
+        });
+      };
+      /** Everything off: no skills, no MCP, no extras — what is left of the prompt. */
+      $("clean").onclick = () => {
+        $("thinking").value = "default";
+        $("outsideCwd").checked = false;
+        $("markdownImages").checked = false;
+        $("plugin").checked = false;
+        $("extra").value = "";
+        for (const box of document.querySelectorAll("[data-mcp]")) box.checked = false;
+        for (const select of document.querySelectorAll("[data-skill]")) select.value = "off";
+        $("apply").classList.remove("dirty");
+        const next = readState();
+        ask(next, "чистый промпт — всё выключено").then(() => {
+          state = { ...state, ...next };
+        });
+      };
+
+      // The prompt of the step on screen, without the diff marks.
+      $("copy").onclick = async () => {
+        const text = steps[viewing]?.prompt ?? prompt;
+        await navigator.clipboard.writeText(text);
+        const button = $("copy");
+        button.textContent = "скопировано";
+        setTimeout(() => (button.textContent = "копировать"), 1200);
+      };
+
+      $("reset").onclick = () => void start();
+
+      void start();
+    </script>
+  </body>
+</html>
