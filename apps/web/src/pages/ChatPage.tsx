@@ -5796,6 +5796,19 @@ function ChatThread() {
   const composerHeld =
     renderSkeleton || (!activeSession && (sessionLoading || loading || hasSessions));
   const showThreadSkeleton = composerHeld;
+
+  // A chat opened from another route (the board) mounts this page while the
+  // composer is held — rendered but `display: none`. The [text] sync above then
+  // measures a zero-width box, so a long draft stays on one scrolling line.
+  // Measure again once the composer is actually laid out.
+  useEffect(() => {
+    if (composerHeld) return;
+    const frame = requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (el) syncComposerSize(el);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [composerHeld]);
   // Each user message starts a new turn segment (one request + its replies) —
   // with multitask on, segments get distinct cards so concurrent requests
   // read as separate workspaces instead of one interleaved feed.
