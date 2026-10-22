@@ -804,6 +804,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const reorderBoardTasks = useAppStore((s) => s.reorderBoardTasks);
   const selectSession = useAppStore((s) => s.selectSession);
   const sendPrompt = useAppStore((s) => s.sendPrompt);
+  const warnIfHarnessNotConfigured = useAppStore((s) => s.warnIfHarnessNotConfigured);
   // Shared with the shell header, whose board title row carries the button that
   // opens this page's folders dialog.
   const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
@@ -1449,6 +1450,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const submitPrompt = async (task: SessionDto) => {
     const text = promptDraft.trim();
     if (!text || sendingPrompt) return;
+    // The card's agent cannot take it yet: say why and keep what was typed.
+    if (warnIfHarnessNotConfigured(task.id)) return;
     setSendingPrompt(true);
     try {
       await sendPrompt(text, { sessionId: task.id });
@@ -1619,6 +1622,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           <span className={styles.chip} title={task.cwd}>
             {folderLabel(task.cwd, task.cwd)}
           </span>
+          {/* The folder's tag rides on the card, so it is read in every
+              column — Todo already wears it on the lane head. */}
+          {column !== "todo" ? renderFolderTag(task.cwd) : null}
           {/* Who the task is done with, right next to where it runs: the same
               label the chat tree's row badge wears. */}
           <span
