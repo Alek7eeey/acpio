@@ -897,6 +897,11 @@ export class AcpClient extends EventEmitter {
           cwd,
           mode: this.mode,
           stateDir: BUILTIN_STATE_DIR,
+          // An in-process agent does not die on a bad MCP entry the way a spawned
+          // CLI does; it just runs without those tools. Its own report is the
+          // only trace of why a server from the chat's list never showed up.
+          onDiagnostic: (event) =>
+            appendDeepLog({ kind: event.kind, ...this.logContext, cwd, data: event.data }),
         }),
       );
     } else {

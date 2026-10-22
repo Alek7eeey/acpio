@@ -29,6 +29,7 @@ import {
   mcpServerEndpoint,
   mcpServersFingerprint,
   mcpCommandNeedsAbsolute,
+  mcpStdioSpawn,
   mcpStdioEnv,
   canonicalCwd,
   toAcpMcpServer,
@@ -694,6 +695,32 @@ describe("MCP helpers", () => {
     expect(mcpCommandNeedsAbsolute({ ...stdio, command: "\\\\server\\share\\mcp.exe" })).toBe(false);
     expect(mcpCommandNeedsAbsolute({ ...stdio, command: "" })).toBe(false);
     expect(mcpCommandNeedsAbsolute(http)).toBe(false);
+  });
+
+  it("quotes a Windows shim so a path with a space still launches", () => {
+    const shim = "C:\\Program Files\\nodejs\\mcp-gitea.cmd";
+    expect(mcpStdioSpawn(shim, ["--root", "a b"], "win32")).toEqual({
+      command: `"${shim}"`,
+      args: ["--root", '"a b"'],
+      shell: true,
+    });
+    // A bare name needs the shell for PATH lookup, but nothing to quote.
+    expect(mcpStdioSpawn("npx", ["-y"], "win32")).toEqual({
+      command: "npx",
+      args: ["-y"],
+      shell: true,
+    });
+    // Executables spawn directly; no shell means no quoting of any kind.
+    expect(mcpStdioSpawn("C:\\Program Files\\nodejs\\node.exe", ["a b"], "win32")).toEqual({
+      command: "C:\\Program Files\\nodejs\\node.exe",
+      args: ["a b"],
+      shell: false,
+    });
+    expect(mcpStdioSpawn("/usr/local/bin/mcp-gitea.cmd", [], "linux")).toEqual({
+      command: "/usr/local/bin/mcp-gitea.cmd",
+      args: [],
+      shell: false,
+    });
   });
 });
 

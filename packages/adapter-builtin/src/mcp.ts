@@ -7,7 +7,7 @@ import { EventEmitter, once } from "node:events";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { Agent, request as httpsRequest } from "node:https";
 import { tool, jsonSchema, type ToolSet } from "ai";
-import { childProcessEnv } from "@acpio/shared";
+import { childProcessEnv, mcpStdioSpawn, ProcessTextDecoder } from "@acpio/shared";
 import type { AskPermission } from "./tools.js";
 
 /** One ACP `mcpServers` entry, normalized. */
@@ -163,6 +163,9 @@ class McpConnection {
   private readonly lifetime = new AbortController();
   private child: ChildProcess | null = null;
   private buffer = "";
+  /** Last words of a stdio server that died — the reason the model never got its tools. */
+  private stderrTail = "";
+  private readonly stderrDecoder = new ProcessTextDecoder();
   private nextId = 1;
   private httpSessionId: string | null = null;
   private agent: Agent | null = null;
@@ -296,19 +299,30 @@ class McpConnection {
   private ensureChild(): ChildProcess {
     if (this.child) return this.child;
     if (this.lifetime.signal.aborted) throw new Error(`MCP server ${this.spec.name} is closed`);
-    const command = this.spec.command ?? "";
-    const args = this.spec.args ?? [];
     // npm ships CLI servers as `.cmd` shims, which spawn without a shell refuses
-    // to execute on Windows.
-    const child = spawn(command, args, {
+    // to execute on Windows — and once a shell is involved the path has to be
+    // quoted, or `C:\Program Files\…` is read as the command `C:\Program`.
+    const launch = mcpStdioSpawn(this.spec.command ?? "", this.spec.args ?? []);
+    const child = spawn(launch.command, launch.args, {
       env: { ...childProcessEnv(), ...(this.spec.env ?? {}) },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
-      shell: /\.(cmd|bat)$/i.test(command),
+      shell: launch.shell,
     });
-    child.on("error", (err) => this.lifetime.abort(new Error(`MCP ${this.spec.name}: ${err.message}`)));
+    child.on("error", (err) =>
+      this.lifetime.abort(
+        new Error(`MCP ${this.spec.name}: ${err.message} (launching ${launch.command})`),
+      ),
+    );
+    child.stderr?.on("data", (chunk: Buffer) => {
+      this.stderrTail = (this.stderrTail + this.stderrDecoder.decode(chunk)).slice(-400);
+    });
     child.on("exit", (code) =>
-      this.lifetime.abort(new Error(`MCP ${this.spec.name} exited with code ${code ?? "null"}`)),
+      this.lifetime.abort(
+        new Error(
+          `MCP ${this.spec.name} exited with code ${code ?? "null"}${this.stderrTail.trim() ? `: ${this.stderrTail.trim()}` : ""}`,
+        ),
+      ),
     );
     // A server that dies mid-write gives EPIPE; that must surface as a failed
     // call, not as an unhandled stream error that takes the server down.
@@ -420,18 +434,29 @@ export class McpManager {
   constructor(
     private readonly specs: McpServerSpec[],
     private readonly ask: AskPermission,
+    /** Where a failed connection is reported: the model only sees its absence. */
+    private readonly report?: (event: { kind: string; data?: Record<string, unknown> }) => void,
   ) {}
 
   async ensure(): Promise<{ tools: McpToolEntry[]; warnings: string[] }> {
     if (this.built) return this.built;
     const tools: McpToolEntry[] = [];
     const warnings: string[] = [];
+    const rows: Array<Record<string, unknown>> = [];
     await Promise.all(
       this.specs.map(async (spec) => {
         const connection = new McpConnection(spec);
+        const started = Date.now();
         try {
           const listed = await connection.connect();
           this.connections.push(connection);
+          rows.push({
+            name: spec.name,
+            endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
+            ok: true,
+            tools: listed.length,
+            ms: Date.now() - started,
+          });
           for (const def of listed) {
             tools.push({
               ...def,
@@ -444,10 +469,27 @@ export class McpManager {
           connection.close();
           const message = err instanceof Error ? err.message : String(err);
           warnings.push(`${spec.name}: ${message}`);
+          rows.push({
+            name: spec.name,
+            endpoint: spec.url ?? [spec.command, ...(spec.args ?? [])].filter(Boolean).join(" "),
+            ok: false,
+            reason: message,
+            ms: Date.now() - started,
+          });
         }
       }),
     );
     this.built = { tools, warnings };
+    // The turn runs with whatever connected; nothing on the wire says a server
+    // from the chat's list was dropped before its tools could be listed.
+    this.report?.({
+      kind: "mcp-connect",
+      data: {
+        total: rows.length,
+        failed: rows.filter((r) => !r.ok).length,
+        servers: [...rows].sort((a, b) => String(a.name).localeCompare(String(b.name))),
+      },
+    });
     return this.built;
   }
 

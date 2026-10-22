@@ -7,6 +7,7 @@ import {
   mcpHttpHeaders,
   mcpServerEndpoint,
   mcpStdioEnv,
+  mcpStdioSpawn,
 } from "@acpio/shared";
 import { pluginMcpServers } from "./plugins.js";
 import { appendDeepLog } from "./deepLogging.js";
@@ -111,11 +112,9 @@ export function probeStdioDetailed(s: McpServerConfig): Promise<McpProbeResult> 
   if (!command) return Promise.resolve({ ok: false, reason: "no-command" });
   const args = s.args ?? [];
   const extraEnv = Object.fromEntries(mcpStdioEnv(s).map((row) => [row.name, row.value]));
-  const winLooseCmd =
-    process.platform === "win32" &&
-    !command.includes("/") &&
-    !command.includes("\\") &&
-    !/\.exe$/i.test(command);
+  // Same launch rule the agents use — a probe that cannot start the `.cmd` shim
+  // would report a working server as dead.
+  const launch = mcpStdioSpawn(command, args);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -142,11 +141,11 @@ export function probeStdioDetailed(s: McpServerConfig): Promise<McpProbeResult> 
       resolve(detail ? { ...result, detail } : result);
     };
 
-    const child = spawn(command, args, {
+    const child = spawn(launch.command, launch.args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...childProcessEnv(), ...extraEnv },
       windowsHide: true,
-      shell: winLooseCmd,
+      shell: launch.shell,
     });
     const timer = setTimeout(
       () => finish({ ok: false, reason: "timeout", detail: `no initialize answer within ${PROBE_TIMEOUT_MS}ms` }),

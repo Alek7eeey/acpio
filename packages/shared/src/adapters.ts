@@ -316,6 +316,13 @@ export interface InProcessAgentOptions {
   mode: AgentMode;
   /** Per-install directory for the agent's own state. */
   stateDir: string;
+  /**
+   * Diagnostics the agent cannot put on the wire — a stdio MCP server it could
+   * not start, the command it tried, the child's stderr. The host writes them
+   * into the deep log, where an MCP server listed in the UI but missing from
+   * the session can be explained.
+   */
+  onDiagnostic?: (event: { kind: string; data?: Record<string, unknown> }) => void;
 }
 
 /**

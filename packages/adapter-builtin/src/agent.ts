@@ -620,7 +620,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
   ) {
     const stored = restore ? loadBuiltinSession(this.opts.stateDir, sessionId) : undefined;
     this.mcp.close();
-    this.mcp = new McpManager(parseMcpServers(mcpServers), (toolCall) => this.askPermission(toolCall));
+    this.mcp = new McpManager(
+      parseMcpServers(mcpServers),
+      (toolCall) => this.askPermission(toolCall),
+      this.opts.onDiagnostic,
+    );
     this.sessionId = sessionId;
     this.cwd = cwd || this.opts.cwd;
     // A conversation saved before providers existed carries a bare model id —

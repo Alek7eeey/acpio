@@ -43,6 +43,7 @@ export {
   SHELL_SESSION_PROVIDER,
 } from "./adapters.js";
 export { childProcessEnv } from "./childEnv.js";
+export { ProcessTextDecoder } from "./processText.js";
 export { CONSOLE_TERMINAL_LIMITS, clampConsoleTerminalSize } from "./consoleTerminal.js";
 export { isProtocolPlaceholder } from "./protocolPlaceholder.js";
 export { DEFAULT_DEV_UI_PORT, DEFAULT_SERVER_PORT, resolveServerPort } from "./ports.js";
@@ -506,6 +507,29 @@ export function mcpCommandNeedsAbsolute(server: McpServerConfig): boolean {
   const command = server.command?.trim() ?? "";
   if (!command) return false;
   return !/[\\/]/.test(command);
+}
+
+/**
+ * How to launch a stdio MCP command. Windows needs a shell for the `.cmd`/`.bat`
+ * shims npm installs (`spawn` answers EINVAL on them) and for a bare name it
+ * must resolve through PATH; with `shell: true` the command line is handed to
+ * `cmd.exe` verbatim, so every word needs its own quotes — an unquoted
+ * `C:\Program Files\nodejs\mcp-gitea.cmd` becomes the command `C:\Program`
+ * and the server never starts, even though the path is right.
+ */
+export function mcpStdioSpawn(
+  command: string,
+  args: string[] = [],
+  platform: NodeJS.Platform = process.platform,
+): { command: string; args: string[]; shell: boolean } {
+  const trimmed = command.trim();
+  const needsShell =
+    platform === "win32" && (/[\\/]/.test(trimmed) ? /\.(cmd|bat)$/i.test(trimmed) : true);
+  if (!needsShell) return { command: trimmed, args, shell: false };
+  // Only what cmd.exe would otherwise split on needs quotes: `npx` stays as it
+  // is, while a shim under "Program Files" keeps its path whole.
+  const quote = (value: string) => (/[\s"&|<>^]/.test(value) ? `"${value}"` : value);
+  return { command: quote(trimmed), args: args.map(quote), shell: true };
 }
 
 /** True when the server has the fields its transport needs (ignores `enabled`). */
