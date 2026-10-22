@@ -849,6 +849,15 @@ export const ru = {
     customAgentTestOk: "Агент отвечает: моделей — {{models}}, режимов — {{modes}}. {{message}}",
     customAgentTestFail: "Не удалось запустить: {{error}}",
     profileSaved: "Имя сохранено",
+    exportSettings: "Экспорт",
+    exportSettingsHint:
+      "Скачать файл настроек, чтобы применить их на другой машине. API-ключи и токены в файл не попадают.",
+    exportSettingsFailed: "Не удалось выгрузить настройки: {{error}}",
+    importSettings: "Импорт",
+    importSettingsHint:
+      "Применить файл настроек другого пользователя. Свои API-ключи и токены остаются на месте.",
+    importSettingsDone: "Настройки применены: {{count}}",
+    importSettingsFailed: "Не удалось применить файл настроек: {{error}}",
     saved: "Сохранено",
     passwordUpdated: "Пароль обновлён",
     fillAllFields: "Заполните все поля",

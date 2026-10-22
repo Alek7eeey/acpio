@@ -307,6 +307,17 @@ The adapter then appears on its own:
   the server starts.
 - **After `git pull`** — hard-refresh the browser (`Ctrl+Shift+R`): old CSS/JS modules are cached.
 
+## Moving settings between installs
+
+- **Export** — the button in the header of every settings page: downloads a JSON file with
+  every setting. Provider API keys, the remote access key and MCP server tokens/env are not
+  written into it, and neither are the composer drafts.
+- **Import** — the button next to it: applies another user's file locally. Your own keys and
+  tokens stay in place (a server or endpoint with the same id keeps your key), and fields
+  this app does not know are dropped.
+- **Folders** (`defaultCwd`, the diagnostics and export folders, per-folder MCP configs)
+  travel as they are — their paths need fixing on another machine.
+
 ## Mobile and remote access
 
 - **Phone & VPN** — dev listens on `0.0.0.0`; open `http://<PC_IP>:18751` from a phone on the same LAN/VPN. Production uses port **18741**.

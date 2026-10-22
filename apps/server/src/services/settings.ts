@@ -602,6 +602,234 @@ function withPluginSkills(settings: AppSettings): AppSettings {
   return contributed.length ? { ...settings, pluginSkills: [...contributed] } : settings;
 }
 
+/** Marker written into a settings file; foreign JSON is refused by it. */
+export const SETTINGS_FILE_KIND = "acpio-settings";
+export const SETTINGS_FILE_VERSION = 1;
+
+/** A settings file: what one install exports and another applies whole. */
+export type SettingsFile = {
+  kind: typeof SETTINGS_FILE_KIND;
+  version: number;
+  exportedAt: string;
+  settings: Record<string, unknown>;
+};
+
+/**
+ * Credentials never travel: a settings file goes from one person to another,
+ * and the keys one of them pays for stay theirs — an import leaves the local
+ * wallet untouched instead of replacing it with a stranger's (or an empty) one.
+ */
+const SECRET_SETTING_KEYS = [
+  "cursorApiKey",
+  "anthropicApiKey",
+  "openaiApiKey",
+  "remoteAccessKey",
+] as const;
+
+/** One provider row without the key it pays with. */
+function stripProviderSecrets(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const { apiKey: _apiKey, ...rest } = raw as Record<string, unknown>;
+  return rest;
+}
+
+/** One MCP server without the token/env/headers it authenticates with. */
+function stripMcpSecrets(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const {
+    token: _token,
+    headers: _headers,
+    remoteConfig: _remoteConfig,
+    env: _env,
+    envConfig: _envConfig,
+    ...rest
+  } = raw as Record<string, unknown>;
+  return rest;
+}
+
+/**
+ * A settings bag without its credentials — the shape both directions use, so a
+ * hand-edited file carrying a key can no more overwrite the local one than an
+ * export can leak it.
+ */
+function stripSecrets(bag: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...bag };
+  for (const key of SECRET_SETTING_KEYS) delete out[key];
+  // Typed drafts are one user's own text, not a setting anyone inherits.
+  delete out.composerDrafts;
+  if (Array.isArray(out.builtinProviders)) {
+    out.builtinProviders = out.builtinProviders.map(stripProviderSecrets);
+  }
+  const pluginProviders = out.pluginProviders;
+  if (pluginProviders && typeof pluginProviders === "object" && !Array.isArray(pluginProviders)) {
+    out.pluginProviders = Object.fromEntries(
+      Object.entries(pluginProviders as Record<string, unknown>).map(([id, row]) => [
+        id,
+        stripProviderSecrets(row),
+      ]),
+    );
+  }
+  if (Array.isArray(out.mcpServers)) {
+    out.mcpServers = out.mcpServers.map(stripMcpSecrets);
+  }
+  const folders = out.mcpFolderConfigs;
+  if (folders && typeof folders === "object" && !Array.isArray(folders)) {
+    out.mcpFolderConfigs = Object.fromEntries(
+      Object.entries(folders as Record<string, unknown>).map(([cwd, cfg]) => {
+        const row =
+          cfg && typeof cfg === "object" && !Array.isArray(cfg)
+            ? (cfg as Record<string, unknown>)
+            : {};
+        return [
+          cwd,
+          {
+            ...row,
+            ...(Array.isArray(row.servers)
+              ? { servers: row.servers.map(stripMcpSecrets) }
+              : {}),
+          },
+        ];
+      }),
+    );
+  }
+  return out;
+}
+
+/** Settings a file may carry: the stored half, credentials left behind. */
+export async function buildSettingsFile(): Promise<SettingsFile> {
+  // The stored rows, never `getSettings`: what a plugin contributes is the
+  // plugin's, and a file must not freeze a copy of it.
+  const stored = await readStoredSettings();
+  return {
+    kind: SETTINGS_FILE_KIND,
+    version: SETTINGS_FILE_VERSION,
+    exportedAt: new Date().toISOString(),
+    settings: stripSecrets({ ...stored }),
+  };
+}
+
+export type SettingsImportResult = {
+  settings: AppSettings;
+  /** Settings the file actually applied, by top-level key. */
+  applied: string[];
+};
+
+/** Keys a settings file may set — anything else is not a setting of this app. */
+const SETTING_KEYS = new Set(Object.keys(DEFAULT_SETTINGS));
+
+/**
+ * Credentials one local MCP server authenticates with, keyed by its id: a row
+ * that comes back from a file is the same server with the same wallet.
+ */
+function localMcpSecrets(
+  rows: readonly McpServerConfig[],
+  id: unknown,
+): Record<string, unknown> {
+  const row = rows.find((s) => s.id === id);
+  if (!row) return {};
+  return {
+    ...(row.token !== undefined ? { token: row.token } : {}),
+    ...(row.headers ? { headers: row.headers } : {}),
+    ...(row.remoteConfig !== undefined ? { remoteConfig: row.remoteConfig } : {}),
+    ...(row.env ? { env: row.env } : {}),
+    ...(row.envConfig !== undefined ? { envConfig: row.envConfig } : {}),
+  };
+}
+
+/**
+ * Give every row of an imported list the credentials the local row with that id
+ * holds: the file gets to say what a server or an endpoint IS (url, models,
+ * switches) and nothing about what it pays with. A row the local install does
+ * not know arrives without one — it is the importing user's to fill.
+ */
+function withLocalSecrets(
+  patch: Record<string, unknown>,
+  current: AppSettings,
+): Record<string, unknown> {
+  const out = { ...patch };
+  if (Array.isArray(out.builtinProviders)) {
+    out.builtinProviders = (out.builtinProviders as unknown[]).map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+      const r = row as Record<string, unknown>;
+      const local = current.builtinProviders.find((p) => p.id === r.id);
+      return { apiKey: local?.apiKey ?? "", ...r };
+    });
+  }
+  const plugins = out.pluginProviders;
+  if (plugins && typeof plugins === "object" && !Array.isArray(plugins)) {
+    out.pluginProviders = Object.fromEntries(
+      Object.entries(plugins as Record<string, unknown>).map(([id, row]) => [
+        id,
+        row && typeof row === "object" && !Array.isArray(row)
+          ? { apiKey: current.pluginProviders[id]?.apiKey ?? "", ...(row as object) }
+          : row,
+      ]),
+    );
+  }
+  if (Array.isArray(out.mcpServers)) {
+    const global = current.mcpServers;
+    out.mcpServers = (out.mcpServers as unknown[]).map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return row;
+      const r = row as Record<string, unknown>;
+      return { ...localMcpSecrets(global, r.id), ...r };
+    });
+  }
+  const folders = out.mcpFolderConfigs;
+  if (folders && typeof folders === "object" && !Array.isArray(folders)) {
+    out.mcpFolderConfigs = Object.fromEntries(
+      Object.entries(folders as Record<string, unknown>).map(([cwd, cfg]) => {
+        if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return [cwd, cfg];
+        const row = cfg as Record<string, unknown>;
+        if (!Array.isArray(row.servers)) return [cwd, row];
+        const known = [
+          ...(current.mcpFolderConfigs[cwd]?.servers ?? []),
+          ...current.mcpServers,
+        ];
+        return [
+          cwd,
+          {
+            ...row,
+            servers: (row.servers as unknown[]).map((server) => {
+              if (!server || typeof server !== "object" || Array.isArray(server)) {
+                return server;
+              }
+              const s = server as Record<string, unknown>;
+              return { ...localMcpSecrets(known, s.id), ...s };
+            }),
+          },
+        ];
+      }),
+    );
+  }
+  return out;
+}
+
+/**
+ * Apply a settings file: every setting it carries lands, its credentials are
+ * ignored (the local ones survive), and the ordinary merge heals whatever this
+ * app version no longer knows.
+ */
+export async function importSettingsFile(raw: unknown): Promise<SettingsImportResult> {
+  const outer = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const bag = (outer as { settings?: unknown }).settings;
+  if (!bag || typeof bag !== "object" || Array.isArray(bag)) {
+    throw new Error("settings file: no settings object");
+  }
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(stripSecrets(bag as Record<string, unknown>))) {
+    if (!SETTING_KEYS.has(key)) continue;
+    patch[key] = value;
+  }
+  // The theme is the one field the merge spreads unchecked, so a typo in a
+  // hand-edited file would otherwise be stored and painted as "no theme".
+  if (patch.theme !== undefined && patch.theme !== "light" && patch.theme !== "dark") {
+    delete patch.theme;
+  }
+  const withSecrets = withLocalSecrets(patch, await readStoredSettings());
+  const settings = await updateSettings(withSecrets as Partial<AppSettings>);
+  return { settings, applied: Object.keys(patch) };
+}
+
 export async function updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
   const current = await readStoredSettings();
   const next = mergeSettings({

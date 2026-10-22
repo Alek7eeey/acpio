@@ -2307,6 +2307,56 @@ export function SettingsPage() {
     showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
   };
 
+  const [settingsFileBusy, setSettingsFileBusy] = useState(false);
+  const settingsFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /** Download these settings as a file another install applies by import. */
+  const exportSettingsFile = async () => {
+    setSettingsFileBusy(true);
+    try {
+      await api.downloadSettingsExport();
+    } catch (err) {
+      showToast(
+        t("settings.exportSettingsFailed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+        { tone: "danger" },
+      );
+    } finally {
+      setSettingsFileBusy(false);
+    }
+  };
+
+  /**
+   * Apply another user's settings file. The page paints the result in place,
+   * and the shell reloads the payload it holds: a theme, a palette or an agent
+   * the file brought only reaches the rest of the app through the store.
+   */
+  const importSettingsFile = async (file: File) => {
+    setSettingsFileBusy(true);
+    try {
+      const doc: unknown = JSON.parse(await file.text());
+      const result = await api.importSettingsFile(doc);
+      await useAppStore.getState().loadBootstrap();
+      const applied = useAppStore.getState().settings ?? result.settings;
+      setForm(applied);
+      setSavedSnapshot(saveGatedSnapshot(applied));
+      showToast(t("settings.importSettingsDone", { count: result.applied.length }), {
+        tone: "success",
+        id: "settings-saved",
+      });
+    } catch (err) {
+      showToast(
+        t("settings.importSettingsFailed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+        { tone: "danger" },
+      );
+    } finally {
+      setSettingsFileBusy(false);
+    }
+  };
+
   const title =
     section === "interface"
       ? leaf === "colors"
@@ -2434,6 +2484,38 @@ export function SettingsPage() {
             <p className={styles.eyebrow}>{highlightText(eyebrow, settingsQuery)}</p>
             <h1>{highlightText(title, settingsQuery)}</h1>
             <p className={styles.lead}>{highlightText(subtitle, settingsQuery)}</p>
+          </div>
+          <div className={styles.headerActions}>
+            <input
+              ref={settingsFileInputRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Clearing lets the same file be picked again after a fix.
+                e.target.value = "";
+                if (file) void importSettingsFile(file);
+              }}
+            />
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              title={t("settings.importSettingsHint")}
+              disabled={settingsFileBusy}
+              onClick={() => settingsFileInputRef.current?.click()}
+            >
+              {t("settings.importSettings")}
+            </button>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              title={t("settings.exportSettingsHint")}
+              disabled={settingsFileBusy}
+              onClick={() => void exportSettingsFile()}
+            >
+              {t("settings.exportSettings")}
+            </button>
           </div>
         </header>
         )}

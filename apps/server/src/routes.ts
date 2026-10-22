@@ -7,7 +7,13 @@ import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
 import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
-import { forgetMcpFolderConfig, getSettings, updateSettings } from "./services/settings.js";
+import {
+  buildSettingsFile,
+  forgetMcpFolderConfig,
+  getSettings,
+  importSettingsFile,
+  updateSettings,
+} from "./services/settings.js";
 import {
   addTaskAttachments,
   createSession,
@@ -883,14 +889,15 @@ export async function registerRoutes(app: FastifyInstance) {
     return searchMessages(needle, limit);
   });
 
-  app.get("/api/settings", async () => getSettings());
-  app.put("/api/settings", async (req) => {
-    const patch = settingsSchema.parse(req.body);
-    const current = await getSettings();
+  /**
+   * What a settings write owes beyond the row itself: caches to drop and live
+   * sessions to restart. Both write paths go through it — an edited page and an
+   * imported file — so an import reaches as far as a Save.
+   */
+  const afterSettingsWrite = (patch: Partial<AppSettings>, current: AppSettings) => {
     if (patch.defaultProvider && patch.defaultProvider !== current.defaultProvider) {
       clearModelsCache();
     }
-    const next = await updateSettings(patch as Partial<AppSettings>);
     if (
       patch.mcpServers ||
       patch.mcpFolderConfigs ||
@@ -963,7 +970,52 @@ export async function registerRoutes(app: FastifyInstance) {
     if (patch.terminalShell && patch.terminalShell !== current.terminalShell) {
       void reconcileUserConsolesShell();
     }
+  };
+
+  app.get("/api/settings", async () => getSettings());
+  app.put("/api/settings", async (req) => {
+    const patch = settingsSchema.parse(req.body) as Partial<AppSettings>;
+    const current = await getSettings();
+    const next = await updateSettings(patch);
+    afterSettingsWrite(patch, current);
     return next;
+  });
+
+  /**
+   * A settings file for another machine: everything this install was tuned to,
+   * credentials left behind. Downloaded as JSON, applied there by an import.
+   */
+  app.get("/api/settings/export", async (_req, reply) => {
+    const file = await buildSettingsFile();
+    const stamp = file.exportedAt.slice(0, 10);
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename*=UTF-8''${encodeURIComponent(`acpio-settings-${stamp}.json`)}`,
+    );
+    return reply
+      .type("application/json; charset=utf-8")
+      .header("Cache-Control", "no-store")
+      .send(JSON.stringify(file, null, 2));
+  });
+
+  /**
+   * Apply another user's settings file locally. Its credentials are ignored and
+   * the local ones survive: the file carries the settings, not the wallet.
+   */
+  app.post("/api/settings/import", async (req) => {
+    const body = z
+      .object({ settings: z.record(z.unknown()) })
+      .passthrough()
+      .parse(req.body);
+    const current = await getSettings();
+    const { settings: next, applied } = await importSettingsFile(body);
+    // Only what the file carried is compared, so an unchanged section (the MCP
+    // list, an endpoint) does not restart live chats for nothing.
+    const patch = Object.fromEntries(
+      applied.map((key) => [key, (next as unknown as Record<string, unknown>)[key]]),
+    ) as Partial<AppSettings>;
+    afterSettingsWrite(patch, current);
+    return { settings: await getSettings(), applied };
   });
 
   app.get("/api/sessions", async (req) => {

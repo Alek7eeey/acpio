@@ -125,6 +125,43 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(patch),
     }),
+  /**
+   * Download this install's settings as a file another one applies with an
+   * import — everything that was tuned, credentials left behind.
+   */
+  downloadSettingsExport: async () => {
+    const res = await fetch("/api/settings/export", { credentials: "include" });
+    if (!res.ok) {
+      const text = await res.text();
+      let message = text || res.statusText;
+      try {
+        const json = JSON.parse(text) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // keep raw text
+      }
+      throw new Error(message);
+    }
+    const content = await res.text();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+    const fileName = match ? decodeURIComponent(match[1]) : "acpio-settings.json";
+    const blob = new Blob([content], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  },
+  /** Apply a settings file: local credentials stay, everything else lands. */
+  importSettingsFile: (file: unknown) =>
+    request<{ settings: AppSettings; applied: string[] }>("/api/settings/import", {
+      method: "POST",
+      body: JSON.stringify(file),
+    }),
   probeAgent: (provider?: AgentProvider) =>
     request<AgentProbeResult>("/api/agent/probe", {
       method: "POST",

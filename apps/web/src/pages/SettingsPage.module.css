@@ -38,6 +38,13 @@
   flex-wrap: wrap;
 }
 
+/* Import/export of a settings file — the page-wide actions of the header. */
+.headerActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .eyebrow {
   margin: 0 0 2px;
   font-size: 0.68rem;
