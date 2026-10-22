@@ -843,6 +843,36 @@ export class AcpClient extends EventEmitter {
       mcpServers?: McpServerConfig[];
     },
   ): Promise<void> {
+    // The deadline covers the whole launch, not just the ACP handshake: stat-ing
+    // the cwd, resolving the command and spawning it can hang on a dead network
+    // share, and a timeout armed only around the handshake never fires — the
+    // caller (the connect check) then waits forever instead of reporting it.
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(
+          new Error(
+            `Таймаут запуска ACP (${timeoutMs}ms). Проверьте CLI и модель. ${this.stderrBuf.slice(-300)}`,
+          ),
+        );
+      }, timeoutMs);
+      timer.unref?.();
+    });
+    try {
+      await Promise.race([this.launch(opts), deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async launch(opts?: {
+    catalogOnly?: boolean;
+    resume?: { sessionId: string; mode: "resume" | "load" };
+    ingestReplay?: boolean;
+    model?: string;
+    modelParams?: Record<string, string>;
+    mcpServers?: McpServerConfig[];
+  }): Promise<void> {
     const env = buildAgentEnv(this.adapter, this.settings);
     const cwd = this.cwd || process.cwd();
     // A missing cwd makes the child die with a generic "cannot find the path"
@@ -1033,20 +1063,7 @@ export class AcpClient extends EventEmitter {
       }
     };
 
-    await Promise.race([
-      boot(),
-      new Promise<never>((_, reject) => {
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Таймаут запуска ACP (${timeoutMs}ms). Проверьте CLI и модель. ${this.stderrBuf.slice(-300)}`,
-              ),
-            ),
-          timeoutMs,
-        );
-      }),
-    ]);
+    await boot();
   }
 
   async listSessions(filter?: { cwd?: string }): Promise<
