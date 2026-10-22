@@ -4258,6 +4258,7 @@ function ChatThread() {
   const saveSettings = useAppStore((s) => s.saveSettings);
   const toggleFavoriteModel = useAppStore((s) => s.toggleFavoriteModel);
   const sendPromptStore = useAppStore((s) => s.sendPrompt);
+  const warnIfHarnessNotConfigured = useAppStore((s) => s.warnIfHarnessNotConfigured);
   const sendPrompt = useCallback(
     (text: string, opts?: { editMessageId?: string; attachments?: PendingAttachment[] }) =>
       sendPromptStore(text, { ...opts, sessionId: bind?.sessionId ?? undefined }),
@@ -5268,6 +5269,13 @@ function ChatThread() {
         : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
+      if (shouldAutoFocusComposer()) focusComposer();
+      return;
+    }
+    // A harness that cannot take a prompt yet (the built-in agent without an
+    // endpoint or a model) is named here, before the composer is wiped — the
+    // draft is the reader's text and a failed send would only queue it.
+    if (warnIfHarnessNotConfigured(bind?.sessionId ?? null)) {
       if (shouldAutoFocusComposer()) focusComposer();
       return;
     }

@@ -241,6 +241,29 @@
   background: var(--accent-hover);
 }
 
+.secondary {
+  width: 100%;
+  height: 38px;
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition:
+    color var(--motion),
+    border-color var(--motion);
+}
+
+.secondary:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 28%, var(--border));
+}
+
 .continue:disabled {
   opacity: 0.38;
   cursor: default;

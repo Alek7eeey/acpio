@@ -118,6 +118,14 @@ export const ru = {
     agentStoppedLead:
       "Эти харнессы были доступны и больше не запущены на этом компьютере. Чаты с ними можно читать, но новые сообщения будут недоступны, пока харнесс снова не заработает.",
     agentStoppedOk: "Понятно",
+    harnessNotConfiguredTitle: "Агент не настроен",
+    harnessNotConfiguredLeadEndpoint:
+      "{{agent}}: укажите endpoint в разделе «Встроенный агент → Провайдеры и модели» — подключаться некуда, поэтому сообщение не отправлено.",
+    harnessNotConfiguredLeadModel:
+      "{{agent}}: добавьте модель в разделе «Встроенный агент → Провайдеры и модели» — отвечать нечем, поэтому сообщение не отправлено.",
+    harnessNotConfiguredStatus: "не настроен",
+    harnessNotConfiguredOpenSettings: "Открыть настройки",
+    harnessNotConfiguredOk: "Понятно",
     agentChecking: "Проверяю…",
     harnessesOnlineCount: "{{count}}",
     harnessesStatus: "{{online}} из {{total}} харнессов онлайн",

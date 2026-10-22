@@ -5,7 +5,7 @@ import { I18nProvider } from "./lib/i18n";
 import { installMessageHotkeys } from "./lib/messageHotkeys";
 import { useSessionSocket } from "./lib/useSessionSocket";
 import { AppShell } from "./components/AppShell";
-import { AgentGate, AgentOfflineWarning } from "./components/AgentGate";
+import { AgentGate, AgentOfflineWarning, HarnessNotConfiguredWarning } from "./components/AgentGate";
 import { BootSplash } from "./components/BootSplash";
 import { NotificationPrompt } from "./components/NotificationPrompt";
 import { ToastHost } from "./components/ToastHost";
@@ -115,6 +115,9 @@ export function App() {
       {showSplash ? <BootSplash ready={ready && !loading} onDone={onSplashDone} /> : null}
       {ready && !loading && !splashBlocking && !agentGateDismissed ? <AgentGate /> : null}
       {ready && !loading && !splashBlocking && agentGateDismissed ? <AgentOfflineWarning /> : null}
+      {/* Not tied to the boot gates: this one answers a send attempt and must
+          speak even while the agent probe is still running. */}
+      {ready && !loading && !splashBlocking ? <HarnessNotConfiguredWarning /> : null}
       {ready && !loading && !splashBlocking && agentGateDismissed ? <NotificationPrompt /> : null}
     </I18nProvider>
   );

@@ -1,5 +1,5 @@
-import type { AdapterMetaDto, AgentProvider } from "@acpio/shared";
-import { isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
+import type { AdapterMetaDto, AgentProvider, AppSettings } from "@acpio/shared";
+import { healBuiltinProviders, isShellSession, SHELL_SESSION_PROVIDER } from "@acpio/shared";
 
 export type AgentAvailabilityMap = Partial<Record<AgentProvider, boolean | null>>;
 
@@ -91,6 +91,27 @@ export function isBuiltinFamilyProvider(
   if (!provider) return false;
   const adapter = adapters.find((a) => a.id === provider);
   return Boolean(adapter && isBuiltinFamilyAdapter(adapter));
+}
+
+/**
+ * Why a chat on this harness cannot take a prompt yet, or `null` when it can.
+ * The built-in agent — and every preset of it — is the one harness with an
+ * in-app precondition: it runs inside the server, so no CLI probe reports it
+ * as offline, and a chat on it without a provider endpoint or a model fails on
+ * every prompt only after the message was already queued. The web asks this
+ * before it takes a prompt so the reason is said up front.
+ */
+export function harnessNotConfiguredReason(
+  provider: AgentProvider | string | null | undefined,
+  adapters: AdapterMetaDto[],
+  settings: AppSettings,
+): "endpoint" | "model" | null {
+  if (!isBuiltinFamilyProvider(provider, adapters)) return null;
+  const providers = healBuiltinProviders(settings.builtinProviders).filter(
+    (p) => p.enabled !== false,
+  );
+  if (!providers.some((p) => p.url.trim())) return "endpoint";
+  return providers.some((p) => p.models.some((m) => m.enabled !== false)) ? null : "model";
 }
 
 /**

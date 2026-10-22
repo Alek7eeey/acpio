@@ -45,7 +45,7 @@ import {
   writeStoredChatPanes,
   type ChatPaneSlot,
 } from "./chatPanes";
-import { pickCreateProvider, isBuiltinFamilyAdapter, isBuiltinFamilyProvider, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
+import { pickCreateProvider, isBuiltinFamilyAdapter, isBuiltinFamilyProvider, harnessNotConfiguredReason, type AgentAvailabilityMap, hasStoredAgentAvailability, readStoredAgentAvailability, writeStoredAgentAvailability } from "./harness";
 import { rememberDiagnosticsError, submitAutoErrorDump } from "./diagnostics";
 import {
   hydrateSessionSlashCommands,
@@ -340,6 +340,19 @@ type AppState = {
   /** Harnesses that were online last time and went offline on this reload. */
   agentOfflineWarning: AgentProvider[];
   dismissAgentOfflineWarning: () => void;
+  /**
+   * A prompt the harness behind the chat cannot take yet (the built-in agent
+   * without an endpoint or a model). Held here rather than in the composer so
+   * the same warning answers every door: the composer, a board card and a
+   * queued message.
+   */
+  harnessNotConfigured: { provider: AgentProvider; reason: "endpoint" | "model" } | null;
+  dismissHarnessNotConfigured: () => void;
+  /**
+   * True when the chat's harness declares itself unconfigured — the warning is
+   * raised as a side effect, so a caller gets both with one call.
+   */
+  warnIfHarnessNotConfigured: (sessionId?: string | null) => boolean;
   pendingPermission: PendingPermission | null;
   /** Extra permission prompts waiting behind the one shown in the UI. */
   permissionQueue: PendingPermission[];
@@ -2059,6 +2072,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   agentGateDismissed:
     typeof window !== "undefined" && hasStoredAgentAvailability(),
   agentOfflineWarning: [],
+  harnessNotConfigured: null,
   pendingPermission: null,
   permissionQueue: [],
   pendingQuestion: null,
@@ -2110,6 +2124,22 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   dismissAgentOfflineWarning() {
     set({ agentOfflineWarning: [] });
+  },
+
+  dismissHarnessNotConfigured() {
+    set({ harnessNotConfigured: null });
+  },
+
+  warnIfHarnessNotConfigured(sessionId) {
+    const id = sessionId ?? get().activeSessionId;
+    const provider =
+      (id ? get().sessions.find((s) => s.id === id)?.provider : null) ??
+      (get().activeSession?.id === id ? get().activeSession?.provider : null) ??
+      null;
+    const reason = harnessNotConfiguredReason(provider, get().adapters, get().settings);
+    if (!provider || !reason) return false;
+    set({ harnessNotConfigured: { provider, reason } });
+    return true;
   },
 
   async probeAllAgents(opts) {
@@ -3043,6 +3073,10 @@ export const useAppStore = create<AppState>((set, get) => ({
    */
   async sendPrompt(text, opts) {
     const sid = opts?.sessionId ?? get().activeSessionId;
+    // A harness the user has not configured yet cannot turn this text into a
+    // turn: say so now instead of queueing a message that would only come back
+    // as a failure.
+    if (get().warnIfHarnessNotConfigured(sid)) return;
     const limit = get().settings.multitask ? 2 : 1;
     const detail = sid ? liveDetail(get(), sid) : get().activeSession;
     const listed = sid ? get().sessions.find((s) => s.id === sid) : null;

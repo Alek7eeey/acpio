@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { useT } from "../lib/i18n";
 import { harnessLabel, isBuiltinFamilyAdapter, isBuiltinFamilyProvider } from "../lib/harness";
+import { settingsPath } from "../lib/settingsNav";
 import { useAppStore } from "../lib/store";
 import styles from "./AgentGate.module.css";
 
@@ -25,6 +27,8 @@ function GateShell({
   actionLabel,
   actionDisabled,
   onAction,
+  secondaryLabel,
+  onSecondaryAction,
 }: {
   titleId: string;
   title: string;
@@ -34,6 +38,9 @@ function GateShell({
   actionLabel: string;
   actionDisabled?: boolean;
   onAction: () => void;
+  /** Optional ghost action under the primary one ("Got it" on a warning). */
+  secondaryLabel?: string;
+  onSecondaryAction?: () => void;
 }) {
   return (
     <div className={styles.overlay} role="dialog" aria-modal="true" aria-labelledby={titleId}>
@@ -62,6 +69,11 @@ function GateShell({
         >
           {actionLabel}
         </button>
+        {secondaryLabel ? (
+          <button type="button" className={styles.secondary} onClick={onSecondaryAction}>
+            {secondaryLabel}
+          </button>
+        ) : null}
       </div>
     </div>
   );
@@ -144,6 +156,51 @@ export function AgentGate() {
           />
         );
       })}
+    </GateShell>
+  );
+}
+
+/**
+ * A prompt aimed at a harness that cannot take it yet — the built-in agent
+ * without an endpoint or a model. Raised by the send doors themselves (the
+ * composer, a board card) before anything is queued, so the missing setting is
+ * named instead of surfacing later as a failed turn.
+ */
+export function HarnessNotConfiguredWarning() {
+  const t = useT();
+  const navigate = useNavigate();
+  const adapters = useAppStore((s) => s.adapters);
+  const warning = useAppStore((s) => s.harnessNotConfigured);
+  const dismiss = useAppStore((s) => s.dismissHarnessNotConfigured);
+  if (!warning) return null;
+  const label = harnessLabel(warning.provider, adapters);
+
+  return (
+    <GateShell
+      titleId="harness-not-configured-title"
+      title={t("common.harnessNotConfiguredTitle")}
+      lead={t(
+        warning.reason === "endpoint"
+          ? "common.harnessNotConfiguredLeadEndpoint"
+          : "common.harnessNotConfiguredLeadModel",
+        { agent: label },
+      )}
+      actionLabel={t("common.harnessNotConfiguredOpenSettings")}
+      onAction={() => {
+        dismiss();
+        navigate(settingsPath("builtin", "providers"));
+      }}
+      secondaryLabel={t("common.harnessNotConfiguredOk")}
+      onSecondaryAction={() => dismiss()}
+    >
+      <AgentRow
+        label={label}
+        loading={false}
+        online={false}
+        checkingLabel={t("common.agentChecking")}
+        onlineLabel={t("common.online")}
+        offlineLabel={t("common.harnessNotConfiguredStatus")}
+      />
     </GateShell>
   );
 }
