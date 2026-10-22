@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
+  BG_MCP_SERVER_ID,
   BUILD_INFO,
+  builtinMcpServers,
   isMcpServerAttached,
   mcpServerEndpoint,
   modelDisplayName,
@@ -833,9 +835,10 @@ export function AppShell() {
   }, [dragging, sidebarOpen, setSidebarOpen]);
 
   // MCP servers actually handed to the agent (enabled + HTTP URL or stdio command).
+  // acpio's own servers ride the same switches and come first, like in Settings.
   const enabledMcpServers = useMemo(
-    () => (settings.mcpServers ?? []).filter(isMcpServerAttached),
-    [settings.mcpServers],
+    () => [...builtinMcpServers(settings), ...(settings.mcpServers ?? [])].filter(isMcpServerAttached),
+    [settings],
   );
 
   // Live MCP server status (probed by the server), shown as dots in the tooltip.
@@ -1880,7 +1883,8 @@ export function AppShell() {
                     ) : (
                       <div className={styles.agentTipMcpList}>
                         {enabledMcpServers.map((s) => {
-                          const st = mcpStatus[s.id];
+                          // The built-in server is this very process: if the UI answers, so does it.
+                          const st = s.id === BG_MCP_SERVER_ID ? true : mcpStatus[s.id];
                           const dotCls =
                             st === true
                               ? styles.agentTipMcpDotOk
@@ -1904,7 +1908,9 @@ export function AppShell() {
                                 {s.name}
                               </span>
                               <span className={styles.agentTipMcpType}>
-                                {t(mcpTypeMessageKey(s.type))}
+                                {s.id === BG_MCP_SERVER_ID
+                                  ? t("settings.mcpBuiltin")
+                                  : t(mcpTypeMessageKey(s.type))}
                               </span>
                             </div>
                           );
