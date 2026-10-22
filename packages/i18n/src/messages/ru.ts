@@ -798,6 +798,9 @@ export const ru = {
     mcpRemote: "Удалённый",
     mcpStdio: "Stdio",
     mcpAdd: "Добавить MCP-сервер",
+    mcpDraftApply: "Применить к списку",
+    mcpDraftApplyHint:
+      "Сервер появится в списке выше; в файл настроек он попадёт по кнопке «Сохранить» внизу страницы.",
     mcpType: "Тип подключения",
     mcpName: "Название",
     mcpUrl: "URL сервера",

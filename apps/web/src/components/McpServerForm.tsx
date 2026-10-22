@@ -15,12 +15,14 @@ export function McpServerForm({
   onSave,
   onCancel,
   saveLabel,
+  saveHint,
 }: {
   draft: McpServerConfig;
   onChange: (next: McpServerConfig) => void;
   onSave: () => void;
   onCancel: () => void;
   saveLabel?: string;
+  saveHint?: string;
 }) {
   const t = useT();
   const canSave = draft.name.trim().length > 0 && isMcpServerConfigured(draft);
@@ -121,6 +123,7 @@ export function McpServerForm({
           {saveLabel ?? t("common.save")}
         </button>
       </div>
+      {saveHint ? <span className={styles.fieldHint}>{saveHint}</span> : null}
     </div>
   );
 }

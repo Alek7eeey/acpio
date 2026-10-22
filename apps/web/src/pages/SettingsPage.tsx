@@ -115,6 +115,44 @@ type ApiKeyField = "cursorApiKey" | "anthropicApiKey" | "openaiApiKey";
 /** Dumps rendered in one go; the wheel down the list asks for the next page. */
 const DIAG_DUMPS_PAGE = 30;
 
+/**
+ * Fields the page's Save never sends: the agent is bound via Connect and the
+ * theme/locale are toggled from the shell, so edits to them are not this Save's
+ * to persist — counting them would keep the button lit on every page.
+ */
+const SAVE_GATED_OMIT = new Set(["defaultProvider", "theme", "locale"]);
+
+/**
+ * Text of the settings the page's Save persists, keys sorted: two payloads
+ * built differently compare equal, so a page nothing has been edited on reads
+ * as unchanged.
+ */
+function saveGatedSnapshot(form: AppSettings): string {
+  const stable = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(stable);
+    if (value && typeof value === "object") {
+      const row = value as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(row)
+          .sort()
+          .map((key) => [key, stable(row[key])]),
+      );
+    }
+    return value;
+  };
+  const fields = form as unknown as Record<string, unknown>;
+  return JSON.stringify(
+    stable(
+      Object.fromEntries(
+        Object.keys(fields)
+          .filter((key) => !SAVE_GATED_OMIT.has(key))
+          .sort()
+          .map((key) => [key, fields[key]]),
+      ),
+    ),
+  );
+}
+
 /** Editable form state for one user-defined ACP agent (args/env as text). */
 type CustomAgentDraft = {
   id: string;
@@ -1548,6 +1586,17 @@ export function SettingsPage() {
   }, [settingsQuery, t, searchIndex]);
   const [form, setForm] = useState<AppSettings>(settings);
   /**
+   * The payload the last Save persisted. The footer button is disabled while
+   * the form matches it — right after a save, and on a page nobody edited — and
+   * lights up as soon as an edit is only in the form: an MCP server added to the
+   * list (or a draft applied) is not saved until that button is pressed.
+   */
+  const [savedSnapshot, setSavedSnapshot] = useState(() => saveGatedSnapshot(settings));
+  const formDirty = useMemo(
+    () => saveGatedSnapshot(form) !== savedSnapshot,
+    [form, savedSnapshot],
+  );
+  /**
    * The output-ceiling field is a free-text number input, like the chat-tree
    * limit: keep the raw string while the user types so a half-erased value
    * ("1" of "16384") is not force-corrected to the default.
@@ -1648,6 +1697,7 @@ export function SettingsPage() {
     if (formHydrated.current || !bootstrapped) return;
     formHydrated.current = true;
     setForm(settings);
+    setSavedSnapshot(saveGatedSnapshot(settings));
   }, [bootstrapped, settings]);
 
   useEffect(() => {
@@ -2232,6 +2282,9 @@ export function SettingsPage() {
     // shell, so stale form values must not flip the interface on save.
     const { defaultProvider: _provider, theme: _theme, locale: _locale, ...rest } = form;
     await saveSettings(rest);
+    // What the form holds is what was just persisted: nothing is pending, so
+    // the button goes back to disabled until the next edit.
+    setSavedSnapshot(saveGatedSnapshot(form));
     // The MCP probes fire server-side on save — fetch once so the dots turn
     // green right away instead of waiting for the next poll tick.
     api
@@ -2250,6 +2303,7 @@ export function SettingsPage() {
     setForm(next);
     const { defaultProvider: _provider, theme: _theme, locale: _locale, ...rest } = next;
     await saveSettings(rest);
+    setSavedSnapshot(saveGatedSnapshot(next));
     showToast(t("settings.saved"), { tone: "success", id: "settings-saved" });
   };
 
@@ -4460,6 +4514,11 @@ export function SettingsPage() {
                 onChange={setMcpDraft}
                 onSave={saveMcp}
                 onCancel={() => setMcpDraft(null)}
+                // Two buttons live on this page and both used to read "Save":
+                // this one only puts the server in the list, the page's footer
+                // button is what persists the settings file.
+                saveLabel={t("settings.mcpDraftApply")}
+                saveHint={t("settings.mcpDraftApplyHint")}
               />
             )}
 
@@ -4878,7 +4937,9 @@ export function SettingsPage() {
           section === "builtin" ||
           (section === "agent" && leaf !== "connect" && leaf !== "remote")) && (
           <div className={styles.footerBar}>
-            <button type="submit">{t("common.save")}</button>
+            <button type="submit" disabled={!formDirty}>
+              {t("common.save")}
+            </button>
           </div>
         )}
         </div>)}

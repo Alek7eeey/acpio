@@ -780,6 +780,9 @@ export const en = {
     mcpRemote: "Remote",
     mcpStdio: "Stdio",
     mcpAdd: "Add MCP server",
+    mcpDraftApply: "Apply to list",
+    mcpDraftApplyHint:
+      "The server joins the list above; the settings file is written by the Save button at the bottom of the page.",
     mcpType: "Connection type",
     mcpName: "Name",
     mcpUrl: "Server URL",
