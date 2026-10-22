@@ -151,7 +151,10 @@ it empty — the description was already sent. A card's column follows the sessi
 stored status: a task whose first turn never ran sits in **Todo**, a live turn shows in **In
 Progress**, and a finished turn, a question waiting for you or a failed turn lands in
 **Wait** — where the card carries **Mark done** for work you call finished. **Done** outranks
-a live turn, and **Reopen** sends the task back to **Todo**. Board tasks never show up in the
+a live turn, and a prompt written into a **Done** task — its chat, or the card's own **Next
+prompt** — reopens it on its own: the card walks back into **In Progress** while the agent
+works and parks in **Wait** when it ends, so **Reopen** is only for a task you want back
+without a word. Board tasks never show up in the
 chat tree, and deleting a board deletes its tasks with it.
 
 A chat opened from the board stays tied to it: the header carries a **‹ board name** pill next

@@ -46,6 +46,17 @@ import styles from "./BoardPage.module.css";
 /** Column order on the board — the same order the spec's four lanes read in. */
 const COLUMN_ORDER: BoardColumn[] = ["todo", "progress", "wait", "done"];
 
+/**
+ * Columns whose card takes the next prompt. A task the agent left (Wait) is the
+ * obvious one; a Done task takes it too, because a prompt is the user writing
+ * into the task again — the claimed turn drops the Done mark server-side, so the
+ * card walks back into Progress on its own, without a Reopen press first.
+ * Progress and Todo cards have no turn to write into.
+ */
+function isPromptable(column: BoardColumn): boolean {
+  return column === "wait" || column === "done";
+}
+
 /** Where the reader left a board: rail, horizontal lane strip, each lane. */
 type BoardScrollState = {
   rail: number;
@@ -1819,7 +1830,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         ) : showFirstMessage ? (
           <p className={styles.cardText}>{text}</p>
         ) : null}
-        {column === "wait" && promptTaskId === task.id ? (
+        {isPromptable(column) && promptTaskId === task.id ? (
           /* The next prompt is typed on the card itself: the task's own text
              stays readable above it, and nothing leaves the board. */
           <div
@@ -2323,8 +2334,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             ) : null}
             {/* A Wait card is a task whose agent stopped — its turn finished,
                 or it is asking something — so what is most likely wanted from
-                the board is the next prompt, typed right here. */}
-            {boardColumn(taskMenu.task) === "wait" ? (
+                the board is the next prompt, typed right here. A Done card is
+                the same door: writing into a task the user had closed reopens
+                it, so the prompt is offered here instead of a Reopen first. */}
+            {isPromptable(boardColumn(taskMenu.task)) ? (
               <button
                 type="button"
                 role="menuitem"
