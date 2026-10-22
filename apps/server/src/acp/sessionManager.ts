@@ -39,6 +39,8 @@ import {
   type SubagentCardUpdate,
   titleFromSlashCommand,
   titleFromUserText,
+  canonicalCwd,
+  resolveMcpServers,
   effectiveMcpServers,
   mcpServerEndpoint,
   mcpServersFingerprint,
@@ -923,19 +925,51 @@ async function bootAcp(
   // is an ordinary entry in that list (Settings → MCP, a folder override or
   // the chat's dialog can switch it off). All that is left is to give it this
   // boot's endpoint.
-  const mcpServers = resolveBackgroundMcp(
-    effectiveMcpServers(
-      settings,
-      detail?.mcpDisabledIds,
-      opts.cwd,
-      [...(await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles)).servers],
-      // Plugin servers ride the same switches; their url already carries this
-      // boot's port and token, so they need no rewrite per session.
-      pluginMcpServers(settings),
-    ),
-    sessionId,
+  const projectMcp = await discoverProjectMcp(opts.cwd, settings.mcpProjectFiles);
+  const mcpResolution = resolveMcpServers(
+    settings,
+    detail?.mcpDisabledIds,
+    opts.cwd,
+    projectMcp.servers,
+    // Plugin servers ride the same switches; their url already carries this
+    // boot's port and token, so they need no rewrite per session.
+    pluginMcpServers(settings),
   );
+  const mcpServers = resolveBackgroundMcp(mcpResolution.servers, sessionId);
   appliedMcpFingerprints.set(sessionId, mcpServersFingerprint(mcpServers));
+  // Settings → MCP keeps listing a server that this chat never gets (off in the
+  // folder, switched off for the chat, shadowed by a same-named app server), and
+  // a boot that dies on a bad MCP entry shows nothing in the UI. Record the
+  // whole decision — attached and skipped with a reason — before the boot, so a
+  // failed start still leaves the list it tried.
+  appendDeepLog({
+    kind: "mcp-attach",
+    sessionId,
+    provider: opts.provider,
+    cwd: opts.cwd,
+    data: {
+      cwd: opts.cwd,
+      mode: opts.mode,
+      restoreMode,
+      chatDisabledIds: detail?.mcpDisabledIds ?? [],
+      folderOverrideIds: Object.keys(settings.mcpFolderConfigs?.[canonicalCwd(opts.cwd)]?.overrides ?? {}),
+      projectFileWarnings: projectMcp.warnings,
+      fingerprint: mcpServersFingerprint(mcpServers),
+      attached: mcpResolution.decisions
+        .filter((d) => d.attached)
+        .map((d) => {
+          const server = mcpServers.find((s) => s.id === d.id);
+          return {
+            id: d.id,
+            name: d.name,
+            type: d.type,
+            source: d.source,
+            ...(server ? { endpoint: mcpServerEndpoint(server) } : {}),
+          };
+        }),
+      skipped: mcpResolution.decisions.filter((d) => !d.attached),
+    },
+  });
 
   const startClient = async (mode: RestoreMode): Promise<AcpClient> => {
     const adapter = getAdapter(opts.provider);
@@ -1113,6 +1147,9 @@ async function bootAcp(
               type: s.type,
               endpoint: mcpServerEndpoint(s),
             })),
+            // What the agent was actually given (resolved commands, dropped
+            // entries) — the list above is the chat's, not the wire's.
+            mcpHandoff: client.mcpHandoff,
             model: bootModelOpts.model,
             modelParams: bootModelOpts.modelParams,
           },
@@ -1142,6 +1179,26 @@ async function bootAcp(
       } catch (err) {
         rt.client = null;
         rt.clientReady = null;
+        // The MCP list is the usual reason `session/new` dies (a command the
+        // agent cannot spawn), and the UI keeps showing the server as present —
+        // put the failing list and the error next to each other in the log.
+        appendDeepLog({
+          kind: "mcp-boot-failed",
+          sessionId,
+          provider: opts.provider,
+          cwd: opts.cwd,
+          data: {
+            mode,
+            error: err instanceof Error ? err.message : String(err),
+            stderr: (err instanceof Error && "stderr" in err ? String(err.stderr) : "").slice(-2000),
+            attached: mcpServers.map((s) => ({
+              id: s.id,
+              name: s.name,
+              type: s.type,
+              endpoint: mcpServerEndpoint(s),
+            })),
+          },
+        });
         throw err;
       }
     })();

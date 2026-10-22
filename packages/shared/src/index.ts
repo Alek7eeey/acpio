@@ -845,13 +845,86 @@ export function effectiveMcpServers(
   /** Servers plugins contribute; they ride the same switches as the built-in ones. */
   pluginServers: McpServerConfig[] = [],
 ): McpServerConfig[] {
+  return resolveMcpServers(settings, disabledIds, cwd, projectServers, pluginServers).servers;
+}
+
+/** Where an MCP server in a chat's effective list came from. */
+export type McpServerSource = "app" | "folder" | "folder-file" | "builtin" | "plugin";
+
+/** Why a configured MCP server was left out of a chat's effective list. */
+export type McpServerSkipReason =
+  | "not-configured"
+  | "disabled-globally"
+  | "off-in-folder"
+  | "disabled-in-chat"
+  | "name-shadowed";
+
+/** One server's fate for one chat, for the deep-log diagnostics. */
+export type McpServerDecision = {
+  id: string;
+  name: string;
+  type: McpServerConfig["type"];
+  source: McpServerSource;
+  /** True when the server is part of the chat's list handed to the agent. */
+  attached: boolean;
+  /** Set only when `attached` is false. */
+  reason?: McpServerSkipReason;
+};
+
+export type McpServersResolution = {
+  servers: McpServerConfig[];
+  decisions: McpServerDecision[];
+};
+
+/**
+ * {@link effectiveMcpServers} plus the reason every other configured server
+ * was dropped (off globally, off in the folder, switched off for this chat, or
+ * shadowed by an app-configured server of the same name). The UI keeps listing
+ * a server that never reaches the session, so the deep log needs to say why.
+ */
+export function resolveMcpServers(
+  settings: AppSettings,
+  disabledIds: string[] | null | undefined,
+  cwd?: string | null,
+  projectServers: McpServerConfig[] = [],
+  /** Servers plugins contribute; they ride the same switches as the built-in ones. */
+  pluginServers: McpServerConfig[] = [],
+): McpServersResolution {
   const folder = mcpFolderConfig(settings, cwd);
   const disabledInChat = new Set(disabledIds ?? []);
-  const out = (settings.mcpServers ?? []).filter(
-    (s) => isMcpServerConfigured(s) && mcpServerInFolder(folder, s) && !disabledInChat.has(s.id),
-  );
+  const out: McpServerConfig[] = [];
+  const decisions: McpServerDecision[] = [];
+
+  const take = (s: McpServerConfig, source: McpServerSource) => {
+    out.push(s);
+    decisions.push({ id: s.id, name: s.name, type: s.type, source, attached: true });
+  };
+  const drop = (s: McpServerConfig, source: McpServerSource, reason: McpServerSkipReason) => {
+    decisions.push({ id: s.id, name: s.name, type: s.type, source, attached: false, reason });
+  };
+  /** Why the switches leave this server off — mirrors the checks below. */
+  const offReason = (
+    s: McpServerConfig,
+    source: McpServerSource,
+  ): McpServerSkipReason => {
+    if (!isMcpServerConfigured(s)) return "not-configured";
+    if (disabledInChat.has(s.id)) return "disabled-in-chat";
+    if (source !== "folder" && source !== "folder-file") {
+      return folder?.overrides?.[s.id] === false ? "off-in-folder" : "disabled-globally";
+    }
+    return "off-in-folder";
+  };
+
+  for (const s of settings.mcpServers ?? []) {
+    if (isMcpServerConfigured(s) && mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) {
+      take(s, "app");
+    } else {
+      drop(s, "app", offReason(s, "app"));
+    }
+  }
   for (const s of folder?.servers ?? []) {
-    if (isMcpServerAttached(s) && !disabledInChat.has(s.id)) out.push(s);
+    if (isMcpServerAttached(s) && !disabledInChat.has(s.id)) take(s, "folder");
+    else drop(s, "folder", offReason(s, "folder"));
   }
   // Folder files come last and never shadow a server configured in the app
   // (whether that one is attached or not): the attached list must not carry
@@ -862,16 +935,24 @@ export function effectiveMcpServers(
       .map((s) => s.name),
   );
   for (const s of projectServers) {
-    if (!isMcpServerConfigured(s) || !mcpServerInFolder(folder, s)) continue;
-    if (disabledInChat.has(s.id)) continue;
-    if (names.has(s.name)) continue;
-    names.add(s.name);
-    out.push(s);
+    if (!isMcpServerConfigured(s)) drop(s, "folder-file", "not-configured");
+    else if (disabledInChat.has(s.id)) drop(s, "folder-file", "disabled-in-chat");
+    else if (!mcpServerInFolder(folder, s)) drop(s, "folder-file", "off-in-folder");
+    else if (names.has(s.name)) drop(s, "folder-file", "name-shadowed");
+    else {
+      names.add(s.name);
+      take(s, "folder-file");
+    }
   }
-  for (const s of [...builtinMcpServers(settings), ...pluginServers]) {
-    if (mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) out.push(s);
+  for (const s of builtinMcpServers(settings)) {
+    if (mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) take(s, "builtin");
+    else drop(s, "builtin", offReason(s, "builtin"));
   }
-  return out;
+  for (const s of pluginServers) {
+    if (mcpServerInFolder(folder, s) && !disabledInChat.has(s.id)) take(s, "plugin");
+    else drop(s, "plugin", offReason(s, "plugin"));
+  }
+  return { servers: out, decisions };
 }
 
 export type Theme = "light" | "dark";

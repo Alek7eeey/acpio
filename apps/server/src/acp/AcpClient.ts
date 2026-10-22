@@ -29,6 +29,9 @@ import {
   isMcpServerAttached,
   isMcpServerConfigured,
   mcpCommandNeedsAbsolute,
+  mcpHttpHeaders,
+  mcpServerEndpoint,
+  mcpStdioEnv,
   toAcpMcpServer,
 } from "@acpio/shared";
 import {
@@ -602,6 +605,57 @@ export class AcpClient extends EventEmitter {
   /** Optional host context attached to deep-log lines for this client. */
   logContext: DeepLogContext = {};
 
+  /**
+   * What this client handed the agent as its MCP list: the servers sent with
+   * `session/new`, the ones dropped for an empty transport field, and how each
+   * stdio command was rewritten. The chat's own boot log repeats it with the
+   * session id, since nothing else records a server that never made the list.
+   */
+  mcpHandoff: {
+    requested: number;
+    attached: Array<Record<string, unknown>>;
+    dropped: Array<Record<string, unknown>>;
+  } | null = null;
+
+  private logMcpHandOff(
+    requested: McpServerConfig[],
+    wanted: McpServerConfig[],
+    resolved: McpServerConfig[],
+    cwd: string,
+  ) {
+    const kept = new Set(wanted.map((s) => s.id));
+    const originals = new Map(requested.map((s) => [s.id, s.command?.trim()]));
+    this.mcpHandoff = {
+      requested: requested.length,
+      attached: resolved.map((s) => ({
+        id: s.id,
+        name: s.name,
+        type: s.type,
+        endpoint: mcpServerEndpoint(s),
+        ...(s.type === "stdio"
+          ? {
+              command: s.command,
+              commandRewritten: originals.get(s.id) !== s.command,
+              args: s.args ?? [],
+              envNames: mcpStdioEnv(s).map((row) => row.name),
+            }
+          : {
+              insecureTls: Boolean(s.insecureTls),
+              headerNames: mcpHttpHeaders(s).map((row) => row.name),
+            }),
+      })),
+      dropped: requested
+        .filter((s) => !kept.has(s.id))
+        .map((s) => ({ id: s.id, name: s.name, type: s.type, reason: "not-configured" })),
+    };
+    appendDeepLog({
+      kind: "mcp-session-servers",
+      ...this.logContext,
+      cwd,
+      data: { cwd, ...this.mcpHandoff },
+    });
+  }
+
   /** OMP-style silent restore: agent supports `session/resume`. */
   get canResumeSession(): boolean {
     return Boolean(this.capabilities.sessionCapabilities?.resume);
@@ -886,12 +940,14 @@ export class AcpClient extends EventEmitter {
       // undo a folder that switched a globally disabled server on. The fallback
       // (probe clients never pass a list) is the raw settings list and does
       // still need the global flag.
-      const mcpServers = (await resolveMcpStdioCommands(
-        (opts?.mcpServers ?? (this.settings.mcpServers ?? []).filter(isMcpServerAttached)).filter(
-          isMcpServerConfigured,
-        ),
-        env,
-      )).map(toAcpMcpServer);
+      const requested = opts?.mcpServers ?? (this.settings.mcpServers ?? []).filter(isMcpServerAttached);
+      const wanted = requested.filter(isMcpServerConfigured);
+      const resolvedStdio = await resolveMcpStdioCommands(wanted, env);
+      const mcpServers = resolvedStdio.map(toAcpMcpServer);
+      // The agent only ever sees this list: a server that was dropped above
+      // (or whose command could not be resolved) never reaches the session and
+      // leaves no trace in the ACP traffic, so log the hand-off explicitly.
+      this.logMcpHandOff(requested, wanted, resolvedStdio, cwd);
 
       const resume = opts?.resume;
       let result: { sessionId?: string; configOptions?: ConfigOption[]; modes?: unknown };
