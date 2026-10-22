@@ -885,6 +885,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** The Todo card whose text is being rewritten, and the text as typed. */
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState("");
+  /** Agent the edited card is being moved to; empty = the one it already has. */
+  const [editProvider, setEditProvider] = useState<AgentProvider | "">("");
   const [savingEdit, setSavingEdit] = useState(false);
   /** The Wait card whose next prompt is being typed on the board, and the text. */
   const [promptTaskId, setPromptTaskId] = useState<string | null>(null);
@@ -1059,7 +1061,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const target = e.target as Node;
       if (taskEditorRef.current?.contains(target)) return;
       if (promptBoxRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest('[role="dialog"]')) return;
+      // The agent picker of the editor hangs its menu in a portal of its own:
+      // a press inside it chooses, it must not drop the editor underneath.
+      if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
       cancelTaskEdit();
       cancelPromptEntry();
     };
@@ -1410,20 +1414,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const startTaskEdit = (task: SessionDto) => {
     setTaskMenu(null);
     setEditDraft(task.taskDescription?.trim() || task.title);
+    setEditProvider(task.provider);
     setEditTaskId(task.id);
   };
 
   const cancelTaskEdit = () => {
     setEditTaskId(null);
     setEditDraft("");
+    setEditProvider("");
   };
 
-  /** Commit the card editor; an empty text is never saved — a card without one is nothing to read. */
+  /** Commit the card editor; an empty text is never saved — a card without one is nothing to read.
+   *  The card is also where its agent is rewritten: a task still in Todo has not
+   *  reached the agent yet, so the edit hands it to the one picked here. */
   const submitTaskEdit = async (task: SessionDto) => {
     const description = editDraft.trim();
     if (!description || savingEdit) return;
     setSavingEdit(true);
     await setTaskDescription(task.id, description);
+    if (editProvider && editProvider !== task.provider) {
+      await setTaskProvider(task.id, editProvider);
+    }
     setSavingEdit(false);
     cancelTaskEdit();
   };
@@ -1771,6 +1782,26 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 }
               }}
             />
+            {/* The agent the task is handed to — the same pick the creation
+                form offers, so a card created on the wrong agent is corrected
+                where it lies instead of being deleted and written again. */}
+            {taskAgentPicker && agentOptions.length ? (
+              <div className={styles.composerField}>
+                <span className={styles.composerFieldLabel}>{t("chat.boardTaskAgent")}</span>
+                <OptionPicker
+                  variant="compact"
+                  placement="up"
+                  menuTitle={t("chat.boardTaskAgent")}
+                  placeholder={t("common.pickAgent")}
+                  value={editProvider || task.provider}
+                  options={agentOptions.map((agent) => ({
+                    value: agent.id,
+                    label: agent.label,
+                  }))}
+                  onChange={(value) => setEditProvider(value as AgentProvider)}
+                />
+              </div>
+            ) : null}
             <div className={styles.composerActions}>
               <button type="button" className={styles.ghostBtn} onClick={cancelTaskEdit}>
                 {t("common.cancel")}
