@@ -131,7 +131,7 @@ CLI fields. If a chat seems stuck — press **Stop** and send again.
   OpenAI-compatible endpoints and the models ticked for the agent; **Agent presets** cut
   the same agent into profiles of their own (a fast one, one with room to reason) that
   join the agent picker like any other harness. Tools: `read`, `glob`, `grep`, `write`,
-  `edit`, `bash`, `ask` and the MCP servers from **Settings → MCP**.
+  `edit`, `bash`, `ask`, `plan` and the MCP servers from **Settings → MCP**.
 - **Own ACP agents** — **Settings → Agents → Connect → Custom agents**: point at an
   executable and its arguments, and it behaves like a bundled harness.
 

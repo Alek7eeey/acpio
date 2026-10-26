@@ -13,6 +13,16 @@ export type AskPermission = (toolCall: {
   input: Record<string, unknown>;
 }) => Promise<void>;
 
+/** One step of the ACP plan update the harness renders in its side panel. */
+export type PlanEntry = {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority: "high" | "medium" | "low";
+};
+
+/** Publish the plan over ACP (`sessionUpdate: "plan"`). */
+export type EmitPlan = (entries: PlanEntry[]) => void;
+
 export interface BuiltinToolOptions {
   host: HostClient;
   ask: AskPermission;
@@ -33,6 +43,12 @@ export interface BuiltinToolOptions {
    * claim a boundary the harness no longer draws.
    */
   outsideCwd?: boolean;
+  /**
+   * Present only for the session's own tool set: adds the `plan` tool. A child
+   * runs inside the parent's chat and must not replace the plan the reader is
+   * already watching, so subagents are built without it.
+   */
+  emitPlan?: EmitPlan;
 }
 
 /** Terminal output the model gets: enough to act on, bounded for the context. */
@@ -652,6 +668,48 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
+  /**
+   * The plan the side panel shows. Other ACP agents report theirs with
+   * `session/update: plan`; this tool is the built-in agent's way onto that same
+   * wire, and the whole list rides every call so a status change is one update.
+   */
+  const emitPlan = opts.emitPlan;
+  const planTool: ToolSet = emitPlan
+    ? {
+        plan: tool({
+          description:
+            "Publish your plan for the task: every step in order, each with its status. Call it " +
+            "before the first step and again when a step starts or lands — the reader watches " +
+            "the list in the side panel, so do not repeat it in the answer.",
+          inputSchema: z.object({
+            entries: z
+              .array(
+                z.object({
+                  content: z.string().describe("One step, as the reader should read it."),
+                  status: z
+                    .enum(["pending", "in_progress", "completed"])
+                    .optional()
+                    .describe("pending (default), in_progress or completed."),
+                }),
+              )
+              .min(1)
+              .describe("The whole plan, in order — every call replaces the previous one."),
+          }),
+          execute: async ({ entries }) => {
+            const list: PlanEntry[] = [];
+            for (const entry of entries) {
+              const content = entry.content.trim();
+              if (!content) continue;
+              list.push({ content, status: entry.status ?? "pending", priority: "medium" });
+            }
+            if (!list.length) throw new Error("plan: every entry needs `content`");
+            emitPlan(list);
+            return `Plan updated: ${list.length} step(s), shown in the side panel.`;
+          },
+        }),
+      }
+    : {};
+
   const write = tool({
     description:
       // The suffix hung off the previous sentence, where "it" named nothing.
@@ -759,5 +817,5 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     },
   });
 
-  return { read, glob, grep, write, edit, bash, ask: askUser, ...taskTool };
+  return { read, glob, grep, write, edit, bash, ask: askUser, ...planTool, ...taskTool };
 }

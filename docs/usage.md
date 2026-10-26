@@ -195,7 +195,7 @@ endpoint it can reach.
   e.g. `x-opencode-session`; write `{{sessionId}}` in a value and it is replaced with the
   chat's session id at request time (rows with that placeholder are skipped when the
   settings page probes `/models`, where no session exists).
-- Tools: `read`, `glob`, `grep`, `write`, `edit`, `bash` and `ask`. `glob`/`grep` search the
+- Tools: `read`, `glob`, `grep`, `write`, `edit`, `bash`, `ask` and `plan`. `glob`/`grep` search the
   workspace directly (no shelling out to `find`/`grep`), `edit` takes every replacement of
   a file as one batched call and refuses an ambiguous or overlapping anchor instead of
   guessing, writes land through the same three-way merge the other harnesses use, and
@@ -206,7 +206,8 @@ endpoint it can reach.
   same inline question card the CLI agents use — choices, several choices, an "Other" field or
   free text — and the turn waits for your answer instead of guessing. Plan and Ask modes get
   `read`, `glob`, `grep` and `ask` only — plus the read-only MCP tools — so a "look, don't touch"
-  chat cannot edit anything.
+  chat cannot edit anything. `plan` publishes the steps of a multi-step job to the same plan
+  chip and right-hand panel the CLI agents' plan updates light up.
 - **Reasoning mode per model.** The composer's model row carries a mode (`Def` · `Low`) and
   the `⋯` menu picks it. Both values shape the *prompt* only: **Default** leaves it alone,
   **Low** appends a hard budget to the system prompt — 150 words of private reasoning,

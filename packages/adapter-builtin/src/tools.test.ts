@@ -497,3 +497,46 @@ describe("createBuiltinTools with subagents", () => {
     expect(description).toContain("cannot spawn");
   });
 });
+
+describe("the plan tool", () => {
+  const emitPlan = () => vi.fn();
+  const setupPlan = (emit: Mock) =>
+    createBuiltinTools({
+      host: { request: vi.fn(async () => ({})) },
+      ask: vi.fn(async () => undefined),
+      sessionId: "S1",
+      emitPlan: emit,
+    });
+
+  it("is offered only to the session's own tool set", () => {
+    expect(Object.keys(setup().tools)).not.toContain("plan");
+    expect(Object.keys(setupPlan(emitPlan()))).toContain("plan");
+  });
+
+  it("publishes the whole list as ACP plan entries", async () => {
+    const emit = emitPlan();
+    const tools = setupPlan(emit);
+    await expect(
+      exec(tools, "plan", {
+        entries: [
+          { content: " Read the code ", status: "in_progress" },
+          { content: "Fix it" },
+          { content: "   " },
+        ],
+      }),
+    ).resolves.toContain("2 step(s)");
+    expect(emit).toHaveBeenCalledWith([
+      { content: "Read the code", status: "in_progress", priority: "medium" },
+      { content: "Fix it", status: "pending", priority: "medium" },
+    ]);
+  });
+
+  it("refuses a call whose entries carry no content", async () => {
+    const emit = emitPlan();
+    const tools = setupPlan(emit);
+    await expect(exec(tools, "plan", { entries: [{ content: "  " }] })).rejects.toThrow(
+      /needs `content`/,
+    );
+    expect(emit).not.toHaveBeenCalled();
+  });
+});

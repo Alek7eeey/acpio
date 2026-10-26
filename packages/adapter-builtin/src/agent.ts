@@ -124,6 +124,17 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
       "rather than `cat`/`find`, and one direct command over a helper script.",
   },
   { id: "smallest-change", text: "Make the smallest change that fully solves the task." },
+  // The side panel is the plan's home: the same place other ACP agents put
+  // theirs. A model told nothing publishes nothing, and one that restates the
+  // list in its answer makes the reader read the same steps twice.
+  {
+    id: "plan",
+    text:
+      "Work that takes more than a couple of steps goes into the `plan` tool before the first " +
+      "one: the whole list in a single call, then the step you are on marked `in_progress` and " +
+      "`completed` once it lands. The reader watches that list in the side panel — never repeat " +
+      "it in the answer.",
+  },
   {
     id: "batch",
     text:
@@ -1466,6 +1477,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           ask,
           outsideCwd: live.builtinAllowOutsideCwd === true,
           subagents: subagents ?? undefined,
+          emitPlan: (entries) => this.emitUpdate({ sessionUpdate: "plan", entries }),
         }),
         ...mcpToolSet(offered, {
           ask,
