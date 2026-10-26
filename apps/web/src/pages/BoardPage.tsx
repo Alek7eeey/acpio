@@ -78,6 +78,21 @@ type BoardScrollState = {
  */
 const boardScrollByBoard: Record<string, BoardScrollState> = {};
 
+/**
+ * The folder whose new-task form a board was left with. The form itself dies
+ * with the page, so without this a trip to a task's chat and back shows an
+ * empty lane with the half-written task nowhere in sight. In-memory like the
+ * reading positions above; the text itself is the composer draft keyed by
+ * `boardTaskDraftKey`, which outlives the form the way a chat's draft outlives
+ * its pane.
+ */
+const composerCwdByBoard: Record<string, string> = {};
+
+/** Where a board folder's new-task text lives between visits — one per folder. */
+function boardTaskDraftKey(boardId: string | undefined, cwd: string): string {
+  return `board:${boardId ?? ""}:${cwd}`;
+}
+
 const COLUMN_TITLE = {
   todo: "chat.colTodo",
   progress: "chat.colProgress",
@@ -198,6 +213,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   showEffortPicker,
   defaultProvider,
   attachSource,
+  draftKey,
   onSubmit,
   onCancel,
 }: {
@@ -221,6 +237,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
   defaultProvider: AgentProvider | null;
   /** Which source a plain click opens — the setting the chat composer obeys. */
   attachSource: AttachSource;
+  /** The composer draft this form writes into: the text outlives the form, so
+   *  leaving the board for a task's chat keeps the half-written task. */
+  draftKey: string;
   onSubmit: (
     cwd: string,
     description: string,
@@ -235,7 +254,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   onCancel: () => void;
 }) {
   const t = useT();
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => readComposerDraft(draftKey));
   /** Files for the task being written — uploaded with it, staged in acpio. */
   const [files, setFiles] = useState<DraftFile[]>([]);
   /** Agent this task is created for; empty = the default the form opened on. */
@@ -399,6 +418,13 @@ const NewTaskComposer = memo(function NewTaskComposer({
   useEffect(() => {
     inputRef.current?.focus();
   }, [inputRef]);
+
+  // Live, not on unmount: the board is unmounted by a trip to a task's chat,
+  // and what was being written has to be in the registry by then. A form that
+  // is cancelled or created clears its entry on its own way out.
+  useEffect(() => {
+    setComposerDraft(draftKey, draft);
+  }, [draftKey, draft]);
 
   // A press outside only drops a form that costs nothing to drop: this ref is
   // how the page sees that there is text (or a pasted file) to protect.
@@ -857,7 +883,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     setFilterCwdState(cwd);
     if (boardId) setBoardFilterCwd(boardId, cwd);
   };
-  const [addingCwd, setAddingCwd] = useState<string | null>(null);
+  const [addingCwd, setAddingCwd] = useState<string | null>(() => {
+    // The form the board was left with comes back — but only because its text
+    // did: an empty form is nothing to come back to.
+    const left = boardId ? composerCwdByBoard[boardId] : undefined;
+    return left && readComposerDraft(boardTaskDraftKey(boardId, left)) ? left : null;
+  });
   const [draft, setDraft] = useState("");
   /** Agent the form's picker shows; empty = the default agent of the settings. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
@@ -1041,6 +1072,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   useEffect(() => {
     setDraftProvider("");
   }, [addingCwd]);
+
+  // A form left open is part of where the reader was: the board remembers the
+  // folder it belongs to, and its text waits in that folder's composer draft.
+  useEffect(() => {
+    if (!boardId) return;
+    if (addingCwd) composerCwdByBoard[boardId] = addingCwd;
+    else delete composerCwdByBoard[boardId];
+  }, [addingCwd, boardId]);
+
   /**
    * The new-task form belongs to its group, not to the screen: a press anywhere
    * else dismisses an empty one exactly like its own Cancel button, so an
@@ -1282,6 +1322,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       });
       setCreating(false);
       if (!created) return; // keep the form so nothing the user typed is lost
+      // The task is born: the form's text has no form left to come back to.
+      setComposerDraft(boardTaskDraftKey(boardId, cwd), "");
       closeNewTask();
       // The folder queue may have picked the fresh card up already: the board
       // re-renders over the created task before this continuation runs. Starting
@@ -2165,7 +2207,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               showEffortPicker={taskEffortPicker}
                               defaultProvider={defaultTaskProvider}
                               attachSource={attachDefaultSource}
-                              onCancel={closeNewTask}
+                              draftKey={boardTaskDraftKey(boardId, group.cwd)}
+                              onCancel={() => {
+                                // Cancel is the way out of a half-written task:
+                                // the form goes, and so does its text.
+                                setComposerDraft(boardTaskDraftKey(boardId, group.cwd), "");
+                                closeNewTask();
+                              }}
                             />
                           ) : boardAddCardStyle !== "hidden" ? (
                             <button

@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
+import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDrafts";
 import { I18nProvider } from "../lib/i18n";
 import { BoardPage } from "./BoardPage";
 import styles from "./BoardPage.module.css";
@@ -89,6 +90,9 @@ const task: SessionDto = {
 };
 
 beforeEach(() => {
+  // Typed text outlives the page on purpose (the board comes back with its
+  // half-written task); each test starts with an empty draft registry.
+  for (const key of Object.keys(composerDraftSnapshot())) forgetComposerDraft(key);
   useAppStore.setState({
     settings: DEFAULT_SETTINGS,
     boards: [board],
