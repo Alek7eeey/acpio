@@ -128,7 +128,9 @@ projects: **Board folders** in that bar adds and removes them, and the rail list
 with its task count. Clicking a folder filters the whole board down to it, **All projects**
 clears the filter, and the **+** on a rail row starts a task in that folder. **Todo** groups
 its cards by project, and both the groups and the cards inside them move up and down — the
-order is saved on the server, so it survives a reload.
+order is saved on the server, so it survives a reload. A card also moves to any slot of its own
+group by being dragged there — by the card itself with a mouse, by the grip on its action row
+with a finger; the line the card under the pointer marks is where it lands.
 
 Every task is a chat session of its own. **+** on a group writes a card carrying the project
 chip, and the **Add task** rectangle in the group opens the same form — clicking away from the

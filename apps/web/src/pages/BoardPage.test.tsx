@@ -20,6 +20,8 @@ const apiMock = vi.hoisted(() => {
     getSession: vi.fn(() => pending<unknown>()),
     // The board's task refresh must not replace the seeded card mid-test.
     listBoardSessions: vi.fn(() => pending<unknown>()),
+    // A drop inside a Todo group writes the group's order through this call.
+    reorderSessions: vi.fn(async (items: Array<{ id: string; sortOrder: number }>) => items),
     // Right-click + creates the task with no description before opening it.
     createSession: vi.fn(async (input: Record<string, unknown>) => ({
       ...task,
@@ -153,6 +155,123 @@ describe("BoardPage card headline", () => {
     expect(body.closest("[data-task-id]")).toBeTruthy();
     // The body is the description-classed paragraph, not a headline.
     expect(body.className).toContain("cardText");
+  });
+});
+
+describe("BoardPage Todo drag and drop", () => {
+  const second: SessionDto = {
+    ...task,
+    id: "t2",
+    title: "Second task",
+    taskDescription: "Second task",
+    sortOrder: 1,
+    createdAt: "2026-09-20T10:06:00.000Z",
+    updatedAt: "2026-09-20T10:06:00.000Z",
+    lastMessageAt: "2026-09-20T10:06:00.000Z",
+  };
+
+  /** A drag as the browser reports it: press, move past the threshold, release
+   *  over the card the point test answers with. */
+  function dragCard(from: HTMLElement, over: HTMLElement) {
+    // jsdom ships no point hit-testing; the card under the pointer is the one
+    // the drag resolves against.
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [over],
+    });
+    try {
+      fireEvent.pointerDown(from, { pointerId: 1, pointerType: "mouse", button: 0, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, pointerType: "mouse", clientY: 80 });
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "mouse", clientY: 80 });
+    } finally {
+      Reflect.deleteProperty(document, "elementsFromPoint");
+    }
+  }
+
+  // The arrows move a card one slot at a time; the drag is the same move made
+  // where the card is — the release writes the group's order the arrows write.
+  it("moves a card below the one it was dropped on", async () => {
+    useAppStore.setState({ boardSessions: [task, second] });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const cardOf = (id: string) =>
+      container.querySelector(`[data-task-id="${id}"]`) as HTMLElement;
+    dragCard(cardOf("t1"), cardOf("t2"));
+
+    await waitFor(() => expect(apiMock.reorderSessions).toHaveBeenCalledTimes(1));
+    expect(apiMock.reorderSessions.mock.calls[0][0]).toEqual([
+      { id: "t2", themeId: null, sortOrder: 0 },
+      { id: "t1", themeId: null, sortOrder: 1 },
+    ]);
+    // The lane shows the drop at once, before the server answers.
+    const order = Array.from(
+      container.querySelectorAll('[data-column="todo"] [data-task-id]'),
+    ).map((el) => el.getAttribute("data-task-id"));
+    expect(order).toEqual(["t2", "t1"]);
+
+    // The pointerup that ends a drag is not a press on the card either.
+    fireEvent.click(cardOf("t1"));
+    expect(useAppStore.getState().activeSessionId).toBeNull();
+  });
+
+  // The swallow covers the one click its own pointerup produces: the next press
+  // on a card — a lane's card included — opens that card as usual.
+  it("opens a card of another lane on the press that follows a drag", async () => {
+    const waiting: SessionDto = {
+      ...second,
+      id: "t3",
+      title: "Waiting task",
+      taskDescription: "Waiting task",
+      startedAt: "2026-09-20T11:00:00.000Z",
+      doneAt: null,
+      sortOrder: 0,
+    };
+    useAppStore.setState({ boardSessions: [task, second, waiting] });
+    const { container } = renderBoard();
+    await screen.findByText("Waiting task");
+
+    const cardOf = (id: string) =>
+      container.querySelector(`[data-task-id="${id}"]`) as HTMLElement;
+    dragCard(cardOf("t1"), cardOf("t2"));
+    await waitFor(() => expect(apiMock.reorderSessions).toHaveBeenCalledTimes(1));
+
+    await userEvent.click(cardOf("t3"));
+
+    expect(useAppStore.getState().activeSessionId).toBe("t3");
+  });
+
+  // The project group is the list being reordered: a card of another folder is
+  // no slot for this one, and the drop leaves the order alone.
+  it("ignores a drop over a card of another project", async () => {
+    const foreign: SessionDto = {
+      ...second,
+      id: "t9",
+      cwd: "/projects/api",
+      title: "Other project task",
+      taskDescription: "Other project task",
+      sortOrder: 0,
+    };
+    useAppStore.setState({
+      boards: [{ ...board, folders: ["/projects/app", "/projects/api"] }],
+      boardSessions: [task, second, foreign],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Other project task");
+
+    const cardOf = (id: string) =>
+      container.querySelector(`[data-task-id="${id}"]`) as HTMLElement;
+    dragCard(cardOf("t1"), cardOf("t9"));
+
+    expect(apiMock.reorderSessions).not.toHaveBeenCalled();
+    expect(
+      useAppStore.getState().boardSessions.map((item) => [item.id, item.sortOrder]),
+    ).toEqual([
+      ["t1", 0],
+      ["t2", 1],
+      ["t9", 0],
+    ]);
   });
 });
 
