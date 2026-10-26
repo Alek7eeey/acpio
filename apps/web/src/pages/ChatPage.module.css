@@ -804,6 +804,11 @@
   justify-items: stretch;
 }
 
+/* The transcript's own record of a model/effort switch (role `system`). */
+.msg.system {
+  justify-items: stretch;
+}
+
 .turnDivider {
   display: flex;
   align-items: center;

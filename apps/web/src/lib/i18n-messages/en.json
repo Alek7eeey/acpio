@@ -435,6 +435,7 @@
     "compactionTokens": "{{from}} → {{to}} tokens",
     "compactionShow": "show digest",
     "compactionHide": "hide digest",
+    "modelNoticeModel": "Model",
     "exportChat": "Export chat",
     "exportDescription": "Download the conversation as a file or save it on the server — handy for handing work over to a client.",
     "exportFormat": "Format",

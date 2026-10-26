@@ -88,6 +88,7 @@ import { removeLikedMessage, saveLikedMessage } from "../lib/likedMessages";
 import { AppDialog } from "../components/AppDialog";
 import { ModelPicker } from "../components/ModelPicker";
 import { HoverTip } from "../components/HoverTip";
+import { SettingsNotice } from "../components/SettingsNotice";
 import { ChatInlinePrompt } from "../components/ChatInlinePrompt";
 import {
   ChatQuestionAnswered,
@@ -553,6 +554,8 @@ function MessageArticle({
         ) : (
           <UserMessage message={msg} onEdit={onEditUser} onSlashCommandClick={onSlashCommandClick} />
         )
+      ) : msg.role === "system" ? (
+        <SettingsNotice message={msg} />
       ) : (
         <AssistantParts
           message={msg}
@@ -5907,10 +5910,16 @@ function ChatThread() {
     () =>
       segments.flatMap((segment, segIndex) =>
         segment
-          .filter(
-            (m) =>
-              m.role !== "assistant" || hasRenderableAssistantContent(m.parts) || m.id === lastMessageId,
-          )
+          .filter((m) => {
+            // A settings notice IS its own notice part: one stored without it
+            // would render as an empty row.
+            if (m.role === "system") return m.parts.some((p) => p.type === "notice");
+            return (
+              m.role !== "assistant" ||
+              hasRenderableAssistantContent(m.parts) ||
+              m.id === lastMessageId
+            );
+          })
           .map((msg, idx) => ({
             msg,
             segStart: idx === 0,
@@ -6023,6 +6032,7 @@ function ChatThread() {
     if (msg.role === "assistant" && !hasRenderableAssistantContent(msg.parts) && !isLiveAssistant) {
       return null;
     }
+    if (msg.role === "system" && !msg.parts.some((p) => p.type === "notice")) return null;
     return (
       <MessageArticle
         key={msg.id}

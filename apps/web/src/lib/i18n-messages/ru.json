@@ -455,6 +455,7 @@
     "compactionTokens": "{{from}} → {{to}} токенов",
     "compactionShow": "показать конспект",
     "compactionHide": "скрыть конспект",
+    "modelNoticeModel": "Модель",
     "exportChat": "Экспорт чата",
     "exportDescription": "Выгрузка разговора файлом или сохранение на сервере — удобно переслать работу заказчику.",
     "exportFormat": "Формат",

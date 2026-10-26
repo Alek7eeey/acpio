@@ -40,6 +40,8 @@ import {
   titleFromSlashCommand,
   titleFromUserText,
   canonicalCwd,
+  chatNoticeText,
+  chatSettingsNoticeLines,
   resolveMcpServers,
   effectiveMcpServers,
   mcpServerEndpoint,
@@ -4134,6 +4136,42 @@ export async function syncSessionAgent(
     : { ...detail, provider };
 }
 
+/**
+ * Record a model/effort switch in the transcript: `old → new`, one line per
+ * thing that moved.
+ *
+ * A chat with no messages yet gets no notice: there the pick is what the chat
+ * starts on rather than a change of anything, and the composer already shows
+ * it. Nothing is written when the pick lands on the value already running.
+ *
+ * Writing the notice must never break the switch itself — the model has been
+ * applied (or queued) by now, and the row is only the transcript's memory of it.
+ */
+async function recordSettingsNotice(
+  detail: SessionDetailDto,
+  after: { model?: string; params?: Record<string, string>; models?: ModelOption[] },
+): Promise<void> {
+  if (!detail.messages.length) return;
+  const lines = chatSettingsNoticeLines({
+    beforeModel: detail.model,
+    afterModel: after.model ?? detail.model,
+    beforeParams: detail.modelParams,
+    afterParams: after.params,
+    models: after.models,
+  });
+  if (!lines.length) return;
+  try {
+    const settings = await getSettings();
+    const message = await createMessage(detail.id, "system");
+    await appendPart(detail.id, message.id, "notice", {
+      lines,
+      text: chatNoticeText(lines, t(settings.locale ?? "en", "chat.modelNoticeModel")),
+    });
+  } catch (err) {
+    console.error(`[acp:${detail.id}] could not record the model switch in chat`, err);
+  }
+}
+
 export async function setSessionModel(
   sessionId: string,
   model: string,
@@ -4153,6 +4191,15 @@ export async function setSessionModel(
     // like MCP changes. Queued follow-up prompts pick it up automatically.
     rt.restartOnIdle = true;
     rt.restartOnIdleModel = { model, ...(params ? { modelParams: params } : {}) };
+    if (detail) {
+      // The turn keeps running on the old model; the row says what the chat is
+      // switched to so the reader sees why the next answer differs.
+      await recordSettingsNotice(detail, {
+        model,
+        params,
+        models: modelsCacheFor(detail.provider)?.models,
+      });
+    }
     return { ok: true, model, appliedLive: false, pending: true };
   }
   // Mid-session set_config_option often leaves OMP/Cursor in a broken state
@@ -4204,6 +4251,18 @@ export async function setSessionModel(
         }),
       };
     }
+    // What the agent reports as running is what the reader gets in the row: an
+    // option the new model does not expose is not part of the switch.
+    const appliedParams = Object.fromEntries(
+      modelParams
+        .filter((p) => p.currentValue != null && p.currentValue !== "")
+        .map((p) => [p.id, String(p.currentValue)]),
+    );
+    await recordSettingsNotice(detail, {
+      model: currentModel ?? model,
+      params: appliedParams,
+      models,
+    });
     return {
       ok: true,
       model,

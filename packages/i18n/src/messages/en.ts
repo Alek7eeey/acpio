@@ -410,6 +410,7 @@ export const en = {
     compactionTokens: "{{from}} → {{to}} tokens",
     compactionShow: "show digest",
     compactionHide: "hide digest",
+    modelNoticeModel: "Model",
   },
   settings: {
     agents: "Agents",

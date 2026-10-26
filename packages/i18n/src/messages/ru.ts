@@ -430,6 +430,7 @@ export const ru = {
     compactionTokens: "{{from}} → {{to}} токенов",
     compactionShow: "показать конспект",
     compactionHide: "скрыть конспект",
+    modelNoticeModel: "Модель",
   },
   settings: {
     agents: "Агенты",

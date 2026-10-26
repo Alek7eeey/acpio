@@ -1083,7 +1083,13 @@ export type MessagePartType =
   | "file"
   | "compaction"
   /** A settled background job, written into the turn that took its note. */
-  | "note";
+  | "note"
+  /**
+   * The chat's model or one of its config options was switched. Own message,
+   * role `system`: the row stands between the turns it separates and belongs
+   * to neither of them.
+   */
+  | "notice";
 
 export type SessionStatus = "idle" | "running" | "waiting" | "error" | "closed";
 
@@ -3033,6 +3039,79 @@ function inferParamFamily(paramId: string, name?: string): ModelParamFamily | nu
   if (/effort|reason|thought|thinking/.test(blob)) return "effort";
   if (/\bcontext\b/.test(blob)) return "context";
   return null;
+}
+
+/**
+ * One line of a chat's settings notice: what a switch in the composer changed.
+ * `model` is the model pick itself; `param` is one agent config option that
+ * moved with it (effort, context window, fast…).
+ */
+export interface ChatNoticeLine {
+  kind: "model" | "param";
+  /** Section name of a `param` line — the option's own title ("Effort"). */
+  label?: string;
+  from: string;
+  to: string;
+}
+
+/**
+ * Lines for the transcript's "settings changed" row: `old → new` for the model
+ * and for every config option the switch moved.
+ *
+ * Options are compared by family, never by id: a model switch re-keys the same
+ * knob (Cursor's `reasoning` ↔ `effort`), so a byte-level diff of the two maps
+ * would print one setting twice — a line for the id that vanished and a line
+ * for the one that appeared.
+ *
+ * No lines means "nothing happened": a pick that lands on the value the chat
+ * already runs is not news, and neither is a value whose old one is unknown
+ * (`? → high` says nothing a reader can use).
+ */
+export function chatSettingsNoticeLines(input: {
+  beforeModel?: string | null;
+  afterModel?: string | null;
+  beforeParams?: Record<string, string> | null;
+  afterParams?: Record<string, string> | null;
+  models?: ModelOption[];
+}): ChatNoticeLine[] {
+  const lines: ChatNoticeLine[] = [];
+  const beforeModel = (input.beforeModel ?? "").trim();
+  const afterModel = (input.afterModel ?? "").trim();
+  if (beforeModel && afterModel && beforeModel !== afterModel) {
+    const label = (value: string) =>
+      input.models?.find((m) => m.value === value)?.name?.trim() || value;
+    lines.push({ kind: "model", from: label(beforeModel), to: label(afterModel) });
+  }
+
+  const keyOf = (id: string) => modelParamFamily(id) ?? id.trim().toLowerCase();
+  const beforeValues = new Map<string, { id: string; value: string }>();
+  for (const [id, raw] of Object.entries(input.beforeParams ?? {})) {
+    const value = String(raw ?? "").trim();
+    if (!value || beforeValues.has(keyOf(id))) continue;
+    beforeValues.set(keyOf(id), { id, value });
+  }
+  for (const [id, raw] of Object.entries(input.afterParams ?? {})) {
+    const value = String(raw ?? "").trim();
+    if (!value) continue;
+    const before = beforeValues.get(keyOf(id));
+    if (!before || before.value === value) continue;
+    // Two spellings of one value (`med` / `medium`) are not a change either.
+    const from = modelParamLabel(before.id, before.value);
+    const to = modelParamLabel(id, value);
+    if (from === to) continue;
+    lines.push({ kind: "param", label: modelParamSectionName(id), from, to });
+  }
+  return lines;
+}
+
+/** Flat `label: from → to · …` text of a notice — exports and previews. */
+export function chatNoticeText(lines: ChatNoticeLine[], modelLabel: string): string {
+  return lines
+    .map((line) => {
+      const label = line.kind === "model" ? modelLabel : (line.label ?? "");
+      return label ? `${label}: ${line.from} → ${line.to}` : `${line.from} → ${line.to}`;
+    })
+    .join(" · ");
 }
 
 /** Prefer stable section titles for Cursor aliases (reasoning → Effort). */

@@ -1,0 +1,61 @@
+/* A model/effort switch, recorded in the transcript where it happened. The row
+   sits between the turns it separates and belongs to neither of them, so it
+   reads as a label rather than as a message. */
+.notice {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 2px 0;
+  padding: 4px 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.icon {
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.lines {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.label {
+  color: color-mix(in srgb, var(--text-secondary) 85%, transparent);
+}
+
+.value {
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.to {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.arrow {
+  color: var(--text-secondary);
+}
