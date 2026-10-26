@@ -347,6 +347,8 @@ export const api = {
       sortOrder?: number;
       pinned?: boolean;
       archived?: boolean;
+      /** Starred on the board: the card's heart and the Favorites section. */
+      favorite?: boolean;
       mcpDisabledIds?: string[];
       /** Board task fields: description edit (Todo) and Wait ⇄ Done toggle. */
       taskDescription?: string | null;

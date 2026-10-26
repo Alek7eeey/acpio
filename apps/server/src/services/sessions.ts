@@ -53,6 +53,7 @@ function mapSession(
     sortOrder: row.sortOrder ?? 0,
     pinned: row.pinned ?? false,
     archived: row.archived ?? false,
+    favorite: row.favorite ?? false,
     boardId: row.boardId ?? null,
     taskDescription: row.taskDescription ?? null,
     taskAttachments: Array.isArray(row.taskAttachments)
@@ -334,6 +335,8 @@ export async function updateSession(
     sortOrder: number;
     pinned: boolean;
     archived: boolean;
+    /** Starred on the board (the Favorites section reads it). */
+    favorite: boolean;
     mcpDisabledIds: string[];
     model?: string;
     modelParams?: Record<string, string>;

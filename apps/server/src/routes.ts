@@ -1210,6 +1210,9 @@ export async function registerRoutes(app: FastifyInstance) {
         sortOrder: z.number().int().optional(),
         pinned: z.boolean().optional(),
         archived: z.boolean().optional(),
+        /** Starred on the board — its card wears a heart, the Favorites
+         *  section lists it. */
+        favorite: z.boolean().optional(),
         mcpDisabledIds: z.array(z.string().min(1).max(64)).optional(),
         taskDescription: z.string().max(20000).nullable().optional(),
         doneAt: z.string().datetime().nullable().optional(),
@@ -1227,11 +1230,19 @@ export async function registerRoutes(app: FastifyInstance) {
       if (rows[0].acpSessionId) return reply.code(400).send({ error: "alreadyStarted" });
     }
     const { doneAt, provider, ...rest } = body;
-    const updated = await updateSession(id, {
-      ...rest,
-      ...(provider ? { provider } : {}),
-      ...(doneAt !== undefined ? { doneAt: doneAt === null ? null : new Date(doneAt) } : {}),
-    });
+    // Starring a card is not activity: the board's Wait lane orders by
+    // `updatedAt`, so a favourite written alone must leave the stamp alone and
+    // keep the card where it stands.
+    const onlyFavorite = body.favorite !== undefined && Object.keys(body).length === 1;
+    const updated = await updateSession(
+      id,
+      {
+        ...rest,
+        ...(provider ? { provider } : {}),
+        ...(doneAt !== undefined ? { doneAt: doneAt === null ? null : new Date(doneAt) } : {}),
+      },
+      onlyFavorite ? { touch: false } : undefined,
+    );
     if (!updated) return reply.code(404).send({ error: "Not found" });
     // A chat-level MCP change needs a fresh agent attach, same as a global one.
     if (body.mcpDisabledIds) void restartSessionMcp(id);

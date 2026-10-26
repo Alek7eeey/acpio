@@ -2611,6 +2611,10 @@ export interface SessionDto {
   pinned: boolean;
   /** Archived sessions are hidden from the main tree (Архив section). */
   archived: boolean;
+  /** Starred on its board: the card wears a small heart and the board's
+   *  Favorites section lists it. Favouriting is not activity — the row's
+   *  `updatedAt` (the Wait lane's order) does not move for it. */
+  favorite: boolean;
   /** Board partition: null = regular chat; a value = task on that board.
    *  Board tasks never show in the chat tree or global search. */
   boardId: string | null;

@@ -266,6 +266,8 @@ type AppState = {
     attachments?: PendingAttachment[];
   }) => Promise<SessionDto | null>;
   setTaskDone: (id: string, done: boolean) => Promise<void>;
+  /** Board task: star it for the board's Favorites section (or unstar it). */
+  setTaskFavorite: (id: string, favorite: boolean) => Promise<void>;
   /** Board task: edit the text an existing task card carries. */
   setTaskDescription: (id: string, description: string) => Promise<void>;
   /** Board task: pick the agent before the first turn (the server accepts it only then). */
@@ -1993,6 +1995,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — the WS mirror reconciles on the next event
     }
   },
+  setTaskFavorite: async (id, favorite) => {
+    // The heart answers the press, not the round-trip; a failed write puts the
+    // card back the way it was instead of leaving a lie on the board.
+    const apply = (value: boolean) => (s: AppState) => ({
+      boardSessions: s.boardSessions.map((b) => (b.id === id ? { ...b, favorite: value } : b)),
+    });
+    set(apply(favorite));
+    try {
+      const updated = await api.updateSession(id, { favorite });
+      set((s) => ({ boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)) }));
+    } catch {
+      set(apply(!favorite));
+    }
+  },
   setTaskDescription: async (id, description) => {
     // The card's text and the chat's own name are the same line: the title is
     // the description's first line, derived exactly as createBoardTask does.
@@ -2810,6 +2826,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       sortOrder: nextSessionSortOrder(get().sessions),
       pinned: false,
       archived: false,
+      favorite: false,
       boardId: null,
       taskDescription: null,
       startedAt: null,

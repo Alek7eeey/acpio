@@ -40,6 +40,8 @@ export const sessions = sqliteTable("sessions", {
   sortOrder: integer("sort_order").notNull().default(0),
   pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
   archived: integer("archived", { mode: "boolean" }).notNull().default(false),
+  /** Starred on its board — the board's Favorites section reads this. */
+  favorite: integer("favorite", { mode: "boolean" }).notNull().default(false),
   /** MCP server ids disabled for this chat only. */
   mcpDisabledIds: text("mcp_disabled_ids", { mode: "json" })
     .notNull()

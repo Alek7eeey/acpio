@@ -40,6 +40,7 @@ export async function ensureSchema() {
       sort_order INTEGER NOT NULL DEFAULT 0,
       pinned INTEGER NOT NULL DEFAULT 0,
       archived INTEGER NOT NULL DEFAULT 0,
+      favorite INTEGER NOT NULL DEFAULT 0,
       mcp_disabled_ids TEXT NOT NULL DEFAULT '[]',
       created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
       updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
@@ -86,6 +87,12 @@ export async function ensureSchema() {
   }
   try {
     db.run(sql`ALTER TABLE sessions ADD COLUMN done_at INTEGER`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+  // A board card the user starred: the board's Favorites section lists it.
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0`);
   } catch (err) {
     if (!isDuplicateColumn(err)) throw err;
   }

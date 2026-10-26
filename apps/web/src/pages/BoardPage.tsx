@@ -100,6 +100,26 @@ const COLUMN_TITLE = {
   done: "chat.colDone",
 } as const;
 
+/**
+ * The board's favourite mark — one heart drawn at every size it is shown in: the
+ * small badge on a starred card, the section row in the rail and the card menu's
+ * command. `filled` reads as "this is a favourite", the outline as "make it one".
+ */
+function HeartIcon({ size = 12, filled = false }: { size?: number; filled?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <path
+        d="M12 20.4 4.9 13.4A4.9 4.9 0 0 1 11.8 6.5l.2.2.2-.2a4.9 4.9 0 0 1 6.9 6.9L12 20.4Z"
+        fill={filled ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 type TodoGroup = { cwd: string; label: string; loose: boolean; tasks: SessionDto[] };
 
 /** Where a board folder is named: the project rail, its Todo lane head, the folders dialog. */
@@ -837,6 +857,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setOpenBoardId = useAppStore((s) => s.setOpenBoardId);
   const createBoardTask = useAppStore((s) => s.createBoardTask);
   const setTaskDone = useAppStore((s) => s.setTaskDone);
+  const setTaskFavorite = useAppStore((s) => s.setTaskFavorite);
   const setTaskDescription = useAppStore((s) => s.setTaskDescription);
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
@@ -926,6 +947,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [deriveError, setDeriveError] = useState<string | null>(null);
   const [deriveBrowse, setDeriveBrowse] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  /** The rail's Favorites section: opened, it lists every starred card. */
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
@@ -1236,6 +1259,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const visibleGroups = filterCwd ? groups.filter((group) => group.cwd === filterCwd) : groups;
 
   /**
+   * Every starred task of this board, in the board's own lane order — a Todo
+   * card first, a Done one last, each lane in the order it shows. The rail's
+   * Favorites section reads this list, and so does the card's star.
+   */
+  const favoriteTasks = useMemo(
+    () => COLUMN_ORDER.flatMap((column) => columns[column].filter((task) => task.favorite)),
+    [columns],
+  );
+
+  /**
    * Open a task in the normal chat. A task that never started seeds its
    * description into the composer draft (never sent): the first turn starts
    * when the user presses Enter, exactly like any other chat. A started task
@@ -1388,6 +1421,131 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       next.map((item, index) => ({ id: item.id, themeId: item.themeId, sortOrder: index })),
     );
   };
+
+  /** Card being dragged inside its Todo group, and the slot it would land in. */
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [taskDropHint, setTaskDropHint] = useState<{
+    id: string;
+    position: "above" | "below";
+  } | null>(null);
+  /** A card drag ends on the pointerup the browser still reads as a click. */
+  const suppressCardClickRef = useRef(false);
+  /** Groups as the last render drew them: a drag commits onto the order it
+   *  releases over, not the one it started under. */
+  const groupsRef = useRef(groups);
+  useLayoutEffect(() => {
+    groupsRef.current = groups;
+  }, [groups]);
+
+  /**
+   * Drag a Todo card to another slot of its own project group — the pointer
+   * twin of the card's up/down arrows. A mouse grabs the card itself; a finger
+   * grabs the card's grip, because a swipe starting anywhere else on the card
+   * belongs to the lane's scroll. The card under the pointer marks the slot it
+   * would land in, and the release writes that one order through the same
+   * `sortOrder` list the arrows write, so both doors leave the same order on
+   * the server. A card of another project is no slot at all: the group is the
+   * list being reordered.
+   */
+  const startTaskDrag =
+    (task: SessionDto, group: TodoGroup, opts?: { grip?: boolean }) =>
+    (e: React.PointerEvent<HTMLElement>) => {
+      if (e.button !== 0) return;
+      if (!opts?.grip && e.pointerType !== "mouse") return;
+      const target = e.target as HTMLElement;
+      if (!opts?.grip && target.closest("button, input, textarea")) return;
+
+      const el = e.currentTarget as HTMLElement;
+      const pointerId = e.pointerId;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let moved = false;
+      let overId: string | null = null;
+      let overPosition: "above" | "below" | null = null;
+      suppressCardClickRef.current = false;
+
+      /** The card under the point, with the group standing around it. */
+      const cardAtPoint = (x: number, y: number) => {
+        for (const node of document.elementsFromPoint(x, y)) {
+          const card = node.closest("[data-task-id]") as HTMLElement | null;
+          if (!card) continue;
+          const lane = card.closest("[data-group]") as HTMLElement | null;
+          return { card, id: card.getAttribute("data-task-id") ?? "", cwd: lane?.dataset.group ?? "" };
+        }
+        return null;
+      };
+
+      const finish = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onCancel);
+        setDraggingTaskId(null);
+        setTaskDropHint(null);
+        if (moved) suppressCardClickRef.current = true;
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        if (!moved) {
+          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
+          moved = true;
+          setDraggingTaskId(task.id);
+        }
+
+        const hit = cardAtPoint(ev.clientX, ev.clientY);
+        // The dragged card itself means "no target": it already holds its slot.
+        if (hit && hit.id !== task.id && hit.cwd === group.cwd) {
+          const rect = hit.card.getBoundingClientRect();
+          const position = ev.clientY < rect.top + rect.height / 2 ? "above" : "below";
+          overId = hit.id;
+          overPosition = position;
+          setTaskDropHint({ id: hit.id, position });
+        } else {
+          overId = null;
+          overPosition = null;
+          setTaskDropHint(null);
+        }
+      };
+
+      /** A cancelled gesture (the browser took the pointer over) drops the drag. */
+      const onCancel = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        finish();
+      };
+
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointerId) return;
+        const over = overId;
+        const position = overPosition;
+        finish();
+        if (!moved || !over || !position) return;
+
+        const list = groupsRef.current.find((item) => item.cwd === group.cwd)?.tasks ?? [];
+        const from = list.findIndex((item) => item.id === task.id);
+        if (from < 0) return;
+        const next = [...list];
+        const [landing] = next.splice(from, 1);
+        const to = next.findIndex((item) => item.id === over);
+        if (!landing || to < 0) return;
+        next.splice(position === "above" ? to : to + 1, 0, landing);
+        void reorderBoardTasks(
+          next.map((item, index) => ({ id: item.id, themeId: item.themeId, sortOrder: index })),
+        );
+      };
+
+      // Touch pointers keep streaming to the grip via capture, so the gesture
+      // survives leaving the card.
+      if (opts?.grip) {
+        try {
+          el.setPointerCapture(pointerId);
+        } catch {
+          // capture is best-effort (pointer may already be gone)
+        }
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onCancel);
+    };
 
   /**
    * The mobile rail is a bottom sheet, so it has to answer the swipe-down
@@ -1669,6 +1827,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
     const column = boardColumn(task);
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
+    // Only a Todo card of a real project group has a list to be dragged in: a
+    // loose task (its folder left the board) stands in a group of its own.
+    const draggable = column === "todo" && !!group && !group.loose;
+    const dropHint = taskDropHint?.id === task.id ? taskDropHint.position : null;
     const description = task.taskDescription?.trim();
     const text = description || task.title;
     // A title the model refined (or a user renamed) no longer repeats the
@@ -1683,14 +1845,40 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       <article
         key={task.id}
         data-task-id={task.id}
-        className={`${styles.card} ${column === "progress" ? styles.cardLive : ""}`}
-        onClick={() => void openTask(task)}
+        className={`${styles.card} ${column === "progress" ? styles.cardLive : ""}${
+          draggingTaskId === task.id ? ` ${styles.cardDragging}` : ""
+        }${
+          dropHint === "above"
+            ? ` ${styles.cardDropAbove}`
+            : dropHint === "below"
+              ? ` ${styles.cardDropBelow}`
+              : ""
+        }`}
+        onClick={() => {
+          // The pointerup that ended a drag still arrives as a click.
+          if (suppressCardClickRef.current) return;
+          void openTask(task);
+        }}
         onContextMenu={(e) => openTaskMenu(e, task)}
+        onPointerDown={(e) => {
+          // Every press on a card is a fresh gesture — the suppression belongs
+          // to the pointerup that ended the drag, and nothing else.
+          suppressCardClickRef.current = false;
+          if (draggable) startTaskDrag(task, group)(e);
+        }}
       >
         <div className={styles.cardTop}>
           <span className={styles.chip} title={task.cwd}>
             {folderLabel(task.cwd, task.cwd)}
           </span>
+          {/* A starred card says so with a small heart and nothing else —
+              the mark is read at a glance, not pressed: the card's menu is
+              where the star is set and dropped. */}
+          {task.favorite ? (
+            <span className={styles.favoriteMark} title={t("chat.boardFavorites")}>
+              <HeartIcon size={11} filled />
+            </span>
+          ) : null}
           {/* The folder's tag rides on the card, so it is read in every
               column — Todo already wears it on the lane head. */}
           {column !== "todo" ? renderFolderTag(task.cwd) : null}
@@ -1708,6 +1896,32 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           <span className={styles.cardActions}>
             {column === "todo" ? (
               <>
+                {/* The card's grip: what a finger takes to move the card. It
+                    carries `touch-action: none`, so the swipe drags instead of
+                    scrolling the lane. */}
+                {draggable ? (
+                  <button
+                    type="button"
+                    className={`${styles.iconBtn} ${styles.dragGrip}`}
+                    data-task-grip
+                    title={t("chat.boardReorderTask")}
+                    aria-label={t("chat.boardReorderTask")}
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      startTaskDrag(task, group, { grip: true })(e);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden>
+                      <circle cx="2.5" cy="2.5" r="1.2" />
+                      <circle cx="7.5" cy="2.5" r="1.2" />
+                      <circle cx="2.5" cy="7" r="1.2" />
+                      <circle cx="7.5" cy="7" r="1.2" />
+                      <circle cx="2.5" cy="11.5" r="1.2" />
+                      <circle cx="7.5" cy="11.5" r="1.2" />
+                    </svg>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={styles.iconBtn}
@@ -2005,6 +2219,71 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               <span className={styles.railLabel}>{t("chat.boardAllProjects")}</span>
               <span className={styles.railCount}>{tasks.length}</span>
             </button>
+            {/* Favorites: a section of its own beside the folders. Opened, it
+                holds every starred card — the list scrolls — and a press on
+                one opens that task, exactly like its card on the board. */}
+            <div className={styles.railFavSection}>
+              <button
+                type="button"
+                data-rail-favorites=""
+                className={`${styles.railItem} ${favoritesOpen ? styles.railItemOn : ""}`}
+                aria-expanded={favoritesOpen}
+                title={t("chat.boardFavorites")}
+                onClick={() => setFavoritesOpen((open) => !open)}
+              >
+                <span className={styles.railFavIcon} aria-hidden>
+                  <HeartIcon size={12} filled={favoriteTasks.length > 0} />
+                </span>
+                <span className={styles.railLabel}>{t("chat.boardFavorites")}</span>
+                <span className={styles.railCount}>{favoriteTasks.length}</span>
+              </button>
+              {favoritesOpen ? (
+                <div className={styles.railFavorites} data-rail-favorites-list="">
+                  {favoriteTasks.length ? (
+                    favoriteTasks.map((task) => {
+                      const text = task.taskDescription?.trim() || task.title;
+                      return (
+                        <div
+                          key={task.id}
+                          className={styles.favCard}
+                          data-favorite-task={task.id}
+                        >
+                          <button
+                            type="button"
+                            className={styles.favCardOpen}
+                            title={text}
+                            onClick={() => void openTask(task)}
+                            onContextMenu={(e) => openTaskMenu(e, task)}
+                          >
+                            <span className={styles.favCardTitle}>{text}</span>
+                            <span className={styles.favCardMeta}>
+                              <span className={styles.chip}>{folderLabel(task.cwd, task.cwd)}</span>
+                              <span className={styles.favCardColumn}>
+                                {t(COLUMN_TITLE[boardColumn(task)])}
+                              </span>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.favCardStar}
+                            title={t("chat.boardRemoveFavorite")}
+                            aria-label={t("chat.boardRemoveFavorite")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void setTaskFavorite(task.id, false);
+                            }}
+                          >
+                            <HeartIcon size={12} filled />
+                          </button>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className={styles.favEmpty}>{t("chat.boardNoFavorites")}</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
             {groups.map((group) => {
               /** This row took the tag editor over, and it opens right here. */
               const editingTag = tagEdit?.cwd === group.cwd && tagEdit.where === "rail";
@@ -2409,6 +2688,27 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 {t("chat.boardNextPrompt")}
               </button>
             ) : null}
+            {/* Star the card (or drop the star): a favourite wears a small heart
+                on the board and a row in the rail's Favorites section. */}
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                const task = taskMenu.task;
+                setTaskMenu(null);
+                void setTaskFavorite(task.id, !task.favorite);
+              }}
+            >
+              <span
+                className={`${styles.menuIcon} ${
+                  taskMenu.task.favorite ? styles.menuIconHeart : ""
+                }`}
+              >
+                <HeartIcon size={13} filled={Boolean(taskMenu.task.favorite)} />
+              </span>
+              {taskMenu.task.favorite ? t("chat.boardRemoveFavorite") : t("chat.boardAddFavorite")}
+            </button>
             <button
               type="button"
               role="menuitem"
