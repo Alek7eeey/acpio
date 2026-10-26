@@ -49,7 +49,7 @@ function matchesFilter(job: BackgroundJobDto, filter: JobFilter): boolean {
  * open can be seen and stopped; the rows come live over the socket, and only
  * the output text is fetched on demand.
  */
-export function TasksPage() {
+export function TasksPage({ onBack }: { onBack?: () => void }) {
   const t = useT();
   const navigate = useNavigate();
   const locale = useAppStore((s) => s.settings.locale);
@@ -127,6 +127,12 @@ export function TasksPage() {
     navigate("/chat");
   };
 
+  /** Away from the page: the shell knows where the user opened it from. */
+  const goBack = () => {
+    if (onBack) onBack();
+    else navigate("/chat");
+  };
+
   // Bulk operation: every active row in one go, whatever the filter shows.
   const onStopAll = async () => {
     setStopping(true);
@@ -143,6 +149,25 @@ export function TasksPage() {
     <div className={styles.page}>
       <header className={styles.head}>
         <div className={styles.headText}>
+          <button
+            type="button"
+            className={styles.back}
+            onClick={goBack}
+            title={t("bg.backHint")}
+          >
+            <span className={styles.backIcon} aria-hidden>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M14.2 5.8 8.5 12l5.7 6.2"
+                  stroke="currentColor"
+                  strokeWidth="2.15"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            {t("bg.back")}
+          </button>
           <h1 className={styles.title}>{t("bg.title")}</h1>
           <p className={styles.hint}>{t("bg.pageHint")}</p>
         </div>
@@ -184,99 +209,103 @@ export function TasksPage() {
         ))}
       </div>
 
-      {rows.length === 0 ? (
-        <div className={styles.empty}>
-          <p className={styles.emptyTitle}>{t("bg.empty")}</p>
-          <p className={styles.emptyHint}>{t("bg.emptyHint")}</p>
-        </div>
-      ) : visible.length === 0 ? (
-        <div className={styles.empty}>
-          <p className={styles.emptyTitle}>{t("bg.filterEmpty")}</p>
-          <p className={styles.emptyHint}>{t("bg.filterEmptyHint")}</p>
-        </div>
-      ) : (
-        <ul className={styles.list}>
-          {visible.map((job) => (
-            <li key={job.id} className={styles.row}>
-              <span
-                className={`${styles.dot} ${styles[`dot_${job.status}`]}`}
-                aria-hidden
-              />
-              <div className={styles.body}>
-                <div className={styles.rowHead}>
-                  <span className={styles.label} title={job.script}>
-                    {job.label}
-                  </span>
-                  <span className={`${styles.status} ${styles[`status_${job.status}`]}`}>
-                    {t(statusMessageKey(job.status))}
-                    {job.exitCode != null ? ` · ${t("bg.exitCode")} ${job.exitCode}` : ""}
-                    {` · ${formatDuration(
-                      (job.endedAt ?? Date.now()) - job.startedAt,
-                      locale ?? "en",
-                      t,
-                    )}`}
-                  </span>
-                </div>
-                <code className={styles.script} title={job.script}>
-                  {job.script}
-                </code>
-                <div className={styles.meta}>
-                  <span className={styles.metaItem} title={job.cwd}>
-                    {t("bg.chat")}: {job.sessionTitle || job.sessionId}
-                  </span>
-                  <span className={styles.metaItem} title={job.cwd}>
-                    {t("bg.folder")}: {job.cwd}
-                  </span>
-                  <span className={styles.metaItem} title={job.logPath}>
-                    {t("bg.logPath")}: {job.logPath}
-                  </span>
-                  {job.pid != null ? (
-                    <span className={styles.metaItem}>
-                      {t("bg.pid")}: {job.pid}
+      {/* The rows are the only part that grows: they get the vertical scroll of
+          their own, so the head and the filter row stay in place above them. */}
+      <div className={styles.scroll}>
+        {rows.length === 0 ? (
+          <div className={styles.empty}>
+            <p className={styles.emptyTitle}>{t("bg.empty")}</p>
+            <p className={styles.emptyHint}>{t("bg.emptyHint")}</p>
+          </div>
+        ) : visible.length === 0 ? (
+          <div className={styles.empty}>
+            <p className={styles.emptyTitle}>{t("bg.filterEmpty")}</p>
+            <p className={styles.emptyHint}>{t("bg.filterEmptyHint")}</p>
+          </div>
+        ) : (
+          <ul className={styles.list}>
+            {visible.map((job) => (
+              <li key={job.id} className={styles.row}>
+                <span
+                  className={`${styles.dot} ${styles[`dot_${job.status}`]}`}
+                  aria-hidden
+                />
+                <div className={styles.body}>
+                  <div className={styles.rowHead}>
+                    <span className={styles.label} title={job.script}>
+                      {job.label}
                     </span>
-                  ) : null}
-                  <span className={styles.metaItem}>{job.id}</span>
+                    <span className={`${styles.status} ${styles[`status_${job.status}`]}`}>
+                      {t(statusMessageKey(job.status))}
+                      {job.exitCode != null ? ` · ${t("bg.exitCode")} ${job.exitCode}` : ""}
+                      {` · ${formatDuration(
+                        (job.endedAt ?? Date.now()) - job.startedAt,
+                        locale ?? "en",
+                        t,
+                      )}`}
+                    </span>
+                  </div>
+                  <code className={styles.script} title={job.script}>
+                    {job.script}
+                  </code>
+                  <div className={styles.meta}>
+                    <span className={styles.metaItem} title={job.cwd}>
+                      {t("bg.chat")}: {job.sessionTitle || job.sessionId}
+                    </span>
+                    <span className={styles.metaItem} title={job.cwd}>
+                      {t("bg.folder")}: {job.cwd}
+                    </span>
+                    <span className={styles.metaItem} title={job.logPath}>
+                      {t("bg.logPath")}: {job.logPath}
+                    </span>
+                    {job.pid != null ? (
+                      <span className={styles.metaItem}>
+                        {t("bg.pid")}: {job.pid}
+                      </span>
+                    ) : null}
+                    <span className={styles.metaItem}>{job.id}</span>
+                  </div>
                 </div>
-              </div>
-              <div className={styles.rowActions}>
-                <button
-                  type="button"
-                  className={styles.button}
-                  title={job.sessionId}
-                  onClick={() => onOpenChat(job)}
-                >
-                  {t("bg.openChat")}
-                </button>
-                <button
-                  type="button"
-                  className={styles.button}
-                  disabled={outputLoading}
-                  onClick={() => void loadOutput(job)}
-                >
-                  {t("bg.openOutput")}
-                </button>
-                {job.status === "running" ? (
-                  <button
-                    type="button"
-                    className={`${styles.button} ${styles.danger}`}
-                    onClick={() => void onStop(job)}
-                  >
-                    {t("bg.stop")}
-                  </button>
-                ) : (
+                <div className={styles.rowActions}>
                   <button
                     type="button"
                     className={styles.button}
-                    onClick={() => void forgetJob(job.id)}
+                    title={job.sessionId}
+                    onClick={() => onOpenChat(job)}
                   >
-                    {t("bg.forget")}
+                    {t("bg.openChat")}
                   </button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+                  <button
+                    type="button"
+                    className={styles.button}
+                    disabled={outputLoading}
+                    onClick={() => void loadOutput(job)}
+                  >
+                    {t("bg.openOutput")}
+                  </button>
+                  {job.status === "running" ? (
+                    <button
+                      type="button"
+                      className={`${styles.button} ${styles.danger}`}
+                      onClick={() => void onStop(job)}
+                    >
+                      {t("bg.stop")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={styles.button}
+                      onClick={() => void forgetJob(job.id)}
+                    >
+                      {t("bg.forget")}
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {output ? (
         <AppDialog

@@ -3090,6 +3090,11 @@ button.userSlashCmd:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* A chat with many jobs would otherwise push the panel off the screen: the
+     rows scroll, the panel header and "all tasks" stay reachable. */
+  max-height: min(38dvh, 260px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .bgItem {

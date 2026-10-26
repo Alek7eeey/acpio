@@ -1,12 +1,28 @@
 .page {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* Short viewports (a phone in landscape) still have to reach the head, so the
+     page itself keeps the vertical scroll as the outer fallback. */
   overflow: auto;
   padding: 16px;
   min-height: 0;
   min-width: 0;
 }
 
+/* The rows — the only part of the page that grows — scroll on their own, so the
+   head and the filter row stay put while the list runs past them. The floor
+   keeps a couple of rows in sight when the viewport is barely taller than the
+   head; the page's own scroll then takes over (the wheel is free to chain into
+   it at the end of the list). */
+.scroll {
+  flex: 1 1 auto;
+  min-height: 240px;
+  overflow-y: auto;
+}
+
 .head {
+  flex: none;
   max-width: 980px;
   margin: 0 auto 14px;
   display: flex;
@@ -18,6 +34,52 @@
 
 .headText {
   min-width: 0;
+}
+
+/* One-click way out of the page: back to the chat or the board the tasks were
+   opened from. */
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 4px 11px 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--motion), border-color var(--motion);
+}
+
+.back:hover {
+  background: var(--bg-secondary);
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.back:active {
+  background: var(--bg-tertiary);
+}
+
+.backIcon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.backIcon svg {
+  display: block;
+  margin-left: -1px;
 }
 
 .title {
@@ -42,6 +104,7 @@
 }
 
 .filters {
+  flex: none;
   max-width: 980px;
   margin: 0 auto 12px;
   display: flex;

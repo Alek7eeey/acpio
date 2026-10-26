@@ -92,11 +92,17 @@ function boardIdFromPath(pathname: string): string | null {
 
 /** AppShell renders pages from the pathname (it has no <Outlet/>), so a route's
  * params never reach the page; the board id is sliced out of the path here. */
-function ShellPage({ pathname }: { pathname: string }) {
+function ShellPage({
+  pathname,
+  onBackFromTasks,
+}: {
+  pathname: string;
+  onBackFromTasks: () => void;
+}) {
   if (pathname === "/" || pathname === "") return <ChatPage />;
   if (pathname.startsWith("/chat")) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
-  if (pathname.startsWith("/tasks")) return <TasksPage />;
+  if (pathname.startsWith("/tasks")) return <TasksPage onBack={onBackFromTasks} />;
   if (pathname.startsWith("/board/")) {
     return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
   }
@@ -886,7 +892,32 @@ export function AppShell() {
     if (window.innerWidth < 900) dismissSheet();
   };
 
+  /**
+   * The page the tasks view was opened from. Its back control — the page's own
+   * button and the toolbar toggle that closes it — returns there, so the tasks
+   * are a place one can step into and out of from wherever one was.
+   */
+  const lastNonTasksRouteRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pathname.startsWith("/tasks")) return;
+    lastNonTasksRouteRef.current = pathname + search;
+  }, [pathname, search]);
 
+  const leaveTasks = useCallback(() => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    if (window.innerWidth < 900) dismissSheet();
+    // The tracked route is the entry right before /tasks: step back through the
+    // history instead of pushing the same page twice. Opened straight from a
+    // link (nothing tracked yet), the chat is the honest destination.
+    if (lastNonTasksRouteRef.current) navigate(-1);
+    else navigate("/chat");
+  }, [navigate, dismissSheet]);
+
+  /** The toolbar's tasks button: it opens the page, and closes it on a repeat click. */
+  const goTasks = () => {
+    if (pathname.startsWith("/tasks")) leaveTasks();
+    else navigate("/tasks");
+  };
 
   const shellStyle = (
     showSidebar
@@ -1940,7 +1971,8 @@ export function AppShell() {
                 className={`${styles.toolClusterBtn} ${styles.toolClusterTasks}${isTasks ? ` ${styles.toolClusterBtnActive}` : ""}`}
                 aria-label={t("bg.title")}
                 title={t("bg.title")}
-                onClick={() => navigate("/tasks")}
+                aria-pressed={isTasks}
+                onClick={goTasks}
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                   <path
@@ -2002,7 +2034,7 @@ export function AppShell() {
           </div>
         </header>
         <div className={styles.content}>
-          <ShellPage pathname={pathname} />
+          <ShellPage pathname={pathname} onBackFromTasks={leaveTasks} />
         </div>
       </div>
 

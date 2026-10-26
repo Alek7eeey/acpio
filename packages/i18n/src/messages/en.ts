@@ -948,6 +948,8 @@ export const en = {
   bg: {
     title: "Background tasks",
     chipHint: "Background tasks of this chat",
+    back: "Back",
+    backHint: "Back to where you opened the tasks",
     pageHint:
       "Commands the agent started in the background through acpio's built-in MCP server. They live in the server's memory: a restart does not keep them.",
     empty: "No background tasks",
