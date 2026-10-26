@@ -655,6 +655,12 @@ export const api = {
         body: file,
       },
     ),
+  /** The chip is gone before the prompt went out: delete the staged bytes too. */
+  deleteAttachment: (id: string, stagedPath: string) =>
+    request<{ ok: boolean }>(
+      `/api/sessions/${id}/attachments?path=${encodeURIComponent(stagedPath)}`,
+      { method: "DELETE" },
+    ),
   cancel: (id: string) =>
     request<{ ok: boolean }>(`/api/sessions/${id}/cancel`, {
       method: "POST",

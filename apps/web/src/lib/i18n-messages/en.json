@@ -274,6 +274,7 @@
     "searchOpen": "open",
     "pendingFiles": "Attached files",
     "removeFile": "Remove file",
+    "copyAttachmentLink": "Copy link to file",
     "fileTooLarge": "File «{{name}}» exceeds 15 MB — skipped",
     "tooManyFiles": "Up to 8 files can be attached",
     "attachmentUploading": "Uploading…",

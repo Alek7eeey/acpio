@@ -80,6 +80,7 @@ import { fetchBuiltinModelCatalog } from "./services/builtinModelCatalog.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import {
   MAX_ATTACH_UPLOAD_BYTES,
+  discardStagedUpload,
   stageAcpioUpload,
   stageSessionUpload,
 } from "./services/attachmentUpload.js";
@@ -1870,6 +1871,25 @@ export async function registerRoutes(app: FastifyInstance) {
       }
       return reply.code(400).send({ error: message || "Upload failed" });
     }
+  });
+
+  /** Drop a file the composer staged and the reader then removed before
+   *  sending: with the chip gone nothing would read those bytes, so a paste
+   *  per attempt would leave them in the folder for good. Only this session's
+   *  own staging folders are reachable — a file the user attached from the
+   *  server keeps living where it lives. */
+  app.delete("/api/sessions/:id/attachments", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = req.query as { path?: string };
+    const stagedPath = (q.path ?? "").trim();
+    if (!stagedPath || stagedPath.length > 4096) {
+      return reply.code(400).send({ error: "Invalid path" });
+    }
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const removed = await discardStagedUpload(id, detail.cwd, stagedPath);
+    if (!removed) return reply.code(404).send({ error: "Not found" });
+    return { ok: true };
   });
 
   app.post("/api/sessions/:id/prompt", async (req, reply) => {

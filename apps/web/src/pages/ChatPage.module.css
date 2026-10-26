@@ -3322,6 +3322,14 @@ button.userSlashCmd:focus-visible {
   margin: 8px 10px 4px 0;
 }
 
+/* Several files in one message: an image per file would stack into a tall
+   block, so the message keeps the bare chips and packs them tighter — no
+   previews to space out, no indent around the row. */
+.userFilesCompact {
+  gap: 4px;
+  margin: 6px 0 2px;
+}
+
 .userFileItem {
   /* Column with children right-aligned: the item is as wide as its widest
      child (the chip), and the preview must sit flush with the right edge —

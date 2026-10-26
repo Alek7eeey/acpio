@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DATA_DIR } from "../db/client.js";
 
@@ -103,4 +103,42 @@ export async function stageAcpioUpload(
   input: { name: string; mime?: string; bytes: Buffer },
 ): Promise<{ name: string; path: string; size: number }> {
   return stageUpload(ACPIO_ATTACHMENTS_DIR, sessionId, input);
+}
+
+/**
+ * Folders this session's own uploads land in: the chat folder's attachment dir
+ * and acpio's data dir (a board task's files). Nothing else is ever written by
+ * `stageUpload`, so nothing else may be deleted on a chip's removal — the path
+ * comes from the client, and a project source file the reader attached from
+ * the server must survive its chip going away.
+ */
+function stagingDirs(sessionId: string, cwd: string): string[] {
+  const roots = [path.join(path.resolve(cwd), ATTACH_DIR), ACPIO_ATTACHMENTS_DIR];
+  return roots.map((root) => path.resolve(root, sessionId) + path.sep);
+}
+
+/**
+ * Delete the file behind a composer chip the reader removed before sending.
+ * The chip was the only reference to those bytes, so a staged file that stays
+ * on disk piles up in the folder unseen.
+ *
+ * Answers whether a file was actually unlinked: a path outside this session's
+ * staging folders (or one already gone) is not an error worth reporting.
+ */
+export async function discardStagedUpload(
+  sessionId: string,
+  cwd: string,
+  filePath: string,
+): Promise<boolean> {
+  if (!sessionId || !filePath || !path.isAbsolute(filePath)) return false;
+  const target = path.resolve(filePath);
+  const key = target.toLowerCase();
+  const inside = stagingDirs(sessionId, cwd).some((dir) => key.startsWith(dir.toLowerCase()));
+  if (!inside) return false;
+  try {
+    await unlink(target);
+    return true;
+  } catch {
+    return false;
+  }
 }

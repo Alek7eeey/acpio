@@ -68,6 +68,7 @@ import {
   setComposerDraft,
 } from "../lib/composerDrafts";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
+import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
 import { buildAgentTimeline, finalAnswerPart, isSingleItemTimeline, splitQuestionPreamble, stepsPartsStillLive, turnAnswerVisible, unansweredQuestionParts, type AgentQuestionItem, type AgentTimelineItem } from "../lib/assistantTurnTimeline.js";
 import { formatDuration, partDurations, partTtfts, sumDurations } from "../lib/partTiming.js";
@@ -501,14 +502,72 @@ function pastedTextFileName(): string {
   return `pasted-text-${stamp}.txt`;
 }
 
+/** Folder a chat's own uploads land in, relative to the chat folder — the
+ *  server's attachment root. */
+const ATTACH_LINK_DIR = ".acpio-attachments";
+
 /**
- * What stands in the composer for a pasted block: a markdown link to the file
- * the attachment staged, addressed by the same session-relative path the
- * server hands the agent. The text stays short, the file rides along as an
- * attachment, and both point at the same file.
+ * What stands in the composer for an attached file: a markdown link to it,
+ * addressed by the same session-relative path the server hands the agent. The
+ * text stays short, the file rides along as an attachment, and both point at
+ * the same file. A staged upload lives in the session's own folder, which is
+ * exactly what its path spells out once the bytes land.
  */
-function pastedTextLink(sessionId: string, name: string): string {
-  return `[${name}](.acpio-attachments/${sessionId}/${name})`;
+function stagedAttachmentLink(sessionId: string, name: string): string {
+  return `[${name}](${ATTACH_LINK_DIR}/${sessionId}/${name})`;
+}
+
+/**
+ * The same link for a file that was picked on the server: the path the prompt
+ * hands the agent — relative to the chat folder when the file is inside it,
+ * absolute otherwise.
+ */
+function attachmentLink(
+  cwd: string | null | undefined,
+  file: { name: string; path: string },
+): string {
+  const target = file.path.replace(/\\/g, "/");
+  const root = (cwd ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const inside =
+    root && target.toLowerCase().startsWith(`${root.toLowerCase()}/`)
+      ? target.slice(root.length + 1)
+      : target;
+  return `[${file.name}](${inside})`;
+}
+
+/** The links the chips above the composer put into its text, one per file. */
+function attachmentLinksOf(
+  files: ComposerAttachment[],
+  session: { id: string; cwd: string } | null | undefined,
+): string[] {
+  return files.map((file) =>
+    file.path
+      ? attachmentLink(session?.cwd, { name: file.name, path: file.path })
+      : session
+        ? stagedAttachmentLink(session.id, file.name)
+        : file.name,
+  );
+}
+
+/** Whether the composer holds nothing but those links: a staged file names
+ *  itself in the text, which is not the reader asking to send a prompt. */
+function isOnlyAttachmentLinks(value: string, links: string[]): boolean {
+  let rest = value;
+  for (const link of links) rest = rest.split(link).join(" ");
+  return rest.trim().length === 0;
+}
+
+/** Take a link back out of the composer text — the file it named never landed,
+ *  so the link would point at nothing. The separator that joined it to the
+ *  text goes with it. */
+function removeComposerLink(value: string, link: string): string {
+  const at = value.indexOf(link);
+  if (at < 0) return value;
+  let start = at;
+  let end = at + link.length;
+  if (value[end] === " ") end += 1;
+  else if (value[start - 1] === " ") start -= 1;
+  return value.slice(0, start) + value.slice(end);
 }
 
 function MessageArticle({
@@ -636,6 +695,9 @@ function UserMessage({
   const ctxRef = useRef<MessageCtxHandle | null>(null);
   const fileParts = message.parts.filter((p) => p.type === "file");
   const textParts = message.parts.filter((p) => p.type === "text");
+  /** Two or more files would stack a preview per image into a tall block, so
+   *  they collapse into the bare chips: paperclip, name, download. */
+  const compactFiles = fileParts.length > 1;
 
   if (!text && fileParts.length === 0) return null;
 
@@ -669,9 +731,17 @@ function UserMessage({
     >
       {body}
       {fileParts.length > 0 ? (
-        <div className={styles.userFiles}>
+        <div
+          className={`${styles.userFiles} ${compactFiles ? styles.userFilesCompact : ""}`.trim()}
+          data-variant={compactFiles ? "compact" : "full"}
+        >
           {fileParts.map((p) => (
-            <UserFileItem key={p.id} part={p} sessionId={message.sessionId} />
+            <UserFileItem
+              key={p.id}
+              part={p}
+              sessionId={message.sessionId}
+              compact={compactFiles}
+            />
           ))}
         </div>
       ) : null}
@@ -835,7 +905,16 @@ function BackgroundNoteMessage({ message, note }: { message: MessageDto; note: B
  * request 404s, so the broken-image icon is replaced by a short notice telling
  * the reader the file is gone (and the download link is dropped).
  */
-function UserFileItem({ part, sessionId }: { part: MessagePartDto; sessionId: string }) {
+function UserFileItem({
+  part,
+  sessionId,
+  compact = false,
+}: {
+  part: MessagePartDto;
+  sessionId: string;
+  /** Chip only: no inline preview and no size line, for a message with many files. */
+  compact?: boolean;
+}) {
   const t = useT();
   const name = String(part.payload.name ?? "file");
   const fileId = String(part.payload.fileId ?? "");
@@ -844,7 +923,7 @@ function UserFileItem({ part, sessionId }: { part: MessagePartDto; sessionId: st
   const href = fileId
     ? `/api/sessions/${sessionId}/attachments/${encodeURIComponent(fileId)}`
     : undefined;
-  const showPreview = Boolean(href) && isImageFile(name);
+  const showPreview = Boolean(href) && isImageFile(name) && !compact;
   const chip = (
     <>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -858,7 +937,9 @@ function UserFileItem({ part, sessionId }: { part: MessagePartDto; sessionId: st
       </svg>
       <span className={styles.userFileMeta}>
         <span className={styles.userFileName}>{name}</span>
-        {size > 0 ? <span className={styles.userFileSize}>{formatBytes(size)}</span> : null}
+        {!compact && size > 0 ? (
+          <span className={styles.userFileSize}>{formatBytes(size)}</span>
+        ) : null}
       </span>
     </>
   );
@@ -4469,6 +4550,40 @@ function ChatThread() {
   /** Object URLs behind the composer previews, keyed by attachment id: revoked
       the moment a chip leaves the composer so the blobs are not pinned. */
   const previewUrlsRef = useRef(new Map<string, string>());
+  /** Chips removed while their upload was still in flight: the bytes land
+      after the chip is gone, so the upload deletes them itself. */
+  const discardedAttachmentsRef = useRef(new Set<string>());
+  /** Right click on a chip above the composer: its menu, anchored at the
+   *  pointer, offers the link that names the file in the text. */
+  const [chipMenu, setChipMenu] = useState<{ x: number; y: number; file: ComposerAttachment } | null>(
+    null,
+  );
+  const chipMenuRef = useRef<HTMLDivElement | null>(null);
+  const chipMenuStyle = useFixedMenuPlacement(chipMenu, chipMenuRef);
+
+  useEffect(() => {
+    if (!chipMenu) return;
+    // Any press elsewhere, a scroll or Escape closes the menu — the same rules
+    // the message context menu follows.
+    const onPointerDown = (event: Event) => {
+      if (chipMenuRef.current?.contains(event.target as Node)) return;
+      setChipMenu(null);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setChipMenu(null);
+    };
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("touchstart", onPointerDown);
+    window.addEventListener("scroll", onPointerDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("touchstart", onPointerDown);
+      window.removeEventListener("scroll", onPointerDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [chipMenu]);
+
   const [attachError, setAttachError] = useState<string | null>(null);
   /** A pasted block waiting for the reader's answer: keep it as a file (link in
    *  the text, the file as an attachment) or paste it as text after all. */
@@ -4962,13 +5077,21 @@ function ChatThread() {
       !agentUnavailable &&
       modelsLoading &&
       models.length === 0);
+  /** Links the staged files name themselves by in the text. */
+  const attachmentLinks = useMemo(
+    () => attachmentLinksOf(pendingFiles, activeSession),
+    [activeSession, pendingFiles],
+  );
   // Keep Stop tied to the live turn (inflight/session), not to "answer started" —
   // otherwise the button vanishes for seconds while Cursor is still thinking.
   // The reader typing the next prompt is asking to queue it behind the running
   // turn, so the square becomes Send; text the composer refuses (a locked one)
   // is not that, and a parked question is not a running turn at all — Stop there
-  // dismisses the question and typing must not take it away.
-  const showStop = turnBusy && !questionParked && !(hasText && !composerLocked);
+  // dismisses the question and typing must not take it away. Links the chips
+  // wrote for their own files are not a prompt either: a file staged mid-turn
+  // keeps Stop, so it waits for the next prompt instead of riding this one.
+  const hasPromptText = hasText && !isOnlyAttachmentLinks(text, attachmentLinks);
+  const showStop = turnBusy && !questionParked && !(hasPromptText && !composerLocked);
 
   const slashCommands = useMemo(
     () => mergeSlashCommands(activeSession?.slashCommands, t),
@@ -5051,6 +5174,72 @@ function ChatThread() {
     [slashCommands],
   );
 
+  /** A staged file no prompt will carry anymore has to leave the folder too:
+   *  the chip was the only reference to those bytes. Best effort — a file
+   *  already gone, or one the server keeps (picked from disk, not staged here),
+   *  needs no error on screen. */
+  const discardStagedFile = useCallback(
+    (stagedPath: string | null) => {
+      const sessionId = activeSession?.id;
+      if (!sessionId || !stagedPath) return;
+      void api.deleteAttachment(sessionId, stagedPath).catch(() => {});
+    },
+    [activeSession?.id],
+  );
+
+  /**
+   * Put text into the composer — the insert the browser would have done itself
+   * had the paste not been intercepted, or a link to a staged file. `at` is the
+   * caret range the insert replaces; "end" appends to what is typed (the
+   * paperclip's own place); left out, the caret as it stands.
+   */
+  const insertComposerText = useCallback(
+    (insertion: string, at?: { start: number; end: number } | "end" | null) => {
+      const el = textareaRef.current;
+      const current = el ? el.value : text;
+      const caretNow = el?.selectionStart ?? current.length;
+      const start =
+        at === "end"
+          ? current.length
+          : at
+            ? Math.min(Math.max(at.start, 0), current.length)
+            : caretNow;
+      const end =
+        at === "end"
+          ? current.length
+          : at
+            ? Math.min(Math.max(at.end, start), current.length)
+            : (el?.selectionEnd ?? start);
+      const next = current.slice(0, start) + insertion + current.slice(end);
+      const caret = start + insertion.length;
+      // An offer still waiting for its answer holds a caret range in this text:
+      // text written before it (a file's link, say) moves it along, so the
+      // block still lands where it was pasted.
+      const offered = pasteOfferAtRef.current;
+      if (offered) {
+        const delta = insertion.length - (end - start);
+        const move = (pos: number) => (pos >= end ? pos + delta : pos >= start ? caret : pos);
+        pasteOfferAtRef.current = { start: move(offered.start), end: move(offered.end) };
+      }
+      // A programmatic insert is a fresh edit: the composer history cursor has
+      // to leave the recalled prompt, exactly as typing after it does.
+      if (!composerHistoryApplyingRef.current && composerHistoryIndexRef.current !== -1) {
+        resetComposerHistory();
+      }
+      setText(next);
+      setCursorPos(caret);
+      setComposerMultilineIfNeeded(next.includes("\n"));
+      requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) return;
+        node.focus({ preventScroll: true });
+        node.setSelectionRange(caret, caret);
+        syncComposerSize(node);
+      });
+    },
+    [text],
+  );
+
   const stageDeviceFiles = useCallback(
     (
       files: File[],
@@ -5060,6 +5249,10 @@ function ChatThread() {
         onSaved?: (saved: { name: string; path: string; size: number }) => void;
         /** The upload failed; the chip above the composer already says so. */
         onFailed?: (err: unknown) => void;
+        /** Write a link to every staged file into the composer — at the caret
+         *  range a paste replaced, or "end" for the paperclip and a drop. The
+         *  name is known before the upload, so the link goes in at once. */
+        linkAt?: { start: number; end: number } | "end";
       },
     ): ComposerAttachment[] => {
       const sessionId = activeSession?.id;
@@ -5103,6 +5296,14 @@ function ChatThread() {
       setAttachError(null);
       setPendingFiles((prev) => [...prev, ...entries].slice(0, MAX_ATTACH_COUNT));
 
+      // Every staged file is named in the text as well: the message keeps a
+      // link to it beside the chip, and the agent is handed that same path.
+      const links =
+        hooks?.linkAt === undefined
+          ? null
+          : entries.map((entry) => stagedAttachmentLink(sessionId, entry.name));
+      if (links) insertComposerText(links.join(" "), hooks?.linkAt);
+
       const patch = (id: string, next: Partial<ComposerAttachment>) => {
         setPendingFiles((prev) =>
           prev.map((f) => (f.id === id ? { ...f, ...next } : f)),
@@ -5112,9 +5313,23 @@ function ChatThread() {
       // never holds up the others.
       accepted.forEach((file, i) => {
         const entry = entries[i]!;
+        const link = links?.[i] ?? null;
         void api
           .uploadAttachment(sessionId, file, entry.name)
           .then((saved) => {
+            // The chip left the composer while this upload was still in
+            // flight: no prompt will ever carry the file, so it must not stay
+            // behind in the folder once the bytes land.
+            if (discardedAttachmentsRef.current.delete(entry.id)) {
+              discardStagedFile(saved.path);
+              return;
+            }
+            // The server had to rename the file (its name was already taken):
+            // the link in the text must follow, or it points at nothing.
+            if (link && saved.name !== entry.name) {
+              const renamed = stagedAttachmentLink(sessionId, saved.name);
+              setText((prev) => prev.replace(link, renamed));
+            }
             patch(entry.id, {
               name: saved.name,
               path: saved.path,
@@ -5125,6 +5340,9 @@ function ChatThread() {
             hooks?.onSaved?.(saved);
           })
           .catch((err: unknown) => {
+            discardedAttachmentsRef.current.delete(entry.id);
+            // Nothing landed, so nothing may be named in the text either.
+            if (link) setText((prev) => removeComposerLink(prev, link));
             patch(entry.id, {
               status: "error",
               error: err instanceof Error ? err.message : String(err),
@@ -5137,54 +5355,23 @@ function ChatThread() {
     [
       activeSession?.id,
       composerLocked,
+      discardStagedFile,
       editingMessageId,
+      insertComposerText,
       pendingFiles.length,
       t,
     ],
   );
 
   const attachPastedFiles = useCallback(
-    (files: File[]) => stageDeviceFiles(files, clipboardFileName),
+    (files: File[], at: { start: number; end: number }) =>
+      stageDeviceFiles(files, clipboardFileName, { linkAt: at }),
     [stageDeviceFiles],
   );
 
   const attachPickedFiles = useCallback(
-    (files: File[]) => stageDeviceFiles(files, deviceFileName),
+    (files: File[]) => stageDeviceFiles(files, deviceFileName, { linkAt: "end" }),
     [stageDeviceFiles],
-  );
-
-  /**
-   * Put a block into the composer at the caret — the insert the browser would
-   * have done itself had the paste not been intercepted to offer a file.
-   */
-  const insertComposerText = useCallback(
-    (insertion: string, at?: { start: number; end: number } | null) => {
-      const el = textareaRef.current;
-      const current = el ? el.value : text;
-      const caretNow = el?.selectionStart ?? current.length;
-      const start = at ? Math.min(Math.max(at.start, 0), current.length) : caretNow;
-      const end = at
-        ? Math.min(Math.max(at.end, start), current.length)
-        : (el?.selectionEnd ?? start);
-      const next = current.slice(0, start) + insertion + current.slice(end);
-      const caret = start + insertion.length;
-      // A programmatic insert is a fresh edit: the composer history cursor has
-      // to leave the recalled prompt, exactly as typing after it does.
-      if (!composerHistoryApplyingRef.current && composerHistoryIndexRef.current !== -1) {
-        resetComposerHistory();
-      }
-      setText(next);
-      setCursorPos(caret);
-      setComposerMultilineIfNeeded(next.includes("\n"));
-      requestAnimationFrame(() => {
-        const node = textareaRef.current;
-        if (!node) return;
-        node.focus({ preventScroll: true });
-        node.setSelectionRange(caret, caret);
-        syncComposerSize(node);
-      });
-    },
-    [text],
   );
 
   const pasteOfferAsText = useCallback(() => {
@@ -5212,7 +5399,7 @@ function ChatThread() {
       return;
     }
     const name = pastedTextFileName();
-    const link = pastedTextLink(sessionId, name);
+    const link = stagedAttachmentLink(sessionId, name);
     const staged = stageDeviceFiles(
       [new File([block], name, { type: "text/plain" })],
       () => name,
@@ -5221,7 +5408,7 @@ function ChatThread() {
         // be left behind a link that points nowhere.
         onSaved: (saved) => {
           if (saved.name === name) return;
-          const renamed = pastedTextLink(sessionId, saved.name);
+          const renamed = stagedAttachmentLink(sessionId, saved.name);
           setText((prev) => prev.replace(link, renamed));
         },
         onFailed: () => {
@@ -5296,6 +5483,32 @@ function ChatThread() {
     [attachPickedFiles, composerLocked, editingMessageId],
   );
 
+  /** A file dropped anywhere in the chat belongs to the composer: the thread
+   *  under the cursor is not a drop target, so without this the browser opens
+   *  the file in the window instead — a JSON replaces the chat with itself. */
+  const onPageDragOver = useCallback(
+    (e: ReactDragEvent<HTMLElement>) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = composerLocked || editingMessageId ? "none" : "copy";
+    },
+    [composerLocked, editingMessageId],
+  );
+
+  const onPageDrop = useCallback(
+    (e: ReactDragEvent<HTMLElement>) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      // A drop on the composer already staged its files on the way here.
+      if (e.defaultPrevented) return;
+      e.preventDefault();
+      setFileDropActive(false);
+      if (composerLocked || editingMessageId) return;
+      const files = Array.from(e.dataTransfer.files ?? []);
+      if (files.length > 0) attachPickedFiles(files);
+    },
+    [attachPickedFiles, composerLocked, editingMessageId],
+  );
+
   const attachDefaultSource: AttachSource =
     settings.attachDefaultSource === "server" ? "server" : "device";
   const attachOtherSource: AttachSource = attachDefaultSource === "server" ? "device" : "server";
@@ -5317,14 +5530,40 @@ function ChatThread() {
     server: t("chat.attachPickServer"),
   };
 
-  const removePendingFile = useCallback((id: string) => {
-    const url = previewUrlsRef.current.get(id);
-    if (url) {
-      previewUrlsRef.current.delete(id);
-      URL.revokeObjectURL(url);
-    }
-    setPendingFiles((prev) => prev.filter((f) => f.id !== id));
-  }, []);
+  const removePendingFile = useCallback(
+    (file: ComposerAttachment) => {
+      const url = previewUrlsRef.current.get(file.id);
+      if (url) {
+        previewUrlsRef.current.delete(file.id);
+        URL.revokeObjectURL(url);
+      }
+      // The file itself goes with the chip: nothing else points at those
+      // bytes. An upload still in flight deletes its own copy once it lands.
+      if (file.status === "uploading") discardedAttachmentsRef.current.add(file.id);
+      else discardStagedFile(file.path);
+      setPendingFiles((prev) => prev.filter((f) => f.id !== file.id));
+    },
+    [discardStagedFile],
+  );
+
+  /** The link that names a chip's file in the text: a staged upload lives in
+   *  the session's attachment folder, a file picked on the server keeps the
+   *  path the prompt hands the agent. Either way it is the very markdown link
+   *  an attachment writes into the composer, so pasting it back brings it
+   *  verbatim. */
+  const attachmentChipLink = useCallback(
+    (file: ComposerAttachment) => attachmentLinksOf([file], activeSession)[0] ?? file.name,
+    [activeSession],
+  );
+
+  const copyAttachmentLink = useCallback(
+    (file: ComposerAttachment) => {
+      void copyTextToClipboard(attachmentChipLink(file))
+        .then(() => showToast(t("common.toastCopied"), { tone: "success", id: "clipboard" }))
+        .catch(() => {});
+    },
+    [attachmentChipLink, t],
+  );
 
   const attachmentsUploading = pendingFiles.some((f) => f.status === "uploading");
 
@@ -6718,6 +6957,8 @@ function ChatThread() {
       onPointerDown={() => {
         if (bind && !bind.focused) focusChatPane(bind.paneIndex);
       }}
+      onDragOver={onPageDragOver}
+      onDrop={onPageDrop}
     >
       <div className={`${styles.mainColumn}${emptyReady || restoringEmpty || initializingEmpty ? ` ${styles.mainColumnEmptyReady}` : ""}${isShellSessionActive ? ` ${styles.mainColumnShell}` : ""}`}>
       {isShellSessionActive && activeSession ? (
@@ -7081,6 +7322,12 @@ function ChatThread() {
                     key={f.id}
                     className={styles.pendingFileChip}
                     data-status={f.status}
+                    onContextMenu={(e) => {
+                      // The link that names this file in the text is one press
+                      // away — the same markdown link the composer writes.
+                      e.preventDefault();
+                      setChipMenu({ x: e.clientX, y: e.clientY, file: f });
+                    }}
                   >
                     {f.previewUrl ? (
                       <img className={styles.pendingFileThumb} src={f.previewUrl} alt="" />
@@ -7106,7 +7353,7 @@ function ChatThread() {
                       className={styles.pendingFileRemove}
                       aria-label={t("chat.removeFile")}
                       title={t("chat.removeFile")}
-                      onClick={() => removePendingFile(f.id)}
+                      onClick={() => removePendingFile(f)}
                     >
                       ×
                     </button>
@@ -7115,6 +7362,28 @@ function ChatThread() {
               })}
             </div>
           )}
+          {chipMenu
+            ? createPortal(
+                <div
+                  ref={chipMenuRef}
+                  className={styles.msgActionMenu}
+                  style={chipMenuStyle ?? undefined}
+                  role="menu"
+                  aria-label={chipMenu.file.name}
+                >
+                  <MsgMenuItem
+                    label={t("chat.copyAttachmentLink")}
+                    onClick={() => {
+                      copyAttachmentLink(chipMenu.file);
+                      setChipMenu(null);
+                    }}
+                  >
+                    <IconCopy />
+                  </MsgMenuItem>
+                </div>,
+                document.body,
+              )
+            : null}
           <ComposerMetaChips
             renderSkeleton={renderSkeleton}
             settings={settings}
@@ -7211,7 +7480,11 @@ function ChatThread() {
                 const files = collectClipboardFiles(e.clipboardData);
                 if (files.length > 0) {
                   e.preventDefault();
-                  attachPastedFiles(files);
+                  // The link to every pasted file lands exactly where the
+                  // paste itself would have: over the selected range.
+                  const start = e.currentTarget.selectionStart ?? text.length;
+                  const end = e.currentTarget.selectionEnd ?? start;
+                  attachPastedFiles(files, { start, end });
                   return;
                 }
                 // A wall of pasted text would swamp the composer (and the
@@ -7579,24 +7852,30 @@ function ChatThread() {
         initialDir={activeSession?.cwd}
         onClose={() => setAttachDialogOpen(false)}
         onAttach={(files) => {
-          setPendingFiles((prev) => {
-            if (prev.length + files.length > MAX_ATTACH_COUNT) {
-              setAttachError(t("chat.tooManyFiles"));
-              return prev;
-            }
-            setAttachError(null);
-            // Files picked from the server are already staged — nothing to upload.
-            return [
-              ...prev,
-              ...files.map((f) => ({
-                id: nextComposerAttachmentId(),
-                name: f.name,
-                path: f.path,
-                size: 0,
-                status: "ready" as const,
-              })),
-            ];
-          });
+          if (pendingFiles.length + files.length > MAX_ATTACH_COUNT) {
+            setAttachError(t("chat.tooManyFiles"));
+            return;
+          }
+          setAttachError(null);
+          // Files picked from the server are already staged — nothing to upload.
+          setPendingFiles((prev) => [
+            ...prev,
+            ...files.map((f) => ({
+              id: nextComposerAttachmentId(),
+              name: f.name,
+              path: f.path,
+              size: 0,
+              status: "ready" as const,
+            })),
+          ]);
+          // The link to every file goes in at the end, where the paperclip's
+          // own picks land — the text names what the chips carry.
+          if (files.length > 0) {
+            insertComposerText(
+              files.map((f) => attachmentLink(activeSession?.cwd, f)).join(" "),
+              "end",
+            );
+          }
         }}
       />
       <McpChatDialog
