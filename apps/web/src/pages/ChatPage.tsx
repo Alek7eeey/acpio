@@ -343,6 +343,9 @@ type ComposerAttachment = {
   name: string;
   /** Staged path on the server; null while (or if) the upload has not landed. */
   path: string | null;
+  /** The link that names this file in the composer text — what a right click
+   *  on the chip copies. Known before the upload: the name is. */
+  link?: string;
   size: number;
   status: "uploading" | "ready" | "error";
   error?: string;
@@ -540,21 +543,25 @@ function attachmentLinksOf(
   files: ComposerAttachment[],
   session: { id: string; cwd: string } | null | undefined,
 ): string[] {
-  return files.map((file) =>
-    file.path
-      ? attachmentLink(session?.cwd, { name: file.name, path: file.path })
-      : session
-        ? stagedAttachmentLink(session.id, file.name)
-        : file.name,
+  return files.map(
+    (file) =>
+      file.link ??
+      (file.path
+        ? attachmentLink(session?.cwd, { name: file.name, path: file.path })
+        : session
+          ? stagedAttachmentLink(session.id, file.name)
+          : file.name),
   );
 }
 
-/** Whether the composer holds nothing but those links: a staged file names
- *  itself in the text, which is not the reader asking to send a prompt. */
+/** Whether the composer holds nothing but such links: a staged file names
+ *  itself in the text, which is not the reader asking to send a prompt. A link
+ *  into a chat's attachment folder counts on its own — a draft restored after
+ *  a reload keeps its text, but never the chips that wrote it. */
 function isOnlyAttachmentLinks(value: string, links: string[]): boolean {
   let rest = value;
   for (const link of links) rest = rest.split(link).join(" ");
-  return rest.trim().length === 0;
+  return rest.replace(/\[[^\]]*\]\(\.acpio-attachments\/[^)\s]+\)/g, " ").trim().length === 0;
 }
 
 /** Take a link back out of the composer text — the file it named never landed,
@@ -5210,14 +5217,19 @@ function ChatThread() {
           : at
             ? Math.min(Math.max(at.end, start), current.length)
             : (el?.selectionEnd ?? start);
-      const next = current.slice(0, start) + insertion + current.slice(end);
-      const caret = start + insertion.length;
+      // Appending keeps the insert off the word it lands after.
+      const body =
+        at === "end" && current.length > 0 && !/\s$/.test(current)
+          ? ` ${insertion}`
+          : insertion;
+      const next = current.slice(0, start) + body + current.slice(end);
+      const caret = start + body.length;
       // An offer still waiting for its answer holds a caret range in this text:
       // text written before it (a file's link, say) moves it along, so the
       // block still lands where it was pasted.
       const offered = pasteOfferAtRef.current;
       if (offered) {
-        const delta = insertion.length - (end - start);
+        const delta = body.length - (end - start);
         const move = (pos: number) => (pos >= end ? pos + delta : pos >= start ? caret : pos);
         pasteOfferAtRef.current = { start: move(offered.start), end: move(offered.end) };
       }
@@ -5284,10 +5296,12 @@ function ChatThread() {
         // (a PDF, an archive) would just render broken.
         const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
         if (previewUrl) previewUrlsRef.current.set(id, previewUrl);
+        const name = resolveName(file, i);
         return {
           id,
-          name: resolveName(file, i),
+          name,
           path: null,
+          link: stagedAttachmentLink(sessionId, name),
           size: file.size,
           status: "uploading",
           previewUrl,
@@ -5326,13 +5340,12 @@ function ChatThread() {
             }
             // The server had to rename the file (its name was already taken):
             // the link in the text must follow, or it points at nothing.
-            if (link && saved.name !== entry.name) {
-              const renamed = stagedAttachmentLink(sessionId, saved.name);
-              setText((prev) => prev.replace(link, renamed));
-            }
+            const renamed = saved.name !== entry.name ? stagedAttachmentLink(sessionId, saved.name) : null;
+            if (link && renamed) setText((prev) => prev.replace(link, renamed));
             patch(entry.id, {
               name: saved.name,
               path: saved.path,
+              link: renamed ?? entry.link,
               size: saved.size,
               status: "ready",
               error: undefined,
@@ -7864,6 +7877,7 @@ function ChatThread() {
               id: nextComposerAttachmentId(),
               name: f.name,
               path: f.path,
+              link: attachmentLink(activeSession?.cwd, f),
               size: 0,
               status: "ready" as const,
             })),
