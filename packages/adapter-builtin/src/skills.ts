@@ -14,7 +14,7 @@ import type { Dirent } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeSkillPaths, type SkillMode } from "@acpio/shared";
+import { normalizeSkillPaths, type SkillMode, type SlashCommandDto } from "@acpio/shared";
 
 export interface BuiltinSkill {
   /** Slash-invocable name: frontmatter `name`, else the folder's. */
@@ -226,6 +226,56 @@ export function enabledSkills(
   modes?: Record<string, SkillMode>,
 ): BuiltinSkill[] {
   return skills.filter((skill) => skillMode(modes, skill.name) !== "off");
+}
+
+/**
+ * The built-in agent's slash menu for a session: its own commands — a manual
+ * compaction pass, the wire thinking switch, the mid-think fuse — followed by
+ * the folder's skills. One builder serves both the announce at attach and the
+ * board's new-task form, which has no session to ask, so the form offers the
+ * very list a chat composer opens.
+ */
+export function builtinSlashCommands(
+  settings: { locale?: string; builtinSkillModes?: Record<string, SkillMode> },
+  skills: readonly BuiltinSkill[],
+): SlashCommandDto[] {
+  const ru = settings.locale === "ru";
+  return [
+    // The manual pass is offered next to the skills: the composer merges this
+    // list into its slash menu, so `/compact` is discoverable without docs.
+    {
+      name: "compact",
+      description: ru
+        ? "Сжать историю сейчас (необязательно — на чём сфокусироваться)"
+        : "Compact the history now (optionally: what to focus on)",
+      inputHint: ru ? "[фокус]" : "[focus]",
+    },
+    // The wire switch sits next to the manual pass, not in the ⋯ menu: that
+    // menu only shapes the prompt, this one stops the endpoint thinking at all.
+    {
+      name: "thinking",
+      description: ru
+        ? "Выключить или включить проход размышлений у эндпоинта (по умолчанию — включён)"
+        : "Turn the endpoint's thinking pass off or on (on by default)",
+      inputHint: "on|off",
+    },
+    // The mid-think fuse: cuts a model call whose private reasoning runs long
+    // and carries the turn on with a reminder — prompt-side, session-level.
+    {
+      name: "thinking-limit",
+      description: ru
+        ? "Оборвать слишком длинные размышления шага и продолжить с напоминанием действовать"
+        : "Cut a step's overlong private reasoning and continue with a reminder to act",
+      inputHint: ru ? "on|off|<символы>" : "on|off|<chars>",
+    },
+    // A `hidden` skill is still offered here — hidden means "out of the
+    // system prompt", not "gone". Only `off` takes the command away.
+    ...enabledSkills(skills, settings.builtinSkillModes).map((skill) => ({
+      name: skill.name,
+      description: skill.description || skill.name,
+      kind: "skill",
+    })),
+  ];
 }
 
 /**

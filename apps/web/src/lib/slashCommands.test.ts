@@ -253,6 +253,25 @@ describe("filterSlashCommands", () => {
     ).toEqual(["skill:humanizer", "skill:reviewer"]);
     expect(filterSlashCommands(skills, "sign", { midPromptSkillOnly: true })).toEqual([]);
   });
+
+  it("mid-prompt search surfaces a skill announced under its bare name", () => {
+    // The built-in agent tags skills with `kind` and no `skill:` prefix, so a
+    // draft with text before the slash must still offer them — and only them.
+    const commands: SlashCommandDto[] = [
+      { name: "commit-en", description: "Create a git commit", kind: "skill" },
+      { name: "compact", description: "Compact the history now" },
+    ];
+    expect(
+      filterSlashCommands(commands, "", { midPromptSkillOnly: true }).map((c) => c.name),
+    ).toEqual(["commit-en"]);
+    expect(
+      filterSlashCommands(commands, "com", { midPromptSkillOnly: true }).map((c) => c.name),
+    ).toEqual(["commit-en"]);
+    expect(
+      filterSlashCommands(commands, "git", { midPromptSkillOnly: true }).map((c) => c.name),
+    ).toEqual(["commit-en"]);
+    expect(filterSlashCommands(commands, "comp", { midPromptSkillOnly: true })).toEqual([]);
+  });
 });
 
 describe("mergeSlashCommands", () => {

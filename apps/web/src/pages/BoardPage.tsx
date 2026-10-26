@@ -35,7 +35,12 @@ import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { stageComposerAttachments } from "../lib/pendingComposerAttachments";
-import { buildSlashInsertion, filterSlashCommands, getSlashContext } from "../lib/slashCommands";
+import {
+  buildSlashInsertion,
+  filterSlashCommands,
+  getSlashContext,
+  mergeSlashCommands,
+} from "../lib/slashCommands";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
 import { harnessLabel, isBuiltinFamilyProvider, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
@@ -248,7 +253,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Caret in the description — where a skill picked from the menu lands. */
   const [caret, setCaret] = useState(0);
-  /** Skills the folder offers, listed while nothing is attached yet. */
+  /** The menu a chat of this agent would open, listed while nothing is attached yet. */
   const [skills, setSkills] = useState<SlashCommandDto[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillIndex, setSkillIndex] = useState(0);
@@ -267,8 +272,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
    *  until the task does — so the menu stays away there. */
   const skillsOffered = isBuiltinFamilyProvider(provider, adapters);
 
-  // A task's skill is the `/name` its first message opens with, so the list is
-  // the folder's skills — read from disk, no agent attached.
+  // A task's skill is the `/name` its first message opens with, so the menu is
+  // the one a chat of that agent would open: the built-in agent's own commands
+  // and the folder's skills. No session exists yet to announce it, so the
+  // server builds it from the same list the agent hands a composer.
   useEffect(() => {
     if (!skillsOffered || !cwd) {
       setSkills([]);
@@ -278,14 +285,12 @@ const NewTaskComposer = memo(function NewTaskComposer({
     let live = true;
     setSkillsLoading(true);
     void api
-      .listSkills(cwd)
+      .builtinCommands(cwd)
       .then((found) => {
-        if (!live) return;
-        // Only `off` is out: a hidden skill is still a slash command, it just
-        // never makes it into the agent's system prompt.
-        setSkills(
-          found.filter((skill) => skill.mode !== "off").map((skill) => ({ ...skill, kind: "skill" })),
-        );
+        // The composer's own shape: `off` skills are already gone, a hidden one
+        // stays (hidden means out of the model's prompt, not out of the menu),
+        // and sanitizing and ordering happen here exactly as in a chat.
+        if (live) setSkills(mergeSlashCommands(found, t));
       })
       .catch(() => {
         if (live) setSkills([]);
@@ -296,7 +301,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
     return () => {
       live = false;
     };
-  }, [skillsOffered, cwd]);
+  }, [skillsOffered, cwd, t]);
 
   // Another agent offers another set of models: a pick made for one of them
   // means nothing on the next, so the form starts over with the agent default.

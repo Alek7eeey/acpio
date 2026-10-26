@@ -104,7 +104,7 @@ import {
 } from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
-import { discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
+import { builtinSlashCommands, discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -859,24 +859,34 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   // Skills the built-in agent would find for a folder, keyed by the same paths
-  // its attach-time announce uses. The board's new-task form needs the list
-  // before any session exists, and a skill is only a `SKILL.md` on disk, so the
-  // scan runs right here instead of waiting for a harness to announce it. A
-  // missing cwd falls back to the settings' default folder, which is what a
-  // task created without one would run in.
+  // its attach-time announce uses. The settings page needs the whole list —
+  // what it switched off included — so the scan runs right here instead of
+  // waiting for a harness to announce it. A missing cwd falls back to the
+  // settings' default folder, which is what a chat without one would run in.
   app.get("/api/skills", async (req) => {
     const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
     const settings = await getSettings();
     const cwd = query.cwd?.trim() || settings.defaultCwd;
     const skills = await discoverSettingsSkills(settings, cwd);
-    // Every skill, hidden ones included: the settings page needs to show what it
-    // switched off, while the board filters them out of its slash menu.
     return skills.map((skill) => ({
       name: skill.name,
       description: skill.description,
       mode: skillMode(settings.builtinSkillModes, skill.name),
       ...(skill.builtin ? { builtin: true } : {}),
     }));
+  });
+
+  // The slash menu the built-in agent announces for a folder: its own commands
+  // plus the skills in effect — `off` ones already dropped, `hidden` ones kept,
+  // exactly what a chat composer opens. The board's new-task form writes a
+  // task's first message, so it offers that list before any session exists to
+  // announce it.
+  app.get("/api/builtin-commands", async (req) => {
+    const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
+    const settings = await getSettings();
+    const cwd = query.cwd?.trim() || settings.defaultCwd;
+    const skills = await discoverSettingsSkills(settings, cwd);
+    return builtinSlashCommands(settings, skills);
   });
 
   app.get("/api/search", async (req) => {

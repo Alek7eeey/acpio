@@ -176,19 +176,23 @@ function scoreCommandTextMatch(lowerPrefix: string, lowerTarget: string) {
   return fuzzyMatch(lowerPrefix, lowerTarget) ? fuzzyScore(lowerPrefix, lowerTarget) : 0;
 }
 
-/** Mirrors OMP `midPromptSkillTokenMatches` — mid-prompt `/tok` only surfaces skill commands. */
+/**
+ * Mid-prompt `/tok` only surfaces skill commands — the ones an agent may honour
+ * inside a message, unlike `/clear`. Mirrors OMP `midPromptSkillTokenMatches`,
+ * but the token matches the skill's own name as well: OMP prefixes its skills
+ * with `skill:`, while the built-in agent announces them under the bare name,
+ * so a prefix-only test hid every one of those as soon as the draft had text.
+ */
 function midPromptSkillTokenMatches(lowerToken: string, name: string, description: string) {
+  const lowerName = name.trim().toLowerCase();
+  const lowerDesc = description.trim().toLowerCase();
   if (SKILL_NAMESPACE.startsWith(lowerToken)) return true;
-  const lowerName = name.toLowerCase();
   if (lowerToken.startsWith(SKILL_NAMESPACE)) {
     if (scoreCommandTextMatch(lowerToken, lowerName) > 0) return true;
-    const lowerDesc = description.toLowerCase();
     return lowerDesc.length > 0 && scoreCommandTextMatch(lowerToken, lowerDesc) > 0;
   }
-  return (
-    lowerName.startsWith(SKILL_NAMESPACE) &&
-    lowerName.slice(SKILL_NAMESPACE.length).startsWith(lowerToken)
-  );
+  if (scoreCommandTextMatch(lowerToken, slashCommandBareName(lowerName)) > 0) return true;
+  return lowerDesc.length > 0 && scoreCommandTextMatch(lowerToken, lowerDesc) > 0;
 }
 
 function scoreSlashCommandSearch(
@@ -204,7 +208,9 @@ function scoreSlashCommandSearch(
   const lowerDesc = description.toLowerCase();
 
   if (opts?.midPromptSkillOnly) {
-    if (!lowerName.startsWith(SKILL_NAMESPACE)) return 0;
+    // A skill is one by its kind or the scope its description carries, not by
+    // the `skill:` name only an OMP bridge adds.
+    if (!isSlashSkill(cmd)) return 0;
     return midPromptSkillTokenMatches(lowerQuery, lowerName, description) ? 1 : 0;
   }
 

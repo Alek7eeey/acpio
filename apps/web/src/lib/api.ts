@@ -20,6 +20,7 @@ import type {
   PromptDelivery,
   BackgroundJobDto,
   BuiltinSkillDto,
+  SlashCommandDto,
   SessionDetailDto,
   SessionDto,
   HarnessSessionDto,
@@ -114,6 +115,16 @@ export const api = {
   listSkills: (cwd?: string | null) => {
     const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
     return request<BuiltinSkillDto[]>(`/api/skills${qs}`);
+  },
+  /**
+   * The slash menu the built-in agent announces for a folder: its own commands
+   * and the skills in effect. The board's new-task form asks before anything is
+   * attached, so a task's first message can open with `/name` — the form then
+   * offers the very list a chat composer does.
+   */
+  builtinCommands: (cwd?: string | null) => {
+    const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
+    return request<SlashCommandDto[]>(`/api/builtin-commands${qs}`);
   },
   searchMessages: (q: string, limit?: number) => {
     const qs = new URLSearchParams({ q });

@@ -31,8 +31,12 @@ Empty chats titled “New chat” / “Новый чат” follow the **Setting
 
 Type `/` in the composer to open the command menu. Commands come from the agent over ACP
 (`available_commands`) and are merged per session — including OMP `skill:*` entries.
+With text already in front of the `/`, the menu offers skills only: an agent honours those
+inside a message, while `/clear` and the like belong to its opening.
 Pick a command to insert it; some commands show an input hint for extra arguments.
 Slash commands are sent to the agent as prompts, not handled locally by the UI.
+The board's new-task form opens the same menu a built-in agent's chat does — the agent's own
+commands and the folder's skills, since a task invokes one with `/name` in its first line.
 
 ### Message search
 

@@ -17,13 +17,14 @@ export { offloadDir } from "./offload.js";
 export { shellCommand } from "./tools.js";
 
 /**
- * Skill discovery outside a chat. The board's new-task form lists the skills a
- * folder offers while no session exists yet, and a skill is nothing but a
- * `SKILL.md` on disk — the scan this agent runs at attach is the same one, so
- * the form asks for it here instead of inventing a second listing.
+ * Skill discovery outside a chat. The board's new-task form needs the menu a
+ * folder's chat would open while no session exists yet — its own commands and
+ * the skills on disk — so the scan and the builder that turns it into that menu
+ * are exported here instead of being invented a second time.
  */
 export {
   BUILTIN_SKILLS_DIR,
+  builtinSlashCommands,
   discoverAgentSkills,
   discoverSettingsSkills,
   discoverSkills,

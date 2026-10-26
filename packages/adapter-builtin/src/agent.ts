@@ -41,8 +41,8 @@ import {
 } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
 import {
+  builtinSlashCommands,
   discoverSettingsSkills,
-  enabledSkills,
   expandSkillInvocation,
   renderSkillsSection,
   supersededRules,
@@ -669,50 +669,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
       : null;
     this.offload = OffloadStore.forSession(this.opts.stateDir, sessionId);
     // Announce discovered skills before the boot reply: the harness merges them
-    // into the composer's slash menu, exactly like a CLI agent's own list.
+    // into the composer's slash menu, exactly like a CLI agent's own list. The
+    // board's new-task form reads the same builder, so it offers what a chat
+    // composer would before the session that would announce it exists.
     const skills = await discoverSettingsSkills(this.opts.settings, this.cwd);
-    const ru = this.opts.settings.locale === "ru";
-    // The manual pass is offered next to the skills: the composer merges this
-    // list into its slash menu, so `/compact` is discoverable without docs.
-    const manual = {
-      name: "compact",
-      description: ru
-        ? "Сжать историю сейчас (необязательно — на чём сфокусироваться)"
-        : "Compact the history now (optionally: what to focus on)",
-      inputHint: ru ? "[фокус]" : "[focus]",
-    };
-    // The wire switch sits next to the manual pass, not in the ⋯ menu: that
-    // menu only shapes the prompt, this one stops the endpoint thinking at all.
-    const wireThinking = {
-      name: "thinking",
-      description: ru
-        ? "Выключить или включить проход размышлений у эндпоинта (по умолчанию — включён)"
-        : "Turn the endpoint's thinking pass off or on (on by default)",
-      inputHint: "on|off",
-    };
-    // The mid-think fuse: cuts a model call whose private reasoning runs long
-    // and carries the turn on with a reminder — prompt-side, session-level.
-    const thinkingLimit = {
-      name: "thinking-limit",
-      description: ru
-        ? "Оборвать слишком длинные размышления шага и продолжить с напоминанием действовать"
-        : "Cut a step's overlong private reasoning and continue with a reminder to act",
-      inputHint: ru ? "on|off|<символы>" : "on|off|<chars>",
-    };
     this.emitUpdate({
       sessionUpdate: "available_commands_update",
-      commands: [
-        manual,
-        wireThinking,
-        thinkingLimit,
-        // A `hidden` skill is still offered here — hidden means "out of the
-        // system prompt", not "gone". Only `off` takes the command away.
-        ...enabledSkills(skills, this.opts.settings.builtinSkillModes).map((s) => ({
-          name: s.name,
-          description: s.description || s.name,
-          kind: "skill",
-        })),
-      ],
+      commands: builtinSlashCommands(this.opts.settings, skills),
     });
     return { sessionId, configOptions: this.configOptions() };
   }

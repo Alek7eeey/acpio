@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   BUILTIN_SKILLS_DIR,
+  builtinSlashCommands,
   discoverAgentSkills,
   discoverSkills,
   enabledSkills,
@@ -162,6 +163,38 @@ describe("skillMode", () => {
     expect(skillMode({}, "commit")).toBe("listed");
     expect(skillMode({ other: "active" }, "commit")).toBe("listed");
     expect(skillMode({ commit: "hidden" }, "Commit")).toBe("hidden");
+  });
+});
+
+describe("builtinSlashCommands", () => {
+  const skills = [
+    { name: "commit", description: "Create a git commit", disableModelInvocation: false, supersedes: [], path: "C:/x/commit/SKILL.md" },
+    { name: "notes", description: "", disableModelInvocation: false, supersedes: [], path: "C:/x/notes/SKILL.md" },
+  ];
+
+  it("offers the agent's own commands and then its skills", () => {
+    const menu = builtinSlashCommands({}, skills);
+    expect(menu.map((cmd) => cmd.name)).toEqual(["compact", "thinking", "thinking-limit", "commit", "notes"]);
+    // A skill stays a skill to the composer's own menu, and an undescribed one
+    // still reads as itself.
+    expect(menu.filter((cmd) => cmd.kind === "skill").map((cmd) => cmd.description)).toEqual([
+      "Create a git commit",
+      "notes",
+    ]);
+  });
+
+  it("drops a skill switched off and keeps a hidden one", () => {
+    const menu = builtinSlashCommands(
+      { builtinSkillModes: { commit: "off", notes: "hidden" } },
+      skills,
+    );
+    expect(menu.map((cmd) => cmd.name)).toEqual(["compact", "thinking", "thinking-limit", "notes"]);
+  });
+
+  it("words the agent's own commands in the settings locale", () => {
+    expect(builtinSlashCommands({ locale: "ru" }, [])[1]?.inputHint).toBe("on|off");
+    expect(builtinSlashCommands({ locale: "ru" }, [])[0]?.description).toContain("Сжать");
+    expect(builtinSlashCommands({ locale: "en" }, [])[0]?.description).toContain("Compact");
   });
 });
 
