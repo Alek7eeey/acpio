@@ -620,12 +620,29 @@ function describeStreamError(value: unknown): Error {
  * cut at the harness's own output cap stopped mid-word — both are a broken
  * chain. Ending the turn there is what leaves a chat silent with the work
  * unfinished and makes the user type "продолжай" to get an answer.
+ *
+ * A turn that ends on its own tool results is the same broken chain, not a turn
+ * that "goes on": the model acted and then the step never wrote the answer it
+ * was acting for — an empty completion, or a stream the provider closed right
+ * after the tool round. The SDK continues a tool round by itself, so a `tool`
+ * message at the tail means there was no further step at all; the turn sits
+ * idle with everything done and nothing said, and only a new message from the
+ * user gets the answer. The step that called the tools is not flagged here:
+ * continuing it would put a message after an unanswered tool call, which the
+ * provider rejects.
  */
 function cutBeforeAnswer(response: ModelMessage[], stopReason: TurnStopReason): boolean {
   if (stopReason === "max_tokens") return true;
   const last = response[response.length - 1];
-  if (!last || last.role !== "assistant" || !Array.isArray(last.content)) return false;
-  return !last.content.some((part) => part.type === "text" || part.type === "tool-call");
+  if (!last) return false;
+  if (last.role === "tool") return true;
+  if (last.role !== "assistant" || !Array.isArray(last.content)) return false;
+  // An empty text part is not an answer either: the step streamed a container
+  // and no letters, which reads in the chat exactly like a silent turn.
+  return !last.content.some(
+    (part) =>
+      part.type === "tool-call" || (part.type === "text" && part.text.trim().length > 0),
+  );
 }
 
 function toStopReason(finishReason: string): TurnStopReason {

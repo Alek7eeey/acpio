@@ -758,12 +758,60 @@ describe("runTurn failure handling", () => {
     // Written answer.
     expect((await answered([{ role: "assistant", content: [{ type: "text", text: "вот ответ" }] }])).truncated)
       .toBeUndefined();
-    // A step that called a tool: the turn goes on, it is not a lost answer.
-    const tooled = await answered([
+    // Acted, then answered: the answer after the tool round closes the turn.
+    const acted = await answered([
       { role: "assistant", content: [{ type: "tool-call", toolCallId: "t", toolName: "read", input: {} }] },
       { role: "tool", content: [{ type: "tool-result", toolCallId: "t", toolName: "read", output: {} }] },
+      { role: "assistant", content: [{ type: "text", text: "вот ответ" }] },
     ]);
-    expect(tooled.truncated).toBeUndefined();
+    expect(acted.truncated).toBeUndefined();
+    // A step that only called a tool and never got its result back is not a
+    // continuation: a message after an unanswered call is rejected upstream.
+    const dangling = await answered([
+      { role: "assistant", content: [{ type: "tool-call", toolCallId: "t", toolName: "read", input: {} }] },
+    ]);
+    expect(dangling.truncated).toBeUndefined();
+  });
+
+  it("reports a turn that ended on its tool results as a broken chain", async () => {
+    // The reported shape: the model acted, the results came back, and the step
+    // that should have written the answer never arrived. The SDK continues a
+    // tool round by itself, so this tail means there was no further step at all
+    // — the turn sat idle with the work done and nothing printed, and the user
+    // had to ask the agent to say it.
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([
+        { role: "assistant", content: [{ type: "tool-call", toolCallId: "t", toolName: "bash", input: {} }] },
+        {
+          role: "tool",
+          content: [{ type: "tool-result", toolCallId: "t", toolName: "bash", output: { type: "text", value: "exit code: 0" } }],
+        },
+      ]),
+      finishReason: Promise.resolve("tool-calls"),
+      usage: Promise.resolve({ totalTokens: 0 }),
+      steps: Promise.resolve([]),
+    });
+
+    const outcome = await runTurn(turnOpts({}));
+    expect(outcome.stopReason).toBe("end_turn");
+    expect(outcome.truncated).toBe(true);
+  });
+
+  it("reports an empty step at the end of a turn as a broken chain", async () => {
+    // A provider that answers with an empty completion: the step streams a text
+    // container and no letters, and the turn ends looking like it said nothing.
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([
+        { role: "assistant", content: [{ type: "text", text: "  \n " }] },
+      ]),
+      finishReason: Promise.resolve("stop"),
+      usage: Promise.resolve({ totalTokens: 0 }),
+      steps: Promise.resolve([]),
+    });
+
+    expect((await runTurn(turnOpts({}))).truncated).toBe(true);
   });
 
   // The `/thinking-limit` fuse: a step that only thinks past the cap is cut,
