@@ -693,45 +693,6 @@
   white-space: nowrap;
 }
 
-.queueModes {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-  padding: 1px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.queueMode {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 20px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.queueMode svg {
-  display: block;
-}
-
-.queueMode:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-
-/* The default the queue is already in — a state, not a button. */
-.queueModeActive {
-  color: var(--text);
-  background: var(--accent-soft);
-}
-
 .queueItemBtn {
   display: grid;
   place-items: center;
@@ -755,7 +716,7 @@
   background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
-/* "Send now" is the item's primary action — keep it apart from edit/delete. */
+/* "Send now" is the item's only action. */
 .queueItemBtnSend {
   color: var(--accent);
 }

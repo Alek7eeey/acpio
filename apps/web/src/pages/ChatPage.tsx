@@ -222,6 +222,22 @@ function userMessageHistory(messages: MessageDto[]): Array<{ id: string; text: s
   return out;
 }
 
+/**
+ * One step of the composer's own undo: the text, its caret and where the
+ * history cursor stood. A programmatic replacement (↑ recalling a sent prompt)
+ * wipes the textarea's native undo history — React wrote the value — so the
+ * draft it replaced survives only here.
+ */
+type ComposerSnapshot = {
+  text: string;
+  start: number;
+  end: number;
+  historyIndex: number;
+  historyDraft: string;
+};
+
+const COMPOSER_UNDO_LIMIT = 100;
+
 type MessageCtxHandle = {
   openAt: (x: number, y: number) => void;
 };
@@ -4317,16 +4333,8 @@ function ChatThread() {
   const inflight = useAppStore((s) =>
     bind?.sessionId ? (s.inflightBySession?.[bind.sessionId] ?? 0) : s.inflight,
   );
-  const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
   const sendQueuedPromptNow = useAppStore((s) => s.sendQueuedPromptNow);
   const deliverQueuedPrompt = useAppStore((s) => s.deliverQueuedPrompt);
-  // Only a harness that folds a message into the turn it is already running can
-  // offer "after the step" — the others hide it instead of showing a dead button.
-  const queueMidTurnSteering = useAppStore(
-    (s) =>
-      s.adapters.find((a) => a.id === (activeSession?.provider ?? ""))?.midTurnSteering ===
-      true,
-  );
   const [text, setText] = useState("");
   const textRef = useRef(text);
   textRef.current = text;
@@ -4428,6 +4436,9 @@ function ChatThread() {
   const composerHistoryIndexRef = useRef(-1);
   const composerHistoryDraftRef = useRef("");
   const composerHistoryApplyingRef = useRef(false);
+  /** Composer states a history recall replaced, newest last — Ctrl+Z's stack. */
+  const composerUndoRef = useRef<ComposerSnapshot[]>([]);
+  const composerRedoRef = useRef<ComposerSnapshot[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   /** Thread viewport box (top + height) — the prompt rail's track. */
   const [threadBox, setThreadBox] = useState({ top: 0, height: 0 });
@@ -4675,21 +4686,69 @@ function ChatThread() {
     composerHistoryDraftRef.current = "";
   };
 
-  const applyComposerHistoryText = (value: string) => {
+  const clearComposerUndo = () => {
+    composerUndoRef.current = [];
+    composerRedoRef.current = [];
+  };
+
+  const applyComposerHistoryText = (value: string, caret?: { start: number; end: number }) => {
+    const start = Math.min(caret?.start ?? value.length, value.length);
+    const end = Math.min(caret?.end ?? value.length, value.length);
     composerHistoryApplyingRef.current = true;
     setSlashMenuDismissed(true);
     setText(value);
-    setCursorPos(value.length);
+    setCursorPos(start);
     setComposerMultilineIfNeeded(value.includes("\n"));
     requestAnimationFrame(() => {
       const el = textareaRef.current;
       if (el) {
         el.focus({ preventScroll: true });
-        el.setSelectionRange(value.length, value.length);
+        el.setSelectionRange(start, end);
         syncComposerSize(el);
       }
       composerHistoryApplyingRef.current = false;
     });
+  };
+
+  /** The composer as it stands — the step Ctrl+Z would come back to. */
+  const composerSnapshot = (): ComposerSnapshot => {
+    const el = textareaRef.current;
+    const start = el?.selectionStart ?? textRef.current.length;
+    const end = el?.selectionEnd ?? start;
+    return {
+      text: textRef.current,
+      start,
+      end,
+      historyIndex: composerHistoryIndexRef.current,
+      historyDraft: composerHistoryDraftRef.current,
+    };
+  };
+
+  const pushComposerUndo = (snapshot: ComposerSnapshot) => {
+    composerUndoRef.current.push(snapshot);
+    if (composerUndoRef.current.length > COMPOSER_UNDO_LIMIT) composerUndoRef.current.shift();
+    composerRedoRef.current = [];
+  };
+
+  const restoreComposerSnapshot = (snapshot: ComposerSnapshot) => {
+    composerHistoryIndexRef.current = snapshot.historyIndex;
+    composerHistoryDraftRef.current = snapshot.historyDraft;
+    applyComposerHistoryText(snapshot.text, snapshot);
+  };
+
+  /**
+   * Walk the composer's own undo/redo stacks. False when there is no step to
+   * take: typing is the browser's own undo to handle, and these stacks never
+   * shadow it while a recall is not what put the text there.
+   */
+  const stepComposerUndo = (direction: "undo" | "redo") => {
+    const from = direction === "undo" ? composerUndoRef.current : composerRedoRef.current;
+    const to = direction === "undo" ? composerRedoRef.current : composerUndoRef.current;
+    const snapshot = from.pop();
+    if (!snapshot) return false;
+    to.push(composerSnapshot());
+    restoreComposerSnapshot(snapshot);
+    return true;
   };
 
   const navigateComposerHistory = (direction: "prev" | "next") => {
@@ -4697,6 +4756,9 @@ function ChatThread() {
     const history = userMessageHistory(activeSession?.messages ?? []);
     if (history.length === 0) return false;
 
+    // Taken before the cursor moves: the recall overwrites this, and Ctrl+Z
+    // has to put it back exactly (the draft, with the caret where it was).
+    const before = composerSnapshot();
     let idx = composerHistoryIndexRef.current;
     if (direction === "prev") {
       if (idx === -1) {
@@ -4713,11 +4775,13 @@ function ChatThread() {
       idx += 1;
     } else {
       resetComposerHistory();
+      pushComposerUndo(before);
       applyComposerHistoryText(composerHistoryDraftRef.current);
       return true;
     }
 
     composerHistoryIndexRef.current = idx;
+    pushComposerUndo(before);
     applyComposerHistoryText(history[idx]!.text);
     return true;
   };
@@ -4772,6 +4836,8 @@ function ChatThread() {
     composerSessionRef.current = composerSessionId;
     const next = composerSessionId ? readComposerDraft(composerSessionId) : "";
     resetComposerHistory();
+    // Another chat's steps are not this composer's to undo.
+    clearComposerUndo();
     setText(next);
     setCursorPos(next.length);
     setSlashMenuDismissed(false);
@@ -5293,6 +5359,7 @@ function ChatThread() {
     for (const url of previewUrlsRef.current.values()) URL.revokeObjectURL(url);
     previewUrlsRef.current.clear();
     resetComposerHistory();
+    clearComposerUndo();
     setText("");
     setPasteOffer(null);
     pasteOfferAtRef.current = null;
@@ -6857,119 +6924,18 @@ function ChatThread() {
                 <span className={styles.queueItemText} title={item.text}>
                   {item.text}
                 </span>
-                <div
-                  className={styles.queueModes}
-                  role="group"
-                  aria-label={t("chat.queueDeliveryLabel")}
-                >
-                  {/* Waiting for the end of the turn is the default, not a
-                      choice: it is what happens if nothing else is pressed. */}
-                  <span
-                    className={`${styles.queueMode} ${styles.queueModeActive}`}
-                    title={t("chat.queueDeliveryQueue")}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.7" />
-                      <path
-                        d="M12 7.5V12l3 2"
-                        stroke="currentColor"
-                        strokeWidth="1.7"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <button
-                    type="button"
-                    className={styles.queueMode}
-                    title={t("chat.queueDeliverySteer")}
-                    aria-label={t("chat.queueDeliverySteer")}
-                    onClick={() => void deliverQueuedPrompt(item.id, "steer")}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                      <path
-                        d="M12 19V5M12 5l-6 6M12 5l6 6"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                  {queueMidTurnSteering && (
-                    <button
-                      type="button"
-                      className={styles.queueMode}
-                      title={t("chat.queueDeliveryAfterStep")}
-                      aria-label={t("chat.queueDeliveryAfterStep")}
-                      onClick={() => void deliverQueuedPrompt(item.id, "afterStep")}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                        <path
-                          d="M6 5v6a3 3 0 0 0 3 3h8"
-                          stroke="currentColor"
-                          strokeWidth="1.7"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                        <path
-                          d="m14 11 3 3-3 3"
-                          stroke="currentColor"
-                          strokeWidth="1.7"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                </div>
                 <button
                   type="button"
-                  className={styles.queueItemBtn}
-                  title={t("common.edit")}
-                  aria-label={t("common.edit")}
-                  onClick={() => {
-                    // Pull the text back into the composer for editing.
-                    removeQueuedPrompt(item.id);
-                    setText(item.text);
-                    setCursorPos(item.text.length);
-                    setComposerMultilineIfNeeded(item.text.includes("\n"));
-                    requestAnimationFrame(() => {
-                      const el = textareaRef.current;
-                      if (!el) return;
-                      el.focus({ preventScroll: true });
-                      el.setSelectionRange(item.text.length, item.text.length);
-                      syncComposerSize(el);
-                    });
-                  }}
+                  className={`${styles.queueItemBtn} ${styles.queueItemBtnSend}`}
+                  title={t("chat.queueDeliverySteer")}
+                  aria-label={t("chat.queueDeliverySteer")}
+                  onClick={() => void deliverQueuedPrompt(item.id, "steer")}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
                     <path
-                      d="M4 20h4.8L20 8.8 15.2 4 4 15.2V20Z"
+                      d="M12 19V5M12 5l-6 6M12 5l6 6"
                       stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinejoin="round"
-                    />
-                    <path
-                      d="M12.8 6.8 17.2 11.2"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  className={styles.queueItemBtn}
-                  title={t("common.delete")}
-                  aria-label={t("common.delete")}
-                  onClick={() => removeQueuedPrompt(item.id)}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
+                      strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
@@ -7274,6 +7240,25 @@ function ChatThread() {
                 if (composerLocked) {
                   e.preventDefault();
                   return;
+                }
+                // Undo/redo over a recalled prompt. The browser's own undo is
+                // gone by then — React wrote the textarea's value — so Ctrl+Z
+                // on a fresh draft is left to it, and only a replaced composer
+                // is served from these stacks.
+                if (
+                  (e.ctrlKey || e.metaKey) &&
+                  !e.altKey &&
+                  (e.code === "KeyZ" ||
+                    e.code === "KeyY" ||
+                    e.key?.toLowerCase() === "z" ||
+                    e.key?.toLowerCase() === "y")
+                ) {
+                  const redo =
+                    e.code === "KeyY" || e.key?.toLowerCase() === "y" || e.shiftKey;
+                  if (stepComposerUndo(redo ? "redo" : "undo")) {
+                    e.preventDefault();
+                    return;
+                  }
                 }
                 const slashMenuHandlesArrows =
                   slashMenuOpen && filteredSlashCommands.length > 1;
