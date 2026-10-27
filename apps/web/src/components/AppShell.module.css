@@ -462,6 +462,17 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A count is digits and digits carry no descender, so their ink rides half a cap
+   height above the middle of the line box — while the heart fills its own box.
+   Centring box against box put the heart a pixel under the number (measured at
+   12.16px digits beside a 13px heart: ink centres 25.98 against 24.92). The
+   heart is lifted by that pixel, so it sits on the digits' middle rather than
+   on the middle of the box they share. */
+.headerBoardFav svg {
+  display: block;
+  transform: translateY(-1px);
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
