@@ -3195,6 +3195,11 @@ button.userSlashCmd:focus-visible {
   flex: 0 0 auto;
   width: 38px;
   height: 38px;
+  /* The icon is centred by the grid, so the browser's own button padding has
+     nothing to do here — and on a small round chip it squeezed the content box
+     under the icon's width, which put the paperclip beside the centre instead
+     of in it. */
+  padding: 0;
   border: none;
   border-radius: 999px;
   display: grid;

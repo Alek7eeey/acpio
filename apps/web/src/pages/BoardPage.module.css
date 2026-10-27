@@ -583,6 +583,11 @@
   place-items: center;
   width: 22px;
   height: 22px;
+  /* No padding: the browser's own 6px on each side of a button leaves 8px of
+     content for a 12px icon, and a grid item that does not fit is laid at the
+     content edge instead of the centre — the paperclip sat 2px right of the
+     chip's middle. */
+  padding: 0;
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 999px;
   background: none;
