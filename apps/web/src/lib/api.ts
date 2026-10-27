@@ -4,6 +4,9 @@ import type {
   AgentProvider,
   AppSettings,
   BuiltinHeaderConfig,
+  BoardColumn,
+  BoardColumnDto,
+  BoardColumnRule,
   BoardDto,
   ChatThemeDto,
   DiagnosticsDumpDto,
@@ -310,6 +313,44 @@ export const api = {
       `/api/boards/${id}/folders/auto-run`,
       { method: "PUT", body: JSON.stringify({ cwd, autoRun }) },
     ).then((r) => r.folderAutoRun),
+  addBoardColumn: (
+    id: string,
+    body: {
+      title: string;
+      kind: "auto" | "manual";
+      anchor?: BoardColumn | null;
+      rule?: BoardColumnRule | null;
+      afterId?: string | null;
+    },
+  ) =>
+    request<BoardDto>(`/api/boards/${id}/columns`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateBoardColumn: (
+    id: string,
+    columnId: string,
+    patch: {
+      title?: string;
+      kind?: "auto" | "manual";
+      anchor?: BoardColumn | null;
+      rule?: BoardColumnRule | null;
+      sortMode?: BoardColumnDto["sortMode"];
+      acceptsPrompt?: boolean;
+      keepOnRun?: boolean;
+    },
+  ) =>
+    request<BoardDto>(`/api/boards/${id}/columns/${columnId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteBoardColumn: (id: string, columnId: string) =>
+    request<BoardDto>(`/api/boards/${id}/columns/${columnId}`, { method: "DELETE" }),
+  reorderBoardColumns: (id: string, ids: string[]) =>
+    request<BoardDto>(`/api/boards/${id}/columns/order`, {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
+    }),
   deleteBoard: (id: string) =>
     request<{ ok: boolean; boards: BoardDto[] }>(`/api/boards/${id}`, { method: "DELETE" }),
   listBoardSessions: (boardId: string) =>
@@ -353,6 +394,8 @@ export const api = {
       /** Board task fields: description edit (Todo) and Wait ⇄ Done toggle. */
       taskDescription?: string | null;
       doneAt?: string | null;
+      /** The board column the card was dropped into; null = back to the flow. */
+      boardColumnId?: string | null;
       /** Pre-start agent pick for a board task. */
       provider?: AgentProvider;
     },

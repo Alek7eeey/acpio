@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
-import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
+import {
+  DEFAULT_SETTINGS,
+  defaultBoardColumns,
+  type BoardColumnDto,
+  type BoardDto,
+  type SessionDto,
+} from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDrafts";
 import { I18nProvider } from "../lib/i18n";
@@ -22,6 +28,12 @@ const apiMock = vi.hoisted(() => {
     listBoardSessions: vi.fn(() => pending<unknown>()),
     // A drop inside a Todo group writes the group's order through this call.
     reorderSessions: vi.fn(async (items: Array<{ id: string; sortOrder: number }>) => items),
+    // A drop onto another lane writes the card's placement through this one.
+    updateSession: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
+      ...task,
+      ...patch,
+      id,
+    })),
     // Right-click + creates the task with no description before opening it.
     createSession: vi.fn(async (input: Record<string, unknown>) => ({
       ...task,
@@ -65,6 +77,11 @@ const board: BoardDto = {
   id: "b1",
   name: "Delivery",
   folders: ["/projects/app"],
+  folderTags: {},
+  folderAutoRun: {},
+  // A board always carries its four stage homes; the custom ones a test adds
+  // are appended to this list.
+  columns: defaultBoardColumns(),
   sortOrder: 0,
   createdAt: "2026-09-20T10:00:00.000Z",
 };
@@ -85,6 +102,7 @@ const task: SessionDto = {
   taskDescription: "Fix the login bug",
   startedAt: null,
   doneAt: null,
+  boardColumnId: null,
   mcpDisabledIds: [],
   createdAt: "2026-09-20T10:05:00.000Z",
   updatedAt: "2026-09-20T10:05:00.000Z",
@@ -272,6 +290,265 @@ describe("BoardPage Todo drag and drop", () => {
       ["t2", 1],
       ["t9", 0],
     ]);
+  });
+});
+
+describe("BoardPage custom columns", () => {
+  /** A lane of the reader's own, outside the lifecycle. */
+  const review: BoardColumnDto = {
+    id: "col-review",
+    title: "Review",
+    kind: "manual",
+    anchor: null,
+    home: false,
+    rule: null,
+    sortOrder: 4,
+    sortMode: "manual",
+    acceptsPrompt: true,
+    keepOnRun: false,
+  };
+
+  /** A rule lane over the Wait stage: what the agent finished, not the questions. */
+  const finished: BoardColumnDto = {
+    ...review,
+    id: "col-finished",
+    title: "Finished",
+    kind: "auto",
+    anchor: "wait",
+    rule: { stage: "wait", questionPending: false, hasError: false },
+  };
+
+  const finishedTask: SessionDto = {
+    ...task,
+    id: "t2",
+    title: "Finished task",
+    taskDescription: "Finished task",
+    startedAt: "2026-09-20T10:06:00.000Z",
+  };
+
+  it("renders a lane the reader added and keeps the card standing in it", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [{ ...finishedTask, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const lane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    expect(lane).toBeTruthy();
+    expect(within(lane).getByText("Review")).toBeTruthy();
+    expect(lane.querySelector('[data-task-id="t2"]')).toBeTruthy();
+    // The lifecycle would have put it in Wait: the placement wins.
+    expect(container.querySelector('[data-column="wait"] [data-task-id="t2"]')).toBeNull();
+  });
+
+  it("splits Wait: a finished turn into the rule lane, the question at home", async () => {
+    const question: SessionDto = {
+      ...finishedTask,
+      id: "t3",
+      title: "Question task",
+      taskDescription: "Question task",
+      status: "waiting",
+    };
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), finished] }],
+      boardSessions: [finishedTask, question],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+    await screen.findByText("Question task");
+
+    const ruleLane = container.querySelector('[data-column="col-finished"]') as HTMLElement;
+    const waitLane = container.querySelector('[data-column="wait"]') as HTMLElement;
+    expect(ruleLane.querySelector('[data-task-id="t2"]')).toBeTruthy();
+    expect(ruleLane.querySelector('[data-task-id="t3"]')).toBeNull();
+    expect(waitLane.querySelector('[data-task-id="t3"]')).toBeTruthy();
+    expect(waitLane.querySelector('[data-task-id="t2"]')).toBeNull();
+  });
+
+  it("places a card in another lane when it is dragged there", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [task],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+    const lane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    // jsdom ships no point hit-testing: the lane under the pointer is the one
+    // the drag resolves against.
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [lane],
+    });
+    try {
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "mouse", button: 0, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, pointerType: "mouse", clientY: 20 });
+
+      // The card the hand carries is on screen under the pointer, and the card
+      // itself is dimmed where it lay.
+      const preview = document.body.querySelector("[data-drag-preview]") as HTMLElement | null;
+      expect(preview?.textContent).toContain("Fix the login bug");
+      expect(card.className).toContain("cardDragging");
+
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "mouse", clientY: 20 });
+    } finally {
+      Reflect.deleteProperty(document, "elementsFromPoint");
+    }
+
+    // Released: the copy is gone, and the drop was written.
+    expect(document.body.querySelector("[data-drag-preview]")).toBeNull();
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateSession.mock.calls[0][1]).toEqual({ boardColumnId: "col-review" });
+  });
+
+  // The card itself is the handle: a drag icon on the card was one control too
+  // many, and the whole card already answers the pointer.
+  it("carries no drag icon on its cards", async () => {
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+    expect(container.querySelectorAll("[data-task-grip]").length).toBe(0);
+  });
+
+  // The way to a new lane is one small button at the end of the strip, not a
+  // lane-sized placeholder that spends board width on nothing.
+  it("opens the columns editor from the small add button in the strip", async () => {
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const add = container.querySelector("[data-add-column-lane]") as HTMLElement;
+    expect(add).toBeTruthy();
+    expect(add.textContent).toContain("+");
+
+    await userEvent.click(add);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.querySelectorAll("[data-column-id]").length).toBe(4);
+  });
+
+  // A stage column is not a place a card can be put by hand — the lifecycle
+  // owns it. The drag says so under the pointer instead of quietly doing
+  // nothing, and nothing is written on release.
+  /** Press a card, move the pointer over a lane and hold it there: the caller
+   *  reads what the lane says, then releases the gesture. */
+  function hoverOver(card: HTMLElement, lane: HTMLElement) {
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [lane],
+    });
+    fireEvent.pointerDown(card, { pointerId: 1, pointerType: "mouse", button: 0, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, pointerType: "mouse", clientY: 40 });
+    return () => {
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "mouse", clientY: 40 });
+      Reflect.deleteProperty(document, "elementsFromPoint");
+    };
+  }
+
+  // Todo is the lifecycle's own answer: a card cannot be put back to «not
+  // started», so the lane refuses the drop instead of quietly doing nothing.
+  it("refuses a drop on Todo, marking it with a cross", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [{ ...finishedTask, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const card = container.querySelector('[data-task-id="t2"]') as HTMLElement;
+    const todoLane = container.querySelector('[data-column="todo"]') as HTMLElement;
+    const release = hoverOver(card, todoLane);
+    try {
+      expect(todoLane.textContent).toContain("✕");
+      expect(todoLane.className).toContain("columnDropBlocked");
+    } finally {
+      release();
+    }
+
+    expect(apiMock.updateSession).not.toHaveBeenCalled();
+    expect(useAppStore.getState().boardSessions[0]!.boardColumnId).toBe("col-review");
+  });
+
+  // Wait takes a card only when there is something to undo — a closed mark or
+  // a placement. A Todo card has neither, so dropping it there is refused.
+  it("refuses Wait for a card with nothing to release", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [task],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+    const waitLane = container.querySelector('[data-column="wait"]') as HTMLElement;
+    const release = hoverOver(card, waitLane);
+    try {
+      expect(waitLane.textContent).toContain("✕");
+    } finally {
+      release();
+    }
+    expect(apiMock.updateSession).not.toHaveBeenCalled();
+  });
+
+  // Done is a stage door a hand *can* open: dropping the card there is the
+  // card's own «Отметить готовой» button, made with the pointer.
+  it("marks a card ready when it is dropped on Done", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [finishedTask],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const card = container.querySelector('[data-task-id="t2"]') as HTMLElement;
+    const doneLane = container.querySelector('[data-column="done"]') as HTMLElement;
+    const release = hoverOver(card, doneLane);
+    try {
+      // The lane says what it will do before the hand lets go.
+      expect(doneLane.querySelector('[data-drop-mark="done"]')).toBeTruthy();
+    } finally {
+      release();
+    }
+
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateSession.mock.calls[0]![1]).toMatchObject({
+      doneAt: expect.any(String),
+    });
+    await waitFor(() =>
+      expect(doneLane.querySelector('[data-task-id="t2"]')).toBeTruthy(),
+    );
+  });
+
+  // Wait is the other door: a closed card dropped there is reopened, and a
+  // placement it carried goes with the mark — it is back to the workflow.
+  it("reopens a card dropped on Wait and lets go of its placement", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [
+        {
+          ...finishedTask,
+          boardColumnId: "col-review",
+          doneAt: "2026-09-21T10:00:00.000Z",
+        },
+      ],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const card = container.querySelector('[data-task-id="t2"]') as HTMLElement;
+    const waitLane = container.querySelector('[data-column="wait"]') as HTMLElement;
+    const release = hoverOver(card, waitLane);
+    try {
+      expect(waitLane.querySelector('[data-drop-mark="reopen"]')).toBeTruthy();
+    } finally {
+      release();
+    }
+
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(2));
+    const patches = apiMock.updateSession.mock.calls.map((call) => call[1]);
+    expect(patches).toContainEqual({ doneAt: null });
+    expect(patches).toContainEqual({ boardColumnId: null });
   });
 });
 

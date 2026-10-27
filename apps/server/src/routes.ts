@@ -93,15 +93,20 @@ import {
   reorderFolders,
 } from "./services/folders.js";
 import {
+  addBoardColumn,
   boardAcceptsCwd,
+  boardHasColumn,
   createBoard,
   deleteBoard,
+  deleteBoardColumn,
   deleteBoardSessions,
   listBoards,
+  reorderBoardColumns,
   setBoardFolderAutoRun,
   setBoardFolderTag,
   setBoardFolders,
   updateBoard,
+  updateBoardColumn,
 } from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
@@ -115,7 +120,7 @@ import {
   readDiagnosticsDump,
   writeDiagnosticsDump,
 } from "./services/diagnostics.js";
-import { addWsClient, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
+import { addWsClient, broadcast, subscribeClient, unsubscribeClient } from "./services/wsHub.js";
 import {
   attachUserConsole,
   reconcileUserConsolesShell,
@@ -1135,6 +1140,83 @@ export async function registerRoutes(app: FastifyInstance) {
     if (folderAutoRun === null) return reply.code(404).send({ error: "Not found" });
     return { ok: true, folderAutoRun };
   });
+  // A board's columns: the four stage homes (seeded with the board) plus the
+  // lanes the reader adds. Every write answers with the board as it stands.
+  const boardColumnSchema = z
+    .object({
+      stage: z.enum(["todo", "progress", "wait", "done"]),
+      questionPending: z.boolean().optional(),
+      hasError: z.boolean().optional(),
+      folders: z.array(z.string().min(1).max(4096)).max(50).optional(),
+    })
+    .strict();
+  const boardColumnPatchSchema = z
+    .object({
+      title: z.string().max(60).optional(),
+      kind: z.enum(["auto", "manual"]).optional(),
+      anchor: z.enum(["todo", "progress", "wait", "done"]).nullable().optional(),
+      rule: boardColumnSchema.nullable().optional(),
+      sortMode: z.enum(["manual", "created", "updated", "done"]).optional(),
+      acceptsPrompt: z.boolean().optional(),
+      keepOnRun: z.boolean().optional(),
+    })
+    .strict();
+  app.post("/api/boards/:id/columns", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        title: z.string().min(1).max(60),
+        kind: z.enum(["auto", "manual"]),
+        anchor: z.enum(["todo", "progress", "wait", "done"]).nullable().optional(),
+        rule: boardColumnSchema.nullable().optional(),
+        afterId: z.string().min(1).max(64).nullable().optional(),
+      })
+      .strict()
+      .parse(req.body ?? {});
+    const result = await addBoardColumn(id, body);
+    if (!result.ok) {
+      return result.reason === "notFound"
+        ? reply.code(404).send({ error: "Not found" })
+        : reply.code(400).send({ error: "Invalid column" });
+    }
+    broadcast({ type: "board.updated", board: result.board });
+    return result.board;
+  });
+  app.patch("/api/boards/:id/columns/:columnId", async (req, reply) => {
+    const { id, columnId } = req.params as { id: string; columnId: string };
+    const body = boardColumnPatchSchema.parse(req.body ?? {});
+    const result = await updateBoardColumn(id, columnId, body);
+    if (!result.ok) {
+      return result.reason === "notFound"
+        ? reply.code(404).send({ error: "Not found" })
+        : reply.code(400).send({ error: "Invalid column" });
+    }
+    broadcast({ type: "board.updated", board: result.board });
+    return result.board;
+  });
+  app.delete("/api/boards/:id/columns/:columnId", async (req, reply) => {
+    const { id, columnId } = req.params as { id: string; columnId: string };
+    const result = await deleteBoardColumn(id, columnId);
+    if (!result.ok) {
+      if (result.reason === "home") {
+        return reply.code(400).send({ error: "A stage column cannot be deleted" });
+      }
+      return reply.code(404).send({ error: "Not found" });
+    }
+    broadcast({ type: "board.updated", board: result.board });
+    return result.board;
+  });
+  app.put("/api/boards/:id/columns/order", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({ ids: z.array(z.string().min(1).max(64)).max(64) })
+      .parse(req.body ?? {});
+    const result = await reorderBoardColumns(id, body.ids);
+    if (!result.ok) return reply.code(404).send({ error: "Not found" });
+    broadcast({ type: "board.updated", board: result.board });
+    return result.board;
+  });
+
   app.delete("/api/boards/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     // Tear down live agents of the board's tasks before deleting their rows.
@@ -1216,6 +1298,8 @@ export async function registerRoutes(app: FastifyInstance) {
         mcpDisabledIds: z.array(z.string().min(1).max(64)).optional(),
         taskDescription: z.string().max(20000).nullable().optional(),
         doneAt: z.string().datetime().nullable().optional(),
+        /** The column the reader put the card in; null = follow the lifecycle. */
+        boardColumnId: z.string().min(1).max(64).nullable().optional(),
         /** Pre-start only: a task picks its agent before the first turn. */
         provider: registeredProviderSchema.optional(),
       })
@@ -1229,11 +1313,26 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!rows[0]) return reply.code(404).send({ error: "Not found" });
       if (rows[0].acpSessionId) return reply.code(400).send({ error: "alreadyStarted" });
     }
+    if (body.boardColumnId) {
+      // A card may only be placed in a column of its own board.
+      const rows = await db
+        .select({ boardId: sessions.boardId })
+        .from(sessions)
+        .where(eq(sessions.id, id))
+        .limit(1);
+      if (!rows[0]) return reply.code(404).send({ error: "Not found" });
+      if (!rows[0].boardId) return reply.code(400).send({ error: "Not a board task" });
+      if (!(await boardHasColumn(rows[0].boardId, body.boardColumnId))) {
+        return reply.code(400).send({ error: "Unknown board column" });
+      }
+    }
     const { doneAt, provider, ...rest } = body;
-    // Starring a card is not activity: the board's Wait lane orders by
-    // `updatedAt`, so a favourite written alone must leave the stamp alone and
-    // keep the card where it stands.
-    const onlyFavorite = body.favorite !== undefined && Object.keys(body).length === 1;
+    // Neither a star nor a card moving between columns is activity: the board's
+    // log lanes order by their own stamps, so a write that only places the card
+    // must leave `updatedAt` alone and keep it where it stands.
+    const onlyBoardMarks =
+      Object.keys(body).length > 0 &&
+      Object.keys(body).every((key) => key === "favorite" || key === "boardColumnId");
     const updated = await updateSession(
       id,
       {
@@ -1241,7 +1340,7 @@ export async function registerRoutes(app: FastifyInstance) {
         ...(provider ? { provider } : {}),
         ...(doneAt !== undefined ? { doneAt: doneAt === null ? null : new Date(doneAt) } : {}),
       },
-      onlyFavorite ? { touch: false } : undefined,
+      onlyBoardMarks ? { touch: false } : undefined,
     );
     if (!updated) return reply.code(404).send({ error: "Not found" });
     // A chat-level MCP change needs a fresh agent attach, same as a global one.

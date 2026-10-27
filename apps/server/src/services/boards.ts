@@ -1,13 +1,98 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import type { BoardDto } from "@acpio/shared";
+import type { BoardColumn, BoardColumnDto, BoardColumnRule, BoardDto } from "@acpio/shared";
 import { db } from "../db/client.js";
-import { boardFolders, boards, sessions } from "../db/schema.js";
+import { boardColumns, boardFolders, boards, sessions } from "../db/schema.js";
 import { listFolders } from "./folders.js";
-import { canonicalCwd } from "@acpio/shared";
+import { canonicalCwd, defaultBoardColumns } from "@acpio/shared";
 
-/** Attach each board row's folders (ordered) — one query for all of them. */
+type BoardColumnRow = typeof boardColumns.$inferSelect;
+
+/** One stored column as the board hands it to the client. */
+function mapColumn(row: BoardColumnRow): BoardColumnDto {
+  return {
+    id: row.id,
+    title: row.title ?? "",
+    kind: row.kind as BoardColumnDto["kind"],
+    anchor: (row.anchor as BoardColumnDto["anchor"]) ?? null,
+    home: row.home,
+    rule: (row.rule as BoardColumnRule | null) ?? null,
+    sortOrder: row.sortOrder ?? 0,
+    sortMode: row.sortMode as BoardColumnDto["sortMode"],
+    acceptsPrompt: row.acceptsPrompt,
+    keepOnRun: row.keepOnRun,
+  };
+}
+
+/**
+ * Give a board its four stage homes. A board made before columns existed (or
+ * one read straight after the upgrade) carries none; seeding on read keeps the
+ * board exactly as it was — the homes carry today's behavior — without a
+ * migration that has to know about every board file. Idempotent: the insert
+ * yields to a row that is already there.
+ */
+export async function ensureBoardColumns(boardId: string): Promise<void> {
+  const rows = await db
+    .select({ id: boardColumns.id })
+    .from(boardColumns)
+    .where(eq(boardColumns.boardId, boardId))
+    .limit(1);
+  if (rows[0]) return;
+  await db
+    .insert(boardColumns)
+    .values(
+      defaultBoardColumns().map((column) => ({
+        id: column.id,
+        boardId,
+        title: column.title,
+        kind: column.kind,
+        anchor: column.anchor,
+        home: column.home,
+        rule: column.rule,
+        sortOrder: column.sortOrder,
+        sortMode: column.sortMode,
+        acceptsPrompt: column.acceptsPrompt,
+        keepOnRun: column.keepOnRun,
+      })),
+    )
+    .onConflictDoNothing();
+}
+
+/** Seed every board of the list that carries no columns yet — one query to find them. */
+async function ensureColumnsFor(boardRows: (typeof boards.$inferSelect)[]) {
+  const ids = boardRows.map((r) => r.id);
+  if (!ids.length) return;
+  const seeded = new Set(
+    (
+      await db
+        .select({ boardId: boardColumns.boardId })
+        .from(boardColumns)
+        .where(inArray(boardColumns.boardId, ids))
+        .groupBy(boardColumns.boardId)
+    ).map((row) => row.boardId),
+  );
+  for (const id of ids) {
+    if (!seeded.has(id)) await ensureBoardColumns(id);
+  }
+}
+
+/** Attach each board row's folders and columns (ordered) — one query each. */
 async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<BoardDto[]> {
   const ids = boardRows.map((r) => r.id);
+  await ensureColumnsFor(boardRows);
+  const columnRows = ids.length
+    ? await db
+        .select()
+        .from(boardColumns)
+        .where(inArray(boardColumns.boardId, ids))
+        .orderBy(asc(boardColumns.sortOrder), asc(boardColumns.createdAt))
+    : [];
+  const columnsByBoard = new Map<string, BoardColumnDto[]>();
+  for (const row of columnRows) {
+    const list = columnsByBoard.get(row.boardId) ?? [];
+    list.push(mapColumn(row));
+    columnsByBoard.set(row.boardId, list);
+  }
   const folderRows = ids.length
     ? await db
         .select()
@@ -39,6 +124,7 @@ async function withFolders(boardRows: (typeof boards.$inferSelect)[]): Promise<B
     folders: byBoard.get(row.id) ?? [],
     folderTags: tagsByBoard.get(row.id) ?? {},
     folderAutoRun: autoRunByBoard.get(row.id) ?? {},
+    columns: columnsByBoard.get(row.id) ?? defaultBoardColumns(),
     sortOrder: row.sortOrder ?? 0,
     createdAt: row.createdAt.toISOString(),
   }));
@@ -67,12 +153,15 @@ export async function createBoard(name: string): Promise<BoardDto> {
     .insert(boards)
     .values({ name: name.trim(), sortOrder })
     .returning();
+  // A new board opens on the four stage homes, exactly like an old one.
+  await ensureBoardColumns(row.id);
   return {
     id: row.id,
     name: row.name,
     folders: [],
     folderTags: {},
     folderAutoRun: {},
+    columns: defaultBoardColumns(),
     sortOrder: row.sortOrder,
     createdAt: row.createdAt.toISOString(),
   };
@@ -241,4 +330,235 @@ export async function boardAcceptsCwd(boardId: string, cwd: string): Promise<boo
     .where(and(eq(boardFolders.boardId, boardId), eq(boardFolders.cwd, key)))
     .limit(1);
   return rows.length > 0;
+}
+
+/** Ceiling on a board's columns — a strip wider than this is unreadable anyway. */
+const MAX_BOARD_COLUMNS = 24;
+const MAX_COLUMN_TITLE = 60;
+/** Ceiling on the folders one rule column may name. */
+const MAX_RULE_FOLDERS = 50;
+
+/** What a column write answered: the board as it stands now, or why not. */
+export type BoardColumnWrite =
+  | { ok: true; board: BoardDto }
+  | { ok: false; reason: "notFound" | "home" | "invalid" };
+
+function cleanColumnTitle(raw: unknown): string {
+  return String(raw ?? "").trim().slice(0, MAX_COLUMN_TITLE);
+}
+
+/** A rule as it will be stored: canonical folders, only the faces that are set. */
+function cleanColumnRule(rule: BoardColumnRule | null | undefined): BoardColumnRule | null {
+  if (!rule) return null;
+  const out: BoardColumnRule = { stage: rule.stage };
+  if (rule.questionPending !== undefined) out.questionPending = rule.questionPending === true;
+  if (rule.hasError !== undefined) out.hasError = rule.hasError === true;
+  const folders = [...new Set((rule.folders ?? []).map((cwd) => canonicalCwd(cwd)).filter(Boolean))];
+  if (folders.length) out.folders = folders.slice(0, MAX_RULE_FOLDERS);
+  return out;
+}
+
+/** The board's columns in display order (a board with none gets its homes). */
+export async function listBoardColumns(boardId: string): Promise<BoardColumnDto[]> {
+  const rows = await db
+    .select()
+    .from(boardColumns)
+    .where(eq(boardColumns.boardId, boardId))
+    .orderBy(asc(boardColumns.sortOrder), asc(boardColumns.createdAt));
+  return rows.map(mapColumn);
+}
+
+/** True when the id names a column of this board (a placement may only point at one). */
+export async function boardHasColumn(boardId: string, columnId: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: boardColumns.id })
+    .from(boardColumns)
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
+/** Whether a column keeps its cards while the agent runs (`keepOnRun`). */
+export async function boardColumnKeepsOnRun(
+  boardId: string,
+  columnId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ keepOnRun: boardColumns.keepOnRun })
+    .from(boardColumns)
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)))
+    .limit(1);
+  return rows[0]?.keepOnRun ?? false;
+}
+
+/** Write the given column order as `sortOrder`; ids not listed keep their tail. */
+async function writeColumnOrder(boardId: string, ids: string[]): Promise<void> {
+  const rows = await db
+    .select({ id: boardColumns.id })
+    .from(boardColumns)
+    .where(eq(boardColumns.boardId, boardId))
+    .orderBy(asc(boardColumns.sortOrder), asc(boardColumns.createdAt));
+  const known = rows.map((row) => row.id);
+  const next = [
+    ...ids.filter((id) => known.includes(id)),
+    ...known.filter((id) => !ids.includes(id)),
+  ];
+  for (const [index, id] of next.entries()) {
+    await db
+      .update(boardColumns)
+      .set({ sortOrder: index })
+      .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, id)));
+  }
+}
+
+/**
+ * Add a column of the reader's own. `auto` claims a slice of one lifecycle
+ * stage by its rule; `manual` is a lane outside the lifecycle. The four stage
+ * homes are not creatable — they come with the board.
+ */
+export async function addBoardColumn(
+  boardId: string,
+  input: {
+    title: string;
+    kind: "auto" | "manual";
+    anchor?: BoardColumn | null;
+    rule?: BoardColumnRule | null;
+    /** Insert right after this column; absent = the end of the strip. */
+    afterId?: string | null;
+  },
+): Promise<BoardColumnWrite> {
+  const board = await getBoard(boardId);
+  if (!board) return { ok: false, reason: "notFound" };
+  if (board.columns.length >= MAX_BOARD_COLUMNS) return { ok: false, reason: "invalid" };
+  const title = cleanColumnTitle(input.title);
+  const anchor = input.anchor ?? null;
+  const rule = input.kind === "auto" ? cleanColumnRule(input.rule ?? (anchor ? { stage: anchor } : null)) : null;
+  if (!title) return { ok: false, reason: "invalid" };
+  if (input.kind === "auto" && (!anchor || !rule || rule.stage !== anchor)) {
+    return { ok: false, reason: "invalid" };
+  }
+  const id = `col-${randomUUID().slice(0, 8)}`;
+  await db.insert(boardColumns).values({
+    id,
+    boardId,
+    title,
+    kind: input.kind,
+    anchor,
+    home: false,
+    rule,
+    sortOrder: board.columns.length,
+    sortMode: "manual",
+    acceptsPrompt: true,
+    // A lane holds the cards the reader drops in it: a begun turn must not take
+    // them back to Wait — the switch in the editor can hand them over instead.
+    keepOnRun: true,
+  });
+  const ids = board.columns.map((column) => column.id);
+  const at = input.afterId ? ids.indexOf(input.afterId) : -1;
+  ids.splice(at >= 0 ? at + 1 : ids.length, 0, id);
+  await writeColumnOrder(boardId, ids);
+  return { ok: true, board: (await getBoard(boardId))! };
+}
+
+/**
+ * Rewrite a column. A home keeps its kind, stage and rule (it *is* the stage);
+ * its title, order and behavior stay editable. A lane of the reader's own may
+ * turn from manual into a rule column and back.
+ */
+export async function updateBoardColumn(
+  boardId: string,
+  columnId: string,
+  patch: {
+    title?: string;
+    kind?: "auto" | "manual";
+    anchor?: BoardColumn | null;
+    rule?: BoardColumnRule | null;
+    sortMode?: BoardColumnDto["sortMode"];
+    acceptsPrompt?: boolean;
+    keepOnRun?: boolean;
+  },
+): Promise<BoardColumnWrite> {
+  // A write must reach a board that carries its homes already — an old board
+  // is seeded here too, so a client that only edits never meets a 404.
+  if (!(await getBoard(boardId))) return { ok: false, reason: "notFound" };
+  const rows = await db
+    .select()
+    .from(boardColumns)
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return { ok: false, reason: "notFound" };
+  const current = mapColumn(row);
+  const kind = current.home ? current.kind : (patch.kind ?? (current.kind === "stage" ? "manual" : current.kind));
+  const anchor = current.home ? current.anchor : (patch.anchor !== undefined ? patch.anchor : current.anchor);
+  const rule =
+    current.home || kind !== "auto"
+      ? null
+      : cleanColumnRule(patch.rule !== undefined ? patch.rule : (current.rule ?? (anchor ? { stage: anchor } : null)));
+  const title = patch.title !== undefined ? cleanColumnTitle(patch.title) : current.title;
+  if (!current.home && !title) return { ok: false, reason: "invalid" };
+  if (kind === "auto" && (!anchor || !rule || rule.stage !== anchor)) {
+    return { ok: false, reason: "invalid" };
+  }
+  await db
+    .update(boardColumns)
+    .set({
+      title,
+      kind,
+      anchor,
+      rule,
+      ...(patch.sortMode !== undefined ? { sortMode: patch.sortMode } : {}),
+      ...(patch.acceptsPrompt !== undefined ? { acceptsPrompt: patch.acceptsPrompt } : {}),
+      ...(patch.keepOnRun !== undefined ? { keepOnRun: patch.keepOnRun } : {}),
+    })
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)));
+  return { ok: true, board: (await getBoard(boardId))! };
+}
+
+/**
+ * Delete a column of the reader's own. The cards stand there by placement, so
+ * they are released with it: each one returns to the rules and the stage home
+ * its lifecycle names, and no card is left pointing at a column that is gone.
+ */
+export async function deleteBoardColumn(
+  boardId: string,
+  columnId: string,
+): Promise<BoardColumnWrite> {
+  if (!(await getBoard(boardId))) return { ok: false, reason: "notFound" };
+  const rows = await db
+    .select({ home: boardColumns.home })
+    .from(boardColumns)
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)))
+    .limit(1);
+  if (!rows[0]) return { ok: false, reason: "notFound" };
+  if (rows[0].home) return { ok: false, reason: "home" };
+  await db
+    .delete(boardColumns)
+    .where(and(eq(boardColumns.boardId, boardId), eq(boardColumns.id, columnId)));
+  await db
+    .update(sessions)
+    .set({ boardColumnId: null })
+    .where(and(eq(sessions.boardId, boardId), eq(sessions.boardColumnId, columnId)));
+  await writeColumnOrder(
+    boardId,
+    (
+      await db
+        .select({ id: boardColumns.id })
+        .from(boardColumns)
+        .where(eq(boardColumns.boardId, boardId))
+        .orderBy(asc(boardColumns.sortOrder), asc(boardColumns.createdAt))
+    ).map((row) => row.id),
+  );
+  return { ok: true, board: (await getBoard(boardId))! };
+}
+
+/** Put the board's columns in the given order (ids the board does not know are ignored). */
+export async function reorderBoardColumns(
+  boardId: string,
+  ids: string[],
+): Promise<BoardColumnWrite> {
+  const board = await getBoard(boardId);
+  if (!board) return { ok: false, reason: "notFound" };
+  await writeColumnOrder(boardId, ids);
+  return { ok: true, board: (await getBoard(boardId))! };
 }

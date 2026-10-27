@@ -24,6 +24,7 @@ import { defaultSessionTitle } from "@acpio/i18n";
 import { db } from "../db/client.js";
 import { adapters } from "../adapters/registry.js";
 import { boardFolders, chatFolders, messageParts, messages, sessions } from "../db/schema.js";
+import { boardColumnKeepsOnRun } from "./boards.js";
 import { broadcastToSession } from "./wsHub.js";
 import { getSettings } from "./settings.js";
 import { rememberFolders } from "./folders.js";
@@ -61,6 +62,7 @@ function mapSession(
       : [],
     startedAt: row.startedAt ? row.startedAt.toISOString() : null,
     doneAt: row.doneAt ? row.doneAt.toISOString() : null,
+    boardColumnId: row.boardColumnId ?? null,
     mcpDisabledIds: Array.isArray(row.mcpDisabledIds)
       ? (row.mcpDisabledIds as string[])
       : [],
@@ -342,6 +344,7 @@ export async function updateSession(
     modelParams?: Record<string, string>;
     taskDescription?: string | null;
     doneAt?: Date | null;
+    boardColumnId?: string | null;
   }>,
   /**
    * `{ touch: false }` records what the row *is* — the harness id a boot
@@ -406,6 +409,20 @@ export async function addTaskAttachments(
  *    closed, not of tasks someone merely asked for another turn.
  */
 export async function claimBoardTaskTurn(id: string): Promise<void> {
+  // A lane of the reader's own holds the card they put in it — «Блок»,
+  // «Отложенные», «На ревью» are places, not steps, so a begun turn leaves the
+  // placement alone. A lane switched to hand its cards over (`keepOnRun` off)
+  // returns them to the workflow at a turn start, the same promise Done keeps.
+  const parked = await db
+    .select({ boardId: sessions.boardId, boardColumnId: sessions.boardColumnId })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .limit(1);
+  const parkedIn = parked[0]?.boardColumnId;
+  const boardId = parked[0]?.boardId;
+  if (parkedIn && boardId && !(await boardColumnKeepsOnRun(boardId, parkedIn))) {
+    await db.update(sessions).set({ boardColumnId: null }).where(eq(sessions.id, id));
+  }
   await db
     .update(sessions)
     .set({ doneAt: null })

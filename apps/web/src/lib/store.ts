@@ -4,6 +4,9 @@ import type {
   AppLocale,
   AppSettings,
   BackgroundJobDto,
+  BoardColumn,
+  BoardColumnDto,
+  BoardColumnRule,
   BoardDto,
   ChatThemeDto,
   MessageDto,
@@ -245,6 +248,34 @@ type AppState = {
   setBoardFolderTag: (id: string, cwd: string, tag: string) => Promise<void>;
   /** Board folder task queue: start its tasks one after another, top to bottom. */
   setBoardFolderAutoRun: (id: string, cwd: string, autoRun: boolean) => Promise<void>;
+  /** The board's own columns: the four stage homes plus the reader's lanes. */
+  addBoardColumn: (
+    id: string,
+    body: {
+      title: string;
+      kind: "auto" | "manual";
+      anchor?: BoardColumn | null;
+      rule?: BoardColumnRule | null;
+      afterId?: string | null;
+    },
+  ) => Promise<void>;
+  updateBoardColumn: (
+    id: string,
+    columnId: string,
+    patch: {
+      title?: string;
+      kind?: "auto" | "manual";
+      anchor?: BoardColumn | null;
+      rule?: BoardColumnRule | null;
+      sortMode?: BoardColumnDto["sortMode"];
+      acceptsPrompt?: boolean;
+      keepOnRun?: boolean;
+    },
+  ) => Promise<void>;
+  deleteBoardColumn: (id: string, columnId: string) => Promise<void>;
+  reorderBoardColumns: (id: string, ids: string[]) => Promise<void>;
+  /** Board task: put the card in a column by hand (null = back to the flow). */
+  setTaskColumn: (id: string, columnId: string | null) => Promise<void>;
   /** Tasks of the open board — the partitioned session list for /board/:id. */
   boardSessions: SessionDto[];
   refreshBoardSessions: (boardId: string) => Promise<void>;
@@ -1983,6 +2014,69 @@ export const useAppStore = create<AppState>((set, get) => ({
       // server offline — the switch keeps the value the user picked
     }
   },
+  addBoardColumn: async (id, body) => {
+    try {
+      const board = await api.addBoardColumn(id, body);
+      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+    } catch {
+      // server offline — the strip keeps the columns it has
+    }
+  },
+  updateBoardColumn: async (id, columnId, patch) => {
+    try {
+      const board = await api.updateBoardColumn(id, columnId, patch);
+      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+    } catch {
+      // server offline — keep what the board shows
+    }
+  },
+  deleteBoardColumn: async (id, columnId) => {
+    try {
+      const board = await api.deleteBoardColumn(id, columnId);
+      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+    } catch {
+      // server offline — the column stays
+    }
+  },
+  reorderBoardColumns: async (id, ids) => {
+    // Optimistic: the strip already moved the column, the server catches up.
+    set((s) => ({
+      boards: s.boards.map((b) => {
+        if (b.id !== id) return b;
+        const order = new Map(ids.map((columnId, index) => [columnId, index]));
+        return {
+          ...b,
+          columns: [...b.columns]
+            .map((column) =>
+              order.has(column.id) ? { ...column, sortOrder: order.get(column.id)! } : column,
+            )
+            .sort((a, c) => a.sortOrder - c.sortOrder),
+        };
+      }),
+    }));
+    try {
+      const board = await api.reorderBoardColumns(id, ids);
+      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+    } catch {
+      void get().refreshBoards();
+    }
+  },
+  setTaskColumn: async (id, columnId) => {
+    const previous = get().boardSessions.find((b) => b.id === id)?.boardColumnId ?? null;
+    const apply = (value: string | null) => (s: AppState) => ({
+      boardSessions: s.boardSessions.map((b) =>
+        b.id === id ? { ...b, boardColumnId: value } : b,
+      ),
+    });
+    // The card answers the drop at once; a failed write puts it back.
+    set(apply(columnId));
+    try {
+      const updated = await api.updateSession(id, { boardColumnId: columnId });
+      set((s) => ({ boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)) }));
+    } catch {
+      set(apply(previous));
+    }
+  },
   boardSessions: [],
   refreshBoardSessions: async (boardId) => {
     try {
@@ -2872,6 +2966,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       taskDescription: null,
       startedAt: null,
       doneAt: null,
+      boardColumnId: null,
       mcpDisabledIds: [],
       usage: null,
       model: pinnedModel ?? "",
@@ -3730,6 +3825,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (event.type === "bg.removed") {
       const gone = new Set(event.jobIds);
       set({ bgJobs: state.bgJobs.filter((job) => !gone.has(job.id)) });
+      return;
+    }
+
+    if (event.type === "board.updated") {
+      // Columns are the board's config: a second tab, or the phone, sees a new
+      // lane — and its cards — without reloading the page.
+      set({ boards: state.boards.map((b) => (b.id === event.board.id ? event.board : b)) });
       return;
     }
 

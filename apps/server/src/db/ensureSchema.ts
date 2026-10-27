@@ -192,6 +192,50 @@ export async function ensureSchema() {
     if (!isDuplicateColumn(err)) throw err;
   }
 
+  // Columns are the board's own data: the four stage homes plus the lanes the
+  // reader adds. A board that has none is seeded on its first read
+  // (ensureBoardColumns), so an older database upgrades without a migration.
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS board_columns (
+      id TEXT NOT NULL,
+      board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+      title TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'manual',
+      anchor TEXT,
+      home INTEGER NOT NULL DEFAULT 0,
+      rule TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      sort_mode TEXT NOT NULL DEFAULT 'manual',
+      accepts_prompt INTEGER NOT NULL DEFAULT 1,
+      keep_on_run INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+      PRIMARY KEY (board_id, id)
+    )
+  `);
+
+  db.run(sql`
+    CREATE INDEX IF NOT EXISTS board_columns_board_order
+    ON board_columns(board_id, sort_order)
+  `);
+
+  // A lane holds what the reader put in it: `keep_on_run` now defaults to 1,
+  // because a hand placement is a decision and not a step of the lifecycle.
+  // Rows written under the old default carry 0, which reads as “a begun turn
+  // takes the card back” — flip those once, marked in `user_version`, so a lane
+  // the reader switches off afterwards stays off on the next boot.
+  const version = db.get(sql`PRAGMA user_version`) as { user_version?: number } | undefined;
+  if ((version?.user_version ?? 0) < 1) {
+    db.run(sql`UPDATE board_columns SET keep_on_run = 1 WHERE home = 0`);
+    db.run(sql`PRAGMA user_version = 1`);
+  }
+
+  // The column a card was placed in by hand; NULL = follow the lifecycle.
+  try {
+    db.run(sql`ALTER TABLE sessions ADD COLUMN board_column_id TEXT`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

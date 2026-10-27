@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { primaryKey, sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { randomUUID } from "node:crypto";
 
 /** UUID text PK; the SQLite-level default lives in ensureSchema's DDL. */
@@ -57,6 +57,9 @@ export const sessions = sqliteTable("sessions", {
   boardId: text("board_id"),
   /** Board task description (card text / first-message prefill). */
   taskDescription: text("task_description"),
+  /** Board column the reader put this card in by hand (null = follow the
+   *  lifecycle). Cleared by a claimed turn unless the column keeps its cards. */
+  boardColumnId: text("board_column_id"),
   /** Pictures attached when the task was created: staged in acpio's own data
    *  folder and carried along by the task's first turn. */
   taskAttachments: text("task_attachments", { mode: "json" })
@@ -125,6 +128,39 @@ export const boardFolders = sqliteTable("board_folders", {
    */
   autoRun: integer("auto_run", { mode: "boolean" }).notNull().default(false),
 });
+
+/**
+ * A board's columns: the four stage homes (seeded with the board, undeletable)
+ * and whatever lanes the reader added — a rule over a stage, or a lane of its
+ * own. Order and behavior are data, so a board is arranged without a rebuild.
+ */
+export const boardColumns = sqliteTable("board_columns", {
+  /** Stable token the board uses: `todo|progress|wait|done` for the homes,
+   *  `col-…` for a column the reader added. A task's placement stores this.
+   *  Unique per board — every board has a `todo`, its own row. */
+  id: text("id").notNull(),
+  boardId: text("board_id")
+    .notNull()
+    .references(() => boards.id, { onDelete: "cascade" }),
+  /** Shown title; empty for a home (its name comes from i18n by id). */
+  title: text("title").notNull().default(""),
+  /** `stage` (home) | `auto` (rule over a stage) | `manual` (lane of its own). */
+  kind: text("kind").notNull().default("manual"),
+  /** The lifecycle stage the column belongs to; null = outside the lifecycle. */
+  anchor: text("anchor"),
+  /** 1 for the one column per stage the lifecycle puts cards in. */
+  home: integer("home", { mode: "boolean" }).notNull().default(false),
+  /** Claim condition of an `auto` column (JSON), null otherwise. */
+  rule: text("rule", { mode: "json" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  /** manual | created | updated | done — the order the lane shows its cards in. */
+  sortMode: text("sort_mode").notNull().default("manual"),
+  acceptsPrompt: integer("accepts_prompt", { mode: "boolean" }).notNull().default(true),
+  /** 1 — a begun turn leaves the card here (a lane holds what the reader put
+   *  in it); 0 — the turn takes it back to the lifecycle. */
+  keepOnRun: integer("keep_on_run", { mode: "boolean" }).notNull().default(true),
+  createdAt: createdAt(),
+}, (table) => [primaryKey({ columns: [table.boardId, table.id] })]);
 
 export const users = sqliteTable("users", {
   id: id(),

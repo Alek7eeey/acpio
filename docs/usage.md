@@ -171,6 +171,30 @@ works and parks in **Wait** when it ends, so **Reopen** is only for a task you w
 without a word. Board tasks never show up in the
 chat tree, and deleting a board deletes its tasks with it.
 
+The board's columns are yours to arrange: **Board columns** in the rail (or the **⋯** in any
+lane's head) opens the editor. The four stage columns — **Todo**, **In Progress**, **Wait**,
+**Done** — always stay: rename them, reorder them, change how a lane orders its cards or
+whether a card takes the next prompt, but they cannot be deleted — a card of that stage would
+have nowhere to stand. Add as many lanes of your own as you like, and each one knows how cards
+reach it: **by a rule** over a stage (a **Review** lane takes everything the agent finished
+while the question and the failed turn stay in Wait; a **Broken** lane takes the failed turns
+only) or **only by hand** — Deferred, Backlog, Blocked. A card moves to a lane of your own by
+being dragged there — by the card itself with a mouse, by the card itself with a finger after a
+short hold (a swipe that starts moving at once stays the lane's scroll). While it travels, a copy
+of the card rides under the pointer and the slot it was taken from keeps a dashed outline, so
+both what is moving and where it would land are on screen. Stage columns are targets too, but as
+actions rather than places: a drop on **Done**
+marks the card ready (a tick under the pointer), a drop on **Wait** sends it back to the
+workflow — the closed mark and any hand placement go with it (a return arrow). **Todo** and **In
+Progress** refuse the drop and light a cross, because «not started» and «running» are not
+something a hand decides. **Back to the workflow** in the card's menu does the same without a
+drag. A lane of your own holds its cards: the turn that starts on one leaves the
+placement alone, so «Deferred» stays deferred and «In review» never slides back to Wait
+after the agent answers. Switch the lane's **Stays here while the agent runs** off in the
+editor and it becomes a step instead of a place — a begun turn lets go of the placement the
+way a prompt drops the **Done** mark. Deleting a lane sends its cards back to the columns of
+their stages, so nothing is lost.
+
 A chat opened from the board stays tied to it: the header carries a **‹ board name** pill next
 to the brand, and one click on it is back to the board (on phones the pill takes the brand's
 place). The context row above the input carries the same trip as a **Board** chip next to the

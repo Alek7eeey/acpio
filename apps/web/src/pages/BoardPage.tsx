@@ -11,17 +11,23 @@ import {
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  boardColumn,
+  boardColumnHome,
+  boardColumnOf,
+  boardColumnsInOrder,
+  compareBoardTasks,
+  defaultBoardColumns,
   titleFromTaskDescription,
   type AgentProvider,
   type AttachSource,
   type BoardColumn,
+  type BoardColumnDto,
   type ModelOption,
   type ModelParamDto,
   type SessionDto,
   type SlashCommandDto,
 } from "@acpio/shared";
 import { AttachDialog } from "../components/AttachDialog";
+import { BoardColumnsDialog } from "../components/BoardColumnsDialog";
 import { BoardTaskPeek } from "../components/BoardTaskPeek";
 import { ModelPicker } from "../components/ModelPicker";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
@@ -46,19 +52,13 @@ import { folderLabel } from "../lib/pathSegments";
 import { useAppStore, type PendingAttachment } from "../lib/store";
 import styles from "./BoardPage.module.css";
 
-/** Column order on the board — the same order the spec's four lanes read in. */
-const COLUMN_ORDER: BoardColumn[] = ["todo", "progress", "wait", "done"];
-
-/**
- * Columns whose card takes the next prompt. A task the agent left (Wait) is the
- * obvious one; a Done task takes it too, because a prompt is the user writing
- * into the task again — the claimed turn drops the Done mark server-side, so the
- * card walks back into Progress on its own, without a Reopen press first.
- * Progress and Todo cards have no turn to write into.
- */
-function isPromptable(column: BoardColumn): boolean {
-  return column === "wait" || column === "done";
-}
+/** The name a stage home wears when its title is left empty (i18n). */
+const STAGE_TITLE: Record<BoardColumn, string> = {
+  todo: "chat.colTodo",
+  progress: "chat.colProgress",
+  wait: "chat.colWait",
+  done: "chat.colDone",
+};
 
 /** Where the reader left a board: rail, horizontal lane strip, each lane. */
 type BoardScrollState = {
@@ -66,7 +66,8 @@ type BoardScrollState = {
   /** On phones the rail scrolls inside its own list, on desktop it is the rail. */
   railList: number;
   columnsX: number;
-  columns: Partial<Record<BoardColumn, number>>;
+  /** Per column id — a board's lanes are the reader's, not a fixed four. */
+  columns: Record<string, number>;
 };
 
 /**
@@ -90,13 +91,6 @@ const composerCwdByBoard: Record<string, string> = {};
 function boardTaskDraftKey(boardId: string | undefined, cwd: string): string {
   return `board:${boardId ?? ""}:${cwd}`;
 }
-
-const COLUMN_TITLE = {
-  todo: "chat.colTodo",
-  progress: "chat.colProgress",
-  wait: "chat.colWait",
-  done: "chat.colDone",
-} as const;
 
 /**
  * The board's favourite mark — one heart drawn at every size it is shown in: the
@@ -126,6 +120,9 @@ type FolderSpot = "rail" | "lane" | "dialog";
 /** The folder whose tag is being edited, and the row that took the editor over. */
 type FolderTagEdit = { cwd: string; where: FolderSpot };
 
+/** A stable empty lane, so a board without cards does not re-make the array. */
+const EMPTY_TASKS: SessionDto[] = [];
+
 /** Files one new task may carry — the same ceiling the chat composer has. */
 const MAX_TASK_FILES = 8;
 
@@ -140,6 +137,10 @@ const ATTACH_HOLD_MS = 500;
  */
 const TEXTAREA_MIN_PX = 36;
 const TEXTAREA_MAX_PX = 160;
+
+/** How long a finger must hold a card still before it becomes a drag. A swipe
+ *  that moves earlier belongs to the lane's scroll, not to the card. */
+const TOUCH_DRAG_HOLD_MS = 300;
 
 /**
  * Folders the "new chat based on this chat" dialog offers: the board's own
@@ -881,6 +882,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setOpenBoardId = useAppStore((s) => s.setOpenBoardId);
   const createBoardTask = useAppStore((s) => s.createBoardTask);
   const setTaskDone = useAppStore((s) => s.setTaskDone);
+  const setTaskColumn = useAppStore((s) => s.setTaskColumn);
   const setTaskFavorite = useAppStore((s) => s.setTaskFavorite);
   const setTaskDescription = useAppStore((s) => s.setTaskDescription);
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
@@ -971,8 +973,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [deriveError, setDeriveError] = useState<string | null>(null);
   const [deriveBrowse, setDeriveBrowse] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  /** The rail's Favorites section: opened, it lists every starred card. */
-  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
@@ -1003,7 +1003,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const railDragRef = useRef<{ startY: number; lastY: number } | null>(null);
   const railListRef = useRef<HTMLDivElement>(null);
   const columnsRef = useRef<HTMLDivElement>(null);
-  const columnRefs = useRef(new Map<BoardColumn, HTMLDivElement>());
+  const columnRefs = useRef(new Map<string, HTMLDivElement>());
+  /** The columns dialog: the strip's own settings, opened from any lane's ⋮. */
+  const [columnsOpen, setColumnsOpen] = useState(false);
   /** Lanes being put back are mid-restore: their scroll events are ours, not
    *  the reader's, and must not overwrite the position we are restoring to. */
   const restoringRef = useRef(false);
@@ -1056,10 +1058,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
 
   const saveScroll = () => {
     if (!boardId || restoringRef.current) return;
-    const columns: Partial<Record<BoardColumn, number>> = {};
-    for (const column of COLUMN_ORDER) {
-      columns[column] = columnRefs.current.get(column)?.scrollTop ?? 0;
-    }
+    const columns: Record<string, number> = {};
+    for (const [id, el] of columnRefs.current) columns[id] = el.scrollTop;
     boardScrollByBoard[boardId] = {
       rail: railRef.current?.scrollTop ?? 0,
       railList: railListRef.current?.scrollTop ?? 0,
@@ -1085,14 +1085,14 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     if (railRef.current) railRef.current.scrollTop = saved.rail;
     if (railListRef.current) railListRef.current.scrollTop = saved.railList;
     if (columnsRef.current) columnsRef.current.scrollLeft = saved.columnsX;
-    for (const column of COLUMN_ORDER) {
-      const el = columnRefs.current.get(column);
-      if (el) el.scrollTop = saved.columns[column] ?? 0;
+    for (const [id, top] of Object.entries(saved.columns)) {
+      const el = columnRefs.current.get(id);
+      if (el) el.scrollTop = top;
     }
-    for (const column of COLUMN_ORDER) {
-      const el = columnRefs.current.get(column);
-      const top = saved.columns[column] ?? 0;
-      if (!el || top <= 0) continue;
+    for (const [id, top] of Object.entries(saved.columns)) {
+      if (top <= 0) continue;
+      const el = columnRefs.current.get(id);
+      if (!el) continue;
       const maxTop = el.scrollHeight - el.clientHeight;
       if (el.scrollTop < top - 1 && el.scrollTop < maxTop - 1) return;
     }
@@ -1234,32 +1234,39 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     };
   }, [folderMenu]);
 
+  /**
+   * The board's lanes in display order. The board hands them over; a board read
+   * before it carried any (or a page rendered before its list arrived) falls
+   * back to the four stage homes, so the strip is never empty.
+   */
+  const boardColumns = useMemo(() => boardColumnsInOrder(board?.columns), [board?.columns]);
+  const columnById = useMemo(
+    () => new Map(boardColumns.map((column) => [column.id, column])),
+    [boardColumns],
+  );
+  /** The Todo home: the lane that groups by project and feeds the folder queue. */
+  const todoColumnId = boardColumnHome(boardColumns, "todo")?.id ?? "todo";
+
   const columns = useMemo(() => {
-    const byColumn: Record<BoardColumn, SessionDto[]> = {
-      todo: [],
-      progress: [],
-      wait: [],
-      done: [],
-    };
-    for (const task of tasks) byColumn[boardColumn(task)].push(task);
-    for (const column of COLUMN_ORDER) {
-      // Done and Wait are logs, not lists to arrange: most recently finished on
-      // top in both. Wait carries no completion stamp of its own — its row is
-      // written when the turn ends (status back to idle), so `updatedAt` is
-      // that finish time. Opening the chat boots the agent and writes the row
-      // too, but as a bookkeeping write that leaves the stamp alone, so the
-      // order moves on the agent's own last action only. The manual order
-      // stays where it means something — Todo.
-      byColumn[column].sort(
-        column === "done"
-          ? (a, b) => (b.doneAt ?? "").localeCompare(a.doneAt ?? "")
-          : column === "wait"
-            ? (a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "")
-            : (a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt),
-      );
+    const byColumn: Record<string, SessionDto[]> = {};
+    for (const column of boardColumns) byColumn[column.id] = [];
+    for (const task of tasks) {
+      const id = boardColumnOf(task, boardColumns);
+      (byColumn[id] ??= []).push(task);
+    }
+    for (const column of boardColumns) {
+      // A lane orders its cards the way its config says: the reader's own order
+      // (what the arrows and the drag write), or a log — newest first by the
+      // stamp the lane is about. Wait is such a log: its row is written when
+      // the turn ends, so `updatedAt` is that finish time, and opening the chat
+      // boots the agent as a bookkeeping write that leaves the stamp alone.
+      byColumn[column.id].sort(compareBoardTasks(column.sortMode));
     }
     return byColumn;
-  }, [tasks]);
+  }, [boardColumns, tasks]);
+
+  /** The cards of the Todo home, whose lane is the one arranged by project. */
+  const todoTasks = columns[todoColumnId] ?? EMPTY_TASKS;
 
   /** Todo lanes group by project; unknown cwds (folder removed from the board) trail. */
   const groups = useMemo<TodoGroup[]>(() => {
@@ -1272,25 +1279,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         cwd,
         label: folderLabel(cwd, cwd),
         loose,
-        tasks: columns.todo.filter((task) => task.cwd === cwd),
+        tasks: todoTasks.filter((task) => task.cwd === cwd),
       });
     };
     for (const cwd of board?.folders ?? []) push(cwd, false);
-    for (const task of columns.todo) push(task.cwd, true);
+    for (const task of todoTasks) push(task.cwd, true);
     return out.filter((group) => !group.loose || group.tasks.length > 0);
-  }, [board, columns.todo]);
+  }, [board, todoTasks]);
 
   const visibleGroups = filterCwd ? groups.filter((group) => group.cwd === filterCwd) : groups;
-
-  /**
-   * Every starred task of this board, in the board's own lane order — a Todo
-   * card first, a Done one last, each lane in the order it shows. The rail's
-   * Favorites section reads this list, and so does the card's star.
-   */
-  const favoriteTasks = useMemo(
-    () => COLUMN_ORDER.flatMap((column) => columns[column].filter((task) => task.favorite)),
-    [columns],
-  );
 
   /**
    * Open a task in the normal chat. A task that never started seeds its
@@ -1452,6 +1449,25 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     id: string;
     position: "above" | "below";
   } | null>(null);
+  /** The lane a dragged card is over — a drop there moves it between columns. */
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null);
+  /** The lane that cannot take the card (a stage home): marked with a cross. */
+  const [dragBlockedColumnId, setDragBlockedColumnId] = useState<string | null>(null);
+  /** The card as it travels under the pointer — the thing the hand carries. */
+  const [dragPreview, setDragPreview] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  /** True from the moment a gesture becomes a drag: the card's menu stays shut,
+   *  and the pointer shows it is carrying something. */
+  const dragActiveRef = useRef(false);
+  /** A stage home that takes the card as an action, not as a place: «Готово»
+   *  (Done) and «вернуть в работу» (Wait) are gestures of their own. */
+  const [dragActionMark, setDragActionMark] = useState<{
+    columnId: string;
+    kind: "done" | "reopen";
+  } | null>(null);
   /** A card drag ends on the pointerup the browser still reads as a click. */
   const suppressCardClickRef = useRef(false);
   /** Groups as the last render drew them: a drag commits onto the order it
@@ -1462,30 +1478,89 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   }, [groups]);
 
   /**
-   * Drag a Todo card to another slot of its own project group — the pointer
-   * twin of the card's up/down arrows. A mouse grabs the card itself; a finger
-   * grabs the card's grip, because a swipe starting anywhere else on the card
-   * belongs to the lane's scroll. The card under the pointer marks the slot it
-   * would land in, and the release writes that one order through the same
-   * `sortOrder` list the arrows write, so both doors leave the same order on
-   * the server. A card of another project is no slot at all: the group is the
-   * list being reordered.
+   * Drag a card. Three drops are possible, and the pointer decides which:
+   *
+   *  - over another lane the reader owns (a manual or a rule lane) — the card
+   *    moves there, and stays by placement;
+   *  - over Done — the card is marked ready (`doneAt`), the same write the
+   *    card's «Отметить готовой» button makes; a placement it already carries
+   *    stays, so reopening it puts it back on its own lane;
+   *  - over Wait — back to the workflow: the closed mark is dropped and any
+   *    placement with it, so the card lands where its lifecycle says;
+   *  - over any other stage home (Todo, In Progress) — nothing happens: the
+   *    lifecycle decides what stands there, and the lane answers with a cross;
+   *  - inside its own Todo group — the pointer twin of the card's up/down
+   *    arrows. The card under the pointer marks the slot it would land in, and
+   *    the release writes that one order through the same `sortOrder` list the
+   *    arrows write. A card of another project is no slot at all: the group is
+   *    the list being reordered.
+   *
+   * The card itself is the handle: a mouse takes it at once, a finger after a
+   * short hold (a swipe that moves earlier is the lane's scroll). While it
+   * travels, a copy of the card rides under the pointer — the reader always
+   * sees what they are carrying and where it would land.
    */
   const startTaskDrag =
-    (task: SessionDto, group: TodoGroup, opts?: { grip?: boolean }) =>
+    (task: SessionDto, group: TodoGroup | null) =>
     (e: React.PointerEvent<HTMLElement>) => {
-      if (e.button !== 0) return;
-      if (!opts?.grip && e.pointerType !== "mouse") return;
+      // A right-click is the card's menu, not a drag.
+      if (e.pointerType === "mouse" && e.button !== 0) return;
       const target = e.target as HTMLElement;
-      if (!opts?.grip && target.closest("button, input, textarea")) return;
+      if (target.closest("button, input, textarea")) return;
 
       const el = e.currentTarget as HTMLElement;
       const pointerId = e.pointerId;
       const startX = e.clientX;
       const startY = e.clientY;
+      const isTouch = e.pointerType === "touch";
+      const text = task.taskDescription?.trim() || task.title;
+      const fromColumnId = columnOf(task).id;
       let moved = false;
+      /** The gesture became a drag: the card leaves its slot and follows the pointer. */
+      const begin = (x: number, y: number) => {
+        moved = true;
+        dragActiveRef.current = true;
+        setDraggingTaskId(task.id);
+        setDragPreview({ x, y, text });
+        // The whole page carries the card: the cursor says so everywhere.
+        document.body.style.cursor = "grabbing";
+        // Once the drag owns the gesture, the pointer keeps streaming to the
+        // card even when it travels off it.
+        try {
+          el.setPointerCapture(pointerId);
+        } catch {
+          // capture is best-effort (the pointer may already be gone)
+        }
+      };
+      /** A finger that moves before the hold scrolls the lane instead. */
+      let holdTimer: number | null = isTouch
+        ? window.setTimeout(() => {
+            holdTimer = null;
+            begin(startX, startY);
+          }, TOUCH_DRAG_HOLD_MS)
+        : null;
       let overId: string | null = null;
       let overPosition: "above" | "below" | null = null;
+      let overColumnId: string | null = null;
+      let blockedColumnId: string | null = null;
+      let homeAction: "done" | "reopen" | null = null;
+
+      /**
+       * What a lane does with this card: take it as a placement, take it as a
+       * stage action, or refuse it. Todo and In Progress refuse — neither is
+       * something a hand can decide — while Done and Wait are the two stage
+       * doors a reader actually wants (mark ready, send back to work).
+       */
+      const resolveTarget = (laneId: string): "placement" | "done" | "reopen" | "blocked" => {
+        const column = columnById.get(laneId);
+        if (!column) return "blocked";
+        if (column.kind !== "stage") return "placement";
+        if (column.anchor === "done") return task.doneAt ? "blocked" : "done";
+        if (column.anchor === "wait") {
+          return task.doneAt || task.boardColumnId ? "reopen" : "blocked";
+        }
+        return "blocked";
+      };
       suppressCardClickRef.current = false;
 
       /** The card under the point, with the group standing around it. */
@@ -1499,26 +1574,86 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         return null;
       };
 
+      /** The lane under the point — a card's lane or the lane's own body. */
+      const columnAtPoint = (x: number, y: number): string | null => {
+        for (const node of document.elementsFromPoint(x, y)) {
+          const lane = node.closest("[data-column]") as HTMLElement | null;
+          if (lane) return lane.getAttribute("data-column");
+        }
+        return null;
+      };
+
       const finish = () => {
+        if (holdTimer !== null) {
+          window.clearTimeout(holdTimer);
+          holdTimer = null;
+        }
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
+        dragActiveRef.current = false;
+        document.body.style.cursor = "";
         setDraggingTaskId(null);
+        setDragPreview(null);
         setTaskDropHint(null);
+        setDragOverColumnId(null);
+        setDragBlockedColumnId(null);
+        setDragActionMark(null);
         if (moved) suppressCardClickRef.current = true;
       };
 
       const onMove = (ev: PointerEvent) => {
         if (ev.pointerId !== pointerId) return;
         if (!moved) {
-          if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 8) return;
-          moved = true;
-          setDraggingTaskId(task.id);
+          const distance = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+          // A finger must hold the card still first: a touch that travels
+          // sooner is the lane's scroll, and stealing it would make a lane of
+          // cards impossible to scroll.
+          if (isTouch) {
+            if (distance > 8 && holdTimer !== null) {
+              window.clearTimeout(holdTimer);
+              holdTimer = null;
+              finish();
+            }
+            return;
+          }
+          if (distance < 8) return;
+          begin(ev.clientX, ev.clientY);
         }
+        setDragPreview((current) =>
+          current ? { ...current, x: ev.clientX, y: ev.clientY } : current,
+        );
+
+        const laneId = columnAtPoint(ev.clientX, ev.clientY);
+        if (laneId && laneId !== fromColumnId) {
+          // Another lane is the target: a slot inside a group means nothing
+          // there, and the lane itself says what it would do with the card —
+          // take it, act on it, or refuse it with a cross.
+          const target = resolveTarget(laneId);
+          overColumnId = target === "placement" ? laneId : null;
+          blockedColumnId = target === "blocked" ? laneId : null;
+          homeAction =
+            target === "done" || target === "reopen" ? (target as "done" | "reopen") : null;
+          overId = null;
+          overPosition = null;
+          setTaskDropHint(null);
+          setDragOverColumnId(target === "blocked" ? null : laneId);
+          setDragBlockedColumnId(target === "blocked" ? laneId : null);
+          setDragActionMark(
+            homeAction ? { columnId: laneId, kind: homeAction } : null,
+          );
+          return;
+        }
+        overColumnId = null;
+        blockedColumnId = null;
+        homeAction = null;
+        setDragOverColumnId(null);
+        setDragBlockedColumnId(null);
+        setDragActionMark(null);
 
         const hit = cardAtPoint(ev.clientX, ev.clientY);
         // The dragged card itself means "no target": it already holds its slot.
-        if (hit && hit.id !== task.id && hit.cwd === group.cwd) {
+        if (group && hit && hit.id !== task.id && hit.cwd === group.cwd) {
           const rect = hit.card.getBoundingClientRect();
           const position = ev.clientY < rect.top + rect.height / 2 ? "above" : "below";
           overId = hit.id;
@@ -1541,8 +1676,30 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         if (ev.pointerId !== pointerId) return;
         const over = overId;
         const position = overPosition;
+        const lane = overColumnId;
+        const blocked = blockedColumnId;
+        const action = homeAction;
         finish();
-        if (!moved || !over || !position) return;
+        if (!moved) return;
+        // A stage home refused the card: the drop is a no-op, with nothing
+        // written and the card staying where it stood.
+        if (blocked) return;
+        if (action === "done") {
+          void setTaskDone(task.id, true);
+          return;
+        }
+        if (action === "reopen") {
+          // Back to the workflow: the closed mark goes, and a placement the
+          // card carried with it (a Done card of a lane of its own) goes too.
+          if (task.doneAt) void setTaskDone(task.id, false);
+          if (task.boardColumnId) void setTaskColumn(task.id, null);
+          return;
+        }
+        if (lane) {
+          void setTaskColumn(task.id, lane);
+          return;
+        }
+        if (!group || !over || !position) return;
 
         const list = groupsRef.current.find((item) => item.cwd === group.cwd)?.tasks ?? [];
         const from = list.findIndex((item) => item.id === task.id);
@@ -1557,15 +1714,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         );
       };
 
-      // Touch pointers keep streaming to the grip via capture, so the gesture
-      // survives leaving the card.
-      if (opts?.grip) {
-        try {
-          el.setPointerCapture(pointerId);
-        } catch {
-          // capture is best-effort (pointer may already be gone)
-        }
-      }
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
       window.addEventListener("pointercancel", onCancel);
@@ -1632,6 +1780,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const openTaskMenu = (e: React.MouseEvent, task: SessionDto) => {
     e.preventDefault();
     e.stopPropagation();
+    // A long press that has already become a drag must not open the menu under
+    // the card the finger is carrying.
+    if (dragActiveRef.current) return;
     setTaskMenu({ task, x: e.clientX, y: e.clientY });
   };
 
@@ -1848,12 +1999,18 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       </span>
     ) : null;
 
+  /** The name a lane wears: the reader's own, or a stage home's built-in one. */
+  const columnTitle = (column: BoardColumnDto) =>
+    column.title || (column.anchor ? t(STAGE_TITLE[column.anchor]) : "");
+
+  /** The lane a card stands in — placed by the reader, a rule, or its stage. */
+  const columnOf = (task: SessionDto): BoardColumnDto =>
+    columnById.get(boardColumnOf(task, boardColumns)) ?? boardColumns[0]!;
+
   const renderCard = (task: SessionDto, group: TodoGroup | null) => {
-    const column = boardColumn(task);
+    const column = columnOf(task);
+    const inTodo = column.id === todoColumnId;
     const index = group ? group.tasks.findIndex((item) => item.id === task.id) : -1;
-    // Only a Todo card of a real project group has a list to be dragged in: a
-    // loose task (its folder left the board) stands in a group of its own.
-    const draggable = column === "todo" && !!group && !group.loose;
     const dropHint = taskDropHint?.id === task.id ? taskDropHint.position : null;
     const description = task.taskDescription?.trim();
     const text = description || task.title;
@@ -1869,7 +2026,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       <article
         key={task.id}
         data-task-id={task.id}
-        className={`${styles.card} ${column === "progress" ? styles.cardLive : ""}${
+        className={`${styles.card} ${task.status === "running" ? styles.cardLive : ""}${
           draggingTaskId === task.id ? ` ${styles.cardDragging}` : ""
         }${
           dropHint === "above"
@@ -1888,7 +2045,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           // Every press on a card is a fresh gesture — the suppression belongs
           // to the pointerup that ended the drag, and nothing else.
           suppressCardClickRef.current = false;
-          if (draggable) startTaskDrag(task, group)(e);
+          startTaskDrag(task, group)(e);
         }}
       >
         <div className={styles.cardTop}>
@@ -1905,7 +2062,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           ) : null}
           {/* The folder's tag rides on the card, so it is read in every
               column — Todo already wears it on the lane head. */}
-          {column !== "todo" ? renderFolderTag(task.cwd) : null}
+          {!inTodo ? renderFolderTag(task.cwd) : null}
           {/* Who the task is done with, right next to where it runs: the same
               label the chat tree's row badge wears. */}
           <span
@@ -1918,34 +2075,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </span>
           <span className={styles.cardSpacer} />
           <span className={styles.cardActions}>
-            {column === "todo" ? (
+            {inTodo ? (
               <>
-                {/* The card's grip: what a finger takes to move the card. It
-                    carries `touch-action: none`, so the swipe drags instead of
-                    scrolling the lane. */}
-                {draggable ? (
-                  <button
-                    type="button"
-                    className={`${styles.iconBtn} ${styles.dragGrip}`}
-                    data-task-grip
-                    title={t("chat.boardReorderTask")}
-                    aria-label={t("chat.boardReorderTask")}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      startTaskDrag(task, group, { grip: true })(e);
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" aria-hidden>
-                      <circle cx="2.5" cy="2.5" r="1.2" />
-                      <circle cx="7.5" cy="2.5" r="1.2" />
-                      <circle cx="2.5" cy="7" r="1.2" />
-                      <circle cx="7.5" cy="7" r="1.2" />
-                      <circle cx="2.5" cy="11.5" r="1.2" />
-                      <circle cx="7.5" cy="11.5" r="1.2" />
-                    </svg>
-                  </button>
-                ) : null}
                 <button
                   type="button"
                   className={styles.iconBtn}
@@ -2051,7 +2182,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           </span>
         </div>
         {headline ? <p className={styles.cardTitle}>{headline}</p> : null}
-        {column === "todo" && editTaskId === task.id ? (
+        {editTaskId === task.id ? (
           /* The editor takes the card over where the card lies: the text being
              rewritten stays on the lane and in the project group it belongs to. */
           <div
@@ -2115,7 +2246,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         ) : showFirstMessage ? (
           <p className={styles.cardText}>{text}</p>
         ) : null}
-        {isPromptable(column) && promptTaskId === task.id ? (
+        {column.acceptsPrompt && promptTaskId === task.id ? (
           /* The next prompt is typed on the card itself: the task's own text
              stays readable above it, and nothing leaves the board. */
           <div
@@ -2157,13 +2288,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             </div>
           </div>
         ) : null}
-        {column === "progress" ? (
+        {task.status === "running" ? (
           <span className={styles.liveRow}>
             <span className={styles.pulse} aria-hidden />
             {t("chat.colProgress")}
           </span>
         ) : null}
-        {column === "wait" && task.status === "waiting" ? (
+        {column.anchor === "wait" && task.status === "waiting" ? (
           /* The agent asked and is standing still. Without this mark a card
              parked on a question reads exactly like one whose turn merely
              ended — both sit in Wait until the user acts. */
@@ -2172,7 +2303,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             {t("common.waitingInput")}
           </span>
         ) : null}
-        {column === "wait" ? (
+        {column.anchor === "wait" && !task.doneAt ? (
           <button
             type="button"
             className={styles.doneToggle}
@@ -2184,7 +2315,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             {t("chat.boardMarkDone")}
           </button>
         ) : null}
-        {column === "done" ? (
+        {task.doneAt ? (
           <button
             type="button"
             className={styles.doneToggle}
@@ -2241,73 +2372,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               }}
             >
               <span className={styles.railLabel}>{t("chat.boardAllProjects")}</span>
-              <span className={styles.railCount}>{tasks.length}</span>
             </button>
-            {/* Favorites: a section of its own beside the folders. Opened, it
-                holds every starred card — the list scrolls — and a press on
-                one opens that task, exactly like its card on the board. */}
-            <div className={styles.railFavSection}>
-              <button
-                type="button"
-                data-rail-favorites=""
-                className={`${styles.railItem} ${favoritesOpen ? styles.railItemOn : ""}`}
-                aria-expanded={favoritesOpen}
-                title={t("chat.boardFavorites")}
-                onClick={() => setFavoritesOpen((open) => !open)}
-              >
-                <span className={styles.railFavIcon} aria-hidden>
-                  <HeartIcon size={12} filled={favoriteTasks.length > 0} />
-                </span>
-                <span className={styles.railLabel}>{t("chat.boardFavorites")}</span>
-                <span className={styles.railCount}>{favoriteTasks.length}</span>
-              </button>
-              {favoritesOpen ? (
-                <div className={styles.railFavorites} data-rail-favorites-list="">
-                  {favoriteTasks.length ? (
-                    favoriteTasks.map((task) => {
-                      const text = task.taskDescription?.trim() || task.title;
-                      return (
-                        <div
-                          key={task.id}
-                          className={styles.favCard}
-                          data-favorite-task={task.id}
-                        >
-                          <button
-                            type="button"
-                            className={styles.favCardOpen}
-                            title={text}
-                            onClick={() => void openTask(task)}
-                            onContextMenu={(e) => openTaskMenu(e, task)}
-                          >
-                            <span className={styles.favCardTitle}>{text}</span>
-                            <span className={styles.favCardMeta}>
-                              <span className={styles.chip}>{folderLabel(task.cwd, task.cwd)}</span>
-                              <span className={styles.favCardColumn}>
-                                {t(COLUMN_TITLE[boardColumn(task)])}
-                              </span>
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.favCardStar}
-                            title={t("chat.boardRemoveFavorite")}
-                            aria-label={t("chat.boardRemoveFavorite")}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void setTaskFavorite(task.id, false);
-                            }}
-                          >
-                            <HeartIcon size={12} filled />
-                          </button>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <p className={styles.favEmpty}>{t("chat.boardNoFavorites")}</p>
-                  )}
-                </div>
-              ) : null}
-            </div>
             {groups.map((group) => {
               /** This row took the tag editor over, and it opens right here. */
               const editingTag = tagEdit?.cwd === group.cwd && tagEdit.where === "rail";
@@ -2381,29 +2446,81 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             >
               {t("chat.boardAddFolder")}
             </button>
+            <button
+              type="button"
+              className={styles.railAddFolder}
+              onClick={() => {
+                setColumnsOpen(true);
+                setRailOpen(false);
+              }}
+            >
+              {t("chat.boardColumns")}
+            </button>
           </div>
         </aside>
 
         <div ref={columnsRef} className={styles.columns} onScroll={saveScroll}>
-          {COLUMN_ORDER.map((column) => {
-            const cards = filterCwd
-              ? columns[column].filter((task) => task.cwd === filterCwd)
-              : columns[column];
+          {boardColumns.map((column) => {
+            const lane = columns[column.id] ?? EMPTY_TASKS;
+            const cards = filterCwd ? lane.filter((task) => task.cwd === filterCwd) : lane;
+            const isTodo = column.id === todoColumnId;
             return (
-              <section key={column} className={styles.column} data-column={column}>
+              <section
+                key={column.id}
+                className={`${styles.column}${
+                  dragOverColumnId === column.id ? ` ${styles.columnDrop}` : ""
+                }${dragBlockedColumnId === column.id ? ` ${styles.columnDropBlocked}` : ""}`}
+                data-column={column.id}
+                data-column-takes={
+                  column.kind !== "stage" || column.anchor === "done" || column.anchor === "wait"
+                    ? "yes"
+                    : "no"
+                }
+              >
+                {/* What the lane would do with the card, said under the pointer
+                    itself: a cross for a lane that refuses it, a tick for Done
+                    (it closes the card) and a return arrow for Wait (it sends
+                    the card back to the workflow). */}
+                {dragBlockedColumnId === column.id ? (
+                  <div
+                    className={`${styles.columnMark} ${styles.columnMarkBlocked}`}
+                    data-drop-mark="blocked"
+                    aria-hidden
+                  >
+                    ✕
+                  </div>
+                ) : dragActionMark?.columnId === column.id ? (
+                  <div
+                    className={`${styles.columnMark} ${styles.columnMarkAction}`}
+                    data-drop-mark={dragActionMark.kind}
+                    aria-hidden
+                  >
+                    {dragActionMark.kind === "done" ? "✓" : "↩"}
+                  </div>
+                ) : null}
                 <div className={styles.columnHead}>
-                  <span>{t(COLUMN_TITLE[column])}</span>
+                  <span className={styles.columnTitle}>{columnTitle(column)}</span>
                   <span className={styles.columnCount}>{cards.length}</span>
+                  <span className={styles.columnSpacer} />
+                  <button
+                    type="button"
+                    className={styles.columnMenuBtn}
+                    title={t("chat.boardColumnSettings")}
+                    aria-label={t("chat.boardColumnSettings")}
+                    onClick={() => setColumnsOpen(true)}
+                  >
+                    ⋯
+                  </button>
                 </div>
                 <div
                   ref={(el) => {
-                    if (el) columnRefs.current.set(column, el);
-                    else columnRefs.current.delete(column);
+                    if (el) columnRefs.current.set(column.id, el);
+                    else columnRefs.current.delete(column.id);
                   }}
                   className={styles.columnBody}
                   onScroll={saveScroll}
                 >
-                  {column === "todo"
+                  {isTodo
                     ? visibleGroups.map((group, groupIndex) => (
                         <div key={group.cwd} className={styles.group} data-group={group.cwd}>
                           <div
@@ -2536,16 +2653,29 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                         </div>
                       ))
                     : cards.map((task) => renderCard(task, null))}
-                  {column === "todo" && !visibleGroups.length ? (
+                  {isTodo && !visibleGroups.length ? (
                     <p className={styles.empty}>{t("chat.boardNoFolders")}</p>
                   ) : null}
-                  {column !== "todo" && !cards.length ? (
+                  {!isTodo && !cards.length ? (
                     <p className={styles.empty}>{t("chat.boardNoTasks")}</p>
                   ) : null}
                 </div>
               </section>
             );
           })}
+          {/* One more lane, from the end of the strip: a slot-wide button, not
+              a lane-sized placeholder — the strip is for the board's columns,
+              and a lane it does not have should not take a lane's width. */}
+          <button
+            type="button"
+            className={styles.columnAdd}
+            data-add-column-lane=""
+            title={t("chat.boardColumnAdd")}
+            aria-label={t("chat.boardColumnAdd")}
+            onClick={() => setColumnsOpen(true)}
+          >
+            <span aria-hidden>+</span>
+          </button>
         </div>
       </div>
 
@@ -2595,6 +2725,38 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             />
           </svg>
           <span className={styles.actionLabel}>{t("chat.boardFoldersTitle")}</span>
+        </button>
+        <button type="button" className={styles.actionBtn} onClick={() => setColumnsOpen(true)}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <rect
+              x="3.5"
+              y="5"
+              width="4"
+              height="14"
+              rx="1.4"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            />
+            <rect
+              x="10"
+              y="5"
+              width="4"
+              height="14"
+              rx="1.4"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            />
+            <rect
+              x="16.5"
+              y="5"
+              width="4"
+              height="14"
+              rx="1.4"
+              stroke="currentColor"
+              strokeWidth="1.7"
+            />
+          </svg>
+          <span className={styles.actionLabel}>{t("chat.boardColumns")}</span>
         </button>
       </div>
 
@@ -2647,8 +2809,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             role="menu"
           >
             {/* A task that has run has a dialogue worth glancing at, so the
-                card's menu opens with the peek; a Todo card has none yet. */}
-            {boardColumn(taskMenu.task) !== "todo" ? (
+                card's menu opens with the peek; a card that never started has
+                none yet. */}
+            {taskMenu.task.startedAt ? (
               <button
                 type="button"
                 role="menuitem"
@@ -2669,7 +2832,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
             ) : null}
             {/* A task that has not started is still only a description, so it
                 stays rewritable; once it runs, the text is what was sent. */}
-            {boardColumn(taskMenu.task) === "todo" ? (
+            {!taskMenu.task.startedAt ? (
               <button
                 type="button"
                 role="menuitem"
@@ -2693,7 +2856,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 the board is the next prompt, typed right here. A Done card is
                 the same door: writing into a task the user had closed reopens
                 it, so the prompt is offered here instead of a Reopen first. */}
-            {isPromptable(boardColumn(taskMenu.task)) ? (
+            {columnOf(taskMenu.task).acceptsPrompt ? (
               <button
                 type="button"
                 role="menuitem"
@@ -2710,6 +2873,26 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   />
                 </svg>
                 {t("chat.boardNextPrompt")}
+              </button>
+            ) : null}
+            {/* A card the reader parked on a lane of its own comes back to the
+                workflow by losing the placement. Moving *between* lanes is the
+                drag's job — the menu does not offer a list of them. */}
+            {taskMenu.task.boardColumnId ? (
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => {
+                  const task = taskMenu.task;
+                  setTaskMenu(null);
+                  void setTaskColumn(task.id, null);
+                }}
+              >
+                <span className={styles.menuIcon} aria-hidden>
+                  ↩
+                </span>
+                {t("chat.boardReturnToFlow")}
               </button>
             ) : null}
             {/* Star the card (or drop the star): a favourite wears a small heart
@@ -3164,6 +3347,38 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           <ExportDialog open sessionId={exportTaskId} onClose={() => setExportTaskId(null)} />,
           document.body,
         )}
+
+      {/* What the hand carries: a copy of the card rides under the pointer, so
+          a drag always says *which* card is moving, not just where it would
+          land. It is a picture, not a control — nothing under it hears the
+          pointer while the drag is live. */}
+      {dragPreview
+        ? createPortal(
+            <div
+              className={styles.dragPreview}
+              data-drag-preview=""
+              style={{
+                left: Math.max(
+                  8,
+                  Math.min(dragPreview.x + 14, window.innerWidth - 236),
+                ),
+                top: Math.max(8, Math.min(dragPreview.y + 14, window.innerHeight - 96)),
+              }}
+              aria-hidden
+            >
+              {dragPreview.text}
+            </div>,
+            document.body,
+          )
+        : null}
+
+      {/* The strip's own settings: the four homes (never deleted) and the lanes
+          the reader adds. Opened from any lane's ⋮ and from the rail. */}
+      <BoardColumnsDialog
+        open={columnsOpen}
+        board={board}
+        onClose={() => setColumnsOpen(false)}
+      />
     </div>
   );
 }
