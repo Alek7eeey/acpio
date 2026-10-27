@@ -314,6 +314,7 @@
     "promptQueue": "Очередь запросов",
     "promptRail": "Промпты в этом чате",
     "queueCount": "В очереди: {{count}}",
+    "queueReorder": "Перетащите, чтобы изменить порядок",
     "sendNow": "Отправить сейчас",
     "queueDeliveryLabel": "Способ отправки",
     "queueDeliveryQueue": "Отправить после завершения хода",

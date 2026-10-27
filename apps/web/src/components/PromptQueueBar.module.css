@@ -1,0 +1,158 @@
+.queueBar {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  max-width: var(--chat-col);
+  margin: 0 auto 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 80%, var(--bg));
+  box-shadow: var(--shadow-soft);
+  flex-shrink: 0;
+  animation: rise 0.18s ease;
+}
+
+.queueBarHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queueBarTitle {
+  font-size: 0.78rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.queueBarCount {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.queueList {
+  display: grid;
+  gap: 4px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.queueItem {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
+/* The dragged row and the slot it would land in: a line, the same way a card
+   finds its place on the board. */
+.queueItemDragging {
+  opacity: 0.55;
+}
+
+.queueItemBefore::before,
+.queueItemAfter::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.queueItemBefore::before {
+  top: -3px;
+}
+
+.queueItemAfter::after {
+  bottom: -3px;
+}
+
+.queueGrip {
+  cursor: grab;
+  touch-action: none;
+}
+
+.queueGrip:active {
+  cursor: grabbing;
+}
+
+.queueItemText {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queueEdit {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  resize: vertical;
+}
+
+.queueEdit:focus {
+  outline: none;
+}
+
+.queueItemBtn {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.queueItemBtn svg {
+  display: block;
+}
+
+.queueItemBtn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+/* «Send now» is the one action that hands the request over immediately. */
+.queueItemBtnSend {
+  color: var(--accent);
+}
+
+.queueItemBtnSend:hover {
+  color: var(--accent-hover);
+  background: var(--accent-soft);
+}
+
+/* The bar rises in the way the chat's own panels do (the keyframes travel
+   with the module: a scoped animation name is not the one global.css holds). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

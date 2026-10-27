@@ -294,6 +294,8 @@ export const ru = {
     jumpToLatest: "Перейти к последним сообщениям",
     promptQueue: "Очередь запросов",
     queueCount: "В очереди: {{count}}",
+
+    queueReorder: "Перетащите, чтобы изменить порядок",
     sendNow: "Отправить сейчас",
     queueDeliveryLabel: "Способ отправки",
     queueDeliveryQueue: "Отправить после завершения хода",

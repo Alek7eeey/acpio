@@ -436,6 +436,16 @@ type AppState = {
   removeQueuedPrompt: (id: string) => void;
   updateQueuedPrompt: (id: string, text: string) => void;
   /**
+   * Move a queued request to another slot. The queue is the delivery order —
+   * the drain hands over whatever stands first — so this is what a drag in the
+   * queue bar writes.
+   */
+  reorderQueuedPrompt: (
+    sourceId: string,
+    targetId: string,
+    position: "before" | "after",
+  ) => void;
+  /**
    * Send one queued request right away, interrupting the turn the agent is
    * running; the requests queued behind it keep waiting.
    */
@@ -3215,6 +3225,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       promptQueue: get().promptQueue.map((item) => (item.id === id ? { ...item, text } : item)),
     });
+  },
+
+  reorderQueuedPrompt(sourceId, targetId, position) {
+    if (sourceId === targetId) return;
+    const queue = [...get().promptQueue];
+    const from = queue.findIndex((item) => item.id === sourceId);
+    if (from < 0) return;
+    const [moved] = queue.splice(from, 1);
+    const landing = queue.findIndex((item) => item.id === targetId);
+    if (!moved || landing < 0) return;
+    queue.splice(position === "before" ? landing : landing + 1, 0, moved);
+    set({ promptQueue: queue });
   },
 
   /**

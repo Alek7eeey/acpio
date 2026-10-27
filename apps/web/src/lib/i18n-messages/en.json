@@ -294,6 +294,7 @@
     "promptQueue": "Request queue",
     "promptRail": "Prompts in this chat",
     "queueCount": "Queued: {{count}}",
+    "queueReorder": "Drag to reorder",
     "sendNow": "Send now",
     "queueDeliveryLabel": "How to send",
     "queueDeliveryQueue": "Send after the turn finishes",

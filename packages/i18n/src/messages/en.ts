@@ -274,6 +274,8 @@ export const en = {
     jumpToLatest: "Jump to latest",
     promptQueue: "Request queue",
     queueCount: "Queued: {{count}}",
+
+    queueReorder: "Drag to reorder",
     sendNow: "Send now",
     queueDeliveryLabel: "How to send",
     queueDeliveryQueue: "Send after the turn finishes",

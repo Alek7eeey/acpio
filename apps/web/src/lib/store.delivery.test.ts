@@ -121,6 +121,32 @@ describe("queue delivery buttons", () => {
     expect(inflight()).toBe(1);
   });
 
+  it("delivers the queue in the order its rows stand", async () => {
+    await enqueue("первый");
+    await enqueue("второй");
+    await enqueue("третий");
+    const [first, , third] = queue().map((item) => item.id);
+
+    // The reader drags the last row above the first one.
+    useAppStore.getState().reorderQueuedPrompt(third!, first!, "before");
+    expect(queue().map((q) => q.text)).toEqual(["третий", "первый", "второй"]);
+
+    // The turn is over: the slot frees up and the queue hands the top row over.
+    apiMock.prompt.mockClear();
+    useAppStore.setState({
+      sessions: [row("idle")],
+      activeSession: detail("idle"),
+      sessionDetails: { [SID]: detail("idle") },
+      inflight: 0,
+      inflightBySession: { [SID]: 0 },
+    });
+    await useAppStore.getState().drainPromptQueue();
+
+    expect(apiMock.prompt).toHaveBeenCalledTimes(1);
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe("третий");
+    expect(queue().map((q) => q.text)).toEqual(["первый", "второй"]);
+  });
+
   it("puts the message back when the server never took it", async () => {
     const id = await enqueue("не дошло");
     apiMock.prompt.mockRejectedValueOnce(new Error("Agent is offline"));
