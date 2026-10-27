@@ -4,9 +4,7 @@ import type {
   AppLocale,
   AppSettings,
   BackgroundJobDto,
-  BoardColumn,
   BoardColumnDto,
-  BoardColumnRule,
   BoardDto,
   ChatThemeDto,
   MessageDto,
@@ -253,9 +251,6 @@ type AppState = {
     id: string,
     body: {
       title: string;
-      kind: "auto" | "manual";
-      anchor?: BoardColumn | null;
-      rule?: BoardColumnRule | null;
       afterId?: string | null;
     },
   ) => Promise<void>;
@@ -264,9 +259,6 @@ type AppState = {
     columnId: string,
     patch: {
       title?: string;
-      kind?: "auto" | "manual";
-      anchor?: BoardColumn | null;
-      rule?: BoardColumnRule | null;
       sortMode?: BoardColumnDto["sortMode"];
       acceptsPrompt?: boolean;
       keepOnRun?: boolean;

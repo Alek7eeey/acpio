@@ -4,9 +4,7 @@ import type {
   AgentProvider,
   AppSettings,
   BuiltinHeaderConfig,
-  BoardColumn,
   BoardColumnDto,
-  BoardColumnRule,
   BoardDto,
   ChatThemeDto,
   DiagnosticsDumpDto,
@@ -317,9 +315,6 @@ export const api = {
     id: string,
     body: {
       title: string;
-      kind: "auto" | "manual";
-      anchor?: BoardColumn | null;
-      rule?: BoardColumnRule | null;
       afterId?: string | null;
     },
   ) =>
@@ -332,9 +327,6 @@ export const api = {
     columnId: string,
     patch: {
       title?: string;
-      kind?: "auto" | "manual";
-      anchor?: BoardColumn | null;
-      rule?: BoardColumnRule | null;
       sortMode?: BoardColumnDto["sortMode"];
       acceptsPrompt?: boolean;
       keepOnRun?: boolean;

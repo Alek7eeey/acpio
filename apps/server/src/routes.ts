@@ -1142,20 +1142,12 @@ export async function registerRoutes(app: FastifyInstance) {
   });
   // A board's columns: the four stage homes (seeded with the board) plus the
   // lanes the reader adds. Every write answers with the board as it stands.
-  const boardColumnSchema = z
-    .object({
-      stage: z.enum(["todo", "progress", "wait", "done"]),
-      questionPending: z.boolean().optional(),
-      hasError: z.boolean().optional(),
-      folders: z.array(z.string().min(1).max(4096)).max(50).optional(),
-    })
-    .strict();
+  // A column is what it is: what a column *is* is not writable — a home stays
+  // the stage's home, a lane stays a lane — so the body carries no kind, stage
+  // or rule, and a lane claims no cards by a condition.
   const boardColumnPatchSchema = z
     .object({
       title: z.string().max(60).optional(),
-      kind: z.enum(["auto", "manual"]).optional(),
-      anchor: z.enum(["todo", "progress", "wait", "done"]).nullable().optional(),
-      rule: boardColumnSchema.nullable().optional(),
       sortMode: z.enum(["manual", "created", "updated", "done"]).optional(),
       acceptsPrompt: z.boolean().optional(),
       keepOnRun: z.boolean().optional(),
@@ -1166,9 +1158,6 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z
       .object({
         title: z.string().min(1).max(60),
-        kind: z.enum(["auto", "manual"]),
-        anchor: z.enum(["todo", "progress", "wait", "done"]).nullable().optional(),
-        rule: boardColumnSchema.nullable().optional(),
         afterId: z.string().min(1).max(64).nullable().optional(),
       })
       .strict()

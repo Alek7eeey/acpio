@@ -144,14 +144,12 @@ export const boardColumns = sqliteTable("board_columns", {
     .references(() => boards.id, { onDelete: "cascade" }),
   /** Shown title; empty for a home (its name comes from i18n by id). */
   title: text("title").notNull().default(""),
-  /** `stage` (home) | `auto` (rule over a stage) | `manual` (lane of its own). */
+  /** `stage` (the home of a lifecycle stage) | `manual` (a lane of the reader's). */
   kind: text("kind").notNull().default("manual"),
-  /** The lifecycle stage the column belongs to; null = outside the lifecycle. */
+  /** The lifecycle stage a home stands for; null = a lane outside the lifecycle. */
   anchor: text("anchor"),
   /** 1 for the one column per stage the lifecycle puts cards in. */
   home: integer("home", { mode: "boolean" }).notNull().default(false),
-  /** Claim condition of an `auto` column (JSON), null otherwise. */
-  rule: text("rule", { mode: "json" }),
   sortOrder: integer("sort_order").notNull().default(0),
   /** manual | created | updated | done — the order the lane shows its cards in. */
   sortMode: text("sort_mode").notNull().default("manual"),

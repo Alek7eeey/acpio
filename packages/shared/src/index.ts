@@ -1141,34 +1141,21 @@ export function boardColumn(s: {
 }
 
 /**
- * Where a column gets its cards from:
+ * What a column is:
  *  - `stage` — the home of one lifecycle stage: the stage puts cards here;
- *  - `auto`  — a rule over one stage: cards the rule matches leave the home
- *              for this column, the rest stay home;
  *  - `manual` — a lane outside the lifecycle: only the reader puts cards here.
+ *
+ * There is no third kind. A column never claims cards by a condition of its
+ * own: two sources of placement (a rule and a stage) left the Wait home
+ * half-empty with no way to say which one decided, so a lane is a place a hand
+ * makes and the lifecycle owns everything else.
  */
-export type BoardColumnKind = "stage" | "auto" | "manual";
+export type BoardColumnKind = "stage" | "manual";
 
 /** How a column orders its cards. `manual` is the persisted `sortOrder`. */
 export type BoardColumnSortMode = "manual" | "created" | "updated" | "done";
 
-/**
- * The condition an `auto` column claims cards by. Every stated face must
- * match, so an empty rule ({ stage }) claims the whole stage — which is what a
- * home already does, and why rule columns are checked before the home.
- */
-export interface BoardColumnRule {
-  /** The lifecycle stage this column watches; a card of another stage never matches. */
-  stage: BoardColumn;
-  /** `true` — the agent is asking something; `false` — the turn simply ended. */
-  questionPending?: boolean;
-  /** `true` — the last turn failed; `false` — it did not. */
-  hasError?: boolean;
-  /** Canonical folder paths the card must belong to (empty/absent = any). */
-  folders?: string[];
-}
-
-/** One column of a board: a stage home, a rule lane, or a lane of the reader's own. */
+/** One column of a board: a stage home, or a lane of the reader's own. */
 export interface BoardColumnDto {
   /** Stable token, unique per board: the four homes are `todo|progress|wait|done`,
    *  a column the reader added is `col-…`. A task's placement stores this id. */
@@ -1176,12 +1163,10 @@ export interface BoardColumnDto {
   /** Shown title; empty for a home (its name comes from i18n, `chat.colTodo`…). */
   title: string;
   kind: BoardColumnKind;
-  /** The lifecycle stage the column belongs to (`null` for a lane outside it). */
+  /** The lifecycle stage this home stands for (`null` for a lane of the reader's). */
   anchor: BoardColumn | null;
   /** `true` for the one column per stage the lifecycle puts cards in — undeletable. */
   home: boolean;
-  /** The claim condition of an `auto` column; `null` otherwise. */
-  rule: BoardColumnRule | null;
   sortOrder: number;
   sortMode: BoardColumnSortMode;
   /** Whether a card here offers the inline "next prompt" entry. */
@@ -1218,7 +1203,6 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       kind: "stage",
       anchor: "todo",
       home: true,
-      rule: null,
       sortOrder: 0,
       sortMode: "manual",
       acceptsPrompt: false,
@@ -1230,7 +1214,6 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       kind: "stage",
       anchor: "progress",
       home: true,
-      rule: null,
       sortOrder: 1,
       sortMode: "manual",
       acceptsPrompt: false,
@@ -1242,7 +1225,6 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       kind: "stage",
       anchor: "wait",
       home: true,
-      rule: null,
       sortOrder: 2,
       sortMode: "updated",
       acceptsPrompt: true,
@@ -1254,7 +1236,6 @@ export function defaultBoardColumns(): BoardColumnDto[] {
       kind: "stage",
       anchor: "done",
       home: true,
-      rule: null,
       sortOrder: 3,
       sortMode: "done",
       acceptsPrompt: true,
@@ -1281,7 +1262,7 @@ export function boardColumnsInOrder(
   return list.sort((a, b) => a.sortOrder - b.sortOrder || a.id.localeCompare(b.id));
 }
 
-/** The column the lifecycle puts cards of this stage in (the undeletable home). */
+/** Whether a column is the home of this stage (only homes carry one). */
 export function boardColumnHome(
   columns: readonly BoardColumnDto[],
   stage: BoardColumn,
@@ -1289,29 +1270,10 @@ export function boardColumnHome(
   return columns.find((c) => c.home && c.anchor === stage);
 }
 
-/** Whether an `auto` column's rule claims this card. */
-export function boardColumnRuleMatches(
-  rule: BoardColumnRule,
-  task: BoardTaskPlacement,
-  stage: BoardColumn = boardColumn(task),
-): boolean {
-  if (rule.stage !== stage) return false;
-  if (
-    rule.questionPending !== undefined &&
-    rule.questionPending !== (task.status === "waiting")
-  ) {
-    return false;
-  }
-  if (rule.hasError !== undefined && rule.hasError !== (task.status === "error")) return false;
-  if (rule.folders?.length && !rule.folders.includes(task.cwd ?? "")) return false;
-  return true;
-}
-
 /**
  * The column a board card stands in. Resolution, in order:
  *  1. a placement the reader made, while that column still exists;
- *  2. the first rule column (in board order) whose condition matches the card;
- *  3. the home of the card's lifecycle stage — so a card is never left without
+ *  2. the home of the card's lifecycle stage — so a card is never left without
  *     a column, however the board is configured.
  */
 export function boardColumnOf(
@@ -1319,15 +1281,9 @@ export function boardColumnOf(
   columns: readonly BoardColumnDto[] | null | undefined,
 ): string {
   const order = boardColumnsInOrder(columns);
-  const stage = boardColumn(task);
   const held = task.boardColumnId ? order.find((c) => c.id === task.boardColumnId) : undefined;
   if (held) return held.id;
-  for (const column of order) {
-    if (column.kind === "auto" && column.rule && boardColumnRuleMatches(column.rule, task, stage)) {
-      return column.id;
-    }
-  }
-  return boardColumnHome(order, stage)?.id ?? order[0]!.id;
+  return boardColumnHome(order, boardColumn(task))?.id ?? order[0]!.id;
 }
 
 /**

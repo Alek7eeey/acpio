@@ -1627,8 +1627,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /**
    * Drag a card. Three drops are possible, and the pointer decides which:
    *
-   *  - over another lane the reader owns (a manual or a rule lane) — the card
-   *    moves there, and stays by placement;
+   *  - over a lane the reader owns — the card moves there, and stays by
+   *    placement;
    *  - over Done — the card is marked ready (`doneAt`), the same write the
    *    card's «Отметить готовой» button makes; a placement it already carries
    *    stays, so reopening it puts it back on its own lane;
@@ -2150,7 +2150,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const columnTitle = (column: BoardColumnDto) =>
     column.title || (column.anchor ? t(STAGE_TITLE[column.anchor]) : "");
 
-  /** The lane a card stands in — placed by the reader, a rule, or its stage. */
+  /** The lane a card stands in — placed there by the reader, or by its stage. */
   const columnOf = (task: SessionDto): BoardColumnDto =>
     columnById.get(boardColumnOf(task, boardColumns)) ?? boardColumns[0]!;
 

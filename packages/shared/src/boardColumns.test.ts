@@ -26,7 +26,6 @@ function column(patch: Partial<BoardColumnDto>): BoardColumnDto {
     kind: "manual",
     anchor: null,
     home: false,
-    rule: null,
     sortOrder: 10,
     sortMode: "manual",
     acceptsPrompt: true,
@@ -99,62 +98,20 @@ describe("boardColumnOf", () => {
     expect(boardColumnOf(gone, homes)).toBe("wait");
   });
 
-  it("splits Wait into a review lane and the questions left at home", () => {
-    const columns = [
-      ...homes,
-      column({
-        kind: "auto",
-        anchor: "wait",
-        rule: { stage: "wait", questionPending: false, hasError: false },
-      }),
-    ];
+  // A lane the reader adds is a place, not a condition: it holds what was put
+  // in it and claims nothing, so a card of any stage falls back to its home.
+  it("never claims a card for a lane the reader added", () => {
+    const columns = [...homes, column({ anchor: "wait" })];
     const finished = task({ status: "idle", startedAt: "2026-09-20T10:00:00.000Z" });
     const question = task({ status: "waiting", startedAt: "2026-09-20T10:00:00.000Z" });
     const failed = task({ status: "error", startedAt: "2026-09-20T10:00:00.000Z" });
-    expect(boardColumnOf(finished, columns)).toBe("col-review");
-    expect(boardColumnOf(question, columns)).toBe("wait");
-    expect(boardColumnOf(failed, columns)).toBe("wait");
-  });
-
-  it("gives the earlier column the card when two rules match", () => {
-    const errors = column({
-      id: "col-errors",
-      anchor: "wait",
-      kind: "auto",
-      sortOrder: 5,
-      rule: { stage: "wait", hasError: true },
-    });
-    const review = column({
-      id: "col-review",
-      anchor: "wait",
-      kind: "auto",
-      sortOrder: 9,
-      rule: { stage: "wait" },
-    });
-    const failed = task({ status: "error", startedAt: "2026-09-20T10:00:00.000Z" });
-    expect(boardColumnOf(failed, [...homes, errors, review])).toBe("col-errors");
-    // The board's own order decides — a rule that stands higher claims first.
-    const flipped = [
-      ...homes,
-      { ...errors, sortOrder: 9 },
-      { ...review, sortOrder: 5 },
-    ];
-    expect(boardColumnOf(failed, flipped)).toBe("col-review");
-  });
-
-  it("keeps a rule column to its own folders", () => {
-    const columns = [
-      ...homes,
-      column({
-        kind: "auto",
-        anchor: "wait",
-        rule: { stage: "wait", folders: ["/p/api"] },
-      }),
-    ];
-    const here = task({ startedAt: "2026-09-20T10:00:00.000Z", cwd: "/p/api" });
-    const there = task({ status: "waiting", startedAt: "2026-09-20T10:00:00.000Z", cwd: "/p/web" });
-    expect(boardColumnOf(here, columns)).toBe("col-review");
-    expect(boardColumnOf(there, columns)).toBe("wait");
+    for (const row of [finished, question, failed]) {
+      expect(boardColumnOf(row, columns)).toBe("wait");
+    }
+    // Only a hand placement puts a card there.
+    expect(boardColumnOf({ ...finished, boardColumnId: "col-review" }, columns)).toBe(
+      "col-review",
+    );
   });
 
   it("never answers with a column the board does not have", () => {

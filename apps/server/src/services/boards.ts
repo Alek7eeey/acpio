@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import type { BoardColumn, BoardColumnDto, BoardColumnRule, BoardDto } from "@acpio/shared";
+import type { BoardColumnDto, BoardDto } from "@acpio/shared";
 import { db } from "../db/client.js";
 import { boardColumns, boardFolders, boards, sessions } from "../db/schema.js";
 import { listFolders } from "./folders.js";
@@ -10,13 +10,16 @@ type BoardColumnRow = typeof boardColumns.$inferSelect;
 
 /** One stored column as the board hands it to the client. */
 function mapColumn(row: BoardColumnRow): BoardColumnDto {
+  // A row from before a lane was only a lane carried `kind: "auto"` and a rule.
+  // Nothing claims cards by a condition now, so it reads as what it can be: a
+  // lane the reader fills by hand — its title stays, its cards go to the homes.
+  const home = row.home;
   return {
     id: row.id,
     title: row.title ?? "",
-    kind: row.kind as BoardColumnDto["kind"],
-    anchor: (row.anchor as BoardColumnDto["anchor"]) ?? null,
-    home: row.home,
-    rule: (row.rule as BoardColumnRule | null) ?? null,
+    kind: home ? "stage" : "manual",
+    anchor: home ? ((row.anchor as BoardColumnDto["anchor"]) ?? null) : null,
+    home,
     sortOrder: row.sortOrder ?? 0,
     sortMode: row.sortMode as BoardColumnDto["sortMode"],
     acceptsPrompt: row.acceptsPrompt,
@@ -48,7 +51,6 @@ export async function ensureBoardColumns(boardId: string): Promise<void> {
         kind: column.kind,
         anchor: column.anchor,
         home: column.home,
-        rule: column.rule,
         sortOrder: column.sortOrder,
         sortMode: column.sortMode,
         acceptsPrompt: column.acceptsPrompt,
@@ -335,8 +337,6 @@ export async function boardAcceptsCwd(boardId: string, cwd: string): Promise<boo
 /** Ceiling on a board's columns — a strip wider than this is unreadable anyway. */
 const MAX_BOARD_COLUMNS = 24;
 const MAX_COLUMN_TITLE = 60;
-/** Ceiling on the folders one rule column may name. */
-const MAX_RULE_FOLDERS = 50;
 
 /** What a column write answered: the board as it stands now, or why not. */
 export type BoardColumnWrite =
@@ -345,17 +345,6 @@ export type BoardColumnWrite =
 
 function cleanColumnTitle(raw: unknown): string {
   return String(raw ?? "").trim().slice(0, MAX_COLUMN_TITLE);
-}
-
-/** A rule as it will be stored: canonical folders, only the faces that are set. */
-function cleanColumnRule(rule: BoardColumnRule | null | undefined): BoardColumnRule | null {
-  if (!rule) return null;
-  const out: BoardColumnRule = { stage: rule.stage };
-  if (rule.questionPending !== undefined) out.questionPending = rule.questionPending === true;
-  if (rule.hasError !== undefined) out.hasError = rule.hasError === true;
-  const folders = [...new Set((rule.folders ?? []).map((cwd) => canonicalCwd(cwd)).filter(Boolean))];
-  if (folders.length) out.folders = folders.slice(0, MAX_RULE_FOLDERS);
-  return out;
 }
 
 /** The board's columns in display order (a board with none gets its homes). */
@@ -412,17 +401,14 @@ async function writeColumnOrder(boardId: string, ids: string[]): Promise<void> {
 }
 
 /**
- * Add a column of the reader's own. `auto` claims a slice of one lifecycle
- * stage by its rule; `manual` is a lane outside the lifecycle. The four stage
- * homes are not creatable — they come with the board.
+ * Add a column of the reader's own: a lane outside the lifecycle that holds
+ * what is put in it. The four stage homes are not creatable — they come with
+ * the board, and no column claims cards by a condition.
  */
 export async function addBoardColumn(
   boardId: string,
   input: {
     title: string;
-    kind: "auto" | "manual";
-    anchor?: BoardColumn | null;
-    rule?: BoardColumnRule | null;
     /** Insert right after this column; absent = the end of the strip. */
     afterId?: string | null;
   },
@@ -431,21 +417,15 @@ export async function addBoardColumn(
   if (!board) return { ok: false, reason: "notFound" };
   if (board.columns.length >= MAX_BOARD_COLUMNS) return { ok: false, reason: "invalid" };
   const title = cleanColumnTitle(input.title);
-  const anchor = input.anchor ?? null;
-  const rule = input.kind === "auto" ? cleanColumnRule(input.rule ?? (anchor ? { stage: anchor } : null)) : null;
   if (!title) return { ok: false, reason: "invalid" };
-  if (input.kind === "auto" && (!anchor || !rule || rule.stage !== anchor)) {
-    return { ok: false, reason: "invalid" };
-  }
   const id = `col-${randomUUID().slice(0, 8)}`;
   await db.insert(boardColumns).values({
     id,
     boardId,
     title,
-    kind: input.kind,
-    anchor,
+    kind: "manual",
+    anchor: null,
     home: false,
-    rule,
     sortOrder: board.columns.length,
     sortMode: "manual",
     acceptsPrompt: true,
@@ -461,18 +441,15 @@ export async function addBoardColumn(
 }
 
 /**
- * Rewrite a column. A home keeps its kind, stage and rule (it *is* the stage);
- * its title, order and behavior stay editable. A lane of the reader's own may
- * turn from manual into a rule column and back.
+ * Rewrite a column: its title and its behavior. What a column *is* does not
+ * change — a home stays the stage's home, a lane stays a lane — so the write
+ * carries no kind, stage or rule.
  */
 export async function updateBoardColumn(
   boardId: string,
   columnId: string,
   patch: {
     title?: string;
-    kind?: "auto" | "manual";
-    anchor?: BoardColumn | null;
-    rule?: BoardColumnRule | null;
     sortMode?: BoardColumnDto["sortMode"];
     acceptsPrompt?: boolean;
     keepOnRun?: boolean;
@@ -489,24 +466,12 @@ export async function updateBoardColumn(
   const row = rows[0];
   if (!row) return { ok: false, reason: "notFound" };
   const current = mapColumn(row);
-  const kind = current.home ? current.kind : (patch.kind ?? (current.kind === "stage" ? "manual" : current.kind));
-  const anchor = current.home ? current.anchor : (patch.anchor !== undefined ? patch.anchor : current.anchor);
-  const rule =
-    current.home || kind !== "auto"
-      ? null
-      : cleanColumnRule(patch.rule !== undefined ? patch.rule : (current.rule ?? (anchor ? { stage: anchor } : null)));
   const title = patch.title !== undefined ? cleanColumnTitle(patch.title) : current.title;
   if (!current.home && !title) return { ok: false, reason: "invalid" };
-  if (kind === "auto" && (!anchor || !rule || rule.stage !== anchor)) {
-    return { ok: false, reason: "invalid" };
-  }
   await db
     .update(boardColumns)
     .set({
       title,
-      kind,
-      anchor,
-      rule,
       ...(patch.sortMode !== undefined ? { sortMode: patch.sortMode } : {}),
       ...(patch.acceptsPrompt !== undefined ? { acceptsPrompt: patch.acceptsPrompt } : {}),
       ...(patch.keepOnRun !== undefined ? { keepOnRun: patch.keepOnRun } : {}),
@@ -517,8 +482,8 @@ export async function updateBoardColumn(
 
 /**
  * Delete a column of the reader's own. The cards stand there by placement, so
- * they are released with it: each one returns to the rules and the stage home
- * its lifecycle names, and no card is left pointing at a column that is gone.
+ * they are released with it: each one returns to the stage home its lifecycle
+ * names, and no card is left pointing at a column that is gone.
  */
 export async function deleteBoardColumn(
   boardId: string,

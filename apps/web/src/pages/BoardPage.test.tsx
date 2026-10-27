@@ -303,21 +303,10 @@ describe("BoardPage custom columns", () => {
     kind: "manual",
     anchor: null,
     home: false,
-    rule: null,
     sortOrder: 4,
     sortMode: "manual",
     acceptsPrompt: true,
     keepOnRun: false,
-  };
-
-  /** A rule lane over the Wait stage: what the agent finished, not the questions. */
-  const finished: BoardColumnDto = {
-    ...review,
-    id: "col-finished",
-    title: "Finished",
-    kind: "auto",
-    anchor: "wait",
-    rule: { stage: "wait", questionPending: false, hasError: false },
   };
 
   const finishedTask: SessionDto = {
@@ -344,7 +333,9 @@ describe("BoardPage custom columns", () => {
     expect(container.querySelector('[data-column="wait"] [data-task-id="t2"]')).toBeNull();
   });
 
-  it("splits Wait: a finished turn into the rule lane, the question at home", async () => {
+  // A lane is a place, never a condition: it holds what was dropped in it and
+  // claims nothing, so Wait keeps every card the lifecycle puts there.
+  it("leaves a finished turn in Wait while no hand puts it elsewhere", async () => {
     const question: SessionDto = {
       ...finishedTask,
       id: "t3",
@@ -353,19 +344,21 @@ describe("BoardPage custom columns", () => {
       status: "waiting",
     };
     useAppStore.setState({
-      boards: [{ ...board, columns: [...defaultBoardColumns(), finished] }],
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
       boardSessions: [finishedTask, question],
     });
     const { container } = renderBoard();
     await screen.findByText("Finished task");
     await screen.findByText("Question task");
 
-    const ruleLane = container.querySelector('[data-column="col-finished"]') as HTMLElement;
     const waitLane = container.querySelector('[data-column="wait"]') as HTMLElement;
-    expect(ruleLane.querySelector('[data-task-id="t2"]')).toBeTruthy();
-    expect(ruleLane.querySelector('[data-task-id="t3"]')).toBeNull();
+    expect(waitLane.querySelector('[data-task-id="t2"]')).toBeTruthy();
     expect(waitLane.querySelector('[data-task-id="t3"]')).toBeTruthy();
-    expect(waitLane.querySelector('[data-task-id="t2"]')).toBeNull();
+    expect(
+      (container.querySelector('[data-column="col-review"]') as HTMLElement).querySelector(
+        '[data-task-id="t2"]',
+      ),
+    ).toBeNull();
   });
 
   it("places a card in another lane when it is dragged there", async () => {

@@ -138,7 +138,7 @@ describe("board columns — the four homes", () => {
     const added = await app.inject({
       method: "POST",
       url: `/api/boards/${other.id}/columns`,
-      payload: { title: "Ревью", kind: "manual" },
+      payload: { title: "Ревью" },
     });
     expect(added.statusCode).toBe(200);
     expect((added.json() as BoardDto).columns.map((c) => c.id).slice(0, 4)).toEqual([
@@ -190,59 +190,42 @@ describe("board columns — the four homes", () => {
 
 describe("board columns — lanes the reader adds", () => {
   it("adds a manual lane after the column it names", async () => {
-    const after = await addColumn({ title: "Отложенные", kind: "manual", afterId: "todo" });
+    const after = await addColumn({ title: "Отложенные", afterId: "todo" });
     const ids = after.columns.map((c) => c.id);
     expect(ids[1]).toMatch(/^col-/);
     const lane = after.columns.find((c) => c.title === "Отложенные")!;
-    expect([lane.kind, lane.anchor, lane.home, lane.rule]).toEqual(["manual", null, false, null]);
+    expect([lane.kind, lane.anchor, lane.home]).toEqual(["manual", null, false]);
   });
 
-  it("refuses a rule column with no stage or a rule about another stage", async () => {
-    const noAnchor = await app.inject({
+  // A column is a place, never a condition: a lane claims no cards by a rule,
+  // so the body that would make one has no way in.
+  it("refuses a lane that claims cards by a rule", async () => {
+    const forTheForm = await app.inject({
       method: "POST",
       url: `/api/boards/${boardId}/columns`,
-      payload: { title: "Ревью", kind: "auto" },
+      payload: { title: "Ревью", kind: "auto", anchor: "wait", rule: { stage: "wait" } },
     });
-    expect(noAnchor.statusCode).toBe(400);
-
-    const wrongStage = await app.inject({
-      method: "POST",
-      url: `/api/boards/${boardId}/columns`,
-      payload: { title: "Ревью", kind: "auto", anchor: "wait", rule: { stage: "progress" } },
-    });
-    expect(wrongStage.statusCode).toBe(400);
+    expect(forTheForm.statusCode).toBe(400);
   });
 
-  it("turns a manual lane into a rule column and back", async () => {
-    const created = await addColumn({ title: "Ревью", kind: "manual" });
+  // What a column *is* does not change: a lane stays a lane, whoever asks.
+  it("keeps a lane a lane, whatever the write asks", async () => {
+    const created = await addColumn({ title: "Ревью" });
     const lane = created.columns.find((c) => c.title === "Ревью")!;
-    const toRule = await app.inject({
+    const restaged = await app.inject({
       method: "PATCH",
       url: `/api/boards/${boardId}/columns/${lane.id}`,
-      payload: {
-        kind: "auto",
-        anchor: "wait",
-        rule: { stage: "wait", questionPending: false, hasError: false },
-      },
+      payload: { kind: "stage", anchor: "wait" },
     });
-    expect(toRule.statusCode).toBe(200);
-    const rule = (toRule.json() as BoardDto).columns.find((c) => c.id === lane.id)!;
-    expect(rule.kind).toBe("auto");
-    expect(rule.rule).toEqual({ stage: "wait", questionPending: false, hasError: false });
-
-    const back = await app.inject({
-      method: "PATCH",
-      url: `/api/boards/${boardId}/columns/${lane.id}`,
-      payload: { kind: "manual" },
-    });
-    expect(back.statusCode).toBe(200);
-    expect((back.json() as BoardDto).columns.find((c) => c.id === lane.id)!.rule).toBeNull();
+    expect(restaged.statusCode).toBe(400);
+    const kept = (await board()).columns.find((c) => c.id === lane.id)!;
+    expect([kept.kind, kept.anchor, kept.title]).toEqual(["manual", null, "Ревью"]);
   });
 });
 
 describe("board columns — placing a card", () => {
   it("keeps a card in the lane the reader dropped it in, however many turns run", async () => {
-    const created = await addColumn({ title: "Отложенные", kind: "manual" });
+    const created = await addColumn({ title: "Отложенные" });
     const lane = created.columns.find((c) => c.title === "Отложенные")!;
     expect(lane.keepOnRun).toBe(true);
     const id = await seedTask({ startedAt: new Date() });
@@ -263,7 +246,7 @@ describe("board columns — placing a card", () => {
   });
 
   it("hands the card back to the lifecycle in a lane switched to let go", async () => {
-    const created = await addColumn({ title: "На ревью", kind: "manual" });
+    const created = await addColumn({ title: "На ревью" });
     const lane = created.columns.find((c) => c.title === "На ревью")!;
     await app.inject({
       method: "PATCH",
@@ -318,7 +301,7 @@ describe("board columns — placing a card", () => {
 
 describe("board columns — deleting a lane", () => {
   it("releases every card standing in it", async () => {
-    const created = await addColumn({ title: "Ревью", kind: "manual" });
+    const created = await addColumn({ title: "Ревью" });
     const lane = created.columns.find((c) => c.title === "Ревью")!;
     const id = await seedTask({ startedAt: new Date() });
     await app.inject({
@@ -339,7 +322,7 @@ describe("board columns — deleting a lane", () => {
   });
 
   it("takes a deleted board's columns with it", async () => {
-    await addColumn({ title: "Ревью", kind: "manual" });
+    await addColumn({ title: "Ревью" });
     const removed = await app.inject({ method: "DELETE", url: `/api/boards/${boardId}` });
     expect(removed.statusCode).toBe(200);
     const res = await app.inject({ method: "GET", url: "/api/boards" });
@@ -348,7 +331,7 @@ describe("board columns — deleting a lane", () => {
     const again = await app.inject({
       method: "POST",
       url: `/api/boards/${boardId}/columns`,
-      payload: { title: "Ревью", kind: "manual" },
+      payload: { title: "Ревью" },
     });
     expect(again.statusCode).toBe(404);
   });
@@ -356,7 +339,7 @@ describe("board columns — deleting a lane", () => {
 
 describe("board columns — the board row carries them", () => {
   it("hands the columns to every reader of the board list", async () => {
-    await addColumn({ title: "Ревью", kind: "manual" });
+    await addColumn({ title: "Ревью" });
     const first = (await board()).columns.map((c) => c.id);
     const second = (await board()).columns.map((c) => c.id);
     expect(second).toEqual(first);

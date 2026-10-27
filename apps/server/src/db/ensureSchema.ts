@@ -203,7 +203,6 @@ export async function ensureSchema() {
       kind TEXT NOT NULL DEFAULT 'manual',
       anchor TEXT,
       home INTEGER NOT NULL DEFAULT 0,
-      rule TEXT,
       sort_order INTEGER NOT NULL DEFAULT 0,
       sort_mode TEXT NOT NULL DEFAULT 'manual',
       accepts_prompt INTEGER NOT NULL DEFAULT 1,

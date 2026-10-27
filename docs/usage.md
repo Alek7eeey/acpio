@@ -175,10 +175,12 @@ The board's columns are yours to arrange: **Board columns** in the rail (or the 
 lane's head) opens the editor. The four stage columns — **Todo**, **In Progress**, **Wait**,
 **Done** — always stay: rename them, reorder them, change how a lane orders its cards or
 whether a card takes the next prompt, but they cannot be deleted — a card of that stage would
-have nowhere to stand. Add as many lanes of your own as you like, and each one knows how cards
-reach it: **by a rule** over a stage (a **Review** lane takes everything the agent finished
-while the question and the failed turn stay in Wait; a **Broken** lane takes the failed turns
-only) or **only by hand** — Deferred, Backlog, Blocked. A card moves to a lane of your own by
+have nowhere to stand. Add as many lanes of your own as you like — Deferred, Backlog, Blocked, Review — and every one
+of them holds only what was put in it: a lane is a place, not a condition. Which card stands in
+which stage is the lifecycle's call alone, through that stage's home; there is no second
+decider, or a home would have to share its cards with a lane and nothing would say which of the
+two won. What a card is doing is on the card itself: in **Wait** the agent's question is marked
+apart from a turn that simply ended. A card moves to a lane of your own by
 being dragged there — by the card itself with a mouse, by the card itself with a finger after a
 short hold (a swipe that starts moving at once stays the lane's scroll). While it travels, a copy
 of the card rides under the pointer and the slot it was taken from keeps a dashed outline, so
