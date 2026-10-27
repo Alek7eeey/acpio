@@ -489,20 +489,62 @@
   flex: 0 0 auto;
 }
 
-/* What the task starts on plus its two actions, as one compact row: the
-   attach button, the agent chip, the model chip with its params menu (⋯), the
-   start-immediately switch — then Cancel and Create, pushed to the right edge
-   whenever the row has room for them. */
+/* What the task starts on plus its two actions: the info line in words at the
+   left — «Built-in · auto · start immediately» — the paperclip beside the
+   actions, and Cancel/Create pushed to the right edge. No control stands in
+   this row: the line costs a text row where four pickers cost four, and the
+   panel a press opens holds them at full size. */
 .composerFooter {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
-.composerFooter .ghostBtn {
+/* The info line is text, so it behaves like text: one line, clipped with an
+   ellipsis when the lane is too narrow for the whole of it (its title keeps
+   the whole). It reads as a statement and only answers a hover, the way a
+   line of prose that happens to be pressable would. */
+.startInfo {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.startInfo:hover,
+.startInfo[aria-expanded="true"] {
+  color: var(--text);
+}
+
+/* The two actions as one group: they go together to the next line when the
+   lane has no room for both, and to the right edge of the row they land on. */
+.composerButtons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+/* The form's actions ride a little smaller than a page's: the row is the
+   second half of a footer the info line already trimmed. */
+.composerFooter .ghostBtn,
+.composerFooter .primaryBtn {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 0.76rem;
 }
 
 .composerInput {
@@ -539,10 +581,10 @@
 .attachFile {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
   background: none;
   color: var(--text-secondary);
   cursor: pointer;
@@ -652,31 +694,66 @@
   background: var(--bg-secondary);
 }
 
-/* Creation form: "start immediately" reads as a switch — label left, track
-   right — and owns its own line, because a 264px board column has no room to
-   squeeze the label between the track and Cancel/Create. The track/knob are
-   shared with the folder menu's switch. */
-.autoStart {
-  flex: 0 0 auto;
-  display: inline-flex;
+/* The panel the info line opens: the same three settings as controls, sized
+   the way a control is — a card without the curtain, hung by the line that
+   asked for it and placed by the page from its measured box. */
+.startPanel {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(288px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.startPanelHead {
+  padding: 1px 2px 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-secondary);
+}
+
+.startField {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.startFieldLabel {
+  padding-left: 2px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* "Start immediately" as a row of the panel: label left, track right, the same
+   track the folder menu carries. */
+.startSwitch {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--text-secondary);
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
 }
 
-.autoStart:hover {
-  color: var(--text);
-}
-
-.autoStart.switchOn,
-.autoStart.switchOn:hover {
+.startSwitch.switchOn {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   color: var(--accent);
 }
 

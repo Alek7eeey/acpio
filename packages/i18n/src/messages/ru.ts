@@ -368,6 +368,7 @@ export const ru = {
     boardStart: "Начать работу",
     boardStartOther: "Запустить с другим агентом",
     boardAutoStart: "Запускать сразу",
+    boardTaskStart: "С чем запускать задачу",
     boardFolderQueue: "Запускать задачи по очереди",
     boardTaskAgent: "Агент",
     boardMarkDone: "Завершить",

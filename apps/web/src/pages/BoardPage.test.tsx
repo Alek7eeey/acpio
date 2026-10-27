@@ -15,6 +15,7 @@ import { composerDraftSnapshot, forgetComposerDraft } from "../lib/composerDraft
 import { I18nProvider } from "../lib/i18n";
 import { BoardPage } from "./BoardPage";
 import styles from "./BoardPage.module.css";
+import pickerStyles from "../components/ModelPicker.module.css";
 
 const apiMock = vi.hoisted(() => {
   /** A promise that never settles — the pending network round-trip. */
@@ -865,9 +866,10 @@ describe("BoardPage new task form", () => {
     expect(within(group).queryByRole("button", { name: "Add task" })).toBeNull();
   });
 
-  // The form opens on two rows — one line of text, one row with everything
-  // else — instead of a stack of labelled pickers.
-  it("opens compact: one line of text and one row of controls", async () => {
+  // The form opens on two rows — one line of text, one row saying in words
+  // what the task starts on with the actions beside it — instead of a stack of
+  // labelled pickers.
+  it("openly compact: one line of text and one line of words, no controls", async () => {
     useAppStore.setState({ boardSessions: [] });
     renderBoard();
     await screen.findByText("Add task");
@@ -881,12 +883,40 @@ describe("BoardPage new task form", () => {
     expect(textarea.getAttribute("rows")).toBe("1");
 
     const box = textarea.closest("div") as HTMLElement;
-    // Everything else sits on the same row: attach, the switch, both actions.
     const row = box.querySelector(`.${styles.composerFooter}`) as HTMLElement | null;
     expect(row).toBeTruthy();
-    expect(within(row).getByRole("switch")).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Cancel" })).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Create" })).toBeTruthy();
+
+    // What the task starts on is words, not controls: one pressable line that
+    // names the agent and the model, and no picker or switch standing in the
+    // form at all — those are read far more often than they are changed.
+    const line = within(row).getByRole("button", { name: /^What the task starts on:/ });
+    expect(line.textContent).toContain("auto");
+    // The switch is off, so the line says nothing about starting: an off switch
+    // is not news, and the line is a summary, not a form.
+    expect(line.textContent).not.toContain("Start immediately");
+    expect(within(row).queryByRole("switch")).toBeNull();
+    expect(row.querySelectorAll(`.${pickerStyles.modelTrigger}`).length).toBe(0);
+    // Nothing of the panel until it is asked for.
+    expect(screen.queryByRole("dialog", { name: "What the task starts on" })).toBeNull();
+
+    // The press opens the very same settings at full size: agent, model, and
+    // the start switch with its words on.
+    await userEvent.click(line);
+    const panel = await screen.findByRole("dialog", { name: "What the task starts on" });
+    expect(within(panel).getByRole("switch")).toBeTruthy();
+    expect(within(panel).getByText("Start immediately")).toBeTruthy();
+    expect(panel.querySelectorAll(`.${pickerStyles.modelTriggerBlock}`).length).toBeGreaterThan(0);
+    expect(within(panel).getByText("Agent")).toBeTruthy();
+
+    // Setting it there is what the line then states, without a control of its
+    // own ever standing on the form.
+    await userEvent.click(within(panel).getByRole("switch"));
+    await userEvent.click(line);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(line.textContent).toContain("Start immediately");
+
     // No other block under the textarea: the labelled pickers are gone.
     expect(box.querySelectorAll(`.${styles.composerField}`).length).toBe(0);
     expect(box.querySelectorAll(`.${styles.composerActions}`).length).toBe(0);

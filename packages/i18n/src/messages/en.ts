@@ -348,6 +348,7 @@ export const en = {
     boardStart: "Start work",
     boardStartOther: "Start with another agent",
     boardAutoStart: "Start immediately",
+    boardTaskStart: "What the task starts on",
     boardFolderQueue: "Run tasks one after another",
     boardTaskAgent: "Agent",
     boardMarkDone: "Mark done",

@@ -21,6 +21,7 @@ import {
   type AttachSource,
   type BoardColumn,
   type BoardColumnDto,
+  modelDisplayName,
   type ModelOption,
   type ModelParamDto,
   type SessionDto,
@@ -620,6 +621,77 @@ const NewTaskComposer = memo(function NewTaskComposer({
     }, ATTACH_HOLD_MS);
   };
 
+  /** What the task starts on, as the line states it: agent, model, and «starts
+   *  by itself» only while that is on — an off switch is not news. */
+  const startSummary = [
+    agentOptions.find((agent) => agent.id === provider)?.label ?? "",
+    draftModel
+      ? modelDisplayName(
+          draftModel,
+          taskModels.find((entry) => entry.value === draftModel)?.name,
+          t("models.auto"),
+        )
+      : t("models.auto"),
+    ...(createAutoStart ? [t("chat.boardAutoStart")] : []),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  /** The panel the info line opens, the box it hangs from, and where it was
+   *  finally placed (measured, so it never runs off the window). */
+  const [startPanel, setStartPanel] = useState<{ rect: DOMRect } | null>(null);
+  const [startPanelPos, setStartPanelPos] = useState<{ left: number; top: number } | null>(null);
+  const startPanelRef = useRef<HTMLDivElement>(null);
+  const startLineRef = useRef<HTMLButtonElement>(null);
+
+  /** Open the controls over the line they state: the panel hangs from that
+   *  line's own box — under it where the form sits high on the board, over it
+   *  where the lane has run to the bottom of the window. */
+  const openStartPanel = () => {
+    const rect = startLineRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setStartPanel({ rect });
+  };
+
+  useLayoutEffect(() => {
+    if (!startPanel) {
+      setStartPanelPos(null);
+      return;
+    }
+    const el = startPanelRef.current;
+    if (!el) return;
+    const { rect } = startPanel;
+    const height = el.offsetHeight;
+    const left = Math.max(
+      12,
+      Math.min(rect.left, window.innerWidth - el.offsetWidth - 12),
+    );
+    let top = rect.bottom + 6;
+    if (top + height > window.innerHeight - 12) top = rect.top - height - 6;
+    setStartPanelPos({ left, top: Math.max(12, top) });
+  }, [startPanel]);
+
+  // A press outside the panel — or on the line that opened it — closes it; so
+  // does Escape, the same answer the board's other menus give.
+  useEffect(() => {
+    if (!startPanel) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (startPanelRef.current?.contains(target)) return;
+      if (startLineRef.current?.contains(target)) return;
+      setStartPanel(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setStartPanel(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [startPanel]);
+
   return (
     <div ref={boxRef} className={styles.composer}>
       {/* Skills the folder offers, offered before the task exists: the pick
@@ -728,10 +800,48 @@ const NewTaskComposer = memo(function NewTaskComposer({
         </div>
       ) : null}
 
-      {/* Everything the task starts on and its two actions on one row: no
-          labels — a chip says what it is — and Cancel/Create hug the right
-          edge whenever there is room for them. */}
+      <input
+        ref={fileInputRef}
+        className={styles.fileInput}
+        type="file"
+        multiple
+        aria-label={t("chat.boardAttachFile")}
+        onChange={(e) => {
+          addFiles(Array.from(e.target.files ?? []));
+          // Clear it so the same file can be picked again after being
+          // removed from the row.
+          e.target.value = "";
+        }}
+      />
+      <AttachDialog
+        open={attachDialogOpen}
+        initialDir={cwd}
+        onClose={() => setAttachDialogOpen(false)}
+        onAttach={addServerFiles}
+      />
+
+      {/* Everything the task starts on, stated in words — the agent, the model,
+          and whether it goes off by itself. These are read far more often than
+          they are changed, so they cost one line of text and no control at
+          all; the press opens the panel that sets them, where the same pickers
+          stand at the size a control is set at. The paperclip is none of those
+          values and sits by the actions instead. */}
       <div className={styles.composerFooter}>
+        <button
+          ref={startLineRef}
+          type="button"
+          className={styles.startInfo}
+          title={startSummary}
+          aria-haspopup="dialog"
+          aria-expanded={startPanel != null}
+          aria-label={`${t("chat.boardTaskStart")}: ${startSummary}`}
+          onClick={() => {
+            if (startPanel) setStartPanel(null);
+            else openStartPanel();
+          }}
+        >
+          {startSummary}
+        </button>
         <button
           type="button"
           className={styles.attachFile}
@@ -759,88 +869,103 @@ const NewTaskComposer = memo(function NewTaskComposer({
             openOtherSource();
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
               d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
               stroke="currentColor"
-              strokeWidth="1.7"
+              strokeWidth="1.9"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           </svg>
         </button>
-        <input
-          ref={fileInputRef}
-          className={styles.fileInput}
-          type="file"
-          multiple
-          aria-label={t("chat.boardAttachFile")}
-          onChange={(e) => {
-            addFiles(Array.from(e.target.files ?? []));
-            // Clear it so the same file can be picked again after being
-            // removed from the row.
-            e.target.value = "";
-          }}
-        />
-        <AttachDialog
-          open={attachDialogOpen}
-          initialDir={cwd}
-          onClose={() => setAttachDialogOpen(false)}
-          onAttach={addServerFiles}
-        />
-        {showAgentPicker && agentOptions.length ? (
-          <OptionPicker
-            variant="compact"
-            placement="up"
-            menuTitle={t("chat.boardTaskAgent")}
-            placeholder={t("common.pickAgent")}
-            value={draftProvider || defaultProvider || ""}
-            options={agentOptions.map((agent) => ({ value: agent.id, label: agent.label }))}
-            onChange={(value) => setDraftProvider(value as AgentProvider)}
-          />
-        ) : null}
-        {showModelPicker && taskModels.length ? (
-          <ModelPicker
-            model={draftModel}
-            models={taskModels}
-            params={taskParams}
-            paramValues={draftParams}
-            paramsByModel={paramsByModel}
-            paramsLoading={paramsLoadingFor != null}
-            paramsLoadingFor={paramsLoadingFor ?? undefined}
-            showParamsMenu={showModelParams}
-            placement="up"
-            variant="compact"
-            onChange={(value) => setDraftModel(value)}
-            onParamsOpen={(value) => loadParamsFor(value)}
-            onParamsChange={(target, next) => applyTaskParams(target, next)}
-          />
-        ) : null}
-    <button
-      type="button"
-      role="switch"
-      aria-checked={createAutoStart}
-      className={`${styles.autoStart}${createAutoStart ? ` ${styles.switchOn}` : ""}`}
-      title={t("chat.boardAutoStart")}
-      onClick={() => toggleBoardAutoStart("create")}
-    >
-      {t("chat.boardAutoStart")}
-      <span className={styles.switchTrack} aria-hidden>
-        <span className={styles.switchKnob} />
-      </span>
-    </button>
-    <button type="button" className={styles.ghostBtn} onClick={onCancel}>
-      {t("common.cancel")}
-    </button>
-    <button
-      type="button"
-      className={styles.primaryBtn}
-      disabled={!draft.trim() || busy}
-      onClick={submit}
-    >
-      {t("common.create")}
-    </button>
+        <div className={styles.composerButtons}>
+          <button type="button" className={styles.ghostBtn} onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className={styles.primaryBtn}
+            disabled={!draft.trim() || busy}
+            onClick={submit}
+          >
+            {t("common.create")}
+          </button>
+        </div>
       </div>
+
+      {/* The same settings as full-size controls, in the panel the info line
+          opens: nothing is hidden from the reader who does want to change them,
+          it is one press away instead of always on the form. */}
+      {startPanel
+        ? createPortal(
+            <div
+              ref={startPanelRef}
+              className={styles.startPanel}
+              style={{
+                left: startPanelPos?.left ?? 0,
+                top: startPanelPos?.top ?? 0,
+                visibility: startPanelPos ? "visible" : "hidden",
+              }}
+              role="dialog"
+              aria-label={t("chat.boardTaskStart")}
+            >
+              <div className={styles.startPanelHead}>{t("chat.boardTaskStart")}</div>
+              {showAgentPicker && agentOptions.length ? (
+                <div className={styles.startField}>
+                  <span className={styles.startFieldLabel}>{t("chat.boardTaskAgent")}</span>
+                  <OptionPicker
+                    variant="block"
+                    placement="up"
+                    menuTitle={t("chat.boardTaskAgent")}
+                    placeholder={t("common.pickAgent")}
+                    value={draftProvider || defaultProvider || ""}
+                    options={agentOptions.map((agent) => ({
+                      value: agent.id,
+                      label: agent.label,
+                    }))}
+                    onChange={(value) => setDraftProvider(value as AgentProvider)}
+                  />
+                </div>
+              ) : null}
+              {showModelPicker && taskModels.length ? (
+                <div className={styles.startField}>
+                  <span className={styles.startFieldLabel}>{t("common.model")}</span>
+                  <ModelPicker
+                    model={draftModel}
+                    models={taskModels}
+                    params={taskParams}
+                    paramValues={draftParams}
+                    paramsByModel={paramsByModel}
+                    paramsLoading={paramsLoadingFor != null}
+                    paramsLoadingFor={paramsLoadingFor ?? undefined}
+                    showParamsMenu={showModelParams}
+                    placement="up"
+                    variant="block"
+                    onChange={(value) => setDraftModel(value)}
+                    onParamsOpen={(value) => loadParamsFor(value)}
+                    onParamsChange={(target, next) => applyTaskParams(target, next)}
+                  />
+                </div>
+              ) : null}
+              <button
+                type="button"
+                role="switch"
+                aria-checked={createAutoStart}
+                className={`${styles.startSwitch}${
+                  createAutoStart ? ` ${styles.switchOn}` : ""
+                }`}
+                onClick={() => toggleBoardAutoStart("create")}
+              >
+                {t("chat.boardAutoStart")}
+                <span className={styles.switchTrack} aria-hidden>
+                  <span className={styles.switchKnob} />
+                </span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 });
