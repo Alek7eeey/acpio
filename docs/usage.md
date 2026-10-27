@@ -145,6 +145,12 @@ row) opens the standard new-chat picker with the folder locked, and confirming i
 task empty — no description form — then opens its chat, so the first message is what names and
 forms it. That is the shape a chat has
 when it comes from the folder tree, and the fresh card rests in **Todo** until that turn runs.
+The form itself opens in two rows: one line for the description (it grows with the text) and
+one for everything else — the attach button, the agent chip, the model chip, the **Start
+immediately** switch and the **Cancel** / **Create** buttons. The model chip is the picker a
+chat's composer has, with its own params menu (**⋯**) for the effort, fast mode and the rest, so
+the task starts on exactly those. Both chips can be switched off in the board's settings.
+
 The **Start immediately** switch in the creation form starts the task the moment it is
 created — the agent the form names gets the description as the first message while you stay on
 the board. The play icon on the card starts work right away too: the description goes out as

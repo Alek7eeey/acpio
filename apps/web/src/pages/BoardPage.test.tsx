@@ -549,6 +549,33 @@ describe("BoardPage new task form", () => {
     expect(within(group).queryByRole("button", { name: "Add task" })).toBeNull();
   });
 
+  // The form opens on two rows — one line of text, one row with everything
+  // else — instead of a stack of labelled pickers.
+  it("opens compact: one line of text and one row of controls", async () => {
+    useAppStore.setState({ boardSessions: [] });
+    renderBoard();
+    await screen.findByText("Add task");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+    // One line to start: the box grows with the text instead of opening tall.
+    expect(textarea.getAttribute("rows")).toBe("1");
+
+    const box = textarea.closest("div") as HTMLElement;
+    // Everything else sits on the same row: attach, the switch, both actions.
+    const row = box.querySelector(`.${styles.composerFooter}`) as HTMLElement | null;
+    expect(row).toBeTruthy();
+    expect(within(row).getByRole("switch")).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Cancel" })).toBeTruthy();
+    expect(within(row).getByRole("button", { name: "Create" })).toBeTruthy();
+    // No other block under the textarea: the labelled pickers are gone.
+    expect(box.querySelectorAll(`.${styles.composerField}`).length).toBe(0);
+    expect(box.querySelectorAll(`.${styles.composerActions}`).length).toBe(0);
+  });
+
   // Regression: the form ignored every press outside it, so an accidental "+"
   // left it in the lane until Cancel was found — an empty form still goes away.
   it("dismisses an empty form on a press outside it", async () => {

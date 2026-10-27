@@ -12,9 +12,6 @@ import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   boardColumn,
-  modelDisplayName,
-  modelParamFamily,
-  modelParamLabel,
   titleFromTaskDescription,
   type AgentProvider,
   type AttachSource,
@@ -26,6 +23,7 @@ import {
 } from "@acpio/shared";
 import { AttachDialog } from "../components/AttachDialog";
 import { BoardTaskPeek } from "../components/BoardTaskPeek";
+import { ModelPicker } from "../components/ModelPicker";
 import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPicker";
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
@@ -136,6 +134,14 @@ const MAX_TASK_FILES = 8;
 const ATTACH_HOLD_MS = 500;
 
 /**
+ * The task box opens on one line and grows with the text: a form that starts
+ * small costs one line of lane, and a long description still fits — it stops
+ * growing at `TEXTAREA_MAX_PX` and scrolls from there.
+ */
+const TEXTAREA_MIN_PX = 36;
+const TEXTAREA_MAX_PX = 160;
+
+/**
  * Folders the "new chat based on this chat" dialog offers: the board's own
  * folders in rail order — the new chat is a card of this board — falling back
  * to the source chat's folder only when the board has none yet.
@@ -230,7 +236,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   agentOptions,
   showAgentPicker,
   showModelPicker,
-  showEffortPicker,
+  showModelParams,
   defaultProvider,
   attachSource,
   draftKey,
@@ -252,7 +258,8 @@ const NewTaskComposer = memo(function NewTaskComposer({
   showAgentPicker: boolean;
   /** Settings switches: the model a task starts on, and its effort. */
   showModelPicker: boolean;
-  showEffortPicker: boolean;
+  /** Settings switch: whether the model chip carries its params menu (⋯). */
+  showModelParams: boolean;
   /** The agent the form opens on — the settings default while it is online. */
   defaultProvider: AgentProvider | null;
   /** Which source a plain click opens — the setting the chat composer obeys. */
@@ -281,11 +288,15 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
   /** Model this task starts on; empty = whatever the agent defaults to. */
   const [draftModel, setDraftModel] = useState("");
-  /** Effort picked for that model; empty = the model's own default. */
-  const [draftEffort, setDraftEffort] = useState("");
+  /** Params of that model (effort, fast, …) as picked in its own menu. */
+  const [draftParams, setDraftParams] = useState<Record<string, string>>({});
   const [taskModels, setTaskModels] = useState<ModelOption[]>([]);
-  /** The effort param the chosen model exposes — nothing to pick without one. */
-  const [effortParam, setEffortParam] = useState<ModelParamDto | null>(null);
+  /** Params of the model the task would start on — what the ⋯ menu edits. */
+  const [taskParams, setTaskParams] = useState<ModelParamDto[]>([]);
+  /** Params of any other model whose ⋯ was opened, keyed by model value. */
+  const [paramsByModel, setParamsByModel] = useState<Record<string, ModelParamDto[]>>({});
+  /** The model whose params are being fetched (the menu shows a loader). */
+  const [paramsLoadingFor, setParamsLoadingFor] = useState<string | null>(null);
   const fileSeq = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /** The server's filesystem picker, open while its source is the one chosen. */
@@ -346,48 +357,74 @@ const NewTaskComposer = memo(function NewTaskComposer({
   // means nothing on the next, so the form starts over with the agent default.
   useEffect(() => {
     setDraftModel("");
-    setDraftEffort("");
+    setDraftParams({});
     setTaskModels([]);
-    setEffortParam(null);
-    if (!provider || (!showModelPicker && !showEffortPicker)) return;
+    setTaskParams([]);
+    setParamsByModel({});
+    if (!provider || !showModelPicker) return;
     let live = true;
     void loadTaskCatalog(provider)
       .then((catalog) => {
-        if (live) setTaskModels(catalog.models);
+        if (!live) return;
+        setTaskModels(catalog.models);
+        // No model picked: the catalogue's params describe the agent default.
+        setTaskParams(catalog.params);
       })
       .catch(() => {
-        if (live) setTaskModels([]);
+        if (!live) return;
+        setTaskModels([]);
+        setTaskParams([]);
       });
     return () => {
       live = false;
     };
-  }, [provider, showModelPicker, showEffortPicker]);
+  }, [provider, showModelPicker]);
 
-  // Effort belongs to a model: it is read from the schema the agent reports for
-  // the model the task will start on, not from a fixed list of words.
+  // Effort, fast mode and the rest belong to a model: they are read from the
+  // schema the agent reports for the model the task will start on — the same
+  // menu a chat's composer opens from its model chip.
   useEffect(() => {
-    if (!provider || !showEffortPicker) {
-      setEffortParam(null);
-      return;
-    }
+    if (!provider || !showModelPicker) return;
     let live = true;
-    setDraftEffort("");
-    setEffortParam(null);
-    void loadTaskCatalog(provider)
-      .then((catalog) => (draftModel ? loadTaskModelParams(provider, draftModel) : catalog.params))
+    setParamsLoadingFor(draftModel || null);
+    void (draftModel
+      ? loadTaskModelParams(provider, draftModel)
+      : loadTaskCatalog(provider).then((catalog) => catalog.params)
+    )
       .then((params) => {
         if (!live) return;
-        setEffortParam(
-          params.find((p) => modelParamFamily(p.id) === "effort" && p.options.length > 0) ?? null,
-        );
+        setTaskParams(params);
+        setParamsByModel((prev) => ({ ...prev, [draftModel]: params }));
       })
       .catch(() => {
-        if (live) setEffortParam(null);
+        if (live) setTaskParams([]);
+      })
+      .finally(() => {
+        if (live) setParamsLoadingFor(null);
       });
     return () => {
       live = false;
     };
-  }, [provider, draftModel, showEffortPicker]);
+  }, [provider, draftModel, showModelPicker]);
+
+  /** Load one model's params for its ⋯ flyout (the loader covers the wait). */
+  const loadParamsFor = (modelValue: string) => {
+    if (!provider || paramsByModel[modelValue]) return;
+    setParamsLoadingFor(modelValue);
+    void (modelValue
+      ? loadTaskModelParams(provider, modelValue)
+      : loadTaskCatalog(provider).then((catalog) => catalog.params)
+    )
+      .then((params) => setParamsByModel((prev) => ({ ...prev, [modelValue]: params })))
+      .catch(() => setParamsByModel((prev) => ({ ...prev, [modelValue]: [] })))
+      .finally(() => setParamsLoadingFor(null));
+  };
+
+  /** Params picked for a model: picking them also picks that model. */
+  const applyTaskParams = (targetModel: string, next: Record<string, string>) => {
+    setDraftModel(targetModel);
+    setDraftParams(next);
+  };
 
   // The agent expands `/name` only as the message's first token, so the menu
   // offers itself at the opening of the description and nowhere else.
@@ -520,9 +557,19 @@ const NewTaskComposer = memo(function NewTaskComposer({
       files.flatMap((entry) => (entry.path ? [{ name: entry.name, path: entry.path }] : [])),
       draftProvider || defaultProvider,
       showModelPicker ? draftModel : "",
-      showEffortPicker && effortParam && draftEffort ? { [effortParam.id]: draftEffort } : {},
+      showModelPicker ? draftParams : {},
     );
   };
+
+  // The box follows its own text: taller for what is typed, short again when
+  // the draft is cleared. Sized after every draft change, so a restored draft
+  // comes back at the height it needs rather than clipped to one line.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, TEXTAREA_MIN_PX), TEXTAREA_MAX_PX)}px`;
+  }, [draft]);
 
   const attachSourceLabels: Record<AttachSource, string> = {
     device: t("chat.attachPickDevice"),
@@ -579,6 +626,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
       <textarea
         ref={inputRef}
         className={styles.composerInput}
+        rows={1}
         value={draft}
         placeholder={t("chat.boardTaskPlaceholder")}
         aria-label={t("chat.boardTaskPlaceholder")}
@@ -640,7 +688,49 @@ const NewTaskComposer = memo(function NewTaskComposer({
           setSkillIndex(index);
         }}
       />
-      <div className={styles.composerFiles}>
+      {files.length ? (
+        <div className={styles.composerFiles}>
+          {files.map((entry) => (
+            <span key={entry.id} className={styles.fileChip}>
+              {entry.url ? (
+                <img className={styles.fileThumb} src={entry.url} alt="" />
+              ) : (
+                <svg
+                  className={styles.fileGlyph}
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  aria-hidden
+                >
+                  <path
+                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+              <span className={styles.fileName}>{entry.name}</span>
+              <button
+                type="button"
+                className={styles.fileRemove}
+                title={t("chat.removeFile")}
+                aria-label={t("chat.removeFile")}
+                onClick={() => removeFile(entry.id)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Everything the task starts on and its two actions on one row: no
+          labels — a chip says what it is — and Cancel/Create hug the right
+          edge whenever there is room for them. */}
+      <div className={styles.composerFooter}>
         <button
           type="button"
           className={styles.attachFile}
@@ -697,46 +787,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
           onClose={() => setAttachDialogOpen(false)}
           onAttach={addServerFiles}
         />
-        {files.map((entry) => (
-          <span key={entry.id} className={styles.fileChip}>
-            {entry.url ? (
-              <img className={styles.fileThumb} src={entry.url} alt="" />
-            ) : (
-              <svg
-                className={styles.fileGlyph}
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                aria-hidden
-              >
-                <path
-                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                  stroke="currentColor"
-                  strokeWidth="1.7"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            )}
-            <span className={styles.fileName}>{entry.name}</span>
-            <button
-              type="button"
-              className={styles.fileRemove}
-              title={t("chat.removeFile")}
-              aria-label={t("chat.removeFile")}
-              onClick={() => removeFile(entry.id)}
-            >
-              ×
-            </button>
-          </span>
-        ))}
-      </div>
-      {/* The agent the task is created for: the default one unless the user
-          picks another here. */}
-      {showAgentPicker && agentOptions.length ? (
-        <div className={styles.composerField}>
-          <span className={styles.composerFieldLabel}>{t("chat.boardTaskAgent")}</span>
+        {showAgentPicker && agentOptions.length ? (
           <OptionPicker
             variant="compact"
             placement="up"
@@ -746,75 +797,48 @@ const NewTaskComposer = memo(function NewTaskComposer({
             options={agentOptions.map((agent) => ({ value: agent.id, label: agent.label }))}
             onChange={(value) => setDraftProvider(value as AgentProvider)}
           />
-        </div>
-      ) : null}
-      {/* The model the task starts on, and the effort it runs with — both read
-          from the agent picked above. */}
-      {showModelPicker && taskModels.length ? (
-        <div className={styles.composerField}>
-          <span className={styles.composerFieldLabel}>{t("chat.boardTaskModel")}</span>
-          <OptionPicker
-            variant="compact"
+        ) : null}
+        {showModelPicker && taskModels.length ? (
+          <ModelPicker
+            model={draftModel}
+            models={taskModels}
+            params={taskParams}
+            paramValues={draftParams}
+            paramsByModel={paramsByModel}
+            paramsLoading={paramsLoadingFor != null}
+            paramsLoadingFor={paramsLoadingFor ?? undefined}
+            showParamsMenu={showModelParams}
             placement="up"
-            menuTitle={t("chat.boardTaskModel")}
-            placeholder={t("models.default")}
-            value={draftModel}
-            options={[
-              { value: "", label: t("models.default") },
-              ...taskModels.map((option) => ({
-                value: option.value,
-                label: modelDisplayName(option.value, option.name, t("models.auto")),
-              })),
-            ]}
-            onChange={setDraftModel}
-          />
-        </div>
-      ) : null}
-      {showEffortPicker && effortParam ? (
-        <div className={styles.composerField}>
-          <span className={styles.composerFieldLabel}>{t("models.effort")}</span>
-          <OptionPicker
             variant="compact"
-            placement="up"
-            menuTitle={t("models.effort")}
-            placeholder={t("models.default")}
-            value={draftEffort}
-            options={[
-              { value: "", label: t("models.default") },
-              ...effortParam.options.map((option) => ({
-                value: option.value,
-                label: modelParamLabel(effortParam.id, option.value, option.name),
-              })),
-            ]}
-            onChange={setDraftEffort}
+            onChange={(value) => setDraftModel(value)}
+            onParamsOpen={(value) => loadParamsFor(value)}
+            onParamsChange={(target, next) => applyTaskParams(target, next)}
           />
-        </div>
-      ) : null}
-      <div className={styles.composerActions}>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={createAutoStart}
-          className={`${styles.autoStart}${createAutoStart ? ` ${styles.switchOn}` : ""}`}
-          title={t("chat.boardAutoStart")}
-          onClick={() => toggleBoardAutoStart("create")}
-        >
-          {t("chat.boardAutoStart")}
-          <span className={styles.switchTrack} aria-hidden>
-            <span className={styles.switchKnob} />
-          </span>
-        </button>
-        <button type="button" className={styles.ghostBtn} onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
-        <button
-          type="button"
-          className={styles.primaryBtn}
-          disabled={!draft.trim() || busy}
-          onClick={submit}
-        >
-          {t("common.create")}
-        </button>
+        ) : null}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={createAutoStart}
+      className={`${styles.autoStart}${createAutoStart ? ` ${styles.switchOn}` : ""}`}
+      title={t("chat.boardAutoStart")}
+      onClick={() => toggleBoardAutoStart("create")}
+    >
+      {t("chat.boardAutoStart")}
+      <span className={styles.switchTrack} aria-hidden>
+        <span className={styles.switchKnob} />
+      </span>
+    </button>
+    <button type="button" className={styles.ghostBtn} onClick={onCancel}>
+      {t("common.cancel")}
+    </button>
+    <button
+      type="button"
+      className={styles.primaryBtn}
+      disabled={!draft.trim() || busy}
+      onClick={submit}
+    >
+      {t("common.create")}
+    </button>
       </div>
     </div>
   );
@@ -2483,7 +2507,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               agentOptions={agentOptions}
                               showAgentPicker={taskAgentPicker}
                               showModelPicker={taskModelPicker}
-                              showEffortPicker={taskEffortPicker}
+                              showModelParams={taskEffortPicker}
                               defaultProvider={defaultTaskProvider}
                               attachSource={attachDefaultSource}
                               draftKey={boardTaskDraftKey(boardId, group.cwd)}

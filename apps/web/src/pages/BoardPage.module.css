@@ -473,8 +473,8 @@
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 5px;
+  padding: 7px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -557,9 +557,27 @@
   flex: 0 0 auto;
 }
 
+/* What the task starts on plus its two actions, as one compact row: the
+   attach button, the agent chip, the model chip with its params menu (⋯), the
+   start-immediately switch — then Cancel and Create, pushed to the right edge
+   whenever the row has room for them. */
+.composerFooter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.composerFooter .ghostBtn {
+  margin-left: auto;
+}
+
 .composerInput {
   width: 100%;
-  min-height: 56px;
+  /* The box sizes itself after the text (rows=1 + a height the component
+     writes); a min-height here would fight that measurement. */
+  min-height: 0;
   resize: vertical;
   border: 0;
   background: none;
@@ -577,8 +595,8 @@
   justify-content: flex-end;
 }
 
-/** Pictures picked for the task being written: the attach button, then the
- *  chips of what it already holds. */
+/** Pictures picked for the task being written — their own row, and only when
+ *  there are any: an empty form has nothing here to show. */
 .composerFiles {
   display: flex;
   flex-wrap: wrap;
@@ -707,7 +725,7 @@
    squeeze the label between the track and Cancel/Create. The track/knob are
    shared with the folder menu's switch. */
 .autoStart {
-  flex: 0 0 100%;
+  flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
