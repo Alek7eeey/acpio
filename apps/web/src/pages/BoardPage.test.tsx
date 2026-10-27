@@ -888,6 +888,14 @@ describe("BoardPage new task form", () => {
     expect(within(row).getByRole("button", { name: "Cancel" })).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Create" })).toBeTruthy();
 
+    // The paperclip keeps the line above, so the info and the two actions read
+    // as one row: what the task starts on at the left, what it does at the
+    // right, and no third button between them.
+    const tools = box.querySelector(`.${styles.composerTools}`) as HTMLElement | null;
+    expect(tools).toBeTruthy();
+    expect(within(tools).getByRole("button", { name: /^Attach/ })).toBeTruthy();
+    expect(within(row).getAllByRole("button").length).toBe(3);
+
     // What the task starts on is words, not controls: one pressable line that
     // names the agent and the model, and no picker or switch standing in the
     // form at all — those are read far more often than they are changed.

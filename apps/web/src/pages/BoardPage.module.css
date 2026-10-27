@@ -489,11 +489,21 @@
   flex: 0 0 auto;
 }
 
-/* What the task starts on plus its two actions: the info line in words at the
-   left — «Built-in · auto · start immediately» — the paperclip beside the
-   actions, and Cancel/Create pushed to the right edge. No control stands in
-   this row: the line costs a text row where four pickers cost four, and the
-   panel a press opens holds them at full size. */
+/* The paperclip, on the line above the chips: it belongs to the files the task
+   carries, not to the values it starts on, and it took the room the actions
+   needed beside the info line. */
+.composerTools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* What the task starts on and its two actions, on one line: the info in words
+   at the left — «Built-in · auto · start immediately» — and Cancel/Create
+   pushed to the right edge. No control stands in this row: the line costs a
+   text row where four pickers cost four, and the panel a press opens holds
+   them at the size of a row. */
 .composerFooter {
   display: flex;
   flex-wrap: wrap;
@@ -538,8 +548,8 @@
   margin-left: auto;
 }
 
-/* The form's actions ride a little smaller than a page's: the row is the
-   second half of a footer the info line already trimmed. */
+/* The form's actions ride a little smaller than a page's: they share the row
+   with a line of text, which already trimmed the footer to one. */
 .composerFooter .ghostBtn,
 .composerFooter .primaryBtn {
   height: 26px;

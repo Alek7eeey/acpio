@@ -820,28 +820,12 @@ const NewTaskComposer = memo(function NewTaskComposer({
         onAttach={addServerFiles}
       />
 
-      {/* Everything the task starts on, stated in words — the agent, the model,
-          and whether it goes off by itself. These are read far more often than
-          they are changed, so they cost one line of text and no control at
-          all; the press opens the panel that sets them, where the same pickers
-          stand at the size a control is set at. The paperclip is none of those
-          values and sits by the actions instead. */}
-      <div className={styles.composerFooter}>
-        <button
-          ref={startLineRef}
-          type="button"
-          className={styles.startInfo}
-          title={startSummary}
-          aria-haspopup="dialog"
-          aria-expanded={startPanel != null}
-          aria-label={`${t("chat.boardTaskStart")}: ${startSummary}`}
-          onClick={() => {
-            if (startPanel) setStartPanel(null);
-            else openStartPanel();
-          }}
-        >
-          {startSummary}
-        </button>
+      {/* The paperclip takes the line above: it is not one of the values the
+          task starts on, and sharing their line pushed the info and the two
+          actions onto a second one. Here the chips and the buttons read as one
+          row — what is said and what it does — with the attach button over
+          them, where a hand looks for files before it looks at the values. */}
+      <div className={styles.composerTools}>
         <button
           type="button"
           className={styles.attachFile}
@@ -878,6 +862,29 @@ const NewTaskComposer = memo(function NewTaskComposer({
               strokeLinejoin="round"
             />
           </svg>
+        </button>
+      </div>
+
+      {/* Everything the task starts on, stated in words — the agent, the model,
+          and whether it goes off by itself. These are read far more often than
+          they are changed, so they cost one line of text and no control at
+          all; the press opens the panel that sets them, where the same pickers
+          stand at the size a control is set at. */}
+      <div className={styles.composerFooter}>
+        <button
+          ref={startLineRef}
+          type="button"
+          className={styles.startInfo}
+          title={startSummary}
+          aria-haspopup="dialog"
+          aria-expanded={startPanel != null}
+          aria-label={`${t("chat.boardTaskStart")}: ${startSummary}`}
+          onClick={() => {
+            if (startPanel) setStartPanel(null);
+            else openStartPanel();
+          }}
+        >
+          {startSummary}
         </button>
         <div className={styles.composerButtons}>
           <button type="button" className={styles.ghostBtn} onClick={onCancel}>
