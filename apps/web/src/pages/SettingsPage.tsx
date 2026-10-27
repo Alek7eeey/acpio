@@ -2358,7 +2358,9 @@ export function SettingsPage() {
   };
 
   const title =
-    section === "interface"
+    section === "data"
+      ? t("settings.importExport")
+      : section === "interface"
       ? leaf === "colors"
         ? t("settings.colors")
         : leaf === "voice"
@@ -2388,7 +2390,9 @@ export function SettingsPage() {
           : t("settings.agentConnectTitle");
 
   const subtitle =
-    section === "interface"
+    section === "data"
+      ? t("settings.settingsFileDesc")
+      : section === "interface"
       ? leaf === "colors"
         ? t("settings.colorsDesc")
         : leaf === "voice"
@@ -2413,11 +2417,15 @@ export function SettingsPage() {
                   : t("settings.agentConnectDesc");
 
   const eyebrow =
-    section === "interface"
-      ? t("settings.interface")
-      : section === "builtin"
-        ? t("settings.builtinTitle")
-        : t("settings.agents");
+    section === "data"
+      ? // A section that is one page needs no second name: the tree entry is
+        // the page's name, and the lead under it says what the page is for.
+        ""
+      : section === "interface"
+        ? t("settings.interface")
+        : section === "builtin"
+          ? t("settings.builtinTitle")
+          : t("settings.agents");
   const pageUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const copyUrl = async () => {
@@ -2478,44 +2486,18 @@ export function SettingsPage() {
             </span>
           </div>
         )}
+        {/* The page's name and what it is for — nothing else: export and import
+            are not here but on the settings-file leaf of the tree, since a
+            button that moves the whole install's setup has no business on the
+            page of each setting. */}
         {(!settingsQuery.trim() || !viewingResults) && (
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>{highlightText(eyebrow, settingsQuery)}</p>
+            {eyebrow ? (
+              <p className={styles.eyebrow}>{highlightText(eyebrow, settingsQuery)}</p>
+            ) : null}
             <h1>{highlightText(title, settingsQuery)}</h1>
             <p className={styles.lead}>{highlightText(subtitle, settingsQuery)}</p>
-          </div>
-          <div className={styles.headerActions}>
-            <input
-              ref={settingsFileInputRef}
-              type="file"
-              accept="application/json,.json"
-              hidden
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                // Clearing lets the same file be picked again after a fix.
-                e.target.value = "";
-                if (file) void importSettingsFile(file);
-              }}
-            />
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              title={t("settings.importSettingsHint")}
-              disabled={settingsFileBusy}
-              onClick={() => settingsFileInputRef.current?.click()}
-            >
-              {t("settings.importSettings")}
-            </button>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              title={t("settings.exportSettingsHint")}
-              disabled={settingsFileBusy}
-              onClick={() => void exportSettingsFile()}
-            >
-              {t("settings.exportSettings")}
-            </button>
           </div>
         </header>
         )}
@@ -2918,6 +2900,53 @@ export function SettingsPage() {
                 onChange={(v) => patch("boardShowFirstMessage", v)}
                 label={t("settings.boardShowFirstMessage")}
               />
+            </SettingRow>
+          </SettingTable>
+        )}
+
+        {/* The settings file: one page for the two actions that move the whole
+            install's setup — a section of its own in the tree, so they are
+            found once instead of standing on every page of another section. */}
+        {section === "data" && (
+          <SettingTable>
+            <SettingRow
+              label={t("settings.exportSettings")}
+              hint={t("settings.exportSettingsHint")}
+            >
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                disabled={settingsFileBusy}
+                onClick={() => void exportSettingsFile()}
+              >
+                {t("settings.exportSettingsFile")}
+              </button>
+            </SettingRow>
+
+            <SettingRow
+              label={t("settings.importSettings")}
+              hint={t("settings.importSettingsHint")}
+            >
+              <input
+                ref={settingsFileInputRef}
+                type="file"
+                accept="application/json,.json"
+                hidden
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  // Clearing lets the same file be picked again after a fix.
+                  e.target.value = "";
+                  if (file) void importSettingsFile(file);
+                }}
+              />
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                disabled={settingsFileBusy}
+                onClick={() => settingsFileInputRef.current?.click()}
+              >
+                {t("settings.importSettingsFile")}
+              </button>
             </SettingRow>
           </SettingTable>
         )}

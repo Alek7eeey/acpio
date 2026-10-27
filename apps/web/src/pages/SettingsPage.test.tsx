@@ -533,6 +533,45 @@ describe("SettingsPage board leaf", () => {
   });
 });
 
+describe("Settings file section", () => {
+  const renderSection = (search: string) => {
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    return render(
+      <MemoryRouter initialEntries={[`/settings${search}`]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  };
+
+  // Export and import move the whole install's setup: the two of them are a
+  // section of their own, beside the agents and the interface — not a button
+  // on the header of every page, nor a page hidden inside another section.
+  it("carries both actions under section=data", async () => {
+    renderSection("?section=data");
+
+    expect(screen.getByRole("heading", { name: "Import/export settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Choose file" })).toBeTruthy();
+  });
+
+  // The link the page had while it was the interface section's last leaf.
+  it("opens from that older section=interface&leaf=data link", async () => {
+    renderSection("?section=interface&leaf=data");
+
+    expect(screen.getByRole("heading", { name: "Import/export settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
+  });
+
+  it("leaves every other page without them", async () => {
+    renderSection("?section=interface&leaf=appearance");
+
+    expect(screen.queryByRole("button", { name: "Download file" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Choose file" })).toBeNull();
+  });
+});
+
 describe("Chat title from a model", () => {
   const provider = {
     id: "p1",

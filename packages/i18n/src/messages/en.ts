@@ -867,6 +867,12 @@ export const en = {
     customAgentTestOk: "Agent answered: {{models}} models, {{modes}} modes. {{message}}",
     customAgentTestFail: "Could not start: {{error}}",
     profileSaved: "Name saved",
+    importExport: "Import/export settings",
+    settingsFile: "Settings file",
+    settingsFileDesc:
+      "The whole setup as one file: export it here, apply it on another machine here. Keys and tokens never travel.",
+    exportSettingsFile: "Download file",
+    importSettingsFile: "Choose file",
     exportSettings: "Export",
     exportSettingsHint:
       "Download a settings file to apply on another machine. API keys and tokens are not written into it.",

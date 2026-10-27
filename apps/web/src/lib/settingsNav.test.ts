@@ -321,6 +321,29 @@ describe("getSettingsTree", () => {
     ]);
   });
 
+  // The settings file is a section of its own, standing beside the agents and
+  // the interface: one page, and no pages under it, so the tree draws it as a
+  // plain item at their level.
+  it("puts the settings file beside the sections, with no pages under it", () => {
+    const tree = getSettingsTree(t);
+    expect(tree.map((b) => b.id)).toEqual(["agent", "builtin", "interface", "data"]);
+    expect(tree[3].label).toBe("settings.importExport");
+    expect(tree[3].children).toEqual([]);
+  });
+
+  it("parses the settings-file section, and the interface leaf it used to be", () => {
+    expect(parseSettingsSearch("?section=data")).toEqual({ section: "data" });
+    expect(parseSettingsSearch("?section=interface&leaf=data")).toEqual({ section: "data" });
+    // A leaf the section does not have is dropped, not carried along.
+    expect(parseSettingsSearch("?section=data&leaf=appearance")).toEqual({ section: "data" });
+  });
+
+  it("names no leaf in the settings-file path", () => {
+    const path = settingsPath("data");
+    expect(path).toBe("/settings?section=data");
+    expect(parseSettingsSearch(path.slice(path.indexOf("?")))).toEqual({ section: "data" });
+  });
+
   it("translates every node label through the given t function", () => {
     const spy = vi.fn((key: string) => key);
     const tree = getSettingsTree(spy);
@@ -334,8 +357,13 @@ describe("getSettingsTree", () => {
     }
   });
 
-  it("returns the three branches in tree order", () => {
-    expect(getSettingsTree(t).map((b) => b.id)).toEqual(["agent", "builtin", "interface"]);
+  it("returns the branches in tree order", () => {
+    expect(getSettingsTree(t).map((b) => b.id)).toEqual([
+      "agent",
+      "builtin",
+      "interface",
+      "data",
+    ]);
   });
 });
 

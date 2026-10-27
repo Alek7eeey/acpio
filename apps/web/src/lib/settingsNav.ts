@@ -1,6 +1,6 @@
 import type { TranslateFn } from "@acpio/i18n";
 
-export type SettingsSection = "agent" | "builtin" | "interface";
+export type SettingsSection = "agent" | "builtin" | "interface" | "data";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
@@ -19,11 +19,17 @@ export type SettingsBuiltinLeaf =
 export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice" | "chat" | "board";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsBuiltinLeaf | SettingsInterfaceLeaf;
 
-/** Where a settings URL points: the section, and the leaf open inside it. */
+/**
+ * Where a settings URL points: the section, and the leaf open inside it. The
+ * settings file is a section of its own and has no pages under it — it is one
+ * page, so it stands in the tree at the same level as the agent sections
+ * instead of being a leaf of one of them.
+ */
 export type SettingsLocation =
   | { section: "agent"; leaf: SettingsAgentLeaf }
   | { section: "builtin"; leaf: SettingsBuiltinLeaf }
-  | { section: "interface"; leaf: SettingsInterfaceLeaf };
+  | { section: "interface"; leaf: SettingsInterfaceLeaf }
+  | { section: "data"; leaf?: undefined };
 
 type TreeBranch =
   | {
@@ -40,7 +46,9 @@ type TreeBranch =
       id: "interface";
       label: string;
       children: Array<{ id: SettingsInterfaceLeaf; label: string }>;
-    };
+    }
+  /** One page and no pages under it: the tree renders it as a plain item. */
+  | { id: "data"; label: string; children: [] };
 
 /**
  * The built-in agent's settings are cut into pages — one tree entry each, one
@@ -112,6 +120,10 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
         { id: "board", label: t("settings.board") },
       ],
     },
+    // The settings file: export and import move the whole install's setup, so
+    // the pair has a page of its own beside the sections rather than a button
+    // on every page of them.
+    { id: "data", label: t("settings.importExport"), children: [] },
   ];
 }
 
@@ -132,6 +144,16 @@ export function settingsSectionTerms(t: TranslateFn): Record<SettingsSection, st
       "agent",
     ],
     interface: [],
+    data: [
+      t("settings.importExport"),
+      t("settings.settingsFileDesc"),
+      t("settings.exportSettings"),
+      t("settings.importSettings"),
+      "export",
+      "import",
+      "экспорт",
+      "импорт",
+    ],
   };
 }
 
@@ -139,6 +161,10 @@ export function parseSettingsSearch(search: string): SettingsLocation {
   const params = new URLSearchParams(search);
   const rawSection = params.get("section");
   const rawLeaf = params.get("leaf");
+  if (rawSection === "data") return { section: "data" };
+  // The settings file used to be the last page of the interface section: a
+  // link from back then opens the section that took the page over.
+  if (rawSection === "interface" && rawLeaf === "data") return { section: "data" };
   if (rawSection === "interface") {
     const leaf: SettingsInterfaceLeaf =
       rawLeaf === "colors"
@@ -183,7 +209,10 @@ export function parseSettingsSearch(search: string): SettingsLocation {
 export function settingsPath(section: SettingsSection, leaf?: SettingsLeaf) {
   const params = new URLSearchParams();
   params.set("section", section);
-  params.set("leaf", leaf ?? defaultLeafFor(section) ?? "connect");
+  // A section with no pages under it names none: a leaf it does not have would
+  // only be parsed away again.
+  const target = leaf ?? defaultLeafFor(section);
+  if (target) params.set("leaf", target);
   return `/settings?${params.toString()}`;
 }
 
