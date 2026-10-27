@@ -237,6 +237,9 @@ type ModelPickerProps = {
   showParamsMenu?: boolean;
   placement?: "up" | "down";
   variant?: "compact" | "block";
+  /** Small trigger: the compact look at a row's size, for a popover that sets
+   *  a value beside its own label rather than on a page of its own. */
+  dense?: boolean;
   className?: string;
   disabled?: boolean;
   loading?: boolean;
@@ -263,6 +266,7 @@ export function ModelPicker({
   showParamsMenu,
   placement = "up",
   variant = "compact",
+  dense = false,
   className,
   disabled = false,
   loading = false,
@@ -891,15 +895,15 @@ export function ModelPicker({
   return (
     <div
       className={`${styles.modelPicker} ${variant === "block" ? styles.block : ""} ${
-        open ? styles.modelPickerOpen : ""
-      } ${className ?? ""}`}
+        dense ? styles.dense : ""
+      } ${open ? styles.modelPickerOpen : ""} ${className ?? ""}`}
       ref={rootRef}
     >
       <button
         type="button"
         className={`${styles.modelTrigger} ${variant === "block" ? styles.modelTriggerBlock : ""} ${
-          open ? styles.modelTriggerOpen : ""
-        } ${disabled ? styles.modelTriggerDisabled : ""}`}
+          dense ? styles.denseTrigger : ""
+        } ${open ? styles.modelTriggerOpen : ""} ${disabled ? styles.modelTriggerDisabled : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-busy={loading || showTriggerParamLoader || undefined}

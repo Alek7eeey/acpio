@@ -230,6 +230,44 @@
   opacity: 0.55;
 }
 
+/* Dense: the compact trigger at the size of a row in a popover, where it stands
+   beside its own small label instead of taking a line of a settings page. It
+   keeps everything that makes it a control — the icon, the params of the
+   model, the chevron — and gives up only the padding and the type size. */
+.denseTrigger {
+  height: 22px;
+  max-width: 100%;
+  padding: 0 6px;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.denseTrigger .modelTriggerName {
+  max-width: 7.5rem;
+}
+
+.denseTrigger .modelBot svg {
+  width: 12px;
+  height: 12px;
+}
+
+.denseTrigger .modelChevron svg {
+  width: 10px;
+  height: 10px;
+}
+
+.denseTrigger .paramChip {
+  height: 14px;
+  padding: 0 4px;
+  font-size: 0.58rem;
+}
+
 .modelMenu {
   position: absolute;
   right: 0;

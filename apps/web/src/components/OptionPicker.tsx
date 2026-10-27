@@ -17,6 +17,8 @@ type OptionPickerProps = {
   emptyLabel?: string;
   placement?: "up" | "down";
   variant?: "block" | "compact" | "quiet";
+  /** Small trigger — the compact look at a row's size. */
+  dense?: boolean;
   disabled?: boolean;
   className?: string;
 };
@@ -30,6 +32,7 @@ export function OptionPicker({
   emptyLabel,
   placement = "down",
   variant = "block",
+  dense = false,
   disabled = false,
   className,
 }: OptionPickerProps) {
@@ -149,14 +152,14 @@ export function OptionPicker({
 
   return (
     <div
-      className={`${styles.modelPicker} ${compact ? "" : styles.block} ${quiet ? styles.quiet : ""} ${open ? styles.modelPickerOpen : ""} ${className ?? ""}`}
+      className={`${styles.modelPicker} ${compact ? "" : styles.block} ${dense ? styles.dense : ""} ${quiet ? styles.quiet : ""} ${open ? styles.modelPickerOpen : ""} ${className ?? ""}`}
       ref={rootRef}
     >
       <button
         type="button"
         className={`${styles.modelTrigger} ${compact ? "" : styles.modelTriggerBlock} ${
-          quiet ? styles.quietTrigger : ""
-        } ${open ? styles.modelTriggerOpen : ""} ${disabled ? styles.modelTriggerDisabled : ""}`}
+          dense ? styles.denseTrigger : ""
+        } ${quiet ? styles.quietTrigger : ""} ${open ? styles.modelTriggerOpen : ""} ${disabled ? styles.modelTriggerDisabled : ""}`}
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}

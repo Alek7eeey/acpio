@@ -699,67 +699,89 @@
   background: var(--bg-secondary);
 }
 
-/* The panel the info line opens: the same three settings as controls, sized
-   the way a control is — a card without the curtain, hung by the line that
-   asked for it and placed by the page from its measured box. */
+/* The panel the info line opens: three settings as rows — a small label and a
+   control of the same height beside it — not a settings page in a card. The
+   values are read at a glance and changed rarely, so the panel stays a corner
+   of the lane: ~200px wide and under 100px tall, hung by the line that asked
+   for it and placed by the page from its measured box. */
 .startPanel {
   position: fixed;
   z-index: 60;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  width: min(288px, calc(100vw - 24px));
-  padding: 8px;
+  gap: 2px;
+  width: min(212px, calc(100vw - 24px));
+  padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }
 
-.startPanelHead {
-  padding: 1px 2px 0;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--text-secondary);
-}
-
-.startField {
+/* One setting: its name at the left, the control at the right edge — the row
+   the whole panel is built of, so the three line up to the pixel. */
+.startRow {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 1px 3px;
   min-width: 0;
 }
 
-.startFieldLabel {
-  padding-left: 2px;
-  font-size: 0.7rem;
+.startRowLabel {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-secondary);
+  white-space: nowrap;
 }
 
-/* "Start immediately" as a row of the panel: label left, track right, the same
-   track the folder menu carries. */
+/* The control takes the rest of the row and clips inside it, so a long agent or
+   model name shortens the value instead of stretching the panel. */
+.startRow > :last-child:not(.startRowLabel) {
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* "Start immediately" as the last row: the words at the left like the labels
+   above, the track at the right like the controls. */
 .startSwitch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-  color: var(--text);
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.68rem;
   font-weight: 600;
   cursor: pointer;
 }
 
+.startSwitch:hover,
 .startSwitch.switchOn {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text);
+}
+
+.startSwitch.switchOn {
   color: var(--accent);
+}
+
+/* A track for a 24px row: the state still reads as a switch. */
+.startSwitch .switchTrackSmall {
+  width: 22px;
+  height: 13px;
+  margin-left: auto;
+}
+
+.startSwitch .switchTrackSmall .switchKnob {
+  top: 1px;
+  left: 1px;
+  width: 9px;
+  height: 9px;
+}
+
+.startSwitch.switchOn .switchTrackSmall .switchKnob {
+  left: 11px;
 }
 
 .switchTrack {

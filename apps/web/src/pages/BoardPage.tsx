@@ -894,9 +894,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
         </div>
       </div>
 
-      {/* The same settings as full-size controls, in the panel the info line
-          opens: nothing is hidden from the reader who does want to change them,
-          it is one press away instead of always on the form. */}
+      {/* The same settings as controls, in the panel the info line opens — real
+          ones, with their menus and chevrons, but at the size of a row: the
+          panel is a convenience beside the form, not a settings page, and a
+          page-sized control set on a 264px lane swallowed the lane. */}
       {startPanel
         ? createPortal(
             <div
@@ -910,12 +911,12 @@ const NewTaskComposer = memo(function NewTaskComposer({
               role="dialog"
               aria-label={t("chat.boardTaskStart")}
             >
-              <div className={styles.startPanelHead}>{t("chat.boardTaskStart")}</div>
               {showAgentPicker && agentOptions.length ? (
-                <div className={styles.startField}>
-                  <span className={styles.startFieldLabel}>{t("chat.boardTaskAgent")}</span>
+                <div className={styles.startRow}>
+                  <span className={styles.startRowLabel}>{t("chat.boardTaskAgent")}</span>
                   <OptionPicker
-                    variant="block"
+                    dense
+                    variant="compact"
                     placement="up"
                     menuTitle={t("chat.boardTaskAgent")}
                     placeholder={t("common.pickAgent")}
@@ -929,9 +930,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
                 </div>
               ) : null}
               {showModelPicker && taskModels.length ? (
-                <div className={styles.startField}>
-                  <span className={styles.startFieldLabel}>{t("common.model")}</span>
+                <div className={styles.startRow}>
+                  <span className={styles.startRowLabel}>{t("common.model")}</span>
                   <ModelPicker
+                    dense
                     model={draftModel}
                     models={taskModels}
                     params={taskParams}
@@ -941,7 +943,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
                     paramsLoadingFor={paramsLoadingFor ?? undefined}
                     showParamsMenu={showModelParams}
                     placement="up"
-                    variant="block"
+                    variant="compact"
                     onChange={(value) => setDraftModel(value)}
                     onParamsOpen={(value) => loadParamsFor(value)}
                     onParamsChange={(target, next) => applyTaskParams(target, next)}
@@ -952,13 +954,13 @@ const NewTaskComposer = memo(function NewTaskComposer({
                 type="button"
                 role="switch"
                 aria-checked={createAutoStart}
-                className={`${styles.startSwitch}${
+                className={`${styles.startRow} ${styles.startSwitch}${
                   createAutoStart ? ` ${styles.switchOn}` : ""
                 }`}
                 onClick={() => toggleBoardAutoStart("create")}
               >
                 {t("chat.boardAutoStart")}
-                <span className={styles.switchTrack} aria-hidden>
+                <span className={`${styles.switchTrack} ${styles.switchTrackSmall}`} aria-hidden>
                   <span className={styles.switchKnob} />
                 </span>
               </button>

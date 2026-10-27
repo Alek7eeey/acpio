@@ -893,26 +893,43 @@ describe("BoardPage new task form", () => {
     // form at all — those are read far more often than they are changed.
     const line = within(row).getByRole("button", { name: /^What the task starts on:/ });
     expect(line.textContent).toContain("auto");
-    // The switch is off, so the line says nothing about starting: an off switch
-    // is not news, and the line is a summary, not a form.
-    expect(line.textContent).not.toContain("Start immediately");
     expect(within(row).queryByRole("switch")).toBeNull();
     expect(row.querySelectorAll(`.${pickerStyles.modelTrigger}`).length).toBe(0);
     // Nothing of the panel until it is asked for.
     expect(screen.queryByRole("dialog", { name: "What the task starts on" })).toBeNull();
 
-    // The press opens the very same settings at full size: agent, model, and
-    // the start switch with its words on.
+    // The press opens the same settings as controls: agent, model, and the
+    // start switch with its words on.
     await userEvent.click(line);
     const panel = await screen.findByRole("dialog", { name: "What the task starts on" });
     expect(within(panel).getByRole("switch")).toBeTruthy();
-    expect(within(panel).getByText("Start immediately")).toBeTruthy();
-    expect(panel.querySelectorAll(`.${pickerStyles.modelTriggerBlock}`).length).toBeGreaterThan(0);
-    expect(within(panel).getByText("Agent")).toBeTruthy();
+
+    // The switch keeps what was picked across reloads, so the test takes it from
+    // wherever the suite left it: off, where the line says nothing about
+    // starting — an off switch is not news, and the line is a summary.
+    if (within(panel).getByRole("switch").getAttribute("aria-checked") === "true") {
+      await userEvent.click(within(panel).getByRole("switch"));
+    }
+    await userEvent.click(line);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(line.textContent).not.toContain("Start immediately");
+    await userEvent.click(line);
+    const reopened = await screen.findByRole("dialog", { name: "What the task starts on" });
+    expect(within(reopened).getByRole("switch")).toBeTruthy();
+    expect(within(reopened).getByText("Start immediately")).toBeTruthy();
+    // Real controls — labels, chevrons, their own menus — but at a row's size:
+    // every trigger in the panel is the dense one, none is page-sized. (The
+    // model picker joins once the agent has reported its models, so the count
+    // itself is the agent's alone here.)
+    const dense = reopened.querySelectorAll(`.${pickerStyles.denseTrigger}`);
+    expect(dense.length).toBeGreaterThan(0);
+    expect(reopened.querySelectorAll(`.${pickerStyles.modelTrigger}`).length).toBe(dense.length);
+    expect(reopened.querySelectorAll(`.${pickerStyles.modelTriggerBlock}`).length).toBe(0);
+    expect(within(reopened).getByText("Agent")).toBeTruthy();
 
     // Setting it there is what the line then states, without a control of its
     // own ever standing on the form.
-    await userEvent.click(within(panel).getByRole("switch"));
+    await userEvent.click(within(reopened).getByRole("switch"));
     await userEvent.click(line);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(line.textContent).toContain("Start immediately");
