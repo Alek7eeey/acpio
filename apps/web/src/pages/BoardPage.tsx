@@ -899,6 +899,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const foldersOpen = useAppStore((s) => s.boardFoldersOpen);
   const setFoldersOpen = useAppStore((s) => s.setBoardFoldersOpen);
   const boardFilterCwd = useAppStore((s) => s.boardFilterCwd);
+  /** The toolbar's heart: the board narrowed to its starred cards. */
+  const boardFavoritesOnly = useAppStore((s) => s.boardFavoritesOnly);
+  const favoritesOnly = boardId ? boardFavoritesOnly[boardId] === true : false;
   const setBoardFilterCwd = useAppStore((s) => s.setBoardFilterCwd);
 
   /** Agents for the task picker — the same shape the chat tree's picker takes. */
@@ -1247,10 +1250,20 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** The Todo home: the lane that groups by project and feeds the folder queue. */
   const todoColumnId = boardColumnHome(boardColumns, "todo")?.id ?? "todo";
 
+  /**
+   * The cards the board shows: all of them, or only the starred ones while the
+   * toolbar's heart is pressed. A filter over the same lanes — a starred card
+   * keeps the column it stands in, grouped by project exactly as before.
+   */
+  const visibleTasks = useMemo(
+    () => (favoritesOnly ? tasks.filter((task) => task.favorite) : tasks),
+    [favoritesOnly, tasks],
+  );
+
   const columns = useMemo(() => {
     const byColumn: Record<string, SessionDto[]> = {};
     for (const column of boardColumns) byColumn[column.id] = [];
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       const id = boardColumnOf(task, boardColumns);
       (byColumn[id] ??= []).push(task);
     }
@@ -1263,7 +1276,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       byColumn[column.id].sort(compareBoardTasks(column.sortMode));
     }
     return byColumn;
-  }, [boardColumns, tasks]);
+  }, [boardColumns, visibleTasks]);
 
   /** The cards of the Todo home, whose lane is the one arranged by project. */
   const todoTasks = columns[todoColumnId] ?? EMPTY_TASKS;
@@ -2372,6 +2385,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               }}
             >
               <span className={styles.railLabel}>{t("chat.boardAllProjects")}</span>
+              <span className={styles.railCount}>{visibleTasks.length}</span>
             </button>
             {groups.map((group) => {
               /** This row took the tag editor over, and it opens right here. */
@@ -2382,7 +2396,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   {renderFolderTag(group.cwd, editingTag ? "rail" : undefined)}
                   {renderQueueBadge(group.cwd)}
                   <span className={styles.railCount}>
-                    {tasks.filter((task) => task.cwd === group.cwd).length}
+                    {visibleTasks.filter((task) => task.cwd === group.cwd).length}
                   </span>
                 </>
               );
@@ -2653,11 +2667,17 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                         </div>
                       ))
                     : cards.map((task) => renderCard(task, null))}
+                  {/* A lane narrowed to nothing says which narrowing left it
+                      empty: no cards at all, or none of them starred. */}
                   {isTodo && !visibleGroups.length ? (
-                    <p className={styles.empty}>{t("chat.boardNoFolders")}</p>
+                    <p className={styles.empty}>
+                      {favoritesOnly ? t("chat.boardNoFavorites") : t("chat.boardNoFolders")}
+                    </p>
                   ) : null}
                   {!isTodo && !cards.length ? (
-                    <p className={styles.empty}>{t("chat.boardNoTasks")}</p>
+                    <p className={styles.empty}>
+                      {favoritesOnly ? t("chat.boardNoFavorites") : t("chat.boardNoTasks")}
+                    </p>
                   ) : null}
                 </div>
               </section>

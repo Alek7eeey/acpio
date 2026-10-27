@@ -139,6 +139,12 @@ export function AppShell() {
   const focusedPaneIndex = useAppStore((s) => s.focusedPaneIndex ?? 0);
   const connection = useAppStore((s) => s.connection);
   const boards = useAppStore((s) => s.boards);
+  /** Starred cards of the open board — the toolbar's heart says how many. */
+  const favoriteCount = useAppStore((s) =>
+    s.boardSessions.reduce((count, task) => count + (task.favorite ? 1 : 0), 0),
+  );
+  const boardFavoritesOnly = useAppStore((s) => s.boardFavoritesOnly);
+  const setBoardFavoritesOnly = useAppStore((s) => s.setBoardFavoritesOnly);
   const headerSession = useMemo(() => {
     const focusedId =
       (chatPaneIds?.length ?? 0) > 1
@@ -1774,6 +1780,34 @@ export function AppShell() {
                   <span className={styles.headerChatTitle}>{openBoard.name}</span>
                 </button>
               )}
+              {/* Narrow the board to its starred cards: a filter, not a list —
+                  every card stays in the lane it stands in. */}
+              <button
+                type="button"
+                className={`${styles.headerBoardFav}${
+                  boardFavoritesOnly[openBoard.id] ? ` ${styles.headerBoardFavOn}` : ""
+                }`}
+                aria-pressed={boardFavoritesOnly[openBoard.id] === true}
+                title={t("chat.boardFavoritesHint")}
+                aria-label={t("chat.boardFavoritesHint")}
+                onClick={() =>
+                  setBoardFavoritesOnly(openBoard.id, !boardFavoritesOnly[openBoard.id])
+                }
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden>
+                  <path
+                    d="M12 20.4 4.9 13.4A4.9 4.9 0 0 1 11.8 6.5l.2.2.2-.2a4.9 4.9 0 0 1 6.9 6.9L12 20.4Z"
+                    fill={boardFavoritesOnly[openBoard.id] ? "currentColor" : "none"}
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {favoriteCount ? (
+                  <span className={styles.headerBoardFavCount}>{favoriteCount}</span>
+                ) : null}
+              </button>
             </div>
           ) : !isSettings && headerSession ? (
             <>

@@ -195,6 +195,11 @@ editor and it becomes a step instead of a place — a begun turn lets go of the 
 way a prompt drops the **Done** mark. Deleting a lane sends its cards back to the columns of
 their stages, so nothing is lost.
 
+The heart beside the board's name is a filter over the starred cards: the board shows only the
+cards you starred, each standing in its own column — there is no separate list. Its count says
+how many there are, and pressing it again brings the whole board back. The card's menu sets and
+drops the star.
+
 A chat opened from the board stays tied to it: the header carries a **‹ board name** pill next
 to the brand, and one click on it is back to the board (on phones the pill takes the brand's
 place). The context row above the input carries the same trip as a **Board** chip next to the

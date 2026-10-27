@@ -123,6 +123,7 @@ beforeEach(() => {
     sessionLoading: false,
     // A rail narrowing outlives the page on purpose; each test starts wide.
     boardFilterCwd: {},
+    boardFavoritesOnly: {},
   });
 });
 
@@ -425,6 +426,42 @@ describe("BoardPage custom columns", () => {
     await userEvent.click(add);
     const dialog = await screen.findByRole("dialog");
     expect(dialog.querySelectorAll("[data-column-id]").length).toBe(4);
+  });
+
+  // The toolbar's heart narrows the board to its starred cards — a filter over
+  // the same lanes, so a starred card is read where it stands, not in a list.
+  it("shows only starred cards, each in its own column, while the filter is on", async () => {
+    const plain: SessionDto = {
+      ...task,
+      id: "t4",
+      title: "Plain task",
+      taskDescription: "Plain task",
+    };
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [
+        { ...task, favorite: true },
+        plain,
+        { ...finishedTask, favorite: true, boardColumnId: "col-review" },
+      ],
+      boardFavoritesOnly: { b1: true },
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    // Starred cards keep their columns and a card of their own.
+    expect(container.querySelector('[data-column="todo"] [data-task-id="t1"]')).toBeTruthy();
+    expect(
+      container.querySelector('[data-column="col-review"] [data-task-id="t2"]'),
+    ).toBeTruthy();
+    // The unstarred card is filtered out, and the lanes say why they are empty.
+    expect(container.querySelector('[data-task-id="t4"]')).toBeNull();
+    expect(container.querySelectorAll('[data-task-id]').length).toBe(2);
+
+    // Releasing the filter brings the whole board back.
+    useAppStore.setState({ boardFavoritesOnly: { b1: false } });
+    await screen.findByText("Plain task");
+    expect(container.querySelectorAll("[data-task-id]").length).toBe(3);
   });
 
   // A stage column is not a place a card can be put by hand — the lifecycle

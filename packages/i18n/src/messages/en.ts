@@ -363,9 +363,11 @@ export const en = {
     deriveChatFailed: "Could not create the chat. Please try again.",
     boardRemoveFolder: "Remove from board",
     boardFavorites: "Favorites",
+
+    boardFavoritesHint: "Show starred cards only",
     boardAddFavorite: "Add to favorites",
     boardRemoveFavorite: "Remove from favorites",
-    boardNoFavorites: "Nothing here yet",
+    boardNoFavorites: "No starred cards",
     boardAllProjects: "All projects",
     boardProjects: "Projects",
     boardNoTasks: "No tasks yet",

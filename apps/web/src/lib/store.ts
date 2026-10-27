@@ -359,6 +359,13 @@ type AppState = {
    */
   boardFilterCwd: Record<string, string | null>;
   setBoardFilterCwd: (boardId: string, cwd: string | null) => void;
+  /**
+   * Boards narrowed to their starred cards — the toolbar's heart button. A
+   * filter, not a list: the cards stay in the lanes they stand in. Kept per
+   * board for the same reason as the folder filter above.
+   */
+  boardFavoritesOnly: Record<string, boolean>;
+  setBoardFavoritesOnly: (boardId: string, only: boolean) => void;
   connected: boolean;
   /** Fine-grained socket state for the toolbar chip; `connected` mirrors it. */
   connection: ConnectionState;
@@ -2215,6 +2222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   boardFoldersOpen: false,
   openBoardId: null,
   boardFilterCwd: {},
+  boardFavoritesOnly: {},
   connected: false,
   connection: "connecting",
   agentAvailable: false,
@@ -3754,6 +3762,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setBoardFilterCwd(boardId, cwd) {
     set((state) => ({ boardFilterCwd: { ...state.boardFilterCwd, [boardId]: cwd } }));
+  },
+
+  setBoardFavoritesOnly(boardId, only) {
+    set((state) => ({
+      boardFavoritesOnly: { ...state.boardFavoritesOnly, [boardId]: only },
+    }));
   },
 
   setConnection(connection) {

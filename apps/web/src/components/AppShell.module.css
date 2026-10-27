@@ -423,6 +423,45 @@
   color: var(--text);
 }
 
+/* The board's favourites toggle, right beside its name: the count says how
+   many cards are starred, the filled heart says the board is narrowed to them. */
+.headerBoardFav {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 7px;
+  margin-left: 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.headerBoardFav:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 62%, transparent);
+  border-color: color-mix(in srgb, var(--border) 58%, transparent);
+}
+
+.headerBoardFavOn,
+.headerBoardFavOn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+}
+
+.headerBoardFavCount {
+  font-variant-numeric: tabular-nums;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;

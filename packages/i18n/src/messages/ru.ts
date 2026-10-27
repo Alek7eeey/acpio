@@ -382,9 +382,11 @@ export const ru = {
     deriveChatFailed: "Не удалось создать чат. Попробуйте ещё раз.",
     boardRemoveFolder: "Убрать с доски",
     boardFavorites: "Избранное",
+
+    boardFavoritesHint: "Показать только избранные задачи",
     boardAddFavorite: "В избранное",
     boardRemoveFavorite: "Убрать из избранного",
-    boardNoFavorites: "Пока ничего не добавлено",
+    boardNoFavorites: "Нет избранных задач",
     boardAllProjects: "Все проекты",
     boardProjects: "Проекты",
     boardNoTasks: "Пока нет задач",
