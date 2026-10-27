@@ -1019,6 +1019,20 @@ function resolveClientMessageId(messageId: string, sessionId?: string) {
   return entry.clientId;
 }
 
+/** The id the server knows a bubble by — the reverse of resolveClientMessageId.
+ *  A message this tab sent keeps its `local-user-N` client id so the optimistic
+ *  bubble never remounts, and that client id is what the pane hands back when
+ *  the reader edits the message. Every route validates a real UUID, so the
+ *  prompt body has to carry the server's own id instead. */
+function resolveServerMessageId(messageId: string, sessionId?: string) {
+  for (const [serverId, entry] of serverToClientMessageId) {
+    if (entry.clientId !== messageId) continue;
+    if (sessionId && entry.sessionId !== sessionId) continue;
+    return serverId;
+  }
+  return messageId;
+}
+
 function clearMessageIdAliases(sessionId?: string) {
   if (sessionId) {
     for (const [key, entry] of serverToClientMessageId) {
@@ -1056,6 +1070,23 @@ function rollbackOptimisticPair(
   );
   if (messages.length === current.messages.length) return;
   commitDetail(get, set, { ...current, messages });
+}
+
+/**
+ * Take the thread back to what it was before a rejected edit: the prompt never
+ * became a turn, so the server never truncated the reply that edit was going to
+ * regenerate — keeping the cut thread on screen lost that answer until a reload.
+ */
+function rollbackEditedThread(
+  get: () => AppState,
+  set: (partial: Partial<AppState>) => void,
+  pair: { userId: string; assistantId: string; sessionId: string },
+  before: SessionDetailDto,
+): void {
+  if (pendingOptimisticPair === pair) pendingOptimisticPair = null;
+  const current = liveDetail(get(), before.id);
+  if (!current) return;
+  commitDetail(get, set, { ...current, messages: before.messages });
 }
 
 function upsertMessage(messages: MessageDto[], message: MessageDto) {
@@ -3253,7 +3284,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         delivery,
         // An edited message keeps its edit: the server truncates and regenerates
         // it, which is itself an interrupt for the live turn.
-        ...(item.editMessageId ? { editMessageId: item.editMessageId } : {}),
+        ...(item.editMessageId
+          ? { editMessageId: resolveServerMessageId(item.editMessageId, item.sessionId) }
+          : {}),
         ...(item.attachments?.length ? { attachments: item.attachments } : {}),
       });
     } catch (err) {
@@ -3483,7 +3516,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const now = new Date().toISOString();
         const assistantId = `local-assistant-${epoch}`;
         const userId = msgs[idx]!.id;
-        pendingOptimisticPair = { userId, assistantId, sessionId: id };
+        const pair = { userId, assistantId, sessionId: id };
+        pendingOptimisticPair = pair;
         commitRunning(
           id,
           [
@@ -3498,7 +3532,14 @@ export const useAppStore = create<AppState>((set, get) => ({
           ],
           epoch,
         );
-        await api.prompt(id, text, { editMessageId: opts.editMessageId });
+        try {
+          await api.prompt(id, text, {
+            editMessageId: resolveServerMessageId(opts.editMessageId, id),
+          });
+        } catch (err) {
+          rollbackEditedThread(get, set, pair, current);
+          throw err;
+        }
         return;
       }
       }
@@ -3515,7 +3556,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       commitRunning(id, null, (get().promptEpochBySession?.[id ?? ""] ?? get().promptEpoch) + 1);
     }
     try {
-      await api.prompt(id, text, opts?.editMessageId ? { editMessageId: opts.editMessageId } : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) });
+      await api.prompt(
+        id,
+        text,
+        opts?.editMessageId
+          ? { editMessageId: resolveServerMessageId(opts.editMessageId, id) }
+          : { ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}) },
+      );
     } catch (err) {
       if (optimisticPair) rollbackOptimisticPair(get, set, optimisticPair);
       throw err;
