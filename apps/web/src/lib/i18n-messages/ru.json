@@ -313,6 +313,8 @@
     "jumpToLatest": "Перейти к последним сообщениям",
     "promptQueue": "Очередь запросов",
     "promptRail": "Промпты в этом чате",
+    "promptRailCutAbove": "Сверху ещё {{count}}",
+    "promptRailCutBelow": "Снизу ещё {{count}}",
     "queueCount": "В очереди: {{count}}",
     "queueReorder": "Перетащите, чтобы изменить порядок",
     "sendNow": "Отправить сейчас",

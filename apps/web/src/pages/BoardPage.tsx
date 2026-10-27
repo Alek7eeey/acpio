@@ -2515,16 +2515,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <div className={styles.columnHead}>
                   <span className={styles.columnTitle}>{columnTitle(column)}</span>
                   <span className={styles.columnCount}>{cards.length}</span>
-                  <span className={styles.columnSpacer} />
-                  <button
-                    type="button"
-                    className={styles.columnMenuBtn}
-                    title={t("chat.boardColumnSettings")}
-                    aria-label={t("chat.boardColumnSettings")}
-                    onClick={() => setColumnsOpen(true)}
-                  >
-                    ⋯
-                  </button>
                 </div>
                 <div
                   ref={(el) => {
@@ -2683,19 +2673,6 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
               </section>
             );
           })}
-          {/* One more lane, from the end of the strip: a slot-wide button, not
-              a lane-sized placeholder — the strip is for the board's columns,
-              and a lane it does not have should not take a lane's width. */}
-          <button
-            type="button"
-            className={styles.columnAdd}
-            data-add-column-lane=""
-            title={t("chat.boardColumnAdd")}
-            aria-label={t("chat.boardColumnAdd")}
-            onClick={() => setColumnsOpen(true)}
-          >
-            <span aria-hidden>+</span>
-          </button>
         </div>
       </div>
 

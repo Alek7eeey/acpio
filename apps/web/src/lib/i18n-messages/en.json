@@ -293,6 +293,8 @@
     "jumpToLatest": "Jump to latest",
     "promptQueue": "Request queue",
     "promptRail": "Prompts in this chat",
+    "promptRailCutAbove": "{{count}} more above",
+    "promptRailCutBelow": "{{count}} more below",
     "queueCount": "Queued: {{count}}",
     "queueReorder": "Drag to reorder",
     "sendNow": "Send now",

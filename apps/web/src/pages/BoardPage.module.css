@@ -262,34 +262,6 @@
   padding: 1px 7px;
 }
 
-.columnSpacer {
-  flex: 1;
-}
-
-/* The lane's own settings: a quiet button that only shows itself on hover or
-   focus, so the head keeps reading as a name with a count. */
-.columnMenuBtn {
-  width: 22px;
-  height: 22px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-  opacity: 0.5;
-}
-
-.columnMenuBtn:hover,
-.columnMenuBtn:focus-visible {
-  opacity: 1;
-  background: var(--bg-tertiary);
-}
-
 /* The lane a dragged card would land in. */
 .columnDrop {
   border-color: var(--accent);
@@ -328,33 +300,6 @@
 .columnMarkAction {
   color: var(--accent);
   background: var(--accent-soft);
-}
-
-/* Adding a lane is one small button at the end of the strip — a full lane-sized
-   placeholder spent a lane's width on something the board does not have. */
-.columnAdd {
-  flex: 0 0 38px;
-  min-width: 38px;
-  align-self: flex-start;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 38px;
-  padding: 0;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 1.15rem;
-  font-weight: 600;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.columnAdd:hover {
-  color: var(--text);
-  border-color: var(--accent);
 }
 
 .columnBody {

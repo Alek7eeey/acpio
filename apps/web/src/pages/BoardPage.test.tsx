@@ -413,17 +413,19 @@ describe("BoardPage custom columns", () => {
     expect(container.querySelectorAll("[data-task-grip]").length).toBe(0);
   });
 
-  // The way to a new lane is one small button at the end of the strip, not a
-  // lane-sized placeholder that spends board width on nothing.
-  it("opens the columns editor from the small add button in the strip", async () => {
+  // One way into the columns editor: the button beside "Add folder" in the
+  // rail. The strip itself ends with the last lane — no add slot, and no
+  // per-lane ⋯ menu in the heads.
+  it("opens the columns editor from the rail button, not from the strip", async () => {
     const { container } = renderBoard();
     await screen.findByText("Fix the login bug");
 
-    const add = container.querySelector("[data-add-column-lane]") as HTMLElement;
-    expect(add).toBeTruthy();
-    expect(add.textContent).toContain("+");
+    expect(container.querySelector("[data-add-column-lane]")).toBeNull();
+    expect(container.querySelectorAll("[data-column]").length).toBe(4);
+    expect(screen.queryByRole("button", { name: "Configure column" })).toBeNull();
 
-    await userEvent.click(add);
+    const rail = container.querySelector("aside") as HTMLElement;
+    await userEvent.click(within(rail).getByRole("button", { name: "Board columns" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog.querySelectorAll("[data-column-id]").length).toBe(4);
   });

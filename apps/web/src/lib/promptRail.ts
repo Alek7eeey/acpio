@@ -10,6 +10,9 @@ export const RAIL_REPLY_CHARS = 220;
 export const RAIL_PILL_HEIGHT_PX = 3;
 /** Gap between pills while the column has room to breathe. */
 export const RAIL_MAX_GAP_PX = 8;
+/** Height of the marker that stands for prompts clipped off an end of the
+ *  column. Keep in sync with `.cut` in ChatPromptRail.module.css. */
+export const RAIL_CUT_HEIGHT_PX = 12;
 /** A pill at rest. */
 export const RAIL_PILL_BASE_PX = 14;
 /** Pill widths by distance from the hovered row: the hovered pill is the crest
@@ -45,6 +48,64 @@ export function railPillSlot(
 ): number {
   if (count < 1) return pillHeight;
   return Math.max(pillHeight, Math.min(pillHeight + maxGap, available / count));
+}
+
+/** What the rail draws in a thread of a given height: a window of the prompt
+ *  list, plus how many prompts were clipped off at each end. */
+export type PromptRailWindow = {
+  /** Index of the first drawn prompt. */
+  start: number;
+  /** Drawn prompts — at least one while there is any prompt at all. */
+  count: number;
+  /** Prompts clipped above the window — a cut marker stands in for them. */
+  above: number;
+  /** Prompts clipped below the window. */
+  below: number;
+  /** Pitch of a drawn pill: the pill plus the air the column can spare. */
+  slot: number;
+};
+
+/**
+ * The part of the prompt list the rail draws when the thread cannot hold all of
+ * them. The pills stop at the column's height instead of running over the
+ * thread — past `available` a pill would sit on the header above or the
+ * composer below — and each clipped end keeps a marker of its own, so the rail
+ * says "there is more" rather than lying about the chat's length.
+ *
+ * The window follows the prompt the reader is in: the lit pill is the one thing
+ * the rail is for, so it must never be the pill that gets clipped.
+ */
+export function railWindow(
+  total: number,
+  activeIndex: number,
+  available: number,
+  pillHeight: number = RAIL_PILL_HEIGHT_PX,
+  cutHeight: number = RAIL_CUT_HEIGHT_PX,
+  maxGap: number = RAIL_MAX_GAP_PX,
+): PromptRailWindow {
+  if (total < 1) return { start: 0, count: 0, above: 0, below: 0, slot: pillHeight };
+  const room = Math.max(0, available);
+  const active = Math.min(Math.max(activeIndex, 0), total - 1);
+  // The most pills the column could ever hold — before the cut markers, which
+  // cost a slot each, take their room back inside the loop.
+  let count = Math.min(total, Math.max(1, Math.floor(room / pillHeight)));
+  for (;;) {
+    const start = Math.min(Math.max(active - count + 1, 0), total - count);
+    const above = start;
+    const below = total - start - count;
+    const cuts = (above > 0 ? cutHeight : 0) + (below > 0 ? cutHeight : 0);
+    const fit = room - cuts;
+    if (count === 1 || count * pillHeight <= fit) {
+      return {
+        start,
+        count,
+        above,
+        below,
+        slot: railPillSlot(count, Math.max(pillHeight, fit), pillHeight, maxGap),
+      };
+    }
+    count -= 1;
+  }
 }
 
 /** Clipping for the rail tooltip: the prompt/answer keeps its own line breaks

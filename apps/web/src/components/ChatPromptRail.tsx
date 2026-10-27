@@ -4,11 +4,9 @@ import { useT } from "../lib/i18n";
 import { useFixedMenuPlacement, type MenuAnchor } from "../lib/menuPosition";
 import { useIsTouchUi } from "../lib/pointerUi";
 import {
-  RAIL_MAX_GAP_PX,
   RAIL_PILL_BASE_PX,
-  RAIL_PILL_HEIGHT_PX,
-  railPillSlot,
   railPillWidth,
+  railWindow,
   type PromptRailItem,
 } from "../lib/promptRail";
 import styles from "./ChatPromptRail.module.css";
@@ -32,6 +30,22 @@ type ChatPromptRailProps = {
 
 type HoveredPrompt = { index: number; item: PromptRailItem; anchor: MenuAnchor };
 
+/** Stands in for the prompts an end of the column had to clip: three dots instead
+ *  of a pill, so the rail keeps saying "there is more this way" while its pills
+ *  stay inside the thread. The count is in the tooltip, not in the glyph — the
+ *  rail is a glance, and a number would outshout the pills. */
+function CutDots({ side, count }: { side: "above" | "below"; count: number }) {
+  const t = useT();
+  const label = t(side === "above" ? "chat.promptRailCutAbove" : "chat.promptRailCutBelow", {
+    count,
+  });
+  return (
+    <span className={styles.cut} role="img" aria-label={label} title={label}>
+      <span className={styles.cutDots} aria-hidden />
+    </span>
+  );
+}
+
 /**
  * A column of pills beside the chat thread — one per prompt the user sent, in
  * order, centred on the thread's height. Hovering raises a wave along the
@@ -50,6 +64,10 @@ type HoveredPrompt = { index: number; item: PromptRailItem; anchor: MenuAnchor }
  * which belongs to the thread's rows and is looked up document-wide by message
  * hotkeys and the screenshot scripts; a pill carrying it would shadow the
  * message it points at.
+ *
+ * A thread too short for its prompts shows a window of them rather than a
+ * column running over the header and the composer; the clipped end is marked
+ * with dots (lib/promptRail.ts: railWindow).
  */
 export function ChatPromptRail({
   items,
@@ -66,12 +84,15 @@ export function ChatPromptRail({
 
   if (touch || items.length === 0 || height <= 0) return null;
 
-  const slot = railPillSlot(
+  const available = Math.max(0, height - TRACK_PAD_PX * 2);
+  const activeIndex = items.findIndex((item) => item.id === activeId);
+  // No lit pill (the reader is between turns): the window ends on the last one.
+  const view = railWindow(
     items.length,
-    Math.max(0, height - TRACK_PAD_PX * 2),
-    RAIL_PILL_HEIGHT_PX,
-    RAIL_MAX_GAP_PX,
+    activeIndex < 0 ? items.length - 1 : activeIndex,
+    available,
   );
+  const shown = items.slice(view.start, view.start + view.count);
 
   return (
     <div
@@ -80,13 +101,14 @@ export function ChatPromptRail({
       role="navigation"
       aria-label={t("chat.promptRail")}
     >
+      {view.above > 0 ? <CutDots side="above" count={view.above} /> : null}
       <div className={styles.stack}>
-        {items.map((item, index) => (
+        {shown.map((item, index) => (
           <button
             key={item.id}
             type="button"
             className={`${styles.pill}${item.id === activeId ? ` ${styles.pillActive}` : ""}`}
-            style={{ height: slot }}
+            style={{ height: view.slot }}
             data-prompt-id={item.id}
             aria-current={item.id === activeId ? "true" : undefined}
             aria-label={item.prompt}
@@ -116,6 +138,7 @@ export function ChatPromptRail({
           </button>
         ))}
       </div>
+      {view.below > 0 ? <CutDots side="below" count={view.below} /> : null}
       {hovered && tipStyle
         ? createPortal(
             <div ref={tipRef} className={styles.tip} style={tipStyle} role="tooltip">

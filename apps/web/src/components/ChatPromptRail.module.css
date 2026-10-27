@@ -1,8 +1,9 @@
 /**
  * Prompt rail: a short column of pills at the thread's left edge, centred on
- * the thread's height — one pill per user prompt, in order. Only the pills are
- * hit targets; the column between them stays transparent to the pointer, so
- * selecting text across it still works.
+ * the thread's height — one pill per user prompt, in order, and a cut marker
+ * where a chat too long for its thread clips the list. Only the pills (and the
+ * marker's tooltip) are hit targets; the column between them stays transparent
+ * to the pointer, so selecting text across it still works.
  */
 .rail {
   position: absolute;
@@ -10,19 +11,55 @@
      thread rather than as part of the sidebar's border. */
   left: 10px;
   width: 34px;
+  /* A column: cut marker, pills, cut marker — centred in the thread's height.
+     The pills never grow past it, so nothing sits on the header above or the
+     composer below (lib/promptRail.ts: railWindow decides how many fit). */
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
   z-index: 8;
   pointer-events: none;
+  /* The column is furniture beside the thread: should a row ever round past the
+     thread's height, the rail loses a pixel of paint instead of spilling onto
+     the header above or the composer below. */
+  overflow: hidden;
 }
 
 /* Slots are stacked edge to edge: the pill's own height (set inline from
-   railPillSlot) carries the air, so hit areas tile the column with no overlap. */
+   railWindow) carries the air, so hit areas tile the column with no overlap. */
 .stack {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
   width: 100%;
   max-height: 100%;
+}
+
+/* The end of the column that had to clip prompts: three dots say the rail goes
+   on, without a pill that pretends to be a prompt. Keep the height in sync with
+   RAIL_CUT_HEIGHT_PX (lib/promptRail.ts) — the window reserves this slot. */
+.cut {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex: 0 0 auto;
+  height: 12px;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.cutDots {
+  /* Dots, not a glyph: a font without the vertical ellipsis must not turn the
+     only "there is more" hint into a box. */
+  color: color-mix(in srgb, var(--text-secondary) 55%, transparent);
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow:
+    0 -4px 0 currentColor,
+    0 4px 0 currentColor;
 }
 
 .pill {
