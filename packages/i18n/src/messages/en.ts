@@ -341,6 +341,7 @@ export const en = {
     boardTaskStart: "What the task starts on",
     boardFolderQueue: "Run tasks one after another",
     boardTaskAgent: "Agent",
+    boardTaskModel: "Model",
     boardMarkDone: "Mark done",
     boardReopen: "Reopen",
     boardFoldersTitle: "Board folders",

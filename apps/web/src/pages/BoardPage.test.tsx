@@ -55,6 +55,13 @@ const apiMock = vi.hoisted(() => {
     // The new-task form's model picker asks the agent what it can run.
     listModels: vi.fn(async () => ({ ok: true, models: [], modelParams: [] })),
     getModelParams: vi.fn(async () => ({ ok: true, modelParams: [] })),
+    // The derived chat's source transcript, exported before the task is made.
+    exportChatReference: vi.fn(async () => ({
+      ok: true,
+      path: "/srv/exports/ref.md",
+      fileName: "ref.md",
+      size: 42,
+    })),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -1053,6 +1060,54 @@ describe("BoardPage card context menu", () => {
 
     fireEvent.mouseDown(document.body);
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // A chat born from another one may run on another model and effort: the
+  // dialog offers both, and they reach the create call untouched.
+  it("creates the derived chat on the model and effort picked in the dialog", async () => {
+    // Another test leaves an agent in the registry: with none the dialog falls
+    // back to the source chat's own agent, whose catalog this mock answers.
+    useAppStore.setState({
+      boardSessions: [{ ...task, provider: "cursor" }],
+      adapters: [],
+      agentAvailability: {},
+    });
+    // Not `Once`: the catalogs are cached per provider for the module's life,
+    // so an earlier test in this file may already have asked (and answered).
+    apiMock.listModels.mockResolvedValue({
+      ok: true,
+      models: [{ value: "gpt-5", name: "GPT-5" }],
+      modelParams: [{ id: "effort", name: "Effort", options: [{ value: "high", name: "High" }] }],
+    } as never);
+    // The effort belongs to the model picked, so it is asked for by name.
+    apiMock.getModelParams.mockResolvedValueOnce({
+      ok: true,
+      modelParams: [{ id: "effort", name: "Effort", options: [{ value: "high", name: "High" }] }],
+    } as never);
+
+    // jsdom ships no scrollIntoView; the picker scrolls its list to the pick.
+    Element.prototype.scrollIntoView = () => {};
+    renderBoard();
+    fireEvent.contextMenu(await screen.findByText("Fix the login bug"));
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: /New chat based on this/ }),
+    );
+
+    const dialog = await screen.findByRole("dialog", { name: "New chat based on this chat" });
+    const pick = async (label: string, option: string) => {
+      const field = (await within(dialog).findByText(label)).parentElement as HTMLElement;
+      await userEvent.click(within(field).getByRole("button"));
+      await userEvent.click(await screen.findByRole("option", { name: option }));
+    };
+    await pick("Model", "GPT 5");
+    await pick("Effort", "High");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    await waitFor(() =>
+      expect(apiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "gpt-5", modelParams: { effort: "high" } }),
+      ),
+    );
   });
 });
 

@@ -22,6 +22,8 @@ import {
   type BoardColumn,
   type BoardColumnDto,
   modelDisplayName,
+  modelParamFamily,
+  modelParamLabel,
   type ModelOption,
   type ModelParamDto,
   type SessionDto,
@@ -1141,9 +1143,60 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [deriveFolder, setDeriveFolder] = useState<string | null>(null);
   /** Agent the derived chat is created for; empty = the settings default. */
   const [deriveProvider, setDeriveProvider] = useState<AgentProvider | "">("");
+  /** Model the derived chat starts on and its effort; empty = agent default. */
+  const [deriveModel, setDeriveModel] = useState("");
+  const [deriveEffort, setDeriveEffort] = useState("");
+  const [deriveModels, setDeriveModels] = useState<ModelOption[]>([]);
+  const [deriveEffortParam, setDeriveEffortParam] = useState<ModelParamDto | null>(null);
   const [deriveBusy, setDeriveBusy] = useState(false);
   const [deriveError, setDeriveError] = useState<string | null>(null);
   const [deriveBrowse, setDeriveBrowse] = useState(false);
+
+  /** The agent the derived chat runs on — the pick the creation below makes. */
+  const deriveAgent: AgentProvider | null =
+    deriveProvider || defaultTaskProvider || deriveTask?.provider || null;
+
+  // The derived chat offers the same model and effort picks the new-task form
+  // does, read from the catalogs of the agent it will run on.
+  useEffect(() => {
+    setDeriveModel("");
+    setDeriveEffort("");
+    setDeriveModels([]);
+    setDeriveEffortParam(null);
+    if (!deriveTask || !deriveAgent || !taskModelPicker) return;
+    let live = true;
+    void loadTaskCatalog(deriveAgent)
+      .then((catalog) => {
+        if (live) setDeriveModels(catalog.models);
+      })
+      .catch(() => {
+        if (live) setDeriveModels([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [deriveTask, deriveAgent, taskModelPicker]);
+
+  useEffect(() => {
+    setDeriveEffort("");
+    setDeriveEffortParam(null);
+    if (!deriveTask || !deriveAgent || !taskEffortPicker) return;
+    let live = true;
+    void loadTaskCatalog(deriveAgent)
+      .then((catalog) => (deriveModel ? loadTaskModelParams(deriveAgent, deriveModel) : catalog.params))
+      .then((params) => {
+        if (!live) return;
+        setDeriveEffortParam(
+          params.find((p) => modelParamFamily(p.id) === "effort" && p.options.length > 0) ?? null,
+        );
+      })
+      .catch(() => {
+        if (live) setDeriveEffortParam(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [deriveTask, deriveAgent, deriveModel, taskEffortPicker]);
   const [railOpen, setRailOpen] = useState(false);
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
@@ -3416,6 +3469,46 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                   onChange={(value) => setDeriveProvider(value as AgentProvider)}
                 />
               </div>
+              {taskModelPicker && deriveModels.length ? (
+                <div className={styles.composerField}>
+                  <span className={styles.composerFieldLabel}>{t("chat.boardTaskModel")}</span>
+                  <OptionPicker
+                    variant="compact"
+                    placement="up"
+                    menuTitle={t("chat.boardTaskModel")}
+                    placeholder={t("models.default")}
+                    value={deriveModel}
+                    options={[
+                      { value: "", label: t("models.default") },
+                      ...deriveModels.map((option) => ({
+                        value: option.value,
+                        label: modelDisplayName(option.value, option.name, t("models.auto")),
+                      })),
+                    ]}
+                    onChange={setDeriveModel}
+                  />
+                </div>
+              ) : null}
+              {taskEffortPicker && deriveEffortParam ? (
+                <div className={styles.composerField}>
+                  <span className={styles.composerFieldLabel}>{t("models.effort")}</span>
+                  <OptionPicker
+                    variant="compact"
+                    placement="up"
+                    menuTitle={t("models.effort")}
+                    placeholder={t("models.default")}
+                    value={deriveEffort}
+                    options={[
+                      { value: "", label: t("models.default") },
+                      ...deriveEffortParam.options.map((option) => ({
+                        value: option.value,
+                        label: modelParamLabel(deriveEffortParam.id, option.value, option.name),
+                      })),
+                    ]}
+                    onChange={setDeriveEffort}
+                  />
+                </div>
+              ) : null}
               <div className={styles.modalActions}>
                 <button type="button" className={styles.ghostBtn} onClick={() => setDeriveBrowse(true)}>
                   {t("chat.boardDeriveBrowse")}
@@ -3449,6 +3542,10 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                           cwd,
                           description: "",
                           provider,
+                          ...(taskModelPicker && deriveModel ? { model: deriveModel } : {}),
+                          ...(taskEffortPicker && deriveEffortParam && deriveEffort
+                            ? { modelParams: { [deriveEffortParam.id]: deriveEffort } }
+                            : {}),
                         });
                         if (!created) {
                           setDeriveError(t("chat.deriveChatFailed"));

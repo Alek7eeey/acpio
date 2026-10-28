@@ -361,6 +361,7 @@ export const ru = {
     boardTaskStart: "С чем запускать задачу",
     boardFolderQueue: "Запускать задачи по очереди",
     boardTaskAgent: "Агент",
+    boardTaskModel: "Модель",
     boardMarkDone: "Завершить",
     boardReopen: "Вернуть в работу",
     boardFoldersTitle: "Папки доски",
