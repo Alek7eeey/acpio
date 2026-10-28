@@ -187,6 +187,12 @@ function clipboardFiles(data: DataTransfer | null): File[] {
   return out;
 }
 
+/** Whether a drag carries files, as opposed to a card being dragged — that one
+ *  moves by pointer and never fills a dataTransfer. */
+function dragHasFiles(data: DataTransfer | null): boolean {
+  return Array.from(data?.types ?? []).includes("Files");
+}
+
 /**
  * Models a new task may start on, per agent — asked once per visit and kept
  * for the next opening of the form. A failed probe is dropped so a later
@@ -532,6 +538,35 @@ const NewTaskComposer = memo(function NewTaskComposer({
       }),
     );
   };
+
+  /** A file dragged in from the file manager belongs to this form: the board is
+   *  a set of places and this one is where a file can be attached. Taken
+   *  anywhere on the page, because the form itself is a thin strip of one lane
+   *  — and taken at all only while the form is open. Without taking the drop
+   *  the browser opens the file in the window instead, replacing the board with
+   *  itself; the page swallows what no open form can use. */
+  const addFilesRef = useRef(addFiles);
+  addFilesRef.current = addFiles;
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      // Without this the drop is refused and the browser navigates to the file.
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!dragHasFiles(e.dataTransfer)) return;
+      e.preventDefault();
+      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      if (dropped.length) addFilesRef.current(dropped);
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
 
   /** A file picked on the server is already on its disk: there is nothing to
    *  upload, the task only has to carry its path into the first turn. */
@@ -2479,7 +2514,21 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   };
 
   return (
-    <div className={styles.page}>
+    <div
+      className={styles.page}
+      // A file dragged in from the file manager is never a reason to leave the
+      // board — a JSON would replace the board with itself. What the board can
+      // take is the new-task form, which picks the drop up while it is open;
+      // with no form open the drop is refused rather than followed.
+      onDragOver={(e) => {
+        if (!dragHasFiles(e.dataTransfer)) return;
+        e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!dragHasFiles(e.dataTransfer)) return;
+        e.preventDefault();
+      }}
+    >
       {/* The board's title row lives in the shell header, above the page: one
           top bar for the whole view instead of a second header under it. */}
 

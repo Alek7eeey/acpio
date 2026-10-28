@@ -1165,3 +1165,41 @@ describe("BoardPage add-task placeholder style", () => {
     expect(screen.queryByText("Add task")).toBeNull();
   });
 });
+
+describe("BoardPage file drop", () => {
+  /** A drop as the browser reports a file dragged in from the file manager. */
+  function dropFile(target: EventTarget, file: File) {
+    return fireEvent.drop(target, { dataTransfer: { types: ["Files"], files: [file] } });
+  }
+
+  // The new-task form is the one place on the board a file can be attached to,
+  // so a file dragged over the board while it is open lands in it as a chip.
+  it("attaches a dropped file to the open new-task form", async () => {
+    useAppStore.setState({ boardSessions: [] });
+    renderBoard();
+    await screen.findByText("Add task");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    within(group).getByPlaceholderText("Describe the task…");
+
+    const taken = dropFile(window, new File(["x"], "plan.pdf", { type: "application/pdf" }));
+
+    // Taken by the form, not followed by the browser: a refused drop is what
+    // opened the file in a tab of its own.
+    expect(taken).toBe(false);
+    expect(await within(group).findByText("plan.pdf")).toBeTruthy();
+  });
+
+  // With no form open there is nothing to attach a file to, and the board is
+  // still no reason to leave the page: the drop is refused either way.
+  it("refuses a file dropped on the board while no form is open", async () => {
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+    const lane = document.querySelector('[data-column="todo"]') as HTMLElement;
+
+    const taken = dropFile(lane, new File(["x"], "plan.pdf", { type: "application/pdf" }));
+
+    expect(taken).toBe(false);
+    expect(screen.queryByText("plan.pdf")).toBeNull();
+  });
+});
