@@ -2764,14 +2764,12 @@ export async function runPrompt(
         }
       }
       // The agent-facing text gets the file hint; the UI text part stays raw
-      // (files render as separate chips). Embedded images are named as already
-      // attached so the model does not waste a tool call reading them as text.
-      // Keep the path even for an embedded image: a model whose endpoint drops
-      // image blocks (text-only model behind a proxy) then still knows which
-      // file on disk the user means instead of hunting for a bare file name.
-      const listed = saved.map((f) =>
-        embedded.has(f.fileId) ? `${f.relPath} (изображение приложено)` : f.relPath,
-      );
+      // (files render as separate chips). Bare paths only: an annotation saying
+      // the picture "is attached" read as a claim the model could doubt — it
+      // answered "I likely cannot see pixels" while the pixels sat in the same
+      // message (session 3d088bb2). The path still names the file on disk for a
+      // model whose endpoint drops image blocks (text-only behind a proxy).
+      const listed = saved.map((f) => f.relPath);
       const hint = `[Прикреплённые файлы: ${listed.join(", ")}${
         embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
       }]`;
