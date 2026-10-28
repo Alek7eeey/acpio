@@ -1478,6 +1478,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
           outsideCwd: live.builtinAllowOutsideCwd === true,
           subagents: subagents ?? undefined,
           emitPlan: (entries) => this.emitUpdate({ sessionUpdate: "plan", entries }),
+          // Same channel as the MCP tools: `read` on a picture hands the bytes
+          // to the turn, which puts them right after that call's result.
+          onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
         }),
         ...mcpToolSet(offered, {
           ask,

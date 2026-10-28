@@ -850,6 +850,22 @@ describe("built-in agent outside the session cwd", () => {
 
   const outsideError = /^Path outside session cwd:/;
 
+  // The agent's `read` hands a picture over this one: text would be mojibake.
+  it("hands a picture over as bytes, through the same door", async () => {
+    const { cwd, outsideFile } = await room();
+    const png = Buffer.from("89504e470d0a1a0a", "hex");
+    const shot = path.join(cwd, "render.png");
+    await fsp.writeFile(shot, png);
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    await expect(acp.handleClientMethod("fs/read_binary_file", { path: shot })).resolves.toEqual({
+      data: png.toString("base64"),
+      size: png.byteLength,
+    });
+    await expect(
+      acp.handleClientMethod("fs/read_binary_file", { path: outsideFile }),
+    ).rejects.toThrow(outsideError);
+  });
+
   it("reads a file outside the folder once the switch is on", async () => {
     const { cwd, outsideFile } = await room();
     const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));

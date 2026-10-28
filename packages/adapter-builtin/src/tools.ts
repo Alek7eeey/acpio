@@ -3,6 +3,7 @@ import type { ElicitationRequestedSchema } from "@acpio/shared";
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { HostClient } from "./host.js";
+import type { ToolImagePart } from "./loop.js";
 import { makeTaskTool, type SubagentsBridge } from "./subagents.js";
 
 /** Ask the harness permission dialog; throws when the user declines. */
@@ -38,6 +39,12 @@ export interface BuiltinToolOptions {
    */
   sessionId: string;
   /**
+   * A picture a tool read off the disk goes here, keyed by the call it answers:
+   * an OpenAI-compatible wire takes only text inside a tool result, so the
+   * picture rides right after it (see `attachToolImages`).
+   */
+  onImages?: (toolCallId: string, images: ToolImagePart[]) => void;
+  /**
    * The harness lets paths outside the session cwd through (Settings →
    * Built-in agent). Only the `write` blurb changes with it: the agent must not
    * claim a boundary the harness no longer draws.
@@ -50,6 +57,15 @@ export interface BuiltinToolOptions {
    */
   emitPlan?: EmitPlan;
 }
+
+/** File types `read` hands to the model as pixels instead of text. */
+const IMAGE_MIME: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+};
 
 /** Terminal output the model gets: enough to act on, bounded for the context. */
 const CLIP_HEAD = 4_000;
@@ -496,14 +512,15 @@ export function renderAskAnswers(
  * Settings behave exactly like they do for Cursor/OMP.
  */
 export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
-  const { host, ask, outsideCwd, sessionId } = opts;
+  const { host, ask, outsideCwd, sessionId, onImages } = opts;
   const taskTool: ToolSet = opts.subagents ? { task: makeTaskTool(opts.subagents) } : {};
 
   const read = tool({
     description:
       "Read a UTF-8 text file. A bare call returns the first 400 lines / 12KB; pass `line`/`limit` " +
       "for a bigger window (up to 2000 lines / 50KB), or continue from the reported line. For one " +
-      "long line use `char_offset` (1-based) and `char_limit`.",
+      "long line use `char_offset` (1-based) and `char_limit`. An image (png/jpg/webp/gif) " +
+      "comes back as the picture itself, not as text.",
     inputSchema: z.object({
       path: z.string().describe("File path."),
       line: z.number().int().positive().optional().describe("1-based first line to read."),
@@ -511,7 +528,16 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       char_offset: z.number().int().positive().optional(),
       char_limit: z.number().int().positive().optional(),
     }),
-    execute: async ({ path, line, limit, char_offset, char_limit }) => {
+    execute: async ({ path, line, limit, char_offset, char_limit }, ctx) => {
+      // Pixels read as text reach the model as mojibake — a PNG it can neither
+      // see nor decode. The bytes leave as an image block beside this result.
+      const mime = IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""];
+      if (mime) {
+        const shot = await host.request<{ data?: string }>("fs/read_binary_file", { path });
+        if (!shot?.data) return `(empty image ${path})`;
+        onImages?.(ctx?.toolCallId ?? "", [{ data: shot.data, mimeType: mime }]);
+        return `${path} — picture attached`;
+      }
       const res = await host.request<{ content?: string; totalLines?: number }>("fs/read_text_file", {
         path,
         ...(line ? { line } : {}),

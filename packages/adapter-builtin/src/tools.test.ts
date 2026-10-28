@@ -3,7 +3,7 @@ import { describe, expect, it, vi, type Mock } from "vitest";
 import { createBuiltinTools, shellCommand, windowRead } from "./tools.js";
 
 /** Tool execution options the SDK passes; only abortSignal is used here. */
-const CTX = { abortSignal: new AbortController().signal };
+const CTX = { abortSignal: new AbortController().signal, toolCallId: "C1" };
 
 type HostMock = { request: Mock };
 
@@ -44,8 +44,23 @@ describe("createBuiltinTools", () => {
     });
   });
 
-  it("read without a window asks for the whole file", async () => {
-    const { tools, host } = setup();
+  it("read of a picture asks the host for bytes and hands them to the turn", async () => {
+    const host = { request: vi.fn(async () => ({ data: "iVBORw0KGgo=" })) };
+    const onImages = vi.fn();
+    const tools = createBuiltinTools({
+      host,
+      ask: vi.fn(async () => undefined),
+      sessionId: "S1",
+      onImages,
+    });
+    await expect(exec(tools, "read", { path: "render/top.png" })).resolves.toBe(
+      "render/top.png — picture attached",
+    );
+    expect(host.request).toHaveBeenCalledWith("fs/read_binary_file", { path: "render/top.png" });
+    expect(onImages).toHaveBeenCalledWith("C1", [{ data: "iVBORw0KGgo=", mimeType: "image/png" }]);
+  });
+
+  it("read without a window asks for the whole file", async () => {    const { tools, host } = setup();
     host.request.mockResolvedValue({ content: "all of it" });
     await expect(exec(tools, "read", { path: "f.txt" })).resolves.toBe("all of it");
     expect(host.request).toHaveBeenCalledWith("fs/read_text_file", { path: "f.txt" });

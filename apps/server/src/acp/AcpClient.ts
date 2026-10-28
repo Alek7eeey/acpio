@@ -51,6 +51,10 @@ const execFileAsync = promisify(execFile);
 /** Built-in sessions, their stored conversations and their result archives. */
 const BUILTIN_STATE_DIR = path.join(DATA_DIR, "agent-sessions");
 
+/** Largest picture `read` hands the model: past this the JSON-RPC frame alone
+ *  costs more than the render is worth, and the agent is told to shrink it. */
+const MAX_AGENT_IMAGE_BYTES = 8 * 1024 * 1024;
+
 // ACPIO_ACP_WIRE debug dumps fire once per frame (including token chunks), so a
 // synchronous append would block the event loop for every chunk of a turn.
 // Chain the appends instead: order stays per-process, and a failed write must
@@ -1503,6 +1507,22 @@ export class AcpClient extends EventEmitter {
     return { content: sliced.join("\n"), totalLines: lines.length };
   }
 
+  /**
+   * A picture cannot ride through the text channel: `utf8` turns PNG bytes into
+   * mojibake. Base64 out, so the agent's `read` hands it to the model as pixels.
+   */
+  private async handleFsReadBinary(params: Record<string, unknown>) {
+    const filePath = this.assertReadablePath(String(params.path ?? ""));
+    const bytes = await fsp.readFile(filePath);
+    if (bytes.byteLength > MAX_AGENT_IMAGE_BYTES) {
+      throw new Error(
+        `${path.basename(filePath)} is ${bytes.byteLength} bytes — past the ${MAX_AGENT_IMAGE_BYTES}-byte ` +
+          "picture limit; crop or shrink it first",
+      );
+    }
+    return { data: bytes.toString("base64"), size: bytes.byteLength };
+  }
+
   private async handleFsWrite(params: Record<string, unknown>) {
     const filePath = this.assertInsideCwd(String(params.path ?? ""));
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
@@ -1659,6 +1679,7 @@ export class AcpClient extends EventEmitter {
   /** Client methods that carry a location the workspace switch can lift. */
   private static readonly PATH_METHODS = new Set([
     "fs/read_text_file",
+    "fs/read_binary_file",
     "fs/write_text_file",
     "fs/glob",
     "fs/search",
@@ -1672,6 +1693,8 @@ export class AcpClient extends EventEmitter {
     switch (method) {
       case "fs/read_text_file":
         return this.handleFsRead(params);
+      case "fs/read_binary_file":
+        return this.handleFsReadBinary(params);
       case "fs/write_text_file":
         return this.handleFsWrite(params);
       case "fs/glob":
