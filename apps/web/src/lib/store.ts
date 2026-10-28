@@ -69,6 +69,7 @@ import {
   seedComposerDrafts,
   setComposerDraftPersistSink,
 } from "./composerDrafts";
+import { readStoredPromptQueue, writeStoredPromptQueue } from "./promptQueueStorage";
 
 // Shell output is never persisted — drop legacy log key if present.
 if (typeof window !== "undefined") {
@@ -1708,6 +1709,9 @@ async function loadAppData(
   } else {
     set({ activeSessionId: null, activeSession: null, chatPaneIds: [null], focusedPaneIndex: 0 });
   }
+  // A queue restored from a reload waits for a free slot; the list just told us
+  // which chats are idle, so this is the boot's one chance to hand it over.
+  void get().drainPromptQueue();
 }
 
 // Theme-scoped CSS lives under [data-theme=...] — set it synchronously at
@@ -2231,7 +2235,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSettingsQuery: (query) => set({ settingsQuery: query }),
   promptEpoch: 0,
   cancelledPromptEpoch: -1,
-  promptQueue: [],
+  // A reload finds the requests the agent was never handed; the boot drain sends them.
+  promptQueue: readStoredPromptQueue(),
   inflight: 0,
   inflightBySession: {},
   promptEpochBySession: {},
@@ -4506,3 +4511,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 }));
+
+// The queue is the only copy of a request the server was not handed yet, so every
+// change is mirrored out of React state — see promptQueueStorage.
+useAppStore.subscribe((state, prev) => {
+  if (state.promptQueue !== prev.promptQueue) writeStoredPromptQueue(state.promptQueue);
+});
