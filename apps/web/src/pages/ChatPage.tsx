@@ -7033,7 +7033,7 @@ function ChatThread() {
         {!activeSession && !sessionLoading && !loading && !hasSessions && (
           <div className={styles.empty}>
             <h1>
-              <span>ACP</span>rocess
+              <span>Acp</span>io
             </h1>
             <p>
               {t("chat.emptyDescription", {
