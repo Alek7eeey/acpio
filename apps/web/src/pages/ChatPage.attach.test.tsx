@@ -134,6 +134,12 @@ function landedImageSession(): SessionDetailDto {
   return detail;
 }
 
+/** The chip above the composer — the file the text names, by name alone. */
+async function stagedChip(container: HTMLElement): Promise<Element> {
+  await waitFor(() => expect(container.querySelector(`.${styles.pendingFileChip}`)).toBeTruthy());
+  return container.querySelector(`.${styles.pendingFileChip}`)!;
+}
+
 function pasteImage(textarea: HTMLElement) {
   const file = new File([new Uint8Array([137, 80, 78, 71])], "screenshot.png", {
     type: "image/png",
@@ -196,7 +202,7 @@ describe("composer attachments during a running turn", () => {
 
     pasteImage(textarea);
 
-    expect(await screen.findByText("screenshot.png")).toBeTruthy();
+    expect(await stagedChip(container)).toBeTruthy();
     expect(apiMock.uploadAttachment).toHaveBeenCalledWith("s1", expect.any(File), "screenshot.png");
   });
 
@@ -208,7 +214,7 @@ describe("composer attachments during a running turn", () => {
     await screen.findByLabelText("Остановить");
 
     pasteImage(textarea);
-    expect(await screen.findByText("screenshot.png")).toBeTruthy();
+    expect(await stagedChip(container)).toBeTruthy();
 
     expect(screen.queryByLabelText("Отправить")).toBeNull();
     expect(screen.getByLabelText("Остановить")).toBeTruthy();
@@ -222,7 +228,7 @@ describe("composer attachments during a running turn", () => {
     await screen.findByLabelText("Остановить");
 
     pasteImage(textarea);
-    await screen.findByText("screenshot.png");
+    await stagedChip(container);
 
     const pending = container.querySelector(`.${styles.pendingFiles}`);
     const meta = container.querySelector(`.${styles.composerMetaShell}`);
@@ -247,6 +253,22 @@ describe("the link an attached file writes into the composer", () => {
     return detail;
   }
 
+  // The field is a textarea, so the link is drawn under it: the same text, the
+  // file's name marked. The textarea's own text is transparent.
+  it("paints the file's name as the link it is", async () => {
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    pasteImage(textarea);
+    await waitFor(() => expect(textarea.value).toBe("screenshot.png"));
+
+    const painted = container.querySelector(`.${styles.pillMirror}`)!;
+    expect(painted.textContent).toBe("screenshot.png");
+    expect(painted.querySelector(`.${styles.pillLink}`)?.textContent).toBe("screenshot.png");
+  });
+
   it("names the file alone while the reader types", async () => {
     const { container } = renderComposer();
     const textarea = container.querySelector("textarea")!;
@@ -257,7 +279,7 @@ describe("the link an attached file writes into the composer", () => {
 
     pasteImage(textarea);
 
-    await waitFor(() => expect(textarea.value).toBe("[screenshot.png](screenshot.png)"));
+    await waitFor(() => expect(textarea.value).toBe("screenshot.png"));
   });
 
   it("carries the path the agent reads in the message that leaves", async () => {
@@ -268,9 +290,9 @@ describe("the link an attached file writes into the composer", () => {
     const textarea = container.querySelector("textarea")!;
     fireEvent.change(textarea, { target: { value: "" } });
     pasteImage(textarea);
-    await waitFor(() => expect(textarea.value).toBe("[screenshot.png](screenshot.png)"));
+    await waitFor(() => expect(textarea.value).toBe("screenshot.png"));
 
-    fireEvent.change(textarea, { target: { value: "посмотри [screenshot.png](screenshot.png)" } });
+    fireEvent.change(textarea, { target: { value: "посмотри screenshot.png" } });
     fireEvent.click(screen.getByLabelText("Отправить"));
 
     await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
@@ -287,15 +309,15 @@ describe("the link an attached file writes into the composer", () => {
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
     seedComposerDrafts({
       s1: {
-        text: "посмотри [screenshot.png](screenshot.png)",
+        text: "посмотри screenshot.png",
         files: [{ name: "screenshot.png", path: "E:/proj/.acpio-attachments/s1/screenshot.png" }],
       },
     });
 
     const { container } = renderComposer();
     const textarea = container.querySelector("textarea")!;
-    await waitFor(() => expect(textarea.value).toBe("посмотри [screenshot.png](screenshot.png)"));
-    expect(await screen.findByText("screenshot.png")).toBeTruthy();
+    await waitFor(() => expect(textarea.value).toBe("посмотри screenshot.png"));
+    expect(await stagedChip(container)).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("Отправить"));
 

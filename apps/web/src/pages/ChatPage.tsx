@@ -346,8 +346,8 @@ type ComposerAttachment = {
   name: string;
   /** Staged path on the server; null while (or if) the upload has not landed. */
   path: string | null;
-  /** The link this file has in the composer text — its name alone (see
-   *  `composerAttachmentLink`). Known before the upload: the name is. */
+  /** What this file is in the composer text — its name alone (see
+   *  `composerAttachmentText`). Known before the upload: the name is. */
   link?: string;
   size: number;
   status: "uploading" | "ready" | "error";
@@ -523,22 +523,6 @@ function stagedAttachmentLink(sessionId: string, name: string): string {
 }
 
 /**
- * The link the composer itself shows: the file's name, and the file's name as
- * the destination — a link that names its own file and nothing else.
- *
- * The field is where the reader types, and the path a staged upload has —
- * `.acpio-attachments/<session id>/<name>` — is a UUID's worth of noise that
- * names nothing they chose. So the field carries the shortest address that
- * still says which file this is, and the real one is written when the message
- * goes out (see `withAttachmentPaths`): the message, the agent and the chip's
- * copy-link all carry the very path of the file. An empty destination is not
- * this: `[shot.png]()` reads as a broken link, not as a link.
- */
-function composerAttachmentLink(name: string): string {
-  return `[${name}](${name})`;
-}
-
-/**
  * The same link for a file that was picked on the server: the path the prompt
  * hands the agent — relative to the chat folder when the file is inside it,
  * absolute otherwise.
@@ -556,9 +540,23 @@ function attachmentLink(
   return `[${file.name}](${inside})`;
 }
 
-/** The links the chips above the composer put into its text, one per file. */
+/**
+ * What a staged file is in the composer text: its own name, nothing else.
+ *
+ * The field is where the reader types, and the path a staged upload has —
+ * `.acpio-attachments/<session id>/<name>` — is a UUID's worth of noise that
+ * names nothing they chose; a markdown link written around the name is syntax
+ * in a place that shows text. So the field says the name, the same text is
+ * painted as a link under the caret (see `ComposerMirror`), and the markdown is
+ * written when the message goes out (see `withAttachmentPaths`).
+ */
+function composerAttachmentText(name: string): string {
+  return name;
+}
+
+/** The names the chips above the composer put into its text, one per file. */
 function attachmentLinksOf(files: ComposerAttachment[]): string[] {
-  return files.map((file) => file.link ?? composerAttachmentLink(file.name));
+  return files.map((file) => file.link ?? composerAttachmentText(file.name));
 }
 
 /**
@@ -587,7 +585,7 @@ function withAttachmentPaths(
     const link = attachmentFileLink(session, file);
     // No session (or no path) to point at: the name is all there is to say.
     if (link === file.name) continue;
-    out = out.replace(composerAttachmentLink(file.name), link);
+    out = out.replace(composerAttachmentText(file.name), link);
   }
   return out;
 }
@@ -601,8 +599,8 @@ function isOnlyAttachmentLinks(value: string, links: string[]): boolean {
   for (const link of links) rest = rest.split(link).join(" ");
   return (
     rest
-      // The field's own form (`[name](name)`, a link that names itself) and the
-      // path form a message or an older draft spells out.
+      // A link a message carries or an older draft spells out: the name alone
+      // is already stripped above, through the list of names the chips hold.
       .replace(/\[([^\]]*)\]\((?:\1|\.acpio-attachments\/[^)\s]+)\)/g, " ")
       .trim().length === 0
   );
@@ -619,6 +617,66 @@ function removeComposerLink(value: string, link: string): string {
   if (value[end] === " ") end += 1;
   else if (value[start - 1] === " ") start -= 1;
   return value.slice(0, start) + value.slice(end);
+}
+
+/** Text split into runs, the ones that are an attached file's name marked. */
+function splitLinkNames(
+  text: string,
+  names: string[],
+): Array<{ text: string; link: boolean }> {
+  const known = names.filter((name) => name && text.includes(name));
+  if (known.length === 0) return text ? [{ text, link: false }] : [];
+  // Longest name first: one that begins another must still win.
+  const pattern = new RegExp(
+    `(${[...known]
+      .sort((a, b) => b.length - a.length)
+      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|")})`,
+    "g",
+  );
+  return text
+    .split(pattern)
+    .filter((part) => part !== "")
+    .map((part) => ({ text: part, link: known.includes(part) }));
+}
+
+/**
+ * The composer's own text, painted under the textarea.
+ *
+ * A textarea cannot colour a range of its text, and an attached file has to
+ * read as the link it is: the name in the accent colour, underlined. So the
+ * same text is drawn here with the names marked, while the textarea keeps what
+ * a textarea is good at — the caret, the selection, the editing; its own text
+ * is transparent (see `.pillInput`). The two boxes therefore have to agree on
+ * every metric that moves a glyph: padding, font, wrapping, overflow. The
+ * mirror is a scroll box of its own for exactly that reason — it grows a
+ * scrollbar when the textarea does, so the text does not rewrap in one of them.
+ */
+function ComposerMirror({
+  text,
+  names,
+  mirrorRef,
+}: {
+  text: string;
+  names: string[];
+  mirrorRef: RefObject<HTMLDivElement | null>;
+}) {
+  const parts = useMemo(() => splitLinkNames(text, names), [text, names]);
+  return (
+    <div ref={mirrorRef} className={styles.pillMirror} aria-hidden>
+      {parts.map((part, i) =>
+        part.link ? (
+          <span key={i} className={styles.pillLink}>
+            {part.text}
+          </span>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+      {/* A trailing newline is a line the textarea reserves and a div does not. */}
+      {text.endsWith("\n") ? "\u200b" : null}
+    </div>
+  );
 }
 
 function MessageArticle({
@@ -4563,6 +4621,8 @@ function ChatThread() {
   const [paramsByModel, setParamsByModel] = useState<Record<string, ModelParamDto[]>>({});
   const [stableParams, setStableParams] = useState<ModelParamDto[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** The painted copy of the composer text (see `ComposerMirror`). */
+  const mirrorRef = useRef<HTMLDivElement>(null);
   /** -1 = composer draft; 0..n-1 = browsing sent user messages (oldest→newest). */
   const composerHistoryIndexRef = useRef(-1);
   const composerHistoryDraftRef = useRef("");
@@ -5369,7 +5429,7 @@ function ChatThread() {
           id,
           name,
           path: null,
-          link: composerAttachmentLink(name),
+          link: composerAttachmentText(name),
           size: file.size,
           status: "uploading",
           previewUrl,
@@ -5383,7 +5443,7 @@ function ChatThread() {
       const links =
         hooks?.linkAt === undefined
           ? null
-          : entries.map((entry) => composerAttachmentLink(entry.name));
+          : entries.map((entry) => composerAttachmentText(entry.name));
       if (links) insertComposerText(links.join(" "), hooks?.linkAt);
 
       const patch = (id: string, next: Partial<ComposerAttachment>) => {
@@ -5409,7 +5469,7 @@ function ChatThread() {
             // The server had to rename the file (its name was already taken):
             // the link in the text must follow, or it points at nothing.
             const renamed =
-              saved.name !== entry.name ? composerAttachmentLink(saved.name) : null;
+              saved.name !== entry.name ? composerAttachmentText(saved.name) : null;
             if (link && renamed) setText((prev) => prev.replace(link, renamed));
             patch(entry.id, {
               name: saved.name,
@@ -5481,7 +5541,7 @@ function ChatThread() {
       return;
     }
     const name = pastedTextFileName();
-    const link = composerAttachmentLink(name);
+    const link = composerAttachmentText(name);
     const staged = stageDeviceFiles(
       [new File([block], name, { type: "text/plain" })],
       () => name,
@@ -5490,7 +5550,7 @@ function ChatThread() {
         // be left behind a link that points nowhere.
         onSaved: (saved) => {
           if (saved.name === name) return;
-          const renamed = composerAttachmentLink(saved.name);
+          const renamed = composerAttachmentText(saved.name);
           setText((prev) => prev.replace(link, renamed));
         },
         onFailed: () => {
@@ -5631,7 +5691,7 @@ function ChatThread() {
   /** The link that names a chip's file with its path: a staged upload lives in
    *  the session's attachment folder, a file picked on the server keeps the
    *  path the prompt hands the agent. The composer shows the name alone (see
-   *  `composerAttachmentLink`), so a copy hands over what the message carries. */
+   *  `composerAttachmentText`), so a copy hands over what the message carries. */
   const attachmentChipLink = useCallback(
     (file: ComposerAttachment) => attachmentFileLink(activeSession, file),
     [activeSession],
@@ -7502,10 +7562,19 @@ function ChatThread() {
               }}
             />
             <div className={styles.pillInputWrap}>
+              <ComposerMirror text={text} names={attachmentLinks} mirrorRef={mirrorRef} />
               <textarea
               ref={textareaRef}
               className={styles.pillInput}
               value={text}
+              onScroll={(e) => {
+                // One text, two boxes: the painted copy follows the one the
+                // caret lives in, or the reader sees the line twice.
+                const mirror = mirrorRef.current;
+                if (!mirror) return;
+                mirror.scrollTop = e.currentTarget.scrollTop;
+                mirror.scrollLeft = e.currentTarget.scrollLeft;
+              }}
               onChange={(e) => {
                 if (composerLocked) return;
                 if (!composerHistoryApplyingRef.current && composerHistoryIndexRef.current !== -1) {
@@ -7915,7 +7984,7 @@ function ChatThread() {
               id: nextComposerAttachmentId(),
               name: f.name,
               path: f.path,
-              link: composerAttachmentLink(f.name),
+              link: composerAttachmentText(f.name),
               size: 0,
               status: "ready" as const,
             })),
@@ -7923,7 +7992,7 @@ function ChatThread() {
           // The link to every file goes in at the end, where the paperclip's
           // own picks land — the text names what the chips carry.
           if (files.length > 0) {
-            insertComposerText(files.map((f) => composerAttachmentLink(f.name)).join(" "), "end");
+            insertComposerText(files.map((f) => composerAttachmentText(f.name)).join(" "), "end");
           }
         }}
       />

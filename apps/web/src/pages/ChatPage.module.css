@@ -3104,6 +3104,15 @@ button.userSlashCmd:focus-visible {
   cursor: wait;
 }
 
+/* The reader sees the mirror's text, so the dimmed state has to reach it. */
+.pillLoading .pillMirror {
+  color: var(--text-secondary);
+}
+
+.pillLoading .pillLink {
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-secondary));
+}
+
 .pillInputWrap {
   --composer-pad: 10px 4px;
   flex: 1 1 0;
@@ -3130,16 +3139,56 @@ button.userSlashCmd:focus-visible {
   outline: none;
   box-shadow: none;
   overflow: auto;
+  /* The text the reader sees is the mirror's (see `.pillMirror`): a textarea
+     cannot colour a range, and an attached file's name is a link. The caret and
+     the selection stay the textarea's own. */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
 }
 
-.pill:not(.pillMultiline) .pillInput {
+.pillInput::placeholder {
+  color: var(--text-secondary);
+  -webkit-text-fill-color: var(--text-secondary);
+}
+
+/* The same text, drawn: every metric that moves a glyph has to match
+   `.pillInput` exactly, or the painted line and the caret drift apart. */
+.pillMirror {
+  grid-area: 1 / 1;
+  min-width: 0;
+  padding: var(--composer-pad);
+  min-height: 40px;
+  max-height: 160px;
+  line-height: 1.45;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  border: none;
+  background: transparent;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text);
+}
+
+.pillLink {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pill:not(.pillMultiline) .pillInput,
+.pill:not(.pillMultiline) .pillMirror {
   overflow-x: auto;
   overflow-y: hidden;
   white-space: nowrap;
   scrollbar-width: none;
 }
 
-.pill:not(.pillMultiline) .pillInput::-webkit-scrollbar {
+.pill:not(.pillMultiline) .pillInput::-webkit-scrollbar,
+.pill:not(.pillMultiline) .pillMirror::-webkit-scrollbar {
   display: none;
 }
 
