@@ -375,6 +375,15 @@ function expandSourceCitations(text: string): string {
     .replace(/(^|[\s(])Ъ(?=\))/g, "$1Коммерсантъ");
 }
 
+/** A picture path markdown cannot read: a bare destination ends at the first
+ *  space or `[`, so a screenshot named `Точки доступа_…__[point].png` stayed
+ *  text. Angle brackets carry such a path through unchanged. */
+function quoteImagePaths(text: string): string {
+  return text.replace(/!\[([^\]\n]*)\]\(([^)\n]*)\)/g, (whole, alt: string, dest: string) =>
+    /[ \t[\]()]/.test(dest) && !/[<>"']/.test(dest) ? `![${alt}](<${dest}>)` : whole,
+  );
+}
+
 /**
  * Keep a markdown image's own `src` intact.
  *
@@ -568,7 +577,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 }: MarkdownContentProps) {
   // Render the server buffer directly. Each incoming chunk becomes visible
   // immediately; no synthetic typing or delayed catch-up animation.
-  const rendered = useMemo(() => expandSourceCitations(text), [text]);
+  const rendered = useMemo(() => quoteImagePaths(expandSourceCitations(text)), [text]);
   // `img` closes over this chat's id, so a path in the text becomes a URL on the
   // chat's own file route. One object per id — a fresh one on every render
   // remounts the whole tree (see the note above markdownComponents).

@@ -43,6 +43,16 @@ describe("a picture in agent markdown", () => {
     expect(imageSrcs(container)).toEqual([fileUrl("C:/tmp/shot.png")]);
   });
 
+  // A destination with spaces or brackets is no destination at all in markdown,
+  // and a test screenshot's name carries both.
+  it("serves a path whose name has spaces and square brackets", () => {
+    const path =
+      "C:/MyFolder/ips/shots/Точки доступа_подбор значения и объявляет select__[point_2cafb74da675.004.png";
+    const { container } = renderMarkdown(`![select 4](${path})`);
+
+    expect(imageSrcs(container)).toEqual([fileUrl(path)]);
+  });
+
   it("keeps a remote image and an inline data image as they are", () => {
     const data = "data:image/png;base64,iVBORw0KGgo=";
     const { container } = renderMarkdown(`![a](https://example.com/a.png)\n\n![b](${data})`);
