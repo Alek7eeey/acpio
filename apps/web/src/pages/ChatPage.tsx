@@ -523,19 +523,19 @@ function stagedAttachmentLink(sessionId: string, name: string): string {
 }
 
 /**
- * The link the composer itself shows: the file's name, nothing else.
+ * The link the composer itself shows: the file's name, and the file's name as
+ * the destination — a link that names its own file and nothing else.
  *
  * The field is where the reader types, and the path a staged upload has —
  * `.acpio-attachments/<session id>/<name>` — is a UUID's worth of noise that
- * names nothing they chose. The destination is the app's business, so it is
- * written when the message goes out (see `withAttachmentPaths`): the message,
- * the agent and the chip's copy-link all still carry the very path of the file.
- * A draft restored after a reload keeps the name and nothing else — the chips
- * that knew the path are not persisted — so `isOnlyAttachmentLinks` reads it as
- * an attachment rather than as a prompt the reader wrote.
+ * names nothing they chose. So the field carries the shortest address that
+ * still says which file this is, and the real one is written when the message
+ * goes out (see `withAttachmentPaths`): the message, the agent and the chip's
+ * copy-link all carry the very path of the file. An empty destination is not
+ * this: `[shot.png]()` reads as a broken link, not as a link.
  */
 function composerAttachmentLink(name: string): string {
-  return `[${name}]()`;
+  return `[${name}](${name})`;
 }
 
 /**
@@ -601,8 +601,9 @@ function isOnlyAttachmentLinks(value: string, links: string[]): boolean {
   for (const link of links) rest = rest.split(link).join(" ");
   return (
     rest
-      // The field's own form (`[name]()`) and the one older drafts spell out.
-      .replace(/\[[^\]]*\]\((?:|\.acpio-attachments\/[^)\s]+)\)/g, " ")
+      // The field's own form (`[name](name)`, a link that names itself) and the
+      // path form a message or an older draft spells out.
+      .replace(/\[([^\]]*)\]\((?:\1|\.acpio-attachments\/[^)\s]+)\)/g, " ")
       .trim().length === 0
   );
 }

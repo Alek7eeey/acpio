@@ -257,7 +257,7 @@ describe("the link an attached file writes into the composer", () => {
 
     pasteImage(textarea);
 
-    await waitFor(() => expect(textarea.value).toBe("[screenshot.png]()"));
+    await waitFor(() => expect(textarea.value).toBe("[screenshot.png](screenshot.png)"));
   });
 
   it("carries the path the agent reads in the message that leaves", async () => {
@@ -268,9 +268,9 @@ describe("the link an attached file writes into the composer", () => {
     const textarea = container.querySelector("textarea")!;
     fireEvent.change(textarea, { target: { value: "" } });
     pasteImage(textarea);
-    await waitFor(() => expect(textarea.value).toBe("[screenshot.png]()"));
+    await waitFor(() => expect(textarea.value).toBe("[screenshot.png](screenshot.png)"));
 
-    fireEvent.change(textarea, { target: { value: "посмотри [screenshot.png]()" } });
+    fireEvent.change(textarea, { target: { value: "посмотри [screenshot.png](screenshot.png)" } });
     fireEvent.click(screen.getByLabelText("Отправить"));
 
     await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
@@ -287,14 +287,14 @@ describe("the link an attached file writes into the composer", () => {
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
     seedComposerDrafts({
       s1: {
-        text: "посмотри [screenshot.png]()",
+        text: "посмотри [screenshot.png](screenshot.png)",
         files: [{ name: "screenshot.png", path: "E:/proj/.acpio-attachments/s1/screenshot.png" }],
       },
     });
 
     const { container } = renderComposer();
     const textarea = container.querySelector("textarea")!;
-    await waitFor(() => expect(textarea.value).toBe("посмотри [screenshot.png]()"));
+    await waitFor(() => expect(textarea.value).toBe("посмотри [screenshot.png](screenshot.png)"));
     expect(await screen.findByText("screenshot.png")).toBeTruthy();
 
     fireEvent.click(screen.getByLabelText("Отправить"));
