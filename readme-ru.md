@@ -6,7 +6,7 @@
 нескольким проектам сразу, и каждая задача — это отдельный чат.
 Чат со стримом рассуждений, tool calls и субагентов, настройки, светлая/тёмная тема в стиле META.
 
-**Актуальная версия:** 0.1.43
+**Актуальная версия:** 0.1.42
 
 > **Disclaimer (AI):** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 

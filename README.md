@@ -6,7 +6,7 @@ server, so a chat works without installing a CLI at all. Kanban **boards** drive
 across projects, each task being a chat of its own.
 Chat with streamed reasoning, tool calls and subagents, settings, META-style light/dark theme.
 
-**Current version:** 0.1.43
+**Current version:** 0.1.42
 
 > **AI disclaimer:** This project was developed in substantial part with the help of AI coding assistants. Review, test, and verify changes before relying on it in production.
 

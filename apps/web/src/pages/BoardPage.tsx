@@ -716,6 +716,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
       const target = e.target as Node;
       if (startPanelRef.current?.contains(target)) return;
       if (startLineRef.current?.contains(target)) return;
+      // The pickers in the panel hang their menus in portals of their own: a
+      // press inside one chooses, it must not drop the panel underneath — the
+      // menu would unmount on the press and the click would land nowhere.
+      if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
       setStartPanel(null);
     };
     const onKey = (e: KeyboardEvent) => {
