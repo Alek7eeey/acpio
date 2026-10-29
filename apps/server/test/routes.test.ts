@@ -2703,6 +2703,70 @@ describe("built-in agent image attachments", () => {
       await stub.close();
     }
   }, 15_000);
+
+  // A file that lives outside the chat folder — a board task's upload, staged
+  // in acpio's own data folder — is named by its absolute path: the only one
+  // the agent can open from where it stands.
+  it("gives the agent an absolute address for a file outside the chat folder", async () => {
+    const stub = await startModelStub();
+    const cwd = await newTempDir("acpio-attach-abs-");
+    const outside = await newTempDir("acpio-attach-store-");
+    const notes = path.join(outside, "notes.md");
+    await fsp.writeFile(notes, "# notes\n");
+    setAgentAvailable("builtin", true);
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        connectedProvider: "builtin",
+        defaultProvider: "builtin",
+        chatAutoTitle: false,
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      },
+    });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        payload: { provider: "builtin", cwd },
+      });
+      const session = created.json() as { id: string };
+      runtimeSessionIds.push(session.id);
+
+      const sent = await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "прочитай notes.md", attachments: [{ name: "notes.md", path: notes }] },
+      });
+      expect(sent.statusCode).toBe(200);
+
+      // No pixels ride along here, so the text goes as one string.
+      expect(await stub.firstUserContent).toEqual(
+        expect.stringContaining(`прочитай [notes.md](${notes.replace(/\\/g, "/")})`),
+      );
+
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const turn = (
+          await app.inject({ method: "GET", url: `/api/sessions/${session.id}/turn` })
+        ).json() as { running?: boolean };
+        if (!turn.running) break;
+        const tick = Promise.withResolvers<void>();
+        setTimeout(tick.resolve, 25);
+        await tick.promise;
+      }
+    } finally {
+      await stub.close();
+    }
+  }, 15_000);
 });
 
 describe("built-in agent MCP tools", () => {

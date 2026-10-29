@@ -148,6 +148,12 @@ function pasteImage(textarea: HTMLElement) {
   return file;
 }
 
+/** Several files at once — the clipboard of a file manager, not a screenshot. */
+function pasteFiles(textarea: HTMLElement, names: string[]) {
+  const files = names.map((name) => new File([new Uint8Array([1])], name, { type: "text/plain" }));
+  fireEvent.paste(textarea, { clipboardData: { files, items: [] } });
+}
+
 beforeEach(() => {
   const detail = runningSession();
   useAppStore.setState({
@@ -252,6 +258,66 @@ describe("the link an attached file writes into the composer", () => {
     detail.messages = [];
     return detail;
   }
+
+  // Every file is named in the text, not only the last one: the message says
+  // what the prompt carries, and each name is painted as its own link.
+  it("names every attached file", async () => {
+    apiMock.uploadAttachment
+      .mockResolvedValueOnce({
+        name: "notes.txt",
+        path: "E:/proj/.acpio-attachments/s1/notes.txt",
+        size: 1,
+      })
+      .mockResolvedValueOnce({
+        name: "plan.md",
+        path: "E:/proj/.acpio-attachments/s1/plan.md",
+        size: 1,
+      });
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    pasteFiles(textarea, ["notes.txt", "plan.md"]);
+
+    await waitFor(() => expect(textarea.value).toBe("notes.txt plan.md"));
+    expect(
+      Array.from(container.querySelectorAll(`.${styles.pillLink}`)).map((el) => el.textContent),
+    ).toEqual(["notes.txt", "plan.md"]);
+  });
+
+  // The server renames a file whose name is taken, and the text has to follow:
+  // a name in the message that no file answers to is a link to nothing.
+  it("follows the name the server had to give", async () => {
+    apiMock.uploadAttachment.mockResolvedValueOnce({
+      name: "screenshot-2.png",
+      path: "E:/proj/.acpio-attachments/s1/screenshot-2.png",
+      size: 4,
+    });
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    pasteImage(textarea);
+
+    await waitFor(() => expect(textarea.value).toBe("screenshot-2.png"));
+  });
+
+  // Nothing landed, so nothing may be named: the name leaves the text with the
+  // file it pointed at.
+  it("takes the name back out when the upload fails", async () => {
+    apiMock.uploadAttachment.mockRejectedValueOnce(new Error("nope"));
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "посмотри " } });
+
+    pasteImage(textarea);
+    await waitFor(() => expect(textarea.value).toBe("посмотри screenshot.png"));
+
+    await waitFor(() => expect(textarea.value).toBe("посмотри"));
+  });
 
   // The field is a textarea, so the link is drawn under it: the same text, the
   // file's name marked. The textarea's own text is transparent.

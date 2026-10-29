@@ -1255,6 +1255,29 @@ describe("BoardPage file drop", () => {
     expect(group.querySelector(`.${styles.composerMirrorLink}`)?.textContent).toBe("plan.pdf");
   });
 
+  // Every file is named, not only the last one, and each name is painted as
+  // its own link — the description says what the task starts on.
+  it("names every dropped file in the description", async () => {
+    useAppStore.setState({ boardSessions: [] });
+    renderBoard();
+    await screen.findByText("Add task");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+
+    dropFile(window, new File(["x"], "plan.pdf", { type: "application/pdf" }));
+    dropFile(window, new File(["x"], "notes.md", { type: "text/markdown" }));
+
+    await waitFor(() => expect(textarea.value).toBe("plan.pdf notes.md"));
+    expect(
+      Array.from(group.querySelectorAll(`.${styles.composerMirrorLink}`)).map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(["plan.pdf", "notes.md"]);
+  });
+
   // The chip's own press offers the link that names the file — the name the
   // description says, the same thing the chat composer hands over.
   it("copies the file's name from its chip", async () => {
