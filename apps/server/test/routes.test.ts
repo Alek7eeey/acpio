@@ -2623,6 +2623,86 @@ describe("built-in agent image attachments", () => {
       await stub.close();
     }
   }, 15_000);
+
+  // The composer names a file by its name — the field shows text, and the
+  // message the reader keeps says the same name — but a model can open only
+  // what it is given a path to. Its own copy of the prompt carries the link;
+  // the stored message is left exactly as the reader wrote it.
+  it("gives the agent the file's address and the message its name", async () => {
+    const stub = await startModelStub();
+    const cwd = await newTempDir("acpio-attach-link-");
+    const shot = path.join(cwd, ".acpio-attachments", "shot.png");
+    await fsp.mkdir(path.dirname(shot), { recursive: true });
+    await fsp.writeFile(shot, PNG);
+    setAgentAvailable("builtin", true);
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        connectedProvider: "builtin",
+        defaultProvider: "builtin",
+        chatAutoTitle: false,
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "Local",
+            url: stub.url,
+            apiKey: "",
+            models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+          },
+        ],
+      },
+    });
+    try {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/sessions",
+        payload: { provider: "builtin", cwd },
+      });
+      const session = created.json() as { id: string };
+      runtimeSessionIds.push(session.id);
+
+      const sent = await app.inject({
+        method: "POST",
+        url: `/api/sessions/${session.id}/prompt`,
+        payload: { text: "посмотри shot.png", attachments: [{ name: "shot.png", path: shot }] },
+      });
+      expect(sent.statusCode).toBe(200);
+
+      expect(await stub.firstUserContent).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining("посмотри [shot.png](.acpio-attachments/shot.png)"),
+        },
+        { type: "image_url", image_url: { url: `data:image/png;base64,${PNG.toString("base64")}` } },
+      ]);
+
+      // The reader's own message is untouched: the name, no address.
+      const detail = (
+        await app.inject({ method: "GET", url: `/api/sessions/${session.id}` })
+      ).json() as SessionDetailDto;
+      const userText = detail.messages
+        .filter((m) => m.role === "user")
+        .flatMap((m) => m.parts)
+        .filter((p) => p.type === "text")
+        .map((p) => String(p.payload.text ?? ""))
+        .join("\n");
+      expect(userText).toBe("посмотри shot.png");
+
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const turn = (
+          await app.inject({ method: "GET", url: `/api/sessions/${session.id}/turn` })
+        ).json() as { running?: boolean };
+        if (!turn.running) break;
+        const tick = Promise.withResolvers<void>();
+        setTimeout(tick.resolve, 25);
+        await tick.promise;
+      }
+    } finally {
+      await stub.close();
+    }
+  }, 15_000);
 });
 
 describe("built-in agent MCP tools", () => {

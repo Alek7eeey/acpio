@@ -509,38 +509,6 @@ function pastedTextFileName(): string {
   return `pasted-text-${stamp}.txt`;
 }
 
-/** Folder a chat's own uploads land in, relative to the chat folder — the
- *  server's attachment root. */
-const ATTACH_LINK_DIR = ".acpio-attachments";
-
-/**
- * What stands in the composer for an attached file: a markdown link to it,
- * addressed by the same session-relative path the server hands the agent. A
- * staged upload lives in the session's own folder, which is exactly what its
- * path spells out once the bytes land.
- */
-function stagedAttachmentLink(sessionId: string, name: string): string {
-  return `[${name}](${ATTACH_LINK_DIR}/${sessionId}/${name})`;
-}
-
-/**
- * The same link for a file that was picked on the server: the path the prompt
- * hands the agent — relative to the chat folder when the file is inside it,
- * absolute otherwise.
- */
-function attachmentLink(
-  cwd: string | null | undefined,
-  file: { name: string; path: string },
-): string {
-  const target = file.path.replace(/\\/g, "/");
-  const root = (cwd ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
-  const inside =
-    root && target.toLowerCase().startsWith(`${root.toLowerCase()}/`)
-      ? target.slice(root.length + 1)
-      : target;
-  return `[${file.name}](${inside})`;
-}
-
 /**
  * What a staged file is in the composer text: its own name, nothing else.
  *
@@ -548,8 +516,9 @@ function attachmentLink(
  * `.acpio-attachments/<session id>/<name>` — is a UUID's worth of noise that
  * names nothing they chose; a markdown link written around the name is syntax
  * in a place that shows text. So the field says the name, the same text is
- * painted as a link under the caret (see `ComposerMirror`), and the markdown is
- * written when the message goes out (see `withAttachmentPaths`).
+ * painted as a link under the caret (see `ComposerMirror`), and the message
+ * says it too (see `UserMessage`) — while the address behind it is written
+ * where only the agent reads it, on the server (see `runPrompt`).
  */
 function composerAttachmentText(name: string): string {
   return name;
@@ -558,37 +527,6 @@ function composerAttachmentText(name: string): string {
 /** The names the chips above the composer put into its text, one per file. */
 function attachmentLinksOf(files: ComposerAttachment[]): string[] {
   return files.map((file) => file.link ?? composerAttachmentText(file.name));
-}
-
-/**
- * The path-form link of a chip's file — what the message gets when it is sent,
- * and what the chip's copy-link hands over: a staged upload is named by its
- * session-relative path, a file picked on the server by the path it already
- * has (relative to the chat folder when it sits inside it).
- */
-function attachmentFileLink(
-  session: { id: string; cwd: string } | null | undefined,
-  file: { name: string; path?: string | null },
-): string {
-  if (file.path) return attachmentLink(session?.cwd, { name: file.name, path: file.path });
-  return session ? stagedAttachmentLink(session.id, file.name) : file.name;
-}
-
-/** Write the destination into every attachment link the composer shows, so the
- *  message carries the path while the field carries the name. */
-function withAttachmentPaths(
-  value: string,
-  files: ComposerAttachment[],
-  session: { id: string; cwd: string } | null | undefined,
-): string {
-  let out = value;
-  for (const file of files) {
-    const link = attachmentFileLink(session, file);
-    // No session (or no path) to point at: the name is all there is to say.
-    if (link === file.name) continue;
-    out = out.replace(composerAttachmentText(file.name), link);
-  }
-  return out;
 }
 
 /** Whether the composer holds nothing but such links: a staged file names
@@ -741,6 +679,8 @@ function highlightUserText(
   knownNames?: Iterable<string>,
   onSlashClick?: (command: string) => void,
   slashClickTitle?: string,
+  /** Files this message carries: their names in the text are links to them. */
+  attachments: Array<{ name: string; href: string }> = [],
 ) {
   return splitSlashCommandHighlight(text, knownNames).map((seg, i) =>
     seg.kind === "command" ? (
@@ -765,7 +705,36 @@ function highlightUserText(
         </span>
       )
     ) : (
-      <Fragment key={i}>{seg.value}</Fragment>
+      <Fragment key={i}>{linkifyUserText(seg.value, attachments, i)}</Fragment>
+    ),
+  );
+}
+
+/** The runs of a message's text, an attached file's own name made a link. */
+function linkifyUserText(
+  value: string,
+  attachments: Array<{ name: string; href: string }>,
+  keyPrefix: number,
+): ReactNode {
+  if (attachments.length === 0) return value;
+  return splitLinkNames(
+    value,
+    attachments.map((file) => file.name),
+  ).map((run, i) =>
+    run.link ? (
+      <a
+        key={`${keyPrefix}-${i}`}
+        className={styles.userFileLink}
+        href={attachments.find((file) => file.name === run.text)?.href}
+        target="_blank"
+        rel="noreferrer"
+        title={run.text}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {run.text}
+      </a>
+    ) : (
+      <Fragment key={`${keyPrefix}-${i}`}>{run.text}</Fragment>
     ),
   );
 }
@@ -790,6 +759,21 @@ function UserMessage({
 
   if (!text && fileParts.length === 0) return null;
 
+  // The files this message carries, by the name its text says: the message
+  // reads like the field that wrote it — the name as a link — and the address
+  // behind it is this message's own file part.
+  const attachments = fileParts.flatMap((p) => {
+    const name = String(p.payload.name ?? "").trim();
+    const fileId = String(p.payload.fileId ?? "").trim();
+    if (!name || !fileId) return [];
+    return [
+      {
+        name,
+        href: `/api/sessions/${encodeURIComponent(message.sessionId)}/attachments/${encodeURIComponent(fileId)}`,
+      },
+    ];
+  });
+
   const body = text ? (
     <div className={styles.userBubble} contentEditable={false} suppressContentEditableWarning>
       {textParts.map((part) => (
@@ -799,6 +783,7 @@ function UserMessage({
             undefined,
             onSlashCommandClick,
             t("common.insertSlashCommand"),
+            attachments,
           )}
         </div>
       ))}
@@ -5692,15 +5677,13 @@ function ChatThread() {
     // A big paste still waiting for its answer must not be lost: sending
     // without a choice means «paste as text», and the block goes back into the
     // very range the paste replaced — not onto the end of what is typed.
-    // The field names an attached file by its name alone; the message that
-    // leaves here names it by the path the agent reads.
-    const value = withAttachmentPaths(
+    // The text leaves as it was typed: an attached file is named here, and the
+    // address the agent reads is written into its copy of the prompt on the
+    // server — the message the reader sees keeps the name (see `UserMessage`).
+    const value =
       pasteOffer === null
         ? raw.trim()
-        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim(),
-      pendingFiles,
-      activeSession,
-    );
+        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();

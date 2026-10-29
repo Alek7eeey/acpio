@@ -282,7 +282,10 @@ describe("the link an attached file writes into the composer", () => {
     await waitFor(() => expect(textarea.value).toBe("screenshot.png"));
   });
 
-  it("carries the path the agent reads in the message that leaves", async () => {
+  // The text leaves as it was typed — the name, no address. The address is
+  // written into the agent's own copy of the prompt on the server (see
+  // runPrompt), so the message the reader keeps reads like the field did.
+  it("sends the text as it was typed", async () => {
     const detail = idleSession();
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
 
@@ -296,35 +299,7 @@ describe("the link an attached file writes into the composer", () => {
     fireEvent.click(screen.getByLabelText("Отправить"));
 
     await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
-    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
-      "посмотри [screenshot.png](.acpio-attachments/s1/screenshot.png)",
-    );
-  });
-
-  // The path is the app's business: the agent gets it inside the link the
-  // message carries, and a file that sits outside the chat folder is named by
-  // its absolute path — the one the agent can open.
-  it("writes an absolute address when the file lives outside the chat folder", async () => {
-    const detail = idleSession();
-    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
-    seedComposerDrafts({
-      s1: {
-        text: "посмотри screenshot.png",
-        files: [
-          { name: "screenshot.png", path: "D:/pet-pr/acpio/data/attachments/s1/screenshot.png" },
-        ],
-      },
-    });
-
-    const { container } = renderComposer();
-    const textarea = container.querySelector("textarea")!;
-    await waitFor(() => expect(textarea.value).toBe("посмотри screenshot.png"));
-    fireEvent.click(screen.getByLabelText("Отправить"));
-
-    await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
-    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
-      "посмотри [screenshot.png](D:/pet-pr/acpio/data/attachments/s1/screenshot.png)",
-    );
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe("посмотри screenshot.png");
   });
 
   // Copying the chip hands over what the composer shows — the name — not the
@@ -370,13 +345,26 @@ describe("the link an attached file writes into the composer", () => {
     fireEvent.click(screen.getByLabelText("Отправить"));
 
     await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
-    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
-      "посмотри [screenshot.png](.acpio-attachments/s1/screenshot.png)",
-    );
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe("посмотри screenshot.png");
   });
 });
 
 describe("attached image in a landed user message", () => {
+  // The message reads like the field that wrote it: the file's name is the
+  // link, and the address behind it is this message's own file part.
+  it("names the file as a link in the message text", async () => {
+    const detail = landedImageSession();
+    detail.messages[0]!.parts[0]!.payload = { text: "что тут shot.png" };
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    const link = container.querySelector<HTMLAnchorElement>(
+      `.${styles.userBubble} a`,
+    );
+    expect(link?.textContent).toBe("shot.png");
+    expect(link?.getAttribute("href")).toBe("/api/sessions/s1/attachments/shot.png");
+  });
+
   // Regression: once the server echoed the file part with its fileId, the chip
   // was replaced by the preview alone, so the file name vanished. The image
   // preview belongs above the chip, and the chip (with the name) stays.

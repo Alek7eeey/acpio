@@ -551,6 +551,29 @@ async function readPromptImage(f: SavedAttachment): Promise<PromptImageBlock | n
  * client lets the agent read the exact file (like attaching any file in
  * Cursor). Returns the list and records every path in `allowedFiles`.
  */
+/**
+ * Write each attached file's address into the text the agent reads, in place of
+ * the bare name the reader's message shows.
+ *
+ * The composer names a file by its name (the field shows text, not markdown),
+ * and the message the reader keeps says the same name — but a model can open
+ * only what it is given a path to, so its own copy of the prompt carries
+ * `[name](path)` beside the `[Прикреплённые файлы: …]` list. The stored message
+ * is written before this and is never touched by it.
+ */
+function withAttachmentLinks(
+  text: string,
+  files: ReadonlyArray<{ name: string; relPath: string }>,
+): string {
+  let out = text;
+  for (const file of files) {
+    if (!file.name || !out.includes(file.name)) continue;
+    const target = file.relPath.replace(/\\/g, "/");
+    out = out.replace(file.name, `[${file.name}](${target})`);
+  }
+  return out;
+}
+
 async function saveAttachments(
   sessionId: string,
   cwd: string,
@@ -2769,6 +2792,7 @@ export async function runPrompt(
       // answered "I likely cannot see pixels" while the pixels sat in the same
       // message (session 3d088bb2). The path still names the file on disk for a
       // model whose endpoint drops image blocks (text-only behind a proxy).
+      promptUserText = withAttachmentLinks(promptUserText, saved);
       const listed = saved.map((f) => f.relPath);
       const hint = `[Прикреплённые файлы: ${listed.join(", ")}${
         embedded.size === saved.length ? "" : " — прочитайте их при необходимости."

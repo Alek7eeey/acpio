@@ -1665,6 +1665,15 @@
   font-weight: inherit;
 }
 
+/* A file the message names, the way the composer showed it: the name as the
+   link it is. */
+.userFileLink {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 button.userSlashCmd {
   display: inline;
   margin: 0;
@@ -3145,6 +3154,14 @@ button.userSlashCmd:focus-visible {
   color: transparent;
   -webkit-text-fill-color: transparent;
   caret-color: var(--text);
+}
+
+.pillInput::selection {
+  /* Selecting the field must not paint its own glyphs: the reader sees the
+     mirror's text, and two copies of one word read as a ghost. */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .pillInput::placeholder {
