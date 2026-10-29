@@ -1827,6 +1827,20 @@ export function normalizeBuiltinSubagents(value: unknown): BuiltinSubagentsSetti
   };
 }
 
+/**
+ * A file a composer draft names by its own name: where it landed on the server.
+ *
+ * The field shows a staged file as `[name]()` — the path a staged upload has is
+ * a session UUID's worth of noise in the place the reader types (see
+ * `composerAttachmentLink` in the chat page). That path is written back when the
+ * message goes out, so a draft that outlives a reload has to carry it.
+ */
+export type ComposerDraftFile = { name: string; path: string };
+
+/** One chat's persisted composer draft: the text as the field shows it, and the
+ *  files its links name (empty for a draft that attached nothing). */
+export type ComposerDraft = { text: string; files: ComposerDraftFile[] };
+
 export interface AppSettings {
   theme: Theme;
   locale: AppLocale;
@@ -2179,9 +2193,11 @@ export interface AppSettings {
   /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
-   * deleted or its message is sent.
+   * deleted or its message is sent. A draft carries the files its text links by
+   * name, so a link the field shows short still points at the file once the
+   * draft is restored.
    */
-  composerDrafts: Record<string, string>;
+  composerDrafts: Record<string, ComposerDraft>;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

@@ -58,16 +58,45 @@ describe("composerDraftSnapshot / seedComposerDrafts", () => {
     setComposerDraft("s1", "сохрани меня");
     setComposerDraft("s2", "   \n ");
 
-    expect(composerDraftSnapshot()).toEqual({ s1: "сохрани меня" });
+    expect(composerDraftSnapshot()).toEqual({ s1: { text: "сохрани меня", files: [] } });
   });
 
   it("restores a persisted map into the registry", async () => {
     const { readComposerDraft, seedComposerDrafts } = await freshRegistry();
-    seedComposerDrafts({ s1: "восстановлен", s2: "", "pane:9": "игнор" });
+    seedComposerDrafts({
+      s1: { text: "восстановлен", files: [] },
+      s2: { text: "", files: [] },
+      "pane:9": { text: "игнор", files: [] },
+    });
 
     expect(readComposerDraft("s1")).toBe("восстановлен");
     expect(readComposerDraft("s2")).toBe("");
     expect(readComposerDraft("pane:9")).toBe("");
+  });
+
+  // The field names a staged file by its name alone, so the path its link is
+  // written with has to travel with the draft — otherwise a reload leaves a
+  // link that points at nothing.
+  it("carries the files a draft's links name through a reload", async () => {
+    const {
+      composerDraftSnapshot,
+      readComposerDraftFiles,
+      seedComposerDrafts,
+      setComposerDraft,
+      setComposerDraftFiles,
+    } = await freshRegistry();
+    const shot = { name: "shot.png", path: "E:/proj/.acpio-attachments/s1/shot.png" };
+    setComposerDraft("s1", "посмотри [shot.png]()");
+    setComposerDraftFiles("s1", [shot]);
+
+    const persisted = composerDraftSnapshot();
+    expect(persisted).toEqual({ s1: { text: "посмотри [shot.png]()", files: [shot] } });
+
+    vi.resetModules();
+    const restarted = await import("./composerDrafts");
+    restarted.seedComposerDrafts(persisted);
+    expect(restarted.readComposerDraft("s1")).toBe("посмотри [shot.png]()");
+    expect(restarted.readComposerDraftFiles("s1")).toEqual([shot]);
   });
 
   it("notifies the persist sink when a draft changes", async () => {

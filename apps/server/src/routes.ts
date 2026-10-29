@@ -391,7 +391,17 @@ const settingsSchema = z.object({
     .optional(),
   chatToolbarStyle: z.enum(["classic", "minimal"]).optional(),
   remoteAccessKey: z.string().max(80).optional(),
-  composerDrafts: z.record(z.string().max(20_000)).optional(),
+  composerDrafts: z
+    .record(
+      z.object({
+        text: z.string().max(20_000),
+        files: z
+          .array(z.object({ name: z.string().max(400), path: z.string().max(4096) }))
+          .max(50)
+          .optional(),
+      }),
+    )
+    .optional(),
   mcpServers: z.array(mcpServerSchema).max(100).optional(),
   mcpBuiltinDisabledIds: z.array(z.string().min(1).max(200)).max(50).optional(),
   mcpFolderConfigs: z

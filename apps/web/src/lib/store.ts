@@ -1603,7 +1603,13 @@ function scheduleComposerDraftPersist(get: () => AppState) {
     let changed = Object.keys(current).length !== Object.keys(next).length;
     if (!changed) {
       for (const [k, v] of Object.entries(next)) {
-        if (current[k] !== v) {
+        const was = current[k];
+        if (
+          !was ||
+          was.text !== v.text ||
+          was.files.length !== v.files.length ||
+          v.files.some((f, i) => was.files[i]?.name !== f.name || was.files[i]?.path !== f.path)
+        ) {
           changed = true;
           break;
         }

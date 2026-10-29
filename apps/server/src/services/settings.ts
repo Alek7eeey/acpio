@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import {
   AppSettings,
   BuiltinProviderConfig,
+  ComposerDraft,
+  ComposerDraftFile,
   DEFAULT_SETTINGS,
   McpServerConfig,
   PluginEntryConfig,
@@ -41,8 +43,10 @@ import { generateRemoteAccessKey } from "../lib/remoteAccess.js";
 import { syncDeepLoggingFromSettings } from "./deepLogging.js";
 
 const SETTINGS_KEY = "app";
-/** Total persisted composer-draft payload cap (keys + text), in characters. */
+/** Total persisted composer-draft payload cap (keys + text + files), in characters. */
 const COMPOSER_DRAFTS_MAX_BYTES = 200_000;
+/** Files one draft may name — the composer stages no more than this either. */
+const COMPOSER_DRAFT_FILES_MAX = 50;
 
 /** True when the provider is a registered harness adapter. */
 function isKnownProvider(provider: unknown): provider is string {
@@ -432,23 +436,36 @@ function mergeSettings(raw: unknown): AppSettings {
     merged.builtinAllowOutsideCwd = DEFAULT_SETTINGS.builtinAllowOutsideCwd;
   }
   // Composer drafts persist so typed text survives a reload. Heal the map:
-  // only string keys with non-empty trimmed string values survive, and the
-  // whole blob is capped so it cannot grow without bound.
+  // only string keys with non-empty trimmed text survive, a bare string is the
+  // draft a version before the files knew (its text alone), and the whole blob
+  // is capped so it cannot grow without bound.
   {
     const rawDrafts = merged.composerDrafts;
-    const drafts: Record<string, string> = {};
+    const drafts: Record<string, ComposerDraft> = {};
     let bytes = 0;
     if (rawDrafts && typeof rawDrafts === "object" && !Array.isArray(rawDrafts)) {
       for (const [key, value] of Object.entries(rawDrafts as Record<string, unknown>)) {
         if (!key.trim()) continue;
         // Ephemeral pre-chat pane tokens are never persisted.
         if (key.startsWith("pane:")) continue;
-        if (typeof value !== "string") continue;
-        const text = value.trim() ? value : "";
-        if (!text) continue;
-        const cost = key.length + text.length;
+        const raw = typeof value === "string" ? { text: value } : value;
+        if (!raw || typeof raw !== "object") continue;
+        const { text: rawText, files: rawFiles } = raw as { text?: unknown; files?: unknown };
+        if (typeof rawText !== "string" || !rawText.trim()) continue;
+        const files: ComposerDraftFile[] = [];
+        if (Array.isArray(rawFiles)) {
+          for (const row of rawFiles) {
+            if (files.length >= COMPOSER_DRAFT_FILES_MAX) break;
+            const { name, path } = (row ?? {}) as { name?: unknown; path?: unknown };
+            if (typeof name !== "string" || !name.trim()) continue;
+            if (typeof path !== "string" || !path.trim()) continue;
+            files.push({ name, path });
+          }
+        }
+        const cost =
+          key.length + rawText.length + files.reduce((n, f) => n + f.name.length + f.path.length, 0);
         if (bytes + cost > COMPOSER_DRAFTS_MAX_BYTES) break;
-        drafts[key] = text;
+        drafts[key] = { text: rawText, files };
         bytes += cost;
       }
     }

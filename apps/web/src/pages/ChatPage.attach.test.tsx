@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
+import { composerDraftSnapshot, forgetComposerDraft, seedComposerDrafts } from "../lib/composerDrafts";
 import { I18nProvider } from "../lib/i18n";
 import { ChatPage } from "./ChatPage";
 import styles from "./ChatPage.module.css";
@@ -15,12 +16,20 @@ const apiMock = vi.hoisted(() => ({
     size: 4,
   })),
   prompt: vi.fn(async () => ({})),
+  // A partial save answers with the whole settings object, as the server does:
+  // the store takes its settings from this answer, so an empty one leaves every
+  // page reading undefined.
+  updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({
+    ...useAppStore.getState().settings,
+    ...patch,
+  })),
 }));
 
 vi.mock("../lib/api", () => {
   const target: Record<string, unknown> = {
     uploadAttachment: apiMock.uploadAttachment,
     prompt: apiMock.prompt,
+    updateSettings: apiMock.updateSettings,
     // A running turn pulls the git chip in; an empty `{}` from the generic
     // proxy would leave `status.files` undefined and crash the chip row.
     gitStatus: vi.fn(async () => ({
@@ -146,6 +155,10 @@ beforeEach(() => {
     focusedPaneIndex: 0,
     unseenFinishedTurns: {},
     sessionDetails: { s1: detail },
+    // A turn that a previous test started never ends here (no server frames
+    // arrive), and a busy chat queues the next prompt instead of sending it.
+    inflight: 0,
+    inflightBySession: {},
   });
 });
 
@@ -153,6 +166,9 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   localStorage.clear();
+  // The draft registry is module state: a draft (and the files it staged) left
+  // behind would come back as a chip in the next test's composer.
+  for (const key of Object.keys(composerDraftSnapshot())) forgetComposerDraft(key);
 });
 
 function renderComposer() {
@@ -255,6 +271,32 @@ describe("the link an attached file writes into the composer", () => {
     await waitFor(() => expect(textarea.value).toBe("[screenshot.png]()"));
 
     fireEvent.change(textarea, { target: { value: "посмотри [screenshot.png]()" } });
+    fireEvent.click(screen.getByLabelText("Отправить"));
+
+    await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
+      "посмотри [screenshot.png](.acpio-attachments/s1/screenshot.png)",
+    );
+  });
+
+  // A reload brings the draft back: the text names the file, and the path it was
+  // staged at travelled with the draft, so the chip returns and the link gets
+  // its destination at send — nothing to upload again.
+  it("brings the chip and the path back with a restored draft", async () => {
+    const detail = idleSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+    seedComposerDrafts({
+      s1: {
+        text: "посмотри [screenshot.png]()",
+        files: [{ name: "screenshot.png", path: "E:/proj/.acpio-attachments/s1/screenshot.png" }],
+      },
+    });
+
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await waitFor(() => expect(textarea.value).toBe("посмотри [screenshot.png]()"));
+    expect(await screen.findByText("screenshot.png")).toBeTruthy();
+
     fireEvent.click(screen.getByLabelText("Отправить"));
 
     await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());

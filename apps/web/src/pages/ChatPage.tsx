@@ -64,8 +64,10 @@ import {
   discardComposerPaneWork,
   newComposerPaneKey,
   readComposerDraft,
+  readComposerDraftFiles,
   setComposerAttachments,
   setComposerDraft,
+  setComposerDraftFiles,
 } from "../lib/composerDrafts";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
@@ -5033,6 +5035,28 @@ function ChatThread() {
     );
   }, [composerSessionId]);
 
+  // Files the draft staged before the page was reloaded: the text names them
+  // by name alone, so their chips come back from the paths the draft kept —
+  // ready, nothing to upload, and the link gets its destination back at send.
+  useEffect(() => {
+    if (!composerSessionId) return;
+    const kept = readComposerDraftFiles(composerSessionId);
+    if (!kept.length) return;
+    setPendingFiles((prev) => {
+      const named = new Set(prev.map((f) => f.name));
+      const restored = kept
+        .filter((f) => !named.has(f.name))
+        .map((f) => ({
+          id: nextComposerAttachmentId(),
+          name: f.name,
+          path: f.path,
+          size: 0,
+          status: "ready" as const,
+        }));
+      return restored.length ? [...prev, ...restored].slice(0, MAX_ATTACH_COUNT) : prev;
+    });
+  }, [composerSessionId]);
+
   // Live, not on switch: the reload guard reads the registry at unload time, so
   // it has to see the text as it is typed — and the chips of attachments the
   // server has already stored but no message references yet.
@@ -5042,8 +5066,14 @@ function ChatThread() {
 
   useEffect(() => {
     setComposerAttachments(composerKey, pendingFiles.length);
+    // The paths travel with the draft: a link the field shows as `[name]()` is
+    // written out in full when the message goes, reload or not.
+    setComposerDraftFiles(
+      composerKey,
+      pendingFiles.flatMap((f) => (f.status === "ready" && f.path ? [{ name: f.name, path: f.path }] : [])),
+    );
     return () => setComposerAttachments(composerKey, 0);
-  }, [composerKey, pendingFiles.length]);
+  }, [composerKey, pendingFiles]);
 
   const isShellSessionActive = isShellSession(activeSession?.provider);
   const panelFillsChat = useFillPanelWhenChatTight(

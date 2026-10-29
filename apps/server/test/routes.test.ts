@@ -207,6 +207,39 @@ describe("health & settings", () => {
     expect(get.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
   });
 
+  // The field names an attached file by its name alone, so the draft keeps the
+  // path its link is written with: without it a reload leaves a link that
+  // points at nothing.
+  it("PUT /api/settings keeps the files a composer draft names", async () => {
+    const files = [{ name: "shot.png", path: "E:/proj/.acpio-attachments/s1/shot.png" }];
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { composerDrafts: { s1: { text: "посмотри [shot.png]()", files } } },
+    });
+    expect(put.statusCode).toBe(200);
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.json().composerDrafts).toEqual({ s1: { text: "посмотри [shot.png]()", files } });
+  });
+
+  // A draft stored before the files were kept is its text and nothing else —
+  // healed into the shape the chat page reads rather than dropped, and the
+  // ephemeral pre-chat pane token still never reaches the row.
+  it("heals a draft saved as bare text", async () => {
+    const stored = { composerDrafts: { s1: "старый черновик", "pane:3": "не в базу", s2: " " } };
+    await db
+      .insert(settingsTable)
+      .values({ key: "app", value: stored, updatedAt: new Date() })
+      .onConflictDoUpdate({
+        target: settingsTable.key,
+        set: { value: stored, updatedAt: new Date() },
+      });
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.json().composerDrafts).toEqual({ s1: { text: "старый черновик", files: [] } });
+  });
+
   // Regression: the field was missing from the PUT schema, so zod stripped it
   // and the board placeholder picker snapped back after every save.
   it("PUT /api/settings persists the board add-task placeholder style", async () => {
