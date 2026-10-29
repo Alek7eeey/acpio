@@ -65,4 +65,55 @@ describe("a picture in agent markdown", () => {
     expect(imageSrcs(container)).toEqual([]);
     expect(container.textContent).toContain("shot");
   });
+
+  // A caption the text did not give is the picture's path, and a path is not a
+  // caption: the reader gets the file's name, the path stays in the tooltip.
+  it("captions a picture it cannot show with the file's name", () => {
+    const { container } = renderMarkdown("![](C:\\tmp\\shot.png)", null);
+
+    expect(container.textContent).toBe("shot.png");
+  });
+
+  it("keeps the whole path in the picture's own tooltip", () => {
+    const { container } = renderMarkdown("![C:\\tmp\\shot.png](C:\\tmp\\shot.png)");
+
+    const img = container.querySelector("img");
+    expect(img?.getAttribute("alt")).toBe("shot.png");
+    expect(img?.getAttribute("title")).toBe("C:\\tmp\\shot.png");
+  });
+});
+
+// Whoever made the file writes its link with the path the file has, so the text
+// of a link is that path — a name the reader cannot find in a sentence. The
+// name is what the link says; the path it came from is its tooltip.
+describe("a link to a file in agent markdown", () => {
+  it("says the file's name instead of the whole path", () => {
+    const { container } = renderMarkdown(
+      "[C:\\work\\shots\\screen.png](C:\\work\\shots\\screen.png)",
+    );
+
+    const link = container.querySelector("a");
+    expect(link?.textContent).toBe("screen.png");
+    expect(link?.getAttribute("title")).toBe("C:\\work\\shots\\screen.png");
+  });
+
+  it("says the file's name for a path relative to the chat folder too", () => {
+    const { container } = renderMarkdown("[docs/usage-ru.md](docs/usage-ru.md)");
+
+    expect(container.querySelector("a")?.textContent).toBe("usage-ru.md");
+  });
+
+  it("leaves a link that already names its file alone", () => {
+    const { container } = renderMarkdown("[shot.png](shots/screen.png)");
+
+    const link = container.querySelector("a");
+    expect(link?.textContent).toBe("shot.png");
+    expect(link?.getAttribute("title")).toBeNull();
+  });
+
+  it("leaves a web address as its own text", () => {
+    const { container } = renderMarkdown("[https://example.com/a/b](https://example.com/a/b)");
+
+    expect(container.querySelector("a")?.textContent).toBe("https://example.com/a/b");
+  });
 });

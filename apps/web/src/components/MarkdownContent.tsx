@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useT } from "../lib/i18n";
+import { lastPathSegment } from "../lib/pathSegments";
 import { ImageViewer, type ViewerPicture } from "./ImageViewer";
 import { toggleWrapLines, useWrapLines } from "../lib/wrapLines";
 import hljs from "highlight.js/lib/core";
@@ -324,6 +325,48 @@ function friendlyLinkLabel(href: string | undefined, children: ReactNode): React
   return children;
 }
 
+/** Text that is nothing but a path on this machine — `C:\work\shot.png`, or one
+ *  relative to the chat folder. A web address is not one, however many slashes
+ *  it has, and neither is a bare word. */
+function isPathText(text: string): boolean {
+  // `C:` reads as a scheme and is not one; `https:` is.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(text) && !/^[a-z]:[\\/]/i.test(text)) return false;
+  return /[\\/]/.test(text);
+}
+
+/**
+ * The file's own name, when the text is nothing but a path.
+ *
+ * A link to a file or a picture is written by whoever made that file, so its
+ * text is the path the file has: `D:\work\shots\screen.png` in the middle of a
+ * sentence is a link the reader cannot find the name in, and the picture beside
+ * it is one word wide. The name is what the link says; the path it came from is
+ * its tooltip, and stays in the destination.
+ */
+function pathLabel(text: string): string | null {
+  const trimmed = text.trim();
+  if (!isPathText(trimmed)) return null;
+  const name = lastPathSegment(trimmed);
+  return name && name !== trimmed ? name : null;
+}
+
+/** A link in agent text. One that points at a file says the file's name. */
+function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+  const text = childrenToPlainText(children).trim();
+  const name = pathLabel(text);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={styles.link}
+      title={name ? text : undefined}
+    >
+      {name ?? friendlyLinkLabel(href, children)}
+    </a>
+  );
+}
+
 /** Expand bare (Ъ) citations in plain markdown text. */
 function expandSourceCitations(text: string): string {
   return text
@@ -422,13 +465,22 @@ export function MarkdownImage({
   const [viewing, setViewing] = useState<{ pictures: ViewerPicture[]; index: number } | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const target = imageTarget(src, sessionId ?? null);
-  const caption = (alt ?? "").trim() || src.trim();
+  // A caption the text did not give is the picture's own path, and a path is not
+  // a caption: the reader gets the file's name, the path stays in the tooltip.
+  const rawCaption = (alt ?? "").trim() || decodePath(src.trim());
+  const shortCaption = pathLabel(rawCaption);
+  const caption = shortCaption ?? rawCaption;
+  const tooltip = shortCaption ? rawCaption : caption;
   if (!target) {
-    return caption ? <span className={styles.imageMissing}>{caption}</span> : null;
+    return caption ? (
+      <span className={styles.imageMissing} title={shortCaption ? rawCaption : undefined}>
+        {caption}
+      </span>
+    ) : null;
   }
   if (broken) {
     return (
-      <span className={styles.imageMissing} title={src}>
+      <span className={styles.imageMissing} title={rawCaption}>
         {caption}
       </span>
     );
@@ -452,7 +504,7 @@ export function MarkdownImage({
           className={styles.image}
           src={target}
           alt={caption}
-          title={caption}
+          title={tooltip}
           loading="lazy"
           onError={() => setBroken(true)}
         />
@@ -490,11 +542,7 @@ const markdownComponents: Components = {
     }
     return <CodeBlock language={match?.[1]} code={value} />;
   },
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className={styles.link}>
-      {friendlyLinkLabel(href, children)}
-    </a>
-  ),
+  a: ({ href, children }) => <MarkdownLink href={href}>{children}</MarkdownLink>,
   blockquote: ({ children }) => (
     <blockquote className={styles.quote}>{children as ReactNode}</blockquote>
   ),

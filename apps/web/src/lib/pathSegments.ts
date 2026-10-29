@@ -4,12 +4,17 @@ import { canonicalCwd } from "@acpio/shared";
 
 export const DRIVES_ROOT = "Computer";
 
+/** Last segment of a path — a file's own name, or a folder's. */
+export function lastPathSegment(fullPath: string): string {
+  const normalized = canonicalCwd(fullPath);
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || normalized;
+}
+
 /** Last segment of a working directory — the label used by the tree, board and menus. */
 export function folderLabel(cwd: string, noFolderLabel: string): string {
   const normalized = canonicalCwd(cwd);
-  if (!normalized) return noFolderLabel;
-  const parts = normalized.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || normalized;
+  return normalized ? lastPathSegment(normalized) : noFolderLabel;
 }
 
 /** Extensions rendered as inline image previews (see IMAGE_MIME on the server). */
