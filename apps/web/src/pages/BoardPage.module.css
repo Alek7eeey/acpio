@@ -604,6 +604,13 @@
      field, and the copy laid over it would hang that much taller. */
   display: block;
   scrollbar-width: none;
+  /* The field's own 2px on every side (the browser's, not ours) shrinks the
+     text it lays out by 4px and pushes it down and right, while the copy has
+     none — so the two wrapped at different widths, every glyph sat a couple of
+     pixels off its painted twin, and the caret at the end of the text stood
+     past the last letter. The copy's box is the one the reader sees: the field
+     keeps no padding of its own. */
+  padding: 0;
 }
 
 .composerText .composerInput::-webkit-scrollbar {
