@@ -5688,13 +5688,13 @@ function ChatThread() {
     [discardStagedFile],
   );
 
-  /** The link that names a chip's file with its path: a staged upload lives in
-   *  the session's attachment folder, a file picked on the server keeps the
-   *  path the prompt hands the agent. The composer shows the name alone (see
-   *  `composerAttachmentText`), so a copy hands over what the message carries. */
+  /** What a chip's copy hands over: the very thing the composer shows — the
+   *  file's name (see `composerAttachmentText`) — not the path form the message
+   *  is written with. A path belongs to the app: it is put into the link as the
+   *  message goes out, and a reader who copies the chip wants the name. */
   const attachmentChipLink = useCallback(
-    (file: ComposerAttachment) => attachmentFileLink(activeSession, file),
-    [activeSession],
+    (file: ComposerAttachment) => file.link ?? composerAttachmentText(file.name),
+    [],
   );
 
   const copyAttachmentLink = useCallback(

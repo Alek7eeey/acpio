@@ -301,6 +301,54 @@ describe("the link an attached file writes into the composer", () => {
     );
   });
 
+  // The path is the app's business: the agent gets it inside the link the
+  // message carries, and a file that sits outside the chat folder is named by
+  // its absolute path — the one the agent can open.
+  it("writes an absolute address when the file lives outside the chat folder", async () => {
+    const detail = idleSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+    seedComposerDrafts({
+      s1: {
+        text: "посмотри screenshot.png",
+        files: [
+          { name: "screenshot.png", path: "D:/pet-pr/acpio/data/attachments/s1/screenshot.png" },
+        ],
+      },
+    });
+
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await waitFor(() => expect(textarea.value).toBe("посмотри screenshot.png"));
+    fireEvent.click(screen.getByLabelText("Отправить"));
+
+    await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
+      "посмотри [screenshot.png](D:/pet-pr/acpio/data/attachments/s1/screenshot.png)",
+    );
+  });
+
+  // Copying the chip hands over what the composer shows — the name — not the
+  // path form the message is written with.
+  it("copies the name from the chip, not the path", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "" } });
+    pasteImage(textarea);
+    const chip = await stagedChip(container);
+
+    fireEvent.contextMenu(chip);
+    fireEvent.click(await screen.findByText("Скопировать ссылку на файл"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("screenshot.png"));
+  });
+
   // A reload brings the draft back: the text names the file, and the path it was
   // staged at travelled with the draft, so the chip returns and the link gets
   // its destination at send — nothing to upload again.
