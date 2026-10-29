@@ -69,6 +69,7 @@ import {
   setComposerDraft,
   setComposerDraftFiles,
 } from "../lib/composerDrafts";
+import { splitLinkNames } from "../lib/linkNames";
 import { isCompactPanelLayout, useChatSplitAllowed } from "../lib/panelLayout";
 import { useFixedMenuPlacement } from "../lib/menuPosition";
 import { sanitizeCatalogModes, selectLiveSessionDetail, useAppStore, type PendingAttachment } from "../lib/store";
@@ -617,27 +618,6 @@ function removeComposerLink(value: string, link: string): string {
   if (value[end] === " ") end += 1;
   else if (value[start - 1] === " ") start -= 1;
   return value.slice(0, start) + value.slice(end);
-}
-
-/** Text split into runs, the ones that are an attached file's name marked. */
-function splitLinkNames(
-  text: string,
-  names: string[],
-): Array<{ text: string; link: boolean }> {
-  const known = names.filter((name) => name && text.includes(name));
-  if (known.length === 0) return text ? [{ text, link: false }] : [];
-  // Longest name first: one that begins another must still win.
-  const pattern = new RegExp(
-    `(${[...known]
-      .sort((a, b) => b.length - a.length)
-      .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      .join("|")})`,
-    "g",
-  );
-  return text
-    .split(pattern)
-    .filter((part) => part !== "")
-    .map((part) => ({ text: part, link: known.includes(part) }));
 }
 
 /**

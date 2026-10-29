@@ -882,7 +882,7 @@ describe("BoardPage new task form", () => {
     // One line to start: the box grows with the text instead of opening tall.
     expect(textarea.getAttribute("rows")).toBe("1");
 
-    const box = textarea.closest("div") as HTMLElement;
+    const box = textarea.closest(`.${styles.composer}`) as HTMLElement;
     const row = box.querySelector(`.${styles.composerFooter}`) as HTMLElement | null;
     expect(row).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Cancel" })).toBeTruthy();
@@ -1242,7 +1242,41 @@ describe("BoardPage file drop", () => {
     // Taken by the form, not followed by the browser: a refused drop is what
     // opened the file in a tab of its own.
     expect(taken).toBe(false);
-    expect(await within(group).findByText("plan.pdf")).toBeTruthy();
+    await waitFor(() => expect(group.querySelector(`.${styles.fileChip}`)).toBeTruthy());
+    expect(group.querySelector(`.${styles.fileChip}`)?.textContent).toContain("plan.pdf");
+
+    // The description names the file as well — the chip below the box is not
+    // part of what the task, and so the agent, is told — and the name is
+    // painted as the link it is (a textarea cannot colour a range itself).
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("plan.pdf");
+    expect(group.querySelector(`.${styles.composerMirrorLink}`)?.textContent).toBe("plan.pdf");
+  });
+
+  // The chip's own press offers the link that names the file — the name the
+  // description says, the same thing the chat composer hands over.
+  it("copies the file's name from its chip", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    useAppStore.setState({ boardSessions: [] });
+    renderBoard();
+    await screen.findByText("Add task");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    within(group).getByPlaceholderText("Describe the task…");
+
+    dropFile(window, new File(["x"], "plan.pdf", { type: "application/pdf" }));
+    await waitFor(() => expect(group.querySelector(`.${styles.fileChip}`)).toBeTruthy());
+
+    fireEvent.contextMenu(group.querySelector(`.${styles.fileChip}`)!);
+    await userEvent.click(await screen.findByText("Copy link to file"));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("plan.pdf"));
   });
 
   // With no form open there is nothing to attach a file to, and the board is

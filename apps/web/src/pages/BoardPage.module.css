@@ -565,11 +565,61 @@
   resize: vertical;
   border: 0;
   background: none;
-  color: var(--text);
   font: inherit;
   font-size: 0.84rem;
   line-height: 1.4;
   outline: none;
+  /* What the reader sees is the mirror's text (see `.composerMirror`): a
+     textarea cannot colour a range, and an attached file's name is a link. */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text);
+}
+
+.composerInput::placeholder {
+  color: var(--text-secondary);
+  -webkit-text-fill-color: var(--text-secondary);
+}
+
+/* The description's box, with its painted copy laid over it: the copy takes no
+   room of its own — the textarea's own height (the component writes it) is the
+   box's height — and every metric that moves a glyph has to match
+   `.composerInput`, or the line and the caret drift apart. The scrollbar is
+   hidden on the field so the two wrap at the same width. */
+.composerText {
+  position: relative;
+  min-width: 0;
+}
+
+.composerText .composerInput {
+  /* Block, not inline-block: the inline box leaves a line's descent under the
+     field, and the copy laid over it would hang that much taller. */
+  display: block;
+  scrollbar-width: none;
+}
+
+.composerText .composerInput::-webkit-scrollbar {
+  display: none;
+}
+
+.composerMirror {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--text);
+  pointer-events: none;
+  user-select: none;
+}
+
+.composerMirrorLink {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .composerActions {

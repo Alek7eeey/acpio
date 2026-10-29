@@ -41,6 +41,8 @@ import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
 import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
+import { splitLinkNames } from "../lib/linkNames";
+import { showToast } from "../lib/toast";
 import { stageComposerAttachments } from "../lib/pendingComposerAttachments";
 import {
   buildSlashInsertion,
@@ -313,6 +315,22 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Caret in the description — where a skill picked from the menu lands. */
   const [caret, setCaret] = useState(0);
+  /** The painted copy of the description (see `splitLinkNames`). */
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  /** The chip whose link is being offered, and where the menu stands. */
+  const [fileMenu, setFileMenu] = useState<{ x: number; y: number; entry: DraftFile } | null>(
+    null,
+  );
+  useEffect(() => {
+    if (!fileMenu) return;
+    const onDown = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[role="menu"]')) return;
+      setFileMenu(null);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [fileMenu]);
   /** The menu a chat of this agent would open, listed while nothing is attached yet. */
   const [skills, setSkills] = useState<SlashCommandDto[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -512,17 +530,38 @@ const NewTaskComposer = memo(function NewTaskComposer({
     [],
   );
 
+  /** Put the names of the files just attached into the description, at the
+   *  caret, and leave it after them — the same place a skill lands. */
+  const insertFileNames = (names: string[]) => {
+    if (names.length === 0) return;
+    const at = Math.min(Math.max(caret, 0), draft.length);
+    const before = draft.slice(0, at);
+    const pad = before && !/\s$/.test(before) ? " " : "";
+    const insertion = `${pad}${names.join(" ")}`;
+    const caretAfter = before.length + insertion.length;
+    setDraft(before + insertion + draft.slice(at));
+    setCaret(caretAfter);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input) return;
+      input.focus();
+      input.setSelectionRange(caretAfter, caretAfter);
+    });
+  };
+
   /** Add drafts to the row, dropping whatever goes past the ceiling — and the
    *  previews of what was dropped with it. */
   const appendDrafts = (created: DraftFile[]) => {
-    setFiles((prev) => {
-      const room = Math.max(0, MAX_TASK_FILES - prev.length);
-      for (const entry of created.slice(room)) {
-        if (entry.url) URL.revokeObjectURL(entry.url);
-      }
-      const added = created.slice(0, room);
-      return added.length ? [...prev, ...added] : prev;
-    });
+    const room = Math.max(0, MAX_TASK_FILES - files.length);
+    for (const entry of created.slice(room)) {
+      if (entry.url) URL.revokeObjectURL(entry.url);
+    }
+    const added = created.slice(0, room);
+    if (added.length === 0) return;
+    setFiles((prev) => [...prev, ...added].slice(0, MAX_TASK_FILES));
+    // The description says what the task starts on, the way the chat composer
+    // does: a chip below the box is not part of what the agent is told.
+    insertFileNames(added.map((entry) => entry.name));
   };
 
   /** Pick up files from the file input or the clipboard (a screenshot, a PDF). */
@@ -581,6 +620,9 @@ const NewTaskComposer = memo(function NewTaskComposer({
       }),
     );
   };
+
+  /** The names the description paints as links — one per attached file. */
+  const fileNames = useMemo(() => files.map((entry) => entry.name), [files]);
 
   const removeFile = (id: string) => {
     const gone = files.find((entry) => entry.id === id);
@@ -737,11 +779,33 @@ const NewTaskComposer = memo(function NewTaskComposer({
     <div ref={boxRef} className={styles.composer}>
       {/* Skills the folder offers, offered before the task exists: the pick
           hands the first message its `/name` and the agent expands it there. */}
+      <div className={styles.composerText}>
+        {/* The description's own text, painted: an attached file is named here
+            by its name, and a textarea cannot colour a range of its text. */}
+        <div ref={mirrorRef} className={styles.composerMirror} aria-hidden>
+          {splitLinkNames(draft, fileNames).map((part, i) =>
+            part.link ? (
+              <span key={i} className={styles.composerMirrorLink}>
+                {part.text}
+              </span>
+            ) : (
+              <span key={i}>{part.text}</span>
+            ),
+          )}
+          {draft.endsWith("\n") ? "\u200b" : null}
+        </div>
       <textarea
         ref={inputRef}
         className={styles.composerInput}
         rows={1}
         value={draft}
+        onScroll={(e) => {
+          // One text, two boxes: the painted copy follows the one the caret is in.
+          const mirror = mirrorRef.current;
+          if (!mirror) return;
+          mirror.scrollTop = e.currentTarget.scrollTop;
+          mirror.scrollLeft = e.currentTarget.scrollLeft;
+        }}
         placeholder={t("chat.boardTaskPlaceholder")}
         aria-label={t("chat.boardTaskPlaceholder")}
         onChange={(e) => {
@@ -788,6 +852,34 @@ const NewTaskComposer = memo(function NewTaskComposer({
           if (e.key === "Escape") onCancel();
         }}
       />
+      </div>
+      {fileMenu
+        ? createPortal(
+            <div
+              className={styles.menu}
+              style={{ left: fileMenu.x, top: fileMenu.y }}
+              role="menu"
+              aria-label={fileMenu.entry.name}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className={styles.menuItem}
+                onClick={() => {
+                  const name = fileMenu.entry.name;
+                  setFileMenu(null);
+                  void navigator.clipboard
+                    .writeText(name)
+                    .then(() => showToast(t("common.toastCopied"), { tone: "success" }))
+                    .catch(() => {});
+                }}
+              >
+                {t("chat.copyAttachmentLink")}
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
       <SlashCommandMenu
         open={skillMenuOpen}
         commands={matchingSkills}
@@ -805,7 +897,17 @@ const NewTaskComposer = memo(function NewTaskComposer({
       {files.length ? (
         <div className={styles.composerFiles}>
           {files.map((entry) => (
-            <span key={entry.id} className={styles.fileChip}>
+            <span
+              key={entry.id}
+              className={styles.fileChip}
+              onContextMenu={(e) => {
+                // The link that names this file is one press away — the same
+                // name the description says, not the path behind it.
+                e.preventDefault();
+                e.stopPropagation();
+                setFileMenu({ x: e.clientX, y: e.clientY, entry });
+              }}
+            >
               {entry.url ? (
                 <img className={styles.fileThumb} src={entry.url} alt="" />
               ) : (
