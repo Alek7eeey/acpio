@@ -866,11 +866,11 @@ export const en = {
     importSettingsFile: "Choose file",
     exportSettings: "Export",
     exportSettingsHint:
-      "Download a settings file to apply on another machine. API keys and tokens are not written into it.",
+      "Download a settings file to apply on another machine. Providers, API keys and tokens are not written into it.",
     exportSettingsFailed: "Could not export the settings: {{error}}",
     importSettings: "Import",
     importSettingsHint:
-      "Apply another user's settings file. Your own API keys and tokens stay in place.",
+      "Apply another user's settings file. Your own providers, API keys and tokens stay in place.",
     importSettingsDone: "Settings applied: {{count}}",
     importSettingsFailed: "Could not apply the settings file: {{error}}",
     saved: "Saved",

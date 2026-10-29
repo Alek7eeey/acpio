@@ -643,13 +643,6 @@ const SECRET_SETTING_KEYS = [
   "remoteAccessKey",
 ] as const;
 
-/** One provider row without the key it pays with. */
-function stripProviderSecrets(raw: unknown): unknown {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
-  const { apiKey: _apiKey, ...rest } = raw as Record<string, unknown>;
-  return rest;
-}
-
 /** One MCP server without the token/env/headers it authenticates with. */
 function stripMcpSecrets(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
@@ -665,27 +658,20 @@ function stripMcpSecrets(raw: unknown): unknown {
 }
 
 /**
- * A settings bag without its credentials — the shape both directions use, so a
- * hand-edited file carrying a key can no more overwrite the local one than an
- * export can leak it.
+ * A settings bag without what must not travel — the shape both directions use,
+ * so a hand-edited file carrying a key can no more overwrite the local one than
+ * an export can leak it.
  */
 function stripSecrets(bag: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = { ...bag };
   for (const key of SECRET_SETTING_KEYS) delete out[key];
   // Typed drafts are one user's own text, not a setting anyone inherits.
   delete out.composerDrafts;
-  if (Array.isArray(out.builtinProviders)) {
-    out.builtinProviders = out.builtinProviders.map(stripProviderSecrets);
-  }
-  const pluginProviders = out.pluginProviders;
-  if (pluginProviders && typeof pluginProviders === "object" && !Array.isArray(pluginProviders)) {
-    out.pluginProviders = Object.fromEntries(
-      Object.entries(pluginProviders as Record<string, unknown>).map(([id, row]) => [
-        id,
-        stripProviderSecrets(row),
-      ]),
-    );
-  }
+  // Providers (the endpoints, their models and the key each pays with) are the
+  // machine's own setup: they are neither written into a file nor taken from
+  // one, so an import leaves the local list exactly as it was.
+  delete out.builtinProviders;
+  delete out.pluginProviders;
   if (Array.isArray(out.mcpServers)) {
     out.mcpServers = out.mcpServers.map(stripMcpSecrets);
   }
@@ -712,7 +698,7 @@ function stripSecrets(bag: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-/** Settings a file may carry: the stored half, credentials left behind. */
+/** Settings a file may carry: the stored half, credentials and providers left behind. */
 export async function buildSettingsFile(): Promise<SettingsFile> {
   // The stored rows, never `getSettings`: what a plugin contributes is the
   // plugin's, and a file must not freeze a copy of it.
@@ -754,35 +740,16 @@ function localMcpSecrets(
 }
 
 /**
- * Give every row of an imported list the credentials the local row with that id
- * holds: the file gets to say what a server or an endpoint IS (url, models,
- * switches) and nothing about what it pays with. A row the local install does
- * not know arrives without one — it is the importing user's to fill.
+ * Give every row of an imported MCP list the credentials the local row with
+ * that id holds: the file gets to say what a server IS (url, switches) and
+ * nothing about what it pays with. A row the local install does not know
+ * arrives without one — it is the importing user's to fill.
  */
 function withLocalSecrets(
   patch: Record<string, unknown>,
   current: AppSettings,
 ): Record<string, unknown> {
   const out = { ...patch };
-  if (Array.isArray(out.builtinProviders)) {
-    out.builtinProviders = (out.builtinProviders as unknown[]).map((row) => {
-      if (!row || typeof row !== "object" || Array.isArray(row)) return row;
-      const r = row as Record<string, unknown>;
-      const local = current.builtinProviders.find((p) => p.id === r.id);
-      return { apiKey: local?.apiKey ?? "", ...r };
-    });
-  }
-  const plugins = out.pluginProviders;
-  if (plugins && typeof plugins === "object" && !Array.isArray(plugins)) {
-    out.pluginProviders = Object.fromEntries(
-      Object.entries(plugins as Record<string, unknown>).map(([id, row]) => [
-        id,
-        row && typeof row === "object" && !Array.isArray(row)
-          ? { apiKey: current.pluginProviders[id]?.apiKey ?? "", ...(row as object) }
-          : row,
-      ]),
-    );
-  }
   if (Array.isArray(out.mcpServers)) {
     const global = current.mcpServers;
     out.mcpServers = (out.mcpServers as unknown[]).map((row) => {
@@ -822,9 +789,9 @@ function withLocalSecrets(
 }
 
 /**
- * Apply a settings file: every setting it carries lands, its credentials are
- * ignored (the local ones survive), and the ordinary merge heals whatever this
- * app version no longer knows.
+ * Apply a settings file: every setting it carries lands, its credentials and
+ * its providers are ignored (the local ones survive), and the ordinary merge
+ * heals whatever this app version no longer knows.
  */
 export async function importSettingsFile(raw: unknown): Promise<SettingsImportResult> {
   const outer = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};

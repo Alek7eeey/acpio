@@ -1009,7 +1009,8 @@ export async function registerRoutes(app: FastifyInstance) {
 
   /**
    * A settings file for another machine: everything this install was tuned to,
-   * credentials left behind. Downloaded as JSON, applied there by an import.
+   * credentials and providers left behind. Downloaded as JSON, applied there by
+   * an import.
    */
   app.get("/api/settings/export", async (_req, reply) => {
     const file = await buildSettingsFile();
@@ -1025,8 +1026,9 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   /**
-   * Apply another user's settings file locally. Its credentials are ignored and
-   * the local ones survive: the file carries the settings, not the wallet.
+   * Apply another user's settings file locally. Its credentials and providers
+   * are ignored and the local ones survive: the file carries the settings, not
+   * the wallet or the endpoints.
    */
   app.post("/api/settings/import", async (req) => {
     const body = z
