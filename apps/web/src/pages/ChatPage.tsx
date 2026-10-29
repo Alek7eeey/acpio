@@ -344,8 +344,8 @@ type ComposerAttachment = {
   name: string;
   /** Staged path on the server; null while (or if) the upload has not landed. */
   path: string | null;
-  /** The link that names this file in the composer text — what a right click
-   *  on the chip copies. Known before the upload: the name is. */
+  /** The link this file has in the composer text — its name alone (see
+   *  `composerAttachmentLink`). Known before the upload: the name is. */
   link?: string;
   size: number;
   status: "uploading" | "ready" | "error";
@@ -512,13 +512,28 @@ const ATTACH_LINK_DIR = ".acpio-attachments";
 
 /**
  * What stands in the composer for an attached file: a markdown link to it,
- * addressed by the same session-relative path the server hands the agent. The
- * text stays short, the file rides along as an attachment, and both point at
- * the same file. A staged upload lives in the session's own folder, which is
- * exactly what its path spells out once the bytes land.
+ * addressed by the same session-relative path the server hands the agent. A
+ * staged upload lives in the session's own folder, which is exactly what its
+ * path spells out once the bytes land.
  */
 function stagedAttachmentLink(sessionId: string, name: string): string {
   return `[${name}](${ATTACH_LINK_DIR}/${sessionId}/${name})`;
+}
+
+/**
+ * The link the composer itself shows: the file's name, nothing else.
+ *
+ * The field is where the reader types, and the path a staged upload has —
+ * `.acpio-attachments/<session id>/<name>` — is a UUID's worth of noise that
+ * names nothing they chose. The destination is the app's business, so it is
+ * written when the message goes out (see `withAttachmentPaths`): the message,
+ * the agent and the chip's copy-link all still carry the very path of the file.
+ * A draft restored after a reload keeps the name and nothing else — the chips
+ * that knew the path are not persisted — so `isOnlyAttachmentLinks` reads it as
+ * an attachment rather than as a prompt the reader wrote.
+ */
+function composerAttachmentLink(name: string): string {
+  return `[${name}]()`;
 }
 
 /**
@@ -540,19 +555,39 @@ function attachmentLink(
 }
 
 /** The links the chips above the composer put into its text, one per file. */
-function attachmentLinksOf(
+function attachmentLinksOf(files: ComposerAttachment[]): string[] {
+  return files.map((file) => file.link ?? composerAttachmentLink(file.name));
+}
+
+/**
+ * The path-form link of a chip's file — what the message gets when it is sent,
+ * and what the chip's copy-link hands over: a staged upload is named by its
+ * session-relative path, a file picked on the server by the path it already
+ * has (relative to the chat folder when it sits inside it).
+ */
+function attachmentFileLink(
+  session: { id: string; cwd: string } | null | undefined,
+  file: { name: string; path?: string | null },
+): string {
+  if (file.path) return attachmentLink(session?.cwd, { name: file.name, path: file.path });
+  return session ? stagedAttachmentLink(session.id, file.name) : file.name;
+}
+
+/** Write the destination into every attachment link the composer shows, so the
+ *  message carries the path while the field carries the name. */
+function withAttachmentPaths(
+  value: string,
   files: ComposerAttachment[],
   session: { id: string; cwd: string } | null | undefined,
-): string[] {
-  return files.map(
-    (file) =>
-      file.link ??
-      (file.path
-        ? attachmentLink(session?.cwd, { name: file.name, path: file.path })
-        : session
-          ? stagedAttachmentLink(session.id, file.name)
-          : file.name),
-  );
+): string {
+  let out = value;
+  for (const file of files) {
+    const link = attachmentFileLink(session, file);
+    // No session (or no path) to point at: the name is all there is to say.
+    if (link === file.name) continue;
+    out = out.replace(composerAttachmentLink(file.name), link);
+  }
+  return out;
 }
 
 /** Whether the composer holds nothing but such links: a staged file names
@@ -562,7 +597,12 @@ function attachmentLinksOf(
 function isOnlyAttachmentLinks(value: string, links: string[]): boolean {
   let rest = value;
   for (const link of links) rest = rest.split(link).join(" ");
-  return rest.replace(/\[[^\]]*\]\(\.acpio-attachments\/[^)\s]+\)/g, " ").trim().length === 0;
+  return (
+    rest
+      // The field's own form (`[name]()`) and the one older drafts spell out.
+      .replace(/\[[^\]]*\]\((?:|\.acpio-attachments\/[^)\s]+)\)/g, " ")
+      .trim().length === 0
+  );
 }
 
 /** Take a link back out of the composer text — the file it named never landed,
@@ -5085,10 +5125,7 @@ function ChatThread() {
       modelsLoading &&
       models.length === 0);
   /** Links the staged files name themselves by in the text. */
-  const attachmentLinks = useMemo(
-    () => attachmentLinksOf(pendingFiles, activeSession),
-    [activeSession, pendingFiles],
-  );
+  const attachmentLinks = useMemo(() => attachmentLinksOf(pendingFiles), [pendingFiles]);
   // Keep Stop tied to the live turn (inflight/session), not to "answer started" —
   // otherwise the button vanishes for seconds while Cursor is still thinking.
   // The reader typing the next prompt is asking to queue it behind the running
@@ -5301,7 +5338,7 @@ function ChatThread() {
           id,
           name,
           path: null,
-          link: stagedAttachmentLink(sessionId, name),
+          link: composerAttachmentLink(name),
           size: file.size,
           status: "uploading",
           previewUrl,
@@ -5315,7 +5352,7 @@ function ChatThread() {
       const links =
         hooks?.linkAt === undefined
           ? null
-          : entries.map((entry) => stagedAttachmentLink(sessionId, entry.name));
+          : entries.map((entry) => composerAttachmentLink(entry.name));
       if (links) insertComposerText(links.join(" "), hooks?.linkAt);
 
       const patch = (id: string, next: Partial<ComposerAttachment>) => {
@@ -5340,7 +5377,8 @@ function ChatThread() {
             }
             // The server had to rename the file (its name was already taken):
             // the link in the text must follow, or it points at nothing.
-            const renamed = saved.name !== entry.name ? stagedAttachmentLink(sessionId, saved.name) : null;
+            const renamed =
+              saved.name !== entry.name ? composerAttachmentLink(saved.name) : null;
             if (link && renamed) setText((prev) => prev.replace(link, renamed));
             patch(entry.id, {
               name: saved.name,
@@ -5412,7 +5450,7 @@ function ChatThread() {
       return;
     }
     const name = pastedTextFileName();
-    const link = stagedAttachmentLink(sessionId, name);
+    const link = composerAttachmentLink(name);
     const staged = stageDeviceFiles(
       [new File([block], name, { type: "text/plain" })],
       () => name,
@@ -5421,7 +5459,7 @@ function ChatThread() {
         // be left behind a link that points nowhere.
         onSaved: (saved) => {
           if (saved.name === name) return;
-          const renamed = stagedAttachmentLink(sessionId, saved.name);
+          const renamed = composerAttachmentLink(saved.name);
           setText((prev) => prev.replace(link, renamed));
         },
         onFailed: () => {
@@ -5559,13 +5597,12 @@ function ChatThread() {
     [discardStagedFile],
   );
 
-  /** The link that names a chip's file in the text: a staged upload lives in
+  /** The link that names a chip's file with its path: a staged upload lives in
    *  the session's attachment folder, a file picked on the server keeps the
-   *  path the prompt hands the agent. Either way it is the very markdown link
-   *  an attachment writes into the composer, so pasting it back brings it
-   *  verbatim. */
+   *  path the prompt hands the agent. The composer shows the name alone (see
+   *  `composerAttachmentLink`), so a copy hands over what the message carries. */
   const attachmentChipLink = useCallback(
-    (file: ComposerAttachment) => attachmentLinksOf([file], activeSession)[0] ?? file.name,
+    (file: ComposerAttachment) => attachmentFileLink(activeSession, file),
     [activeSession],
   );
 
@@ -5584,10 +5621,15 @@ function ChatThread() {
     // A big paste still waiting for its answer must not be lost: sending
     // without a choice means «paste as text», and the block goes back into the
     // very range the paste replaced — not onto the end of what is typed.
-    const value =
+    // The field names an attached file by its name alone; the message that
+    // leaves here names it by the path the agent reads.
+    const value = withAttachmentPaths(
       pasteOffer === null
         ? raw.trim()
-        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
+        : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim(),
+      pendingFiles,
+      activeSession,
+    );
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
@@ -7842,7 +7884,7 @@ function ChatThread() {
               id: nextComposerAttachmentId(),
               name: f.name,
               path: f.path,
-              link: attachmentLink(activeSession?.cwd, f),
+              link: composerAttachmentLink(f.name),
               size: 0,
               status: "ready" as const,
             })),
@@ -7850,10 +7892,7 @@ function ChatThread() {
           // The link to every file goes in at the end, where the paperclip's
           // own picks land — the text names what the chips carry.
           if (files.length > 0) {
-            insertComposerText(
-              files.map((f) => attachmentLink(activeSession?.cwd, f)).join(" "),
-              "end",
-            );
+            insertComposerText(files.map((f) => composerAttachmentLink(f.name)).join(" "), "end");
           }
         }}
       />

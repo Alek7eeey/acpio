@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type MessagePartDto, type SessionDetailDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
@@ -9,12 +9,18 @@ import { ChatPage } from "./ChatPage";
 import styles from "./ChatPage.module.css";
 
 const apiMock = vi.hoisted(() => ({
-  uploadAttachment: vi.fn(async () => ({ name: "screenshot.png", path: "/tmp/screenshot.png", size: 4 })),
+  uploadAttachment: vi.fn(async () => ({
+    name: "screenshot.png",
+    path: "E:/proj/.acpio-attachments/s1/screenshot.png",
+    size: 4,
+  })),
+  prompt: vi.fn(async () => ({})),
 }));
 
 vi.mock("../lib/api", () => {
   const target: Record<string, unknown> = {
     uploadAttachment: apiMock.uploadAttachment,
+    prompt: apiMock.prompt,
     // A running turn pulls the git chip in; an empty `{}` from the generic
     // proxy would leave `status.files` undefined and crash the chip row.
     gitStatus: vi.fn(async () => ({
@@ -209,6 +215,52 @@ describe("composer attachments during a running turn", () => {
     expect(
       pending!.compareDocumentPosition(meta!) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+// The field is where the reader types, and the path a staged upload has — a
+// session UUID and the folder it landed in — names nothing they chose. The
+// composer shows the file's name alone; the path is written when the message
+// goes out, so the agent reads the same file the chip holds.
+describe("the link an attached file writes into the composer", () => {
+  /** An idle chat with nothing in it — the composer can send. */
+  function idleSession(): SessionDetailDto {
+    const detail = runningSession();
+    detail.status = "idle";
+    detail.messages = [];
+    return detail;
+  }
+
+  it("names the file alone while the reader types", async () => {
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    // A draft outlives the pane that typed it (lib/composerDrafts), so a test
+    // starts from whatever the one before it left in the field.
+    fireEvent.change(textarea, { target: { value: "" } });
+
+    pasteImage(textarea);
+
+    await waitFor(() => expect(textarea.value).toBe("[screenshot.png]()"));
+  });
+
+  it("carries the path the agent reads in the message that leaves", async () => {
+    const detail = idleSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    fireEvent.change(textarea, { target: { value: "" } });
+    pasteImage(textarea);
+    await waitFor(() => expect(textarea.value).toBe("[screenshot.png]()"));
+
+    fireEvent.change(textarea, { target: { value: "посмотри [screenshot.png]()" } });
+    fireEvent.click(screen.getByLabelText("Отправить"));
+
+    await waitFor(() => expect(apiMock.prompt).toHaveBeenCalled());
+    expect(apiMock.prompt.mock.calls[0]![1]).toBe(
+      "посмотри [screenshot.png](.acpio-attachments/s1/screenshot.png)",
+    );
   });
 });
 
