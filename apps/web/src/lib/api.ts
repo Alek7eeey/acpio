@@ -3,6 +3,7 @@ import type {
   AgentProbeResult,
   AgentProvider,
   AppSettings,
+  AppUpdateStateDto,
   BuiltinHeaderConfig,
   BoardColumnDto,
   BoardDto,
@@ -67,6 +68,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ ok: boolean; platform: string }>("/api/health"),
+  /** Both version numbers and how far a download got — the check is the server's. */
+  appUpdate: () => request<AppUpdateStateDto>("/api/app/update"),
+  /** Start `npm i -g acpio@latest`; the answer says "installing" and the polls follow. */
+  installAppUpdate: () => request<AppUpdateStateDto>("/api/app/update", { method: "POST" }),
+  /** Hand the process over to the installed build (the page reloads itself after). */
+  restartApp: () => request<{ ok: boolean }>("/api/app/restart", { method: "POST" }),
   getSettings: () => request<AppSettings>("/api/settings"),
   remoteAccessStatus: () =>
     request<{ required: boolean; unlocked: boolean }>("/api/remote-access"),

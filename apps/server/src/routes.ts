@@ -76,6 +76,7 @@ import {
   getLiveTurnState,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
+import { createAppUpdater, restartServer } from "./services/appUpdate.js";
 import { fetchBuiltinModelCatalog } from "./services/builtinModelCatalog.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import {
@@ -553,6 +554,41 @@ export async function registerRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/health", async () => ({ ok: true, platform: process.platform }));
+
+  // One updater per process: the registry answer is cached for a quarter of an
+  // hour, and the install it starts is the one the popup polls.
+  const appUpdater = createAppUpdater();
+
+  /**
+   * Is there a newer Acpio on npm? The check is the server's job — the browser
+   * has no CORS-friendly registry, and the answer is one cached question — so
+   * the header asks it once and gets both numbers and the install's progress.
+   */
+  app.get("/api/app/update", async () => appUpdater.state());
+
+  /**
+   * Download the new version: `npm i -g acpio@latest`, in the background. The
+   * popup polls the GET above until it says done and then asks for a restart.
+   */
+  app.post("/api/app/update", async (_req, reply) => {
+    const state = await appUpdater.install();
+    if (!state.available) {
+      return reply.code(409).send({ error: "noUpdateAvailable", ...state });
+    }
+    return state;
+  });
+
+  /**
+   * Start the freshly installed build: the process hands over to a detached
+   * successor and leaves. A 409 means there is no command line to repeat —
+   * the caller then asks the user to restart Acpio themselves.
+   */
+  app.post("/api/app/restart", async (_req, reply) => {
+    if (!restartServer()) {
+      return reply.code(409).send({ error: "restartUnavailable" });
+    }
+    return { ok: true };
+  });
 
   app.get("/api/remote-access", async (req) => {
     const expected = (await getSettings()).remoteAccessKey?.trim() ?? "";

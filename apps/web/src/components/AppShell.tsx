@@ -35,6 +35,7 @@ import { canonicalCwd } from "@acpio/shared";
 import { firstUserTitleLine, localizePlaceholderSessionTitle, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
 import { HoverTip } from "./HoverTip";
+import { AppUpdateNotice } from "./AppUpdateNotice";
 import { InstallAppButton } from "./InstallAppButton";
 import { LocaleToggle } from "./LocaleToggle";
 import { SearchDialog, type SearchDialogTab } from "./SearchDialog";
@@ -1721,6 +1722,9 @@ export function AppShell() {
             >
               {renderBrandButton({ bump: true })}
             </span>
+            {/* Beside the name and version: npm has a newer build, and its
+                number is where the running one is. */}
+            <AppUpdateNotice />
             {backToBoard ? (
               <button
                 type="button"

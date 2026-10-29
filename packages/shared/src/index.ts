@@ -59,6 +59,14 @@ export {
 } from "./pluginSource.js";
 
 export { BUILD_INFO } from "./buildInfo.js";
+export {
+  compareVersions,
+  isNewerVersion,
+  parseVersion,
+  type AppUpdateStateDto,
+  type AppUpdateStatus,
+  type ParsedVersion,
+} from "./appUpdate.js";
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
   BUILTIN_MAX_OUTPUT_TOKENS_MAX,

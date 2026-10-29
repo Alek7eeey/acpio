@@ -1279,4 +1279,19 @@ export const en = {
     counter: "{{current}} of {{total}}",
     hint: "Wheel — scale · click — magnify · drag — move · ←/→ — another picture · Esc — close",
   },
+  update: {
+    trigger: "Version {{version}} is available",
+    title: "A new version is available",
+    versions: "Installed {{current}} · npm already has {{latest}}",
+    body: "Download the update — the new code starts working right after the restart.",
+    action: "Update",
+    later: "Later",
+    installing: "Downloading the update… This can take a couple of minutes.",
+    restarting: "Done. Restarting Acpio — the page reloads itself.",
+    restartWarning: "The restart cuts off agents that are answering right now.",
+    failed: "The update failed",
+    retry: "Try again",
+    restartTimeout:
+      "Acpio did not come back after the restart. Start it by hand and reload this page.",
+  },
 };

@@ -1,0 +1,203 @@
+/* The chip sits beside the header's name-and-version pill: same height, same
+   rounded shape, but tinted with the accent so it reads as a call to action
+   rather than as part of the title. */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  margin-left: 6px;
+  padding: 0 9px 0 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  animation: updatePulse 2.4s ease-in-out infinite;
+}
+
+.trigger:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+.triggerVersion {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes updatePulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trigger {
+    animation: none;
+  }
+}
+
+/* Phones: the icon alone, so the header keeps room for the chat's title. */
+@media (max-width: 620px) {
+  .trigger {
+    padding: 0 7px;
+  }
+
+  .triggerVersion {
+    display: none;
+  }
+}
+
+.popup {
+  position: fixed;
+  z-index: 720;
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  box-sizing: border-box;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.versions {
+  margin: 0;
+  font-size: 0.79rem;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.body {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.log {
+  margin: 0;
+  padding: 8px 9px;
+  max-height: 96px;
+  overflow: auto;
+  border-radius: 9px;
+  background: var(--bg-tertiary);
+  color: var(--text);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.primary,
+.secondary {
+  height: 30px;
+  padding: 0 13px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, black);
+  border-color: color-mix(in srgb, var(--accent) 88%, black);
+}
+
+.secondary {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.secondary:hover {
+  background: var(--bg-tertiary);
+  color: var(--text);
+}
+
+.busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-top-color: var(--accent);
+  animation: updateSpin 0.8s linear infinite;
+}
+
+@keyframes updateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}
+
+.warning {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--text-secondary) 80%, var(--accent));
+}
