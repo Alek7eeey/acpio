@@ -126,8 +126,7 @@ export function ImageViewer({ pictures, startIndex = 0, onClose }: ImageViewerPr
   const zoomBy = useCallback((factor: number) => {
     setView((v) => {
       const scale = clamp(v.scale * factor, MIN_SCALE, MAX_SCALE);
-      // Zooming out to the fit size drops a pan that no longer has anywhere to go.
-      if (scale <= 1) return { ...v, scale, x: 0, y: 0 };
+      // A shifted picture keeps its place through the zoom, small ones included.
       const ratio = scale / v.scale;
       return { ...v, scale, x: v.x * ratio, y: v.y * ratio };
     });
@@ -201,8 +200,8 @@ export function ImageViewer({ pictures, startIndex = 0, onClose }: ImageViewerPr
   }, [zoomBy]);
 
   /** Start from the fingers that are down right now: two of them pinch, one of
-   *  them drags a picture that is already bigger than its frame, and one of them
-   *  on an unzoomed picture is the start of a tap instead. */
+   *  them drags the picture at any scale (a shrunk one is dragged too), and a
+   *  drag that never passes the slop turns out to be a tap. */
   const startGesture = () => {
     const entries = Array.from(pointersRef.current.entries());
     const [first, second] = entries;
@@ -220,10 +219,9 @@ export function ImageViewer({ pictures, startIndex = 0, onClose }: ImageViewerPr
       tapIgnoredRef.current = true;
       return;
     }
-    gestureRef.current =
-      first && view.scale > 1
-        ? { kind: "pan", id: first[0], x: first[1].x, y: first[1].y, from: view, moved: false }
-        : null;
+    gestureRef.current = first
+      ? { kind: "pan", id: first[0], x: first[1].x, y: first[1].y, from: view, moved: false }
+      : null;
   };
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -318,7 +316,6 @@ export function ImageViewer({ pictures, startIndex = 0, onClose }: ImageViewerPr
             src={picture.src}
             alt={picture.alt}
             draggable={false}
-            data-zoomed={view.scale > 1 ? "true" : "false"}
             onClick={() => {
               if (tapIgnoredRef.current) {
                 tapIgnoredRef.current = false;

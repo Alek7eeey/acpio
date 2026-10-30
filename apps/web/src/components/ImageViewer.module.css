@@ -28,13 +28,10 @@
   -webkit-user-drag: none;
   transform-origin: center center;
   will-change: transform;
-}
-
-.image[data-zoomed="true"] {
   cursor: grab;
 }
 
-.image[data-zoomed="true"]:active {
+.image:active {
   cursor: grabbing;
 }
 
