@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, waitFor, within, fireEvent } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import {
@@ -215,6 +215,48 @@ describe("BoardPage Todo drag and drop", () => {
       Reflect.deleteProperty(document, "elementsFromPoint");
     }
   }
+
+  /** A touch that holds the card still first then moves is a drag, and the
+   *  board must not pan under it — while a swipe that travels sooner is the
+   *  scroll's and stays untouched (that was the broken half). */
+  it("lets a touch swipe scroll the board and takes the card on a hold", async () => {
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+
+    vi.useFakeTimers();
+    try {
+      // A swipe travels before the hold: the drag gives up, nothing is blocked.
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "touch", clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, pointerType: "touch", clientX: 60, clientY: 10 });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(document.body.querySelector("[data-drag-preview]")).toBeNull();
+      const swipe = new Event("touchmove", { cancelable: true, bubbles: true });
+      window.dispatchEvent(swipe);
+      expect(swipe.defaultPrevented).toBe(false);
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "touch", clientY: 10 });
+
+      // A held finger takes the card, and from then on the pan is refused.
+      fireEvent.pointerDown(card, { pointerId: 2, pointerType: "touch", clientY: 10 });
+      act(() => {
+        vi.advanceTimersByTime(400);
+      });
+      expect(document.body.querySelector("[data-drag-preview]")).toBeTruthy();
+      const pan = new Event("touchmove", { cancelable: true, bubbles: true });
+      window.dispatchEvent(pan);
+      expect(pan.defaultPrevented).toBe(true);
+
+      // The end of the drag hands the gesture back.
+      fireEvent.pointerUp(window, { pointerId: 2, pointerType: "touch", clientY: 10 });
+      const later = new Event("touchmove", { cancelable: true, bubbles: true });
+      window.dispatchEvent(later);
+      expect(later.defaultPrevented).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   // The arrows move a card one slot at a time; the drag is the same move made
   // where the card is — the release writes the group's order the arrows write.

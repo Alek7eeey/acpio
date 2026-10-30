@@ -1857,6 +1857,16 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       const text = task.taskDescription?.trim() || task.title;
       const fromColumnId = columnOf(task).id;
       let moved = false;
+      /**
+       * The board must not pan under a drag. Before the hold the listener sits
+       * idle so a swipe over a card still scrolls; it is registered on the
+       * press, not at the hold, because the browser decides at touchstart
+       * whether it may scroll without asking anyone.
+       */
+      const blockPan = (ev: TouchEvent) => {
+        if (moved) ev.preventDefault();
+      };
+      if (isTouch) window.addEventListener("touchmove", blockPan, { passive: false });
       /** The gesture became a drag: the card leaves its slot and follows the pointer. */
       const begin = (x: number, y: number) => {
         moved = true;
@@ -1932,6 +1942,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
+        window.removeEventListener("touchmove", blockPan);
         dragActiveRef.current = false;
         document.body.style.cursor = "";
         setDraggingTaskId(null);

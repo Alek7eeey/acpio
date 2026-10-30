@@ -924,9 +924,6 @@
   background: var(--surface);
   box-shadow: var(--shadow-soft);
   cursor: pointer;
-  /* A finger scrolls the lane up and down; a sideways gesture belongs to the
-     card (it becomes a drag after a short hold). */
-  touch-action: pan-y;
   transition:
     transform 0.08s ease,
     border-color 0.15s ease;
