@@ -94,4 +94,18 @@ if (!args.includes("--no-open")) {
   setTimeout(() => openBrowser(url), 1200).unref();
 }
 
-await import(pathToFileURL(path.join(appDir, "apps", "server", "dist", "index.js")).href);
+try {
+  await import(pathToFileURL(path.join(appDir, "apps", "server", "dist", "index.js")).href);
+} catch (err) {
+  // npm 11.17+/12 skips install scripts unless the package is allowed, so
+  // better-sqlite3 never fetches its prebuilt binary and the raw bindings
+  // stack trace is the first thing a new user sees.
+  if (!/better_sqlite3\.node|bindings file/.test(String(err?.stack ?? err))) throw err;
+  console.error(`Acpio ${version}: the native SQLite module is missing — npm skipped install scripts.
+
+Reinstall with them allowed:
+  npm i -g acpio --allow-scripts=acpio,better-sqlite3,node-pty
+
+(or for npx: npx --allow-scripts=acpio,better-sqlite3,node-pty acpio)`);
+  process.exit(1);
+}
