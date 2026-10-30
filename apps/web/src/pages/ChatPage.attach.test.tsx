@@ -424,11 +424,32 @@ describe("attached image in a landed user message", () => {
     useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
 
     const { container } = renderComposer();
-    const link = container.querySelector<HTMLAnchorElement>(
-      `.${styles.userBubble} a`,
-    );
+    const link = container.querySelector<HTMLButtonElement>(`.${styles.userBubble} .${styles.userFileLink}`);
     expect(link?.textContent).toBe("shot.png");
-    expect(link?.getAttribute("href")).toBe("/api/sessions/s1/attachments/shot.png");
+  });
+
+  // The name in the text and the preview above the chip are the reader's own
+  // picture: both open it under the viewer the agent's images get, not a tab.
+  it("opens the picture under the viewer from the name in the text", async () => {
+    const detail = landedImageSession();
+    detail.messages[0]!.parts[0]!.payload = { text: "что тут shot.png" };
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    fireEvent.click(container.querySelector(`.${styles.userBubble} .${styles.userFileLink}`)!);
+
+    expect(await screen.findByLabelText("Просмотр картинки")).toBeTruthy();
+    expect(document.body.querySelector<HTMLImageElement>(`img[src*="/attachments/shot.png"]`)).toBeTruthy();
+  });
+
+  it("opens the picture under the viewer from its preview", async () => {
+    const detail = landedImageSession();
+    useAppStore.setState({ sessions: [detail], activeSession: detail, sessionDetails: { s1: detail } });
+
+    const { container } = renderComposer();
+    fireEvent.click(container.querySelector(`.${styles.userFilePreviewWrap}`)!);
+
+    expect(await screen.findByLabelText("Просмотр картинки")).toBeTruthy();
   });
 
   // Regression: once the server echoed the file part with its fileId, the chip

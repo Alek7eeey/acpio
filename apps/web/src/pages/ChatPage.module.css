@@ -1674,6 +1674,15 @@
   cursor: pointer;
 }
 
+button.userFileLink {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+}
+
 button.userSlashCmd {
   display: inline;
   margin: 0;
@@ -3324,11 +3333,14 @@ button.userSlashCmd:focus-visible {
 .userFilePreviewWrap {
   display: block;
   max-width: min(160px, 100%);
+  margin: 0;
+  padding: 0;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--bg-secondary);
   line-height: 0;
+  cursor: zoom-in;
 }
 
 .userFilePreviewWrap:hover {

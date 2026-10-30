@@ -117,6 +117,7 @@ import {
   CreateSessionFolderPicker,
 } from "../components/CreateSessionFolderPicker";
 import { MarkdownContent, MarkdownImage } from "../components/MarkdownContent";
+import { ImageViewer, type ViewerPicture } from "../components/ImageViewer";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
@@ -681,6 +682,8 @@ function highlightUserText(
   slashClickTitle?: string,
   /** Files this message carries: their names in the text are links to them. */
   attachments: Array<{ name: string; href: string }> = [],
+  /** The message's pictures, in reading order: a name opens the viewer on its own. */
+  pictures: ViewerPicture[] = [],
 ) {
   return splitSlashCommandHighlight(text, knownNames).map((seg, i) =>
     seg.kind === "command" ? (
@@ -705,7 +708,7 @@ function highlightUserText(
         </span>
       )
     ) : (
-      <Fragment key={i}>{linkifyUserText(seg.value, attachments, i)}</Fragment>
+      <Fragment key={i}>{linkifyUserText(seg.value, attachments, i, pictures)}</Fragment>
     ),
   );
 }
@@ -715,13 +718,23 @@ function linkifyUserText(
   value: string,
   attachments: Array<{ name: string; href: string }>,
   keyPrefix: number,
+  pictures: ViewerPicture[] = [],
 ): ReactNode {
   if (attachments.length === 0) return value;
   return splitLinkNames(
     value,
     attachments.map((file) => file.name),
-  ).map((run, i) =>
-    run.link ? (
+  ).map((run, i) => {
+    const picture = pictures.findIndex((p) => p.alt === run.text);
+    if (!run.link) return <Fragment key={`${keyPrefix}-${i}`}>{run.text}</Fragment>;
+    return picture >= 0 ? (
+      <UserFilePictureLink
+        key={`${keyPrefix}-${i}`}
+        name={run.text}
+        pictures={pictures}
+        startIndex={picture}
+      />
+    ) : (
       <a
         key={`${keyPrefix}-${i}`}
         className={styles.userFileLink}
@@ -733,9 +746,44 @@ function linkifyUserText(
       >
         {run.text}
       </a>
-    ) : (
-      <Fragment key={`${keyPrefix}-${i}`}>{run.text}</Fragment>
-    ),
+    );
+  });
+}
+
+/** An attached picture's name in a message: it opens under the same viewer the
+ *  agent's own images get, not a bare tab with the raw file. */
+function UserFilePictureLink({
+  name,
+  pictures,
+  startIndex,
+}: {
+  name: string;
+  pictures: ViewerPicture[];
+  startIndex: number;
+}) {
+  const [viewing, setViewing] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className={styles.userFileLink}
+        title={name}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={() => setViewing(true)}
+      >
+        {name}
+      </button>
+      {viewing
+        ? createPortal(
+            <ImageViewer
+              pictures={pictures}
+              startIndex={startIndex}
+              onClose={() => setViewing(false)}
+            />,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 
@@ -756,6 +804,19 @@ function UserMessage({
   /** Two or more files would stack a preview per image into a tall block, so
    *  they collapse into the bare chips: paperclip, name, download. */
   const compactFiles = fileParts.length > 1;
+  /** The message's own pictures, so a click on one opens the viewer instead of
+   *  a tab — the same look the agent's images get. */
+  const pictures: ViewerPicture[] = fileParts.flatMap((p) => {
+    const name = String(p.payload.name ?? "").trim();
+    const fileId = String(p.payload.fileId ?? "").trim();
+    if (!name || !fileId || !isImageFile(name)) return [];
+    return [
+      {
+        src: `/api/sessions/${encodeURIComponent(message.sessionId)}/attachments/${encodeURIComponent(fileId)}?inline=1`,
+        alt: name,
+      },
+    ];
+  });
 
   if (!text && fileParts.length === 0) return null;
 
@@ -784,6 +845,7 @@ function UserMessage({
             onSlashCommandClick,
             t("common.insertSlashCommand"),
             attachments,
+            pictures,
           )}
         </div>
       ))}
@@ -809,14 +871,19 @@ function UserMessage({
           className={`${styles.userFiles} ${compactFiles ? styles.userFilesCompact : ""}`.trim()}
           data-variant={compactFiles ? "compact" : "full"}
         >
-          {fileParts.map((p) => (
-            <UserFileItem
-              key={p.id}
-              part={p}
-              sessionId={message.sessionId}
-              compact={compactFiles}
-            />
-          ))}
+          {fileParts.map((p) => {
+            const name = String(p.payload.name ?? "file");
+            return (
+              <UserFileItem
+                key={p.id}
+                part={p}
+                sessionId={message.sessionId}
+                compact={compactFiles}
+                pictures={pictures}
+                startIndex={pictures.findIndex((picture) => picture.alt === name)}
+              />
+            );
+          })}
         </div>
       ) : null}
       <UserMessageActions
@@ -983,13 +1050,19 @@ function UserFileItem({
   part,
   sessionId,
   compact = false,
+  pictures = [],
+  startIndex = -1,
 }: {
   part: MessagePartDto;
   sessionId: string;
   /** Chip only: no inline preview and no size line, for a message with many files. */
   compact?: boolean;
+  /** The message's pictures: the preview opens them, this file first. */
+  pictures?: ViewerPicture[];
+  startIndex?: number;
 }) {
   const t = useT();
+  const [viewing, setViewing] = useState(false);
   const name = String(part.payload.name ?? "file");
   const fileId = String(part.payload.fileId ?? "");
   const size = Number(part.payload.size ?? 0);
@@ -1049,12 +1122,11 @@ function UserFileItem({
             <span>{t("chat.attachmentDeleted")}</span>
           </div>
         ) : (
-          <a
+          <button
+            type="button"
             className={styles.userFilePreviewWrap}
-            href={`${href}?inline=1`}
-            target="_blank"
-            rel="noopener noreferrer"
             title={name}
+            onClick={() => setViewing(true)}
           >
             <img
               className={styles.userFilePreview}
@@ -1063,7 +1135,7 @@ function UserFileItem({
               loading="lazy"
               onError={() => setMissing(true)}
             />
-          </a>
+          </button>
         )
       ) : null}
       {href && !missing ? (
@@ -1073,6 +1145,16 @@ function UserFileItem({
       ) : (
         <span className={styles.userFileChip}>{chip}</span>
       )}
+      {viewing && startIndex >= 0
+        ? createPortal(
+            <ImageViewer
+              pictures={pictures}
+              startIndex={startIndex}
+              onClose={() => setViewing(false)}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
