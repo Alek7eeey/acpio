@@ -2829,7 +2829,7 @@ export async function runPrompt(
   // short, clear task title. Fire-and-forget: a slow or failed call must not
   // hold up the turn, and the message-derived title is a fine place to land.
   if (opts.aiTitle) {
-    void refineSessionTitle(sessionId, opts.aiTitle, settings).catch((err) => {
+    void refineSessionTitle(sessionId, opts.aiTitle, settings, getSessionSlashCommands(sessionId)).catch((err) => {
       console.error("chat title refinement failed", err);
     });
   }

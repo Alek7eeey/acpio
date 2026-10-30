@@ -149,6 +149,36 @@ describe("generateChatTitle", () => {
     expect(await generateChatTitle(settings, "посмотри на чат ...")).toBeNull();
   });
 
+  it("sends the named command's own description, and only that one", async () => {
+    const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
+    await generateChatTitle(settings, "/commit то что с stage index", undefined, undefined, [
+      { name: "commit", description: "Commit the staged changes with a message" },
+      { name: "review", description: "Review uncommitted changes" },
+    ]);
+    const system = (lastBody as { messages?: { content: string }[] }).messages![0].content;
+    expect(system).toContain("/commit");
+    expect(system).toContain("Commit the staged changes");
+    expect(system).not.toContain("Review uncommitted changes");
+    // An unknown command adds no claim about what it does.
+    await generateChatTitle(settings, "/nope сделай что-то", undefined, undefined, [
+      { name: "commit", description: "Commit the staged changes" },
+    ]);
+    expect((lastBody as { messages?: { content: string }[] }).messages![0].content).not.toContain(
+      "Commit the staged changes",
+    );
+  });
+
+  it("drops a tool call answered instead of a title", async () => {
+    const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
+    // A flash model fed a slash command answers with the call it would make.
+    reply = {
+      status: 200,
+      content:
+        "<tool_call><function=Bash><parameter=command>git status --short</parameter></function></tool_call>",
+    };
+    expect(await generateChatTitle(settings, "/commit что в stage")).toBeNull();
+  });
+
   it("retries once when the first answer arrives past the timeout", async () => {
     const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
     steps = [{ delayMs: 120 }];
