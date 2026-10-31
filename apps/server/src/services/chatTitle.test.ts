@@ -181,9 +181,13 @@ describe("generateChatTitle", () => {
 
   it("retries once when the first answer arrives past the timeout", async () => {
     const settings = settingsWith({ builtinProviders: [provider("p", base, ["m"])] });
-    steps = [{ delayMs: 120 }];
+    // The first answer is far past the ceiling and the retry gets the whole of
+    // it: a budget tight enough to also starve the second try (a loaded suite
+    // adds tens of milliseconds to a loopback round trip) fails a test about the
+    // retry for a reason that has nothing to do with it.
+    steps = [{ delayMs: 1_000 }];
     const title = await generateChatTitle(settings, "источник", undefined, {
-      timeoutMs: 50,
+      timeoutMs: 400,
       retryDelayMs: 10,
     });
     expect(title).toBe("plain title");

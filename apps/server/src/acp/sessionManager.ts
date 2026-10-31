@@ -90,6 +90,7 @@ import {
 } from "../adapters/registry.js";
 import {
   AcpClient,
+  AcpClosedError,
   AcpRpcError,
   findModeConfigOption,
   findModelConfigOption,
@@ -1095,7 +1096,12 @@ async function bootAcp(
           }
           await handleUpdate(rt, update);
         } catch (err) {
-          console.error("update handler error", err);
+          // A runtime that is being closed has no rows to write into any more;
+          // the update is the shutdown's, not a handler bug. `rt` itself is the
+          // reliable witness here — the map has already dropped it.
+          if (!rt.disposing && !(err instanceof AcpClosedError)) {
+            console.error("update handler error", err);
+          }
         }
       });
     });
@@ -1233,6 +1239,11 @@ async function bootAcp(
     } catch (err) {
       rt.client = null;
       rt.clientReady = null;
+      // A runtime torn down on purpose kills its client mid-boot, so the boot
+      // fails with our own exit: a shutdown, not an agent that could not start.
+      // Leave it unlogged and let the caller see the rejection — booting a
+      // fresh session for a chat that is closing would be worse than useless.
+      if (rt.disposing) throw err;
       const locale = (await getSettings()).locale ?? "en";
       // Restore is best-effort: an unknown/removed agent session, a CLI build
       // without the capability, or a broken replay must never brick the chat —
@@ -1280,13 +1291,36 @@ function observedBoot(promise: Promise<AcpClient>): Promise<AcpClient> {
   return promise;
 }
 
+/**
+ * True while a session's runtime is being torn down on purpose (the chat was
+ * closed, its provider switched, the app is exiting). A failure reported from
+ * there is our own exit, not the agent's, and logging it as one would report
+ * every shutdown as an error.
+ */
+export function isRuntimeDisposing(sessionId: string): boolean {
+  return runtimes.get(sessionId)?.disposing === true;
+}
+
+/**
+ * Whether a failure is our own shutdown rather than the agent's: the runtime is
+ * being closed, or the work died because its client was closed under it. Those
+ * rejections still reach the caller — they just do not read as agent faults.
+ */
+export function isShutdownFailure(sessionId: string, err: unknown): boolean {
+  return isRuntimeDisposing(sessionId) || err instanceof AcpClosedError;
+}
+
 /** Pre-spawn ACP for a session so the first prompt isn't blocked on cold start. */
 export function warmAcp(
   sessionId: string,
   opts: { provider: AgentProvider; cwd: string; mode: AgentMode },
 ) {
   return ensureAcp(sessionId, opts).catch((err) => {
-    console.error(`[acp:${sessionId}] warm failed`, err);
+    if (isShutdownFailure(sessionId, err)) return;
+    // A pre-spawn is a hint, not the turn: its failure is reported when the
+    // chat is actually prompted (and again by `Agent start failed`), so it
+    // belongs in the log as a line rather than as an error of its own.
+    console.log(`[acp:${sessionId}] warm failed`, err instanceof Error ? err.message : err);
   });
 }
 
@@ -3016,7 +3050,9 @@ export async function notifyBackgroundJobDone(job: BackgroundJobDto): Promise<vo
   } catch (err) {
     // A chat that cannot take the note (agent offline, session mid-teardown)
     // must not take the server down with it: the job row still holds the
-    // result, and the user sees it in the tasks page.
+    // result, and the user sees it in the tasks page. A runtime that is being
+    // closed on purpose is not a failure to report.
+    if (isShutdownFailure(job.sessionId, err)) return;
     console.error(`[bg] could not deliver job ${job.id} to chat ${job.sessionId}`, err);
   }
 }
@@ -3787,6 +3823,10 @@ async function applyDeferredRestart(rt: SessionRuntime) {
 
 /** Start the next FIFO-queued turn, if any (after the current turn finished). */
 async function dequeueTurn(rt: SessionRuntime) {
+  // A runtime that was torn down has no queue left to drain: its chat is gone
+  // (closed, deleted, or a wiped test DB), and starting the next turn there
+  // reported FOREIGN KEY failures against rows nobody owns any more.
+  if (rt.disposing) return;
   if (rt.running) return;
   // A steer already took the next turn: starting a queued one here would run
   // two turns on one runtime. The steer's own turn re-enters when it finishes.
@@ -3812,7 +3852,9 @@ async function dequeueTurn(rt: SessionRuntime) {
     started = true;
     await runTurn(rt, rt.sessionId, next.text, next.images, "", next.opts, settings, acpReady);
   } catch (err) {
-    console.error(`[acp:${rt.sessionId}] queued turn failed`, err);
+    if (!rt.disposing && !(err instanceof AcpClosedError)) {
+      console.error(`[acp:${rt.sessionId}] queued turn failed`, err);
+    }
   } finally {
     if (!started) {
       // Failed before runTurn claimed the turn — release the claim or the

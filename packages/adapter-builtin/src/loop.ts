@@ -722,6 +722,10 @@ export async function runTurn(opts: TurnOptions): Promise<TurnOutcome> {
     // 0 = the provider's own ceiling: the key must not go out at all.
     ...(outputCap > 0 ? { maxOutputTokens: outputCap } : {}),
     maxRetries: 2,
+    // The SDK answers a failed call with a full error object in the console by
+    // default. The turn reports that same failure into the chat, and the agent
+    // names it in its own log line, so the dump is a second copy of one error.
+    onError: () => {},
     // Between steps two things join the next call: a message the host sent
     // mid-turn, and a tool's pictures, which cannot sit inside the tool result
     // (an OpenAI-compatible endpoint takes a string there). `responseMessages`

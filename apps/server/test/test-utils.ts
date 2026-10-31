@@ -7,7 +7,9 @@ import { afterEach, beforeEach } from "vitest";
 import { sql } from "drizzle-orm";
 import { db } from "../src/db/client.js";
 import { ensureSchema } from "../src/db/ensureSchema.js";
+import { sessions as sessionsTable } from "../src/db/schema.js";
 import { registerRoutes } from "../src/routes.js";
+import { disposeRuntime } from "../src/acp/sessionManager.js";
 
 /** Fresh Fastify instance with the real route table (no listen, no logger). */
 export async function buildApp(): Promise<FastifyInstance> {
@@ -23,6 +25,12 @@ export async function buildApp(): Promise<FastifyInstance> {
 
 /** Wipe every table between tests so tests never see each other's rows. */
 export async function resetDb() {
+  // Close the agents of the previous test first: a runtime left live keeps
+  // writing into the rows this wipe removes, which surfaced as FOREIGN KEY
+  // failures and "ACP client is closed" logs over whatever test came next.
+  for (const row of await db.select({ id: sessionsTable.id }).from(sessionsTable)) {
+    disposeRuntime(row.id);
+  }
   // Children first — FK constraints are ON in SQLite.
   for (const table of [
     "auth_sessions",

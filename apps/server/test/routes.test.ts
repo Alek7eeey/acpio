@@ -2567,6 +2567,10 @@ describe("built-in agent image attachments", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // The app's own background-job MCP server is not started in this suite,
+        // and a built-in chat would attach it and warn per turn that it is
+        // unreachable.
+        mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
         // Not a title test: the default-on refinement would race its request
         // into the stub and shift the recorded bodies.
         chatAutoTitle: false,
@@ -2641,6 +2645,10 @@ describe("built-in agent image attachments", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // The app's own background-job MCP server is not started in this suite,
+        // and a built-in chat would attach it and warn per turn that it is
+        // unreachable.
+        mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
         chatAutoTitle: false,
         builtinProviders: [
           {
@@ -2720,6 +2728,10 @@ describe("built-in agent image attachments", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // The app's own background-job MCP server is not started in this suite,
+        // and a built-in chat would attach it and warn per turn that it is
+        // unreachable.
+        mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
         chatAutoTitle: false,
         builtinProviders: [
           {
@@ -2856,6 +2868,10 @@ describe("built-in agent MCP tools", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // The app's own background-job MCP server is not started in this suite,
+        // and a built-in chat would attach it and warn per turn that it is
+        // unreachable.
+        mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
         // Not a title test: the default-on refinement would land a request of
         // its own in the stub and move bodies[1] off the second turn call.
         chatAutoTitle: false,
@@ -3005,6 +3021,10 @@ describe("built-in agent workspace search", () => {
       payload: {
         connectedProvider: "builtin",
         defaultProvider: "builtin",
+        // The app's own background-job MCP server is not started in this suite,
+        // and a built-in chat would attach it and warn per turn that it is
+        // unreachable.
+        mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
         builtinProviders: [
           {
             id: "p1",

@@ -8,13 +8,30 @@
 //
 // Point the global at the storage of the jsdom instance the environment left on
 // `globalThis.jsdom` (the window itself is not reachable — vitest makes the
-// global its own window). On a Node without that global (20, 22, 24) vitest
-// already copied the window's own, so this is a no-op there: the same suite runs
-// green on every version the pipeline and a laptop may use.
+// global its own window). Defined without reading the old one: on a Node whose
+// own global is an experimental getter, that read prints "localStorage is not
+// available because --localstorage-file was not provided" on every worker, and
+// the value it would hand back is the same storage vitest already copied.
 const dom = (globalThis as { jsdom?: { window: Window } }).jsdom;
-if (dom && (globalThis as { localStorage?: unknown }).localStorage === undefined) {
-  Object.defineProperty(globalThis, "localStorage", {
-    get: () => dom.window.localStorage,
-    configurable: true,
-  });
+if (dom) {
+  try {
+    Object.defineProperty(globalThis, "localStorage", {
+      get: () => dom.window.localStorage,
+      configurable: true,
+    });
+  } catch {
+    // A non-configurable global stays as Node defined it; jsdom's copy is
+    // already there on every Node the suite supports.
+  }
+}
+
+// jsdom has no canvas, and says so — `Not implemented: HTMLCanvasElement's
+// getContext()` — on every call, which xterm makes while feature-detecting in
+// its module body. Answer `null` instead: that is exactly what jsdom answers
+// after the message, so nothing about the app changes, and a test run stops
+// filling its log with a notice about a picture nobody draws.
+const canvas = (globalThis as { HTMLCanvasElement?: { prototype: HTMLCanvasElement } })
+  .HTMLCanvasElement;
+if (canvas) {
+  canvas.prototype.getContext = (() => null) as HTMLCanvasElement["getContext"];
 }

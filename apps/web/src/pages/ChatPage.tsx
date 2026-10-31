@@ -3737,7 +3737,11 @@ function MessageActions({
       aria-label={t("common.actions")}
       aria-hidden={hidden}
     >
-      {iconActions.map((id) => renderIconAction(id))}
+      {iconActions.map((id) => (
+        // Keyed here rather than on each button: the case that renders null
+        // (an action this message cannot offer) is the same list member.
+        <Fragment key={id}>{renderIconAction(id)}</Fragment>
+      ))}
       {overflowActions.length > 0 && (
         <button
           type="button"

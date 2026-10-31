@@ -142,6 +142,19 @@ export class AcpRpcError extends Error {
   }
 }
 
+/**
+ * Work cut short because the client was closed on purpose — the chat was
+ * closed, its provider switched, the app is exiting. The caller treats it as a
+ * shutdown rather than as an agent that failed, so a stop does not read as an
+ * error in the log.
+ */
+export class AcpClosedError extends Error {
+  constructor(message = "ACP client is closed") {
+    super(message);
+    this.name = "AcpClosedError";
+  }
+}
+
 export type ConfigOption = {
   id: string;
   name?: string;
@@ -587,6 +600,8 @@ export class AcpClient extends EventEmitter {
   private activeTools = new Set<string>();
   private promptRequestId: JsonRpcId | null = null;
   private closed = false;
+  /** Closed by {@link dispose} — the shutdown's own rejections, see {@link AcpClosedError}. */
+  private closedByCaller = false;
   private stderrBuf = "";
   private terminals = new Map<string, TerminalEntry>();
   sessionId: string | null = null;
@@ -783,9 +798,8 @@ export class AcpClient extends EventEmitter {
     message?: string,
   ) {
     this.closed = true;
-    const err = new Error(
-      message ?? `ACP agent stopped (${code ?? signal ?? "closed"})`,
-    );
+    const text = message ?? `ACP agent stopped (${code ?? signal ?? "closed"})`;
+    const err = this.closedByCaller ? new AcpClosedError(text) : new Error(text);
     for (const [, p] of this.pending) {
       clearTimeout(p.timer);
       p.reject(err);
@@ -1342,6 +1356,8 @@ export class AcpClient extends EventEmitter {
 
   dispose() {
     this.closed = true;
+    // Every rejection that follows this one is our own exit, not the agent's.
+    this.closedByCaller = true;
     this.awaitingReply.clear();
     this.activeTools.clear();
     this.killAllTerminals();
@@ -1739,7 +1755,7 @@ export class AcpClient extends EventEmitter {
     if (!this.isConnected()) {
       return {
         id: -1,
-        promise: Promise.reject(new Error("ACP client is closed")),
+        promise: Promise.reject(new AcpClosedError()),
       };
     }
     const id = this.nextId++;

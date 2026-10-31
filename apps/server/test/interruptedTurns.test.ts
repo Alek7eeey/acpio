@@ -7,7 +7,7 @@
 // transcript and the fake agent echoes it back, so a turn that never reached the
 // agent fails the check.
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import os from "node:os";
 import path from "node:path";
 import fsp from "node:fs/promises";
@@ -112,6 +112,7 @@ async function readDetail(sessionId: string): Promise<SessionDetailDto> {
   return res.json() as SessionDetailDto;
 }
 
+
 async function waitForDetail(
   sessionId: string,
   predicate: (detail: SessionDetailDto) => boolean,
@@ -146,6 +147,19 @@ afterEach(async () => {
 });
 
 describe("interrupted turns, resumed at boot", () => {
+  // Three cases here provoke a boot that cannot succeed — a folder that is gone,
+  // a harness switched off — and the agent reports that failure as it happens.
+  // The assertion is the chat left alone, not the log line; keep the console
+  // quiet so a green run does not read like a broken one.
+  let logged: ReturnType<typeof vi.spyOn> | null = null;
+  beforeEach(() => {
+    logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    logged?.mockRestore();
+    logged = null;
+  });
+
   it("continues a chat that was mid-turn when the previous process died", async () => {
     await connectAgent();
     const sessionId = await seedInterruptedChat();

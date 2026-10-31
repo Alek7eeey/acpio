@@ -1275,7 +1275,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
       update: (delta, previous) => ask(delta, previous, opts.force),
     });
     if (result.state && result.state.covered !== before) {
-      console.warn(
+      // An ordinary pass, not a fault: the row it reports says the same thing.
+      console.log(
         `[builtin] compacted messages ${before}..${result.state.covered} into a digest ` +
           `(${skipMask ? "masking skipped: reasoning history" : ""})`,
       );

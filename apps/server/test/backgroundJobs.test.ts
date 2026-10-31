@@ -12,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import {
+  BG_MCP_SERVER_ID,
   BG_MCP_SERVER_NAME,
   DEFAULT_SETTINGS,
   bgMcpToolName,
@@ -596,6 +597,10 @@ describe("a note that folds into the running turn", () => {
         payload: {
           connectedProvider: "builtin",
           defaultProvider: "builtin",
+          // The app's own background-job MCP server is not started in this
+          // suite; a built-in chat would attach it and warn per turn that it is
+          // unreachable.
+          mcpBuiltinDisabledIds: [BG_MCP_SERVER_ID],
           // The title refinement would race its own model call into the stub.
           chatAutoTitle: false,
           builtinProviders: [

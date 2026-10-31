@@ -74,6 +74,7 @@ import {
   resetAllAgentSessions,
   replayPendingInteractive,
   getLiveTurnState,
+  isShutdownFailure,
 } from "./acp/sessionManager.js";
 import { pickDirectory } from "./services/pickDirectory.js";
 import { createAppUpdater, restartServer } from "./services/appUpdate.js";
@@ -2126,6 +2127,9 @@ export async function registerRoutes(app: FastifyInstance) {
       titleHint: titleIsDefault ? body.text : undefined,
       aiTitle,
     }).catch((err) => {
+      // A chat closed or restarted under a running prompt dies mid-turn by our
+      // own hand; the turn's own error part already says so in the chat.
+      if (isShutdownFailure(id, err)) return;
       console.error("prompt failed", err);
     });
 

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -256,7 +256,14 @@ describe("loadPlugins", () => {
     const { updateSettings } = await import("./settings.js");
     await updateSettings({ pluginsConfig: path.join(dir, "nowhere", "config.json") });
 
-    await plugins.loadPlugins();
+    // The report is the registry's warning, asserted below; the console line the
+    // loader also writes is the same message, not a second failure to read.
+    const logged = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await plugins.loadPlugins();
+    } finally {
+      logged.mockRestore();
+    }
 
     const state = await plugins.pluginsState();
     // Nothing from the source — the app's own `skillPath` is not its doing.

@@ -924,6 +924,9 @@ function renderBoard() {
       <I18nProvider>
         <Routes>
           <Route path="/board/:boardId" element={<BoardPage />} />
+          {/* A card's chat and a derived chat both navigate here; without the
+              route react-router warns on every test that opens one. */}
+          <Route path="/chat" element={<div>chat opened</div>} />
         </Routes>
       </I18nProvider>
     </MemoryRouter>,

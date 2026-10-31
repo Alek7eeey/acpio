@@ -333,7 +333,9 @@ export async function reviveUserConsole(sessionId: string, cwd: string): Promise
   const now = Date.now();
   if (now - (revivedAt.get(sessionId) ?? 0) < REVIVE_COOLDOWN_MS) return;
   revivedAt.set(sessionId, now);
-  console.error("[console] input arrived with no shell — starting one for session", sessionId);
+  // The recovery this function exists for, so it is an ordinary entry in the
+  // log — not an error the reader has to explain away.
+  console.log("[console] input arrived with no shell — starting one for session", sessionId);
   await attachUserConsole(sessionId, cwd);
   broadcastToSession(sessionId, { type: "process.cleared", sessionId });
 }
