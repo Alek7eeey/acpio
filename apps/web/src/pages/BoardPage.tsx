@@ -1873,8 +1873,15 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         dragActiveRef.current = true;
         setDraggingTaskId(task.id);
         setDragPreview({ x, y, text });
-        // The whole page carries the card: the cursor says so everywhere.
+        // The whole page carries the card: the cursor says so everywhere, and
+        // no word on it is being selected — the pointer travels over the text
+        // as the drag does, so the browser would paint it blue on the way.
         document.body.style.cursor = "grabbing";
+        // The press may already have started a selection inside the threshold;
+        // the drag owns the gesture, so that one goes with it.
+        window.getSelection()?.removeAllRanges();
+        document.body.style.setProperty("user-select", "none");
+        document.body.style.setProperty("-webkit-user-select", "none");
         // Once the drag owns the gesture, the pointer keeps streaming to the
         // card even when it travels off it.
         try {
@@ -1945,6 +1952,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         window.removeEventListener("touchmove", blockPan);
         dragActiveRef.current = false;
         document.body.style.cursor = "";
+        document.body.style.removeProperty("user-select");
+        document.body.style.removeProperty("-webkit-user-select");
         setDraggingTaskId(null);
         setDragPreview(null);
         setTaskDropHint(null);

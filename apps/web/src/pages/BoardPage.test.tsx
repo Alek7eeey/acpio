@@ -448,6 +448,44 @@ describe("BoardPage custom columns", () => {
     expect(apiMock.updateSession.mock.calls[0][1]).toEqual({ boardColumnId: "col-review" });
   });
 
+  // A drag is a gesture, not a selection: the pointer travels over the card's
+  // own words, and the press has already anchored a selection there by the time
+  // the threshold is crossed — a whole card painted blue on the way to the next
+  // lane. The drag owns the gesture, so the page stops selecting while it lasts
+  // and picks the habit up again on release.
+  it("selects no text while a card is being dragged", async () => {
+    useAppStore.setState({ boardSessions: [task] });
+    const { container } = renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const card = container.querySelector('[data-task-id="t1"]') as HTMLElement;
+    // The point stays on the card being read: this gesture is about the text
+    // under the pointer, not about where it would land.
+    Object.defineProperty(document, "elementsFromPoint", {
+      configurable: true,
+      writable: true,
+      value: () => [card],
+    });
+    // The selection the press on the card's text already started.
+    const range = document.createRange();
+    range.selectNodeContents(card);
+    window.getSelection()?.addRange(range);
+    try {
+      fireEvent.pointerDown(card, { pointerId: 1, pointerType: "mouse", button: 0, clientY: 10 });
+      fireEvent.pointerMove(window, { pointerId: 1, pointerType: "mouse", clientY: 80 });
+
+      expect(document.body.style.getPropertyValue("user-select")).toBe("none");
+      expect(window.getSelection()?.rangeCount).toBe(0);
+
+      fireEvent.pointerUp(window, { pointerId: 1, pointerType: "mouse", clientY: 80 });
+    } finally {
+      Reflect.deleteProperty(document, "elementsFromPoint");
+    }
+
+    // Released: the page selects its text again.
+    expect(document.body.style.getPropertyValue("user-select")).toBe("");
+  });
+
   // The card itself is the handle: a drag icon on the card was one control too
   // many, and the whole card already answers the pointer.
   it("carries no drag icon on its cards", async () => {
@@ -1357,3 +1395,4 @@ describe("BoardPage file drop", () => {
     expect(screen.queryByText("plan.pdf")).toBeNull();
   });
 });
+
