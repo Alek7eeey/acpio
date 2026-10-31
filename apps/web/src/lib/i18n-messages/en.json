@@ -521,6 +521,7 @@
     "builtinBlockGenerationContext": "Generation and context",
     "builtinBlockProviders": "Providers and models",
     "builtinBlockPrompt": "Prompt and skills",
+    "builtinBlockTools": "Tools",
     "builtinBlockSubagents": "Subagents",
     "builtinPresetsTitle": "Agent presets",
     "builtinPresetsHint": "Your own cuts of the built-in agent for a specific kind of work: say “Chat (Fast)” for the same model with less thinking and no turn retries, and “Chat (Think)” for the one with room to reason. Every preset joins the agent picker — when a chat or a board task is created — exactly like the built-in agent. An empty field means “as set above”, so a preset overrides only what it fills in.",

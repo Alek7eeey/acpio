@@ -463,6 +463,7 @@ export const en = {
     builtinBlockGenerationContext: "Generation and context",
     builtinBlockProviders: "Providers and models",
     builtinBlockPrompt: "Prompt and skills",
+    builtinBlockTools: "Tools",
     builtinBlockSubagents: "Subagents",
     builtinPresetsTitle: "Agent presets",
     builtinPresetsHint:

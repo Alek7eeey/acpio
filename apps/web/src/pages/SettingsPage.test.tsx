@@ -384,7 +384,7 @@ describe("SettingsPage form state", () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=tools"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>

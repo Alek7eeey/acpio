@@ -23,7 +23,7 @@ describe("parseSettingsSearch", () => {
     },
   );
 
-  it.each(["presets", "generation", "providers", "prompt", "subagents"] as const)(
+  it.each(["presets", "generation", "providers", "prompt", "tools", "subagents"] as const)(
     "parses the built-in agent leaf %j",
     (leaf) => {
       expect(parseSettingsSearch(`?section=builtin&leaf=${leaf}`)).toEqual({
@@ -218,7 +218,7 @@ describe("settingsPath", () => {
     },
   );
 
-  it.each(["presets", "generation", "subagents", "prompt"] as const)(
+  it.each(["presets", "generation", "subagents", "prompt", "tools"] as const)(
     "round-trips the built-in agent leaf %j",
     (leaf) => {
       const path = settingsPath("builtin", leaf);
@@ -297,6 +297,7 @@ describe("getSettingsTree", () => {
       "generation",
       "providers",
       "prompt",
+      "tools",
       "subagents",
     ]);
   });

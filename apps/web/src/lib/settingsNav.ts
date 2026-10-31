@@ -15,6 +15,7 @@ export type SettingsBuiltinLeaf =
   | "generation"
   | "providers"
   | "prompt"
+  | "tools"
   | "subagents";
 export type SettingsInterfaceLeaf = "appearance" | "colors" | "voice" | "chat" | "board";
 export type SettingsLeaf = SettingsAgentLeaf | SettingsBuiltinLeaf | SettingsInterfaceLeaf;
@@ -63,6 +64,10 @@ const BUILTIN_LEAVES: ReadonlyArray<{ id: SettingsBuiltinLeaf; key: string }> = 
   { id: "generation", key: "settings.builtinBlockGenerationContext" },
   { id: "providers", key: "settings.builtinBlockProviders" },
   { id: "prompt", key: "settings.builtinBlockPrompt" },
+  // The tools the agent keeps in a chat have a page of their own: a switch per
+  // tool is a page's worth of rows, and a tool nobody uses can be turned off
+  // without touching the prompt.
+  { id: "tools", key: "settings.builtinBlockTools" },
   { id: "subagents", key: "settings.builtinBlockSubagents" },
 ];
 

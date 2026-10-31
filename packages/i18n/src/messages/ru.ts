@@ -483,6 +483,7 @@ export const ru = {
     builtinBlockGenerationContext: "Генерация и контекст",
     builtinBlockProviders: "Провайдеры и модели",
     builtinBlockPrompt: "Промпт и навыки",
+    builtinBlockTools: "Инструменты",
     builtinBlockSubagents: "Субагенты",
     builtinPresetsTitle: "Пресеты агента",
     builtinPresetsHint:
