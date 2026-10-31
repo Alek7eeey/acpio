@@ -59,7 +59,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      # Full history and the tags, because the build stamps the release it came
+      # from: `scripts/generate-version.mjs` reads the `v*.*.*` tags, and a
+      # depth-1 clone carries none — every CI build would then call itself
+      # 0.1.0 (the `package.json` base, not v0.1.42), see npm's newer release,
+      # and open the update popup over the shell the e2e suite drives. The
+      # release build fetches the same way for the same reason.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
