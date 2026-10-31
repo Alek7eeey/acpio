@@ -48,7 +48,7 @@ import {
   supersededRules,
 } from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
-import { createBuiltinTools, type PlanDocument, type PlanUpdate } from "./tools.js";
+import { createBuiltinTools, type PlanDocument, type PlanEntry, type PlanUpdate } from "./tools.js";
 import {
   createSubagentsBridge,
   type SubagentsBridge,
@@ -132,10 +132,11 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
     text:
       "Work that takes more than a couple of steps goes into the `plan` tool before the first " +
       "one: the whole list in a single call, then the step you are on marked `in_progress` and " +
-      "`completed` once it lands. When the user asks for a plan, or to plan before acting, hand " +
-      "the plan itself over in that call — `name`, a line or two of `overview` and `plan` as " +
-      "Markdown — and the right-hand panel opens with it above the steps. The reader watches " +
-      "that panel — never repeat it in the answer.",
+      "`completed` once it lands. Steps left open send the turn back to you: finish them, or " +
+      "say why a step cannot be done and drop it. When the user asks for a plan, or to plan " +
+      "before acting, hand the plan itself over in that call — `name`, a line or two of " +
+      "`overview` and `plan` as Markdown — and the right-hand panel opens with it above the " +
+      "steps. The reader watches that panel — never repeat it in the answer.",
   },
   {
     id: "batch",
@@ -227,6 +228,24 @@ export function systemPrompt(
     // would have no way to tell the two apart.
     ...(thinkingInstructions.trim() ? ["", thinkingInstructions.trim()] : []),
   ].join("\n");
+}
+
+/**
+ * What the model reads when it stops with plan steps still open: the steps
+ * themselves, so the reminder cannot be waved off as a general "carry on", and
+ * the two honest ways out — do the step, or say why it is not being done.
+ */
+function planFinishNudge(locale: string, steps: PlanEntry[]): string {
+  const list = steps.map((step) => `- ${step.content} (${step.status})`).join("\n");
+  return locale === "ru"
+    ? `План не закрыт: в панели справа эти шаги ещё не выполнены.\n${list}\n` +
+        "Продолжай и закрой их: сделай работу, затем вызови `plan` с выполненными шагами " +
+        "в `completed`. Если шаг сделать нельзя — скажи почему в ответе и убери его из плана. " +
+        "Не заканчивай ход с половиной списка."
+    : `The plan is not finished: the side panel still lists these steps as open.\n${list}\n` +
+        "Keep going and close them: do the work, then call `plan` with the steps you finished " +
+        "marked `completed`. If a step cannot be done, say why in the answer and drop it from " +
+        "the plan. Do not end the turn with the list half done.";
 }
 
 /**
@@ -327,6 +346,15 @@ const THINKING_LIMIT_COMMAND_RE = /^\/thinking-limit(?:\s+(\S+))?\s*$/i;
 
 /** The fuse's default line: one step's thinking past this is cut. */
 const THINKING_LIMIT_DEFAULT_CHARS = 3_000;
+
+/**
+ * How many times a turn is sent back to finish a plan it wrote itself. The
+ * panel is a promise to the reader: a turn that published steps and stopped
+ * with them open is work abandoned mid-way, so the model is told to close them
+ * — twice, not forever, because a model that will not finish has to be let go
+ * with its answer rather than spun in place.
+ */
+const PLAN_FINISH_NUDGES = 2;
 
 /**
  * What "High" appends: the opposite failure to Extra low's — a model that
@@ -458,6 +486,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * plan must not fall out of the panel mid-task (see `publishPlan`).
    */
   private planDocument: PlanDocument = {};
+  /**
+   * Steps of the plan as last published, and how many `plan` calls have landed.
+   * A turn that wrote a plan has to finish it (see the nudge in `prompt`); the
+   * count is how that turn is told apart from one where the plan was already
+   * there — an unrelated question must not be pulled back into old work.
+   */
+  private planEntries: PlanEntry[] = [];
+  private planEpoch = 0;
   /** Archive of bulky tool results for this session, when offloading is on. */
   private offload: OffloadStore | undefined;
   private abort: AbortController | null = null;
@@ -802,7 +838,14 @@ export class BuiltinAgent implements InProcessAgentTransport {
       if (value) next[field] = value;
     }
     this.planDocument = next;
+    this.planEntries = update.entries;
+    this.planEpoch += 1;
     this.emitUpdate({ sessionUpdate: "plan", ...next, entries: update.entries });
+  }
+
+  /** Steps the plan still owes: not `completed` — what the turn is nudged for. */
+  private openPlanSteps(): PlanEntry[] {
+    return this.planEntries.filter((entry) => entry.status !== "completed");
   }
 
   private emitUpdate(update: Record<string, unknown>): void {
@@ -1605,6 +1648,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
         },
       };
       let folded: TurnOutcome | null = null;
+      // The plan as it stands before this turn: a plan written later is this
+      // turn's own promise, an older one is not (see the nudge below).
+      const planEpochAtStart = this.planEpoch;
       let outcome = await runTurnWithRetry(turn, retryOpts);
       if (outcome.reasoningLimitHit && !abort.signal.aborted) {
         // The fuse spent its continuations and the turn is still silent: on
@@ -1621,6 +1667,33 @@ export class BuiltinAgent implements InProcessAgentTransport {
         } finally {
           this.thinkingLimit = cap;
         }
+      }
+      // The turn that wrote a plan owes its steps: the panel is what the reader
+      // watches, and a turn ending with half of it open is work abandoned
+      // mid-way. Asked twice at most — the nudge names the two honest ways out
+      // (do the step, or say why not), so a plan that cannot be finished ends
+      // with an answer rather than a spin.
+      for (let asked = 1; !abort.signal.aborted && asked <= PLAN_FINISH_NUDGES; asked += 1) {
+        if (outcome.failure || outcome.reasoningLimitHit) break;
+        if (outcome.stopReason !== "end_turn" && outcome.stopReason !== "max_tokens") break;
+        if (this.planEpoch === planEpochAtStart) break;
+        const open = this.openPlanSteps();
+        if (!open.length) break;
+        // What this turn produced has to be in the history the rerun reads.
+        if (folded !== outcome) {
+          keepResponse(outcome);
+          folded = outcome;
+        }
+        this.messages = [
+          ...this.messages,
+          userContent([{ type: "text", text: planFinishNudge(live.locale, open) }]),
+        ];
+        this.persist();
+        retryOpts.note(
+          `План не закрыт: прошу модель доработать оставшиеся шаги ` +
+            `(${asked} из ${PLAN_FINISH_NUDGES}).`,
+        );
+        outcome = await runTurnWithRetry(turn, retryOpts);
       }
       if (folded !== outcome) keepResponse(outcome);
       if (outcome.failure) throw outcome.failure;

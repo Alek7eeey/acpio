@@ -146,6 +146,19 @@ function planUpdates(frames: Array<Record<string, unknown>>): Array<Record<strin
     .map((f) => (f.params as { update: Record<string, unknown> }).update);
 }
 
+/** Text of the last message a request carried — the nudge, when there is one. */
+function lastMessageText(body: Record<string, unknown>): string {
+  const messages = (body.messages ?? []) as Array<{ content?: unknown }>;
+  const content = messages.at(-1)?.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) =>
+      part && typeof part === "object" ? String((part as { text?: unknown }).text ?? "") : "",
+    )
+    .join("\n");
+}
+
 const DOCUMENT = {
   name: "Переписать экспорт чата",
   overview: "Экспорт знает про план, но не про туду: три шага, последний — тесты.",
@@ -166,14 +179,14 @@ it("publishes the plan itself, and keeps it when a later call moves a status", a
         },
       },
     },
-    // The step that lands: the model sends the statuses alone.
+    // The steps that land: the model sends the statuses alone.
     {
       tool: {
         name: "plan",
         args: {
           entries: [
             { content: "Read the code", status: "completed" },
-            { content: "Fix it", status: "in_progress" },
+            { content: "Fix it", status: "completed" },
           ],
         },
       },
@@ -200,9 +213,85 @@ it("publishes the plan itself, and keeps it when a later call moves a status", a
       ...DOCUMENT,
       entries: [
         { content: "Read the code", status: "completed", priority: "medium" },
-        { content: "Fix it", status: "in_progress", priority: "medium" },
+        { content: "Fix it", status: "completed", priority: "medium" },
       ],
     });
+  } finally {
+    await close();
+  }
+});
+
+it("sends the model back to finish a plan it left open", async () => {
+  const { frames, bodies, prompt, close } = await boot([
+    {
+      tool: {
+        name: "plan",
+        args: {
+          entries: [
+            { content: "Read the code", status: "in_progress" },
+            { content: "Fix it" },
+          ],
+        },
+      },
+    },
+    // The model calls it done with both steps still open: the turn is not over.
+    { text: "Готово." },
+    {
+      tool: {
+        name: "plan",
+        args: {
+          entries: [
+            { content: "Read the code", status: "completed" },
+            { content: "Fix it", status: "completed" },
+          ],
+        },
+      },
+    },
+    { text: "Готово." },
+  ]);
+  try {
+    await prompt("сделай");
+    // plan, answer, the nudge, the finished plan, its answer.
+    expect(bodies).toHaveLength(4);
+    const last = lastMessageText(bodies[2] ?? {});
+    expect(last).toContain("The plan is not finished");
+    expect(last).toContain("Read the code (in_progress)");
+    expect(last).toContain("Fix it (pending)");
+    // The panel ends the turn closed, and the reader is told why the turn ran on.
+    const updates = planUpdates(frames);
+    expect(updates.at(-1)?.entries).toEqual([
+      { content: "Read the code", status: "completed", priority: "medium" },
+      { content: "Fix it", status: "completed", priority: "medium" },
+    ]);
+    const notes = frames
+      .map((f) => (f.params as { update?: { sessionUpdate?: string; content?: { text?: string } } }))
+      .filter((u) => u?.update?.sessionUpdate === "agent_thought_chunk")
+      .map((u) => String(u?.update?.content?.text ?? ""));
+    expect(notes.join("\n")).toContain("План не закрыт");
+  } finally {
+    await close();
+  }
+});
+
+it("nudges at most twice when the model will not close its plan", async () => {
+  const { bodies, prompt, close } = await boot([
+    {
+      tool: {
+        name: "plan",
+        args: { entries: [{ content: "Fix it", status: "in_progress" }] },
+      },
+    },
+    // From here on the model only ever answers, never closing the step.
+    { text: "Не могу." },
+  ]);
+  try {
+    await prompt("сделай");
+    // plan, answer, the first nudge, the second — then the turn is let go.
+    expect(bodies).toHaveLength(4);
+    const nudges = bodies.filter((body) =>
+      lastMessageText(body).includes("The plan is not finished"),
+    );
+    expect(nudges).toHaveLength(2);
   } finally {
     await close();
   }
