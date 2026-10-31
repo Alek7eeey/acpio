@@ -2199,6 +2199,14 @@ export interface AppSettings {
    */
   builtinMarkdownImages: boolean;
   /**
+   * Offer the built-in agent its `plan` tool (Settings → Built-in agent). With
+   * it the agent publishes the steps of a task — and, when the user asks for
+   * one, the plan itself — into the right-hand panel; the system prompt's plan
+   * rule leaves with the tool, so nothing asks for a tool that is not there.
+   * On by default: the panel is where the work is legible.
+   */
+  builtinPlanTool: boolean;
+  /**
    * Composer drafts persisted so typed text survives a reload, keyed by chat id.
    * Empty values are pruned server-side; a chat's draft is dropped when it is
    * deleted or its message is sent. A draft carries the files its text links by
@@ -2329,6 +2337,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   builtinAllowOutsideCwd: false,
   builtinMarkdownImages: true,
+  builtinPlanTool: true,
   composerDrafts: {},
 };
 

@@ -3812,6 +3812,30 @@ export function SettingsPage() {
                   label={t("settings.builtinMarkdownImages")}
                 />
               </SettingRow>
+              {/* The plan tool is the other half of that same prompt: its rule
+                  is what asks the agent to keep the plan in the side panel. */}
+              <SettingRow
+                label={t("settings.builtinPlanTool")}
+                hint={t("settings.builtinPlanToolHint")}
+                terms={[
+                  t("settings.builtinPlanTool"),
+                  t("settings.builtinPlanToolHint"),
+                  "plan",
+                  "туду",
+                  "todo",
+                ]}
+              >
+                <Toggle
+                  checked={form.builtinPlanTool !== false}
+                  onChange={(v) => {
+                    patch("builtinPlanTool", v);
+                    // Applies at once: the next turn is built with the tool set
+                    // and the prompt the switch decided.
+                    void saveSettings({ builtinPlanTool: v });
+                  }}
+                  label={t("settings.builtinPlanTool")}
+                />
+              </SettingRow>
             </SettingTable>
 
             {/* File access shares the page with the prompt: the switch is what

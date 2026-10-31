@@ -476,6 +476,9 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   if (typeof partial.builtinMarkdownImages !== "boolean") {
     merged.builtinMarkdownImages = DEFAULT_SETTINGS.builtinMarkdownImages;
   }
+  if (typeof partial.builtinPlanTool !== "boolean") {
+    merged.builtinPlanTool = DEFAULT_SETTINGS.builtinPlanTool;
+  }
   if (typeof partial.chatAutoTitle !== "boolean") {
     merged.chatAutoTitle = DEFAULT_SETTINGS.chatAutoTitle;
   }

@@ -48,7 +48,7 @@ import {
   supersededRules,
 } from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
-import { createBuiltinTools } from "./tools.js";
+import { createBuiltinTools, type PlanDocument, type PlanUpdate } from "./tools.js";
 import {
   createSubagentsBridge,
   type SubagentsBridge,
@@ -132,8 +132,10 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
     text:
       "Work that takes more than a couple of steps goes into the `plan` tool before the first " +
       "one: the whole list in a single call, then the step you are on marked `in_progress` and " +
-      "`completed` once it lands. The reader watches that list in the side panel — never repeat " +
-      "it in the answer.",
+      "`completed` once it lands. When the user asks for a plan, or to plan before acting, hand " +
+      "the plan itself over in that call — `name`, a line or two of `overview` and `plan` as " +
+      "Markdown — and the right-hand panel opens with it above the steps. The reader watches " +
+      "that panel — never repeat it in the answer.",
   },
   {
     id: "batch",
@@ -168,6 +170,8 @@ export function systemPrompt(
   outsideCwd: boolean,
   /** Settings → Built-in agent: say that the chat draws markdown pictures. */
   markdownImages: boolean,
+  /** Settings → Built-in agent: the `plan` tool is offered, so its rule holds. */
+  planTool: boolean,
   /** Settings → Built-in agent: the user's own instructions, appended last. */
   extraInstructions: string,
   /** The harness's own rider (the thinking knob) — not the user's words. */
@@ -199,9 +203,12 @@ export function systemPrompt(
     "",
     // Four laws that hold whatever the task is: everything narrower belongs to
     // a skill, so a skill can never argue with a rule that already answered its
-    // case. A rule an active skill words itself is not repeated here.
+    // case. A rule an active skill words itself is not repeated here, and the
+    // plan rule leaves with the tool it names (Settings → Built-in agent).
     "Rules:",
-    ...RULES.filter((rule) => !supersededRules.has(rule.id)).map((rule) => `- ${rule.text}`),
+    ...RULES.filter(
+      (rule) => !supersededRules.has(rule.id) && (planTool || rule.id !== "plan"),
+    ).map((rule) => `- ${rule.text}`),
     // Stable to volatile, top to bottom: the rules and the frozen skills block
     // come first so a MCP server coming online or the thinking knob turning mid
     // chat rewrites only the tail, never the head the provider has cached.
@@ -444,6 +451,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
    * message (see `expandSkillInvocation`).
    */
   private frozenSkills: { section: string; supersedes: Set<string> } | null = null;
+  /**
+   * The plan document this session published: the title, the overview and the
+   * Markdown the panel draws above the steps. Kept for the session — a later
+   * `plan` call that only moves a step's status arrives without one, and the
+   * plan must not fall out of the panel mid-task (see `publishPlan`).
+   */
+  private planDocument: PlanDocument = {};
   /** Archive of bulky tool results for this session, when offloading is on. */
   private offload: OffloadStore | undefined;
   private abort: AbortController | null = null;
@@ -774,6 +788,21 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private applyThinkingLimit(global: number): void {
     this.thinkingLimit = this.thinkingLimitOverride ?? normalizeBuiltinThinkingLimit(global);
+  }
+
+  /**
+   * What the `plan` tool puts on the wire: the steps as the model sent them,
+   * plus the plan document this session has — the one from an earlier call when
+   * this one carries none, so moving a status never blanks the panel.
+   */
+  private publishPlan(update: PlanUpdate): void {
+    const next: PlanDocument = {};
+    for (const field of ["name", "overview", "plan"] as const) {
+      const value = update[field]?.trim() || this.planDocument[field];
+      if (value) next[field] = value;
+    }
+    this.planDocument = next;
+    this.emitUpdate({ sessionUpdate: "plan", ...next, entries: update.entries });
   }
 
   private emitUpdate(update: Record<string, unknown>): void {
@@ -1368,6 +1397,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
     // The fuse follows this chat's override, else the global setting — a knob
     // turned in Settings reaches this turn instead of a new session.
     this.applyThinkingLimit(normalizeBuiltinThinkingLimit(live.builtinThinkingLimit));
+    // Settings → Built-in agent: the plan tool on unless the switch says off.
+    // Read live, like the two prompt switches below, so a chat that is already
+    // running gets the answer on its next turn.
+    const planToolEnabled = live.builtinPlanTool !== false;
     const { contextWindow } = selection;
     const abort = new AbortController();
     this.abort = abort;
@@ -1457,6 +1490,10 @@ export class BuiltinAgent implements InProcessAgentTransport {
         skillsPrompt.supersedes,
         live.builtinAllowOutsideCwd === true,
         live.builtinMarkdownImages === true,
+        // Settings → Built-in agent: the `plan` tool is offered unless it was
+        // switched off; its rule leaves the prompt with it, or the model would
+        // be told to call a tool it does not have.
+        planToolEnabled,
         live.builtinExtraInstructions ?? "",
         THINKING_INSTRUCTIONS[this.thinking],
       );
@@ -1477,7 +1514,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           ask,
           outsideCwd: live.builtinAllowOutsideCwd === true,
           subagents: subagents ?? undefined,
-          emitPlan: (entries) => this.emitUpdate({ sessionUpdate: "plan", entries }),
+          emitPlan: planToolEnabled ? (update) => this.publishPlan(update) : undefined,
           // Same channel as the MCP tools: `read` on a picture hands the bytes
           // to the turn, which puts them right after that call's result.
           onImages: (toolCallId, images) => toolImages.set(toolCallId, images),

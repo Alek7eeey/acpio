@@ -481,6 +481,7 @@ const settingsSchema = z.object({
     .optional(),
   builtinAllowOutsideCwd: z.boolean().optional(),
   builtinMarkdownImages: z.boolean().optional(),
+  builtinPlanTool: z.boolean().optional(),
 });
 
 /** Registered provider id (built-ins + custom agents). Sessions may only

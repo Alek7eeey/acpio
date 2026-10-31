@@ -121,7 +121,7 @@ function boot(
 }
 
 describe("system prompt rules", () => {
-  const build = (superseded: string[], skillsSection = "") =>
+  const build = (superseded: string[], skillsSection = "", planTool = true) =>
     systemPrompt(
       "en",
       "/work",
@@ -130,6 +130,7 @@ describe("system prompt rules", () => {
       new Set(superseded),
       false,
       false,
+      planTool,
       "",
       "",
     );
@@ -150,6 +151,13 @@ describe("system prompt rules", () => {
 
   it("is untouched by an id no rule carries", () => {
     expect(build(["no-such-rule"])).toBe(build([]));
+  });
+
+  it("keeps the plan rule only while the plan tool is offered", () => {
+    expect(build([])).toContain("goes into the `plan` tool");
+    expect(build([], "", false)).not.toContain("`plan` tool");
+    // The other laws stay: the switch takes the tool, not the rules.
+    expect(build([], "", false)).toContain("Make the smallest change that fully solves the task.");
   });
 
   it("names rules a skill's `supersedes` may refer to", () => {

@@ -540,10 +540,47 @@ describe("the plan tool", () => {
         ],
       }),
     ).resolves.toContain("2 step(s)");
-    expect(emit).toHaveBeenCalledWith([
-      { content: "Read the code", status: "in_progress", priority: "medium" },
-      { content: "Fix it", status: "pending", priority: "medium" },
-    ]);
+    // No document in the call: the update is the steps alone, the shape every
+    // other ACP agent sends.
+    expect(emit).toHaveBeenCalledWith({
+      entries: [
+        { content: "Read the code", status: "in_progress", priority: "medium" },
+        { content: "Fix it", status: "pending", priority: "medium" },
+      ],
+    });
+  });
+
+  it("hands the plan itself over with the steps when the user asked for one", async () => {
+    const emit = emitPlan();
+    const tools = setupPlan(emit);
+    await expect(
+      exec(tools, "plan", {
+        name: " Export ",
+        overview: "  Three steps. ",
+        plan: " # Plan\n\n1. Read. ",
+        entries: [{ content: "Read the code" }],
+      }),
+    ).resolves.toContain("Plan published");
+    expect(emit).toHaveBeenCalledWith({
+      name: "Export",
+      overview: "Three steps.",
+      plan: "# Plan\n\n1. Read.",
+      entries: [{ content: "Read the code", status: "pending", priority: "medium" }],
+    });
+  });
+
+  it("leaves the document out when the call carries none", async () => {
+    const emit = emitPlan();
+    const tools = setupPlan(emit);
+    await exec(tools, "plan", {
+      name: "  ",
+      overview: "",
+      entries: [{ content: "Read the code" }],
+    });
+    // Blank fields are absent, not empty: the agent keeps the plan it has.
+    expect(emit).toHaveBeenCalledWith({
+      entries: [{ content: "Read the code", status: "pending", priority: "medium" }],
+    });
   });
 
   it("refuses a call whose entries carry no content", async () => {

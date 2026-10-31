@@ -544,6 +544,7 @@ describe("DEFAULT_SETTINGS", () => {
     builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
     builtinAllowOutsideCwd: false,
     builtinMarkdownImages: true,
+    builtinPlanTool: true,
     composerDrafts: {},
   };
 

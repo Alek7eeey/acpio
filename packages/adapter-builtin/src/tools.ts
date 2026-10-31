@@ -21,8 +21,22 @@ export type PlanEntry = {
   priority: "high" | "medium" | "low";
 };
 
+/**
+ * The plan itself, for a user who asked for one: what the harness draws *above*
+ * the steps in the right-hand panel — a title, a line or two on the shape of
+ * it, and the plan as Markdown. Absent on a call that only moves a status.
+ */
+export type PlanDocument = {
+  name?: string;
+  overview?: string;
+  plan?: string;
+};
+
+/** One `plan` call: the whole list of steps, plus the document when there is one. */
+export type PlanUpdate = { entries: PlanEntry[] } & PlanDocument;
+
 /** Publish the plan over ACP (`sessionUpdate: "plan"`). */
-export type EmitPlan = (entries: PlanEntry[]) => void;
+export type EmitPlan = (update: PlanUpdate) => void;
 
 export interface BuiltinToolOptions {
   host: HostClient;
@@ -51,9 +65,9 @@ export interface BuiltinToolOptions {
    */
   outsideCwd?: boolean;
   /**
-   * Present only for the session's own tool set: adds the `plan` tool. A child
-   * runs inside the parent's chat and must not replace the plan the reader is
-   * already watching, so subagents are built without it.
+   * Present when the user left the plan tool on (Settings → Built-in agent):
+   * adds the `plan` tool. A child also runs without it — it runs inside the
+   * parent's chat and must not replace the plan the reader is already watching.
    */
   emitPlan?: EmitPlan;
 }
@@ -698,6 +712,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
    * The plan the side panel shows. Other ACP agents report theirs with
    * `session/update: plan`; this tool is the built-in agent's way onto that same
    * wire, and the whole list rides every call so a status change is one update.
+   * A user who asks for a plan gets the plan itself too — `name`, `overview`
+   * and the Markdown — which the harness draws above the steps (see
+   * {@link PlanDocument}).
    */
   const emitPlan = opts.emitPlan;
   const planTool: ToolSet = emitPlan
@@ -706,7 +723,10 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
           description:
             "Publish your plan for the task: every step in order, each with its status. Call it " +
             "before the first step and again when a step starts or lands — the reader watches " +
-            "the list in the side panel, so do not repeat it in the answer.",
+            "the plan in the side panel, so do not repeat it in the answer. When the user asks " +
+            "for a plan, or to plan before acting, hand the plan itself over in that call too: " +
+            "`name`, a line or two of `overview` and `plan` as Markdown, which the panel opens " +
+            "with above the steps. Later calls carry the steps alone — the document stays.",
           inputSchema: z.object({
             entries: z
               .array(
@@ -720,8 +740,23 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               )
               .min(1)
               .describe("The whole plan, in order — every call replaces the previous one."),
+            name: z
+              .string()
+              .optional()
+              .describe("Title of the plan, when the user asked for the plan itself."),
+            overview: z
+              .string()
+              .optional()
+              .describe("One or two lines on the shape of the plan: what it does and why."),
+            plan: z
+              .string()
+              .optional()
+              .describe(
+                "The plan itself as Markdown: the steps with the files and the reasoning that " +
+                  "ties them together. The panel draws it above the list.",
+              ),
           }),
-          execute: async ({ entries }) => {
+          execute: async ({ entries, name, overview, plan: markdown }) => {
             const list: PlanEntry[] = [];
             for (const entry of entries) {
               const content = entry.content.trim();
@@ -729,8 +764,17 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               list.push({ content, status: entry.status ?? "pending", priority: "medium" });
             }
             if (!list.length) throw new Error("plan: every entry needs `content`");
-            emitPlan(list);
-            return `Plan updated: ${list.length} step(s), shown in the side panel.`;
+            // An empty field means "no document on this call", so it is left
+            // out rather than sent empty: the agent keeps the one it has.
+            const document: PlanDocument = {
+              ...(name?.trim() ? { name: name.trim() } : {}),
+              ...(overview?.trim() ? { overview: overview.trim() } : {}),
+              ...(markdown?.trim() ? { plan: markdown.trim() } : {}),
+            };
+            emitPlan({ ...document, entries: list });
+            return document.plan
+              ? `Plan published: ${list.length} step(s), the plan itself in the side panel above them.`
+              : `Plan updated: ${list.length} step(s), shown in the side panel.`;
           },
         }),
       }

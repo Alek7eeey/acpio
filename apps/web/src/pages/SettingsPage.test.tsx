@@ -377,6 +377,28 @@ describe("SettingsPage form state", () => {
     );
     expect(toggle.checked).toBe(false);
   });
+
+  // The plan tool is read per turn, so a chat already running gets the answer
+  // as soon as the switch is flipped — no Save in between.
+  it("saves the plan-tool switch as soon as it is flipped", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    const toggle = screen.getByLabelText("Plan tool") as HTMLInputElement;
+    expect(toggle.checked).toBe(true);
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith({ builtinPlanTool: false }),
+    );
+    expect(toggle.checked).toBe(false);
+  });
 });
 
 describe("Built-in providers", () => {
