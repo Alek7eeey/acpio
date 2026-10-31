@@ -171,8 +171,11 @@ works and parks in **Wait** when it ends, so **Reopen** is only for a task you w
 without a word. Board tasks never show up in the
 chat tree, and deleting a board deletes its tasks with it.
 
-The board's columns are yours to arrange: **Board columns** in the rail (or the **⋯** in any
-lane's head) opens the editor. The four stage columns — **Todo**, **In Progress**, **Wait**,
+The board's columns are yours to arrange: **Board columns** in the rail opens the editor. The
+whole strip stands on the left, one line a column and in order; the picked column is highlighted
+and its settings — its name, the order of its cards, its switches — show on the right. The arrows
+between the list and the settings move the picked column, **×** takes a lane of your own away.
+The four stage columns — **Todo**, **In Progress**, **Wait**,
 **Done** — always stay: rename them, reorder them, change how a lane orders its cards or
 whether a card takes the next prompt, but they cannot be deleted — a card of that stage would
 have nowhere to stand. Add as many lanes of your own as you like — Deferred, Backlog, Blocked, Review — and every one

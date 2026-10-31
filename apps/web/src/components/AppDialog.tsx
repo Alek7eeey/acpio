@@ -7,9 +7,18 @@ type AppDialogProps = {
   children?: ReactNode;
   onClose: () => void;
   actions: ReactNode;
+  /** A panel wide enough for two things standing side by side. */
+  wide?: boolean;
 };
 
-export function AppDialog({ title, description, children, onClose, actions }: AppDialogProps) {
+export function AppDialog({
+  title,
+  description,
+  children,
+  onClose,
+  actions,
+  wide,
+}: AppDialogProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -42,7 +51,7 @@ export function AppDialog({ title, description, children, onClose, actions }: Ap
     >
       <div
         ref={panelRef}
-        className={`${styles.modal} ${styles.dialogCompact}`}
+        className={`${styles.modal} ${wide ? styles.modalWide : styles.dialogCompact}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

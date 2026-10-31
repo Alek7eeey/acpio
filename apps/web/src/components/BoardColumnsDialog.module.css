@@ -1,32 +1,200 @@
+/* Two panes and the rail between them: the strip stays whole on the left, the
+   picked column answers on the right. */
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px minmax(0, 1fr);
+  gap: 10px;
+  height: min(46vh, 340px);
+  min-height: 0;
+}
+
+.pane,
+.detail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  min-height: 0;
+}
+
+.detail {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.paneHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.detailName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* The strip itself, read as the board reads it: one line a column, in order. */
 .list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  max-height: min(56vh, 520px);
+  gap: 2px;
+  min-height: 0;
   overflow-y: auto;
-  padding-right: 2px;
-}
-
-.row {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  padding: 4px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius);
-  background: var(--bg-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
 }
 
-.rowTop {
+.row,
+.rowActive {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 60%, transparent);
+}
+
+.row:focus-visible,
+.rowActive:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.rowActive {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.rowIndex {
+  width: 1.1em;
+  flex: none;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.rowTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.rowActive .rowIndex {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.homeMark {
+  flex: none;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-tertiary) 80%, transparent);
+  border-radius: 999px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+.rowActive .homeMark {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* What can be done to the picked column, standing between the strip and it. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.iconBtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.iconBtn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-soft));
+  color: var(--accent);
+}
+
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.deleteBtn {
+  margin-top: 8px;
+  font-size: 1rem;
+}
+
+.deleteBtn:hover:not(:disabled) {
+  border-color: currentColor;
+  color: var(--danger);
+}
+
+.detailBody {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--bg-secondary) 55%, transparent);
 }
 
 .titleInput {
-  flex: 1;
+  width: 100%;
   min-width: 0;
-  padding: 6px 8px;
+  padding: 7px 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--bg);
@@ -40,123 +208,67 @@
   border-color: var(--accent);
 }
 
-.rowOrder {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.iconBtn {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 0.8rem;
-  line-height: 1;
-}
-
-.iconBtn:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.homeMark {
-  font-size: 0.7rem;
-  font-weight: 650;
-  color: var(--text-secondary);
-  background: var(--bg-tertiary);
-  border-radius: 999px;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
-
-.deleteBtn {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.deleteBtn:hover {
-  color: var(--danger, #d9534f);
-  border-color: currentColor;
-}
-
-.rowFields {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
   font-size: 0.72rem;
   color: var(--text-secondary);
-  min-width: 120px;
-  flex: 1;
 }
 
 .field select {
-  padding: 5px 6px;
+  padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--bg);
   color: var(--text);
   font: inherit;
-}
-
-.field select:disabled {
-  opacity: 0.6;
+  font-weight: 600;
 }
 
 .rowToggles {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .toggle {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--text);
   cursor: pointer;
+}
+
+.toggle input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
 }
 
 .addBox {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-soft);
+  gap: 6px;
+  min-width: 0;
 }
 
 .addBtn {
-  align-self: flex-start;
-  padding: 7px 14px;
-  border-radius: 8px;
+  flex: none;
+  width: 34px;
   border: 1px solid var(--border-soft);
+  border-radius: 8px;
   background: var(--bg-secondary);
   color: var(--text);
-  font-weight: 600;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -175,12 +287,30 @@
   cursor: pointer;
 }
 
+/* On a phone the panes take turns instead of sharing a row: the strip, the rail
+   lying down under it, then the picked column. */
 @media (max-width: 640px) {
-  .rowFields {
-    flex-direction: column;
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    max-height: none;
   }
 
-  .field {
-    min-width: 0;
+  .list {
+    max-height: 208px;
+  }
+
+  .rail {
+    flex-direction: row;
+    justify-content: flex-end;
+  }
+
+  .deleteBtn {
+    margin-top: 0;
+    margin-left: 8px;
+  }
+
+  .detailBody {
+    max-height: 260px;
   }
 }

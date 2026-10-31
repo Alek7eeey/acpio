@@ -73,54 +73,65 @@ function renderDialog() {
 }
 
 describe("BoardColumnsDialog", () => {
-  it("lists the four stage homes plus the reader's lane, homes undeletable", () => {
+  it("lists the four stage homes plus the reader's lane, homes marked as stages", () => {
     const { container } = renderDialog();
     const rows = container.querySelectorAll("[data-column-id]");
     expect(rows.length).toBe(5);
 
     const todo = container.querySelector('[data-column-id="todo"]') as HTMLElement;
     expect(todo.querySelector("[data-column-home]")).toBeTruthy();
-    expect(todo.querySelector("[data-column-delete]")).toBeNull();
 
     const lane = container.querySelector('[data-column-id="col-review"]') as HTMLElement;
     expect(lane.querySelector("[data-column-home]")).toBeNull();
-    expect(lane.querySelector("[data-column-delete]")).toBeTruthy();
+  });
+
+  // A home is where a stage puts its cards, so the editor never offers to take
+  // it away: the delete is refused for it and works for a lane.
+  it("deletes a lane of the reader's through the page's action, never a home", async () => {
+    const { container } = renderDialog();
+    const remove = container.querySelector("[data-column-delete]") as HTMLButtonElement;
+
+    // The editor opens on the first column, a home.
+    expect(remove.disabled).toBe(true);
+    await userEvent.click(container.querySelector('[data-column-id="wait"]') as HTMLElement);
+    expect(remove.disabled).toBe(true);
+    expect(apiMock.deleteBoardColumn).not.toHaveBeenCalled();
+
+    await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    expect(remove.disabled).toBe(false);
+    await userEvent.click(remove);
+    expect(apiMock.deleteBoardColumn).toHaveBeenCalledWith("b1", "col-review");
   });
 
   // The rule the editor lost: a column never claims cards by a condition, so a
   // lane answers only for its title, its order and its behavior.
-  it("asks a lane nothing about a stage or a rule", () => {
+  it("asks a lane nothing about a stage or a rule", async () => {
     const { container } = renderDialog();
-    const lane = container.querySelector('[data-column-id="col-review"]') as HTMLElement;
-    const selects = [...lane.querySelectorAll("select")].map(
-      (select) => select.getAttribute("aria-label") ?? select.parentElement?.textContent,
-    );
-    // One select: the order its cards read in.
-    expect(selects.length).toBe(1);
-    expect(lane.querySelectorAll("input[type='checkbox']").length).toBe(2);
+    const settings = () => container.querySelector("[data-column-settings]") as HTMLElement;
+
+    await userEvent.click(container.querySelector('[data-column-id="todo"]') as HTMLElement);
+    expect(settings().querySelectorAll("select").length).toBe(1);
+    expect(settings().querySelectorAll("input[type='checkbox']").length).toBe(1);
+
+    await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    expect(settings().querySelectorAll("select").length).toBe(1);
+    expect(settings().querySelectorAll("input[type='checkbox']").length).toBe(2);
 
     const addBox = container.querySelector("[data-new-column-title]")!.parentElement!;
     expect(addBox.querySelectorAll("select").length).toBe(0);
   });
 
-  it("renames a column through the same action the page uses", async () => {
+  it("renames the picked column through the same action the page uses", async () => {
     const { container } = renderDialog();
-    const lane = container.querySelector('[data-column-id="col-review"]') as HTMLElement;
-    const input = lane.querySelector("input") as HTMLInputElement;
+    await userEvent.click(container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    const input = container.querySelector("[data-column-settings] input") as HTMLInputElement;
+    expect(input.value).toBe("Review");
+
     fireEvent.change(input, { target: { value: "Deferred" } });
     fireEvent.blur(input);
     expect(apiMock.updateBoardColumn).toHaveBeenCalledWith("b1", "col-review", {
       title: "Deferred",
     });
-  });
-
-  it("deletes a lane through the same action the page uses", async () => {
-    const { container } = renderDialog();
-    const remove = container.querySelector(
-      '[data-column-id="col-review"] [data-column-delete]',
-    ) as HTMLElement;
-    await userEvent.click(remove);
-    expect(apiMock.deleteBoardColumn).toHaveBeenCalledWith("b1", "col-review");
   });
 
   it("adds a lane of the reader's own, by its title alone", async () => {

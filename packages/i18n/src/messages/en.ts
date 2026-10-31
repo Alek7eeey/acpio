@@ -325,6 +325,7 @@ export const en = {
     boardColumnDelete: "Delete column",
     boardColumnHomeHint: "A stage column cannot be deleted",
     boardColumnSettings: "Configure column",
+    boardColumnAll: "All columns",
     boardReturnToFlow: "Back to the workflow",
     boardAddTask: "New task",
     boardAddTaskCard: "Add task",

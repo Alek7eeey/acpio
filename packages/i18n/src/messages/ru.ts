@@ -345,6 +345,7 @@ export const ru = {
     boardColumnDelete: "Удалить колонку",
     boardColumnHomeHint: "Колонку стадии удалить нельзя",
     boardColumnSettings: "Настроить колонку",
+    boardColumnAll: "Все колонки",
     boardReturnToFlow: "Вернуть в работу",
     boardAddTask: "Новая задача",
     boardAddTaskCard: "Добавить задачу",
