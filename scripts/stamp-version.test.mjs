@@ -137,6 +137,9 @@ describe("version stamping at commit time", () => {
     expect(headFiles(dir)).not.toContain("VERSIONS.md");
   });
 
+  // A fresh fixture, two commits through the hook and two build-time
+  // derivations: every git call is a process, and on Windows this outruns the
+  // suite's 20s default while the rest of the pyramid runs beside it.
   it("carries a pulled release into the next commit when the hook is installed", () => {
     const dir = createFixture();
     node(dir, "install-git-hooks.mjs");
@@ -165,5 +168,5 @@ describe("version stamping at commit time", () => {
     expect(headFiles(dir)).not.toContain("README.md");
     expect(headFile(dir, "README.md")).toContain("**Current version:** 0.1.2");
     expect(status(dir)).toBe("");
-  });
+  }, 60_000);
 });

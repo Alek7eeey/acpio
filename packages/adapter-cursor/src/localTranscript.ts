@@ -8,10 +8,15 @@ const REDACTED = /^\[REDACTED\]$/i;
 
 /** Candidate Cursor project folder names for a workspace cwd. */
 export function cursorProjectSlugs(cwd: string): string[] {
-  const resolved = path.resolve(cwd.trim() || ".");
-  const match = /^([A-Za-z]):[\\/](.*)$/.exec(resolved);
+  const trimmed = cwd.trim() || ".";
+  // A drive letter is read off the string, not off the host: `E:\work\acpio`
+  // names the same Cursor project whoever reads it, while `path.resolve` on a
+  // POSIX host glues that string onto the current directory and the drive
+  // disappears. Relative input still resolves against this host's cwd.
+  const fullPath = /^[A-Za-z]:[\\/]/.test(trimmed) ? trimmed : path.resolve(trimmed);
+  const match = /^([A-Za-z]):[\\/](.*)$/.exec(fullPath);
   if (!match) {
-    const slug = resolved.replace(/^[\\/]+/, "").replace(/[\\/]+/g, "-");
+    const slug = fullPath.replace(/^[\\/]+/, "").replace(/[\\/]+/g, "-");
     return slug ? [slug, slug.toLowerCase()] : [];
   }
   const drive = match[1];

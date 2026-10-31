@@ -1267,6 +1267,19 @@ async function bootAcp(
   return startClient(restoreMode);
 }
 
+/**
+ * A boot promise handed to a turn that may throw before it ever awaits it:
+ * `runTurn` reads it only after its own first DB writes, so a turn that dies in
+ * that window used to leave the agent's start failure (`omp` not in PATH, an
+ * MCP server refusing the handoff) with no listener — an unhandled rejection
+ * over the session instead of the turn's own error. A no-op handler marks the
+ * boot observed; what `await` sees is unchanged.
+ */
+function observedBoot(promise: Promise<AcpClient>): Promise<AcpClient> {
+  promise.catch(() => {});
+  return promise;
+}
+
 /** Pre-spawn ACP for a session so the first prompt isn't blocked on cold start. */
 export function warmAcp(
   sessionId: string,
@@ -2717,10 +2730,12 @@ export async function runPrompt(
   // Kick off ACP as early as possible (spawn overlaps with persisting the user message).
   // Edit/regenerate must NOT resume: the agent's on-disk session still holds the
   // OLD transcript (including the reply being replaced) — fresh context is correct.
-  const acpReady = ensureAcp(sessionId, opts, {
-    preferResume: !opts.editMessageId,
-    forceRestore: opts.forceRestore,
-  });
+  const acpReady = observedBoot(
+    ensureAcp(sessionId, opts, {
+      preferResume: !opts.editMessageId,
+      forceRestore: opts.forceRestore,
+    }),
+  );
   // Failures before runTurn never hit its finalize path — without restoring the
   // row here, a rejected cold start (or any persist error) would strand the chat
   // in "running" forever and lock the composer. Once runTurn owns the turn it
@@ -3793,7 +3808,7 @@ async function dequeueTurn(rt: SessionRuntime) {
   let started = false;
   try {
     const settings = await getSettings();
-    const acpReady = ensureAcp(rt.sessionId, next.opts);
+    const acpReady = observedBoot(ensureAcp(rt.sessionId, next.opts));
     started = true;
     await runTurn(rt, rt.sessionId, next.text, next.images, "", next.opts, settings, acpReady);
   } catch (err) {
