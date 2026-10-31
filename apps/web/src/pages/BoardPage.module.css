@@ -1102,6 +1102,23 @@
   gap: 6px;
 }
 
+/* The fields a card opens in place — the task's text and the next prompt — have
+   no painted copy laid over them the way the new-task form does: a card carries
+   no file links to colour, so the field is the only thing drawing the text, and
+   it must not keep the transparency the form's mirror hides its own glyphs
+   with, or the card opens blank. */
+.cardEdit .composerInput {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
+/* Selecting that text paints the highlight over glyphs the field itself draws,
+   so they stay legible instead of vanishing into the selection. */
+.cardEdit .composerInput::selection {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
 .liveRow {
   display: flex;
   align-items: center;
