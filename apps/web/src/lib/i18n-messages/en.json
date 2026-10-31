@@ -416,6 +416,7 @@
     "searchEmpty": "Nothing found",
     "clearSearch": "Clear search",
     "editingMessage": "Editing message — send to regenerate the reply",
+    "editingQueued": "Editing a queued request — send to write the text back into the queue",
     "renameTheme": "Rename theme",
     "cwdLabel": "Working directory for this chat",
     "stopGeneration": "Stop current generation",

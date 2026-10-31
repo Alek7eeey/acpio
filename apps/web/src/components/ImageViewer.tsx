@@ -292,7 +292,16 @@ export function ImageViewer({ pictures, startIndex = 0, onClose }: ImageViewerPr
       role="dialog"
       aria-modal="true"
       aria-label={t("imageViewer.title")}
+      onContextMenu={(e) => {
+        // The viewer is a portal drawn by the message it was opened from, and a
+        // portal bubbles through its React parents — the right click on a big
+        // picture is the browser's (copy, save), not the message's own menu.
+        e.stopPropagation();
+      }}
       onMouseDown={(e) => {
+        // Only a left press is a click on the surface: a right one belongs to
+        // the browser's menu, which a dismissed overlay has taken away.
+        if (e.button !== 0) return;
         if (tapIgnoredRef.current) {
           tapIgnoredRef.current = false;
           return;

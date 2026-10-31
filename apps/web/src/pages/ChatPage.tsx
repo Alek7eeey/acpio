@@ -4575,6 +4575,7 @@ function ChatThread() {
     bind?.sessionId ? (s.inflightBySession?.[bind.sessionId] ?? 0) : s.inflight,
   );
   const sendQueuedPromptNow = useAppStore((s) => s.sendQueuedPromptNow);
+  const updateQueuedPrompt = useAppStore((s) => s.updateQueuedPrompt);
   const [text, setText] = useState("");
   const textRef = useRef(text);
   textRef.current = text;
@@ -4586,6 +4587,12 @@ function ChatThread() {
   const composerKey = composerSessionId ?? composerPaneKeyRef.current;
   const hasText = text.trim().length > 0;
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  /** The queued request the composer is rewriting — the queue has no field of
+   *  its own: the pencil above hands the text down here (see `PromptQueueBar`). */
+  const [editingQueueId, setEditingQueueId] = useState<string | null>(null);
+  /** The composer holds a rewrite — of a sent message or of a queued request —
+   *  so it stages no files and recalls no history: an edit rewrites text only. */
+  const rewriting = editingMessageId !== null || editingQueueId !== null;
   const [composerMultiline, setComposerMultiline] = useState(false);
   const composerMultilineRef = useRef(false);
   const [cursorPos, setCursorPos] = useState(0);
@@ -4704,7 +4711,7 @@ function ChatThread() {
    *  own, so a chip is enough to send. Editing keeps the file out: an edit only
    *  rewrites the text of a message that is already there. */
   const hasSendableAttachments =
-    !editingMessageId && pendingFiles.some((f) => f.status === "ready" && f.path);
+    !rewriting && pendingFiles.some((f) => f.status === "ready" && f.path);
   const canSend = hasText || hasSendableAttachments;
   /** A drag carrying files is over the composer right now. */
   const [fileDropActive, setFileDropActive] = useState(false);
@@ -5028,7 +5035,7 @@ function ChatThread() {
   };
 
   const navigateComposerHistory = (direction: "prev" | "next") => {
-    if (editingMessageId || composerLocked) return false;
+    if (rewriting || composerLocked) return false;
     const history = userMessageHistory(activeSession?.messages ?? []);
     if (history.length === 0) return false;
 
@@ -5453,7 +5460,7 @@ function ChatThread() {
       // instead of Send, so nothing can go out by accident. Blocking it here
       // (and on the paperclip and paste) meant a screenshot taken while the
       // agent worked could not be queued at all.
-      if (editingMessageId || composerLocked) return [];
+      if (rewriting || composerLocked) return [];
 
       const oversized = files.find((f) => f.size > MAX_ATTACH_SIZE);
       if (oversized) {
@@ -5549,7 +5556,7 @@ function ChatThread() {
       activeSession?.id,
       composerLocked,
       discardStagedFile,
-      editingMessageId,
+      rewriting,
       insertComposerText,
       pendingFiles.length,
       t,
@@ -5644,7 +5651,7 @@ function ChatThread() {
 
   const onComposerDragOver = useCallback(
     (e: ReactDragEvent<HTMLElement>) => {
-      if (composerLocked || editingMessageId) return;
+      if (composerLocked || rewriting) return;
       if (!dragHasFiles(e.dataTransfer)) return;
       // Without preventDefault the browser would open the dropped file
       // instead of handing it to the composer.
@@ -5652,7 +5659,7 @@ function ChatThread() {
       e.dataTransfer.dropEffect = "copy";
       setFileDropActive(true);
     },
-    [composerLocked, editingMessageId],
+    [composerLocked, rewriting],
   );
 
   const onComposerDragLeave = useCallback((e: ReactDragEvent<HTMLElement>) => {
@@ -5664,7 +5671,7 @@ function ChatThread() {
 
   const onComposerDrop = useCallback(
     (e: ReactDragEvent<HTMLElement>) => {
-      if (composerLocked || editingMessageId) return;
+      if (composerLocked || rewriting) return;
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
       setFileDropActive(false);
@@ -5673,7 +5680,7 @@ function ChatThread() {
       const files = Array.from(e.dataTransfer.files ?? []);
       if (files.length > 0) attachPickedFiles(files);
     },
-    [attachPickedFiles, composerLocked, editingMessageId],
+    [attachPickedFiles, composerLocked, rewriting],
   );
 
   /** A file dropped anywhere in the chat belongs to the composer: the thread
@@ -5683,9 +5690,9 @@ function ChatThread() {
     (e: ReactDragEvent<HTMLElement>) => {
       if (!dragHasFiles(e.dataTransfer)) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = composerLocked || editingMessageId ? "none" : "copy";
+      e.dataTransfer.dropEffect = composerLocked || rewriting ? "none" : "copy";
     },
-    [composerLocked, editingMessageId],
+    [composerLocked, rewriting],
   );
 
   const onPageDrop = useCallback(
@@ -5695,11 +5702,11 @@ function ChatThread() {
       if (e.defaultPrevented) return;
       e.preventDefault();
       setFileDropActive(false);
-      if (composerLocked || editingMessageId) return;
+      if (composerLocked || rewriting) return;
       const files = Array.from(e.dataTransfer.files ?? []);
       if (files.length > 0) attachPickedFiles(files);
     },
-    [attachPickedFiles, composerLocked, editingMessageId],
+    [attachPickedFiles, composerLocked, rewriting],
   );
 
   const attachDefaultSource: AttachSource =
@@ -5759,6 +5766,49 @@ function ChatThread() {
 
   const attachmentsUploading = pendingFiles.some((f) => f.status === "uploading");
 
+  /** The pencil on a queue row: the request's text moves into the composer,
+   *  where it is rewritten and written back into the queue on send. */
+  const beginQueueEdit = (item: { id: string; text: string }) => {
+    resetComposerHistory();
+    setEditingMessageId(null);
+    setEditingQueueId(item.id);
+    setText(item.text);
+    setCursorPos(item.text.length);
+    setComposerMultilineIfNeeded(item.text.includes("\n"));
+    setSlashMenuDismissed(true);
+    window.requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      syncComposerSize(el);
+      el.setSelectionRange(item.text.length, item.text.length);
+    });
+  };
+
+  /** Leave the rewrite without touching the queue — the request keeps its text. */
+  const cancelQueueEdit = () => {
+    setEditingQueueId(null);
+    resetComposerHistory();
+    clearComposerUndo();
+    setText("");
+    setCursorPos(0);
+    setComposerMultilineIfNeeded(false);
+    const el = textareaRef.current;
+    if (el) {
+      el.style.height = "auto";
+      el.focus();
+    }
+  };
+
+  // The queued request can leave the queue from under the composer — drained by
+  // the agent, sent now from its own arrow, deleted in the other pane. The edit
+  // then has nowhere to land, so the composer keeps the text as a fresh draft.
+  useEffect(() => {
+    if (!editingQueueId) return;
+    if (promptQueueAll.some((q) => q.id === editingQueueId)) return;
+    setEditingQueueId(null);
+  }, [editingQueueId, promptQueueAll]);
+
   const submitMessage = (raw: string) => {
     // A big paste still waiting for its answer must not be lost: sending
     // without a choice means «paste as text», and the block goes back into the
@@ -5770,6 +5820,15 @@ function ChatThread() {
       pasteOffer === null
         ? raw.trim()
         : spliceComposerText(raw, pasteOffer, pasteOfferAtRef.current).trim();
+    // Rewriting a queued request: the composer is its editor, so this is a
+    // write back into the queue — nothing goes to the agent here. An empty text
+    // is not worth a row, so the request keeps the text it had.
+    if (editingQueueId) {
+      const queued = promptQueueAll.find((q) => q.id === editingQueueId);
+      if (queued && value && value !== queued.text) updateQueuedPrompt(queued.id, value);
+      cancelQueueEdit();
+      return;
+    }
     if ((!value && !hasSendableAttachments) || composerLocked || attachmentsUploading) return;
     if (!isSlashCommandReadyToSend(value, slashCommands)) {
       if (shouldAutoFocusComposer()) focusComposer();
@@ -7346,7 +7405,13 @@ function ChatThread() {
 
       {error && <div className={styles.banner}>{error}</div>}
 
-      {promptQueue.length > 0 && <PromptQueueBar items={promptQueue} />}
+      {promptQueue.length > 0 && (
+        <PromptQueueBar
+          items={promptQueue}
+          onEdit={beginQueueEdit}
+          editingId={editingQueueId}
+        />
+      )}
 
       {!isShellSessionActive ? (
       <form
@@ -7413,19 +7478,31 @@ function ChatThread() {
                 </button>
               </div>
             )}
-            {!editingMessageId && agentOffline && (
+            {!editingMessageId && editingQueueId && (
+              <div className={styles.typingBar}>
+                <span>{t("chat.editingQueued")}</span>
+                <button
+                  type="button"
+                  className={styles.editCancel}
+                  onClick={cancelQueueEdit}
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+            )}
+            {!rewriting && agentOffline && (
               <div className={styles.typingBar}>{t("common.thisChatAgentOffline")}</div>
             )}
-            {!editingMessageId && agentDisabled && (
+            {!rewriting && agentDisabled && (
               <div className={styles.typingBar}>{t("common.thisChatAgentDisabled")}</div>
             )}
-            {!editingMessageId && agentMissing && (
+            {!rewriting && agentMissing && (
               <div className={styles.typingBar}>{t("common.noAgentsOnline")}</div>
             )}
-            {!editingMessageId && !agentMissing && !agentUnavailable && activeSession?.status === "waiting" && (
+            {!rewriting && !agentMissing && !agentUnavailable && activeSession?.status === "waiting" && (
               <div className={styles.typingBar}>{t("common.waitingInput")}</div>
             )}
-            {!editingMessageId &&
+            {!rewriting &&
               !agentMissing &&
               !agentUnavailable &&
               !chatInitializing &&
@@ -7645,7 +7722,7 @@ function ChatThread() {
                 setCursorPos(e.currentTarget.selectionStart);
               }}
               onPaste={(e) => {
-                if (composerLocked || editingMessageId) return;
+                if (composerLocked || rewriting) return;
                 const files = collectClipboardFiles(e.clipboardData);
                 if (files.length > 0) {
                   e.preventDefault();
@@ -7763,6 +7840,13 @@ function ChatThread() {
                     return;
                   }
                 }
+                // A rewritten queued request is dropped the way the queue used
+                // to drop it inline: Escape leaves the edit, the row keeps its text.
+                if (e.key === "Escape" && editingQueueId) {
+                  e.preventDefault();
+                  cancelQueueEdit();
+                  return;
+                }
                 if (e.key === "Enter" && !e.shiftKey) {
                   // Enter-to-send (default): Enter submits, Ctrl/Shift+Enter
                   // is a newline. Off: Enter inserts a newline and Ctrl+Enter
@@ -7789,7 +7873,7 @@ function ChatThread() {
                 title={`${attachSourceLabels[attachDefaultSource]} · ${t("chat.attachSwapHint", {
                   other: attachSourceLabels[attachOtherSource],
                 })}`}
-                disabled={composerLocked || editingMessageId !== null}
+                disabled={composerLocked || rewriting}
                 onClick={() => openAttachSource(attachDefaultSource)}
                 onContextMenu={(e) => {
                   e.preventDefault();

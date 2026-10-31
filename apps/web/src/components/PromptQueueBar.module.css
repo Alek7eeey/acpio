@@ -93,22 +93,11 @@
   white-space: nowrap;
 }
 
-.queueEdit {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--accent);
-  border-radius: 7px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.8rem;
-  line-height: 1.35;
-  resize: vertical;
-}
-
-.queueEdit:focus {
-  outline: none;
+/* The row whose text the composer is holding: the queue says which request the
+   reader is shaping down there. */
+.queueItemEditing {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .queueItemBtn {

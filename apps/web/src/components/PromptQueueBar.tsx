@@ -15,34 +15,32 @@ const DRAG_THRESHOLD_PX = 6;
  * over — the queue is the delivery order, so the order here is the order the
  * agent gets them in. The single arrow is «send now»: stop the live step and
  * hand this request over at once.
+ *
+ * The pencil does not open a field of its own: the row hands its text to the
+ * chat's composer (`onEdit`), which is where the reader writes — one editor for
+ * the message they are sending and the request they are still shaping.
  */
-export function PromptQueueBar({ items }: { items: ReadonlyArray<QueueItem> }) {
+export function PromptQueueBar({
+  items,
+  onEdit,
+  editingId = null,
+}: {
+  items: ReadonlyArray<QueueItem>;
+  onEdit: (item: QueueItem) => void;
+  /** The row whose text the composer is holding right now. */
+  editingId?: string | null;
+}) {
   const t = useT();
   const deliverQueuedPrompt = useAppStore((s) => s.deliverQueuedPrompt);
   const removeQueuedPrompt = useAppStore((s) => s.removeQueuedPrompt);
-  const updateQueuedPrompt = useAppStore((s) => s.updateQueuedPrompt);
   const reorderQueuedPrompt = useAppStore((s) => s.reorderQueuedPrompt);
 
-  /** The row being rewritten, and the text as typed. */
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   /** The row being dragged, the row it is over and which side of it. */
   const [drag, setDrag] = useState<{
     id: string;
     overId: string | null;
     position: "before" | "after";
   } | null>(null);
-  const startEdit = (item: QueueItem) => {
-    setDraft(item.text);
-    setEditingId(item.id);
-  };
-
-  /** Commit the rewritten text; an empty one is not worth a row — keep the old. */
-  const commitEdit = (item: QueueItem) => {
-    setEditingId(null);
-    if (!draft.trim() || draft === item.text) return;
-    updateQueuedPrompt(item.id, draft);
-  };
 
   /** The row under the point — the reorder resolves against what is on screen. */
   const itemAtPoint = (x: number, y: number) => {
@@ -127,7 +125,7 @@ export function PromptQueueBar({ items }: { items: ReadonlyArray<QueueItem> }) {
                 drag?.id === item.id ? ` ${styles.queueItemDragging}` : ""
               }${dropHint === "before" ? ` ${styles.queueItemBefore}` : ""}${
                 dropHint === "after" ? ` ${styles.queueItemAfter}` : ""
-              }`}
+              }${editing ? ` ${styles.queueItemEditing}` : ""}`}
             >
               <button
                 type="button"
@@ -145,55 +143,31 @@ export function PromptQueueBar({ items }: { items: ReadonlyArray<QueueItem> }) {
                   <circle cx="7.5" cy="11.5" r="1.2" />
                 </svg>
               </button>
-              {editing ? (
-                <textarea
-                  className={styles.queueEdit}
-                  value={draft}
-                  rows={2}
-                  autoFocus
-                  aria-label={t("common.edit")}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    // The queue lives above the composer: its keys stop here.
-                    e.stopPropagation();
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      commitEdit(item);
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      setEditingId(null);
-                    }
-                  }}
-                  onBlur={() => commitEdit(item)}
-                />
-              ) : (
-                <span
-                  className={styles.queueItemText}
-                  title={item.text}
-                  onDoubleClick={() => startEdit(item)}
-                >
-                  {item.text}
-                </span>
-              )}
-              {editing ? null : (
-                <button
-                  type="button"
-                  className={styles.queueItemBtn}
-                  title={t("common.edit")}
-                  aria-label={t("common.edit")}
-                  onClick={() => startEdit(item)}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M4.5 19.5h15M6 15.5l9.6-9.6a1.7 1.7 0 0 1 2.4 2.4L8.4 18H6v-2.5Z"
-                      stroke="currentColor"
-                      strokeWidth="1.7"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </button>
-              )}
+              <span
+                className={styles.queueItemText}
+                title={item.text}
+                onDoubleClick={() => onEdit(item)}
+              >
+                {item.text}
+              </span>
+              <button
+                type="button"
+                className={styles.queueItemBtn}
+                title={t("common.edit")}
+                aria-label={t("common.edit")}
+                aria-pressed={editing}
+                onClick={() => onEdit(item)}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+                  <path
+                    d="M4.5 19.5h15M6 15.5l9.6-9.6a1.7 1.7 0 0 1 2.4 2.4L8.4 18H6v-2.5Z"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
               <button
                 type="button"
                 className={styles.queueItemBtn}

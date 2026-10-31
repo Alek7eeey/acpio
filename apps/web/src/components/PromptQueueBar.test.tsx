@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The request queue above the composer: every row is editable, deletable and
 // movable before the queue hands it over — the order of the rows is the order
-// the agent gets them in.
+// the agent gets them in. The pencil has no field of its own: it hands the text
+// to the chat's composer (`onEdit`), which is the one every prompt is written in.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -37,15 +38,17 @@ afterEach(() => {
 
 /** The page hands the bar a fresh list on every queue change — the harness
  *  subscribes the same way, so a store write is a re-render here too. */
-function Harness() {
+function Harness({ onEdit }: { onEdit: (item: { id: string; text: string }) => void }) {
   const items = useAppStore((s) => s.promptQueue);
-  return <PromptQueueBar items={items} />;
+  return <PromptQueueBar items={items} onEdit={onEdit} />;
 }
 
-function renderBar() {
+const noop = () => {};
+
+function renderBar(onEdit: (item: { id: string; text: string }) => void = noop) {
   return render(
     <I18nProvider>
-      <Harness />
+      <Harness onEdit={onEdit} />
     </I18nProvider>,
   );
 }
@@ -88,27 +91,18 @@ describe("PromptQueueBar", () => {
     expect(screen.queryByText("Second queued")).toBeNull();
   });
 
-  it("rewrites a request in place", async () => {
-    renderBar();
+  // The rewrite belongs to the composer: the row only names the request it
+  // hands over, and opens no field of its own.
+  it("hands a request to the composer for rewriting", async () => {
+    const edits: string[] = [];
+    renderBar((item) => edits.push(item.text));
     const row = screen.getByText("First queued").closest("[data-queue-id]") as HTMLElement;
-    const edit = within(row).getAllByRole("button")[1]!;
-    await userEvent.click(edit);
+    expect(within(row).queryByRole("textbox")).toBeNull();
 
-    const field = within(row).getByRole("textbox");
-    await userEvent.clear(field);
-    await userEvent.type(field, "Rewritten request{Enter}");
-
-    expect(useAppStore.getState().promptQueue[0]!.text).toBe("Rewritten request");
-    expect(screen.getByText("Rewritten request")).toBeTruthy();
-  });
-
-  it("keeps the old text when an edit is cancelled with Escape", async () => {
-    renderBar();
-    const row = screen.getByText("First queued").closest("[data-queue-id]") as HTMLElement;
     await userEvent.click(within(row).getAllByRole("button")[1]!);
-    const field = within(row).getByRole("textbox");
-    await userEvent.clear(field);
-    await userEvent.type(field, "Half-typed{Escape}");
+
+    expect(edits).toEqual(["First queued"]);
+    expect(within(row).queryByRole("textbox")).toBeNull();
     expect(useAppStore.getState().promptQueue[0]!.text).toBe("First queued");
   });
 

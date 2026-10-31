@@ -1826,7 +1826,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    *  - over Done — the card is marked ready (`doneAt`), the same write the
    *    card's «Отметить готовой» button makes, and it settles in Done: a lane
    *    the card was parked on goes with the mark, because a closed card is
-   *    the lifecycle's, not the reader's;
+   *    the lifecycle's, not the reader's. A card already closed but standing
+   *    on a lane comes back the same way, keeping its own stamp — the lane is
+   *    a place, not a stage the card has left;
    *  - over Wait — back to the workflow: the closed mark is dropped and any
    *    placement with it, so the card lands where its lifecycle says;
    *  - over any other stage home (Todo, In Progress) — nothing happens: the
@@ -1914,7 +1916,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         const column = columnById.get(laneId);
         if (!column) return "blocked";
         if (column.kind !== "stage") return "placement";
-        if (column.anchor === "done") return task.doneAt ? "blocked" : "done";
+        if (column.anchor === "done") {
+          // A closed card standing on a lane of its own is Done's already: the
+          // drop there is the way back home, so it takes the card and lets the
+          // lane go instead of refusing it.
+          return task.doneAt ? (task.boardColumnId ? "done" : "blocked") : "done";
+        }
         if (column.anchor === "wait") {
           return task.doneAt || task.boardColumnId ? "reopen" : "blocked";
         }
@@ -2047,6 +2054,12 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         // written and the card staying where it stood.
         if (blocked) return;
         if (action === "done") {
+          // A closed card keeps its own stamp — the Done log is ordered by it —
+          // so what the drop takes away here is only the lane it was parked on.
+          if (task.doneAt) {
+            if (task.boardColumnId) void setTaskColumn(task.id, null);
+            return;
+          }
           void setTaskDone(task.id, true);
           return;
         }

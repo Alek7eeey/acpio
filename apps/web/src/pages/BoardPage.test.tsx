@@ -682,6 +682,47 @@ describe("BoardPage custom columns", () => {
     expect(reviewLane.querySelector('[data-task-id="t2"]')).toBeNull();
   });
 
+  // A closed card keeps its stamp when it is parked on a lane of its own, and
+  // that is not a lock on its stage: the drop on Done takes it back (the lane
+  // goes, the mark stays as it was), so a finished card comes home without a
+  // trip through «Вернуть в работу».
+  it("takes a closed card back into Done from the lane it was dropped on", async () => {
+    const closed = { ...finishedTask, doneAt: "2026-09-21T10:00:00.000Z" };
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [closed],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const doneLane = container.querySelector('[data-column="done"]') as HTMLElement;
+    const reviewLane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    const cardIn = (lane: HTMLElement) =>
+      lane.querySelector('[data-task-id="t2"]') as HTMLElement | null;
+    expect(cardIn(doneLane)).toBeTruthy();
+
+    // Done → its own lane: the hand placement wins, the mark rides along.
+    hoverOver(cardIn(doneLane)!, reviewLane)();
+    await waitFor(() => expect(cardIn(reviewLane)).toBeTruthy());
+    expect(useAppStore.getState().boardSessions[0]!.boardColumnId).toBe("col-review");
+
+    // And back: the lane is a place, not a stage the card has left.
+    const release = hoverOver(cardIn(reviewLane)!, doneLane);
+    try {
+      expect(doneLane.querySelector('[data-drop-mark="done"]')).toBeTruthy();
+    } finally {
+      release();
+    }
+
+    await waitFor(() => expect(cardIn(doneLane)).toBeTruthy());
+    expect(cardIn(reviewLane)).toBeNull();
+    // The stamp was the card's own and stays so — only the lane went with the
+    // drop, and Done keeps its log order.
+    const after = useAppStore.getState().boardSessions[0]!;
+    expect(after.boardColumnId).toBeNull();
+    expect(after.doneAt).toBe("2026-09-21T10:00:00.000Z");
+  });
+
   // Wait is the other door: a closed card dropped there is reopened, and a
   // placement it carried goes with the mark — it is back to the workflow.
   it("reopens a card dropped on Wait and lets go of its placement", async () => {
