@@ -291,6 +291,22 @@ export function AppShell() {
   const treeRoute = isChat || isBoard;
   const showSidebar = treeRoute || isSettings;
 
+  // Below 900px the tree is a drawer, not a column.
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 900,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 899px)");
+    const sync = () => setNarrow(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // Exactly one name-and-version pill is on screen: the tree's while it has a
+  // column, the header's on a phone's drawer and behind a collapsed tree. The
+  // update notice rides inside that pill's version, so it follows the pill.
+  const brandInTree = !narrow && sidebarOpen && !isSettings;
+
   const sheetRef = useRef<HTMLElement | null>(null);
   const sheetSnapRef = useRef(2);
   const sheetDragRaf = useRef(0);
@@ -954,7 +970,12 @@ export function AppShell() {
       : undefined
   ) as CSSProperties | undefined;
 
-  const renderBrandButton = (opts?: { bump?: boolean }) => {
+  /**
+   * The pill that names the app: the name is one press onto the chat, and the
+   * version beside it is the update notice's own — `version` says which of the
+   * two pills on screen carries it (only one of them is ever in view).
+   */
+  const renderBrandButton = (opts?: { bump?: boolean; version?: boolean }) => {
     /** The trip the press makes, named: on the board page the press stays put,
      *  so the hint names the page instead of promising a move. */
     const hint = openBoard
@@ -963,27 +984,35 @@ export function AppShell() {
         ? t("common.backToBoard", { name: litBoard.name })
         : t("common.goToChat");
     return (
-      <button
-        type="button"
+      <span
         className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
-        onClick={goChat}
-        title={hint}
-        aria-label={`Acpio ${BUILD_INFO.released}`}
       >
-        <span className={styles.brandLetters} aria-hidden>
-          {"Acpio".split("").map((ch, i) => (
-            <span
-              key={`${ch}-${i}`}
-              className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
-            >
-              {ch}
-            </span>
-          ))}
-        </span>
-        <span className={styles.brandVersion} aria-hidden>
-          {BUILD_INFO.released}
-        </span>
-      </button>
+        <button
+          type="button"
+          className={styles.brandGo}
+          onClick={goChat}
+          title={hint}
+          aria-label={`Acpio ${BUILD_INFO.released}`}
+        >
+          <span className={styles.brandLetters} aria-hidden>
+            {"Acpio".split("").map((ch, i) => (
+              <span
+                key={`${ch}-${i}`}
+                className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
+              >
+                {ch}
+              </span>
+            ))}
+          </span>
+        </button>
+        {opts?.version === false ? (
+          <span className={styles.brandVersion} aria-hidden>
+            {BUILD_INFO.released}
+          </span>
+        ) : (
+          <AppUpdateNotice />
+        )}
+      </span>
     );
   };
 
@@ -1058,7 +1087,9 @@ export function AppShell() {
                 {t("common.backToChat")}
               </button>
             ) : (
-              <span className={styles.sidebarBrand}>{renderBrandButton()}</span>
+              <span className={styles.sidebarBrand}>
+                {renderBrandButton({ version: brandInTree })}
+              </span>
             )}
             <span className={styles.sheetTitle}>
               {isSettings ? t("common.openSettingsSheet") : t("common.openChatsSheet")}
@@ -1749,11 +1780,8 @@ export function AppShell() {
                     : styles.headerBrandWrap
               }
             >
-              {renderBrandButton({ bump: true })}
+              {renderBrandButton({ bump: true, version: !brandInTree })}
             </span>
-            {/* Beside the name and version: npm has a newer build, and its
-                number is where the running one is. */}
-            <AppUpdateNotice />
             {backToBoard ? (
               <button
                 type="button"

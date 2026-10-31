@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { BUILD_INFO } from "@acpio/shared";
 import { useT } from "../lib/i18n";
 import { RESTART_TIMEOUT, useAppUpdate } from "../lib/appUpdate";
 import styles from "./AppUpdateNotice.module.css";
@@ -21,10 +22,12 @@ export function AppUpdateNotice() {
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   // Anchored under the chip, clamped to the viewport — the same placement the
-  // install button's menu uses, since the header is where both live. Measured
-  // after every render and kept identical while nothing moves: the header
-  // re-lays itself out (the tree opens, the chip appears) without a resize
-  // event, and a popup anchored to yesterday's position would float away.
+  // install button's menu uses. Measured after every render and kept identical
+  // while nothing moves: the tree re-lays itself out (it opens, the chip
+  // appears) without a resize event, and a popup anchored to yesterday's
+  // position would float away. A chip inside a closed drawer has no place on
+  // screen at all, so the popup falls back to the top of the page — still the
+  // update's, still dismissible, just without its anchor.
   useLayoutEffect(() => {
     if (!update.open || !triggerRef.current) {
       setPos(null);
@@ -32,11 +35,14 @@ export function AppUpdateNotice() {
     }
     const rect = triggerRef.current.getBoundingClientRect();
     const width = Math.min(POPUP_WIDTH, window.innerWidth - 16);
-    const next = {
-      top: rect.bottom + 8,
-      left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
-      width,
-    };
+    const anchored = rect.width > 0 && rect.bottom > 0 && rect.top < window.innerHeight;
+    const next = anchored
+      ? {
+          top: rect.bottom + 8,
+          left: Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8)),
+          width,
+        }
+      : { top: 8, left: 8, width };
     setPos((prev) =>
       prev && prev.top === next.top && prev.left === next.left && prev.width === next.width
         ? prev
@@ -79,38 +85,39 @@ export function AppUpdateNotice() {
   }, [open, dismiss]);
 
   const state = update.state;
-  if (!state?.available || !state.latest) return null;
+  // The running version is this component's own text: plain while it is the
+  // newest, lit and pressable once npm has a newer one — so the pill keeps its
+  // shape either way, and the news opens under the number it is about.
+  const running = state?.current ?? BUILD_INFO.released;
+  const latest = state?.available ? state.latest : null;
 
   const { phase } = update;
-  const triggerLabel = t("update.trigger", { version: state.latest });
+  const triggerLabel = latest ? t("update.trigger", { version: latest }) : running;
   const failure =
     update.error === RESTART_TIMEOUT ? t("update.restartTimeout") : update.error;
   const busy = phase === "installing" || phase === "restarting";
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        className={styles.trigger}
-        aria-haspopup="dialog"
-        aria-expanded={update.open}
-        aria-label={triggerLabel}
-        title={triggerLabel}
-        onClick={update.toggle}
-      >
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M12 19V5m0 0-5 5m5-5 5 5"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <span className={styles.triggerVersion}>{state.latest}</span>
-      </button>
-      {update.open && pos
+      {latest ? (
+        <button
+          ref={triggerRef}
+          type="button"
+          className={`${styles.version} ${styles.new}`}
+          aria-haspopup="dialog"
+          aria-expanded={update.open}
+          aria-label={triggerLabel}
+          title={triggerLabel}
+          onClick={update.toggle}
+        >
+          {running}
+        </button>
+      ) : (
+        <span className={styles.version} aria-hidden>
+          {running}
+        </span>
+      )}
+      {latest && update.open && pos
         ? createPortal(
             <div
               ref={popupRef}
@@ -140,7 +147,7 @@ export function AppUpdateNotice() {
                 </button>
               </div>
               <p className={styles.versions}>
-                {t("update.versions", { current: state.current, latest: state.latest })}
+                {t("update.versions", { current: running, latest })}
               </p>
               <p className={styles.body}>
                 {phase === "installing"

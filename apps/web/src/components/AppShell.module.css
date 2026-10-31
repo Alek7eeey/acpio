@@ -100,6 +100,21 @@
   border-radius: 999px;
 }
 
+/* The name inside the pill: the pill draws the shape, so this press is bare and
+   only carries the letters (the version beside it is the update notice's). */
+.brandGo {
+  display: inline-flex;
+  align-items: baseline;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+
 .headerBrand:hover {
   background: color-mix(in srgb, var(--surface) 62%, transparent);
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));

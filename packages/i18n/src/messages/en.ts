@@ -1288,7 +1288,7 @@ export const en = {
     trigger: "Version {{version}} is available",
     title: "A new version is available",
     versions: "Installed {{current}} · npm already has {{latest}}",
-    body: "Download the update — the new code starts working right after the restart.",
+    body: "The app will be updated to the new version.",
     action: "Update",
     later: "Later",
     installing: "Downloading the update… This can take a couple of minutes.",

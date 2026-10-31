@@ -1,58 +1,52 @@
-/* The chip sits beside the header's name-and-version pill: same height, same
-   rounded shape, but tinted with the accent so it reads as a call to action
-   rather than as part of the title. */
-.trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
+/* The running version, inside the tree's name-and-version pill: as quiet as it
+   was before this feature, so the pill keeps its width and the version keeps its
+   place — only the state changes. */
+.version {
   margin-left: 6px;
-  padding: 0 9px 0 7px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 46%, var(--border));
-  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
-  color: var(--accent);
-  font-size: 0.76rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.58em;
+  font-weight: 600;
   line-height: 1;
-  cursor: pointer;
+  letter-spacing: 0;
+  opacity: 0.65;
   flex: 0 0 auto;
-  animation: updatePulse 2.4s ease-in-out infinite;
-}
-
-.trigger:hover {
-  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
-}
-
-.triggerVersion {
+  user-select: none;
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes updatePulse {
+/* npm has a newer one: the number itself is the invitation — accent, dotted
+   underline, a slow breath — and the popup opens under exactly this text. */
+.new {
+  color: var(--accent);
+  opacity: 1;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  animation: versionBreath 2.6s ease-in-out infinite;
+}
+
+.new:hover {
+  text-decoration-style: solid;
+  text-underline-offset: 4px;
+}
+
+@keyframes versionBreath {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    text-shadow: 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
   }
   50% {
-    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+    text-shadow: 0 0 9px color-mix(in srgb, var(--accent) 55%, transparent);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .trigger {
+  .new {
     animation: none;
-  }
-}
-
-/* Phones: the icon alone, so the header keeps room for the chat's title. */
-@media (max-width: 620px) {
-  .trigger {
-    padding: 0 7px;
-  }
-
-  .triggerVersion {
-    display: none;
   }
 }
 

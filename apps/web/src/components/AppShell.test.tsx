@@ -118,7 +118,7 @@ function renderShell(path: string) {
   // The header's brand chip: the app's name and version, beside the update
   // chip — the very button the report presses.
   const brand = container.querySelector<HTMLButtonElement>(
-    `.${styles.headerBrandSlot} button.${styles.headerBrand}`,
+    `.${styles.headerBrandSlot} button.${styles.brandGo}`,
   );
   if (!brand) throw new Error("the header carries no brand chip");
   return brand;
