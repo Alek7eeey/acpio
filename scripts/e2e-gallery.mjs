@@ -86,8 +86,21 @@ function build({ shots, taken }) {
   nav button[aria-pressed="true"] { background: #2f6feb; border-color: #2f6feb; color: #fff; }
   header a { color: #8ab4ff; text-decoration: none; }
   main { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .stage { display: flex; align-items: center; justify-content: center; background: #101216; border: 1px solid #2a2e37; border-radius: 10px; min-height: 46vh; }
-  .stage img { max-width: 100%; max-height: 62vh; border-radius: 6px; }
+  .stage { position: relative; display: flex; align-items: center; justify-content: center; background: #101216; border: 1px solid #2a2e37; border-radius: 10px; min-height: 46vh; }
+  .stage img { max-width: 100%; max-height: 62vh; border-radius: 6px; cursor: zoom-in; }
+  /* Full screen is the stage itself, not the page: the picture takes the whole
+     screen, the bar below it goes away, and the keys keep working — a browser
+     that refuses the request (an embedded frame, a policy) gets a stage pinned
+     over the viewport instead, so the button always does something. */
+  .stage:fullscreen, body.stage-full .stage { border: 0; border-radius: 0; background: #000; width: 100vw; height: 100vh; min-height: 0; }
+  body.stage-full .stage { position: fixed; inset: 0; z-index: 50; }
+  .stage:fullscreen img, body.stage-full .stage img { max-width: 100vw; max-height: 100vh; border-radius: 0; cursor: zoom-out; }
+  .hud { display: none; }
+  .stage:fullscreen .hud, body.stage-full .hud {
+    display: flex; gap: 10px; align-items: baseline; position: absolute; left: 14px; bottom: 14px;
+    padding: 6px 12px; border-radius: 8px; background: rgba(16, 18, 22, .78); color: #cfd4de; font-size: 13px;
+  }
+  .hud span:first-child { color: #8b93a3; font-variant-numeric: tabular-nums; }
   .bar { display: flex; gap: 8px; align-items: center; }
   .bar button, .bar select { background: #232732; color: #e6e8ec; border: 1px solid #333846; border-radius: 8px; padding: 6px 14px; font: inherit; cursor: pointer; }
   .bar button:hover { background: #2c313d; }
@@ -111,11 +124,15 @@ function build({ shots, taken }) {
   <a href="http://localhost:9323/" target="_blank" rel="noreferrer">Report ↗</a>
 </header>
 <main>
-  <div class="stage"><img id="shot" alt=""></div>
+  <div class="stage" id="stage">
+    <img id="shot" alt="" title="Click or press F for full screen">
+    <div class="hud"><span id="hudCounter"></span><span id="hudTitle"></span></div>
+  </div>
   <div class="bar">
     <button id="prev" title="Previous (←)">‹</button>
     <button id="play" title="Play / pause (Space)">▶</button>
     <button id="next" title="Next (→)">›</button>
+    <button id="full" title="Full screen (F)">⛶</button>
     <span id="counter"></span>
     <select id="speed" title="Slide time">
       <option value="1000">1 s</option>
@@ -137,6 +154,32 @@ const TAKEN = ${JSON.stringify(taken.toISOString())};
 let filter = "all", list = [], at = 0, timer = null;
 const $ = (id) => document.getElementById(id);
 const shot = $("shot");
+const stage = $("stage");
+/** Set when the browser refused requestFullscreen and the stage is pinned instead. */
+let pinned = false;
+const inFull = () => document.fullscreenElement === stage || pinned;
+
+function syncFull() {
+  $("full").textContent = inFull() ? "⤡" : "⛶";
+  $("full").setAttribute("aria-pressed", String(inFull()));
+}
+
+async function toggleFull() {
+  if (inFull()) {
+    if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+    pinned = false;
+    document.body.classList.remove("stage-full");
+    syncFull();
+    return;
+  }
+  try {
+    await stage.requestFullscreen();
+  } catch {
+    pinned = true;
+    document.body.classList.add("stage-full");
+  }
+  syncFull();
+}
 
 function projects() { return [...new Set(ITEMS.map((i) => i.project))]; }
 
@@ -170,6 +213,9 @@ function show() {
   $("title").textContent = item.title;
   $("meta").textContent = (item.status === "passed" ? "" : item.status + " · ") + (item.duration / 1000).toFixed(1) + " s";
   $("counter").textContent = (at + 1) + " / " + list.length;
+  // The bar is off screen in full screen, so the frame carries its own caption.
+  $("hudCounter").textContent = (at + 1) + " / " + list.length;
+  $("hudTitle").textContent = item.title;
   const next = list[at + 1];
   new Image().src = next ? next.src : ITEMS[0].src;
   for (const [i, b] of [...$("thumbs").children].entries()) b.setAttribute("aria-current", String(i === at));
@@ -203,12 +249,18 @@ $("prev").onclick = () => step(-1);
 $("next").onclick = () => step(1);
 $("play").onclick = () => play(!timer);
 $("speed").onchange = () => { if (timer) play(true); };
+$("full").onclick = () => toggleFull();
+// The picture itself is the way in and out — the click that a lightbox answers to.
+shot.onclick = () => toggleFull();
+document.addEventListener("fullscreenchange", syncFull);
 addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft") step(-1);
   else if (e.key === "ArrowRight") step(1);
   else if (e.key === " ") { e.preventDefault(); play(!timer); }
   else if (e.key === "Home") { at = 0; show(); }
   else if (e.key === "End") { at = list.length - 1; show(); }
+  else if (e.key === "f" || e.key === "F") toggleFull();
+  else if (e.key === "Escape" && pinned) toggleFull();
 });
 $("total").textContent = " · " + ITEMS.length + " tests · " + new Date(TAKEN).toLocaleString();
 apply();

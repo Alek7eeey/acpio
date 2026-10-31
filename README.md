@@ -277,7 +277,9 @@ npm run test:e2e:gallery   # http://127.0.0.1:9324/gallery/
 
 The report shows one test per page; this shows the same run as a strip of screenshots — one
 frame per test, in run order, captioned with its project, group and title. ← / → to step,
-Space to autoplay, the chips on top to keep one layout. It reads `tmp/e2e/manifest.json`,
+Space to autoplay, the chips on top to keep one layout, and `F`, the `⛶` button or a click on the
+picture for full screen — a phone layout on a big monitor is worth it, and the frame keeps its
+counter and title there while ← / → still step. It reads `tmp/e2e/manifest.json`,
 written by the run itself (`e2e/support/manifest-reporter.mjs`), so it always shows the last
 one — start it again after a new run. `-- --port 9400` moves the port, `-- --no-serve` only
 writes the page.
