@@ -37,6 +37,7 @@ import {
   settings as settingsTable,
 } from "../src/db/schema.js";
 import { disposeRuntime, setAgentAvailable } from "../src/acp/sessionManager.js";
+import { addWsClient } from "../src/services/wsHub.js";
 import { clearModelRegistryCache } from "../src/services/modelRegistry.js";
 import {
   appendPart,
@@ -45,7 +46,7 @@ import {
   reconcileStaleSessions,
 } from "../src/services/sessions.js";
 import { BG_MCP_SERVER_ID, BG_MCP_SERVER_NAME } from "@acpio/shared";
-import type { GitCommitDetailDto, GitCommitDto, GitStatusDto, MessagePartDto, SessionDetailDto } from "@acpio/shared";
+import type { GitCommitDetailDto, GitCommitDto, GitStatusDto, MessagePartDto, SessionDetailDto, WsServerEvent } from "@acpio/shared";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
  *  connects to it instead of a real harness. */
@@ -3248,6 +3249,42 @@ function allPartTexts(detail: SessionDetailDto): string[] {
     .filter(Boolean);
 }
 
+/** Every WS frame the server broadcasts, captured as a tab receives it. */
+function captureWsFrames() {
+  const events: WsServerEvent[] = [];
+  const handlers = new Map<string, () => void>();
+  const socket = {
+    readyState: 1,
+    send: (payload: string) => events.push(JSON.parse(payload) as WsServerEvent),
+    on: (name: string, handler: () => void) => handlers.set(name, handler),
+    ping: () => {},
+    terminate: () => {},
+  };
+  addWsClient(socket as never);
+  return {
+    events,
+    close: () => {
+      socket.readyState = 3;
+      handlers.get("close")?.();
+    },
+  };
+}
+
+/**
+ * Frames that say "no turn is left in this chat". A tab reads one as a free
+ * slot and hands over every request it still has queued for that chat.
+ */
+function settledFrames(events: WsServerEvent[], sessionId: string) {
+  return events.filter(
+    (e) =>
+      e.type === "session.updated" &&
+      e.sessionId === sessionId &&
+      (e.session.status === "idle" ||
+        e.session.status === "error" ||
+        e.session.status === "closed"),
+  );
+}
+
 describe("prompt delivery while the agent is busy", () => {
   it("advertises mid-turn folding for the harness that can do it, and only it", async () => {
     const meta = (await app.inject({ method: "GET", url: "/api/adapters" })).json() as Array<{
@@ -3298,6 +3335,53 @@ describe("prompt delivery while the agent is busy", () => {
         .filter((m) => m.role === "user")
         .map((m) => String(m.parts.find((p) => p.type === "text")?.payload.text ?? "")),
     ).toEqual(["SLOW-HANG долгая работа", "нужно сейчас"]);
+  });
+
+  it("keeps the chat busy while the steered turn starts, so the queue behind it waits", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG долгая работа" },
+    });
+    await waitForDetail(session.id, (d) => allPartTexts(d).some((t) => t.includes("hang tick")));
+
+    const frames = captureWsFrames();
+    const steered = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "нужно сейчас", delivery: "steer" },
+    });
+    expect(steered.statusCode).toBe(200);
+    // The promoted message became a turn of its own. Everything the tab sees up
+    // to this point is what it acts on while that turn is still starting.
+    await waitForDetail(session.id, (d) =>
+      d.messages.some(
+        (m) =>
+          m.role === "user" &&
+          m.parts.some((p) => String(p.payload.text ?? "").includes("нужно сейчас")),
+      ),
+    );
+    const beforeSteerTurn = settledFrames(frames.events, session.id);
+    frames.close();
+
+    // The turn the steer interrupted finalizes inside the steer's own stop. Its
+    // "idle" — or the "error" of an adapter that rejects instead of resolving on
+    // cancel — would reach the tab as "the slot is free", and the tab hands the
+    // requests still queued behind the promoted one over at once: one click on
+    // one row sent every row. The steered turn writes the status when it ends.
+    expect(beforeSteerTurn).toEqual([]);
+
+    // …and it does end, so the queue behind it is not stuck either.
+    await waitForDetail(session.id, (d) =>
+      textParts(d).some((t) => t.includes("echo: нужно сейчас")),
+    );
   });
 
   it("keeps the default delivery: the same message without one waits for the turn", async () => {

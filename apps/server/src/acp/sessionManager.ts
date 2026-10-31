@@ -3451,7 +3451,21 @@ function registerInteractivePending(
   return done;
 }
 
+/**
+ * Whether a steer already owns the next turn on this runtime. The turn being
+ * stopped finalizes inside that wait, and its terminal status — "idle", or the
+ * "error" of an adapter that rejects instead of resolving on cancel — must not
+ * be published over the steer's claim. A tab reads any settled status as "the
+ * slot is free": it then hands the requests still queued behind the promoted
+ * one over at once, so a click on one row sent every row. The steer's own turn
+ * writes the status when it ends.
+ */
+function steerOwnsNextTurn(rt: SessionRuntime): boolean {
+  return rt.steerWaiting;
+}
+
 async function finishTurnSessionStatus(sessionId: string, rt: SessionRuntime, status: "idle" | "error") {
+  if (steerOwnsNextTurn(rt)) return;
   if (rt.pending.size > 0) {
     await updateSession(sessionId, { status: "waiting" });
     return;
@@ -3777,9 +3791,11 @@ async function runTurn(
     // A turn that died while an agent question was open must not be buried in
     // "error": the question part is the durable, answerable state, and the user
     // may come back days later. Answering it re-drives the turn.
-    await updateSession(sessionId, {
-      status: rt.pending.size > 0 ? "waiting" : "error",
-    });
+    if (!steerOwnsNextTurn(rt)) {
+      await updateSession(sessionId, {
+        status: rt.pending.size > 0 ? "waiting" : "error",
+      });
+    }
     broadcastToSession(sessionId, { type: "error", sessionId, message: userMessage });
     // Broken ACP process → recreate next time
     if (/exited|spawn|ENOENT|таймаут|timeout/i.test(message)) {
