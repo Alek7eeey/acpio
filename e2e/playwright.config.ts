@@ -4,6 +4,9 @@
  *   npm run test:e2e            # desktop + both phone sizes
  *   npm run test:e2e:desktop    # one project
  *   npm run test:e2e:mobile
+ *   npm run test:e2e:ui         # the same suite, watched live in UI mode
+ *   npm run test:e2e:report     # open the last run's screenshots and traces
+ *   npm run test:e2e:gallery    # the same screenshots as a slideshow
  *
  * What runs is the production bundle from `npm run build` — the server serves
  * the built UI on one port, exactly as a release does (see support/server.mjs,
@@ -28,13 +31,24 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
+  // Locally a run leaves a browsable HTML report (one screenshot per test, a
+  // trace with every step) next to the artifacts; CI reads the log instead and
+  // uploads the failures.
+  reporter: process.env.CI
+    ? [["list"], ["github"]]
+    : [
+        ["list"],
+        ["html", { outputFolder: "../tmp/e2e/report", open: "never" }],
+        // The slideshow's index (`npm run test:e2e:gallery`): which screenshot
+        // and trace each test of this run left behind.
+        ["./support/manifest-reporter.mjs"],
+      ],
   use: {
     baseURL: E2E_BASE_URL,
     locale: "en-US",
     timezoneId: "UTC",
-    trace: "retain-on-failure",
-    screenshot: "only-on-failure",
+    trace: process.env.CI ? "retain-on-failure" : "on",
+    screenshot: process.env.CI ? "only-on-failure" : "on",
     video: "off",
   },
   projects: [

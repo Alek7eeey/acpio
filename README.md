@@ -188,12 +188,104 @@ agent from `apps/server/test/fake-agent.mjs`, and runs the same specs on a deskt
 (1440×900) and two phones (Pixel 7, iPhone SE). Each spec gets its own chat and the app's
 global settings are put back before the next one.
 
+### Which command runs which tests
+
+The first time, build the app and install the browser:
+
 ```bash
-npm run build && npx playwright install chromium   # once
-npm run test:e2e:desktop                           # one project
-npm run test:e2e:mobile
-node e2e/support/server.mjs                        # poke at the suite's own instance (:18761)
+npm run build && npx playwright install chromium
 ```
+
+After that, pick a command — every one of them needs no other setup:
+
+| Command | What it runs | Tests | Time |
+|---|---|---|---|
+| `npm run test:e2e` | everything: desktop + Pixel 7 + iPhone SE | 20 | ~1.5 min |
+| `npm run test:e2e:desktop` | only the desktop layout, 1440×900 | 10 | ~35 s |
+| `npm run test:e2e:mobile` | only the phones: Pixel 7 and iPhone SE | 10 | ~30 s |
+
+`desktop.spec.ts` belongs to the `desktop` project only, `mobile.spec.ts` to the two phone
+projects (`mobile` = Pixel 7, `mobile-small` = iPhone SE) — which is why its five tests count
+twice in the full run. A single test or a group: add `-- -g "phone chat"` to any of them.
+
+The suite's own helpers live in `e2e/support/`: `server.mjs` is the app under test (the built
+server on its own database, :18761 — `node e2e/support/server.mjs` runs it by hand), `seed.mjs`
+houses the fake agent and the settings every test starts from, `app.ts` the fixtures the specs
+share, and `manifest-reporter.mjs` the index the screenshots slideshow reads.
+
+### Watching a run
+
+A green line in the log is not proof that a screen looks right. Three ways to look at the same
+suite — the first is live, the other two are after the fact. Run them one at a time: two runs
+at once share `tmp/e2e/artifacts` and one database, so they fail each other.
+
+| What you want | Command | Where it opens |
+|---|---|---|
+| run tests by hand, watch every step | `npm run test:e2e:ui` | its own Playwright window (random port; `--ui-port 9333` pins it) |
+| one page per test, with traces | `npm run test:e2e:report` | http://localhost:9323 (after a run) |
+| all screenshots in a row | `npm run test:e2e:gallery` | http://127.0.0.1:9324/gallery/ (`--port` moves it) |
+
+Both servers live exactly as long as the command that started them (Ctrl+C — the address stops
+answering); the files under `tmp/e2e` outlive them until the next run. The report is written by
+the run itself, the gallery reads `tmp/e2e/manifest.json`, which the run writes too — so both
+always show the *last* run, and both need the run to happen first.
+
+**Variant 1 — run the tests by hand (UI mode)**
+
+```bash
+npm run test:e2e:ui
+```
+
+A Playwright window opens by itself — there is no URL to open and nothing to remember. In it:
+
+1. the tests are on the left; the `Projects:` chip in the top bar decides which layouts are
+   listed (`desktop`, `mobile`, `mobile-small`);
+2. ▶ next to a test or a group (`desktop shell`, `phone chat`…) runs that one; ▶ at the top of
+   the list runs everything the current filter shows;
+3. after the run, click any action in the timeline: each keeps its own screenshot and a DOM
+   snapshot, so a missed click on a phone layout is visible instead of guessed at;
+4. the tabs below (Console, Network, Source, Errors) are that moment of the page;
+5. the eye icon is watch mode: edit the code and the test runs again by itself.
+
+This run leaves nothing to reopen — close the window and it is gone.
+
+**Variant 2 — run it, then read the report**
+
+```bash
+npm run test:e2e          # the whole suite: desktop + Pixel 7 + iPhone SE, ~1.5 min
+npm run test:e2e:report   # serves tmp/e2e/report on http://localhost:9323
+```
+
+The console gives one line per test and the total:
+
+```
+  ok  1 [desktop] › desktop.spec.ts:20:3 › desktop shell › boots the chat view … (3.0s)
+  …
+  20 passed (1.1m)
+```
+
+The report has a row per test; `View Trace` under a row replays its steps with the same
+screenshots and console — after the fact, and for every test at once. Locally every test,
+green ones included, keeps a screenshot and a full trace; CI keeps only failures.
+`npx playwright show-trace tmp/e2e/artifacts/<test>/trace.zip` opens a single trace on its own.
+
+**Or all the screenshots at once**
+
+```bash
+npm run test:e2e:gallery   # http://127.0.0.1:9324/gallery/
+```
+
+The report shows one test per page; this shows the same run as a strip of screenshots — one
+frame per test, in run order, captioned with its project, group and title. ← / → to step,
+Space to autoplay, the chips on top to keep one layout. It reads `tmp/e2e/manifest.json`,
+written by the run itself (`e2e/support/manifest-reporter.mjs`), so it always shows the last
+one — start it again after a new run. `-- --port 9400` moves the port, `-- --no-serve` only
+writes the page.
+
+Order matters: the run *writes* `tmp/e2e/report`, `test:e2e:report` only *serves* it. A new run
+wipes the folder under an open tab and it starts answering 404 — so run first, open second, and
+repeat the serve command after every new run. `test:e2e:desktop` / `test:e2e:mobile` are the
+same suite narrowed to one layout.
 
 CI runs it after `npm test` in the same `ci` job, so a broken shell or a broken phone layout
 fails the required check; a failing run uploads its traces and screenshots as an artifact.
