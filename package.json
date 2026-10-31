@@ -15,6 +15,8 @@
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w @acpio/server\" \"npm run dev -w @acpio/web\"",
     "dev:server": "npm run dev -w @acpio/server",
     "dev:web": "npm run dev -w @acpio/web",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
+    "ci:protect": "node scripts/setup-branch-protection.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "npm run build -w @acpio/shared && npm run build -w @acpio/i18n && npm run build -w @acpio/plugin-api && npm run build -w @acpio/adapter-cursor && npm run build -w @acpio/adapter-omp && npm run build -w @acpio/adapter-opencode && npm run build -w @acpio/adapter-builtin && npm run build -w @acpio/plugin-ponytail && npm run build -w @acpio/server && npm run build -w @acpio/plugin-example && npm run build -w @acpio/web",
@@ -37,6 +39,7 @@
     "jsdom": "^28.1.0",
     "playwright": "^1.64.1",
     "sharp": "^0.35.3",
+    "typescript": "^5.8.2",
     "vitest": "^4.1.10"
   },
   "engines": {

@@ -1,0 +1,43 @@
+// One type check for the whole repo, the way CI runs it:
+//
+//   npm run typecheck
+//
+// Every workspace's sources are compiled together with `noEmit`, and the
+// workspace packages resolve to their sources (not to `dist`), so the check
+// needs neither a prior build nor a warm dist folder — a fresh clone is enough
+// to tell a type error apart from a packaging problem. Test files are left out:
+// the images the vitest config builds are untyped by design, and their own
+// type drift must not fail a pipeline that has nothing to do with it.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["apps/web/src/*"],
+      "@acpio/shared": ["packages/shared/src/index.ts"],
+      "@acpio/i18n": ["packages/i18n/src/index.ts"],
+      "@acpio/plugin-api": ["packages/plugin-api/src/index.ts"],
+      "@acpio/adapter-builtin": ["packages/adapter-builtin/src/index.ts"],
+      "@acpio/adapter-cursor": ["packages/adapter-cursor/src/index.ts"],
+      "@acpio/adapter-omp": ["packages/adapter-omp/src/index.ts"],
+      "@acpio/adapter-opencode": ["packages/adapter-opencode/src/index.ts"],
+      "@acpio/plugin-ponytail": ["packages/plugin-ponytail/src/server.ts"],
+      "@acpio/plugin-example": ["packages/plugin-example/src/server.ts"]
+    }
+  },
+  "include": ["packages/*/src", "apps/*/src", "apps/server/test", "apps/web/test"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"]
+}

@@ -1,0 +1,73 @@
+# The gate every commit and every pull request goes through.
+#
+#   push (any branch)   →  typecheck → build → test
+#   pull_request        →  the same three checks
+#
+# Nothing here publishes: `release.yml` owns npm and the GitHub Release, and a
+# pipeline that went red must not be able to publish anything, so this workflow
+# only reads.
+#
+# The three checks, in the order they run:
+#
+#   typecheck  `tsc -p tsconfig.typecheck.json` — every workspace's sources
+#              compiled together with noEmit. The config resolves the workspace
+#              packages to their sources, so this needs no prior build: a fresh
+#              clone tells a type error apart from a packaging problem.
+#   build      `npm run build` — the real thing: tsc declarations per package,
+#              the server's JS, the web bundle (vite) and its service worker.
+#   test       `npm test` — vitest over the whole pyramid (unit, server
+#              integration against an in-memory schema, jsdom components).
+#
+# Merging before the pipeline is green is refused by branch protection, not by
+# this file: the repository settings require the `ci` job as a status check on
+# the protected branch. That setting lives outside the repository — write it
+# once from a machine with an admin token:
+#
+#   GITHUB_TOKEN=… npm run ci:protect
+#
+# (scripts/setup-branch-protection.mjs, idempotent, leaves other rules alone).
+#
+# Note for `ci` being a required check: the job id is the check name GitHub
+# shows and branch protection matches, so renaming `ci` silently unpins the
+# rule — rename it in both places or neither.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to the same branch makes the previous run pointless — GitHub keeps
+# paying for it otherwise, and a stale red check would stay on the PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the lockfile's engines (>=20) and what the release builds on.
+          node-version: 22
+          cache: npm
+
+      # `npm ci` (not `install`): the lockfile decides, and a lock out of sync
+      # with package.json fails here instead of drifting between machines.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test

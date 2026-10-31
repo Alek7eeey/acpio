@@ -22,7 +22,7 @@ export default defineConfig({
     env: {
       DATABASE_PATH: ":memory:",
     },
-    setupFiles: ["apps/server/test/setup-env.ts"],
+    setupFiles: ["apps/server/test/setup-env.ts", "apps/web/test/setup-jsdom.ts"],
     testTimeout: 20_000,
     hookTimeout: 30_000,
     // Components need jsdom; the @vitest-environment comment opts in per file.
