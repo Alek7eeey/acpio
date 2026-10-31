@@ -268,6 +268,14 @@ export function AppShell() {
   /** The owning board is a way back, so it only exists while off the board. */
   const backToBoard = isChat && headerBoard ? headerBoard : null;
   /**
+   * The board the tree keeps lit. A board page lights its own row and a task's
+   * chat lights the board the task belongs to (`ChatSidebar`'s
+   * `activeBoardId`); pressing the app's name is a way home, so while a board
+   * holds that light the brand leads there instead of into a chat nobody
+   * opened.
+   */
+  const litBoard = openBoard ?? (isChat ? headerBoard : null);
+  /**
    * The agent a board task's chat runs on. The card wears that badge on the
    * board, so the chat it opens into has to say it too — otherwise the agent
    * a task was handed to disappears the moment the task is opened.
@@ -892,12 +900,18 @@ export function AppShell() {
     (document.activeElement as HTMLElement | null)?.blur();
     if (window.innerWidth < 900) dismissSheet();
     const fromSettings = pathname.startsWith("/settings");
-    navigate(
-      fromSettings && lastNonSettingsRouteRef.current
-        ? lastNonSettingsRouteRef.current
-        : "/chat",
-    );
-  }, [navigate, dismissSheet, pathname]);
+    if (fromSettings && lastNonSettingsRouteRef.current) {
+      navigate(lastNonSettingsRouteRef.current);
+      return;
+    }
+    if (litBoard) {
+      // Already the board's own page: it stays, and no history entry is pushed
+      // for a trip that ends where it began.
+      if (openBoard?.id !== litBoard.id) navigate(`/board/${litBoard.id}`);
+      return;
+    }
+    navigate("/chat");
+  }, [navigate, dismissSheet, pathname, litBoard, openBoard?.id]);
 
   const goSettings = (section: SettingsSection, leaf?: SettingsLeaf) => {
     navigate(settingsPath(section, leaf ?? defaultLeafFor(section)));
@@ -940,29 +954,38 @@ export function AppShell() {
       : undefined
   ) as CSSProperties | undefined;
 
-  const renderBrandButton = (opts?: { bump?: boolean }) => (
-    <button
-      type="button"
-      className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
-      onClick={goChat}
-      title={t("common.goToChat")}
-      aria-label={`Acpio ${BUILD_INFO.released}`}
-    >
-      <span className={styles.brandLetters} aria-hidden>
-        {"Acpio".split("").map((ch, i) => (
-          <span
-            key={`${ch}-${i}`}
-            className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
-          >
-            {ch}
-          </span>
-        ))}
-      </span>
-      <span className={styles.brandVersion} aria-hidden>
-        {BUILD_INFO.released}
-      </span>
-    </button>
-  );
+  const renderBrandButton = (opts?: { bump?: boolean }) => {
+    /** The trip the press makes, named: on the board page the press stays put,
+     *  so the hint names the page instead of promising a move. */
+    const hint = openBoard
+      ? openBoard.name
+      : litBoard
+        ? t("common.backToBoard", { name: litBoard.name })
+        : t("common.goToChat");
+    return (
+      <button
+        type="button"
+        className={`${styles.headerBrand}${opts?.bump && brandBump ? ` ${styles.brandBump}` : ""}`}
+        onClick={goChat}
+        title={hint}
+        aria-label={`Acpio ${BUILD_INFO.released}`}
+      >
+        <span className={styles.brandLetters} aria-hidden>
+          {"Acpio".split("").map((ch, i) => (
+            <span
+              key={`${ch}-${i}`}
+              className={`${styles.brandFlip}${i < 3 ? ` ${styles.brandMark}` : ""}`}
+            >
+              {ch}
+            </span>
+          ))}
+        </span>
+        <span className={styles.brandVersion} aria-hidden>
+          {BUILD_INFO.released}
+        </span>
+      </button>
+    );
+  };
 
   /** Settings search field: lives inside the tree top row, between the
    *  back-to-chat button and the collapse button. */

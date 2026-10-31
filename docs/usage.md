@@ -210,8 +210,11 @@ A chat opened from the board stays tied to it: the header carries a **‹ board 
 to the brand, and one click on it is back to the board (on phones the pill takes the brand's
 place). The context row above the input carries the same trip as a **Board** chip next to the
 folder chip — right under the thumb while you type — and **Settings → Interface → Chat →
-Advanced** turns it off or moves it. The way back keeps the reading position: the lanes and the
-folder rail open where you left them, and the card you left through stays in view. The tree
+Advanced** turns it off or moves it. The brand chip of the app's name and version is the way
+home too: while the tree lights up a board, a press leaves you on that board (or takes you back
+to it from a task's chat) instead of dropping you into whichever chat was open before. The way
+back keeps the reading position: the lanes and the folder rail open where you left them, and the
+card you left through stays in view. The tree
 lights up the board the task belongs to as well, so its row is another way back — the task
 itself never appears there. A page reload lands back in that same chat: the task opened from
 the board stays open instead of being swapped for the newest chat in the tree.
