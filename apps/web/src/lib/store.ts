@@ -2131,6 +2131,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const updated = await api.updateSession(id, {
         doneAt: done ? new Date().toISOString() : null,
+        // Closing a card is the lifecycle's answer, and Done is where it
+        // shows: the lane the reader had parked the card on goes with the
+        // mark, in the same write. Otherwise the card is closed and stays on
+        // its lane, reading as an open task with only «вернуть в работу» on it.
+        ...(done ? { boardColumnId: null } : {}),
       });
       set((s) => ({
         boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)),

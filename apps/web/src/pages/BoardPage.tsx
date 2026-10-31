@@ -1824,8 +1824,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    *  - over a lane the reader owns — the card moves there, and stays by
    *    placement;
    *  - over Done — the card is marked ready (`doneAt`), the same write the
-   *    card's «Отметить готовой» button makes; a placement it already carries
-   *    stays, so reopening it puts it back on its own lane;
+   *    card's «Отметить готовой» button makes, and it settles in Done: a lane
+   *    the card was parked on goes with the mark, because a closed card is
+   *    the lifecycle's, not the reader's;
    *  - over Wait — back to the workflow: the closed mark is dropped and any
    *    placement with it, so the card lands where its lifecycle says;
    *  - over any other stage home (Todo, In Progress) — nothing happens: the

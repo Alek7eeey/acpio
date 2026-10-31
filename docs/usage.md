@@ -189,7 +189,8 @@ short hold (a swipe that starts moving at once stays the lane's scroll). While i
 of the card rides under the pointer and the slot it was taken from keeps a dashed outline, so
 both what is moving and where it would land are on screen. Stage columns are targets too, but as
 actions rather than places: a drop on **Done**
-marks the card ready (a tick under the pointer), a drop on **Wait** sends it back to the
+marks the card ready (a tick under the pointer) and lets go of the hand placement — a closed card
+stands in **Done** instead of staying on its own lane — a drop on **Wait** sends it back to the
 workflow — the closed mark and any hand placement go with it (a return arrow). **Todo** and **In
 Progress** refuse the drop and light a cross, because «not started» and «running» are not
 something a hand decides. **Back to the workflow** in the card's menu does the same without a

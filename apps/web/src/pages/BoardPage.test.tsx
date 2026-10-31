@@ -30,8 +30,11 @@ const apiMock = vi.hoisted(() => {
     // A drop inside a Todo group writes the group's order through this call.
     reorderSessions: vi.fn(async (items: Array<{ id: string; sortOrder: number }>) => items),
     // A drop onto another lane writes the card's placement through this one.
+    // The server answers with the whole row it just wrote, so the fake merges
+    // the patch into the card as the store currently holds it — not into the
+    // fixture, which would smear every field the patch does not name.
     updateSession: vi.fn(async (id: string, patch: Record<string, unknown>) => ({
-      ...task,
+      ...(useAppStore.getState().boardSessions.find((row) => row.id === id) ?? task),
       ...patch,
       id,
     })),
@@ -638,6 +641,45 @@ describe("BoardPage custom columns", () => {
     await waitFor(() =>
       expect(doneLane.querySelector('[data-task-id="t2"]')).toBeTruthy(),
     );
+  });
+
+  // A lane of the reader's own keeps the card through its turns, but closing
+  // it is the lifecycle's answer: the drop on Done puts the card in Done
+  // instead of leaving it on its lane with just «Вернуть в работу» on it.
+  it("moves a parked card into Done when it is dropped there", async () => {
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [{ ...finishedTask, boardColumnId: "col-review" }],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const reviewLane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    const card = reviewLane.querySelector('[data-task-id="t2"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    const doneLane = container.querySelector('[data-column="done"]') as HTMLElement;
+    expect(doneLane.querySelector('[data-task-id="t2"]')).toBeNull();
+
+    const release = hoverOver(card, doneLane);
+    try {
+      expect(doneLane.querySelector('[data-drop-mark="done"]')).toBeTruthy();
+    } finally {
+      release();
+    }
+
+    // The closed mark and the placement reach the server together: a card that
+    // is closed belongs to Done, so its lane goes with the mark.
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalled());
+    const written = Object.assign(
+      {},
+      ...apiMock.updateSession.mock.calls.map((call) => call[1]),
+    );
+    expect(typeof written.doneAt).toBe("string");
+    expect(written.boardColumnId).toBeNull();
+
+    // And the card is read where the gesture put it.
+    await waitFor(() => expect(doneLane.querySelector('[data-task-id="t2"]')).toBeTruthy());
+    expect(reviewLane.querySelector('[data-task-id="t2"]')).toBeNull();
   });
 
   // Wait is the other door: a closed card dropped there is reopened, and a
