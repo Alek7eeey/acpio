@@ -22,7 +22,7 @@ npm i -g acpio     # global → `acpio`
 Opens http://localhost:18741; `acpio --help` and `acpio --version` answer without
 starting anything.
 
-> **npm 12+** skips install-time scripts unless the package is allowed, and they
+> **npm 11.17+** skips install-time scripts unless the package is allowed, and they
 > are what builds the native modules — add
 > `--allow-scripts=acpio,better-sqlite3,node-pty` to the commands above.
 
@@ -33,6 +33,21 @@ first run:
 
 ```powershell
 irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
+```
+
+**From npm through PowerShell (Windows)** — the same Node 20+ bootstrap, then a global
+`npm i -g acpio@latest` with the install scripts allowed, so the native modules are built
+in one go and the `acpio` command starts the app later:
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/install.ps1 | iex
+```
+
+Save the script to pass `-Version 0.1.42` (pin a release) or `-NoLaunch` (install only):
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 -NoLaunch
 ```
 
 **From source (production, single port):**

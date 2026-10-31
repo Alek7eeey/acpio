@@ -27,6 +27,13 @@ const CHECK_FAILURE_TTL_MS = 60_000;
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
 /** How much of npm's output is kept for the popup's error line. */
 const OUTPUT_KEEP = 4_000;
+/**
+ * The packages whose install scripts build a native module, named as npm wants
+ * them: since 11.17 npm runs no install script unless it is told which packages
+ * may, and an update that skips better-sqlite3's leaves a build without its
+ * SQLite binary — the next start then dies on the very first query.
+ */
+const INSTALL_SCRIPTS = "--allow-scripts=acpio,better-sqlite3,node-pty";
 
 /** How an install ended: npm's exit code and the tail of what it said. */
 export interface InstallOutcome {
@@ -168,11 +175,11 @@ export function installFailure(outcome: InstallOutcome): string {
  */
 export function npmInstall(version: string): Promise<InstallOutcome> {
   return new Promise((resolve) => {
-    if (!parseVersion(version)) {
+    const command = installCommand(version);
+    if (!command) {
       resolve({ code: 1, output: `not a version: ${version}` });
       return;
     }
-    const command = `npm install -g ${PACKAGE_NAME}@${version}`;
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(command, {
@@ -204,6 +211,12 @@ export function npmInstall(version: string): Promise<InstallOutcome> {
     });
     child.on("close", (code) => settle(code ?? 1));
   });
+}
+
+/** The install line for a version from the registry, or null when it is not one. */
+export function installCommand(version: string): string | null {
+  if (!parseVersion(version)) return null;
+  return `npm install -g ${PACKAGE_NAME}@${version} ${INSTALL_SCRIPTS}`;
 }
 
 export interface RestartOptions {

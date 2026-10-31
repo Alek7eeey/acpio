@@ -5,6 +5,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createServer, type Server } from "node:http";
 import {
   createAppUpdater,
+  installCommand,
   restartCommand,
   restartServer,
   restartScript,
@@ -122,6 +123,17 @@ describe("checking the registry", () => {
 });
 
 describe("installing", () => {
+  it("names the packages whose install scripts build the native modules", () => {
+    // npm 11.17+ builds nothing for a package it was not told about, and an
+    // update that skips better-sqlite3 leaves a build that cannot open its
+    // database — the same failure a plain `npm i -g acpio` hits.
+    expect(installCommand("0.1.42")).toContain("--allow-scripts=acpio,better-sqlite3,node-pty");
+    expect(installCommand("0.1.42")).toContain("npm install -g acpio@0.1.42");
+    // Nothing but a parsed version may reach that command line.
+    expect(installCommand("0.1.42; rm -rf ~")).toBeNull();
+    expect(installCommand("latest")).toBeNull();
+  });
+
   it("runs npm for the version on the registry, and reports done when it exits 0", async () => {
     registryAnswer = { version: "0.1.42" };
     const calls: string[] = [];

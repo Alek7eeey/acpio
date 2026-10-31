@@ -22,7 +22,7 @@ npm i -g acpio     # глобально → `acpio`
 Открывает http://localhost:18741; `acpio --help` и `acpio --version` отвечают,
 ничего не запуская.
 
-> **npm 12+** не запускает install-скрипты пакета, пока его не разрешат, а
+> **npm 11.17+** не запускает install-скрипты пакета, пока его не разрешат, а
 > именно они собирают нативные модули — добавьте к командам выше
 > `--allow-scripts=acpio,better-sqlite3,node-pty`.
 
@@ -33,6 +33,22 @@ npm i -g acpio     # глобально → `acpio`
 
 ```powershell
 irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/setup.ps1 | iex
+```
+
+**Из npm через PowerShell (Windows)** — тот же бутстрап Node 20+, затем глобальный
+`npm i -g acpio@latest` с разрешёнными install-скриптами: нативные модули собираются
+сразу, а команда `acpio` запускает приложение потом:
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/install.ps1 | iex
+```
+
+Сохраните скрипт в файл, чтобы передать `-Version 0.1.42` (закрепить релиз) или
+`-NoLaunch` (только установить):
+
+```powershell
+irm https://raw.githubusercontent.com/Alek7eeey/acpio/dev/scripts/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1 -NoLaunch
 ```
 
 **Из исходников (прод, один порт):**
