@@ -566,6 +566,12 @@ export function AppShell() {
 
   /** Mobile: slide the sheet off-screen, then unmount. Desktop: instant close. */
   const dismissSheet = useCallback(() => {
+    // A sheet that is already down has nothing to slide away. Dismissing it
+    // anyway arms the whole ritual — the closing flag, the transition and its
+    // 480 ms timer — on a closed element, and that leftover fires on whatever
+    // the NEXT tap opens: the sheet came up and went back down ~100 ms later,
+    // so the first tap on the puller read as dead and only a second one worked.
+    if (!sidebarOpen) return;
     if (window.innerWidth >= 900) {
       setSidebarOpen(false);
       return;
@@ -607,7 +613,7 @@ export function AppShell() {
     };
     el.addEventListener("transitionend", onEnd);
     window.setTimeout(finish, 480);
-  }, [setSidebarOpen]);
+  }, [setSidebarOpen, sidebarOpen]);
 
   const snapSheetHeight = useCallback(
     (heightPx: number) => {

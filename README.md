@@ -175,6 +175,29 @@ inbound TCP **18741** (and **18751**) in the firewall if needed. **Settings → 
 shows a cheat sheet with a copy button; **Install** in the toolbar adds the site to the home
 screen. `http://0.0.0.0:18741` is the listening address, not a browser address.
 
+## Tests
+
+```bash
+npm test                 # unit, server integration, jsdom components (vitest)
+npm run test:e2e         # the built app in a real browser (Playwright)
+```
+
+The end-to-end suite drives the production bundle, not the dev servers: it starts the built
+server on its own database (`tmp/e2e`, wiped per run), registers the deterministic fake ACP
+agent from `apps/server/test/fake-agent.mjs`, and runs the same specs on a desktop layout
+(1440×900) and two phones (Pixel 7, iPhone SE). Each spec gets its own chat and the app's
+global settings are put back before the next one.
+
+```bash
+npm run build && npx playwright install chromium   # once
+npm run test:e2e:desktop                           # one project
+npm run test:e2e:mobile
+node e2e/support/server.mjs                        # poke at the suite's own instance (:18761)
+```
+
+CI runs it after `npm test` in the same `ci` job, so a broken shell or a broken phone layout
+fails the required check; a failing run uploads its traces and screenshots as an artifact.
+
 ## Architecture
 
 Browser ↔ REST/WS server ↔ registry-driven spawn of the harness CLI (`agent acp` / `omp acp`

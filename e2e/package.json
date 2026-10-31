@@ -1,0 +1,6 @@
+{
+  "name": "acpio-e2e",
+  "private": true,
+  "type": "module",
+  "//": "Not a workspace: the suite drives the built app from the outside. The type keeps support/seed.mjs one module for Playwright (config + specs) and for plain `node support/server.mjs`."
+}

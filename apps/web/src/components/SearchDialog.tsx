@@ -239,7 +239,7 @@ export function SearchDialog({
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
-                  d="M7 3.5h10a2 2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H9.5L6 18.4V15H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z"
+                  d="M7 3.5h10a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H9.5L6 18.4V15H7a2 2 0 0 1-2-2V5.5a2 2 0 0 1 2-2Z"
                   stroke="currentColor"
                   strokeWidth="1.5"
                   strokeLinejoin="round"

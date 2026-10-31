@@ -1,13 +1,13 @@
 # The gate every commit and every pull request goes through.
 #
-#   push (any branch)   →  typecheck → build → test
-#   pull_request        →  the same three checks
+#   push (any branch)   →  typecheck → build → test → test:e2e
+#   pull_request        →  the same four checks
 #
 # Nothing here publishes: `release.yml` owns npm and the GitHub Release, and a
 # pipeline that went red must not be able to publish anything, so this workflow
 # only reads.
 #
-# The three checks, in the order they run:
+# The four checks, in the order they run:
 #
 #   typecheck  `tsc -p tsconfig.typecheck.json` — every workspace's sources
 #              compiled together with noEmit. The config resolves the workspace
@@ -17,6 +17,14 @@
 #              the server's JS, the web bundle (vite) and its service worker.
 #   test       `npm test` — vitest over the whole pyramid (unit, server
 #              integration against an in-memory schema, jsdom components).
+#   test:e2e   `npm run test:e2e` — Playwright against the build from the step
+#              above: a real server, a real ACP agent process (the deterministic
+#              fake from apps/server/test), three layouts (1440×900, Pixel 7,
+#              iPhone SE). It runs in this job on purpose: `ci` is the required
+#              status check, so an e2e failure has to turn the same check red.
+#              On failure the trace and screenshot of each broken spec are
+#              uploaded as an artifact — `npx playwright show-trace` reads a
+#              trace offline.
 #
 # Merging before the pipeline is green is refused by branch protection, not by
 # this file: the repository settings require the `ci` job as a status check on
@@ -49,7 +57,7 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -71,3 +79,20 @@ jobs:
 
       - name: Test
         run: npm test
+
+      # One engine for every layout: the suite's projects change viewport and
+      # touch, not browser, so Chromium alone is enough.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Test (e2e)
+        run: npm run test:e2e
+
+      - name: Upload what the e2e run left behind
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: tmp/e2e/artifacts
+          if-no-files-found: ignore
+          retention-days: 7
