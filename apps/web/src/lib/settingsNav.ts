@@ -1,6 +1,6 @@
 import type { TranslateFn } from "@acpio/i18n";
 
-export type SettingsSection = "agent" | "builtin" | "interface" | "data";
+export type SettingsSection = "agent" | "builtin" | "interface" | "data" | "about";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
@@ -30,7 +30,8 @@ export type SettingsLocation =
   | { section: "agent"; leaf: SettingsAgentLeaf }
   | { section: "builtin"; leaf: SettingsBuiltinLeaf }
   | { section: "interface"; leaf: SettingsInterfaceLeaf }
-  | { section: "data"; leaf?: undefined };
+  | { section: "data"; leaf?: undefined }
+  | { section: "about"; leaf?: undefined };
 
 type TreeBranch =
   | {
@@ -49,7 +50,8 @@ type TreeBranch =
       children: Array<{ id: SettingsInterfaceLeaf; label: string }>;
     }
   /** One page and no pages under it: the tree renders it as a plain item. */
-  | { id: "data"; label: string; children: [] };
+  | { id: "data"; label: string; children: [] }
+  | { id: "about"; label: string; children: [] };
 
 /**
  * The built-in agent's settings are cut into pages — one tree entry each, one
@@ -129,6 +131,9 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
     // the pair has a page of its own beside the sections rather than a button
     // on every page of them.
     { id: "data", label: t("settings.importExport"), children: [] },
+    // What this install is: the running version, and the update to the newest
+    // one for a reader who put the popup off.
+    { id: "about", label: t("settings.aboutApp"), children: [] },
   ];
 }
 
@@ -149,6 +154,17 @@ export function settingsSectionTerms(t: TranslateFn): Record<SettingsSection, st
       "agent",
     ],
     interface: [],
+    about: [
+      t("settings.aboutApp"),
+      t("settings.aboutAppDesc"),
+      t("settings.appVersion"),
+      t("settings.appLatestVersion"),
+      "версия",
+      "version",
+      "обновление",
+      "update",
+      "npm",
+    ],
     data: [
       t("settings.importExport"),
       t("settings.settingsFileDesc"),
@@ -167,6 +183,7 @@ export function parseSettingsSearch(search: string): SettingsLocation {
   const rawSection = params.get("section");
   const rawLeaf = params.get("leaf");
   if (rawSection === "data") return { section: "data" };
+  if (rawSection === "about") return { section: "about" };
   // The settings file used to be the last page of the interface section: a
   // link from back then opens the section that took the page over.
   if (rawSection === "interface" && rawLeaf === "data") return { section: "data" };

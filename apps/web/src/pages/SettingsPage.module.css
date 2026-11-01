@@ -1006,6 +1006,29 @@
   align-items: center;
 }
 
+/** A version number: the same digits the header shows, read as a number. */
+.appVersion {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+
+/** The installer's last words, when the update did not go through. */
+.appUpdateLog {
+  margin: 8px 0 4px;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: var(--settings-control-radius);
+  border: 1px solid var(--border);
+  background: var(--surface-2, var(--surface));
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .customAgentTestResult {
   margin: 0 0 4px;
   font-size: 0.8rem;

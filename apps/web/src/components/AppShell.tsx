@@ -1294,7 +1294,13 @@ export function AppShell() {
                   title={branch.label}
                   aria-label={branch.label}
                   aria-expanded={railSettingsMenu?.section === branch.id}
-                  onClick={(e) => openRailSettings(e, branch.id)}
+                  onClick={(e) =>
+                    // A section without pages has nothing to list: its rail
+                    // button opens the page itself.
+                    branch.children.length > 0
+                      ? openRailSettings(e, branch.id)
+                      : goSettings(branch.id)
+                  }
                 >
                   {branch.id === "agent" ? (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -1341,6 +1347,24 @@ export function AppShell() {
                         strokeWidth="1.7"
                         strokeLinecap="round"
                       />
+                    </svg>
+                  ) : branch.id === "about" ? (
+                    // The app itself: an "i" in a circle.
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="8.5"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      />
+                      <path
+                        d="M12 10.6v6"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="12" cy="7.6" r="1.1" fill="currentColor" />
                     </svg>
                   ) : (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>

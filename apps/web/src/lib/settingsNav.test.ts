@@ -327,9 +327,21 @@ describe("getSettingsTree", () => {
   // plain item at their level.
   it("puts the settings file beside the sections, with no pages under it", () => {
     const tree = getSettingsTree(t);
-    expect(tree.map((b) => b.id)).toEqual(["agent", "builtin", "interface", "data"]);
+    expect(tree.map((b) => b.id)).toEqual(["agent", "builtin", "interface", "data", "about"]);
     expect(tree[3].label).toBe("settings.importExport");
     expect(tree[3].children).toEqual([]);
+  });
+
+  // The app itself: the version this build is, and the update to a newer one,
+  // reachable in the tree after the popup was put off.
+  it("puts the about page beside the sections, with no pages under it", () => {
+    const tree = getSettingsTree(t);
+    expect(tree[4].label).toBe("settings.aboutApp");
+    expect(tree[4].children).toEqual([]);
+    expect(parseSettingsSearch("?section=about")).toEqual({ section: "about" });
+    expect(settingsSectionTerms(t).about).toContain("settings.aboutApp");
+    const path = settingsPath("about");
+    expect(path).toBe("/settings?section=about");
   });
 
   it("parses the settings-file section, and the interface leaf it used to be", () => {
@@ -364,6 +376,7 @@ describe("getSettingsTree", () => {
       "builtin",
       "interface",
       "data",
+      "about",
     ]);
   });
 });

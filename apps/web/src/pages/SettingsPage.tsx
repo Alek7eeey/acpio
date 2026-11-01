@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
+  BUILD_INFO,
   CHAT_TITLE_MAX_LEN_MAX,
   CHAT_TITLE_MAX_LEN_MIN,
   CHAT_TREE_RECENT_LIMIT_MAX,
@@ -67,6 +68,7 @@ import {
 } from "@acpio/shared";
 import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
+import { RESTART_TIMEOUT, useAppUpdate } from "../lib/appUpdate";
 import { SubagentsEditor } from "../components/SubagentsEditor";
 import {
   builtinLeafLabel,
@@ -1326,6 +1328,73 @@ function BuiltinPresetsRows({
   );
 }
 
+/**
+ * The app's own page: which build is running and whether npm has a newer one.
+ * The button runs the header popup's install from here, so an update put off
+ * with "Позже" is one page away instead of gone.
+ */
+function AppAboutRows() {
+  const t = useT();
+  const update = useAppUpdate();
+  const current = update.state?.current ?? BUILD_INFO.released;
+  const latest = update.state?.latest ?? null;
+  const available = Boolean(update.state?.available && latest);
+  const { phase } = update;
+  const busy = phase === "installing" || phase === "restarting";
+  const failure = update.error === RESTART_TIMEOUT ? t("update.restartTimeout") : update.error;
+  const hint =
+    phase === "installing"
+      ? t("update.installing")
+      : phase === "restarting"
+        ? t("update.restarting")
+        : phase === "failed"
+          ? t("update.failed")
+          : available && latest
+            ? t("settings.appLatestHint", { version: latest })
+            : latest
+              ? t("settings.appUpToDateHint")
+              : t("settings.appLatestUnknownHint");
+
+  return (
+    <>
+      <SettingTable>
+        <SettingRow
+          label={t("settings.appVersion")}
+          hint={t("settings.appVersionHint")}
+          terms={[t("settings.appVersion"), t("settings.aboutApp")]}
+        >
+          <span className={styles.appVersion}>{current}</span>
+        </SettingRow>
+
+        <SettingRow
+          label={t("settings.appLatestVersion")}
+          hint={hint}
+          terms={[t("settings.appLatestVersion"), t("update.title"), t("update.action")]}
+        >
+          <span className={styles.providerRowControl}>
+            <span className={styles.appVersion}>{latest ?? t("settings.appLatestUnknown")}</span>
+            <button
+              type="button"
+              className={styles.primaryBtn}
+              disabled={!available || busy}
+              onClick={update.start}
+            >
+              {phase === "failed" ? t("update.retry") : t("update.action")}
+            </button>
+          </span>
+        </SettingRow>
+
+        {phase === "failed" && failure ? (
+          <pre className={styles.appUpdateLog}>{failure}</pre>
+        ) : null}
+        {available && !busy ? (
+          <p className={styles.hint}>{t("update.restartWarning")}</p>
+        ) : null}
+      </SettingTable>
+    </>
+  );
+}
+
 function SchemeCard({
   active,
   name,
@@ -2360,64 +2429,68 @@ export function SettingsPage() {
   const title =
     section === "data"
       ? t("settings.importExport")
-      : section === "interface"
-      ? leaf === "colors"
-        ? t("settings.colors")
-        : leaf === "voice"
-          ? t("settings.voiceTitle")
-          : leaf === "chat"
-            ? t("settings.chatTitle")
-            : leaf === "board"
-              ? t("settings.boardTitle")
-              : t("settings.appearance")
-      : section === "builtin"
-        ? // Each tree entry is a page of its own: its name is the page's title.
-          builtinLeafLabel(t, leaf)
-        : section === "agent"
-          ? leaf === "connect"
-            ? t("settings.agentConnectTitle")
-            : leaf === "model"
-              ? t("settings.agentModelTitle")
-              : leaf === "remote"
-                ? t("settings.remoteAccessTitle")
-                : leaf === "diagnostics"
-                  ? t("settings.diagnosticsTitle")
-                  : leaf === "mcp"
-                    ? t("settings.mcpTitle")
-                    : leaf === "plugins"
-                      ? t("settings.pluginsTitle")
-                      : t("settings.agentAdvancedTitle")
-          : t("settings.agentConnectTitle");
+      : section === "about"
+        ? t("settings.aboutApp")
+        : section === "interface"
+          ? leaf === "colors"
+            ? t("settings.colors")
+            : leaf === "voice"
+              ? t("settings.voiceTitle")
+              : leaf === "chat"
+                ? t("settings.chatTitle")
+                : leaf === "board"
+                  ? t("settings.boardTitle")
+                  : t("settings.appearance")
+          : section === "builtin"
+            ? // Each tree entry is a page of its own: its name is the page's title.
+              builtinLeafLabel(t, leaf)
+            : section === "agent"
+              ? leaf === "connect"
+                ? t("settings.agentConnectTitle")
+                : leaf === "model"
+                  ? t("settings.agentModelTitle")
+                  : leaf === "remote"
+                    ? t("settings.remoteAccessTitle")
+                    : leaf === "diagnostics"
+                      ? t("settings.diagnosticsTitle")
+                      : leaf === "mcp"
+                        ? t("settings.mcpTitle")
+                        : leaf === "plugins"
+                          ? t("settings.pluginsTitle")
+                          : t("settings.agentAdvancedTitle")
+              : t("settings.agentConnectTitle");
 
   const subtitle =
     section === "data"
       ? t("settings.settingsFileDesc")
-      : section === "interface"
-      ? leaf === "colors"
-        ? t("settings.colorsDesc")
-        : leaf === "voice"
-          ? t("settings.voiceDesc")
-          : leaf === "chat"
-            ? t("settings.chatDesc")
-            : leaf === "board"
-              ? t("settings.boardDesc")
-              : t("settings.sidebarCollapseHint")
-      : section === "builtin"
-        ? t("settings.builtinHint")
-        : section === "agent" && leaf === "mcp"
-          ? t("settings.mcpHint")
-          : section === "agent" && leaf === "plugins"
-            ? t("settings.pluginsHint")
-            : section === "agent" && leaf === "advanced"
-              ? t("settings.agentAdvancedDesc")
-              : section === "agent" && leaf === "remote"
-                ? t("settings.remoteAccessDesc")
-                : section === "agent" && leaf === "diagnostics"
-                  ? t("settings.diagnosticsDesc")
-                  : t("settings.agentConnectDesc");
+      : section === "about"
+        ? t("settings.aboutAppDesc")
+        : section === "interface"
+          ? leaf === "colors"
+            ? t("settings.colorsDesc")
+            : leaf === "voice"
+              ? t("settings.voiceDesc")
+              : leaf === "chat"
+                ? t("settings.chatDesc")
+                : leaf === "board"
+                  ? t("settings.boardDesc")
+                  : t("settings.sidebarCollapseHint")
+          : section === "builtin"
+            ? t("settings.builtinHint")
+            : section === "agent" && leaf === "mcp"
+              ? t("settings.mcpHint")
+              : section === "agent" && leaf === "plugins"
+                ? t("settings.pluginsHint")
+                : section === "agent" && leaf === "advanced"
+                  ? t("settings.agentAdvancedDesc")
+                  : section === "agent" && leaf === "remote"
+                    ? t("settings.remoteAccessDesc")
+                    : section === "agent" && leaf === "diagnostics"
+                      ? t("settings.diagnosticsDesc")
+                      : t("settings.agentConnectDesc");
 
   const eyebrow =
-    section === "data"
+    section === "data" || section === "about"
       ? // A section that is one page needs no second name: the tree entry is
         // the page's name, and the lead under it says what the page is for.
         ""
@@ -2950,6 +3023,11 @@ export function SettingsPage() {
             </SettingRow>
           </SettingTable>
         )}
+
+        {/* The app itself: the running build, and the newest one npm has —
+            the popup's update, reachable also for a reader who pressed
+            "Позже" on it. */}
+        {section === "about" && <AppAboutRows />}
 
         {section === "interface" && leaf === "colors" && (
           <SettingTable>
