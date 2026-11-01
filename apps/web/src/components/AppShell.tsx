@@ -1188,6 +1188,11 @@ export function AppShell() {
                         }
                       }}
                     >
+                      {!hasChildren && (
+                        // No pages to fold out, but the label still lines up
+                        // with the sections around it: an empty chevron slot.
+                        <span className={styles.settingsChevron} aria-hidden />
+                      )}
                       {hasChildren && (
                         <span className={styles.settingsChevron} aria-hidden>
                           {open ? (

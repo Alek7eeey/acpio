@@ -555,7 +555,7 @@ describe("SettingsPage board leaf", () => {
   });
 });
 
-describe("Settings file section", () => {
+describe("Settings file on the About page", () => {
   const renderSection = (search: string) => {
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     return render(
@@ -567,23 +567,38 @@ describe("Settings file section", () => {
     );
   };
 
-  // Export and import move the whole install's setup: the two of them are a
-  // section of their own, beside the agents and the interface — not a button
-  // on the header of every page, nor a page hidden inside another section.
-  it("carries both actions under section=data", async () => {
-    renderSection("?section=data");
+  // Export and import move the whole install's setup, so they sit on the app's
+  // own page — beside what the app is and which version it runs, not in a
+  // section of their own in the tree.
+  it("carries both actions on the About page", async () => {
+    renderSection("?section=about");
 
-    expect(screen.getByRole("heading", { name: "Import/export settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "About" })).toBeTruthy();
+    expect(screen.getByText("Import/export settings")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Choose file" })).toBeTruthy();
   });
 
-  // The link the page had while it was the interface section's last leaf.
-  it("opens from that older section=interface&leaf=data link", async () => {
-    renderSection("?section=interface&leaf=data");
+  // Links from before the move: the section it had, and the interface leaf it
+  // was before that.
+  it.each(["?section=data", "?section=interface&leaf=data"])(
+    "opens the About page from the older %s link",
+    async (search) => {
+      renderSection(search);
 
-    expect(screen.getByRole("heading", { name: "Import/export settings" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "About" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Download file" })).toBeTruthy();
+    },
+  );
+
+  // The addresses are information, not actions: the row shows the link itself.
+  it("shows the sources and the npm package as plain links", async () => {
+    renderSection("?section=about");
+
+    const repo = screen.getByRole("link", { name: "github.com/Alek7eeey/acpio" });
+    const npm = screen.getByRole("link", { name: "npmjs.com/package/acpio" });
+    expect(repo.getAttribute("href")).toBe("https://github.com/Alek7eeey/acpio");
+    expect(npm.getAttribute("href")).toBe("https://www.npmjs.com/package/acpio");
   });
 
   it("leaves every other page without them", async () => {

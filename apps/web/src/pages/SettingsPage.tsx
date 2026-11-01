@@ -1329,10 +1329,16 @@ function BuiltinPresetsRows({
 }
 
 /**
- * The app's own page: which build is running and whether npm has a newer one.
- * The button runs the header popup's install from here, so an update put off
- * with "Позже" is one page away instead of gone.
+ * The app's own page: what it can do, which build is running and whether npm
+ * has a newer one. The button runs the header popup's install from here, so an
+ * update put off with "Позже" is one page away instead of gone.
  */
+/** Where the app lives: the sources, and the package an install comes from. */
+const ABOUT_LINKS = {
+  repo: { href: "https://github.com/Alek7eeey/acpio", text: "github.com/Alek7eeey/acpio" },
+  npm: { href: "https://www.npmjs.com/package/acpio", text: "npmjs.com/package/acpio" },
+};
+
 function AppAboutRows() {
   const t = useT();
   const update = useAppUpdate();
@@ -1357,25 +1363,56 @@ function AppAboutRows() {
 
   return (
     <>
+      {/* The links are information, not actions: the address itself, clickable. */}
+      <SettingTable>
+        <SettingRow label={t("settings.aboutRepo")} hint={t("settings.aboutRepoHint")}>
+          <a
+            className={styles.aboutLink}
+            href={ABOUT_LINKS.repo.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {ABOUT_LINKS.repo.text}
+          </a>
+        </SettingRow>
+        <SettingRow label={t("settings.aboutNpm")} hint={t("settings.aboutNpmHint")}>
+          <a
+            className={styles.aboutLink}
+            href={ABOUT_LINKS.npm.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {ABOUT_LINKS.npm.text}
+          </a>
+        </SettingRow>
+      </SettingTable>
+
+      {/* One line for the whole story: what runs, what npm offers, and the
+          button that is on exactly when those two differ. */}
       <SettingTable>
         <SettingRow
-          label={t("settings.appVersion")}
-          hint={t("settings.appVersionHint")}
-          terms={[t("settings.appVersion"), t("settings.aboutApp")]}
-        >
-          <span className={styles.appVersion}>{current}</span>
-        </SettingRow>
-
-        <SettingRow
-          label={t("settings.appLatestVersion")}
+          label={t("settings.aboutVersion")}
           hint={hint}
-          terms={[t("settings.appLatestVersion"), t("update.title"), t("update.action")]}
+          terms={[
+            t("settings.appVersion"),
+            t("settings.appLatestVersion"),
+            t("settings.aboutApp"),
+            t("update.title"),
+            t("update.action"),
+          ]}
         >
-          <span className={styles.providerRowControl}>
-            <span className={styles.appVersion}>{latest ?? t("settings.appLatestUnknown")}</span>
+          <span className={styles.aboutVersionRow}>
+            <span className={styles.aboutVersionItem}>
+              <span className={styles.aboutVersionLabel}>{t("settings.appVersion")}</span>
+              <span className={styles.appVersion}>{current}</span>
+            </span>
+            <span className={styles.aboutVersionItem}>
+              <span className={styles.aboutVersionLabel}>{t("settings.appLatestVersion")}</span>
+              <span className={styles.appVersion}>{latest ?? t("settings.appLatestUnknown")}</span>
+            </span>
             <button
               type="button"
-              className={styles.primaryBtn}
+              className={`${styles.primaryBtn} ${styles.aboutUpdateBtn}`}
               disabled={!available || busy}
               onClick={update.start}
             >
@@ -2427,11 +2464,9 @@ export function SettingsPage() {
   };
 
   const title =
-    section === "data"
-      ? t("settings.importExport")
-      : section === "about"
-        ? t("settings.aboutApp")
-        : section === "interface"
+    section === "about"
+      ? t("settings.aboutApp")
+      : section === "interface"
           ? leaf === "colors"
             ? t("settings.colors")
             : leaf === "voice"
@@ -2461,11 +2496,9 @@ export function SettingsPage() {
               : t("settings.agentConnectTitle");
 
   const subtitle =
-    section === "data"
-      ? t("settings.settingsFileDesc")
-      : section === "about"
-        ? t("settings.aboutAppDesc")
-        : section === "interface"
+    section === "about"
+      ? t("settings.aboutAppDesc")
+      : section === "interface"
           ? leaf === "colors"
             ? t("settings.colorsDesc")
             : leaf === "voice"
@@ -2490,7 +2523,7 @@ export function SettingsPage() {
                       : t("settings.agentConnectDesc");
 
   const eyebrow =
-    section === "data" || section === "about"
+    section === "about"
       ? // A section that is one page needs no second name: the tree entry is
         // the page's name, and the lead under it says what the page is for.
         ""
@@ -2977,10 +3010,17 @@ export function SettingsPage() {
           </SettingTable>
         )}
 
-        {/* The settings file: one page for the two actions that move the whole
-            install's setup — a section of its own in the tree, so they are
-            found once instead of standing on every page of another section. */}
-        {section === "data" && (
+        {/* The app itself: what it does, where its sources and package live,
+            and the newest build npm has — the popup's update, reachable also
+            for a reader who pressed "Позже" on it. */}
+        {section === "about" && <AppAboutRows />}
+
+        {/* The settings file: the two actions that move the whole install's
+            setup, on the same page as the app they belong to rather than a
+            section of their own. */}
+        {section === "about" && (
+          <>
+            <p className={styles.eyebrow}>{t("settings.importExport")}</p>
           <SettingTable>
             <SettingRow
               label={t("settings.exportSettings")}
@@ -3022,12 +3062,8 @@ export function SettingsPage() {
               </button>
             </SettingRow>
           </SettingTable>
+          </>
         )}
-
-        {/* The app itself: the running build, and the newest one npm has —
-            the popup's update, reachable also for a reader who pressed
-            "Позже" on it. */}
-        {section === "about" && <AppAboutRows />}
 
         {section === "interface" && leaf === "colors" && (
           <SettingTable>

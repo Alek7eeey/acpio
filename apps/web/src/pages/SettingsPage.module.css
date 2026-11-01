@@ -911,6 +911,18 @@
   color: var(--text);
 }
 
+/** A bare address: the repo and the npm package read as information, not a button. */
+.aboutLink {
+  color: var(--accent);
+  font-size: 0.86rem;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.aboutLink:hover {
+  text-decoration: underline;
+}
+
 .secondaryBtn:hover:not(:disabled) {
   background: var(--bg-tertiary);
 }
@@ -1011,6 +1023,33 @@
   font-variant-numeric: tabular-nums;
   font-size: 0.92rem;
   color: var(--text-secondary);
+}
+
+/** Nothing to install: the button greys out instead of looking pressable. */
+.aboutUpdateBtn:disabled {
+  background: var(--surface-2, var(--surface));
+  color: var(--text-tertiary, var(--text-secondary));
+  opacity: 1;
+}
+
+/** The one version row: both numbers and the button, wrapping on a phone. */
+.aboutVersionRow {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+/** The one version row: a caption per number, so the digits are not bare. */
+.aboutVersionItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.aboutVersionLabel {
+  font-size: 0.78rem;
+  color: var(--text-tertiary, var(--text-secondary));
 }
 
 /** The installer's last words, when the update did not go through. */

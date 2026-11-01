@@ -322,39 +322,24 @@ describe("getSettingsTree", () => {
     ]);
   });
 
-  // The settings file is a section of its own, standing beside the agents and
-  // the interface: one page, and no pages under it, so the tree draws it as a
-  // plain item at their level.
-  it("puts the settings file beside the sections, with no pages under it", () => {
-    const tree = getSettingsTree(t);
-    expect(tree.map((b) => b.id)).toEqual(["agent", "builtin", "interface", "data", "about"]);
-    expect(tree[3].label).toBe("settings.importExport");
-    expect(tree[3].children).toEqual([]);
-  });
-
-  // The app itself: the version this build is, and the update to a newer one,
-  // reachable in the tree after the popup was put off.
+  // The app itself: what it does, the links to its sources and package, the
+  // settings file and the version of this build — one page, and no pages under
+  // it, so the tree draws it as a plain item at the sections' level.
   it("puts the about page beside the sections, with no pages under it", () => {
     const tree = getSettingsTree(t);
-    expect(tree[4].label).toBe("settings.aboutApp");
-    expect(tree[4].children).toEqual([]);
+    expect(tree[3].label).toBe("settings.aboutApp");
+    expect(tree[3].children).toEqual([]);
     expect(parseSettingsSearch("?section=about")).toEqual({ section: "about" });
     expect(settingsSectionTerms(t).about).toContain("settings.aboutApp");
+    // Export and import live on this page now, so their words find it too.
+    expect(settingsSectionTerms(t).about).toContain("settings.importExport");
     const path = settingsPath("about");
     expect(path).toBe("/settings?section=about");
   });
 
-  it("parses the settings-file section, and the interface leaf it used to be", () => {
-    expect(parseSettingsSearch("?section=data")).toEqual({ section: "data" });
-    expect(parseSettingsSearch("?section=interface&leaf=data")).toEqual({ section: "data" });
-    // A leaf the section does not have is dropped, not carried along.
-    expect(parseSettingsSearch("?section=data&leaf=appearance")).toEqual({ section: "data" });
-  });
-
-  it("names no leaf in the settings-file path", () => {
-    const path = settingsPath("data");
-    expect(path).toBe("/settings?section=data");
-    expect(parseSettingsSearch(path.slice(path.indexOf("?")))).toEqual({ section: "data" });
+  it("opens the about page for the settings file and its old interface leaf", () => {
+    expect(parseSettingsSearch("?section=data")).toEqual({ section: "about" });
+    expect(parseSettingsSearch("?section=interface&leaf=data")).toEqual({ section: "about" });
   });
 
   it("translates every node label through the given t function", () => {
@@ -375,7 +360,6 @@ describe("getSettingsTree", () => {
       "agent",
       "builtin",
       "interface",
-      "data",
       "about",
     ]);
   });

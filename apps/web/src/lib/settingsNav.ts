@@ -1,6 +1,6 @@
 import type { TranslateFn } from "@acpio/i18n";
 
-export type SettingsSection = "agent" | "builtin" | "interface" | "data" | "about";
+export type SettingsSection = "agent" | "builtin" | "interface" | "about";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
@@ -22,15 +22,13 @@ export type SettingsLeaf = SettingsAgentLeaf | SettingsBuiltinLeaf | SettingsInt
 
 /**
  * Where a settings URL points: the section, and the leaf open inside it. The
- * settings file is a section of its own and has no pages under it — it is one
- * page, so it stands in the tree at the same level as the agent sections
- * instead of being a leaf of one of them.
+ * app's own page has no pages under it — one page, standing in the tree at the
+ * same level as the sections.
  */
 export type SettingsLocation =
   | { section: "agent"; leaf: SettingsAgentLeaf }
   | { section: "builtin"; leaf: SettingsBuiltinLeaf }
   | { section: "interface"; leaf: SettingsInterfaceLeaf }
-  | { section: "data"; leaf?: undefined }
   | { section: "about"; leaf?: undefined };
 
 type TreeBranch =
@@ -50,7 +48,6 @@ type TreeBranch =
       children: Array<{ id: SettingsInterfaceLeaf; label: string }>;
     }
   /** One page and no pages under it: the tree renders it as a plain item. */
-  | { id: "data"; label: string; children: [] }
   | { id: "about"; label: string; children: [] };
 
 /**
@@ -127,12 +124,8 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
         { id: "board", label: t("settings.board") },
       ],
     },
-    // The settings file: export and import move the whole install's setup, so
-    // the pair has a page of its own beside the sections rather than a button
-    // on every page of them.
-    { id: "data", label: t("settings.importExport"), children: [] },
-    // What this install is: the running version, and the update to the newest
-    // one for a reader who put the popup off.
+    // What this install is: what the app does, where its sources and package
+    // live, the settings file, and the build npm offers.
     { id: "about", label: t("settings.aboutApp"), children: [] },
   ];
 }
@@ -157,6 +150,13 @@ export function settingsSectionTerms(t: TranslateFn): Record<SettingsSection, st
     about: [
       t("settings.aboutApp"),
       t("settings.aboutAppDesc"),
+      t("settings.aboutRepo"),
+      t("settings.aboutNpm"),
+      // The settings file is this page's too: both of its actions live here.
+      t("settings.importExport"),
+      t("settings.exportSettings"),
+      t("settings.importSettings"),
+      t("settings.aboutVersion"),
       t("settings.appVersion"),
       t("settings.appLatestVersion"),
       "версия",
@@ -164,16 +164,11 @@ export function settingsSectionTerms(t: TranslateFn): Record<SettingsSection, st
       "обновление",
       "update",
       "npm",
-    ],
-    data: [
-      t("settings.importExport"),
-      t("settings.settingsFileDesc"),
-      t("settings.exportSettings"),
-      t("settings.importSettings"),
-      "export",
-      "import",
+      "github",
       "экспорт",
       "импорт",
+      "export",
+      "import",
     ],
   };
 }
@@ -182,11 +177,12 @@ export function parseSettingsSearch(search: string): SettingsLocation {
   const params = new URLSearchParams(search);
   const rawSection = params.get("section");
   const rawLeaf = params.get("leaf");
-  if (rawSection === "data") return { section: "data" };
   if (rawSection === "about") return { section: "about" };
-  // The settings file used to be the last page of the interface section: a
-  // link from back then opens the section that took the page over.
-  if (rawSection === "interface" && rawLeaf === "data") return { section: "data" };
+  // The settings file used to be a section of its own, and before that the last
+  // page of the interface section: a link from back then opens the page that
+  // took both over.
+  if (rawSection === "data") return { section: "about" };
+  if (rawSection === "interface" && rawLeaf === "data") return { section: "about" };
   if (rawSection === "interface") {
     const leaf: SettingsInterfaceLeaf =
       rawLeaf === "colors"
