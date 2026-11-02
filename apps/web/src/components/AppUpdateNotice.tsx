@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { BUILD_INFO } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { RESTART_TIMEOUT, useAppUpdate } from "../lib/appUpdate";
+import { RESTART_TIMEOUT, RESTART_UNCHANGED, useAppUpdate } from "../lib/appUpdate";
 import styles from "./AppUpdateNotice.module.css";
 
 /** The popup's own width; narrower than this on a phone, it fits the viewport. */
@@ -92,9 +92,17 @@ export function AppUpdateNotice() {
   const latest = state?.available ? state.latest : null;
 
   const { phase } = update;
+  // A copy with no way to replace itself (unpacked by hand, neither npm nor a
+  // checkout) gets the news and nothing to press: the download would land
+  // beside it and the restart would bring the same code back.
+  const installable = update.selfUpdate;
   const triggerLabel = latest ? t("update.trigger", { version: latest }) : running;
   const failure =
-    update.error === RESTART_TIMEOUT ? t("update.restartTimeout") : update.error;
+    update.error === RESTART_TIMEOUT
+      ? t("update.restartTimeout")
+      : update.error === RESTART_UNCHANGED
+        ? t("update.staleRestart", { version: running })
+        : update.error;
   const busy = phase === "installing" || phase === "restarting";
 
   return (
@@ -150,13 +158,15 @@ export function AppUpdateNotice() {
                 {t("update.versions", { current: running, latest })}
               </p>
               <p className={styles.body}>
-                {phase === "installing"
-                  ? t("update.installing")
-                  : phase === "restarting"
-                    ? t("update.restarting")
-                    : phase === "failed"
-                      ? t("update.failed")
-                      : t("update.body")}
+                {!installable
+                  ? t("update.manual")
+                  : phase === "installing"
+                    ? t("update.installing")
+                    : phase === "restarting"
+                      ? t("update.restarting")
+                      : phase === "failed"
+                        ? t("update.failed")
+                        : t("update.body")}
               </p>
               {phase === "failed" && failure ? (
                 <pre className={styles.log}>{failure}</pre>
@@ -167,15 +177,17 @@ export function AppUpdateNotice() {
                 </div>
               ) : (
                 <div className={styles.actions}>
-                  <button type="button" className={styles.primary} onClick={update.start}>
-                    {phase === "failed" ? t("update.retry") : t("update.action")}
-                  </button>
+                  {installable ? (
+                    <button type="button" className={styles.primary} onClick={update.start}>
+                      {phase === "failed" ? t("update.retry") : t("update.action")}
+                    </button>
+                  ) : null}
                   <button type="button" className={styles.secondary} onClick={update.dismiss}>
                     {t("update.later")}
                   </button>
                 </div>
               )}
-              {phase === "idle" || phase === "failed" ? (
+              {installable && (phase === "idle" || phase === "failed") ? (
                 <p className={styles.warning}>{t("update.restartWarning")}</p>
               ) : null}
             </div>,

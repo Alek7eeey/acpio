@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppUpdateStateDto } from "@acpio/shared";
 import { api } from "./api";
 
@@ -23,9 +23,18 @@ const RESTART_FIRST_POLL_MS = 1_500;
 const RESTART_POLL_MS = 1_000;
 /** After this the popup stops pretending the server is coming back by itself. */
 const RESTART_GIVE_UP_MS = 45_000;
+/**
+ * How long a server that answers with the version it had before counts as "not
+ * restarted yet". The successor exits within a third of a second and is up in
+ * a second or two; a build still answering after this never handed over — the
+ * install went to another copy.
+ */
+const RESTART_UNCHANGED_MS = 6_000;
 
 /** The error the hook reports when the restarted server never answered. */
 export const RESTART_TIMEOUT = "restart-timeout";
+/** The error the hook reports when something answered, but as the old build. */
+export const RESTART_UNCHANGED = "restart-unchanged";
 
 export type AppUpdatePhase = "idle" | "installing" | "restarting" | "failed";
 
@@ -38,6 +47,8 @@ export interface AppUpdateHandle {
   open: boolean;
   /** A newer version exists: the chip beside the brand belongs in the header. */
   visible: boolean;
+  /** Can this build replace itself with the new version at all? */
+  selfUpdate: boolean;
   /** The chip: open the popup, or close it when it is already up. */
   toggle: () => void;
   /** "Позже" — this version will not open the popup again. */
@@ -69,6 +80,8 @@ export function useAppUpdate(): AppUpdateHandle {
   const [error, setError] = useState("");
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(readDismissed);
+  /** The version the install was made from: the restart is verified by it. */
+  const targetRef = useRef<string | null>(null);
 
   // The check: on mount, then now and then while the tab stays open.
   useEffect(() => {
@@ -106,6 +119,8 @@ export function useAppUpdate(): AppUpdateHandle {
       .installAppUpdate()
       .then((next) => {
         setState(next);
+        // What the restart is verified by: the version this install was made from.
+        targetRef.current = next.latest ?? targetRef.current;
         if (next.status === "error") {
           setPhase("failed");
           setError(next.message ?? "");
@@ -140,6 +155,7 @@ export function useAppUpdate(): AppUpdateHandle {
         if (!alive) return;
         setState(next);
         if (next.status === "done") {
+          targetRef.current = next.latest ?? targetRef.current;
           setPhase("restarting");
           return;
         }
@@ -161,29 +177,42 @@ export function useAppUpdate(): AppUpdateHandle {
     };
   }, [phase]);
 
-  // The new build is on disk: hand the process over and wait for it to serve
-  // this page again, then reload onto it.
+  // The new build is on disk: hand the process over and wait for a server that
+  // reports *that* version, then reload onto it. Health alone does not answer
+  // the question — the build that was running before answers it just as well,
+  // and reloading into it is an update that silently changed nothing.
   useEffect(() => {
     if (phase !== "restarting") return;
     let alive = true;
     let timer: number | undefined;
     const startedAt = Date.now();
+    const target = targetRef.current;
     void api.restartApp().catch(() => {
-      // 409 (no command line to repeat) or an already-dead server: the health
-      // poll below is what decides whether anything came back.
+      // 409 (no command line to repeat) or an already-dead server: the poll
+      // below is what decides whether anything came back.
     });
     const tick = async () => {
       if (!alive) return;
-      if (Date.now() - startedAt > RESTART_GIVE_UP_MS) {
+      const waited = Date.now() - startedAt;
+      if (waited > RESTART_GIVE_UP_MS) {
         setPhase("failed");
         setError(RESTART_TIMEOUT);
         return;
       }
       try {
-        await api.health();
+        const answered = await api.health();
         if (!alive) return;
-        window.location.reload();
-        return;
+        // A build that cannot be verified (no version known) is taken as it
+        // answers, the way this poll worked before the versions were compared.
+        if (!target || answered.version === target) {
+          window.location.reload();
+          return;
+        }
+        if (waited > RESTART_UNCHANGED_MS) {
+          setPhase("failed");
+          setError(RESTART_UNCHANGED);
+          return;
+        }
       } catch {
         // Still down — the successor is starting.
       }
@@ -203,6 +232,9 @@ export function useAppUpdate(): AppUpdateHandle {
     // An install in progress is not something "Позже" may hide.
     open: open || phase === "installing" || phase === "restarting",
     visible: Boolean(state?.available),
+    // Unknown until the first poll: a build that cannot be asked yet is not a
+    // reason to hide the button that most installs do have.
+    selfUpdate: state?.selfUpdate !== false,
     toggle,
     dismiss,
     start,

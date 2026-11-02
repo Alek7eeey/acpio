@@ -67,7 +67,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ ok: boolean; platform: string }>("/api/health"),
+  /** `version` is which build answers — how a page tells the successor from the old process. */
+  health: () => request<{ ok: boolean; platform: string; version: string }>("/api/health"),
   /** Both version numbers and how far a download got — the check is the server's. */
   appUpdate: () => request<AppUpdateStateDto>("/api/app/update"),
   /** Start `npm i -g acpio@latest`; the answer says "installing" and the polls follow. */

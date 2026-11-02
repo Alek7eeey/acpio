@@ -20,6 +20,9 @@ function state(patch: Partial<AppUpdateStateDto> = {}): AppUpdateStateDto {
     latest: "0.1.42",
     available: true,
     status: "idle",
+    // Unless a test says otherwise this copy came from npm, so the popup keeps
+    // the button the rest of these tests press.
+    selfUpdate: true,
     checkedAt: "2026-10-29T10:00:00.000Z",
     ...patch,
   };
@@ -29,7 +32,8 @@ const apiMock = vi.hoisted(() => ({
   appUpdate: vi.fn(),
   installAppUpdate: vi.fn(),
   restartApp: vi.fn(async () => ({ ok: true })),
-  health: vi.fn(async () => ({ ok: true, platform: "test" })),
+  // The restarted build answers as itself: the page reloads onto that version.
+  health: vi.fn(async () => ({ ok: true, platform: "test", version: "0.1.42" })),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
@@ -102,7 +106,7 @@ describe("AppUpdateNotice", () => {
     renderNotice();
     await user.click(await screen.findByRole("button", { name: "Обновить" }));
     expect(apiMock.installAppUpdate).toHaveBeenCalledTimes(1);
-    expect(screen.getByText("Скачиваем обновление… Это может занять пару минут.")).toBeTruthy();
+    expect(screen.getByText("Обновляем Acpio… Это может занять несколько минут.")).toBeTruthy();
     // Nothing to press twice while npm works.
     expect(screen.queryByRole("button", { name: "Обновить" })).toBeNull();
   });
@@ -153,5 +157,38 @@ describe("AppUpdateNotice", () => {
     expect(
       screen.getByText("Готово. Перезапускаем Acpio — страница обновится сама."),
     ).toBeTruthy();
+  });
+
+  // A build that did not come from npm has nothing to install here: the news
+  // stays, the button that changes nothing goes.
+  it("keeps the news and drops the install when this copy is not npm's", async () => {
+    apiMock.appUpdate.mockResolvedValue(state({ selfUpdate: false }));
+    renderNotice();
+    const popup = await screen.findByRole("dialog", { name: "Доступна новая версия" });
+    expect(popup.textContent).toContain("Установлена 0.1.41 · в npm уже 0.1.42");
+    expect(screen.queryByRole("button", { name: "Обновить" })).toBeNull();
+    expect(popup.textContent).toContain("установлена не из npm");
+    expect(screen.getByRole("button", { name: "Позже" })).toBeTruthy();
+    expect(apiMock.installAppUpdate).not.toHaveBeenCalled();
+  });
+
+  // The restart is verified by the version the server answers with: a build
+  // that never handed over keeps answering as the old one, and the page must
+  // not reload into it pretending the update worked.
+  it("does not pass off the old build as the restarted one", async () => {
+    const user = userEvent.setup();
+    apiMock.appUpdate.mockResolvedValue(state());
+    apiMock.installAppUpdate.mockResolvedValue(state({ status: "installing" }));
+    renderNotice();
+    await user.click(await screen.findByRole("button", { name: "Обновить" }));
+    apiMock.appUpdate.mockResolvedValue(state({ status: "done" }));
+    await waitFor(() => expect(apiMock.restartApp).toHaveBeenCalledTimes(1), { timeout: 6_000 });
+    // The process never handed over: whatever answers is still the old build.
+    apiMock.health.mockResolvedValue({ ok: true, platform: "test", version: "0.1.41" });
+    await waitFor(
+      () => expect(screen.getByText("Не удалось обновить")).toBeTruthy(),
+      { timeout: 20_000 },
+    );
+    expect(screen.getByText(/версия осталась 0\.1\.41/)).toBeTruthy();
   });
 });

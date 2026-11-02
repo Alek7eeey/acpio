@@ -17,6 +17,14 @@ export interface AppUpdateStateDto {
   latest: string | null;
   available: boolean;
   status: AppUpdateStatus;
+  /**
+   * Whether this build has a way to replace itself: npm's package (and the npx
+   * cache) reinstalls, a checkout of the sources pulls and rebuilds, the
+   * portable bundle downloads its release zip. A copy that is none of those —
+   * unpacked by hand, say — gets the news and no button, since any download
+   * would land beside it while the restart brings back the same code.
+   */
+  selfUpdate: boolean;
   /** The installer's last words — shown when it failed. */
   message?: string;
   /** When the registry answer behind `latest` was fetched (ISO), null if never. */

@@ -45,7 +45,7 @@ import {
   createMessage,
   reconcileStaleSessions,
 } from "../src/services/sessions.js";
-import { BG_MCP_SERVER_ID, BG_MCP_SERVER_NAME } from "@acpio/shared";
+import { BG_MCP_SERVER_ID, BG_MCP_SERVER_NAME, BUILD_INFO } from "@acpio/shared";
 import type { GitCommitDetailDto, GitCommitDto, GitStatusDto, MessagePartDto, SessionDetailDto, WsServerEvent } from "@acpio/shared";
 
 /** Deterministic fake ACP agent; wired as the omp command so session warm-up
@@ -149,10 +149,10 @@ afterEach(async () => {
 });
 
 describe("health & settings", () => {
-  it("GET /api/health returns ok", async () => {
+  it("GET /api/health returns ok and the build that answers", async () => {
     const res = await app.inject({ method: "GET", url: "/api/health" });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: true, platform: process.platform });
+    expect(res.json()).toEqual({ ok: true, platform: process.platform, version: BUILD_INFO.released });
   });
 
   it("GET /api/export/default-dir returns the exports folder", async () => {

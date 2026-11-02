@@ -32,6 +32,8 @@ const apiMock = vi.hoisted(() => ({
   builtinModels: vi.fn(async () => ({ ok: true, models: [] })),
   // The built-in-skill rows are named by the skills the build ships.
   listSkills: vi.fn(async () => [] as Array<{ name: string; description: string; mode: string }>),
+  // The About leaf asks whether npm has a newer Acpio than the running build.
+  appUpdate: vi.fn(),
 }));
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
@@ -54,6 +56,15 @@ beforeEach(() => {
   // with. The spy also records which element it was asked to bring into view.
   HTMLElement.prototype.scrollIntoView = vi.fn();
   useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: false });
+  // Up to date, from npm, unless a test says otherwise.
+  apiMock.appUpdate.mockResolvedValue({
+    current: "0.1.41",
+    latest: "0.1.41",
+    available: false,
+    status: "idle",
+    selfUpdate: true,
+    checkedAt: null,
+  });
 });
 
 afterEach(() => {
@@ -606,6 +617,39 @@ describe("Settings file on the About page", () => {
 
     expect(screen.queryByRole("button", { name: "Download file" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Choose file" })).toBeNull();
+  });
+
+  // The version row tells a build that npm cannot update what to do instead of
+  // offering the install that would leave it exactly as it is.
+  it("keeps the install button off a copy npm cannot update", async () => {
+    apiMock.appUpdate.mockResolvedValue({
+      current: "0.1.41",
+      latest: "0.1.42",
+      available: true,
+      status: "idle",
+      selfUpdate: false,
+      checkedAt: null,
+    });
+    renderSection("?section=about");
+
+    expect(await screen.findByText("0.1.42")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Update" })).toBeNull();
+    expect(screen.getByText(/did not come from npm/)).toBeTruthy();
+  });
+
+  // The npm-installed copy keeps the button that hands it over to the new build.
+  it("offers the install on a copy that came from npm", async () => {
+    apiMock.appUpdate.mockResolvedValue({
+      current: "0.1.41",
+      latest: "0.1.42",
+      available: true,
+      status: "idle",
+      selfUpdate: true,
+      checkedAt: null,
+    });
+    renderSection("?section=about");
+
+    expect(await screen.findByRole("button", { name: "Update" })).toBeTruthy();
   });
 });
 

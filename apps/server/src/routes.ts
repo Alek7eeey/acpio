@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { BUILD_INFO, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -555,7 +555,13 @@ export async function registerRoutes(app: FastifyInstance) {
     return reply.code(401).send({ error: "remote_key_required", code: "remote_key_required" });
   });
 
-  app.get("/api/health", async () => ({ ok: true, platform: process.platform }));
+  app.get("/api/health", async () => ({
+    ok: true,
+    platform: process.platform,
+    // Which build answers: a page waiting for its new version to come up has
+    // nothing else to tell the successor from the process it left behind.
+    version: BUILD_INFO.released,
+  }));
 
   // One updater per process: the registry answer is cached for a quarter of an
   // hour, and the install it starts is the one the popup polls.
@@ -571,9 +577,14 @@ export async function registerRoutes(app: FastifyInstance) {
   /**
    * Download the new version: `npm i -g acpio@latest`, in the background. The
    * popup polls the GET above until it says done and then asks for a restart.
+   * A copy npm did not install has nothing to download here — 409, and the
+   * popup never offered the button in the first place.
    */
   app.post("/api/app/update", async (_req, reply) => {
     const state = await appUpdater.install();
+    if (!state.selfUpdate) {
+      return reply.code(409).send({ error: "notSelfUpdatable", ...state });
+    }
     if (!state.available) {
       return reply.code(409).send({ error: "noUpdateAvailable", ...state });
     }
@@ -582,11 +593,13 @@ export async function registerRoutes(app: FastifyInstance) {
 
   /**
    * Start the freshly installed build: the process hands over to a detached
-   * successor and leaves. A 409 means there is no command line to repeat —
-   * the caller then asks the user to restart Acpio themselves.
+   * successor and leaves. A downloaded portable bundle is put in place by that
+   * successor, since its files are still open here. A 409 means there is no
+   * command line to repeat — the caller then asks the user to restart Acpio
+   * themselves.
    */
   app.post("/api/app/restart", async (_req, reply) => {
-    if (!restartServer()) {
+    if (!restartServer({ applyFrom: appUpdater.pendingFiles() })) {
       return reply.code(409).send({ error: "restartUnavailable" });
     }
     return { ok: true };

@@ -68,7 +68,7 @@ import {
 } from "@acpio/shared";
 import { formatArgs, formatEnvLines, parseEnvLines, splitArgs } from "../lib/argsInput";
 import { api } from "../lib/api";
-import { RESTART_TIMEOUT, useAppUpdate } from "../lib/appUpdate";
+import { RESTART_TIMEOUT, RESTART_UNCHANGED, useAppUpdate } from "../lib/appUpdate";
 import { SubagentsEditor } from "../components/SubagentsEditor";
 import {
   builtinLeafLabel,
@@ -1346,8 +1346,16 @@ function AppAboutRows() {
   const latest = update.state?.latest ?? null;
   const available = Boolean(update.state?.available && latest);
   const { phase } = update;
+  // The install is npm's own: a copy npm did not put here can read the number,
+  // not take it, so the row names the release and leaves the button out.
+  const installable = update.selfUpdate;
   const busy = phase === "installing" || phase === "restarting";
-  const failure = update.error === RESTART_TIMEOUT ? t("update.restartTimeout") : update.error;
+  const failure =
+    update.error === RESTART_TIMEOUT
+      ? t("update.restartTimeout")
+      : update.error === RESTART_UNCHANGED
+        ? t("update.staleRestart", { version: current })
+        : update.error;
   const hint =
     phase === "installing"
       ? t("update.installing")
@@ -1356,7 +1364,9 @@ function AppAboutRows() {
         : phase === "failed"
           ? t("update.failed")
           : available && latest
-            ? t("settings.appLatestHint", { version: latest })
+            ? installable
+              ? t("settings.appLatestHint", { version: latest })
+              : t("settings.appManualHint", { version: latest })
             : latest
               ? t("settings.appUpToDateHint")
               : t("settings.appLatestUnknownHint");
@@ -1410,21 +1420,23 @@ function AppAboutRows() {
               <span className={styles.aboutVersionLabel}>{t("settings.appLatestVersion")}</span>
               <span className={styles.appVersion}>{latest ?? t("settings.appLatestUnknown")}</span>
             </span>
-            <button
-              type="button"
-              className={`${styles.primaryBtn} ${styles.aboutUpdateBtn}`}
-              disabled={!available || busy}
-              onClick={update.start}
-            >
-              {phase === "failed" ? t("update.retry") : t("update.action")}
-            </button>
+            {installable ? (
+              <button
+                type="button"
+                className={`${styles.primaryBtn} ${styles.aboutUpdateBtn}`}
+                disabled={!available || busy}
+                onClick={update.start}
+              >
+                {phase === "failed" ? t("update.retry") : t("update.action")}
+              </button>
+            ) : null}
           </span>
         </SettingRow>
 
         {phase === "failed" && failure ? (
           <pre className={styles.appUpdateLog}>{failure}</pre>
         ) : null}
-        {available && !busy ? (
+        {available && installable && !busy ? (
           <p className={styles.hint}>{t("update.restartWarning")}</p>
         ) : null}
       </SettingTable>

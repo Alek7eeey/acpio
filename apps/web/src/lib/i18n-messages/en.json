@@ -737,6 +737,7 @@
     "appVersion": "Current",
     "appLatestVersion": "Available",
     "appLatestHint": "npm already has {{version}} — the update runs from here.",
+    "appManualHint": "npm already has {{version}}, but this build did not come from npm — update it where it came from.",
     "appUpToDateHint": "No update: this is the latest version.",
     "appLatestUnknown": "unknown",
     "appLatestUnknownHint": "npm did not answer — we will try again later.",
@@ -1493,11 +1494,13 @@
     "body": "The app will be updated to the new version.",
     "action": "Update",
     "later": "Later",
-    "installing": "Downloading the update… This can take a couple of minutes.",
+    "installing": "Updating Acpio… This can take a few minutes.",
     "restarting": "Done. Restarting Acpio — the page reloads itself.",
     "restartWarning": "The restart cuts off agents that are answering right now.",
     "failed": "The update failed",
     "retry": "Try again",
-    "restartTimeout": "Acpio did not come back after the restart. Start it by hand and reload this page."
+    "restartTimeout": "Acpio did not come back after the restart. Start it by hand and reload this page.",
+    "manual": "This Acpio build did not come from npm, so it cannot update itself from here. Update the copy where it came from: the npm package installs and updates on its own.",
+    "staleRestart": "Acpio answered, but the version is still {{version}} — a different copy is running. Start the updated build by hand."
   }
 }

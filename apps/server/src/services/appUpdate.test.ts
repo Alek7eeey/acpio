@@ -3,12 +3,20 @@
 // real npm and never the real registry.
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import { createServer, type Server } from "node:http";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
+  bundleInstall,
   createAppUpdater,
+  gitInstall,
   installCommand,
+  installPrefix,
+  isNpmPackageManifest,
   restartCommand,
   restartServer,
   restartScript,
+  updateKind,
   type InstallOutcome,
 } from "./appUpdate.js";
 
@@ -51,12 +59,17 @@ beforeEach(() => {
   requests = 0;
 });
 
-function updater(options: {
-  current?: string;
-  runInstall?: (version: string) => Promise<InstallOutcome>;
-  now?: () => number;
-}) {
-  return createAppUpdater({ registryUrl: base, current: "0.1.41", ...options });
+function updater(options: Parameters<typeof createAppUpdater>[0] = {}) {
+  return createAppUpdater({
+    registryUrl: base,
+    current: "0.1.41",
+    // These tests are about the registry and an install; which copy of Acpio
+    // the test runner happens to sit in is not theirs to read.
+    kind: "npm",
+    selfUpdate: true,
+    readAppVersion: () => null,
+    ...options,
+  });
 }
 
 describe("checking the registry", () => {
@@ -119,6 +132,194 @@ describe("checking the registry", () => {
     clock += 31_000;
     expect((await instance.state()).available).toBe(true);
     expect(requests).toBe(2);
+  });
+});
+
+describe("which copy this is", () => {
+  it("knows the published npm package from a checkout and from the portable bundle", () => {
+    expect(
+      isNpmPackageManifest({ name: "acpio", version: "0.1.43", bin: { acpio: "bin/acpio.mjs" } }),
+    ).toBe(true);
+    // A checkout of the sources and the unpacked release bundle are Acpio too,
+    // but npm's package is not what they run.
+    expect(
+      isNpmPackageManifest({
+        name: "acpio",
+        version: "0.1.0",
+        private: true,
+        workspaces: ["apps/*"],
+      }),
+    ).toBe(false);
+    expect(isNpmPackageManifest({ name: "acprocess", version: "0.1.0", private: true })).toBe(
+      false,
+    );
+    expect(isNpmPackageManifest(null)).toBe(false);
+  });
+
+  it("offers npm's number as news, and no install this copy could not make", async () => {
+    registryAnswer = { version: "0.1.42" };
+    const ran: string[] = [];
+    const instance = updater({
+      selfUpdate: false,
+      runInstall: async (version) => {
+        ran.push(version);
+        return { code: 0, output: "" };
+      },
+    });
+    expect(await instance.state()).toMatchObject({
+      latest: "0.1.42",
+      available: true,
+      selfUpdate: false,
+    });
+    // Whatever the popup asks, npm is not touched: it would install a copy
+    // nobody runs and leave this one exactly as it is.
+    expect((await instance.install()).status).toBe("idle");
+    expect(ran).toEqual([]);
+  });
+
+  it("installs into the prefix this copy lives in, not whatever npm calls global", () => {
+    const prefix = installPrefix("C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\acpio");
+    expect(prefix).toBe("C:\\Users\\me\\AppData\\Roaming\\npm");
+    // npm's layout on posix keeps global packages one directory deeper.
+    expect(installPrefix("/usr/local/lib/node_modules/acpio")).toBe("/usr/local");
+    // A copy outside npm's tree has no prefix to install back into.
+    expect(installPrefix("/opt/acpio")).toBeNull();
+    expect(installCommand("0.1.42", prefix)).toContain(
+      '--prefix "C:\\Users\\me\\AppData\\Roaming\\npm"',
+    );
+    expect(installCommand("0.1.42", null)).toContain("npm install -g acpio@0.1.42");
+  });
+
+  it("says so when the install landed on another copy", async () => {
+    registryAnswer = { version: "0.1.42" };
+    const instance = updater({
+      runInstall: async () => ({ code: 0, output: "added 1 package" }),
+      // npm was happy, but this copy on disk is still the one that runs.
+      readAppVersion: () => "0.1.41",
+    });
+    await instance.install();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const state = await instance.state();
+    expect(state.status).toBe("error");
+    expect(state.message).toContain("0.1.42");
+    expect(state.message).toContain("0.1.41");
+  });
+
+  it("leaves a downloaded bundle for the restart to put in place", async () => {
+    registryAnswer = { version: "0.1.42" };
+    const instance = updater({
+      kind: "bundle",
+      appRoot: "/app/bundle",
+      runInstall: async () => ({ code: 0, output: "unpacked" }),
+    });
+    // The bundle replaces files this process holds open: nothing is swapped
+    // until the restart, which is told where the download waits.
+    expect(instance.pendingFiles()).toBeNull();
+    await instance.install();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await instance.state()).status).toBe("done");
+    expect(instance.pendingFiles()).toBe(path.join("/app/bundle", ".update-0.1.42"));
+  });
+
+  it("calls the install done once this copy really is the new version", async () => {
+    registryAnswer = { version: "0.1.42" };
+    const instance = updater({
+      runInstall: async () => ({ code: 0, output: "" }),
+      readAppVersion: () => "0.1.42",
+    });
+    await instance.install();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((await instance.state()).status).toBe("done");
+  });
+});
+
+describe("the three ways an Acpio is installed", () => {
+  it("pulls, installs and builds a checkout, in the checkout itself", async () => {
+    const ran: Array<{ command: string; cwd: string }> = [];
+    const outcome = await gitInstall("/app/checkout", async (command, cwd) => {
+      ran.push({ command, cwd });
+      return { code: 0, output: "ok" };
+    });
+    expect(outcome.code).toBe(0);
+    expect(ran.map((step) => step.command)).toEqual([
+      "git pull --ff-only",
+      "npm install --no-audit --no-fund",
+      "npm run build",
+    ]);
+    expect(ran.every((step) => step.cwd === "/app/checkout")).toBe(true);
+  });
+
+  it("stops at the step that failed and keeps its words for the popup", async () => {
+    const outcome = await gitInstall("/app/checkout", async (command) => ({
+      code: command.startsWith("git") ? 1 : 0,
+      output: "error: Your local changes would be overwritten by merge",
+    }));
+    // A tree with uncommitted work is not something an update may merge over.
+    expect(outcome.code).toBe(1);
+    expect(outcome.output).toContain("git pull --ff-only failed");
+    expect(outcome.output).toContain("local changes");
+  });
+
+  it("downloads the release zip of the version and unpacks it beside the copy", async () => {
+    const asked: string[] = [];
+    const unpacked: string[] = [];
+    const outcome = await bundleInstall("/app/bundle", "0.1.42", {
+      runCommand: async () => ({ code: 0, output: "" }),
+      download: async (url) => {
+        asked.push(url);
+      },
+      extract: async (_zip, dir) => {
+        unpacked.push(dir);
+      },
+    });
+    expect(outcome.code).toBe(0);
+    expect(asked).toEqual([
+      "https://github.com/Alek7eeey/acpio/releases/download/v0.1.42/acpio-win-x64.zip",
+    ]);
+    expect(unpacked).toEqual([path.join("/app/bundle", ".update-0.1.42")]);
+  });
+
+  it("reports a bundle that never arrived", async () => {
+    const outcome = await bundleInstall("/app/bundle", "0.1.42", {
+      runCommand: async () => ({ code: 0, output: "" }),
+      download: async () => {
+        throw new Error("404 Not Found");
+      },
+      extract: async () => {},
+    });
+    expect(outcome.code).toBe(1);
+    expect(outcome.output).toContain("404");
+  });
+
+  it("knows the three copies apart, and gives up on anything else", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "acpio-copy-"));
+    try {
+      // npm's package, the way `npm i -g` and `npx` lay it out.
+      writeFileSync(
+        path.join(root, "package.json"),
+        JSON.stringify({ name: "acpio", version: "0.1.42", bin: { acpio: "bin/acpio.mjs" } }),
+      );
+      expect(updateKind(root)).toBe("npm");
+
+      // A checkout of the sources: private, a workspace root, and a git tree.
+      writeFileSync(
+        path.join(root, "package.json"),
+        JSON.stringify({ name: "acpio", version: "0.1.0", private: true, workspaces: ["apps/*"] }),
+      );
+      mkdirSync(path.join(root, ".git"));
+      expect(updateKind(root)).toBe("git");
+
+      // The unpacked release bundle: a built server, no git, no npm manifest.
+      rmSync(path.join(root, ".git"), { recursive: true, force: true });
+      rmSync(path.join(root, "package.json"));
+      mkdirSync(path.join(root, "apps", "server", "dist"), { recursive: true });
+      writeFileSync(path.join(root, "apps", "server", "dist", "index.js"), "");
+      expect(updateKind(root, "win32")).toBe("bundle");
+      // The zip is published for Windows alone.
+      expect(updateKind(root, "linux")).toBe("none");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -226,6 +427,25 @@ describe("restarting", () => {
     const ok = restartServer({ argv: [], launch: () => {}, exit: () => (exited += 1) });
     expect(ok).toBe(false);
     expect(exited).toBe(0);
+  });
+
+  it("puts a downloaded bundle in place before the successor starts", () => {
+    const launched: string[] = [];
+    restartServer({
+      argv: ["/app/apps/server/dist/index.js"],
+      execArgv: [],
+      delayMs: 10,
+      applyFrom: "/app/.update-0.1.42",
+      launch: (script) => launched.push(script),
+      exit: () => {},
+    });
+    const script = launched[0] ?? "";
+    // The chats and a local .env are not part of the build being replaced.
+    expect(script).toContain('"/app/.update-0.1.42"');
+    expect(script).toContain("const to = path.dirname(from);");
+    expect(script).toContain('new Set(["data", ".env", path.basename(from)])');
+    // ...and the files are in place before anything starts them.
+    expect(script.indexOf("readdirSync")).toBeLessThan(script.indexOf("spawn("));
   });
 
   it("repeats the argv it was given, not a guessed one", () => {
