@@ -61,6 +61,7 @@ import { appendDeepLog } from "../services/deepLogging.js";
 import {
   appendPart,
   appendTextChunk,
+  cancelPartIfOpen,
   createMessage,
   createSession,
   getPartPayload,
@@ -630,6 +631,8 @@ class SessionRuntime {
   openTextPartId: string | null = null;
   /** One thought block for the whole turn */
   turnThoughtPartId: string | null = null;
+  /** Assistant message that already carries its "stopped by the user" note. */
+  interruptNoteFor: string | null = null;
   openThoughtPartId: string | null = null;
   toolPartByCallId = new Map<string, string>();
   /**
@@ -2942,6 +2945,12 @@ export async function runPrompt(
     if (!rt.running && rt.pending.size > 0) {
       await updateSession(sessionId, { status: "waiting" }).catch(() => {});
     }
+    // The turn that owned the runtime can finish while this message is still
+    // being written (the fold above waits, the transcript write awaits): its
+    // own `dequeueTurn` then ran before this push, and the message — a settled
+    // job's note, most often — sits in the queue with nobody to start it. A
+    // note that never becomes a turn is the job's result lost to the reader.
+    if (!rt.running && rt.turnQueue.length > 0) void dequeueTurn(rt);
     return { queued: true };
   }
 
@@ -2972,6 +2981,27 @@ export async function runPrompt(
  * and it needs no message of its own (the text reached the model through the
  * steer that folded it in).
  */
+/**
+ * Mark the turn the reader stopped, right where it stopped. The halted call keeps
+ * its own status; this note is the sentence that explains the silence after it.
+ * Written once per assistant message, and only into a turn that has one.
+ */
+async function appendInterruptNote(rt: SessionRuntime, halted: number): Promise<void> {
+  const messageId = rt.assistantMessageId;
+  if (!messageId || rt.interruptNoteFor === messageId) return;
+  rt.interruptNoteFor = messageId;
+  const ru = ((await getSettings()).locale ?? "en") === "ru";
+  const haltedText = halted
+    ? ru
+      ? ` — остановлено вызовов: ${halted}`
+      : ` — tool calls halted: ${halted}`
+    : "";
+  await appendNotePart(
+    rt,
+    ru ? `Ход прерван пользователем${haltedText}` : `Turn stopped by the user${haltedText}`,
+  );
+}
+
 async function appendNotePart(rt: SessionRuntime, text: string): Promise<void> {
   try {
     const messageId = rt.assistantMessageId ?? (await ensureAssistantMessage(rt));
@@ -3087,15 +3117,19 @@ async function stopLiveTurn(rt: SessionRuntime, keepTurnQueue: boolean) {
   // (the agent won't send final statuses for calls it was interrupted on).
   // The map holds every call the turn opened, terminal ones included — those
   // keep the status they earned, or Stop rewrites finished work as halted.
+  let halted = 0;
   for (const [, partId] of rt.toolPartByCallId) {
     try {
-      const status = String(((await getPartPayload(partId)) ?? {}).status ?? "");
-      if (TERMINAL_TOOL_STATUSES.has(status)) continue;
-      await updatePart(sessionId, partId, { status: "cancelled", interrupted: true });
+      // One statement, guard included: a call whose final status landed while
+      // Stop was walking the map stays as the agent left it.
+      if (await cancelPartIfOpen(sessionId, partId, [...TERMINAL_TOOL_STATUSES])) halted += 1;
     } catch {
       // ignore secondary failures
     }
   }
+  // A stopped turn ends on a tool call and no words. Without this line the
+  // transcript cannot tell "the reader pressed Stop" from "the agent died".
+  if (!keepTurnQueue) await appendInterruptNote(rt, halted);
   for (const [reqKey, p] of rt.pending) {
     const id = p.rpcId ?? parseRpcId(reqKey, sessionId);
     try {

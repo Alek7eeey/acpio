@@ -15,11 +15,17 @@ import {
   normalizeBuiltinMaxOutputTokens,
   normalizeBuiltinTurnRetryAttempts,
   normalizeBuiltinThinkingLimit,
+  normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinContextSettings,
   normalizeBuiltinExtraInstructions,
   normalizeBuiltinProviders,
   normalizeBuiltinPresets,
   normalizeBuiltinSubagents,
+  DEFAULT_EDITOR_KEYS,
+  normalizeEditorKeyCombo,
+  normalizeEditorSplit,
+  normalizeEditorTheme,
+  normalizeEditorToolSource,
   normalizeChatChipOptions,
   normalizeChatMetaChips,
   normalizeChatTitleMaxLen,
@@ -161,6 +167,24 @@ function mergeSettings(raw: unknown): AppSettings {
   if (merged.locale !== "en" && merged.locale !== "ru") {
     merged.locale = DEFAULT_SETTINGS.locale;
   }
+  // A hand-edited settings file may carry a combo the editor cannot bind or a
+  // side that does not exist: heal both here, at the single read path.
+  merged.editorTheme = normalizeEditorTheme(merged.editorTheme);
+  merged.editorSplit = normalizeEditorSplit(merged.editorSplit);
+  merged.editorKeyDefinition = normalizeEditorKeyCombo(
+    merged.editorKeyDefinition,
+    DEFAULT_EDITOR_KEYS.definition,
+  );
+  merged.editorKeyUsages = normalizeEditorKeyCombo(merged.editorKeyUsages, DEFAULT_EDITOR_KEYS.usages);
+  merged.editorKeySave = normalizeEditorKeyCombo(merged.editorKeySave, DEFAULT_EDITOR_KEYS.save);
+  merged.editorKeyAsk = normalizeEditorKeyCombo(merged.editorKeyAsk, DEFAULT_EDITOR_KEYS.ask);
+  merged.editorKeyFormat = normalizeEditorKeyCombo(
+    merged.editorKeyFormat,
+    DEFAULT_EDITOR_KEYS.format,
+  );
+  merged.editorToolTypescript = normalizeEditorToolSource(merged.editorToolTypescript);
+  merged.editorToolOxlint = normalizeEditorToolSource(merged.editorToolOxlint);
+  merged.editorToolOxfmt = normalizeEditorToolSource(merged.editorToolOxfmt);
   if (typeof merged.displayName !== "string") {
     merged.displayName = DEFAULT_SETTINGS.displayName;
   }
@@ -374,6 +398,7 @@ function mergeSettings(raw: unknown): AppSettings {
     merged.builtinTurnRetryAttempts,
   );
   merged.builtinThinkingLimit = normalizeBuiltinThinkingLimit(merged.builtinThinkingLimit);
+  merged.builtinBashTimeoutSec = normalizeBuiltinBashTimeoutSec(merged.builtinBashTimeoutSec);
   normalizeBuiltinContextSettings(merged);
   // Fields replaced by icon-level controls / never shipped.
   for (const stale of [

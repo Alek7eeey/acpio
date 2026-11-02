@@ -217,6 +217,10 @@ export function settingsSearchIndex(
       t("settings.builtinMarkdownImagesHint"),
       t("settings.builtinAllowOutsideCwd"),
       t("settings.builtinAllowOutsideCwdHint"),
+      t("settings.builtinBashTimeout"),
+      t("settings.builtinBashTimeoutHint"),
+      "timeout_ms",
+      "таймаут",
       "system prompt",
       "промпт",
       "размышления",
@@ -447,6 +451,7 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
       t("settings.builtinSkillPathsHint"),
       t("settings.builtinMarkdownImagesHint"),
       t("settings.builtinAllowOutsideCwdHint"),
+      t("settings.builtinBashTimeoutHint"),
     ],
     tools: [t("settings.builtinPlanToolHint")],
     subagents: [

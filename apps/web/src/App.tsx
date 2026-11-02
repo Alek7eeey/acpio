@@ -13,6 +13,7 @@ import { BoardPage } from "./pages/BoardPage";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TasksPage } from "./pages/TasksPage";
+import { EditorPage } from "./pages/EditorPage";
 import { RemoteKeyGate } from "./components/RemoteKeyGate";
 import { api } from "./lib/api";
 import { hasUnsavedComposerAttachments } from "./lib/composerDrafts";
@@ -100,6 +101,7 @@ export function App() {
           <Route path="board/:boardId" element={<BoardPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="tasks" element={<TasksPage />} />
+          <Route path="editor" element={<EditorPage />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Route>
       </Routes>

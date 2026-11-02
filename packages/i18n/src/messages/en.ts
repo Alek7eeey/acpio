@@ -642,6 +642,9 @@ export const en = {
     builtinAllowOutsideCwd: "Work outside the working folder",
     builtinAllowOutsideCwdHint:
       "Let the agent's tools leave the chat folder: read and search by absolute path (global skills in ~/.agents/skills, for instance), write outside it, and run a command in another folder. Off — the chat folder stays the boundary and a path outside it is rejected.",
+    builtinBashTimeout: "Bash timeout, seconds",
+    builtinBashTimeoutHint:
+      "How long a shell command may run before it is killed. 15s covers ordinary commands — the median call finishes under a second, and only 5% pass 10s. A build or a test run passes its own timeout_ms (up to 300s) or goes to the background-job tool instead.",
     builtinMarkdownImages: "Markdown pictures",
     builtinMarkdownImagesHint:
       "Tell the agent that this chat draws a picture out of markdown — `![shot](path)`, a path inside the working folder or an absolute one. Without the hint the model answers that it cannot show an image.",

@@ -59,6 +59,14 @@ const MAX_RUNNING_JOBS = 24;
 /** Finished jobs kept for the page and for the agent to read back. */
 const MAX_FINISHED_JOBS = 40;
 /**
+ * Longest one `run` call may block on the job. It has to stay under the MCP
+ * client's 180 s per-call limit (`adapter-builtin/src/mcp.ts`): a call that
+ * outlives it is dropped by the client, and the model gets an error instead of
+ * the tail it was promised. `bash` has its own 300 s ceiling and is a native
+ * tool, so the two numbers are not the same on purpose.
+ */
+export const MAX_WAIT_MS = 170_000;
+/**
  * Output that rides inside the completion note. Kept small on purpose: the note
  * stays in the transcript forever, while the full log is one `read` away — so
  * the note carries a taste of the output and the path, not the output.
@@ -259,6 +267,8 @@ function settle(record: BackgroundJobRecord, status: BackgroundJobStatus, exitCo
     broadcast({ type: "bg.removed", jobIds: [oldest] });
   }
   publish(record);
+  settleWaiters.get(record.id)?.forEach((resolve) => resolve());
+  settleWaiters.delete(record.id);
   // The agent's own `stop` call is its own notification; a user's stop is news
   // the model still needs, so only that one is delivered as a note.
   if (record.stoppedBy !== "agent") onJobDone?.(toDto(record));
@@ -383,6 +393,47 @@ export interface BackgroundJobOutput {
   to: number;
   /** True when this read did not cover the whole log (older or newer output). */
   dropped: boolean;
+}
+
+/**
+ * Callers parked on a job's end. A settled job wakes the chat by itself, but a
+ * turn that means to go on cannot sleep exactly as long as the job runs — it
+ * guesses, and the guess is the wait it pays. This waits for the event instead.
+ */
+const settleWaiters = new Map<string, Array<() => void>>();
+
+/**
+ * Resolve once the job stops running or `timeoutMs` passes, whichever first;
+ * the job's state right after. Unknown id → null.
+ */
+export async function waitForBackgroundJob(
+  id: string,
+  timeoutMs: number,
+): Promise<BackgroundJobDto | null> {
+  const record = jobs.get(id);
+  if (!record) return null;
+  if (record.status === "running" && timeoutMs > 0) {
+    await new Promise<void>((resolve) => {
+      const unpark = () => {
+        const list = settleWaiters.get(id);
+        const at = list?.indexOf(resolve) ?? -1;
+        if (list && at >= 0) list.splice(at, 1);
+        if (list && !list.length) settleWaiters.delete(id);
+        resolve();
+      };
+      const parked = settleWaiters.get(id) ?? [];
+      parked.push(resolve);
+      settleWaiters.set(id, parked);
+      const timer = setTimeout(unpark, Math.min(Math.max(timeoutMs, 0), MAX_WAIT_MS));
+      // The job may have settled between the read above and the park.
+      if (jobs.get(id)?.status !== "running") {
+        clearTimeout(timer);
+        unpark();
+      }
+    });
+  }
+  const after = jobs.get(id);
+  return after ? toDto(after) : null;
 }
 
 /** Size of a log file, 0 when it does not exist (a job whose log could not open). */

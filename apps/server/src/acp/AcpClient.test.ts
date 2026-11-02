@@ -17,6 +17,7 @@ import {
   mergeConfigOptions,
   resolveCommand,
   resolveMcpStdioCommands,
+  shellPath,
   buildAgentEnv,
   type ConfigOption,
   type AgentModeOption,
@@ -785,10 +786,52 @@ describe("path guards", () => {
     for (const call of [
       () => acp.assertInsideCwd(outside),
       () => acp.assertReadablePath(outside),
-      () => acp.assertReadablePath("/tmp/verify.mjs"),
+      () => acp.assertReadablePath(path.resolve("elsewhere", "verify.mjs")),
     ]) {
       expect(call).toThrow(/^Path outside session cwd:/);
       expect(call).toThrow(cwd);
+    }
+  });
+
+  // Git Bash spells a Windows path as `/c/Users/...`, and `/tmp/...` for scratch:
+  // handed straight to `read`, the first resolved to `C:\c\Users\...` and failed
+  // (four times in one chat, twice with the same path repeated).
+  it.runIf(process.platform === "win32")(
+    "reads the shell's spelling of a path as the path it names",
+    () => {
+      const acp = guardClient(path.resolve("workspaces", "demo"));
+      const cwd = path.resolve("workspaces", "demo");
+      // The cwd written the way `pwd` prints it: /c/<rest of the cwd>.
+      const msys = `/${cwd[0].toLowerCase()}${cwd.slice(2).replaceAll("\\", "/")}/lib/a.mjs`;
+      expect(acp.assertReadablePath(msys)).toBe(path.join(cwd, "lib", "a.mjs"));
+      expect(acp.assertInsideCwd(msys)).toBe(path.join(cwd, "lib", "a.mjs"));
+      // Outside stays outside — the translation must not open a door.
+      expect(() => acp.assertReadablePath("/c/Users/Krauchanka/a.diff")).toThrow(
+        /^Path outside session cwd:/,
+      );
+      expect(() => acp.assertInsideCwd("/e/share/x.txt")).toThrow(/^Path outside session cwd:/);
+      // A path that only looks msys is left alone on a drive that is not one.
+      expect(shellPath("/dev/null")).toBe("/dev/null");
+    },
+  );
+
+  it.runIf(process.platform !== "win32")("leaves a POSIX path exactly as it was", () => {
+    expect(shellPath("/c/Users/x.txt")).toBe("/c/Users/x.txt");
+    expect(shellPath("/tmp/x.diff")).toBe("/tmp/x.diff");
+  });
+
+  // `/tmp` is scratch space bash writes to, not workspace: the refusal has to
+  // say where the shell's /tmp landed, or the model repeats the same path.
+  it("says where the shell's /tmp actually is", () => {
+    const acp = guardClient(path.resolve("workspaces", "demo"));
+    for (const call of [
+      () => acp.assertReadablePath("/tmp/pr3883.diff"),
+      () => acp.assertInsideCwd("/tmp/pr3883.diff"),
+    ]) {
+      expect(call).toThrow(/^Path outside session cwd:/);
+      expect(call).toThrow(/\/tmp is the shell's scratch folder/);
+      // The refusal names the real folder, so the next step is obvious.
+      if (process.platform === "win32") expect(call).toThrow(os.tmpdir());
     }
   });
 
@@ -866,6 +909,20 @@ describe("built-in agent outside the session cwd", () => {
     ).rejects.toThrow(outsideError);
   });
 
+  // The path a model copies from `pwd`: Git Bash prints the cwd as /c/... and a
+  // `read` of that spelling used to resolve to C:\c\... and fail.
+  it.runIf(process.platform === "win32")("reads a file named the way the shell prints it", async () => {
+    const { cwd } = await room();
+    const target = path.join(cwd, "notes.txt");
+    await fsp.writeFile(target, "body\n", "utf8");
+    const msys = `/${cwd[0].toLowerCase()}${cwd.slice(2).replaceAll("\\", "/")}/notes.txt`;
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    const res = (await acp.handleClientMethod("fs/read_text_file", { path: msys })) as {
+      content: string;
+    };
+    expect(res.content).toBe("body\n");
+  });
+
   it("reads a file outside the folder once the switch is on", async () => {
     const { cwd, outsideFile } = await room();
     const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
@@ -901,7 +958,7 @@ describe("built-in agent outside the session cwd", () => {
     );
     await expect(
       acp.handleClientMethod("fs/read_text_file", { path: outsideFile }),
-    ).resolves.toEqual({ content: "---\nname: notes\n---\nbody\n" });
+    ).resolves.toEqual({ content: "---\nname: notes\n---\nbody\n", hash: expect.any(String) });
   });
 
   it("leaves a spawned harness confined whatever the switch says", async () => {
@@ -1023,5 +1080,138 @@ describe("built-in agent outside the session cwd", () => {
 
     const off = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
     await expect(off.handleClientMethod("terminal/create", create)).rejects.toThrow(outsideError);
+  });
+});
+
+/**
+ * An overwrite is the one write that destroys work: the file may hold edits the
+ * user made in their own IDE while the agent was thinking. The hash `read`
+ * reports is the proof `write` demands before replacing an existing file.
+ */
+describe("a write over a file that changed since it was read", () => {
+  async function scratch(content: string) {
+    const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), "acpio-hash-"));
+    const target = path.join(cwd, "notes.txt");
+    await fsp.writeFile(target, content);
+    return { cwd, target };
+  }
+
+  function client(harness: HarnessAdapter, cwd: string) {
+    const acp = new AcpClient(harness, DEFAULT_SETTINGS, cwd, "agent" as AgentMode);
+    return acp as unknown as {
+      handleClientMethod: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+    };
+  }
+
+  const builtin = (cwd: string) => client(getAdapter("builtin"), cwd);
+
+  it("refuses the overwrite once someone else edited the file", async () => {
+    const { cwd, target } = await scratch("one\n");
+    const acp = builtin(cwd);
+    const read = (await acp.handleClientMethod("fs/read_text_file", { path: target })) as {
+      hash: string;
+    };
+    await fsp.writeFile(target, "edited in the IDE\n");
+    await expect(
+      acp.handleClientMethod("fs/write_text_file", { path: target, content: "two\n", expect: read.hash }),
+    ).rejects.toThrow(/changed since it was read/);
+    expect(await fsp.readFile(target, "utf8")).toBe("edited in the IDE\n");
+  });
+
+  it("notices an edit that kept the file the same size", async () => {
+    const { cwd, target } = await scratch("abcdef\n");
+    const acp = builtin(cwd);
+    const read = (await acp.handleClientMethod("fs/read_text_file", { path: target })) as {
+      hash: string;
+    };
+    // Byte-for-byte the same length: only the stamp can tell these apart.
+    await fsp.writeFile(target, "abcdeX\n");
+    await expect(
+      acp.handleClientMethod("fs/write_text_file", { path: target, content: "mine\n", expect: read.hash }),
+    ).rejects.toThrow(/changed since it was read/);
+    expect(await fsp.readFile(target, "utf8")).toBe("abcdeX\n");
+  });
+
+  it("writes when the hash matches and hands back the new one", async () => {
+    const { cwd, target } = await scratch("one\n");
+    const acp = builtin(cwd);
+    const read = (await acp.handleClientMethod("fs/read_text_file", { path: target })) as {
+      hash: string;
+    };
+    const wrote = (await acp.handleClientMethod("fs/write_text_file", {
+      path: target,
+      content: "two\n",
+      expect: read.hash,
+    })) as { hash: string };
+    expect(wrote.hash).toMatch(/^[0-9a-z]{5}$/);
+    expect(wrote.hash).not.toBe(read.hash);
+    expect(await fsp.readFile(target, "utf8")).toBe("two\n");
+    // The stamp from a write opens the next one: write → write needs no re-read.
+    await expect(
+      acp.handleClientMethod("fs/write_text_file", { path: target, content: "three\n", expect: wrote.hash }),
+    ).resolves.toEqual({ hash: expect.any(String) });
+  });
+
+  it("accepts the stamp typed in the wrong case", async () => {
+    const { cwd, target } = await scratch("one\n");
+    const acp = builtin(cwd);
+    const read = (await acp.handleClientMethod("fs/read_text_file", { path: target })) as {
+      hash: string;
+    };
+    // The model retypes the stamp: hex is the one alphabet where case carries no
+    // bits, so a capitalised copy is the same version, not a refused write.
+    await expect(
+      acp.handleClientMethod("fs/write_text_file", {
+        path: target,
+        content: "two\n",
+        expect: read.hash.toUpperCase(),
+      }),
+    ).resolves.toEqual({ hash: expect.any(String) });
+  });
+
+  it("stamps the whole file even when the read returned a window", async () => {
+    const { cwd, target } = await scratch("a\nb\nc\n");
+    const acp = builtin(cwd);
+    const windowed = (await acp.handleClientMethod("fs/read_text_file", {
+      path: target,
+      line: 2,
+      limit: 1,
+    })) as { content: string; hash: string };
+    expect(windowed.content).toBe("b");
+    await expect(
+      acp.handleClientMethod("fs/write_text_file", {
+        path: target,
+        content: "whole file\n",
+        expect: windowed.hash,
+      }),
+    ).resolves.toEqual({ hash: expect.any(String) });
+  });
+
+  it("demands the hash from the built-in agent before overwriting", async () => {
+    const { cwd, target } = await scratch("one\n");
+    await expect(
+      builtin(cwd).handleClientMethod("fs/write_text_file", { path: target, content: "two\n" }),
+    ).rejects.toThrow(/read it first and pass expect/);
+    expect(await fsp.readFile(target, "utf8")).toBe("one\n");
+  });
+
+  it("creates a new file without a hash", async () => {
+    const { cwd } = await scratch("one\n");
+    const fresh = path.join(cwd, "fresh.txt");
+    await expect(
+      builtin(cwd).handleClientMethod("fs/write_text_file", { path: fresh, content: "new\n" }),
+    ).resolves.toEqual({ hash: expect.any(String) });
+  });
+
+  it("leaves a spawned harness writing as it always could", async () => {
+    const { cwd, target } = await scratch("one\n");
+    const custom = client(
+      customAgentAdapter({ id: "my-agent", label: "My Agent", command: "agent.exe", args: [] }),
+      cwd,
+    );
+    await expect(
+      custom.handleClientMethod("fs/write_text_file", { path: target, content: "two\n" }),
+    ).resolves.toEqual({ hash: expect.any(String) });
+    expect(await fsp.readFile(target, "utf8")).toBe("two\n");
   });
 });

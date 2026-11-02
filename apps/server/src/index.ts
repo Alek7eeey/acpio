@@ -13,6 +13,7 @@ import { notifyBackgroundJobDone, resumeInterruptedTurns } from "./acp/sessionMa
 import { setBackgroundJobDoneHandler } from "./services/backgroundJobs.js";
 import { resetBackgroundJobLogs } from "./services/bgLogs.js";
 import { registerRoutes } from "./routes.js";
+import { registerEditorRoutes } from "./editorRoutes.js";
 import { resolveServerPort } from "@acpio/shared";
 import { loadPlugins } from "./services/plugins.js";
 import { ensureSchema } from "./db/ensureSchema.js";
@@ -88,6 +89,7 @@ async function main() {
   await app.register(cookie);
   await app.register(websocket);
   await registerRoutes(app);
+  await registerEditorRoutes(app);
 
   // Single-port prod: serve the built web UI (API + WS + static on DEFAULT_SERVER_PORT).
   // Dev layout: apps/web/dist; packaged layout: web/dist.

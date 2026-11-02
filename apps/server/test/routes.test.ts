@@ -208,6 +208,33 @@ describe("health & settings", () => {
     expect(get.json().chatChipOptions.folder).toEqual({ compress: false, truncate: "middle" });
   });
 
+  // The pane's own look, side and shortcuts are settings, not code: a save has
+  // to survive the schema and a hand-typed combo the editor cannot bind is
+  // healed back to the default instead of being stored as sent.
+  it("PUT /api/settings persists editor settings and heals a bad combo", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        editorTheme: "dark",
+        editorSplit: "right",
+        editorKeyDefinition: "Ctrl-Shift-d",
+        editorKeyUsages: "какой-то текст",
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().editorTheme).toBe("dark");
+    expect(put.json().editorSplit).toBe("right");
+    expect(put.json().editorKeyDefinition).toBe("Ctrl-Shift-d");
+    expect(put.json().editorKeyUsages).toBe("Shift-F12");
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    expect(get.json().editorTheme).toBe("dark");
+    expect(get.json().editorSplit).toBe("right");
+    expect(get.json().editorKeyDefinition).toBe("Ctrl-Shift-d");
+    expect(get.json().editorKeyUsages).toBe("Shift-F12");
+  });
+
   // The field names an attached file by its name alone, so the draft keeps the
   // path its link is written with: without it a reload leaves a link that
   // points at nothing.
@@ -618,6 +645,33 @@ describe("sessions", () => {
     expect(detail.acpSessionId).toMatch(/^fake-sess-/);
     expect(detail.messages).toEqual([]);
     expect(detail.slashCommands).toEqual([]);
+  });
+
+  it("hands a chat created without a folder the last chat's folder, not acpio's own", async () => {
+    await connectAgent();
+    // No configured default, so the old fallback was the server's own cwd —
+    // the folder acpio was installed in.
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { defaultCwd: "" } });
+    const cwd = await newTempDir("acpio-inherit-cwd-");
+    const first = await app.inject({ method: "POST", url: "/api/sessions", payload: { cwd } });
+    expect(first.statusCode).toBe(200);
+    runtimeSessionIds.push(first.json().id);
+    // A chat in acpio's own folder is the most recent one — a project chat is
+    // still the folder to hand on, not the harness's own sources.
+    const own = await app.inject({
+      method: "POST",
+      url: "/api/sessions",
+      payload: { cwd: REPO_ROOT },
+    });
+    expect(own.statusCode).toBe(200);
+    runtimeSessionIds.push(own.json().id);
+
+    const second = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(second.statusCode).toBe(200);
+    runtimeSessionIds.push(second.json().id);
+    const handed = second.json().cwd as string;
+    expect(handed.toLowerCase()).toBe(cwd.replaceAll("\\", "/").toLowerCase());
+    expect(handed).not.toBe(REPO_ROOT);
   });
 
   it("pins the chat's starting model and keeps it when the default moves", async () => {
@@ -2046,6 +2100,38 @@ describe("durable questions", () => {
     // A cancelled question must not park the chat across a restart either.
     const recovered = await reconcileStaleSessions();
     expect(recovered.sessions).toBe(0);
+    setAgentAvailable("omp", false);
+  });
+
+  it("Stop says in the transcript that the reader stopped it", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    // A call the fake agent opens and never closes: exactly what a Stop lands on.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "TOOL-SILENT please" },
+    });
+    await waitForDetail(session.id, (d) =>
+      d.messages.some((m) => m.parts.some((p) => p.type === "tool_call")),
+    );
+
+    await app.inject({ method: "POST", url: `/api/sessions/${session.id}/cancel` });
+
+    // Without the note the turn ends on a cancelled call and silence — the same
+    // transcript a crash leaves.
+    const stopped = await waitForDetail(session.id, (d) =>
+      d.messages.some((m) => m.parts.some((p) => p.type === "note")),
+    );
+    const note = stopped.messages
+      .flatMap((m) => m.parts)
+      .find((p) => p.type === "note");
+    expect(String(note?.payload.text)).toMatch(/^Turn stopped by the user/);
+    expect(String(note?.payload.text)).toMatch(/halted: 1/);
     setAgentAvailable("omp", false);
   });
 

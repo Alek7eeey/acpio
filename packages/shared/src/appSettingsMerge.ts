@@ -5,7 +5,12 @@ import {
 } from "./adapters.js";
 import {
   DEFAULT_CHAT_CHIP_OPTIONS,
+  DEFAULT_EDITOR_KEYS,
   DEFAULT_SETTINGS,
+  normalizeEditorKeyCombo,
+  normalizeEditorSplit,
+  normalizeEditorTheme,
+  normalizeEditorToolSource,
   normalizeBuiltinProviders,
   normalizeBuiltinSubagents,
   normalizeMcpProjectFiles,
@@ -208,6 +213,35 @@ export function normalizeBuiltinThinkingLimit(value: unknown): number {
     return DEFAULT_SETTINGS.builtinThinkingLimit;
   }
   return Math.min(BUILTIN_THINKING_LIMIT_MAX, Math.max(0, Math.round(value)));
+}
+
+/** Bounds for the built-in agent's bash timeout, in seconds. */
+export const BUILTIN_BASH_TIMEOUT_SEC_MIN = 5;
+export const BUILTIN_BASH_TIMEOUT_SEC_MAX = 300;
+
+/**
+ * Longest a single terminal wait may run: the ceiling on `bash`'s `timeout_ms`
+ * and the host's own clamp on `terminal/wait_for_exit`. It is deliberately
+ * above the setting's default ceiling — a build or a test run may name its own
+ * bigger limit for one call — but it is not open-ended: a command that waits for
+ * input never ends by itself, and the cap is what gives the model control back
+ * instead of leaving the turn parked until someone presses Stop.
+ */
+export const TERMINAL_WAIT_MAX_MS = 1_800_000;
+
+/**
+ * Heal the built-in agent's bash timeout. Anything not a finite number falls
+ * back to the default; a command needs a moment to fail, so a lower value clamps
+ * up to the minimum the harness itself enforces on `terminal/wait_for_exit`.
+ */
+export function normalizeBuiltinBashTimeoutSec(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SETTINGS.builtinBashTimeoutSec;
+  }
+  return Math.min(
+    BUILTIN_BASH_TIMEOUT_SEC_MAX,
+    Math.max(BUILTIN_BASH_TIMEOUT_SEC_MIN, Math.round(value)),
+  );
 }
 
 /** Bounds for the built-in agent's compaction knobs. */
@@ -443,6 +477,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
     partial.builtinTurnRetryAttempts,
   );
   merged.builtinThinkingLimit = normalizeBuiltinThinkingLimit(partial.builtinThinkingLimit);
+  merged.builtinBashTimeoutSec = normalizeBuiltinBashTimeoutSec(partial.builtinBashTimeoutSec);
   normalizeBuiltinContextSettings(merged);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
@@ -458,6 +493,22 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
   merged.chatTitleMaxLen = normalizeChatTitleMaxLen(partial.chatTitleMaxLen);
+  merged.editorTheme = normalizeEditorTheme(partial.editorTheme);
+  merged.editorSplit = normalizeEditorSplit(partial.editorSplit);
+  merged.editorKeyDefinition = normalizeEditorKeyCombo(
+    partial.editorKeyDefinition,
+    DEFAULT_EDITOR_KEYS.definition,
+  );
+  merged.editorKeyUsages = normalizeEditorKeyCombo(partial.editorKeyUsages, DEFAULT_EDITOR_KEYS.usages);
+  merged.editorKeySave = normalizeEditorKeyCombo(partial.editorKeySave, DEFAULT_EDITOR_KEYS.save);
+  merged.editorKeyAsk = normalizeEditorKeyCombo(partial.editorKeyAsk, DEFAULT_EDITOR_KEYS.ask);
+  merged.editorKeyFormat = normalizeEditorKeyCombo(
+    partial.editorKeyFormat,
+    DEFAULT_EDITOR_KEYS.format,
+  );
+  merged.editorToolTypescript = normalizeEditorToolSource(partial.editorToolTypescript);
+  merged.editorToolOxlint = normalizeEditorToolSource(partial.editorToolOxlint);
+  merged.editorToolOxfmt = normalizeEditorToolSource(partial.editorToolOxfmt);
   merged.chatChipOptions = normalizeChatChipOptions(partial.chatChipOptions);
   merged.mcpProjectFiles = normalizeMcpProjectFiles(partial.mcpProjectFiles);
   merged.mcpBuiltinDisabledIds = Array.isArray(partial.mcpBuiltinDisabledIds)

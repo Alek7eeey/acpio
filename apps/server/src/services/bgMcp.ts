@@ -10,9 +10,11 @@ import {
   DEFAULT_OUTPUT_TAIL_LINES,
   getBackgroundJob,
   listBackgroundJobs,
+  MAX_WAIT_MS,
   readBackgroundJobOutput,
   startBackgroundJob,
   stopBackgroundJob,
+  waitForBackgroundJob,
 } from "./backgroundJobs.js";
 import { listSessionsByIds } from "./sessions.js";
 import {
@@ -59,6 +61,15 @@ const TOOL_DEFS: ToolDef[] = [
         },
         label: { type: "string", description: "Short name shown in the UI." },
         cwd: { type: "string", description: "Working folder, relative to the chat folder." },
+        // Absent → control comes straight back, which is what a server wants.
+        // A number → block until the job ends (not that long: the wait ends with
+        // the job), so a test run needs no `sleep` guess before reading it.
+        waitMs: {
+          type: "integer",
+          description:
+            `Stay with the job until it ends, at most this long (max ${MAX_WAIT_MS}); ` +
+            "the tail of its output comes back in this result. Omit it for a server or a watcher.",
+        },
       },
       required: ["command"],
       additionalProperties: false,
@@ -153,6 +164,36 @@ async function callTool(
           script: command,
           label: asString(args.label),
         });
+        const waitMs = asInt(args.waitMs) ?? 0;
+        if (waitMs > 0) {
+          const settled = await waitForBackgroundJob(job.id, waitMs);
+          if (settled && settled.status !== "running") {
+            const read = readBackgroundJobOutput(job.id, {
+              tailLines: DEFAULT_OUTPUT_TAIL_LINES,
+              maxChars: DEFAULT_OUTPUT_MAX_CHARS,
+            });
+            const exit = settled.exitCode == null ? "" : ` exit ${settled.exitCode}`;
+            return result(
+              [
+                `${settled.id} [${settled.status}${exit}] ${elapsedText(settled)} — «${settled.label}»`,
+                `Log: ${settled.logPath}`,
+                `--- output (to=${read?.to ?? 0}) ---`,
+                read?.text.trim() ? read.text.replace(/\s+$/, "") : "(no output)",
+              ].join("\n"),
+            );
+          }
+          // Patience ran out while the job still runs. Said as an instruction, not
+          // as news: told only that a note comes, the model fills the gap with
+          // `sleep` (measured), and the sleep is the wait it was trying to avoid.
+          return result(
+            [
+              `${job.id} is still running after ${waitMs >= 1000 ? `${Math.round(waitMs / 1000)}s` : `${waitMs}ms`} — ` +
+                "it outlived the wait, it was not killed.",
+              "Do not sleep and do not poll: end your turn, and the note with its output tail continues from there.",
+              `If you need it sooner: ${bgMcpToolName("output")}({ jobId: "${job.id}" }), or stop it with ${bgMcpToolName("stop")}({ jobId: "${job.id}" }).`,
+            ].join("\n"),
+          );
+        }
         return result(
           [
             `Started background job ${job.id} (${job.label}) in ${job.cwd}.`,

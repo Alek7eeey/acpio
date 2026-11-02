@@ -814,6 +814,21 @@ describe("runTurn failure handling", () => {
     expect((await runTurn(turnOpts({}))).truncated).toBe(true);
   });
 
+  it("reports a step that produced nothing at all as a broken chain", async () => {
+    // A provider that closes a step with neither letters nor a call: the turn's
+    // response is empty, and reading that as a finished turn left the chat
+    // silent until the user typed "продолжай".
+    mockStream({
+      fullStream: streamOf([]),
+      responseMessages: Promise.resolve([]),
+      finishReason: Promise.resolve("stop"),
+      usage: Promise.resolve({ totalTokens: 0 }),
+      steps: Promise.resolve([]),
+    });
+
+    expect((await runTurn(turnOpts({}))).truncated).toBe(true);
+  });
+
   // The `/thinking-limit` fuse: a step that only thinks past the cap is cut,
   // and its reasoning is kept as the step's own message instead of vanishing.
   it("cuts a step whose reasoning crosses the limit and keeps the thinking", async () => {

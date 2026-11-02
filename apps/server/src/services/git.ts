@@ -526,6 +526,23 @@ export async function getGitDiff(cwd: string, filePath?: string): Promise<string
   return chunks.join("\n\n");
 }
 
+/**
+ * A file as one revision has it — the left side of an editable diff. A file the
+ * revision does not have (new or untracked) answers with an empty text, which is
+ * exactly what a diff wants to show.
+ */
+export async function getGitFileText(
+  cwd: string,
+  filePath: string,
+  rev = "HEAD",
+): Promise<{ text: string; exists: boolean }> {
+  const root = await resolveGitRoot(cwd);
+  if (!root) return { text: "", exists: false };
+  const revision = validateRevision(rev) ?? "HEAD";
+  const res = await runGit(root, ["show", `${revision}:${filePath}`]);
+  return { text: res.ok ? res.out : "", exists: res.ok };
+}
+
 export async function checkoutGitBranch(
   cwd: string,
   branch: string,

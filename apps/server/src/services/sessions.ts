@@ -21,7 +21,7 @@ import {
   SHELL_SESSION_PROVIDER,
 } from "@acpio/shared";
 import { defaultSessionTitle } from "@acpio/i18n";
-import { db } from "../db/client.js";
+import { db, REPO_ROOT } from "../db/client.js";
 import { adapters } from "../adapters/registry.js";
 import { boardFolders, chatFolders, messageParts, messages, sessions } from "../db/schema.js";
 import { boardColumnKeepsOnRun } from "./boards.js";
@@ -549,6 +549,44 @@ export async function updatePart(
   return part;
 }
 
+/**
+ * Close a tool call Stop found in flight. The status it must not touch is read
+ * and written by the same statement: the agent's own "completed" update can land
+ * between a read and a write, and rewriting a finished call as halted makes the
+ * transcript disagree with what the reader watched happen.
+ */
+export async function cancelPartIfOpen(
+  sessionId: string,
+  partId: string,
+  /** Statuses that are already the call's last word. */
+  terminal: readonly string[],
+): Promise<MessagePartDto | null> {
+  const [row] = await db
+    .update(messageParts)
+    .set({
+      payload: sql`json_set(${messageParts.payload}, '$.status', 'cancelled', '$.interrupted', json('true'))`,
+    })
+    .where(
+      and(
+        eq(messageParts.id, partId),
+        sql`coalesce(json_extract(${messageParts.payload}, '$.status'), '') not in (${sql.join(
+          terminal.map((status) => sql`${status}`),
+          sql`, `,
+        )})`,
+      ),
+    )
+    .returning();
+  if (!row) return null;
+  const part = mapPart(row);
+  broadcastToSession(sessionId, {
+    type: "part.updated",
+    sessionId,
+    messageId: row.messageId,
+    part,
+  });
+  return part;
+}
+
 /** Current payload of a message part, or null if missing. */
 export async function getPartPayload(partId: string): Promise<Record<string, unknown> | null> {
   const existing = await db.select().from(messageParts).where(eq(messageParts.id, partId)).limit(1);
@@ -722,6 +760,27 @@ export async function replaceUserMessageText(
     broadcastToSession(sessionId, { type: "session.updated", sessionId, session });
   }
   return updated;
+}
+
+/**
+ * The folder of the most recently touched chat, acpio's own install folder
+ * excepted. A chat asked for without a folder of its own inherits this one:
+ * the server's cwd is where acpio lives, and an agent told to work there reads
+ * and writes the harness's own sources instead of the project the reader had in
+ * mind.
+ */
+export async function mostRecentChatCwd(): Promise<string> {
+  const own = canonicalCwd(REPO_ROOT).toLowerCase();
+  const rows = await db
+    .select({ cwd: sessions.cwd })
+    .from(sessions)
+    .orderBy(desc(sessions.updatedAt))
+    .limit(20);
+  for (const row of rows) {
+    const cwd = canonicalCwd(row.cwd);
+    if (cwd && cwd.toLowerCase() !== own) return cwd;
+  }
+  return "";
 }
 
 const STUCK_TOOL_STATUSES = new Set(["pending", "in_progress", "running"]);

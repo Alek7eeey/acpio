@@ -5,12 +5,13 @@ import {
 } from "node:child_process";
 import { execFile } from "node:child_process";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import readline from "node:readline";
 import { PassThrough, Readable, Writable } from "node:stream";
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type InProcessAgentTransport,
   parseModelWire,
@@ -26,6 +27,7 @@ import {
   type HarnessAdapter,
   type McpServerConfig,
   childProcessEnv,
+  TERMINAL_WAIT_MAX_MS,
   isMcpServerAttached,
   isMcpServerConfigured,
   mcpCommandNeedsAbsolute,
@@ -420,6 +422,60 @@ export async function resolveMcpStdioCommands(
   }
   return out;
 }
+
+/**
+ * The path as the shell spelled it. Git Bash prints `/c/Users/...` and `/tmp/...`,
+ * and Node reads those as `C:\c\Users\...` and `C:\tmp\...` — neither exists. A
+ * model that ran `pwd` or wrote a scratch file with `> /tmp/x.diff` then hands
+ * that spelling to `read`, so it is translated before anything resolves it.
+ */
+export function shellPath(target: string): string {
+  if (process.platform !== "win32") return target;
+  if (/^\/tmp(\/|$)/.test(target)) return path.join(os.tmpdir(), target.slice("/tmp".length));
+  const drive = /^\/(?:cygdrive\/)?([A-Za-z])(?=\/|$)(.*)$/.exec(target);
+  if (!drive) return target;
+  return `${drive[1].toUpperCase()}:${drive[2].replaceAll("/", "\\") || "\\"}`;
+}
+
+/**
+ * The OS temp folder is scratch space, not workspace: `bash` writes there (a
+ * diff, a build log) and `read` cannot follow, so the refusal says where the
+ * shell's `/tmp` actually landed instead of repeating the spelling back.
+ */
+function tempHint(target: string): string {
+  return /^\/tmp(\/|$)/.test(target)
+    ? "/tmp is the shell's scratch folder, not the workspace — read it with bash if you must."
+    : "";
+}
+
+/**
+ * Five characters of the file's bytes: enough to tell "the version I read" from
+ * "someone edited it", short enough to ride every read result and every write
+ * argument without cost. Not a security measure — a staleness stamp. One case
+ * and no `-`/`_`: a model copies this token, so the alphabet it never has to
+ * reinterpret is the one that survives the round trip.
+ *
+ * Not an mtime/size stamp, though that needs no read: an edit that keeps the
+ * length and lands inside one millisecond left both unchanged, and the write it
+ * authorized destroyed the edit. The bytes are the only honest witness.
+ */
+function fileHash(bytes: Buffer): string {
+  let rest = BigInt(`0x${createHash("sha256").update(bytes).digest("hex")}`);
+  let stamp = "";
+  for (let i = 0; i < 5; i += 1) {
+    stamp += STAMP_ALPHABET[Number(rest % 36n)];
+    rest /= 36n;
+  }
+  return stamp;
+}
+
+/**
+ * Base36: every digit and letter, one case. Measured over 100k files, five
+ * characters give 60 million combinations — 58× what hex gives at the same
+ * length, and the code compares them lower-cased so a capitalised copy still
+ * matches. Nobody compares two stamps by eye: the refusal prints both.
+ */
+const STAMP_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 /** Render a harness's install hint with the missing command interpolated. */
 function installHintFor(adapter: HarnessAdapter, command: string): string {
@@ -1420,7 +1476,7 @@ export class AcpClient extends EventEmitter {
 
   private assertInsideCwd(targetPath: string) {
     const root = this.rootCwd();
-    const resolved = path.resolve(root, targetPath);
+    const resolved = path.resolve(root, shellPath(targetPath));
     // The switch is the user lifting the workspace boundary: every path the
     // agent names is then simply resolved against the cwd as before.
     if (this.outsideCwdAllowed) return resolved;
@@ -1429,7 +1485,8 @@ export class AcpClient extends EventEmitter {
       // The cwd in the message is the recovery path: a model aiming at a temp
       // dir retries once, inside the workspace, instead of guessing again.
       throw new Error(
-        `Path outside session cwd: ${resolved}. The session cwd is ${root} — keep files, including scratch scripts, inside it.`,
+        `Path outside session cwd: ${resolved}. The session cwd is ${root} — ` +
+          (tempHint(targetPath) || "keep files, including scratch scripts, inside it."),
       );
     }
     return resolved;
@@ -1437,7 +1494,7 @@ export class AcpClient extends EventEmitter {
 
   /** Reads may also target user-attached files outside the cwd (exact paths). */
   private assertReadablePath(targetPath: string) {
-    const resolved = path.resolve(this.rootCwd(), targetPath);
+    const resolved = path.resolve(this.rootCwd(), shellPath(targetPath));
     if (this.outsideCwdAllowed) return resolved;
     const rel = path.relative(this.rootCwd(), resolved);
     if (!rel.startsWith("..") && !path.isAbsolute(rel)) return resolved;
@@ -1472,13 +1529,14 @@ export class AcpClient extends EventEmitter {
     // for reading — this session's own, never another chat's.
     if (isBackgroundJobLogPath(this.sessionId, resolved)) return resolved;
     throw new Error(
-      `Path outside session cwd: ${resolved}. The session cwd is ${this.rootCwd()} — keep files, including scratch scripts, inside it.`,
+      `Path outside session cwd: ${resolved}. The session cwd is ${this.rootCwd()} — ` +
+        (tempHint(targetPath) || "keep files, including scratch scripts, inside it."),
     );
   }
 
   /** Directories a read-only search may scope to: the cwd, plus this chat's job logs. */
   private assertSearchableDir(targetPath: string) {
-    const resolved = path.resolve(this.rootCwd(), targetPath);
+    const resolved = path.resolve(this.rootCwd(), shellPath(targetPath));
     if (!this.outsideCwdAllowed && isBackgroundJobLogPath(this.sessionId, resolved)) return resolved;
     return this.assertInsideCwd(targetPath);
   }
@@ -1509,18 +1567,22 @@ export class AcpClient extends EventEmitter {
 
   private async handleFsRead(params: Record<string, unknown>) {
     const filePath = this.assertReadablePath(String(params.path ?? ""));
-    const raw = await fsp.readFile(filePath, "utf8");
+    const bytes = await fsp.readFile(filePath);
+    const raw = bytes.toString("utf8");
+    // The stamp covers the whole file even when a window goes back: `write`
+    // compares it before overwriting, so a slice is still a read of this version.
+    const hash = fileHash(bytes);
     // No window requested → return the bytes untouched: split/join would
     // normalize CRLF to LF, and an agent that edits afterwards would rewrite
     // every line ending in the file.
-    if (Number(params.line ?? 1) <= 1 && params.limit == null) return { content: raw };
+    if (Number(params.line ?? 1) <= 1 && params.limit == null) return { content: raw, hash };
     const lines = raw.split(/\r?\n/);
     const start = Math.max(0, Number(params.line ?? 1) - 1);
     const limit = params.limit == null ? undefined : Number(params.limit);
     const sliced = limit == null ? lines.slice(start) : lines.slice(start, start + limit);
     // A slice hides the file's real length: the agent needs it to say "continue
     // with line N" against the right file, not against what it was sent.
-    return { content: sliced.join("\n"), totalLines: lines.length };
+    return { content: sliced.join("\n"), totalLines: lines.length, hash };
   }
 
   /**
@@ -1541,9 +1603,37 @@ export class AcpClient extends EventEmitter {
 
   private async handleFsWrite(params: Record<string, unknown>) {
     const filePath = this.assertInsideCwd(String(params.path ?? ""));
+    const content = String(params.content ?? "");
+    const expect =
+      typeof params.expect === "string" ? params.expect.trim().toLowerCase() : "";
+    // An overwrite is the one write that destroys work: the file may hold edits
+    // the user made in their own IDE while the agent was thinking. The hash a
+    // `read` reported is the proof it writes over the version it actually saw.
+    // Reading the file to check it costs the same order as writing it, and it is
+    // the only check that survives an edit which kept the length.
+    const current = await fsp.readFile(filePath).catch(() => null);
+    if (current) {
+      const now = fileHash(current);
+      const name = path.basename(filePath);
+      if (!expect && this.adapter.id === "builtin") {
+        throw new Error(
+          `write: ${name} already exists — read it first and pass expect: the hash that read reported`,
+        );
+      }
+      if (expect && expect !== now.toLowerCase()) {
+        throw new Error(
+          `write: ${name} changed since it was read (now ${now}, expected ${expect}) — read it again, then write`,
+        );
+      }
+    }
+    // shortcut: check-then-write leaves a window for an edit landing in between,
+    // which is a lost update only for a second writer inside those microseconds;
+    // upgrade to a lock file when a second writer becomes likely.
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
-    await fsp.writeFile(filePath, String(params.content ?? ""), "utf8");
-    return {};
+    const bytes = Buffer.from(content, "utf8");
+    await fsp.writeFile(filePath, bytes);
+    // Hand the new stamp back: write → write needs no re-read in between.
+    return { hash: fileHash(bytes) };
   }
 
   /**
@@ -1669,7 +1759,7 @@ export class AcpClient extends EventEmitter {
     }
     const timeoutMs = Math.max(
       5_000,
-      Math.min(Number(params.timeoutMs ?? 90_000) || 90_000, 300_000),
+      Math.min(Number(params.timeoutMs ?? 90_000) || 90_000, TERMINAL_WAIT_MAX_MS),
     );
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {

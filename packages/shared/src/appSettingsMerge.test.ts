@@ -5,12 +5,15 @@ import {
   normalizeBuiltinProviders,
 } from "./index.js";
 import {
+  BUILTIN_BASH_TIMEOUT_SEC_MAX,
+  BUILTIN_BASH_TIMEOUT_SEC_MIN,
   BUILTIN_EXTRA_INSTRUCTIONS_MAX,
   BUILTIN_MAX_OUTPUT_TOKENS_MAX,
   BUILTIN_THINKING_LIMIT_MAX,
   CHAT_TREE_RECENT_LIMIT_MAX,
   SETTINGS_SCHEMA_VERSION,
   mergeClientAppSettings,
+  normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinExtraInstructions,
   normalizeChatMetaChips,
   readSettingsSchema,
@@ -438,6 +441,22 @@ describe("readSettingsSchema", () => {
   it("defaults to 1 when absent", () => {
     expect(readSettingsSchema({})).toBe(1);
     expect(readSettingsSchema(null)).toBe(1);
+  });
+});
+
+describe("normalizeBuiltinBashTimeoutSec", () => {
+  it("defaults to a timeout that covers an ordinary command", () => {
+    expect(DEFAULT_SETTINGS.builtinBashTimeoutSec).toBe(15);
+    expect(normalizeBuiltinBashTimeoutSec(undefined)).toBe(15);
+    expect(normalizeBuiltinBashTimeoutSec("30")).toBe(15);
+    expect(normalizeBuiltinBashTimeoutSec(Number.NaN)).toBe(15);
+  });
+
+  it("clamps to the bounds the harness enforces", () => {
+    expect(normalizeBuiltinBashTimeoutSec(1)).toBe(BUILTIN_BASH_TIMEOUT_SEC_MIN);
+    expect(normalizeBuiltinBashTimeoutSec(-40)).toBe(BUILTIN_BASH_TIMEOUT_SEC_MIN);
+    expect(normalizeBuiltinBashTimeoutSec(9_000)).toBe(BUILTIN_BASH_TIMEOUT_SEC_MAX);
+    expect(normalizeBuiltinBashTimeoutSec(42.6)).toBe(43);
   });
 });
 

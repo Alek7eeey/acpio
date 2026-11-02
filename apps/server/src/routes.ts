@@ -6,7 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { BUILD_INFO, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand } from "@acpio/shared";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -23,6 +23,7 @@ import {
   listBoardSessions,
   listSessions,
   listSessionsByIds,
+  mostRecentChatCwd,
   reorderSessions,
   updateSession,
 } from "./services/sessions.js";
@@ -147,6 +148,7 @@ import {
   getGitBlame,
   getGitCommitDetail,
   getGitDiff,
+  getGitFileText,
   getGitFileLines,
   getGitLog,
   getGitShow,
@@ -294,6 +296,12 @@ const settingsSchema = z.object({
     .min(0)
     .max(BUILTIN_THINKING_LIMIT_MAX)
     .optional(),
+  builtinBashTimeoutSec: z
+    .number()
+    .int()
+    .min(BUILTIN_BASH_TIMEOUT_SEC_MIN)
+    .max(BUILTIN_BASH_TIMEOUT_SEC_MAX)
+    .optional(),
   builtinContextMode: z.enum(["off", "prune", "summary"]).optional(),
   builtinCompactionThresholdPercent: z
     .number()
@@ -404,6 +412,18 @@ const settingsSchema = z.object({
       }),
     )
     .optional(),
+  editorTheme: z.enum(EDITOR_THEMES).optional(),
+  editorSplit: z.enum(EDITOR_SPLITS).optional(),
+  // A combo the pane cannot bind is healed to the default on read, not refused
+  // here: the settings form must never fail a save over a hand-typed shortcut.
+  editorKeyDefinition: z.string().max(40).optional(),
+  editorKeyUsages: z.string().max(40).optional(),
+  editorKeySave: z.string().max(40).optional(),
+  editorKeyAsk: z.string().max(40).optional(),
+  editorKeyFormat: z.string().max(40).optional(),
+  editorToolTypescript: z.enum(EDITOR_TOOL_SOURCES).optional(),
+  editorToolOxlint: z.enum(EDITOR_TOOL_SOURCES).optional(),
+  editorToolOxfmt: z.enum(EDITOR_TOOL_SOURCES).optional(),
   mcpServers: z.array(mcpServerSchema).max(100).optional(),
   mcpBuiltinDisabledIds: z.array(z.string().min(1).max(200)).max(50).optional(),
   mcpFolderConfigs: z
@@ -1430,7 +1450,14 @@ export async function registerRoutes(app: FastifyInstance) {
       })
       .parse(req.body ?? {});
     const settings = await getSettings();
-    const cwd = body.cwd ?? settings.defaultCwd ?? process.cwd();
+    // A chat asked for without a folder must never land in acpio's own install
+    // directory: the agent would then edit the harness's sources instead of the
+    // project the reader was working in. Inherit the folder of the last chat.
+    const cwd =
+      body.cwd?.trim() ||
+      settings.defaultCwd?.trim() ||
+      (await mostRecentChatCwd()) ||
+      process.cwd();
     const provider = body.provider ?? settings.connectedProvider ?? settings.defaultProvider;
     if (!isShellSession(provider) && !adapters.get(provider)) {
       return reply.code(400).send({ error: "unknownAgent" });
@@ -1658,6 +1685,17 @@ export async function registerRoutes(app: FastifyInstance) {
     const cwd = await getSessionCwd(id);
     if (cwd === null) return reply.code(404).send({ error: "Not found" });
     return getGitStatus(cwd, { summary: q.summary === "1" });
+  });
+
+  // The working-tree side of a diff is the editor buffer; this is the other side.
+  app.get("/api/sessions/:id/git/file", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const q = z
+      .object({ path: z.string().min(1).max(4096), rev: z.string().max(200).optional() })
+      .parse(req.query ?? {});
+    const cwd = await getSessionCwd(id);
+    if (cwd === null) return reply.code(404).send({ error: "Not found" });
+    return getGitFileText(cwd, q.path, q.rev);
   });
 
   app.get("/api/sessions/:id/git/diff", async (req, reply) => {

@@ -6,7 +6,12 @@ import type {
   InProcessAgentOptions,
   InProcessAgentTransport,
 } from "@acpio/shared";
-import { builtinProviderHeaders, normalizeBuiltinThinkingLimit, parseBuiltinBody } from "@acpio/shared";
+import {
+  builtinProviderHeaders,
+  normalizeBuiltinBashTimeoutSec,
+  normalizeBuiltinThinkingLimit,
+  parseBuiltinBody,
+} from "@acpio/shared";
 import { generateText, type ModelMessage, type ToolSet } from "ai";
 import {
   builtinModelOptions,
@@ -1496,6 +1501,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
                 host: this.rpc,
                 sessionId: this.sessionId,
                 ask: childAsk,
+                bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
               }),
           })
         : null;
@@ -1557,6 +1563,9 @@ export class BuiltinAgent implements InProcessAgentTransport {
           sessionId: this.sessionId,
           ask,
           outsideCwd: live.builtinAllowOutsideCwd === true,
+          // Read live, like the switch above: a raised limit reaches the very
+          // next call, without restarting the chat.
+          bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
           subagents: subagents ?? undefined,
           emitPlan: planToolEnabled ? (update) => this.publishPlan(update) : undefined,
           // Same channel as the MCP tools: `read` on a picture hands the bytes

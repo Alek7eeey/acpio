@@ -629,12 +629,13 @@ function describeStreamError(value: unknown): Error {
  * idle with everything done and nothing said, and only a new message from the
  * user gets the answer. The step that called the tools is not flagged here:
  * continuing it would put a message after an unanswered tool call, which the
- * provider rejects.
+ * provider rejects. A response with no messages at all is the same silence —
+ * the provider closed the step having said nothing.
  */
 function cutBeforeAnswer(response: ModelMessage[], stopReason: TurnStopReason): boolean {
   if (stopReason === "max_tokens") return true;
   const last = response[response.length - 1];
-  if (!last) return false;
+  if (!last) return true;
   if (last.role === "tool") return true;
   if (last.role !== "assistant" || !Array.isArray(last.content)) return false;
   // An empty text part is not an answer either: the step streamed a container

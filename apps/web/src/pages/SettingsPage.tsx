@@ -51,6 +51,9 @@ import {
   BUILTIN_KEEP_RECENT_PERCENT_MAX,
   BUILTIN_MAX_SUMMARY_TOKENS_MAX,
   BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX,
+  BUILTIN_BASH_TIMEOUT_SEC_MIN,
+  BUILTIN_BASH_TIMEOUT_SEC_MAX,
+  normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinMaxOutputTokens,
   normalizeBuiltinThinkingLimit,
   normalizeBuiltinTurnRetryAttempts,
@@ -3964,6 +3967,21 @@ export function SettingsPage() {
                   label={t("settings.builtinAllowOutsideCwd")}
                 />
               </SettingRow>
+              {/* The shell timeout sits with the file-access switch: both are
+                  about what a tool may do once it reaches the machine. */}
+              <ContextNumberRow
+                label={t("settings.builtinBashTimeout")}
+                hint={t("settings.builtinBashTimeoutHint")}
+                value={form.builtinBashTimeoutSec ?? 15}
+                min={BUILTIN_BASH_TIMEOUT_SEC_MIN}
+                max={BUILTIN_BASH_TIMEOUT_SEC_MAX}
+                onCommit={(v) => {
+                  const next = normalizeBuiltinBashTimeoutSec(v);
+                  patch("builtinBashTimeoutSec", next);
+                  // A running chat reads it on its next bash call.
+                  void saveSettings({ builtinBashTimeoutSec: next });
+                }}
+              />
             </SettingTable>
           </>
         )}

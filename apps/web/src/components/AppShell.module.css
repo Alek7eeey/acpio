@@ -4552,6 +4552,26 @@
   overflow: hidden;
 }
 
+/* Chat and the code pane side by side; the side is a setting. */
+.splitScreen {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.splitPane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.splitPane + .splitPane {
+  border-left: 1px solid var(--border);
+}
+
+
 .backdrop {
   display: none;
 }

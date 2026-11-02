@@ -33,6 +33,7 @@ import {
   clearFinishedBackgroundJobs,
   forgetBackgroundJob,
   formatBackgroundJobNote,
+  getBackgroundJob,
   listBackgroundJobs,
   readBackgroundJobOutput,
   setBackgroundJobDoneHandler,
@@ -230,6 +231,34 @@ describe("running a command in the background", () => {
     expect(jobsFrom(list).map((row) => row.id)).toContain(id);
     const output = await app.inject({ method: "GET", url: `/api/bg/${id}/output` });
     expect((output.json() as { text: string }).text).toContain("bg-marker-1");
+  });
+
+  // `waitMs` is patience, not a sleep: the call comes back the moment the job
+  // ends, with its tail — no guessed duration, no second read.
+  it("stays with the job only as long as asked, and brings the tail back", async () => {
+    const chat = await seedChat();
+    const started = await toolCall(chat.id, "run", {
+      command: `node -e "console.log('wait-marker')"`,
+      waitMs: 20_000,
+    });
+    const text = toolText(started);
+    expect(text).toContain("exit 0");
+    expect(text).toContain("wait-marker");
+    expect(listBackgroundJobs()[0]?.status).not.toBe("running");
+
+    // A job that outlives the patience comes back still running, not blocked.
+    const slow = await toolCall(chat.id, "run", {
+      command: `node -e "setTimeout(() => {}, 4000)"`,
+      waitMs: 200,
+    });
+    const late = toolText(slow);
+    expect(late).toContain("still running after 200ms");
+    expect(late).toContain("not killed");
+    // The way out of a lost wait is the note, not a sleep of its own.
+    expect(late).toContain("Do not sleep");
+    const id = /^(bg-\d+)/.exec(late)?.[1];
+    expect(getBackgroundJob(id!)?.status).toBe("running");
+    stopBackgroundJob(id!, "agent");
   });
 
   // The output is a file, not an MCP answer: the agent reads it with the same

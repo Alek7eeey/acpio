@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, it, vi, type Mock } from "vitest";
+import { BUILTIN_BASH_TIMEOUT_SEC_MAX, TERMINAL_WAIT_MAX_MS } from "@acpio/shared";
 import { createBuiltinTools, shellCommand, windowRead } from "./tools.js";
 
 /** Tool execution options the SDK passes; only abortSignal is used here. */
@@ -64,6 +65,40 @@ describe("createBuiltinTools", () => {
     host.request.mockResolvedValue({ content: "all of it" });
     await expect(exec(tools, "read", { path: "f.txt" })).resolves.toBe("all of it");
     expect(host.request).toHaveBeenCalledWith("fs/read_text_file", { path: "f.txt" });
+  });
+
+  it("read shows the hash that write demands", async () => {
+    const { tools, host } = setup();
+    host.request.mockResolvedValue({ content: "all of it", hash: "1a2b3" });
+    await expect(exec(tools, "read", { path: "f.txt" })).resolves.toBe("all of it\n[hash 1a2b3]");
+  });
+
+  it("write forwards the hash it was given, and reports the new one", async () => {
+    const { tools, host } = setup();
+    host.request.mockResolvedValue({ hash: "9f8e7" });
+    await expect(
+      exec(tools, "write", { path: "f.txt", content: "new", expect: "1a2b3" }),
+    ).resolves.toBe("Wrote 3 characters to f.txt [hash 9f8e7]");
+    expect(host.request).toHaveBeenCalledWith("fs/write_text_file", {
+      path: "f.txt",
+      content: "new",
+      expect: "1a2b3",
+    });
+  });
+
+  it("edit writes against the version it just read", async () => {
+    const { tools, host } = setup();
+    host.request.mockImplementation(async (method: string) =>
+      method === "fs/read_text_file" ? { content: "one\n", hash: "1a2b3" } : { hash: "9f8e7" },
+    );
+    await expect(
+      exec(tools, "edit", { path: "f.txt", edits: [{ old_string: "one", new_string: "two" }] }),
+    ).resolves.toBe("Replaced 1 occurrence(s) in f.txt");
+    expect(host.request).toHaveBeenCalledWith("fs/write_text_file", {
+      path: "f.txt",
+      content: "two\n",
+      expect: "1a2b3",
+    });
   });
 
   it("write asks permission before the file is touched", async () => {
@@ -237,6 +272,81 @@ describe("createBuiltinTools", () => {
       "terminal/output",
       "terminal/release",
     ]);
+  });
+
+  it("bash waits for the configured timeout unless the call names one", async () => {
+    const host: HostMock = { request: vi.fn(async () => ({})) };
+    host.request.mockImplementation(async (method: string) => {
+      if (method === "terminal/create") return { terminalId: "T1" };
+      if (method === "terminal/wait_for_exit") return { exitCode: 0, signal: null };
+      return {};
+    });
+    const tools = createBuiltinTools({
+      host,
+      ask: vi.fn(async () => undefined),
+      sessionId: "S1",
+      bashTimeoutMs: 20_000,
+    });
+    await exec(tools, "bash", { command: "echo hello" });
+    expect(host.request).toHaveBeenCalledWith("terminal/wait_for_exit", {
+      terminalId: "T1",
+      timeoutMs: 20_000,
+    });
+    await exec(tools, "bash", { command: "echo hello", timeout_ms: 240_000 });
+    expect(host.request).toHaveBeenCalledWith("terminal/wait_for_exit", {
+      terminalId: "T1",
+      timeoutMs: 240_000,
+    });
+  });
+
+  it("a killed command says which limit bit and what to do", async () => {
+    const host: HostMock = { request: vi.fn(async () => ({})) };
+    host.request.mockImplementation(async (method: string) => {
+      if (method === "terminal/create") return { terminalId: "T1" };
+      if (method === "terminal/wait_for_exit") throw new Error("Terminal timed out after 15000ms");
+      return {};
+    });
+    const tools = createBuiltinTools({
+      host,
+      ask: vi.fn(async () => undefined),
+      sessionId: "S1",
+      bashTimeoutMs: 15_000,
+    });
+    // The turn keeps its reason instead of a bare SIGKILL, and the terminal is
+    // still released — a killed command must not leave one hanging.
+    const killed = exec(tools, "bash", { command: "git log -S x --all" });
+    await expect(killed).rejects.toThrow(/killed after 15s .*timeout_ms/s);
+    // The model cannot open Settings: a path to it only invites "raise the limit"
+    // instead of the narrowing the message asks for.
+    await expect(killed).rejects.not.toThrow(/Settings/);
+    expect(host.request.mock.calls.map((c: unknown[]) => c[0])).toContain("terminal/release");
+  });
+
+  // The setting's ceiling is the default's, not the call's: a build may ask for
+  // half an hour in one call, and the host reads the same constant.
+  it("lets one call name a wait past the settings ceiling", () => {
+    const { tools } = setup();
+    const schema = tools.bash.inputSchema as any;
+    expect(schema.parse({ command: "x", timeout_ms: TERMINAL_WAIT_MAX_MS }).timeout_ms).toBe(
+      TERMINAL_WAIT_MAX_MS,
+    );
+    expect(() => schema.parse({ command: "x", timeout_ms: TERMINAL_WAIT_MAX_MS + 1 })).toThrow();
+    // The description carries that same number, not a stale copy of it.
+    const field = (tools.bash.inputSchema as any).shape.timeout_ms;
+    expect(field.description).toContain(`max ${TERMINAL_WAIT_MAX_MS / 1000}s`);
+    // The setting's ceiling stays where it is: it bounds the default, not a call.
+    expect(TERMINAL_WAIT_MAX_MS).toBeGreaterThan(BUILTIN_BASH_TIMEOUT_SEC_MAX * 1000);
+  });
+
+  // The description states this tool's limit and what a kill costs. Where else
+  // to put long work is the model's call: the route depends on the chat (a
+  // background tool that Settings → MCP can switch off, `&`, a watcher).
+  it("states the kill and its cost without prescribing a route", () => {
+    const { tools } = setup();
+    expect(tools.bash.description).toContain("killed and its output is lost");
+    expect(tools.bash.description).toContain("pass a bigger `timeout_ms` up front");
+    expect(tools.bash.description).not.toContain("background-job tool");
+    expect(tools.bash.description).not.toContain("cmd &");
   });
 
   it("declined bash never spawns a terminal", async () => {

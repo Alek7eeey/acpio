@@ -8,6 +8,37 @@ import type {
   PromptDelivery,
 } from "./adapters.js";
 import type { PluginEntryConfig, PluginSkillFolder } from "./pluginSource.js";
+import {
+  DEFAULT_EDITOR_KEYS,
+  DEFAULT_EDITOR_THEME,
+  DEFAULT_EDITOR_TOOL_SOURCE,
+  type EditorSplit,
+  type EditorThemeChoice,
+  type EditorToolSource,
+} from "./editorKeys.js";
+
+export {
+  DEFAULT_EDITOR_KEYS,
+  DEFAULT_EDITOR_THEME,
+  DEFAULT_EDITOR_TOOL_SOURCE,
+  EDITOR_KEY_ACTIONS,
+  EDITOR_SPLITS,
+  EDITOR_THEMES,
+  EDITOR_TOOL_SOURCES,
+  EDITOR_TOOLS,
+  isEditorKeyCombo,
+  normalizeEditorKeyCombo,
+  normalizeEditorSplit,
+  normalizeEditorTheme,
+  normalizeEditorToolSource,
+} from "./editorKeys.js";
+export type {
+  EditorKeyAction,
+  EditorSplit,
+  EditorThemeChoice,
+  EditorTool,
+  EditorToolSource,
+} from "./editorKeys.js";
 
 export type {
   AdapterExtensionKind,
@@ -70,6 +101,10 @@ export {
 export { normalizeToolCallId, toolCallIdVariants } from "./toolCallId.js";
 export {
   BUILTIN_MAX_OUTPUT_TOKENS_MAX,
+  BUILTIN_BASH_TIMEOUT_SEC_MIN,
+  BUILTIN_BASH_TIMEOUT_SEC_MAX,
+  TERMINAL_WAIT_MAX_MS,
+  normalizeBuiltinBashTimeoutSec,
   BUILTIN_TURN_RETRY_ATTEMPTS_MIN,
   BUILTIN_TURN_RETRY_ATTEMPTS_MAX,
   BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN,
@@ -1936,6 +1971,12 @@ export interface AppSettings {
    */
   builtinThinkingLimit: number;
   /**
+   * How long a `bash` call may run before the harness kills it (Settings →
+   * Built-in agent). The agent can ask for longer per call with `timeout_ms`;
+   * this is only what it gets when it asks for nothing.
+   */
+  builtinBashTimeoutSec: number;
+  /**
    * What the built-in agent does when the stored history outgrows the active
    * window (Settings → Built-in agent). `"summary"` — the default — replaces
    * the oldest turns with a model-written digest and falls back to plain
@@ -2214,6 +2255,23 @@ export interface AppSettings {
    * draft is restored.
    */
   composerDrafts: Record<string, ComposerDraft>;
+  /**
+   * Code pane's own look: `auto` follows the app theme, the other two keep the
+   * editor readable next to a differently-themed app. And it sits on the screen
+   * beside the chat, on the left or on the right, or not at all.
+   */
+  editorTheme: EditorThemeChoice;
+  editorSplit: EditorSplit;
+  /** CodeMirror notation, healed on read — see `editorKeys.ts`. */
+  editorKeyDefinition: string;
+  editorKeyUsages: string;
+  editorKeySave: string;
+  editorKeyAsk: string;
+  editorKeyFormat: string;
+  /** Where each tool comes from: the project's own copy or ours. */
+  editorToolTypescript: EditorToolSource;
+  editorToolOxlint: EditorToolSource;
+  editorToolOxfmt: EditorToolSource;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -2256,6 +2314,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // The mid-think fuse stays off until asked for: cutting a model call is a
   // deliberate choice per install (and per chat via `/thinking-limit`).
   builtinThinkingLimit: 0,
+  // 15s, not the old two minutes: the median bash call finishes in 143ms and
+  // only 5% pass 10s — a default that big was a two-minute wait for a command
+  // that was already wrong. Builds and test runs pass `timeout_ms` themselves.
+  builtinBashTimeoutSec: 15,
   builtinContextMode: "summary",
   builtinCompactionThresholdPercent: 80,
   // 20% verbatim, not 60%: with a carried-over digest the tail only has to hold
@@ -2339,6 +2401,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
   builtinMarkdownImages: true,
   builtinPlanTool: true,
   composerDrafts: {},
+  editorTheme: DEFAULT_EDITOR_THEME,
+  editorSplit: "off",
+  editorKeyDefinition: DEFAULT_EDITOR_KEYS.definition,
+  editorKeyUsages: DEFAULT_EDITOR_KEYS.usages,
+  editorKeySave: DEFAULT_EDITOR_KEYS.save,
+  editorKeyAsk: DEFAULT_EDITOR_KEYS.ask,
+  editorKeyFormat: DEFAULT_EDITOR_KEYS.format,
+  editorToolTypescript: DEFAULT_EDITOR_TOOL_SOURCE,
+  editorToolOxlint: DEFAULT_EDITOR_TOOL_SOURCE,
+  editorToolOxfmt: DEFAULT_EDITOR_TOOL_SOURCE,
 };
 
 export function modelForProvider(

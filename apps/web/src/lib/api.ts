@@ -423,6 +423,14 @@ export const api = {
     const q = opts?.summary ? "?summary=1" : "";
     return request<GitStatusDto>(`/api/sessions/${id}/git/status${q}`);
   },
+  /** One file as a revision has it: the left side of an editable diff. */
+  gitFileText: (id: string, filePath: string, rev?: string) => {
+    const params = new URLSearchParams({ path: filePath });
+    if (rev) params.set("rev", rev);
+    return request<{ text: string; exists: boolean }>(
+      `/api/sessions/${id}/git/file?${params.toString()}`,
+    );
+  },
   gitDiff: (id: string, filePath?: string) => {
     const q = filePath ? `?path=${encodeURIComponent(filePath)}` : "";
     return request<{ diff: string }>(`/api/sessions/${id}/git/diff${q}`);

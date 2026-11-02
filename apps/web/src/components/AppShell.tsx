@@ -29,6 +29,7 @@ import {
 import { highlightText, matchAny, settingsSearchIndex } from "../lib/settingsSearch";
 import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
+import { EditorPage } from "../pages/EditorPage";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
 import { harnessLabel } from "../lib/harness";
 import { canonicalCwd } from "@acpio/shared";
@@ -100,10 +101,28 @@ function ShellPage({
   pathname: string;
   onBackFromTasks: () => void;
 }) {
-  if (pathname === "/" || pathname === "") return <ChatPage />;
-  if (pathname.startsWith("/chat")) return <ChatPage />;
+  // The code pane can share the screen with a chat: which half it takes is a
+  // setting, so the same chat is reachable with the editor on either side.
+  const split = useAppStore((state) => state.settings.editorSplit);
+  const chatPath = pathname === "/" || pathname === "" || pathname.startsWith("/chat");
+  if (chatPath && split !== "off") {
+    const chat = <ChatPage />;
+    const editor = <EditorPage />;
+    const panes = split === "left" ? [editor, chat] : [chat, editor];
+    return (
+      <div className={styles.splitScreen}>
+        {panes.map((pane, index) => (
+          <div key={index} className={styles.splitPane}>
+            {pane}
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (chatPath) return <ChatPage />;
   if (pathname.startsWith("/settings")) return <SettingsPage />;
   if (pathname.startsWith("/tasks")) return <TasksPage onBack={onBackFromTasks} />;
+  if (pathname.startsWith("/editor")) return <EditorPage />;
   if (pathname.startsWith("/board/")) {
     return <BoardPage boardId={boardIdFromPath(pathname) ?? ""} />;
   }

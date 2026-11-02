@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { ElicitationRequestedSchema } from "@acpio/shared";
+import { TERMINAL_WAIT_MAX_MS, type ElicitationRequestedSchema } from "@acpio/shared";
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { HostClient } from "./host.js";
@@ -70,6 +70,11 @@ export interface BuiltinToolOptions {
    * parent's chat and must not replace the plan the reader is already watching.
    */
   emitPlan?: EmitPlan;
+  /**
+   * `bash` kill time when the call names none (Settings → Built-in agent).
+   * Omitted it falls back to {@link DEFAULT_BASH_TIMEOUT_MS}.
+   */
+  bashTimeoutMs?: number;
 }
 
 /** File types `read` hands to the model as pixels instead of text. */
@@ -84,8 +89,10 @@ const IMAGE_MIME: Record<string, string> = {
 /** Terminal output the model gets: enough to act on, bounded for the context. */
 const CLIP_HEAD = 4_000;
 const CLIP_TAIL = 2_000;
-const DEFAULT_BASH_TIMEOUT_MS = 120_000;
-const MAX_BASH_TIMEOUT_MS = 300_000;
+/** Only a fallback: the live value comes from Settings → Built-in agent. */
+const DEFAULT_BASH_TIMEOUT_MS = 15_000;
+/** The host clamps the same number, so one constant keeps the two honest. */
+const MAX_BASH_TIMEOUT_MS = TERMINAL_WAIT_MAX_MS;
 const TERMINAL_BYTE_LIMIT = 64 * 1024;
 const MAX_SEARCH_RESULTS = 200;
 const MAX_GLOB_RESULTS = 500;
@@ -527,6 +534,7 @@ export function renderAskAnswers(
  */
 export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   const { host, ask, outsideCwd, sessionId, onImages } = opts;
+  const bashTimeoutMs = opts.bashTimeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
   const taskTool: ToolSet = opts.subagents ? { task: makeTaskTool(opts.subagents) } : {};
 
   const read = tool({
@@ -552,19 +560,28 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         onImages?.(ctx?.toolCallId ?? "", [{ data: shot.data, mimeType: mime }]);
         return `${path} — picture attached`;
       }
-      const res = await host.request<{ content?: string; totalLines?: number }>("fs/read_text_file", {
-        path,
-        ...(line ? { line } : {}),
-        ...(limit ? { limit } : {}),
-      });
-      const content = (res?.content || "").replace(/\r\n/g, "\n");
-      if (!content) return "(empty file)";
-      if (char_offset != null) {
-        return charWindow(content, {
+      const res = await host.request<{ content?: string; totalLines?: number; hash?: string }>(
+        "fs/read_text_file",
+        {
           path,
-          from: char_offset,
-          len: Math.min(char_limit ?? CHAR_WINDOW_CHARS, CHAR_WINDOW_CHARS),
-        });
+          ...(line ? { line } : {}),
+          ...(limit ? { limit } : {}),
+        },
+      );
+      // The hash is what `write` demands before overwriting this file — shown on
+      // every read so the model has the stamp for the version it just saw.
+      const hash = res?.hash ?? "";
+      const stamped = (text: string) => (hash ? `${text}\n[hash ${hash}]` : text);
+      const content = (res?.content || "").replace(/\r\n/g, "\n");
+      if (!content) return stamped("(empty file)");
+      if (char_offset != null) {
+        return stamped(
+          charWindow(content, {
+            path,
+            from: char_offset,
+            len: Math.min(char_limit ?? CHAR_WINDOW_CHARS, CHAR_WINDOW_CHARS),
+          }),
+        );
       }
       // A window the model asked for is honoured up to the caps; a bare call gets
       // the small default, so an unscoped read cannot flood the context.
@@ -573,19 +590,21 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       // One unbroken line: there is no `line: N` to continue from and no line cap
       // to raise, so the continuation is a character window.
       if (!content.includes("\n") && content.length > maxChars) {
-        return (
+        return stamped(
           `${content.slice(0, maxChars)}\n...[truncated at ${maxChars} chars: ${path} is one ` +
-          `${content.length}-character line; continue with char_offset: ${maxChars + 1}]...`
+            `${content.length}-character line; continue with char_offset: ${maxChars + 1}]...`,
         );
       }
-      return windowRead(
-        content,
-        path,
-        line ?? 1,
-        asked ? READ_MAX_LINES : READ_DEFAULT_LINES,
-        maxChars,
-        // The host knows the file's length even when it only sent back a slice.
-        res?.totalLines,
+      return stamped(
+        windowRead(
+          content,
+          path,
+          line ?? 1,
+          asked ? READ_MAX_LINES : READ_DEFAULT_LINES,
+          maxChars,
+          // The host knows the file's length even when it only sent back a slice.
+          res?.totalLines,
+        ),
       );
     },
   });
@@ -788,11 +807,19 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     inputSchema: z.object({
       path: z.string().describe("File path."),
       content: z.string().describe("Full new file content."),
+      expect: z
+        .string()
+        .optional()
+        .describe("The `hash` from read — required to overwrite an existing file."),
     }),
-    execute: async ({ path, content }) => {
+    execute: async ({ path, content, expect }) => {
       await ask({ title: `write ${path}`, kind: "edit", input: { path } });
-      await host.request("fs/write_text_file", { path, content });
-      return `Wrote ${content.length} characters to ${path}`;
+      const res = await host.request<{ hash?: string }>("fs/write_text_file", {
+        path,
+        content,
+        ...(expect ? { expect } : {}),
+      });
+      return `Wrote ${content.length} characters to ${path}${res?.hash ? ` [hash ${res.hash}]` : ""}`;
     },
   });
 
@@ -813,7 +840,10 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         .min(1),
     }),
     execute: async ({ path, edits }) => {
-      const { content } = await host.request<{ content: string }>("fs/read_text_file", { path });
+      const { content, hash } = await host.request<{ content: string; hash?: string }>(
+        "fs/read_text_file",
+        { path },
+      );
       // Match in `\n`-land (what read shows), write back in the file's own EOL
       // style: the needle comes from read output, the file may be CRLF.
       const eol = content.includes("\r\n") ? "\r\n" : "\n";
@@ -829,6 +859,9 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       await host.request("fs/write_text_file", {
         path,
         content: eol === "\r\n" ? next.replace(/\n/g, "\r\n") : next,
+        // The read above is the version this edit was planned against; a stamp
+        // makes a concurrent user/IDE save an error instead of a silent clobber.
+        ...(hash ? { expect: hash } : {}),
       });
       return `Replaced ${plan.length} occurrence(s) in ${path}`;
     },
@@ -838,7 +871,13 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
     description:
       "Run a shell command in the working directory and wait for exit. Returns the exit code and output, " +
       "clipped to the first 4000 and last 2000 chars — pipe through `head`/`tail`/`grep` when the middle matters " +
-      "instead of re-running it unchanged." +
+      "instead of re-running it unchanged. A command still running at `timeout_ms` is killed and its output is " +
+      // The limit and what a kill costs are facts about this tool. Where to put
+      // the long work instead is not: the route differs per chat (background
+      // tool, `&`, a watcher), and a route that is not there is an instruction
+      // the model cannot follow.
+      "lost: pass a bigger `timeout_ms` up front for a build or a test run, and after a kill narrow the " +
+      "command (a path, a glob) rather than repeating it." +
       (posixShell()
         ? process.platform === "win32"
           ? " On Windows the shell is Git Bash: a relative path is `./build.ps1`, not `.\\build.ps1`; " +
@@ -854,7 +893,10 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         .positive()
         .max(MAX_BASH_TIMEOUT_MS)
         .optional()
-        .describe("Kill after this long (default 120s, max 300s)."),
+        .describe(
+          `Kill after this long (default ${Math.round(bashTimeoutMs / 1000)}s, ` +
+            `max ${Math.round(MAX_BASH_TIMEOUT_MS / 1000)}s — longer work runs in the background).`,
+        ),
     }),
     execute: async ({ command, timeout_ms }, ctx) => {
       await ask({ title: `bash ${command}`, kind: "execute", input: { command } });
@@ -870,10 +912,27 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       };
       signal?.addEventListener("abort", onAbort, { once: true });
       try {
-        const exit = await host.request<{ exitCode: number | null; signal?: string | null }>(
-          "terminal/wait_for_exit",
-          { terminalId, timeoutMs: timeout_ms ?? DEFAULT_BASH_TIMEOUT_MS },
-        );
+        const limitMs = timeout_ms ?? bashTimeoutMs;
+        let exit: { exitCode: number | null; signal?: string | null };
+        try {
+          exit = await host.request<{ exitCode: number | null; signal?: string | null }>(
+            "terminal/wait_for_exit",
+            { terminalId, timeoutMs: limitMs },
+          );
+        } catch (err) {
+          // A killed command is a result the model must act on, not a mystery:
+          // say which limit bit, and what the two ways out are. The settings
+          // path that owns the limit stays out — the model cannot open it, and
+          // its only use for it is telling the user to go there instead of
+          // narrowing the command.
+          const message = err instanceof Error ? err.message : String(err);
+          if (!/timed out/i.test(message)) throw err;
+          throw new Error(
+            `command killed after ${Math.round(limitMs / 1000)}s — that is the bash timeout. ` +
+              `Pass a bigger \`timeout_ms\` (up to ${Math.round(MAX_BASH_TIMEOUT_MS / 1000)}s) for a build or a ` +
+              "test run, or narrow the command (a path, a glob) instead of repeating it.",
+          );
+        }
         const out = await host.request<{ output?: string; truncated?: boolean }>("terminal/output", {
           terminalId,
         });
