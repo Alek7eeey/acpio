@@ -27,7 +27,10 @@ export type EditorDiagnostic = {
 /** Absolute path inside the project root, or null when the request climbs out of it. */
 export function insideRoot(root: string, rel: string): string | null {
   const base = path.resolve(root);
-  const abs = path.resolve(base, rel || ".");
+  // A backslash is a separator on Windows only; read it as one everywhere, so a
+  // Windows-style `..\..\x` that reaches a POSIX server is refused instead of
+  // resolving to a file whose name happens to carry backslashes.
+  const abs = path.resolve(base, (rel || ".").replace(/\\/g, "/"));
   return abs === base || abs.startsWith(base + path.sep) ? abs : null;
 }
 
