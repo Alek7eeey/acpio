@@ -35,6 +35,13 @@ function navItemKey(item: NavItem) {
   return `${item.questionId}:${item.optionId}`;
 }
 
+/** A key typed into a field belongs to that field, not to the card around it. */
+function isTextField(target: EventTarget | null) {
+  const el = target as HTMLElement | null;
+  if (!el || typeof el.tagName !== "string") return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable === true;
+}
+
 function listNavItems(questions: InlineQuestion[]): NavItem[] {
   const items: NavItem[] = [];
   for (const q of questions) {
@@ -210,6 +217,10 @@ export function ChatQuestionPrompt({
   }, [activeNavIndex, navItems]);
 
   const handleCardKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    // The "Other" and free-text fields keep their own arrows and answer on Enter;
+    // letting the card handle the same key answered the question twice, and the
+    // repeat came back as "Question request not found" while the agent worked on.
+    if (isTextField(e.target)) return;
     if (e.key === "ArrowDown" || e.key === "ArrowRight") {
       e.preventDefault();
       moveNav(1);

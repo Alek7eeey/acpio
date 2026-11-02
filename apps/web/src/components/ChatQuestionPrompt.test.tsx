@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "../lib/i18n";
 import { ChatQuestionPrompt, type QuestionPromptPayload } from "./ChatQuestionPrompt";
 
@@ -48,6 +48,38 @@ describe("ChatQuestionPrompt", () => {
     expect(comment.textContent).toContain("Posts a comment in the PR thread.");
     const skip = screen.getByRole("radio", { name: /Do not publish/ });
     expect(skip.textContent).toContain("Keeps the review in chat only.");
+  });
+
+  it("answers once when Enter sends the words typed into the Other field", () => {
+    const onAnswer = vi.fn();
+    render(
+      <I18nProvider>
+        <ChatQuestionPrompt
+          payload={{
+            title: "Which way?",
+            questions: [
+              {
+                id: "mode",
+                prompt: "Which way?",
+                options: [{ id: "git", label: "Update the checkout itself" }],
+                freeTextField: "mode__other",
+                freeTextLabel: "Other",
+              },
+            ],
+          }}
+          onAnswer={onAnswer}
+        />
+      </I18nProvider>,
+    );
+
+    const other = screen.getByPlaceholderText("Other");
+    fireEvent.change(other, { target: { value: "explain the cause first" } });
+    fireEvent.keyDown(other, { key: "Enter" });
+
+    // The field's own Enter answers the question; the card's keyboard handler
+    // must not answer it a second time (that repeat found no request and put
+    // "Question request not found" in the banner while the agent worked on).
+    expect(onAnswer).toHaveBeenCalledTimes(1);
   });
 
   it("renders plain options without a description line", () => {
