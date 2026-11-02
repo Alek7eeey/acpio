@@ -256,6 +256,9 @@ describe("running a command in the background", () => {
     expect(late).toContain("not killed");
     // The way out of a lost wait is the note, not a sleep of its own.
     expect(late).toContain("Do not sleep");
+    // `output` is a read, not a second way to wait — said plainly, or it becomes
+    // the poll loop the line above forbids.
+    expect(late).toContain("this does not wait");
     const id = /^(bg-\d+)/.exec(late)?.[1];
     expect(getBackgroundJob(id!)?.status).toBe("running");
     stopBackgroundJob(id!, "agent");

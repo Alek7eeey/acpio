@@ -190,7 +190,11 @@ async function callTool(
               `${job.id} is still running after ${waitMs >= 1000 ? `${Math.round(waitMs / 1000)}s` : `${waitMs}ms`} — ` +
                 "it outlived the wait, it was not killed.",
               "Do not sleep and do not poll: end your turn, and the note with its output tail continues from there.",
-              `If you need it sooner: ${bgMcpToolName("output")}({ jobId: "${job.id}" }), or stop it with ${bgMcpToolName("stop")}({ jobId: "${job.id}" }).`,
+              // `output` reads the log as it stands and comes back at once: it is
+              // not a second way to wait, and naming it without saying so invites
+              // a poll loop.
+              `To look at the output as it stands (this does not wait): ${bgMcpToolName("output")}({ jobId: "${job.id}" }); ` +
+                `to kill it: ${bgMcpToolName("stop")}({ jobId: "${job.id}" }).`,
             ].join("\n"),
           );
         }
