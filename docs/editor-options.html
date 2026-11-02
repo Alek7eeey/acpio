@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Редактор в вебе: VS Code / Monaco / CodeMirror — сводка по потребностям</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --line: #263041; --text: #e6edf3; --dim: #9aa7b4;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff; --okbg: #10261a;
+    --warnbg: #2a2110; --badbg: #2a1415;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fff; --panel:#f6f8fa; --line:#d8dee4; --text:#1f2328; --dim:#59636e;
+      --okbg:#e8f6ec; --warnbg:#fdf6e3; --badbg:#fdeceb; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 24px 64px; background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  main { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .sub { color: var(--dim); margin: 0 0 28px; font-size: 14px; }
+  h2 { font-size: 17px; margin: 36px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; background: var(--panel); }
+  caption { caption-side: top; text-align: left; color: var(--dim); font-size: 13px; padding-bottom: 8px; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; vertical-align: top; text-align: left; }
+  thead th { position: sticky; top: 0; background: var(--panel); font-size: 13px; }
+  th.need { width: 230px; }
+  td:first-child { font-weight: 600; }
+  tbody th { font-weight: 600; background: color-mix(in srgb, var(--panel) 70%, var(--bg)); }
+  .m { white-space: nowrap; font-weight: 700; }
+  .y { color: var(--ok); } .p { color: var(--warn); } .n { color: var(--bad); }
+  tr.ok td { background: var(--okbg); } tr.warn td { background: var(--warnbg); } tr.bad td { background: var(--badbg); }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--dim); margin-bottom: 18px; }
+  code { background: color-mix(in srgb, var(--line) 55%, transparent); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .card { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 8px; font-size: 15px; }
+  .card ul { margin: 6px 0 0; padding-left: 18px; }
+  .card li { margin: 3px 0; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); margin-left: 6px; }
+  .note { border-left: 3px solid var(--accent); padding: 10px 14px; background: var(--panel); font-size: 13.5px; margin: 14px 0; }
+  footer { margin-top: 40px; color: var(--dim); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Редактор кода в вебе: VS Code / Monaco / CodeMirror</h1>
+  <p class="sub">Что нужно нам — дерево папок, открытие файлов, навигация по символам (definition / references), подсветка ошибок TS и C# в версии, взятой из проекта, плюс oxlint и oxfmt. Проверка покрытия тремя вариантами.</p>
+
+  <div class="legend">
+    <span><b class="y">✓</b> из коробки</span>
+    <span><b class="p">~</b> работает, но нужен свой клей</span>
+    <span><b class="n">✗</b> нет / только сбоку прикрутить</span>
+  </div>
+
+  <h2>Сводная таблица</h2>
+  <table>
+    <caption>Колонки — что даёт движок редактора; языковой сервис (tsserver / Roslyn) считается отдельно и почти всегда внешний.</caption>
+    <thead>
+      <tr>
+        <th class="need">Потребность</th>
+        <th>VS Code (<code>openvscode-server</code> / <code>code-server</code> в iframe)</th>
+        <th>Monaco <span class="tag">+ monaco-languageclient</span></th>
+        <th>CodeMirror 6 <span class="tag">+ @codemirror/lsp-client</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="ok">
+        <td>Дерево папок (explorer)</td>
+        <td><span class="m y">✓</span> встроено, с git-статусами, drag-n-drop, контекстным меню</td>
+        <td><span class="m n">✗</span> пишем сами на React (как наш <code>AppShell</code>)</td>
+        <td><span class="m n">✗</span> пишем сами на React</td>
+      </tr>
+      <tr class="ok">
+        <td>Открыть файл, вкладки, dirty-статус</td>
+        <td><span class="m y">✓</span> встроено + сохранение, авто-детект отступов</td>
+        <td><span class="m p">~</span> редактор есть, вкладки/сохранение — наши</td>
+        <td><span class="m p">~</span> EditorState на файл, вкладки/сохранение — наши</td>
+      </tr>
+      <tr class="warn">
+        <td>TS: go to definition / find references</td>
+        <td><span class="m y">✓</span> встроено, самый отшлифованный опыт (peek-окно, breadcrumbs)</td>
+        <td><span class="m p">~</span> через LSP-канал (adapter <code>vscode-ws-jsonrpc</code>); без LSP — свой провайдер на воркере</td>
+        <td><span class="m p">~</span> штатный <code>@codemirror/lsp-client</code>: definition, references, rename, hover, format</td>
+      </tr>
+      <tr class="warn">
+        <td>TS: версия компилятора из проекта</td>
+        <td><span class="m y">✓</span> берёт <code>node_modules/typescript</code> автоматически</td>
+        <td><span class="m p">~</span> tsserver на сервере берёт сам; встроенный воркер Monaco — своя версия, надо грузить нужную <code>typescript.js</code></td>
+        <td><span class="m p">~</span> то же: версия определяется сервером (<code>typescript-language-server</code> + проектный tsserver)</td>
+      </tr>
+      <tr class="warn">
+        <td>TS: подсветка ошибок типов</td>
+        <td><span class="m y">✓</span> инлайн, по мере набора, с быстрыми фиксами</td>
+        <td><span class="m y">✓</span> из коробки (воркер), но помнит только подсунутые файлы → <code>Cannot find module</code></td>
+        <td><span class="m p">~</span> через LSP-диагностику, полная и проектная</td>
+      </tr>
+      <tr class="warn">
+        <td>C#: go to definition / find references</td>
+        <td><span class="m p">~</span> есть расширение C#, <b>но лицензия разрешает его только в самом VS Code</b> — в <code>openvscode-server</code> это нарушение; рабочий путь — OmniSharp</td>
+        <td><span class="m p">~</span> через LSP: Roslyn LS или OmniSharp, разъём стандартный</td>
+        <td><span class="m p">~</span> тот же LSP-канал, что и для TS</td>
+      </tr>
+      <tr class="warn">
+        <td>C#: LangVersion из проекта (<code>csproj</code>/<code>Directory.Build.props</code>)</td>
+        <td><span class="m y">✓</span> Roslyn читает проект и уважает <code>LangVersion</code>/<code>TargetFramework</code></td>
+        <td><span class="m p">~</span> определяется сервером (Roslyn — да; голый OmniSharp — через <code>.sln</code>)</td>
+        <td><span class="m p">~</span> так же: всё решает сервер, клиенту всё равно</td>
+      </tr>
+      <tr class="warn">
+        <td>C#: подсветка синтаксических/семантических ошибок</td>
+        <td><span class="m y">✓</span> Roslyn-диагностика вживую</td>
+        <td><span class="m p">~</span> LSP publishDiagnostics → маркеры</td>
+        <td><span class="m p">~</span> то же самое</td>
+      </tr>
+      <tr class="ok">
+        <td>oxlint (TS/JS)</td>
+        <td><span class="m y">✓</span> расширение <code>oxc.oxc-vscode</code> ставится и работает</td>
+        <td><span class="m p">~</span> <code>oxlint --format=json</code> на сервере → <code>setModelMarkers</code> (≈40 строк)</td>
+        <td><span class="m p">~</span> <code>@codemirror/lint</code> + тот же JSON (≈40 строк)</td>
+      </tr>
+      <tr class="ok">
+        <td>oxfmt (TS/JS)</td>
+        <td><span class="m y">✓</span> то же расширение, format-on-save</td>
+        <td><span class="m p">~</span> вызов CLI + apply правки на файл (одна команда)</td>
+        <td><span class="m p">~</span> то же</td>
+      </tr>
+      <tr>
+        <td>Автодополнение, rename, quick fixes, импорты</td>
+        <td><span class="m y">✓</span> всё, из коробки</td>
+        <td><span class="m p">~</span> через LSP; без него — руками</td>
+        <td><span class="m p">~</span> через LSP, набор команд скромнее</td>
+      </tr>
+      <tr class="warn">
+        <td>Свой UI внутри редактора (пункт меню, кнопка у строки, инлайн-ввод)</td>
+        <td><span class="m p">~</span> только через своё расширение в extension host; наш React внутрь не вставить</td>
+        <td><span class="m y">✓</span> штатные API: <code>addAction</code>, glyph margin, content widget — наш DOM/React</td>
+        <td><span class="m y">✓</span> extensions: gutter, widget decoration, свой обработчик contextmenu</td>
+      </tr>
+      <tr class="bad">
+        <td>Сколько своего кода писать</td>
+        <td><span class="m y">✓</span> ~0 (прокси с WS-upgrade + iframe + старт/стоп процесса)</td>
+        <td><span class="m n">✗</span> дерево, вкладки, LSP-мост, oxlint/oxfmt-клей</td>
+        <td><span class="m n">✗</span> то же + больше UI-примитивов</td>
+      </tr>
+      <tr class="bad">
+        <td>Вес / RAM</td>
+        <td><span class="m n">✗</span> ~350 МБ на диске, отдельный инстанс на проект</td>
+        <td><span class="m p">~</span> бандл +100–150 КБ gz на пейн</td>
+        <td><span class="m y">✓</span> самый лёгкий, деревья шейкерятся по расширениям</td>
+      </tr>
+      <tr>
+        <td>Контроль состояния и темы (наш React, наш i18n)</td>
+        <td><span class="m n">✗</span> внутри iframe живёт чужое приложение, тема — через его API</td>
+        <td><span class="m y">✓</span> обычный компонент, тема через <code>defineTheme</code></td>
+        <td><span class="m y">✓</span> обычный компонент, тема через <code>EditorView.theme</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Расширение редактора: меню, кнопка у строки, поле ввода вопроса</h2>
+  <table>
+    <caption>Сценарий: «спросить модель про вот это место в коде» — пункт в контекстном меню, кнопка слева от строки, инлайн-инпут, привязанный к позиции.</caption>
+    <thead>
+      <tr>
+        <th class="need">Что хотим</th>
+        <th>VS Code (расширение)</th>
+        <th>Monaco</th>
+        <th>CodeMirror 6</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="warn">
+        <td>Свой пункт в контекстном меню</td>
+        <td><span class="m y">✓</span> <code>contributes.menus</code> → <code>editor/context</code>, <code>when</code> по языку/выделению. Но это отдельный пакет расширения, а не наш компонент</td>
+        <td><span class="m y">✓</span> <code>editor.addAction({ contextMenuGroupId, contextMenuOrder })</code> — колбэк прямо в нашем React-дереве</td>
+        <td><span class="m p">~</span> встроенного меню нет вообще: ловим <code>contextmenu</code> и рисуем своё (зато любое)</td>
+      </tr>
+      <tr class="warn">
+        <td>Кнопка в gutter, слева от строки</td>
+        <td><span class="m p">~</span> только картинка: <code>TextEditorDecorationType({ gutterIconPath })</code>; клик по ней расширению не доставляется. Интерактив — CodeLens (это текст <i>над</i> строкой) или иконки отладчика</td>
+        <td><span class="m y">✓</span> декорация с <code>glyphMarginClassName</code> + <code>onMouseDown</code>, target <code>GUTTER_GLYPH_MARGIN</code> → знаем строку</td>
+        <td><span class="m y">✓</span> <code>gutter()</code> + <code>GutterMarker.toDOM()</code> + <code>domEventHandlers</code>; можно показать кнопку только на hover-строке</td>
+      </tr>
+      <tr class="warn">
+        <td>Поле ввода вопроса у конкретного места в коде</td>
+        <td><span class="m p">~</span> честный путь один — <code>comments.createCommentController()</code> + <code>CommentThread</code> (редактируемая область в редакторе). <code>showInputBox</code> — модалка, не инлайн. Свой React-инпут не переносится</td>
+        <td><span class="m y">✓</span> <code>addContentWidget</code> / <code>addOverlayWidget</code> с произвольным DOM — вставляем наш React-компонент как есть</td>
+        <td><span class="m y">✓</span> <code>Decoration.widget({ widget: new WidgetType() })</code>, <code>toDOM()</code> отдаёт любой узел; позиция едет вместе с текстом</td>
+      </tr>
+      <tr class="warn">
+        <td>Доступ к нашему контексту (чат, сессия, i18n, API)</td>
+        <td><span class="m p">~</span> только через <code>postMessage</code>/webview или команды в extension host — граница процесса</td>
+        <td><span class="m y">✓</span> тот же React-компонент: прямой <code>api.*</code>/WS-вызов из колбэка</td>
+        <td><span class="m y">✓</span> то же самое</td>
+      </tr>
+      <tr class="bad">
+        <td>Цена внедрения</td>
+        <td><span class="m n">✗</span> отдельный package.json, сборка <code>.vsix</code>, установка в инстанс, версии двух приложений синхронизировать</td>
+        <td><span class="m y">✓</span> файл в нашем пейне, десятки строк</td>
+        <td><span class="m y">✓</span> файл-расширение в <code>extensions: [...]</code>, столько же</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <b>Практический вывод.</b> Сценарий «спросить модель про эту строку» — это ровно та вещь, где Monaco и CodeMirror выигрывают у VS Code: инлайн-виджет с нашим инпутом — 20–40 строк. В VS Code это расширение с Comments API, и кнопку в gutter всё равно не сделать кликабельной.
+  </div>
+
+  <h2>Три варианта в двух абзацах</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>VS Code в iframe <span class="tag">самый быстрый результат</span></h3>
+      <p>Даёт буквально всё из списка сразу — сильнее любого самописного варианта. Цена: второй процесс в жизни (~350 МБ), состояние панели вне нашего React, а C# в неофициальной сборке упирается в лицензию расширения (идём через OmniSharp/Roslyn LS).</p>
+      <ul>
+        <li>срок: 1–2 дня, включая прокси</li>
+        <li>риск: вес, лицензия C#-расширения, «приложение в приложении»</li>
+        <li>свой UI — только своим расширением: gutter-кнопка некликабельна, инлайн-инпут — через Comments API</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Monaco + LSP <span class="tag">баланс</span></h3>
+      <p>Редактор из VS Code и его TS-движок, но UI наш. Языки — через <code>monaco-languageclient</code>: tsserver для TS, Roslyn LS для C#; версии определяет сервер по проекту. oxlint/oxfmt — наши CLI-вызовы в маркеры.</p>
+      <ul>
+        <li>срок: 3–5 дней до рабочего TS+C#, ещё день на C#-сервер</li>
+        <li>риск: LSP-мост (JSON-RPC ⇄ WS) — единственная по-настоящему новая часть</li>
+        <li>плюс: инлайн-инпут «спросить про эту строку» — content widget, наш React внутри</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>CodeMirror 6 <span class="tag">самый лёгкий</span></h3>
+      <p>Тот же LSP-подход (<code>@codemirror/lsp-client</code>), меньше бандл, но свой UI-слой шире: peek-окна, breadcrumbs, quick-fix меню придётся собирать самим. Оправдан, только если вес критичен.</p>
+      <ul>
+        <li>срок: 4–7 дней</li>
+        <li>риск: много UI-мелочи, которой у Monaco/VS Code уже готово; контекстное меню — своё с нуля</li>
+        <li>плюс: виджет-инпут — самый простой из трёх (<code>WidgetType.toDOM</code>)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>Что общего у всех трёх:</b> настоящая навигация и настоящие ошибки TS/C# приходят не от редактора, а от языкового сервера на сервере (<code>tsserver</code>, <code>Roslyn</code>). Разница только в том, сколько UI отдать нам и сколько клея написать.
+  </div>
+
+  <h2>Итог</h2>
+  <table>
+    <thead><tr><th class="need">Если приоритет…</th><th>Бери</th></tr></thead>
+    <tbody>
+      <tr><td>«Работает завтра, C# обязательно»</td><td><b>VS Code</b> (Roslyn LS через OmniSharp-путь)</td></tr>
+      <tr><td>«Один продукт, наш стиль, средний срок»</td><td><b>Monaco + LSP + oxlint/oxfmt</b> — рекомендую</td></tr>
+      <tr><td>«Минимальный вес бандла»</td><td><b>CodeMirror 6 + LSP</b>, но UI-слой дороже</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Нужно: дерево · открытие файлов · definition/references · ошибки TS и C# в версии из проекта · oxlint · oxfmt ·
+    свой пункт в меню, кнопка у строки, инлайн-ввод вопроса по месту в коде.
+    Проверено на: tsserver, Roslyn LS, OmniSharp, monaco-languageclient, @codemirror/lsp-client, oxlint --format=json, oxfmt,
+    VS Code API (editor/context, Comments, decorations).
+    Оценки сроков — грубые и без тестов/ревью.
+  </footer>
+</main>
+</body>
+</html>

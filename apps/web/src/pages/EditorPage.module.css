@@ -1,0 +1,789 @@
+.page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/*
+ * The pane's own scheme, independent of the app's: the light/dark palettes are
+ * re-declared on the page, so the chrome, the menu and the editor itself all
+ * follow `data-editor-scheme` even when the app is themed the other way.
+ */
+.page[data-editor-scheme="light"] {
+  --surface: #ffffff;
+  --surface-2: #f6f8fa;
+  --bg-tertiary: #e9edf3;
+  --border: #d8dee8;
+  --text: #0f1419;
+  --text-secondary: #59636e;
+  --accent: #0866ff;
+  --accent-soft: rgba(8, 102, 255, 0.1);
+  --danger: #e41e3f;
+  --warning: #b78103;
+  --diff-add: rgba(46, 160, 67, 0.13);
+  --diff-add-text: rgba(46, 160, 67, 0.35);
+  --diff-del: rgba(248, 81, 73, 0.13);
+  --diff-del-text: rgba(248, 81, 73, 0.35);
+}
+
+.page[data-editor-scheme="dark"] {
+  --surface: #171a21;
+  --surface-2: #1d222c;
+  --bg-tertiary: #262b36;
+  --border: #2f3643;
+  --text: #f2f4f8;
+  --text-secondary: #9aa3b2;
+  --accent: #4b8dff;
+  --accent-soft: rgba(75, 141, 255, 0.14);
+  --danger: #ff6b6b;
+  --warning: #e0a800;
+  --diff-add: rgba(46, 160, 67, 0.22);
+  --diff-add-text: rgba(46, 160, 67, 0.5);
+  --diff-del: rgba(248, 81, 73, 0.2);
+  --diff-del-text: rgba(248, 81, 73, 0.45);
+}
+
+/*
+ * The merge view tints changes with a selector as deep as ours, so overriding it
+ * takes `!important` — a diff has to read like VS Code's: red on the old side,
+ * green on the new one, and the changed tokens filled in instead of underlined.
+ */
+:global(.cm-merge-b .cm-changedLine),
+:global(.cm-merge-b .cm-changedLineGutter),
+:global(.cm-insertedLine),
+:global(.cm-insertedLine .cm-lineNumbers) {
+  background-color: var(--diff-add) !important;
+}
+
+:global(.cm-merge-a .cm-changedLine),
+:global(.cm-merge-a .cm-changedLineGutter),
+:global(.cm-deletedChunk),
+:global(.cm-deletedLine) {
+  background-color: var(--diff-del) !important;
+}
+
+:global(.cm-merge-b .cm-changedText) {
+  background: var(--diff-add-text) !important;
+  text-decoration: none !important;
+}
+
+:global(.cm-merge-a .cm-changedText),
+:global(.cm-deletedText),
+:global(.cm-deletedChunk .cm-deletedText) {
+  background: var(--diff-del-text) !important;
+  text-decoration: none !important;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.actionAlert {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Problems panel: everything the pane knows, one row per finding. */
+.problems {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+}
+
+.problemEmpty {
+  padding: 8px 12px;
+  color: var(--text-secondary);
+}
+
+.problemRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.problemRow:hover {
+  background: var(--accent-soft);
+}
+
+.severityDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.dotError {
+  background: var(--danger);
+}
+
+.dotWarn {
+  background: var(--warning);
+}
+
+.problemSource {
+  flex: none;
+  min-width: 48px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.problemText {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problemWhere {
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* Только поповер: сам он висит над статус-баром, кнопка живёт в нём. */
+.headerTools {
+  position: static;
+  flex: none;
+  height: 0;
+}
+
+.popover {
+  position: fixed;
+  right: 8px;
+  bottom: 28px;
+  z-index: 40;
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.field > span {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.field select {
+  font: inherit;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.keyRow input {
+  width: 120px;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.hint {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.hint code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Вкладки панели: файлы проекта / изменённые файлы (как SCM-вид в VS Code). */
+.treeTabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+
+.treeTab {
+  flex: 1;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.treeTab:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.treeTabActive {
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.treeNote {
+  padding: 8px 10px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+/* Одна строка изменённого файла: буква статуса, имя, +/−. */
+.changeRow {
+  gap: 6px;
+}
+
+.changeBadge {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.badgeModified {
+  color: var(--warning);
+}
+
+.badgeAdded {
+  color: var(--success);
+}
+
+.badgeDeleted {
+  color: var(--danger);
+}
+
+.badgeConflict {
+  color: var(--danger);
+  text-decoration: underline;
+}
+
+.changeStat {
+  margin-left: auto;
+  flex: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+}
+
+.labelChanged {
+  color: var(--warning);
+}
+
+/* Пара редакторов MergeView: слева ревизия, справа живой документ. */
+.mergeHost {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+
+.mergeHost :global(.cm-mergeView) {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 0;
+}
+
+.mergeHost :global(.cm-mergeViewEditors) {
+  min-height: 0;
+  padding: 0;
+}
+
+.mergeHost :global(.cm-editor) {
+  height: 100%;
+  min-height: 0;
+}
+
+.tree {
+  width: 260px;
+  min-width: 180px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  overflow: auto;
+  font-size: 12.5px;
+  background: var(--surface-2);
+}
+
+.treeList {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0 12px;
+}
+
+/* One row per entry, the way an editor's explorer draws it: guides for depth,
+ * a chevron that only folders get, an icon, then the name. */
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  flex: none;
+  padding: 0 8px 0 6px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 22px;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.treeRow:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.treeRowActive {
+  background: var(--accent-soft);
+  color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.guide {
+  width: 8px;
+  flex: none;
+  align-self: stretch;
+  box-sizing: border-box;
+  border-left: 1px solid var(--border);
+  opacity: 0.6;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: transform 120ms ease;
+}
+
+.chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  display: block;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  padding-right: 84px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  flex: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px 3px 9px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.tab:hover {
+  opacity: 1;
+  background: var(--accent-soft);
+}
+
+.tabActive {
+  opacity: 1;
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.tabName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Кнопка меню в конце полосы вкладок: высоты не добавляет. */
+.tabKind {
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.tabDirty {
+  color: var(--accent);
+  font-size: 9px;
+  line-height: 1;
+}
+
+/* Кнопки вкладки появляются на hover, но у пиннутой крестика нет вовсе. */
+.tabPin,
+.tabClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.tabPin svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(38deg);
+}
+
+.tab:hover .tabPin,
+.tab:hover .tabClose,
+.tabPinOn {
+  opacity: 0.65;
+}
+
+.tabPin:hover,
+.tabClose:hover {
+  opacity: 1;
+  background: var(--accent-soft);
+}
+
+/* Статус-бар: 22px по высоте и всё, что нужно, в одну строку. */
+.statusBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.barText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.barNote {
+  opacity: 0.8;
+}
+
+.barChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 12px;
+  line-height: 1;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: default;
+}
+
+.barAction {
+  cursor: pointer;
+}
+
+.barAction:hover,
+.barAction[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.barProblems {
+  cursor: pointer;
+  padding-left: 12px;
+}
+
+.barGear {
+  width: 12px;
+  height: 12px;
+}
+
+.barProblems:hover {
+  background: var(--accent-soft);
+}
+
+/* Источник инструмента — точка и цвет, слово не тратим. */
+.sourceDot {
+  position: relative;
+  padding-left: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  opacity: 0.85;
+}
+
+.sourceDot::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.dotProject {
+  color: var(--success);
+}
+
+.dotBundled {
+  color: var(--text-secondary);
+}
+
+.dotMissing {
+  color: var(--danger);
+  opacity: 0.7;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.refs {
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  background: var(--surface-2);
+}
+
+.refRow {
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-align: left;
+  padding: 3px 10px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.refRow:hover {
+  background: var(--accent-soft);
+}
+
+.menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 230px;
+  max-width: calc(100vw - 16px);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+}
+
+.menuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.menuItem:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.menuKey {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+/* CodeMirror widgets and gutters live outside the CSS-module scope. */
+:global(.cm-askGutter) {
+  width: 16px;
+}
+
+/* Под курсором с зажатым Ctrl — как ссылка в VS Code. */
+:global(.cm-ctrlLink) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+:global(.cm-askGutterButton) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+}
+
+:global(.cm-editor:hover .cm-askGutterButton),
+:global(.cm-askGutterButton:hover) {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* A block widget: the question field opens as a row under the line. */
+:global(.cm-askBox) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0 6px 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-soft);
+}
+
+:global(.cm-askInput) {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 2px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+
+:global(.cm-askSend) {
+  flex: none;
+  font: inherit;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+}
