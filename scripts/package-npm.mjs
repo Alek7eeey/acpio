@@ -37,6 +37,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { deriveVersion } from "./releaseTags.mjs";
+import { stampPackedRelease } from "./versionHistory.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outRoot = path.join(repoRoot, "dist-npm");
@@ -161,6 +162,17 @@ for (const name of WORKSPACE_PACKAGES) {
   const bundled = path.join(outRoot, "node_modules", "@acpio", name);
   copyDir(path.join(repoRoot, "packages", name, "dist"), path.join(bundled, "dist"));
   writeJson(path.join(bundled, "package.json"), workspaceManifest(name, version));
+}
+
+// The stamp the shipped copy reports names this release, not the one git saw:
+// the release run packs before it pushes its own tag, so the tag-derived
+// `released` is the previous release — and an npm copy would show it in the
+// header while `acpio -v` said the version that is actually installed.
+if (!versionSuffix) {
+  for (const file of ["buildInfo.js", "buildInfo.d.ts"]) {
+    const stamped = path.join(outRoot, "node_modules", "@acpio", "shared", "dist", file);
+    fs.writeFileSync(stamped, stampPackedRelease(fs.readFileSync(stamped, "utf8"), version));
+  }
 }
 
 // postinstall: the node-pty (Windows/ConPTY) workarounds the repo applies after

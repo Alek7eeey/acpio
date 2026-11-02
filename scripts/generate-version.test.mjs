@@ -8,6 +8,7 @@ import {
   parseReleaseVersion,
   parseVersionsMarkdown,
   renderVersionsMarkdown,
+  stampPackedRelease,
 } from "./versionHistory.mjs";
 
 describe("parseReleaseVersion", () => {
@@ -84,5 +85,16 @@ describe("version history markdown", () => {
 
   it("renders just the header while nothing is released", () => {
     expect(parseVersionsMarkdown(renderVersionsMarkdown([]))).toEqual([]);
+  });
+});
+
+describe("stampPackedRelease", () => {
+  it("puts the packaged release into the stamp the shipped build reports", () => {
+    const js =
+      'export const BUILD_INFO = {\n    "version": "0.1.43",\n    "released": "0.1.42",\n} as const;';
+    expect(stampPackedRelease(js, "0.1.43")).toContain('"released": "0.1.43"');
+    expect(stampPackedRelease(js, "0.1.43")).toContain('"version": "0.1.43"');
+    const dts = 'export declare const BUILD_INFO: {\n    readonly released: "0.1.42";\n};';
+    expect(stampPackedRelease(dts, "0.1.43")).toContain('readonly released: "0.1.43";');
   });
 });

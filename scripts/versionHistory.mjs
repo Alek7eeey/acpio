@@ -96,3 +96,18 @@ export function renderVersionsMarkdown(entries) {
   const rows = entries.map((entry) => `| ${entry.version} | ${entry.released} |`).join("\n");
   return `${VERSIONS_HEADER}${rows}\n`;
 }
+
+/**
+ * A build stamp (`buildInfo.js` or its `.d.ts`) naming another release.
+ *
+ * The published package has to report the release it *is*, not the one git saw
+ * when it was built: `release.yml` packs on a workflow_dispatch run before it
+ * pushes the tag that build carries, so the tag-derived number is the previous
+ * release. An npm copy then showed 0.1.42 in the header while `acpio -v` said
+ * 0.1.43, offered to install the version already running, installed it, and the
+ * page after the restart found the old number again. A prerelease is not a
+ * release, so it keeps the stamp it was built from.
+ */
+export function stampPackedRelease(text, released) {
+  return text.replace(/(\breleased"?\s*:\s*)"[^"]*"/, `$1"${released}"`);
+}
