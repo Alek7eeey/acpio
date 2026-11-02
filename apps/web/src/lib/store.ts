@@ -801,6 +801,30 @@ function turnCancelledForSession(state: AppState, sessionId: string) {
   return cancelled === epoch && epoch !== 0;
 }
 
+/**
+ * Messages the server created *after* the user's Stop, per session.
+ *
+ * The cancelled epoch silences the interrupted turn's late parts, but the
+ * transcript keeps growing after a Stop: a system notice (the model switch,
+ * say) is a fresh message written once the turn is over, and swallowing it
+ * left the chat without the line until a reload. Only a part whose message
+ * this tab never saw start is a late chunk of the turn that was stopped.
+ */
+const messagesAfterCancel = new Map<string, Set<string>>();
+
+function noteMessageAfterCancel(state: AppState, sessionId: string, messageId: string) {
+  if (!turnCancelledForSession(state, sessionId)) return;
+  const seen = messagesAfterCancel.get(sessionId) ?? new Set<string>();
+  seen.add(messageId);
+  messagesAfterCancel.set(sessionId, seen);
+}
+
+/** True when the cancelled epoch must drop this part as the interrupted turn's own. */
+function partSilencedByCancel(state: AppState, sessionId: string, messageId: string) {
+  if (!turnCancelledForSession(state, sessionId)) return false;
+  return !messagesAfterCancel.get(sessionId)?.has(messageId);
+}
+
 /** True only while this tab has an in-flight user prompt for the session. */
 function isClientTurnLive(state: AppState, sessionId: string) {
   if (turnCancelledForSession(state, sessionId)) return false;
@@ -1475,13 +1499,10 @@ function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppS
     const state = get();
     const current = liveDetail(state, sessionId);
     if (!current) continue;
-    const epoch = state.promptEpochBySession?.[sessionId] ?? state.promptEpoch;
-    const cancelled = state.cancelledPromptEpochBySession?.[sessionId] ?? state.cancelledPromptEpoch;
-    if (cancelled === epoch && epoch !== 0) continue;
-
     let messages = current.messages;
     let touched = false;
     for (const event of events) {
+      if (partSilencedByCancel(state, sessionId, event.messageId)) continue;
       let messageId = resolveClientMessageId(event.messageId, current.id);
       if (messageId === event.messageId) {
         const optimisticId =
@@ -3762,6 +3783,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const epoch = state.promptEpochBySession?.[id] ?? state.promptEpoch;
     const inflightBySession = { ...state.inflightBySession, [id]: 0 };
     clearDelayedIdle(id);
+    messagesAfterCancel.delete(id);
     set({
       cancelledPromptEpoch: epoch,
       cancelledPromptEpochBySession: { ...state.cancelledPromptEpochBySession, [id]: epoch },
@@ -4208,6 +4230,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       return;
     }
     if (event.type === "message.created") {
+      noteMessageAfterCancel(state, event.sessionId, event.message.id);
       // Only user messages stamp tree activity / order. Assistant bubbles during
       // a turn must not reshuffle the sidebar; open/warm never creates users.
       const stampActivity = event.message.role === "user";
@@ -4266,11 +4289,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (event.type === "part.appended" || event.type === "part.updated") {
       if (!liveDetail(state, event.sessionId)) return;
-      const epoch = state.promptEpochBySession?.[event.sessionId] ?? state.promptEpoch;
-      const cancelledAt =
-        state.cancelledPromptEpochBySession?.[event.sessionId] ??
-        (state.activeSession?.id === event.sessionId ? state.cancelledPromptEpoch : -2);
-      if (cancelledAt === epoch && epoch !== 0) return;
+      if (partSilencedByCancel(state, event.sessionId, event.messageId)) return;
       // Error parts are not rendered in the thread; lift them to the banner.
       if (event.part.type === "error") {
         const message = String(event.part.payload?.message ?? "").trim();
