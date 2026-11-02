@@ -512,10 +512,16 @@ const NewTaskComposer = memo(function NewTaskComposer({
   }, [draftKey, draft]);
 
   // A press outside only drops a form that costs nothing to drop: this ref is
-  // how the page sees that there is text (or a pasted file) to protect.
+  // how the page sees that there is text (or a pasted file) to protect — or an
+  // agent, model or params picked for the task, which the empty text hides.
   useEffect(() => {
-    dirtyRef.current = draft.trim().length > 0 || files.length > 0;
-  }, [dirtyRef, draft, files]);
+    dirtyRef.current =
+      draft.trim().length > 0 ||
+      files.length > 0 ||
+      draftProvider !== "" ||
+      draftModel !== "" ||
+      Object.keys(draftParams).length > 0;
+  }, [dirtyRef, draft, files, draftProvider, draftModel, draftParams]);
 
   // The previews are object URLs of files the user picked: nothing else
   // releases them, so a dismissed form (or a board left behind) must.

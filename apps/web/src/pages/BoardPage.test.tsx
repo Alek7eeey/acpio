@@ -1152,6 +1152,48 @@ describe("BoardPage new task form", () => {
     expect(kept.value).toBe("Half-typed");
   });
 
+  // The report: an empty form was dropped by a press outside it even though an
+  // agent had been picked in its settings panel — no text, but a choice made.
+  it("keeps an empty form whose agent was picked on a press outside it", async () => {
+    useAppStore.setState({
+      // No model picker: the form would ask for the agent's catalog, and that
+      // answer is cached for the whole file (a later test asks for its own).
+      settings: { ...DEFAULT_SETTINGS, boardTaskModelPicker: false },
+      adapters: [
+        { id: "omp", label: "OMP" } as never,
+        { id: "cursor", label: "Cursor" } as never,
+      ],
+      agentAvailability: { omp: true, cursor: true },
+    });
+    renderBoard();
+    await screen.findByText("Fix the login bug");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByLabelText("New task"));
+
+    // jsdom ships no scrollIntoView, and the picker's list scrolls its row in.
+    Element.prototype.scrollIntoView = () => {};
+
+    // Nothing written: only the agent changes, in the panel the info line opens.
+    await userEvent.click(
+      within(group).getByRole("button", { name: /^What the task starts on:/ }),
+    );
+    const panel = await screen.findByRole("dialog", { name: "What the task starts on" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Cursor" }));
+    await userEvent.click(await screen.findByRole("option", { name: "OMP" }));
+
+    fireEvent.mouseDown(document.body);
+
+    const kept = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+    expect(kept.value).toBe("");
+
+    // The agents go back to what the file found: a form opened on a leaked one
+    // asks for its catalog, and that answer is cached for the whole file.
+    useAppStore.setState({ adapters: [], agentAvailability: {} });
+  });
+
   // The folder's own "+" is outside the form too: pressing it used to reset
   // the form through the same dismissal path and wipe the text.
   it("keeps the text when the same folder's + is pressed again", async () => {
