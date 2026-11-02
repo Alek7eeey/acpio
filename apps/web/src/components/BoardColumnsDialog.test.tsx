@@ -15,7 +15,7 @@ import {
 } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
-import { BoardColumnsDialog } from "./BoardColumnsDialog";
+import { BoardColumnsDialog, forgetBoardColumnPick } from "./BoardColumnsDialog";
 
 const review: BoardColumnDto = {
   id: "col-review",
@@ -56,6 +56,7 @@ const apiMock = vi.hoisted(() => ({
 vi.mock("../lib/api", () => ({ api: apiMock }));
 
 beforeEach(() => {
+  forgetBoardColumnPick();
   useAppStore.setState({ settings: DEFAULT_SETTINGS, boards: [board] });
 });
 
@@ -119,6 +120,29 @@ describe("BoardColumnsDialog", () => {
 
     const addBox = container.querySelector("[data-new-column-title]")!.parentElement!;
     expect(addBox.querySelectorAll("select").length).toBe(0);
+  });
+
+  // The arrows in the rail move the column the strip has picked, so the pick has
+  // to be the one the reader was arranging — not the first column again after
+  // the board has been left and come back (the page unmounts on the way).
+  it("comes back on the column that was being arranged, not the first", async () => {
+    const first = renderDialog();
+    await userEvent.click(first.container.querySelector('[data-column-id="col-review"]') as HTMLElement);
+    first.unmount();
+
+    const { container } = renderDialog();
+    const picked = () =>
+      [...container.querySelectorAll("[data-column-id]")]
+        .filter((el) => el.getAttribute("aria-pressed") === "true")
+        .map((el) => el.getAttribute("data-column-id"));
+    expect(picked()).toEqual(["col-review"]);
+
+    // ...and ↑ moves that very column, leaving the first one where it stands.
+    await userEvent.click(container.querySelector('[aria-label="Move up"]') as HTMLElement);
+    const order = apiMock.reorderBoardColumns.mock.calls[0]![1] as string[];
+    expect(order.indexOf("col-review")).toBe(3);
+    expect(order[0]).toBe("todo");
+    expect(picked()).toEqual(["col-review"]);
   });
 
   it("renames the picked column through the same action the page uses", async () => {

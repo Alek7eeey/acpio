@@ -27,6 +27,19 @@ const SORT_TITLE: Record<BoardColumnDto["sortMode"], string> = {
 };
 
 /**
+ * The column each board's editor is on, outside the component: the board page
+ * unmounts when a task's chat takes the screen, and the editor must come back
+ * on the column the reader was arranging — the arrows in the rail move whatever
+ * is picked, so a pick that slides back to the first column moves the wrong one.
+ */
+const picked = new Map<string, string>();
+
+/** Test seam: a pick outlives a test's DOM, so a suite starts from nothing. */
+export function forgetBoardColumnPick() {
+  picked.clear();
+}
+
+/**
  * The board's columns, edited in one place: the four stage homes (rename,
  * reorder, behavior — never delete) and the lanes the reader adds.
  *
@@ -59,15 +72,26 @@ export function BoardColumnsDialog({
   const reorderBoardColumns = useAppStore((s) => s.reorderBoardColumns);
 
   const [newTitle, setNewTitle] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() =>
+    board ? (picked.get(board.id) ?? null) : null,
+  );
 
   if (!open || !board) return null;
 
   const rows = boardColumnsInOrder(board.columns);
-  // The first column answers until the reader picks another — and stays answered
-  // only while it is still there (it may have just been deleted).
-  const selected = rows.find((column) => column.id === selectedId) ?? rows[0]!;
+  // What the reader picked answers — the first column until they pick one — and
+  // stays answered only while it is still there (it may have just been deleted).
+  const selected =
+    rows.find((column) => column.id === selectedId) ??
+    rows.find((column) => column.id === picked.get(board.id)) ??
+    rows[0]!;
   const at = rows.indexOf(selected);
+
+  /** Picking is what the rail acts on, and it outlives this dialog. */
+  const pick = (id: string) => {
+    picked.set(board.id, id);
+    setSelectedId(id);
+  };
 
   /** What the strip prints on the column: the reader's name, or the stage's own. */
   const nameOf = (column: BoardColumnDto) =>
@@ -79,6 +103,9 @@ export function BoardColumnsDialog({
     const to = from + dir;
     if (from < 0 || to < 0 || to >= ids.length) return;
     [ids[from], ids[to]] = [ids[to], ids[from]];
+    // The column that moved is the one the reader is arranging: it stays picked
+    // however the board comes back from the write.
+    pick(id);
     void reorderBoardColumns(board.id, ids);
   };
 
@@ -123,7 +150,7 @@ export function BoardColumnsDialog({
                 className={column.id === selected.id ? styles.rowActive : styles.row}
                 data-column-id={column.id}
                 aria-pressed={column.id === selected.id}
-                onClick={() => setSelectedId(column.id)}
+                onClick={() => pick(column.id)}
               >
                 <span className={styles.rowIndex}>{index + 1}</span>
                 <span className={styles.rowTitle}>{nameOf(column)}</span>

@@ -1780,6 +1780,35 @@ const initialSidePanels = resolveExclusiveSidePanels(
   Boolean(initialActiveSessionId && initialGitPanelOpenSessions.has(initialActiveSessionId)),
 );
 
+/**
+ * Every column write answers with the whole board, and the server broadcasts it
+ * too. A reader who presses an arrow twice runs two round trips at once, and the
+ * first one — the older order — may land last: the strip would then snap back,
+ * the column they just moved jumping to its old line. So each write takes a
+ * ticket and only the newest may land; dropping an older answer costs nothing,
+ * the newest one carries the board. The broadcast of a write that started before
+ * our own may also arrive late (it is answered before our room trip is over), so
+ * no board frame lands while a write of ours is still out.
+ */
+const boardWriteTicket = new Map<string, number>();
+const boardWritesOut = new Map<string, number>();
+
+function beginBoardWrite(boardId: string): { newest: () => boolean; end: () => void } {
+  const ticket = (boardWriteTicket.get(boardId) ?? 0) + 1;
+  boardWriteTicket.set(boardId, ticket);
+  boardWritesOut.set(boardId, (boardWritesOut.get(boardId) ?? 0) + 1);
+  return {
+    newest: () => boardWriteTicket.get(boardId) === ticket,
+    end: () =>
+      boardWritesOut.set(boardId, Math.max(0, (boardWritesOut.get(boardId) ?? 1) - 1)),
+  };
+}
+
+/** Whether a column write of ours is still on the wire for this board. */
+function boardWriteOut(boardId: string): boolean {
+  return (boardWritesOut.get(boardId) ?? 0) > 0;
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
   serverPlatform: null,
@@ -2024,30 +2053,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   addBoardColumn: async (id, body) => {
+    const write = beginBoardWrite(id);
     try {
       const board = await api.addBoardColumn(id, body);
-      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+      if (write.newest()) set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
     } catch {
       // server offline — the strip keeps the columns it has
+    } finally {
+      write.end();
     }
   },
   updateBoardColumn: async (id, columnId, patch) => {
+    const write = beginBoardWrite(id);
     try {
       const board = await api.updateBoardColumn(id, columnId, patch);
-      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+      if (write.newest()) set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
     } catch {
       // server offline — keep what the board shows
+    } finally {
+      write.end();
     }
   },
   deleteBoardColumn: async (id, columnId) => {
+    const write = beginBoardWrite(id);
     try {
       const board = await api.deleteBoardColumn(id, columnId);
-      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+      if (write.newest()) set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
     } catch {
       // server offline — the column stays
+    } finally {
+      write.end();
     }
   },
   reorderBoardColumns: async (id, ids) => {
+    const write = beginBoardWrite(id);
     // Optimistic: the strip already moved the column, the server catches up.
     set((s) => ({
       boards: s.boards.map((b) => {
@@ -2065,9 +2104,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }));
     try {
       const board = await api.reorderBoardColumns(id, ids);
-      set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
+      if (write.newest()) set((s) => ({ boards: s.boards.map((b) => (b.id === id ? board : b)) }));
     } catch {
-      void get().refreshBoards();
+      // A stale failure has nothing to put back — a newer write owns the board.
+      if (write.newest()) void get().refreshBoards();
+    } finally {
+      write.end();
     }
   },
   setTaskColumn: async (id, columnId) => {
@@ -3852,7 +3894,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     if (event.type === "board.updated") {
       // Columns are the board's config: a second tab, or the phone, sees a new
-      // lane — and its cards — without reloading the page.
+      // lane — and its cards — without reloading the page. A frame of our own is
+      // answered before the write's round trip ends, so it may carry the order
+      // the reader has already moved past: while a write of ours is out, the
+      // board waits for its answer rather than for a frame.
+      if (boardWriteOut(event.board.id)) return;
       set({ boards: state.boards.map((b) => (b.id === event.board.id ? event.board : b)) });
       return;
     }
