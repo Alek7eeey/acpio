@@ -145,6 +145,61 @@ describe("finished turn reasoning headers", () => {
   });
 });
 
+// A model with thinking off writes a lone "." as its message text before every
+// tool call, and the harness stores it as a text part between two stretches of
+// reasoning. It is filler, not a sentence: it must not reach the reader, and it
+// must not split the reasoning either side of it into two blocks.
+describe("a lone dot from a thinking-off model", () => {
+  const dotted: SessionDetailDto = {
+    ...detail,
+    messages: [
+      detail.messages[0]!,
+      {
+        id: "m1",
+        sessionId: "s1",
+        role: "assistant",
+        createdAt: "2026-09-30T10:00:01.000Z",
+        parts: [
+          part("t1", "thought", 0, "Сначала посмотрю файлы"),
+          part("d1", "text", 1, "."),
+          part("t2", "thought", 2, "Теперь читаю файлы"),
+          part("d2", "text", 3, "."),
+          part("x1", "text", 4, "Готово: два файла"),
+        ],
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      sessions: [dotted],
+      activeSession: dotted,
+      sessionDetails: { s1: dotted },
+    });
+  });
+
+  it("drops the dot and keeps the reasoning in one block", async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText(/Готово: два файла/);
+
+    const blocks = Array.from(container.querySelectorAll<HTMLElement>(`.${styles.thought}`));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.textContent).toContain("Сначала посмотрю файлы");
+    expect(blocks[0]!.textContent).toContain("Теперь читаю файлы");
+    const dots = Array.from(container.querySelectorAll("*")).filter(
+      (el) => el.textContent?.trim() === ".",
+    );
+    expect(dots).toHaveLength(0);
+  });
+});
+
 // A picture in an agent answer is a file it saved itself: a path in its own text
 // and, for a harness that generates images, a `status` part with `kind: "image"`
 // (the core's normalized event). Neither had a way to the reader — no route

@@ -1493,6 +1493,13 @@ function UserMessageActions({
   );
 }
 
+/** A text part that is nothing but dots. A model with thinking off writes a
+ *  lone "." as its message text before each tool call (see the omp/deepseek
+ *  transcript): filler, not a sentence the reader should get. */
+function isDotOnlyText(part: MessagePartDto): boolean {
+  return part.type === "text" && /^\.+$/.test(String(part.payload.text ?? "").trim());
+}
+
 function coalesceParts(parts: MessagePartDto[]): MessagePartDto[] {
   const out: MessagePartDto[] = [];
   for (const part of parts) {
@@ -4036,7 +4043,10 @@ function isSubagentLike(part: MessagePartDto) {
 function coalesceAssistantParts(
   parts: MessagePartDto[],
 ): MessagePartDto[] {
-  const coalesced = coalesceParts(parts);
+  // Filler dots are dropped before the merge, so the reasoning either side of
+  // them stays adjacent and coalesces into one block instead of two split by an
+  // empty line.
+  const coalesced = coalesceParts(parts.filter((part) => !isDotOnlyText(part)));
   const out: MessagePartDto[] = [];
   const subagentIndexByKey = new Map<string, number>();
 
