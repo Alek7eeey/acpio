@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import {
+  BG_JOB_MAX_WAIT_MS,
   BG_MCP_PATH,
   BG_MCP_SERVER_ID,
   BG_MCP_SERVER_NAME,
@@ -63,13 +64,14 @@ const MAX_RUNNING_JOBS = 24;
 /** Finished jobs kept for the page and for the agent to read back. */
 const MAX_FINISHED_JOBS = 40;
 /**
- * Longest one `run` call may block on the job. It has to stay under the MCP
- * client's 180 s per-call limit (`adapter-builtin/src/mcp.ts`): a call that
- * outlives it is dropped by the client, and the model gets an error instead of
- * the tail it was promised. `bash` has its own 300 s ceiling and is a native
- * tool, so the two numbers are not the same on purpose.
+ * Longest one `run` wait or one `job` call may block on the job. It is the same
+ * ceiling `bash` has (`TERMINAL_WAIT_MAX_MS`), so waiting for a job is never
+ * weaker than sleeping in a command: a 170 s wait for 35 minutes of work only
+ * pushed the model into `timeout … sleep` loops over ssh. The client that calls
+ * `job` must allow the call this long — `adapter-builtin/src/mcp.ts` does for
+ * `acpio_bg`.
  */
-export const MAX_WAIT_MS = 170_000;
+export const MAX_WAIT_MS = BG_JOB_MAX_WAIT_MS;
 /**
  * Output that rides inside the completion note. Kept small on purpose: the note
  * stays in the transcript forever, while the full log is one `read` away — so

@@ -7,7 +7,7 @@ import { EventEmitter, once } from "node:events";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { Agent, request as httpsRequest } from "node:https";
 import { tool, jsonSchema, type ToolSet } from "ai";
-import { childProcessEnv, mcpStdioSpawn, ProcessTextDecoder } from "@acpio/shared";
+import { BG_MCP_SERVER_NAME, childProcessEnv, mcpStdioSpawn, ProcessTextDecoder, TERMINAL_WAIT_MAX_MS } from "@acpio/shared";
 import type { AskPermission } from "./tools.js";
 
 /** One ACP `mcpServers` entry, normalized. */
@@ -32,6 +32,13 @@ export interface McpToolDef {
 
 const CONNECT_TIMEOUT_MS = 20_000;
 const CALL_TIMEOUT_MS = 180_000;
+/**
+ * `acpio_bg`'s `job` blocks on purpose, up to `BG_JOB_MAX_WAIT_MS` — the same
+ * ceiling `bash` has. The 180 s guard above would drop that call mid-wait and
+ * the tail it was waiting for would arrive as an error instead, so this server
+ * alone gets a limit that outlives the longest wait it can serve.
+ */
+const BG_CALL_TIMEOUT_MS = TERMINAL_WAIT_MAX_MS + 60_000;
 const MAX_SERVERS = 20;
 const MAX_TOOLS_PER_SERVER = 200;
 const RESULT_CHAR_LIMIT = 30_000;
@@ -206,7 +213,8 @@ class McpConnection {
   }
 
   async call(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
-    const result = await this.request("tools/call", { name, arguments: args }, CALL_TIMEOUT_MS);
+    const limit = this.spec.name === BG_MCP_SERVER_NAME ? BG_CALL_TIMEOUT_MS : CALL_TIMEOUT_MS;
+    const result = await this.request("tools/call", { name, arguments: args }, limit);
     return renderCallResult(result);
   }
 

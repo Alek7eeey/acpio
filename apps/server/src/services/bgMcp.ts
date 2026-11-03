@@ -59,8 +59,9 @@ const TOOL_DEFS: ToolDef[] = [
         label: { type: "string", description: "Name shown in the UI." },
         cwd: { type: "string", description: "Folder, relative to the chat's." },
         // Absent → control comes straight back, which is what a server wants.
-        // A number → block until the job ends (not that long: the wait ends with
-        // the job), so a test run needs no `sleep` guess before reading it.
+        // A number → block until the job ends (the wait ends with the job, so it
+        // is never a guess), so a test run needs no `sleep` before reading it.
+        // The ceiling is `bash`'s own, so this wait is never the weaker tool.
         waitMs: {
           type: "integer",
           description:

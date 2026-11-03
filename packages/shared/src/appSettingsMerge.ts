@@ -284,6 +284,16 @@ export const BUILTIN_BASH_TIMEOUT_SEC_MAX = 300;
 export const TERMINAL_WAIT_MAX_MS = 1_800_000;
 
 /**
+ * Longest one background-job wait may block — the same ceiling `bash` has, so a
+ * job can be waited on as long as a command could be slept on. It used to be
+ * 170 s, under the MCP client's 180 s per-call limit, and a wait shorter than
+ * the work it waits for taught the model to poll with `sleep` instead
+ * (`bgMcp.ts` says so itself in the note it leaves for a job that outlives a
+ * call). Whichever client calls `job` must give the call at least this long.
+ */
+export const BG_JOB_MAX_WAIT_MS = TERMINAL_WAIT_MAX_MS;
+
+/**
  * Heal the built-in agent's bash timeout. Anything not a finite number falls
  * back to the default; a command needs a moment to fail, so a lower value clamps
  * up to the minimum the harness itself enforces on `terminal/wait_for_exit`.
