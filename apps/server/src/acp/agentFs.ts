@@ -4,6 +4,7 @@
 // already rooted in the session cwd the other fs/* methods enforce.
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { type IgnoreRules, loadIgnoreFiles } from "./ignoreFiles.js";
 
 /** Directories no search should descend into: package dumps and build output. */
 const SKIP_DIRS = new Set([
@@ -46,6 +47,8 @@ export interface GlobRequest {
    */
   base?: string;
   pattern: string;
+  /** Ignore files the walk honours ({@link loadIgnoreFiles}); absent = defaults. */
+  ignoreFiles?: string[];
   /**
    * Match a nested file by its bare name as well. A pattern with no folder of
    * its own is a filename pattern (`*.ts` finds `src/a.ts`); a split walk keeps
@@ -65,6 +68,8 @@ export interface SearchRequest {
   glob?: string;
   ignoreCase?: boolean;
   maxResults?: number;
+  /** Ignore files the walk honours ({@link loadIgnoreFiles}); absent = defaults. */
+  ignoreFiles?: string[];
 }
 
 export interface SearchHit {
@@ -184,8 +189,15 @@ interface WalkEntry {
 /**
  * Depth-first walk that yields files only, skipping the heavy directories and
  * never following a symlink (a link back up the tree would loop forever).
+ * `ignore` is the folder's own ignore files, resolved against its root: the
+ * walk may start below the root (a `grep` in a subfolder), while the patterns
+ * are written from the project's folder.
  */
-async function* walkFiles(root: string): AsyncGenerator<WalkEntry> {
+async function* walkFiles(
+  root: string,
+  ignore?: { patterns: IgnoreRules; root: string },
+  skipped?: IgnoredFolders,
+): AsyncGenerator<WalkEntry> {
   const pending: WalkEntry[] = [{ abs: root, rel: "" }];
   while (pending.length) {
     const dir = pending.pop()!;
@@ -197,14 +209,46 @@ async function* walkFiles(root: string): AsyncGenerator<WalkEntry> {
     }
     for (const entry of entries) {
       const rel = dir.rel ? `${dir.rel}/${entry.name}` : entry.name;
+      const abs = path.join(dir.abs, entry.name);
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(entry.name) || entry.isSymbolicLink()) continue;
-        pending.push({ abs: path.join(dir.abs, entry.name), rel });
+        if (ignore && ignoredBy(ignore, abs, true)) {
+          // Named in the answer, so a search that found nothing can say where
+          // else to look instead of leaving the model to guess.
+          if (skipped) {
+            skipped.count += 1;
+            const shown = path.relative(ignore.root, abs).split(path.sep).join("/");
+            if (skipped.dirs.length < SKIPPED_FILES_LIST_CAP && shown) skipped.dirs.push(shown);
+          }
+          continue;
+        }
+        pending.push({ abs, rel });
       } else if (entry.isFile()) {
-        yield { abs: path.join(dir.abs, entry.name), rel };
+        if (ignore && ignoredBy(ignore, abs, false)) continue;
+        yield { abs, rel };
       }
     }
   }
+}
+
+/** Folders an ignore file kept out of a walk, as the walk met them. */
+export interface IgnoredFolders {
+  /** Paths relative to the folder that owns the ignore files, walk order. */
+  dirs: string[];
+  /** Every pruned folder, of which `dirs` is the first few. */
+  count: number;
+}
+
+/** One ignore lookup: a path of the walked tree, against its own root. */
+function ignoredBy(
+  ignore: { patterns: IgnoreRules; root: string },
+  abs: string,
+  isDir: boolean,
+): boolean {
+  const rel = path.relative(ignore.root, abs).split(path.sep).join("/");
+  // A walk that left the root (an absolute pattern) is outside the file's say.
+  if (!rel || rel === ".." || rel.startsWith("../")) return false;
+  return ignore.patterns.ignores(rel, isDir);
 }
 
 /** `null` when the file vanished between the walk and the stat. */
@@ -230,9 +274,13 @@ export async function globFiles(
   const matcher = globToRegExp(pattern);
   const base = req.base ?? req.root;
   const nameOnly = req.nameOnly ?? !pattern.includes("/");
+  const patterns = await loadIgnoreFiles(req.root, req.ignoreFiles);
   const files: GlobFile[] = [];
   let truncated = false;
-  for await (const entry of walkFiles(req.root)) {
+  for await (const entry of walkFiles(
+    req.root,
+    patterns ? { patterns, root: req.root } : undefined,
+  )) {
     if (!matchesGlob(entry.rel, matcher, nameOnly)) continue;
     if (files.length >= limit) {
       truncated = true;
@@ -261,6 +309,9 @@ export async function searchFiles(
   skippedLarge: number;
   skippedLargeFiles: SkippedFile[];
   skippedBinary: number;
+  /** Folders the ignore files pruned: what the walk left unsearched. */
+  ignoredDirs: string[];
+  ignoredDirCount: number;
 }> {
   const limit = Math.max(1, Math.min(req.maxResults ?? MAX_SEARCH_RESULTS, MAX_SEARCH_RESULTS));
   const source = req.pattern.trim().slice(0, MAX_PATTERN_LENGTH);
@@ -273,6 +324,8 @@ export async function searchFiles(
       skippedLarge: 0,
       skippedLargeFiles: [],
       skippedBinary: 0,
+      ignoredDirs: [],
+      ignoredDirCount: 0,
     };
   }
   let matcher: RegExp;
@@ -298,11 +351,26 @@ export async function searchFiles(
   // target — and a folder cap that silently skipped it made grep answer "no
   // matches" for a file that was never opened.
   const named = req.dir ? await namedFile(req.dir, req.root) : undefined;
-  const walk: WalkEntry[] | AsyncGenerator<WalkEntry> = named ? [named] : walkFiles(req.dir ?? req.root);
+  // A target the model named is searched as it is: the ignore files hide paths
+  // from a walk, they do not make an explicit file unreadable — nor an explicit
+  // folder, which is how the model reaches what the last answer said was skipped.
+  const patterns = named ? null : await loadIgnoreFiles(req.root, req.ignoreFiles);
+  const scope = req.dir && !named ? path.relative(req.root, req.dir).split(path.sep).join("/") : "";
+  const scopeIgnored = Boolean(patterns && scope && !scope.startsWith("..") && patterns.ignores(scope, true));
+  const ignore = patterns && !scopeIgnored ? { patterns, root: req.root } : undefined;
+  const ignored: IgnoredFolders = { dirs: [], count: 0 };
+  const walk: WalkEntry[] | AsyncGenerator<WalkEntry> = named
+    ? [named]
+    : walkFiles(req.dir ?? req.root, ignore, ignored);
+  // A hit's path is what the model hands back to `read`: the walk may start in
+  // a subfolder, but the path it reports is the folder-relative one every other
+  // answer speaks in.
+  const prefix = !named && scope && !scope.startsWith("..") ? `${scope}/` : "";
+  const shown = (rel: string) => (prefix ? `${prefix}${rel}` : rel);
   const maxBytes = named ? NAMED_FILE_MAX_BYTES : MAX_FILE_BYTES;
 
   for await (const entry of walk) {
-    if (!named && fileMatcher && !matchesGlob(entry.rel, fileMatcher, !fileGlob.includes("/"))) {
+    if (!named && fileMatcher && !matchesGlob(shown(entry.rel), fileMatcher, !fileGlob.includes("/"))) {
       continue;
     }
     filesScanned += 1;
@@ -317,7 +385,7 @@ export async function searchFiles(
       else {
         skippedLarge += 1;
         if (skippedLargeFiles.length < SKIPPED_FILES_LIST_CAP) {
-          skippedLargeFiles.push({ path: entry.rel, bytes: scan.bytes });
+          skippedLargeFiles.push({ path: shown(entry.rel), bytes: scan.bytes });
         }
       }
       continue;
@@ -333,7 +401,7 @@ export async function searchFiles(
         break;
       }
       matched.push({
-        path: entry.rel,
+        path: shown(entry.rel),
         line: i + 1,
         // A window around the match: on a minified line the match sits far past
         // the first preview chars, and a head-cut would hide the one thing the
@@ -342,7 +410,7 @@ export async function searchFiles(
       });
     }
     if (matched.length) {
-      files.push({ path: entry.rel, bytes: scan.bytes, lines: lines.length });
+      files.push({ path: shown(entry.rel), bytes: scan.bytes, lines: lines.length });
       hits.push(...matched);
     }
     if (truncated) break;
@@ -350,7 +418,17 @@ export async function searchFiles(
   // Walk order is filesystem order; a stable path/line order reads better in
   // the transcript and keeps the tool output reproducible.
   hits.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
-  return { hits, files, truncated, filesScanned, skippedLarge, skippedLargeFiles, skippedBinary };
+  return {
+    hits,
+    files,
+    truncated,
+    filesScanned,
+    skippedLarge,
+    skippedLargeFiles,
+    skippedBinary,
+    ignoredDirs: ignored.dirs,
+    ignoredDirCount: ignored.count,
+  };
 }
 
 /** What one candidate file turned out to be when the scan looked at it. */

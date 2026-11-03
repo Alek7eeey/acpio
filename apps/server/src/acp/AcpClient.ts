@@ -44,7 +44,7 @@ import {
 import { adapterArgs, adapterCommand, adapterSetting } from "../adapters/registry.js";
 import { globFiles, searchFiles, splitGlobScope } from "./agentFs.js";
 import { DATA_DIR } from "../db/client.js";
-import { BUILTIN_SKILLS_DIR, offloadDir } from "@acpio/adapter-builtin";
+import { BUILTIN_SKILLS_DIR, discoverSettingsSkills, offloadDir } from "@acpio/adapter-builtin";
 import { isBackgroundJobLogPath } from "../services/bgLogs.js";
 import { ProcessTextDecoder } from "../services/processText.js";
 
@@ -429,6 +429,33 @@ export async function resolveMcpStdioCommands(
  * model that ran `pwd` or wrote a scratch file with `> /tmp/x.diff` then hands
  * that spelling to `read`, so it is translated before anything resolves it.
  */
+/**
+ * `att://<name>` inside a shell command becomes the path it names.
+ *
+ * The handle is what the prompt gives the model for a file outside its folder,
+ * and `read`/`grep` resolve it — but the shell cannot, and the shell is the
+ * tool a model reaches for first: given a 1.4 MB transcript it wrote
+ * `grep -n … "att://<name>"`, got "No such file or directory", and spent the
+ * rest of the turn hunting the disk (chat «Разбор противоречий в данных»).
+ * Only a name the chat really got is substituted — an unknown one stays as it
+ * is, so the shell's own error still names it.
+ */
+export function resolveAttHandles(text: string, files: Iterable<string>): string {
+  if (!text.includes("att://")) return text;
+  // Newest first, the same order `read` resolves a handle in.
+  const known = [...files].reverse();
+  const name = (raw: string) => path.basename(raw).toLowerCase();
+  return text.replace(
+    /(["'`])att:\/\/((?:(?!\1).)+)\1|att:\/\/([^\s"'`]+)/gi,
+    (whole: string, quote?: string, quoted?: string, bare?: string) => {
+      const wanted = (quoted ?? bare ?? "").toLowerCase();
+      const hit = known.find((f) => name(f) === wanted);
+      if (!hit) return whole;
+      return quote ? `${quote}${path.resolve(hit)}${quote}` : path.resolve(hit);
+    },
+  );
+}
+
 export function shellPath(target: string): string {
   if (process.platform !== "win32") return target;
   if (/^\/tmp(\/|$)/.test(target)) return path.join(os.tmpdir(), target.slice("/tmp".length));
@@ -779,6 +806,54 @@ export class AcpClient extends EventEmitter {
 
   allowReadFile(absPath: string) {
     this.extraReadFiles.add(path.resolve(absPath));
+  }
+
+  /**
+   * A handle this harness named instead of a path: `att://image.png` for a file
+   * the chat was sent, `skill://goal-loop` for a SKILL.md it may apply.
+   *
+   * Both live outside the chat's folder — in this app's own data or install
+   * directory — and a model that read such a path as "the project" went hunting
+   * in the harness's sources instead of its working folder (measured on chat
+   * 12c738c9: 4 runs of 4 with the path; 0 of 4 with the name). A scheme keeps
+   * the handle without naming a disk location, and is a plain shortening of the
+   * prompt's longest lines.
+   *
+   * Returns the path unchanged when it is not a scheme.
+   */
+  private async uriPath(target: string): Promise<string> {
+    const raw = target.trim();
+    const att = /^att:\/\/([^\\/]+)$/i.exec(raw);
+    if (att) {
+      const wanted = att[1].toLowerCase();
+      // Newest first: a second file of the same name replaces the first one's handle.
+      const known = [...this.extraReadFiles]
+        .reverse()
+        .find((f) => path.basename(f).toLowerCase() === wanted);
+      if (known) return path.resolve(known);
+      const have = [...this.extraReadFiles].map((f) => `att://${path.basename(f)}`);
+      throw new Error(
+        `No attachment "${att[1]}" in this chat — the files it was sent: ${have.join(", ") || "none"}.`,
+      );
+    }
+    const skill = /^skill:\/\/([^\\/]+)$/i.exec(raw);
+    if (!skill) return target;
+    // The same scan the prompt was built from, so a name resolves only to a
+    // skill this chat was really offered — the boundary is not widened, the
+    // model cannot name a file of its own choosing.
+    const offered = await discoverSettingsSkills(this.bootSettings, this.rootCwd(), os.homedir());
+    const wanted = skill[1].toLowerCase();
+    const hit = offered.find((s) => s.name.toLowerCase() === wanted);
+    if (hit) {
+      // A skill this harness announced is readable whatever the switch says: a
+      // global collection lives outside every chat's folder, and applying it is
+      // what the prompt just offered — not the model naming a file of its own.
+      this.extraReadFiles.add(path.resolve(hit.path));
+      return hit.path;
+    }
+    throw new Error(
+      `No skill "${skill[1]}" here — offered: ${offered.map((s) => `skill://${s.name}`).join(", ") || "none"}.`,
+    );
   }
 
   get lastStderr() {
@@ -1460,6 +1535,17 @@ export class AcpClient extends EventEmitter {
     return this.adapter.settingsFor ? this.adapter.settingsFor(raw) : raw;
   }
 
+  /**
+   * The ignore files the agent's walk honours. Only the in-process built-in
+   * agent reads our list: a spawned CLI has its own, and filtering its search
+   * behind its back would just hide files it expects to see.
+   */
+  private async walkIgnoreFiles(): Promise<string[]> {
+    if ((this.adapter.family ?? this.adapter.id) !== "builtin") return [];
+    // Read live, like the switch below: a file added to the list applies at once.
+    return (await this.liveSettings()).builtinIgnoreFiles;
+  }
+
   private async refreshOutsideCwd(): Promise<void> {
     // Only the in-process built-in agent has the switch: a spawned CLI keeps the
     // workspace boundary whatever a built-in setting says. A preset of it is the
@@ -1534,7 +1620,22 @@ export class AcpClient extends EventEmitter {
     );
   }
 
+  /**
+   * A `grep` scope: an `att://` handle names one attached file — the same
+   * handle `read` opens — and anything else names a folder. Without this the
+   * handle resolved to a folder under the cwd, the scan found nothing, and the
+   * answer "no matches" read as "the attachment is empty": the built-in agent
+   * then spent the turn hunting the disk for the file (chat «Разбор
+   * противоречий в данных», 3 нояб. 2026).
+   */
+  private searchScope(raw: string, resolved: string) {
+    return /^att:\/\//i.test(raw)
+      ? this.assertReadablePath(resolved)
+      : this.assertSearchableDir(raw);
+  }
+
   /** Directories a read-only search may scope to: the cwd, plus this chat's job logs. */
+
   private assertSearchableDir(targetPath: string) {
     const resolved = path.resolve(this.rootCwd(), shellPath(targetPath));
     if (!this.outsideCwdAllowed && isBackgroundJobLogPath(this.sessionId, resolved)) return resolved;
@@ -1566,7 +1667,7 @@ export class AcpClient extends EventEmitter {
   }
 
   private async handleFsRead(params: Record<string, unknown>) {
-    const filePath = this.assertReadablePath(String(params.path ?? ""));
+    const filePath = this.assertReadablePath(await this.uriPath(String(params.path ?? "")));
     const bytes = await fsp.readFile(filePath);
     const raw = bytes.toString("utf8");
     // The stamp covers the whole file even when a window goes back: `write`
@@ -1590,7 +1691,7 @@ export class AcpClient extends EventEmitter {
    * mojibake. Base64 out, so the agent's `read` hands it to the model as pixels.
    */
   private async handleFsReadBinary(params: Record<string, unknown>) {
-    const filePath = this.assertReadablePath(String(params.path ?? ""));
+    const filePath = this.assertReadablePath(await this.uriPath(String(params.path ?? "")));
     const bytes = await fsp.readFile(filePath);
     if (bytes.byteLength > MAX_AGENT_IMAGE_BYTES) {
       throw new Error(
@@ -1652,6 +1753,8 @@ export class AcpClient extends EventEmitter {
       pattern: scope.pattern,
       nameOnly: scope.nameOnly,
       maxResults: params.max_results == null ? undefined : Number(params.max_results),
+      // Read live: a file added to the list applies to the very next search.
+      ignoreFiles: await this.walkIgnoreFiles(),
     });
   }
 
@@ -1660,17 +1763,24 @@ export class AcpClient extends EventEmitter {
     const scope = String(params.path ?? "").trim();
     return searchFiles({
       root: this.rootCwd(),
-      ...(scope ? { dir: this.assertSearchableDir(scope) } : {}),
+      ...(scope
+        ? { dir: this.searchScope(scope, await this.uriPath(scope)) }
+        : {}),
       pattern: String(params.pattern ?? ""),
       ...(params.glob == null ? {} : { glob: String(params.glob) }),
       ignoreCase: params.ignore_case === true,
       maxResults: params.max_results == null ? undefined : Number(params.max_results),
+      ignoreFiles: await this.walkIgnoreFiles(),
     });
   }
 
   private handleTerminalCreate(params: Record<string, unknown>) {
-    const command = String(params.command ?? "");
-    const args = Array.isArray(params.args) ? params.args.map(String) : [];
+    // A handle the prompt named is openable in every tool, the shell included.
+    const handles = this.extraReadFiles;
+    const command = resolveAttHandles(String(params.command ?? ""), handles);
+    const args = Array.isArray(params.args)
+      ? params.args.map(String).map((a) => resolveAttHandles(a, handles))
+      : [];
     const cwd =
       typeof params.cwd === "string" && params.cwd
         ? this.assertInsideCwd(params.cwd)

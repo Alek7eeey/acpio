@@ -2871,12 +2871,40 @@ export async function runPrompt(
       // (files render as separate chips). Bare paths only: an annotation saying
       // the picture "is attached" read as a claim the model could doubt — it
       // answered "I likely cannot see pixels" while the pixels sat in the same
-      // message (session 3d088bb2). The path still names the file on disk for a
-      // model whose endpoint drops image blocks (text-only behind a proxy).
-      promptUserText = withAttachmentLinks(promptUserText, saved);
-      const listed = saved.map((f) => f.relPath);
+      // message (session 3d088bb2).
+      //
+      // A file outside the chat's folder is named `att://<name>`, never by the
+      // absolute path it was staged to: a board task's screenshot lives in this
+      // app's own `data/attachments`, and a model that read that path as "the
+      // project" went hunting in the harness's sources instead of its working
+      // folder (measured on the first turn of chat 12c738c9: with the path 4
+      // runs of 4, with the name 0 of 4 — and removing the skills' own absolute
+      // paths changed nothing). The scheme keeps the handle for a later turn,
+      // where the picture itself is no longer in the prompt: `read` opens it.
+      const cwdRoot = path.resolve(opts.cwd);
+      const handle = (f: SavedAttachment) => {
+        const rel = path.relative(cwdRoot, f.absPath);
+        return rel && !rel.startsWith("..") && !path.isAbsolute(rel)
+          ? f.relPath
+          : `att://${f.name}`;
+      };
+      promptUserText = withAttachmentLinks(
+        promptUserText,
+        saved.map((f) => ({ name: f.name, relPath: handle(f) })),
+      );
+      const listed = saved.map(handle);
+      // A scheme handle is not a path a model knows how to open: told only
+      // "прочитайте их", the built-in agent read `att://<name>` as "not a file",
+      // never called `read`, and spent five minutes hunting the disk with bash
+      // (chat «Разбор противоречий в данных»). The skills line spells out
+      // `read skill://<name>`; this hint spells out the call for its handle too.
+      const att = listed.find((h) => h.startsWith("att://"));
       const hint = `[Прикреплённые файлы: ${listed.join(", ")}${
-        embedded.size === saved.length ? "" : " — прочитайте их при необходимости."
+        embedded.size === saved.length
+          ? ""
+          : att
+            ? ` — откройте через read({ path: "${att}" })`
+            : " — прочитайте их при необходимости."
       }]`;
       // A picture sent without words has no text of its own: the hint must not
       // start with the blank lines that separated it from a prompt.

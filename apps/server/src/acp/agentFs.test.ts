@@ -20,6 +20,23 @@ async function workspace(): Promise<string> {
   return root;
 }
 
+/** The workspace above plus a `.cursorignore` with what a real project writes. */
+async function ignoreWorkspace(): Promise<string> {
+  const root = await workspace();
+  await fsp.mkdir(path.join(root, "bin", "Debug"), { recursive: true });
+  await fsp.writeFile(path.join(root, "bin", "Debug", "app.txt"), "hidden calcTotal\n");
+  await fsp.mkdir(path.join(root, "web", "packages", "ui"), { recursive: true });
+  await fsp.writeFile(
+    path.join(root, "web", "packages", "ui", "calc.ts"),
+    "export const calcTotal = 3;\n",
+  );
+  await fsp.writeFile(
+    path.join(root, ".cursorignore"),
+    "# build output\n**/[Bb]in/\n**/packages/\n!web/packages/\n!web/packages/**\n",
+  );
+  return root;
+}
+
 afterEach(async () => {
   for (const root of roots.splice(0)) {
     await fsp.rm(root, { recursive: true, force: true });
@@ -109,7 +126,7 @@ describe("searchFiles", () => {
     expect(filesScanned).toBeLessThan(6);
   });
 
-  it("scopes a search to one directory", async () => {
+  it("scopes a search to one directory, and reports paths the folder's way", async () => {
     const root = await workspace();
     const { hits } = await searchFiles({
       root,
@@ -117,7 +134,8 @@ describe("searchFiles", () => {
       pattern: "calctotal",
       ignoreCase: true,
     });
-    expect(hits.map((h) => h.path)).toEqual(["b.ts"]);
+    // Folder-relative, like every other answer: the path goes back into `read`.
+    expect(hits.map((h) => h.path)).toEqual(["src/nested/b.ts"]);
   });
 
   it("stops at maxResults and says so", async () => {
@@ -125,6 +143,53 @@ describe("searchFiles", () => {
     const { hits, truncated } = await searchFiles({ root, pattern: "calc", maxResults: 1 });
     expect(hits).toHaveLength(1);
     expect(truncated).toBe(true);
+  });
+
+  it("keeps what .cursorignore hides out of the walk, and a negated folder in", async () => {
+    const root = await ignoreWorkspace();
+    expect((await globFiles({ root, pattern: "**/*.ts" })).files.map((f) => f.path)).toEqual([
+      "src/a.ts",
+      "src/nested/b.ts",
+      "web/packages/ui/calc.ts",
+    ]);
+    const { hits } = await searchFiles({ root, pattern: "calcTotal" });
+    expect(hits.map((h) => h.path)).toEqual([
+      "README.md",
+      "src/a.ts",
+      "web/packages/ui/calc.ts",
+    ]);
+  });
+
+  it("says which folders the ignore files kept out of the walk", async () => {
+    const root = await ignoreWorkspace();
+    const res = await searchFiles({ root, pattern: "nothing-matches-this" });
+    expect(res.ignoredDirCount).toBe(1);
+    expect(res.ignoredDirs).toEqual(["bin"]);
+  });
+
+  it("searches a folder the model names, ignored or not", async () => {
+    const root = await ignoreWorkspace();
+    const quiet = await searchFiles({ root, pattern: "calcTotal" });
+    expect(quiet.hits.map((h) => h.path)).not.toContain("bin/Debug/app.txt");
+
+    // Saying the folder is the answer to "nothing was found there": the walk
+    // starts inside it and applies no ignore of its own for this call.
+    const named = await searchFiles({
+      root,
+      dir: path.join(root, "bin"),
+      pattern: "hidden",
+    });
+    expect(named.hits.map((h) => h.path)).toEqual(["bin/Debug/app.txt"]);
+  });
+
+  it("still searches a file the model names, ignored or not", async () => {
+    const root = await ignoreWorkspace();
+    const { hits } = await searchFiles({
+      root,
+      dir: path.join(root, "bin", "Debug", "app.txt"),
+      pattern: "hidden",
+    });
+    expect(hits.map((h) => h.path)).toEqual(["bin/Debug/app.txt"]);
   });
 
   it("explains a bad regular expression instead of throwing raw", async () => {

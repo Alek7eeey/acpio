@@ -17,6 +17,7 @@ import {
   mergeConfigOptions,
   resolveCommand,
   resolveMcpStdioCommands,
+  resolveAttHandles,
   shellPath,
   buildAgentEnv,
   type ConfigOption,
@@ -923,6 +924,82 @@ describe("built-in agent outside the session cwd", () => {
     expect(res.content).toBe("body\n");
   });
 
+  // The prompt names a file it handed over as `att://<name>` instead of the path
+  // it was staged to (a board task's screenshot lives in this app's own data
+  // folder, and a path pointing there read as "the project" — chat 12c738c9 went
+  // hunting in the harness's sources, 4 runs of 4). The scheme must still open
+  // the file, and must not become a way to name anything else.
+  it("opens an attached file by its att:// name, not by its staging path", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    (acp as unknown as { allowReadFile: (p: string) => void }).allowReadFile(outsideFile);
+    const res = (await acp.handleClientMethod("fs/read_text_file", { path: "att://SKILL.md" })) as {
+      content: string;
+    };
+    expect(res.content).toContain("body");
+    // A name the chat never got lists the ones it did — and names no path.
+    await expect(
+      acp.handleClientMethod("fs/read_text_file", { path: "att://menu.png" }),
+    ).rejects.toThrow(/No attachment "menu\.png"/);
+    await expect(
+      acp.handleClientMethod("fs/read_text_file", { path: "att://menu.png" }),
+    ).rejects.toThrow(/att:\/\/SKILL\.md/);
+  });
+
+  // The shell is the tool a model reaches for first, and it cannot open a
+  // handle: `grep … "att://<name>"` came back "No such file or directory" and
+  // the turn turned into a disk hunt. A command naming a real attachment gets
+  // the path it names; an unknown one keeps its spelling.
+  it("resolves an att:// handle inside a shell command", () => {
+    const files = ["C:\\store\\a\\notes.md", "C:\\store\\b\\Разбор противоречий.md"];
+    expect(resolveAttHandles('grep -n x "att://Разбор противоречий.md"', files)).toBe(
+      'grep -n x "C:\\store\\b\\Разбор противоречий.md"',
+    );
+    expect(resolveAttHandles("cat att://notes.md | head", files)).toBe(
+      "cat C:\\store\\a\\notes.md | head",
+    );
+    // Not an attachment of this chat — left for the shell to complain about.
+    expect(resolveAttHandles('cat "att://menu.png"', files)).toBe('cat "att://menu.png"');
+  });
+
+  // `read` alone is not enough for a 1.4 MB transcript: the model greps it, and
+  // a grep scope of `att://<name>` used to scan a folder of that name under the
+  // cwd, find nothing, and answer "No matches" — which read as "the attachment
+  // is empty" (chat «Разбор противоречий в данных»).
+  it("greps an attached file by its att:// name", async () => {
+    const { cwd, outsideFile } = await room();
+    const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
+    (acp as unknown as { allowReadFile: (p: string) => void }).allowReadFile(outsideFile);
+    const res = (await acp.handleClientMethod("fs/search", {
+      path: "att://SKILL.md",
+      pattern: "body",
+    })) as { hits: Array<{ path: string; line: number }> };
+    expect(res.hits.length).toBeGreaterThan(0);
+    await expect(
+      acp.handleClientMethod("fs/search", { path: "att://menu.png", pattern: "body" }),
+    ).rejects.toThrow(/No attachment "menu\.png"/);
+  });
+
+  // Shipped skills sit in this app's install folder; the prompt names them
+  // `skill://<name>` for the same reason and because the path is the longest line
+  // it prints. Only a skill the chat was offered may be opened this way.
+  it("opens a skill by its skill:// name", async () => {
+    const { cwd, outsideDir } = await room();
+    const acp = client(
+      getAdapter("builtin"),
+      cwd,
+      // The configured path holds skill folders, so it is the parent of `notes`.
+      settingsWith({ builtinAllowOutsideCwd: false, builtinSkillPaths: [path.dirname(outsideDir)] }),
+    );
+    const res = (await acp.handleClientMethod("fs/read_text_file", { path: "skill://notes" })) as {
+      content: string;
+    };
+    expect(res.content).toContain("body");
+    await expect(
+      acp.handleClientMethod("fs/read_text_file", { path: "skill://elsewhere" }),
+    ).rejects.toThrow(/No skill "elsewhere"/);
+  });
+
   it("reads a file outside the folder once the switch is on", async () => {
     const { cwd, outsideFile } = await room();
     const acp = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: true }));
@@ -1005,6 +1082,25 @@ describe("built-in agent outside the session cwd", () => {
 
     const off = client(getAdapter("builtin"), cwd, settingsWith({ builtinAllowOutsideCwd: false }));
     await expect(off.handleClientMethod("fs/glob", { pattern })).rejects.toThrow(outsideError);
+  });
+
+  it("honours the ignore files for the built-in agent, and leaves a CLI's search alone", async () => {
+    const { cwd } = await room();
+    await fsp.mkdir(path.join(cwd, "src"), { recursive: true });
+    await fsp.mkdir(path.join(cwd, "dist"), { recursive: true });
+    await fsp.writeFile(path.join(cwd, "src", "a.ts"), "", "utf8");
+    await fsp.writeFile(path.join(cwd, "dist", "bundle.ts"), "", "utf8");
+    await fsp.writeFile(path.join(cwd, ".gitignore"), "dist/\n", "utf8");
+    const glob = async (family: "builtin" | "cursor") =>
+      (
+        (await client(getAdapter(family), cwd, settingsWith({})).handleClientMethod("fs/glob", {
+          pattern: "**/*.ts",
+        })) as { files: Array<{ path: string }> }
+      ).files.map((f) => f.path);
+
+    // The setting belongs to the built-in agent: a spawned CLI reads its own.
+    expect(await glob("builtin")).toEqual(["src/a.ts"]);
+    expect(await glob("cursor")).toEqual(["dist/bundle.ts", "src/a.ts"]);
   });
 
   it("globs a workspace pattern exactly as before, absolute or relative", async () => {

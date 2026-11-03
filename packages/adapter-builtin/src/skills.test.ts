@@ -346,12 +346,15 @@ describe("renderSkillsSection", () => {
     expect(section).toContain("Skills active by default:");
     expect(section).toContain("Run git commit; skip the report.");
     expect(section).not.toContain("Write it down.");
-    // Name alone: the body below already carries the description, and its path
+    // Name alone: the body below already carries the description, and its handle
     // would only invite a second read of the same file.
     expect(section).toContain("\n- commit — already in effect, its text is below.\n");
     expect(section).not.toContain("- commit:");
     expect(section.match(/commit\/SKILL\.md`/g) ?? []).toHaveLength(0);
-    expect(section).toMatch(/\n- notes: Take notes — `.*notes.SKILL\.md`$/m);
+    // A listed skill is named by a handle, never by the SKILL.md path: the path
+    // points into this app's install folder and reads as "the project".
+    expect(section).toMatch(/\n- notes: Take notes — read `skill:\/\/notes`$/m);
+    expect(section).not.toContain("SKILL.md`");
   });
 });
 
@@ -394,12 +397,16 @@ describe("translated skills", () => {
     });
   });
 
-  it("puts the ru path and description in the prompt", async () => {
+  it("puts the ru description in the prompt and names the skill by handle", async () => {
     const { cwd, skills } = await translated();
     const section = await renderSkillsSection(skills, undefined, "ru");
-    expect(section).toContain("- commit: Сделать коммит — `");
-    expect(section).toContain(join(cwd, "commit", "SKILL.ru.md"));
-    expect(await renderSkillsSection(skills, undefined, "en")).toContain("- commit: Make a commit");
+    expect(section).toContain("- commit: Сделать коммит — читай `skill://commit`");
+    // The path the ru file lives at stays out of the prompt: a path into the
+    // app's install folder reads as "the project", the handle does not.
+    expect(section).not.toContain(cwd);
+    expect(await renderSkillsSection(skills, undefined, "en")).toContain(
+      "- commit: Make a commit — read `skill://commit`",
+    );
   });
 
   it("inlines the ru body of an active skill", async () => {

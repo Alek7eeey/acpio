@@ -464,8 +464,12 @@ export async function renderSkillsSection(
       return ru
         ? `- ${s.name} — уже в силе, его текст ниже.`
         : `- ${s.name} — already in effect, its text is below.`;
-    const { path: file, description } = skillText(s, locale);
-    return `- ${s.name}${description ? `: ${description}` : ""} — \`${file}\``;
+    // `skill://<name>`, not the file's path: the shipped skills live in this
+    // app's own install folder, and a path pointing there reads as "the
+    // project" (see `AcpClient`'s URI resolution). The handle is also
+    // shorter — a SKILL.md path is the longest line in the prompt.
+    const { description } = skillText(s, locale);
+    return `- ${s.name}${description ? `: ${description}` : ""} — ${ru ? "читай" : "read"} \`skill://${s.name}\``;
   });
   return [
     "",
