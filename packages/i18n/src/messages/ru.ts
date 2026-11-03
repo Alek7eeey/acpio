@@ -483,7 +483,7 @@ export const ru = {
       "Работает сразу: читает и правит файлы папки чата, исполняет команды и запрашивает разрешения как остальные агенты.",
     builtinBlockGenerationContext: "Генерация и контекст",
     builtinBlockProviders: "Провайдеры и модели",
-    builtinBlockPrompt: "Промпт и навыки",
+    builtinBlockPrompt: "Промпт",
     builtinBlockTools: "Инструменты",
     builtinBlockSubagents: "Субагенты",
     builtinPresetsTitle: "Пресеты агента",
@@ -673,6 +673,9 @@ export const ru = {
     profileTitle: "Профиль",
     agentConnectDesc: "Доступность агентов проверяется автоматически при входе",
     agentAdvancedDesc: "Папка по умолчанию, API-ключи и запуск CLI",
+    skillsTitle: "Скиллы",
+    skillsDesc:
+      "Папки, где агент ищет скиллы, и режимы скиллов, которые везёт само приложение.",
     voice: "Озвучка",
     voiceTitle: "Голос озвучки",
     voiceDesc: "Выберите, каким голосом читать сообщения вслух.",

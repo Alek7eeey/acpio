@@ -463,7 +463,7 @@ export const en = {
       "Works out of the box: reads and edits files in the chat folder, runs commands and asks for permission like any other harness.",
     builtinBlockGenerationContext: "Generation and context",
     builtinBlockProviders: "Providers and models",
-    builtinBlockPrompt: "Prompt and skills",
+    builtinBlockPrompt: "Prompt",
     builtinBlockTools: "Tools",
     builtinBlockSubagents: "Subagents",
     builtinPresetsTitle: "Agent presets",
@@ -655,6 +655,9 @@ export const en = {
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",
     agentAdvancedDesc: "Default folder, API keys and CLI launch",
+    skillsTitle: "Skills",
+    skillsDesc:
+      "Folders the agent scans for skills, and the modes of the skills the app itself ships.",
     voice: "Read-aloud",
     voiceTitle: "Read-aloud voice",
     voiceDesc: "Choose which voice reads messages aloud.",

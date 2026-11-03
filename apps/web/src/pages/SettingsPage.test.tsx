@@ -122,7 +122,21 @@ describe("Built-in agent section", () => {
   it("opens the outside-the-folder switch on the prompt page", () => {
     renderBuiltin("?section=builtin&leaf=access");
     expect(screen.getByLabelText("Work outside the working folder")).toBeTruthy();
+  });
+
+  // Skills are not a knob of the built-in agent any more: the folders and the
+  // shipped set are one page of the agent section.
+  it("paints the skill rows on their own page of the agent section", () => {
+    renderBuiltin("?section=agent&leaf=skills");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Skills");
     expect(screen.getByLabelText("Skill folders")).toBeTruthy();
+    expect(screen.getByText("Built-in skills")).toBeTruthy();
+  });
+
+  it("keeps the skill folders off the built-in agent's prompt page", () => {
+    renderBuiltin("?section=builtin&leaf=prompt");
+    expect(screen.queryByLabelText("Skill folders")).toBeNull();
+    expect(screen.getByLabelText("Markdown pictures")).toBeTruthy();
   });
 
   // The walk down the tree that used to reach it: a link naming the leaf it was
@@ -310,7 +324,7 @@ describe("SettingsPage form state", () => {
     const user = userEvent.setup();
     useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
     render(
-      <MemoryRouter initialEntries={["/settings?section=builtin&leaf=prompt"]}>
+      <MemoryRouter initialEntries={["/settings?section=agent&leaf=skills"]}>
         <I18nProvider>
           <SettingsPage />
         </I18nProvider>

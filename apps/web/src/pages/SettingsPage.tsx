@@ -2499,15 +2499,17 @@ export function SettingsPage() {
                 ? t("settings.agentConnectTitle")
                 : leaf === "model"
                   ? t("settings.agentModelTitle")
-                  : leaf === "remote"
-                    ? t("settings.remoteAccessTitle")
-                    : leaf === "diagnostics"
-                      ? t("settings.diagnosticsTitle")
-                      : leaf === "mcp"
-                        ? t("settings.mcpTitle")
-                        : leaf === "plugins"
-                          ? t("settings.pluginsTitle")
-                          : t("settings.agentAdvancedTitle")
+                  : leaf === "skills"
+                    ? t("settings.skillsTitle")
+                    : leaf === "remote"
+                      ? t("settings.remoteAccessTitle")
+                      : leaf === "diagnostics"
+                        ? t("settings.diagnosticsTitle")
+                        : leaf === "mcp"
+                          ? t("settings.mcpTitle")
+                          : leaf === "plugins"
+                            ? t("settings.pluginsTitle")
+                            : t("settings.agentAdvancedTitle")
               : t("settings.agentConnectTitle");
 
   const subtitle =
@@ -2525,17 +2527,19 @@ export function SettingsPage() {
                   : t("settings.sidebarCollapseHint")
           : section === "builtin"
             ? t("settings.builtinHint")
-            : section === "agent" && leaf === "mcp"
-              ? t("settings.mcpHint")
-              : section === "agent" && leaf === "plugins"
-                ? t("settings.pluginsHint")
-                : section === "agent" && leaf === "advanced"
-                  ? t("settings.agentAdvancedDesc")
-                  : section === "agent" && leaf === "remote"
-                    ? t("settings.remoteAccessDesc")
-                    : section === "agent" && leaf === "diagnostics"
-                      ? t("settings.diagnosticsDesc")
-                      : t("settings.agentConnectDesc");
+            : section === "agent" && leaf === "skills"
+              ? t("settings.skillsDesc")
+              : section === "agent" && leaf === "mcp"
+                ? t("settings.mcpHint")
+                : section === "agent" && leaf === "plugins"
+                  ? t("settings.pluginsHint")
+                  : section === "agent" && leaf === "advanced"
+                    ? t("settings.agentAdvancedDesc")
+                    : section === "agent" && leaf === "remote"
+                      ? t("settings.remoteAccessDesc")
+                      : section === "agent" && leaf === "diagnostics"
+                        ? t("settings.diagnosticsDesc")
+                        : t("settings.agentConnectDesc");
 
   const eyebrow =
     section === "about"
@@ -3885,39 +3889,6 @@ export function SettingsPage() {
             </SettingTable>
 
             <SettingTable>
-              <SettingRow
-                layout="stack"
-                label={t("settings.builtinSkillPathsTitle")}
-                hint={t("settings.builtinSkillPathsHint")}
-                terms={[
-                  t("settings.builtinSkillPathsTitle"),
-                  t("settings.builtinSkillPathsHint"),
-                  "SKILL.md",
-                  ".agents/skills",
-                  "~/.agents/skills",
-                ]}
-              >
-                <textarea
-                  className={styles.mcpFilesInput}
-                  rows={3}
-                  spellCheck={false}
-                  value={skillPathsDraft ?? (form.builtinSkillPaths ?? []).join("\n")}
-                  onChange={(e) => {
-                    setSkillPathsDraft(e.target.value);
-                    patch("builtinSkillPaths", parsePathLines(e.target.value));
-                  }}
-                  onBlur={() => setSkillPathsDraft(null)}
-                  aria-label={t("settings.builtinSkillPathsTitle")}
-                  placeholder={DEFAULT_BUILTIN_SKILL_PATHS.join("\n")}
-                />
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => patch("builtinSkillPaths", [...DEFAULT_BUILTIN_SKILL_PATHS])}
-                >
-                  {t("settings.builtinSkillPathsReset")}
-                </button>
-              </SettingRow>
               {/* The picture line is one sentence of the same system prompt the
                   instructions above extend, so it lives in this group. */}
               <SettingRow
@@ -3944,7 +3915,7 @@ export function SettingsPage() {
             </SettingTable>
 
             {/* File access shares the page with the prompt: the switch is what
-                lets the agent open a skill folder kept outside the chat one. */}
+                lets the agent open a folder kept outside the chat one. */}
             <SettingTable>
               <SettingRow
                 label={t("settings.builtinAllowOutsideCwd")}
@@ -4018,8 +3989,47 @@ export function SettingsPage() {
           </>
         )}
 
-        {section === "builtin" && leaf === "subagents" && (
+        {/* Skills sit with the agents rather than with the built-in one: the
+            folders and the shipped set are what every chat of every agent gets,
+            so the page is one of the agent section's. */}
+        {section === "agent" && leaf === "skills" && (
           <>
+            <SettingTable>
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinSkillPathsTitle")}
+                hint={t("settings.builtinSkillPathsHint")}
+                terms={[
+                  t("settings.builtinSkillPathsTitle"),
+                  t("settings.builtinSkillPathsHint"),
+                  "SKILL.md",
+                  ".agents/skills",
+                  "~/.agents/skills",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={3}
+                  spellCheck={false}
+                  value={skillPathsDraft ?? (form.builtinSkillPaths ?? []).join("\n")}
+                  onChange={(e) => {
+                    setSkillPathsDraft(e.target.value);
+                    patch("builtinSkillPaths", parsePathLines(e.target.value));
+                  }}
+                  onBlur={() => setSkillPathsDraft(null)}
+                  aria-label={t("settings.builtinSkillPathsTitle")}
+                  placeholder={DEFAULT_BUILTIN_SKILL_PATHS.join("\n")}
+                />
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("builtinSkillPaths", [...DEFAULT_BUILTIN_SKILL_PATHS])}
+                >
+                  {t("settings.builtinSkillPathsReset")}
+                </button>
+              </SettingRow>
+            </SettingTable>
+
             <SettingTable>
               <SettingRow
                 layout="stack"
@@ -4072,7 +4082,11 @@ export function SettingsPage() {
                 )}
               </SettingRow>
             </SettingTable>
+          </>
+        )}
 
+        {section === "builtin" && leaf === "subagents" && (
+          <>
             <SettingTable>
               <SettingRow
                 label={t("settings.subagentsEnabled")}

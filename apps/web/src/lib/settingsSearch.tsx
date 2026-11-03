@@ -143,6 +143,26 @@ export function settingsSearchIndex(
       t("common.noAgentsOnline"),
       t("settings.auto"),
     ],
+    skills: [
+      t("settings.skillsTitle"),
+      t("settings.skillsDesc"),
+      t("settings.builtinSkillPathsTitle"),
+      t("settings.builtinSkillPathsHint"),
+      t("settings.builtinSkillPathsReset"),
+      t("settings.builtinSkillsTitle"),
+      t("settings.builtinSkillsHint"),
+      t("settings.builtinSkillsEmpty"),
+      t("settings.builtinSkillModeOff"),
+      t("settings.builtinSkillModeHidden"),
+      t("settings.builtinSkillModeListed"),
+      t("settings.builtinSkillModeActive"),
+      "SKILL.md",
+      ".agents/skills",
+      "навык",
+      "скилл",
+      "skill",
+      "ponytail",
+    ],
     // The built-in agent's section: one index per page of it, so a hit names
     // the page to open rather than a heading of one long page.
     presets: [
@@ -175,12 +195,6 @@ export function settingsSearchIndex(
       t("settings.builtinOffloadToolResultTokens"),
       t("settings.builtinExtraInstructionsTitle"),
       t("settings.builtinExtraInstructionsHint"),
-      t("settings.builtinSkillsTitle"),
-      t("settings.builtinSkillsHint"),
-      t("settings.builtinSkillModeOff"),
-      t("settings.builtinSkillModeHidden"),
-      t("settings.builtinSkillModeListed"),
-      t("settings.builtinSkillModeActive"),
     ],
     providers: [
       t("settings.builtinBlockProviders"),
@@ -211,8 +225,6 @@ export function settingsSearchIndex(
       t("settings.builtinBlockPrompt"),
       t("settings.builtinExtraInstructionsTitle"),
       t("settings.builtinExtraInstructionsHint"),
-      t("settings.builtinSkillPathsTitle"),
-      t("settings.builtinSkillPathsHint"),
       t("settings.builtinMarkdownImages"),
       t("settings.builtinMarkdownImagesHint"),
       t("settings.builtinAllowOutsideCwd"),
@@ -224,8 +236,6 @@ export function settingsSearchIndex(
       "system prompt",
       "промпт",
       "размышления",
-      "SKILL.md",
-      ".agents/skills",
       "markdown",
       "![shot](shot.png)",
       "cwd",
@@ -423,6 +433,11 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
   return {
     connect: [],
     model: [],
+    skills: [
+      t("settings.skillsDesc"),
+      t("settings.builtinSkillPathsHint"),
+      t("settings.builtinSkillsHint"),
+    ],
     presets: [t("settings.builtinPresetsHint"), t("settings.builtinPresetsEmpty")],
     generation: [
       t("settings.builtinMaxOutputTokensHint"),
@@ -448,7 +463,6 @@ function settingsRowHints(t: TranslateFn): Record<SettingsLeaf, string[]> {
     ],
     prompt: [
       t("settings.builtinExtraInstructionsHint"),
-      t("settings.builtinSkillPathsHint"),
       t("settings.builtinMarkdownImagesHint"),
       t("settings.builtinAllowOutsideCwdHint"),
       t("settings.builtinBashTimeoutHint"),

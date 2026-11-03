@@ -4,6 +4,9 @@ export type SettingsSection = "agent" | "builtin" | "interface" | "about";
 export type SettingsAgentLeaf =
   | "connect"
   | "model"
+  // Skills are not a knob of a harness: every chat of every agent gets the same
+  // folders and the same shipped set, so they sit with the agents themselves.
+  | "skills"
   | "advanced"
   | "remote"
   | "diagnostics"
@@ -55,8 +58,8 @@ type TreeBranch =
  * page each, so a group is opened instead of scrolled to. This list names
  * them: the tree's children and the pages' titles are read from the same
  * entries. Closely related knobs share a page (the context limits sit with the
- * generation knobs, the outside-the-folder switch with the skill paths it
- * governs) rather than getting a page of a row or two.
+ * generation knobs, the picture line with the prompt it extends) rather than
+ * getting a page of a row or two.
  */
 const BUILTIN_LEAVES: ReadonlyArray<{ id: SettingsBuiltinLeaf; key: string }> = [
   { id: "presets", key: "settings.builtinPresetsTitle" },
@@ -95,6 +98,7 @@ export function getSettingsTree(t: TranslateFn): TreeBranch[] {
   const agentChildren: Array<{ id: SettingsAgentLeaf; label: string }> = [
     { id: "connect", label: t("settings.connection") },
     { id: "model", label: t("settings.modelSection") },
+    { id: "skills", label: t("settings.skillsTitle") },
     { id: "advanced", label: t("settings.advanced") },
     { id: "mcp", label: t("settings.mcpTitle") },
     { id: "plugins", label: t("settings.pluginsTitle") },
@@ -213,6 +217,7 @@ export function parseSettingsSearch(search: string): SettingsLocation {
 
   const leaf: SettingsAgentLeaf =
     rawLeaf === "model" ||
+    rawLeaf === "skills" ||
     rawLeaf === "advanced" ||
     rawLeaf === "connect" ||
     rawLeaf === "remote" ||
