@@ -172,6 +172,30 @@ export function fenceFor(text: string): string {
   return "`".repeat(Math.max(longest + 1, 3));
 }
 
+/**
+ * The stored title of an older part may have been cut at 80 chars by the agent
+ * (`bash cd … && …`) — the export must show the command that really ran, and
+ * the full subject is still in the call's args. Rebuild it from there when the
+ * title ends in an ellipsis.
+ */
+function fullToolTitle(title: string, args: unknown): string {
+  if (!title.endsWith("…") || typeof args !== "object" || args === null) return title;
+  // The agent's title is `<toolName> <subject cut>…`: the head is that subject's
+  // prefix, so the arg it came from is the one that starts with it.
+  const cut = title.slice(0, -1);
+  const toolName = cut.split(" ")[0];
+  const head = cut.slice(toolName.length).trim();
+  for (const value of Object.values(args as Record<string, unknown>)) {
+    if (typeof value !== "string") continue;
+    const oneLine = value.replace(/\s+/g, " ").trim();
+    if (!oneLine) continue;
+    if (head ? oneLine.startsWith(head) : oneLine.startsWith(cut)) {
+      return head ? `${toolName} ${oneLine}` : oneLine;
+    }
+  }
+  return title;
+}
+
 function roleLabel(role: MessageDto["role"], locale: AppLocale): string {
   if (role === "user") return t(locale, "export.user");
   if (role === "assistant") return t(locale, "export.assistant");
@@ -216,11 +240,15 @@ function renderMessageMarkdown(message: MessageDto, locale: AppLocale): string {
       }
       case "tool_call": {
         const raw = (payload.raw as Record<string, unknown> | undefined) ?? {};
+        const args = raw.rawInput ?? raw.input ?? raw.arguments;
         const title =
-          toolDisplayTitle(
-            String(payload.title ?? payload.description ?? ""),
-            typeof raw.toolName === "string" ? raw.toolName : undefined,
-            raw.rawInput ?? raw.input ?? raw.arguments,
+          fullToolTitle(
+            toolDisplayTitle(
+              String(payload.title ?? payload.description ?? ""),
+              typeof raw.toolName === "string" ? raw.toolName : undefined,
+              args,
+            ),
+            args,
           ) || t(locale, "export.tool");
         // Exports feed agent-side analysis: output goes in full, never clipped.
         const output = toolOutputText(part);

@@ -291,6 +291,12 @@ describe("renderMarkdown", () => {
     [{ title: "MCP: tool", raw: { toolName: "mcp__example_grep" } }, "example_grep"],
     [{ title: "Tool", raw: { toolName: "bash" } }, "bash"],
     [{ title: "MCP: tool" }, "Инструмент"],
+    // A title the agent cut at 80 chars is rebuilt from the call's args: the
+    // export shows the command that really ran.
+    [
+      { title: "bash cd /w && grep -q VERDICT…", raw: { input: { command: "cd /w && grep -q VERDICT log && echo ok" } } },
+      "bash cd /w && grep -q VERDICT log && echo ok",
+    ],
   ])("tool title for payload %j is %s", (payload, title) => {
     const md = renderMarkdown(
       makeDetail({ messages: [makeMessage("assistant", [makePart("tool_call", payload)])] }),

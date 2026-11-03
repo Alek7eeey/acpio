@@ -533,9 +533,11 @@ function toolTitle(toolName: string, input: Record<string, unknown>): string {
       : typeof input.command === "string"
         ? input.command
         : "";
+  // Kept whole, on one line: the transcript is data (an export of it must show
+  // the command the agent really ran), and the card header ellipsizes visually.
   const oneLine = subject.replace(/\s+/g, " ").trim();
   if (!oneLine) return toolName;
-  return `${toolName} ${oneLine.length > 80 ? `${oneLine.slice(0, 77)}…` : oneLine}`;
+  return `${toolName} ${oneLine}`;
 }
 
 /**
