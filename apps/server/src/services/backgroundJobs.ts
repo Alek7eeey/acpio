@@ -49,10 +49,14 @@ const MAX_LOG_BYTES = 32 * 1024 * 1024;
 const LOG_FULL_MARK = "\n…[log truncated: this job reached the log size limit]\n";
 /** Bytes read per step when a reader asks for the tail of a log. */
 const TAIL_BLOCK_BYTES = 64 * 1024;
-/** `tailLines` default for the `output` tool — enough for a failing test run's summary. */
-export const DEFAULT_OUTPUT_TAIL_LINES = 200;
+/**
+ * `tailLines` default for the `job` tool — enough for a failing test run's
+ * summary. The whole log stays one `read`/`grep` away, so a smaller default
+ * costs nothing and keeps ~4k tokens out of the context of every read.
+ */
+export const DEFAULT_OUTPUT_TAIL_LINES = 60;
 /** Characters one read may return — the caller passes its own ceiling. */
-export const DEFAULT_OUTPUT_MAX_CHARS = 24_000;
+export const DEFAULT_OUTPUT_MAX_CHARS = 8_000;
 /** Running jobs at once: per chat, and across the whole server. */
 const MAX_RUNNING_PER_SESSION = 6;
 const MAX_RUNNING_JOBS = 24;
@@ -299,7 +303,7 @@ export async function startBackgroundJob(input: StartBackgroundJobInput): Promis
   }
   if (runningCount(input.sessionId) >= MAX_RUNNING_PER_SESSION) {
     throw new Error(
-      `This chat already runs ${MAX_RUNNING_PER_SESSION} background jobs — stop one first (${bgMcpToolName("stop")}).`,
+      `This chat already runs ${MAX_RUNNING_PER_SESSION} background jobs — stop one first (${bgMcpToolName("job")}({ jobId, kill: true })).`,
     );
   }
   if (runningCount() >= MAX_RUNNING_JOBS) {
@@ -688,8 +692,8 @@ export function formatBackgroundJobNote(job: BackgroundJobDto, tail: string, loc
       : "No output.";
   const log = ru ? `Лог: ${job.logPath}` : `Log: ${job.logPath}`;
   const how = ru
-    ? `Читай лог окнами через read или ищи в нём grep; хвост — ${bgMcpToolName("output")}({ jobId: "${job.id}" }), остальные задачи — ${bgMcpToolName("list")}().`
-    : `Read the log with read (windows) or grep; tail — ${bgMcpToolName("output")}({ jobId: "${job.id}" }), other jobs — ${bgMcpToolName("list")}().`;
+    ? `Читай лог окнами через read или ищи в нём grep; хвост — ${bgMcpToolName("job")}({ jobId: "${job.id}" }), остальные задачи — ${bgMcpToolName("job")}().`
+    : `Read the log with read (windows) or grep; tail — ${bgMcpToolName("job")}({ jobId: "${job.id}" }), other jobs — ${bgMcpToolName("job")}().`;
   return [head, command, log, body, how].join("\n");
 }
 

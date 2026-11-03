@@ -3323,7 +3323,7 @@ export function builtinMcpServers(
 }
 
 /** Tool names as the endpoint publishes them. */
-export const BG_MCP_TOOLS = ["run", "list", "output", "stop"] as const;
+export const BG_MCP_TOOLS = ["run", "job"] as const;
 export type BgMcpTool = (typeof BG_MCP_TOOLS)[number];
 
 /**

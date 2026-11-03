@@ -26,9 +26,9 @@ import {
 
 /**
  * The MCP server acpio is for its own chats: `run` starts a shell command in
- * the background, `list` / `output` / `stop` manage the ones this chat started.
- * The JSON-RPC plumbing it answers with lives in `servedMcp.ts`, shared with
- * the endpoint plugins get.
+ * the background, `job` is everything about one afterwards (read, wait, kill,
+ * list). The JSON-RPC plumbing it answers with lives in `servedMcp.ts`, shared
+ * with the endpoint plugins get.
  */
 
 interface ToolDef {
@@ -42,33 +42,30 @@ interface ToolDef {
 // These definitions ride every request a harness makes, so each one is trimmed
 // to what the model needs to pick the tool and fill its fields: what it does,
 // when to reach for it, and the argument meanings that are not obvious from the
-// name. The tool names, the note a settled job delivers and every result name
-// the tools that read more, so the list itself does not have to.
+// name. Two tools, not five: the four things done to a job share one result
+// shape and one id, so they share one entry — the call's own arguments say
+// which of them it is, and the split cost ~1500 chars of schema per request.
 const TOOL_DEFS: ToolDef[] = [
   {
     name: "run",
     readOnly: false,
     description:
-      "Run a shell command in the background (builds, tests, dev servers) and return its job id at once. The chat gets its output tail when it finishes.",
+      "Run a shell command in the background (builds, tests, dev servers); returns its job id at once. " +
+      "The chat gets its output tail when it finishes.",
     inputSchema: {
       type: "object",
       properties: {
-        command: {
-          type: "string",
-          description:
-            "Shell command line, run through the same shell as the `bash` tool (on Windows Git Bash: `./x` for a " +
-            "relative path, `//c` for a native CLI flag).",
-        },
-        label: { type: "string", description: "Short name shown in the UI." },
-        cwd: { type: "string", description: "Working folder, relative to the chat folder." },
+        command: { type: "string", description: "Shell command, same shell as `bash`." },
+        label: { type: "string", description: "Name shown in the UI." },
+        cwd: { type: "string", description: "Folder, relative to the chat's." },
         // Absent → control comes straight back, which is what a server wants.
         // A number → block until the job ends (not that long: the wait ends with
         // the job), so a test run needs no `sleep` guess before reading it.
         waitMs: {
           type: "integer",
           description:
-            `Stay with the job until it ends, at most this long (max ${MAX_WAIT_MS}); ` +
-            "the tail of its output comes back in this result. Omit it for a server or a watcher.",
+            `Block until it ends (max ${MAX_WAIT_MS}); its tail comes back too. ` +
+            "Omit for a server or a watcher.",
         },
       },
       required: ["command"],
@@ -76,35 +73,25 @@ const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
-    name: "list",
-    readOnly: true,
-    description: "List this chat's background jobs, running first.",
-    inputSchema: { type: "object" },
-  },
-  {
-    name: "output",
-    readOnly: true,
+    name: "job",
+    readOnly: false,
     description:
-      "Read a job's output — the last lines, or only what is new since a previous read.",
+      "A job by id: its output, wait for its end (timeoutMs), kill it (kill). " +
+      "No jobId lists this chat's jobs.",
     inputSchema: {
       type: "object",
       properties: {
-        jobId: { type: "string", description: "Job id." },
+        jobId: { type: "string", description: "Job id from `run` (bg-N); omit to list jobs." },
+        timeoutMs: {
+          type: "integer",
+          description:
+            `Block until it ends (max ${MAX_WAIT_MS}); its tail comes back. ` +
+            "Omit to read as it stands — that does not wait.",
+        },
         tailLines: { type: "integer", description: `Lines from the end (default ${DEFAULT_OUTPUT_TAIL_LINES}).` },
-        since: { type: "integer", description: "Offset from a previous read — its `to` value." },
+        since: { type: "integer", description: "Cursor from a previous read." },
+        kill: { type: "boolean", description: "Stop it and its process tree." },
       },
-      required: ["jobId"],
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "stop",
-    readOnly: false,
-    description: "Stop a job and its process tree.",
-    inputSchema: {
-      type: "object",
-      properties: { jobId: { type: "string", description: "Job id." } },
-      required: ["jobId"],
       additionalProperties: false,
     },
   },
@@ -137,11 +124,38 @@ function jobLine(job: BackgroundJobDto): string {
   return `- ${job.id} [${job.status}${exit}] ${elapsedText(job)} — «${job.label}» in ${job.cwd}`;
 }
 
+function patienceText(ms: number): string {
+  return ms >= 1000 ? `${Math.round(ms / 1000)}s` : `${ms}ms`;
+}
+
 /** A job id from another chat is "unknown" here on purpose: one chat never reads another's output. */
 function ownedJob(jobId: string, sessionId: string): BackgroundJobDto | null {
   const job = getBackgroundJob(jobId);
   if (!job || job.sessionId !== sessionId) return null;
   return job;
+}
+
+/** A settled job's tail, or what a running one has so far. */
+function jobReport(
+  job: BackgroundJobDto,
+  args: Record<string, unknown>,
+  empty = "(no output yet)",
+): string {
+  const read = readBackgroundJobOutput(job.id, {
+    tailLines: asInt(args.tailLines) ?? DEFAULT_OUTPUT_TAIL_LINES,
+    since: asInt(args.since),
+    maxChars: DEFAULT_OUTPUT_MAX_CHARS,
+  });
+  const exit = job.exitCode == null ? "" : ` exit ${job.exitCode}`;
+  return [
+    `${job.id} [${job.status}${exit}] ${elapsedText(job)} — «${job.label}»`,
+    `Log: ${job.logPath}`,
+    read?.dropped ? "(not the whole log — read the file for the rest)" : "",
+    `--- output (to=${read?.to ?? 0}) ---`,
+    read?.text.trim() ? read!.text.replace(/\s+$/, "") : empty,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function callTool(
@@ -168,33 +182,23 @@ async function callTool(
         if (waitMs > 0) {
           const settled = await waitForBackgroundJob(job.id, waitMs);
           if (settled && settled.status !== "running") {
-            const read = readBackgroundJobOutput(job.id, {
-              tailLines: DEFAULT_OUTPUT_TAIL_LINES,
-              maxChars: DEFAULT_OUTPUT_MAX_CHARS,
-            });
-            const exit = settled.exitCode == null ? "" : ` exit ${settled.exitCode}`;
-            return result(
-              [
-                `${settled.id} [${settled.status}${exit}] ${elapsedText(settled)} — «${settled.label}»`,
-                `Log: ${settled.logPath}`,
-                `--- output (to=${read?.to ?? 0}) ---`,
-                read?.text.trim() ? read.text.replace(/\s+$/, "") : "(no output)",
-              ].join("\n"),
-            );
+            return result(jobReport(settled, {}, "(no output)"));
           }
           // Patience ran out while the job still runs. Said as an instruction, not
           // as news: told only that a note comes, the model fills the gap with
           // `sleep` (measured), and the sleep is the wait it was trying to avoid.
           return result(
             [
-              `${job.id} is still running after ${waitMs >= 1000 ? `${Math.round(waitMs / 1000)}s` : `${waitMs}ms`} — ` +
+              `${job.id} is still running after ${patienceText(waitMs)} — ` +
                 "it outlived the wait, it was not killed.",
-              "Do not sleep and do not poll: end your turn, and the note with its output tail continues from there.",
-              // `output` reads the log as it stands and comes back at once: it is
-              // not a second way to wait, and naming it without saying so invites
-              // a poll loop.
-              `To look at the output as it stands (this does not wait): ${bgMcpToolName("output")}({ jobId: "${job.id}" }); ` +
-                `to kill it: ${bgMcpToolName("stop")}({ jobId: "${job.id}" }).`,
+              `Do not sleep and do not poll: stay with it by calling ${bgMcpToolName("job")}` +
+                `({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }), or end your turn — ` +
+                "the note with its output tail continues from there.",
+              // A read comes back at once: it is not a second way to wait, and
+              // naming it without saying so invites a poll loop.
+              `To look at the output as it stands (this does not wait): ` +
+                `${bgMcpToolName("job")}({ jobId: "${job.id}" }); ` +
+                `to kill it: ${bgMcpToolName("job")}({ jobId: "${job.id}", kill: true }).`,
             ].join("\n"),
           );
         }
@@ -203,54 +207,48 @@ async function callTool(
             `Started background job ${job.id} (${job.label}) in ${job.cwd}.`,
             `Output goes to ${job.logPath} — read it with read (windows) or grep.`,
             "It keeps running while you work; when it finishes the chat receives a note with its output tail.",
-            `Read its output now with ${bgMcpToolName("output")}({ jobId: "${job.id}" }); kill it with ${bgMcpToolName("stop")}({ jobId: "${job.id}" }).`,
+            `Read its output now with ${bgMcpToolName("job")}({ jobId: "${job.id}" }); ` +
+              `kill it with ${bgMcpToolName("job")}({ jobId: "${job.id}", kill: true }).`,
           ].join("\n"),
         );
       }
-      case "list": {
-        const jobs = listBackgroundJobs().filter((job) => job.sessionId === sessionId);
-        if (!jobs.length) {
-          return result(
-            `This chat has no background jobs. Start one with ${bgMcpToolName("run")}({ command: "…" }).`,
-          );
+      case "job": {
+        const jobId = asString(args.jobId).trim();
+        if (!jobId) {
+          const jobs = listBackgroundJobs().filter((job) => job.sessionId === sessionId);
+          if (!jobs.length) {
+            return result(
+              `This chat has no background jobs. Start one with ${bgMcpToolName("run")}({ command: "…" }).`,
+            );
+          }
+          return result(["Background jobs of this chat:", ...jobs.map(jobLine)].join("\n"));
         }
-        return result(["Background jobs of this chat:", ...jobs.map(jobLine)].join("\n"));
-      }
-      case "output": {
-        const jobId = asString(args.jobId).trim();
-        if (!jobId) return result("`jobId` is required.", true);
-        if (!ownedJob(jobId, sessionId)) return result(`Unknown job "${jobId}" in this chat.`, true);
-        const read = readBackgroundJobOutput(jobId, {
-          tailLines: asInt(args.tailLines) ?? DEFAULT_OUTPUT_TAIL_LINES,
-          since: asInt(args.since),
-          maxChars: DEFAULT_OUTPUT_MAX_CHARS,
-        });
-        if (!read) return result(`Unknown job "${jobId}" in this chat.`, true);
-        const { job, text, to, dropped } = read;
-        const exit = job.exitCode == null ? "" : ` exit ${job.exitCode}`;
-        const body = text.trim() ? text.replace(/\s+$/, "") : "(no output yet)";
-        return result(
-          [
-            `${job.id} [${job.status}${exit}] ${elapsedText(job)} — «${job.label}»`,
-            `Log: ${job.logPath}`,
-            dropped ? "(not the whole log — read the file for the rest)" : "",
-            `--- output (to=${to}) ---`,
-            body,
-          ]
-            .filter(Boolean)
-            .join("\n"),
-        );
-      }
-      case "stop": {
-        const jobId = asString(args.jobId).trim();
-        if (!jobId) return result("`jobId` is required.", true);
         const job = ownedJob(jobId, sessionId);
         if (!job) return result(`Unknown job "${jobId}" in this chat.`, true);
-        if (job.status !== "running") {
-          return result(`${job.id} is not running any more (${job.status}).`);
+        if (args.kill === true) {
+          if (job.status !== "running") {
+            return result(`${job.id} is not running any more (${job.status}).`);
+          }
+          stopBackgroundJob(job.id, "agent");
+          return result(`${job.id} is stopping — its process tree is being killed.`);
         }
-        stopBackgroundJob(job.id, "agent");
-        return result(`${job.id} is stopping — its process tree is being killed.`);
+        // `timeoutMs` is patience, not a sleep: the call comes back the moment
+        // the job ends, and a job that outlives it is simply still running.
+        const patience = Math.min(Math.max(asInt(args.timeoutMs) ?? 0, 0), MAX_WAIT_MS);
+        const current = patience > 0 ? await waitForBackgroundJob(jobId, patience) : job;
+        const report = jobReport(current ?? job, args);
+        if ((current ?? job).status !== "running") return result(report);
+        return result(
+          [
+            report,
+            patience > 0
+              ? `Still running after ${patienceText(patience)} — nothing was killed. ` +
+                `Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }) ` +
+                "again to stay with it, or end your turn: the note with its tail arrives when it finishes."
+              : `Still running. Call ${bgMcpToolName("job")}({ jobId: "${job.id}", timeoutMs: ${MAX_WAIT_MS} }) ` +
+                "to stay with it — this read does not wait.",
+          ].join("\n"),
+        );
       }
       default:
         return result(`Tool "${String(name)}" is not implemented.`, true);

@@ -172,7 +172,7 @@ describe("the built-in background MCP server", () => {
     expect(resolveBackgroundMcp([], "chat-1")).toEqual([]);
   });
 
-  it("initializes and lists its four tools", async () => {
+  it("initializes and lists its two tools", async () => {
     const chat = await seedChat();
     const init = await mcp(chat.id, rpc("initialize", { protocolVersion: "2024-11-05" }));
     expect(init.statusCode).toBe(200);
@@ -182,7 +182,7 @@ describe("the built-in background MCP server", () => {
 
     const listed = await mcp(chat.id, rpc("tools/list"));
     const tools = (listed.json() as { result: { tools: Array<{ name: string }> } }).result.tools;
-    expect(tools.map((tool) => tool.name).sort()).toEqual(["list", "output", "run", "stop"]);
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["job", "run"]);
   });
 
   it("refuses a request without the token, and one for an unknown chat", async () => {
@@ -220,7 +220,7 @@ describe("running a command in the background", () => {
     expect(job.sessionId).toBe(chat.id);
     expect(job.sessionTitle).toBe("Seeded chat");
 
-    const read = await toolCall(chat.id, "output", { jobId: id });
+    const read = await toolCall(chat.id, "job", { jobId: id });
     const text = toolText(read);
     expect(text).toContain("bg-marker-1");
     expect(text).toContain("bg-marker-2");
@@ -256,12 +256,34 @@ describe("running a command in the background", () => {
     expect(late).toContain("not killed");
     // The way out of a lost wait is the note, not a sleep of its own.
     expect(late).toContain("Do not sleep");
-    // `output` is a read, not a second way to wait — said plainly, or it becomes
-    // the poll loop the line above forbids.
+    // A read is not a second way to wait — said plainly, or it becomes the poll
+    // loop the line above forbids.
     expect(late).toContain("this does not wait");
     const id = /^(bg-\d+)/.exec(late)?.[1];
     expect(getBackgroundJob(id!)?.status).toBe("running");
     stopBackgroundJob(id!, "agent");
+  });
+
+  // The wait the agent used to build by hand — a `bash` call polling the log
+  // with `until grep …; do sleep 2; done` — is this call instead.
+  it("blocks on a job's end and brings its tail back", async () => {
+    const chat = await seedChat();
+    const started = await toolCall(chat.id, "run", {
+      command: `node -e "setTimeout(() => console.log('waited-marker'), 1500)"`,
+    });
+    const id = /Started background job (bg-\d+)/.exec(toolText(started))?.[1];
+    expect(id, toolText(started)).toBeTruthy();
+
+    // Patience shorter than the job: still running, and told how to stay.
+    const impatient = await toolCall(chat.id, "job", { jobId: id, timeoutMs: 100 });
+    expect(toolText(impatient)).toContain("Still running after 100ms");
+    expect(toolText(impatient)).toContain("nothing was killed");
+    expect(toolText(impatient)).toContain(`mcp__acpio_bg_job`);
+
+    const waited = await toolCall(chat.id, "job", { jobId: id, timeoutMs: 20_000 });
+    const text = toolText(waited);
+    expect(text).toContain("exit 0");
+    expect(text).toContain("waited-marker");
   });
 
   // The output is a file, not an MCP answer: the agent reads it with the same
@@ -306,11 +328,11 @@ describe("running a command in the background", () => {
     const id = /Started background job (bg-\d+)/.exec(toolText(started))?.[1];
     await waitForJob(id!, "exited");
 
-    const stolen = await toolCall(other.id, "output", { jobId: id });
+    const stolen = await toolCall(other.id, "job", { jobId: id });
     expect(toolText(stolen)).toContain(`Unknown job "${id}"`);
     expect((stolen.json() as { result?: { isError?: boolean } }).result?.isError).toBe(true);
 
-    const list = await toolCall(other.id, "list");
+    const list = await toolCall(other.id, "job", {});
     expect(toolText(list)).toContain("no background jobs");
   });
 
@@ -370,7 +392,7 @@ describe("stopping a job", () => {
       label: "sleeper",
     });
     const id = /Started background job (bg-\d+)/.exec(toolText(started))?.[1]!;
-    const stopped = await toolCall(chat.id, "stop", { jobId: id });
+    const stopped = await toolCall(chat.id, "job", { jobId: id, kill: true });
     expect(toolText(stopped)).toContain("stopping");
     await waitForJob(id, "killed");
     // The tool call was the notification; a second note would only interrupt.
@@ -414,7 +436,7 @@ describe("the note a settled job leaves in the chat", () => {
     expect(ru).toContain("npm run build");
     expect(ru).toContain("код 2");
     expect(ru).toContain("error TS2304");
-    expect(ru).toContain(bgMcpToolName("output"));
+    expect(ru).toContain(bgMcpToolName("job"));
     expect(ru).toContain("bg-7");
 
     const en = formatBackgroundJobNote({ ...job, status: "exited", exitCode: 0 }, "", "en");
@@ -444,7 +466,7 @@ describe("the note a settled job leaves in the chat", () => {
       emptyOutput: false,
       rest: [],
     });
-    expect(ru?.hint).toContain(bgMcpToolName("list"));
+    expect(ru?.hint).toContain(bgMcpToolName("job"));
 
     const en = parseBackgroundJobNote(
       formatBackgroundJobNote({ ...job, status: "exited", exitCode: 0 }, "done", "en"),
@@ -495,7 +517,7 @@ describe("a settled job wakes its chat", () => {
     expect(note).toContain("[Background task]");
     expect(note).toContain("note job");
     expect(note).toContain(`id ${id}`);
-    expect(note).toContain(bgMcpToolName("output"));
+    expect(note).toContain(bgMcpToolName("job"));
   }, 40_000);
 });
 
