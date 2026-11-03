@@ -6,6 +6,10 @@
  * into message history from the real first/last rendered row — otherwise a
  * wrapped draft gets replaced by the previous message the moment the caret is
  * on a lower row, and there is no way to walk the caret back up.
+ *
+ * Rows are located with a marker, not with `scrollHeight`: a box that ends with
+ * `\n` reports only its filled rows, so "one\n" reads as a single row and the
+ * caret at the start of line 2 would pass for the first row.
  */
 
 let mirror: HTMLDivElement | null = null;
@@ -62,15 +66,16 @@ function lineHeightPx(cs: CSSStyleDeclaration): number {
 }
 
 /**
- * Number of rendered rows `text` occupies in `el`'s box, soft-wraps included.
- * A mirror div carries the textarea's own wrap-affecting styles and width, so
- * the browser does the line breaking we are asking about.
+ * 0-based index of the rendered row `before` ends on, soft-wraps included. A
+ * mirror div carries the textarea's own wrap-affecting styles and width, so the
+ * browser does the line breaking we are asking about, and one row-tall marker
+ * span pins the row: its top edge is the row's top edge, and an empty trailing
+ * line still gets one.
  */
-function textRows(el: HTMLTextAreaElement, text: string): number {
-  if (!text) return 1;
+function caretRow(el: HTMLTextAreaElement, before: string): number {
   const cs = getComputedStyle(el);
   const lineHeight = lineHeightPx(cs);
-  if (!Number.isFinite(lineHeight) || lineHeight <= 0) return 1;
+  if (!Number.isFinite(lineHeight) || lineHeight <= 0) return 0;
 
   const m = mirrorElement();
   const s = m.style;
@@ -82,17 +87,29 @@ function textRows(el: HTMLTextAreaElement, text: string): number {
   const contentWidth =
     el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   s.width = `${Math.max(0, contentWidth)}px`;
-  m.textContent = text;
+  m.textContent = before;
 
-  return Math.max(1, Math.round(m.scrollHeight / lineHeight));
+  const marker = document.createElement("span");
+  marker.style.display = "inline-block";
+  marker.style.width = "0";
+  marker.style.height = `${lineHeight}px`;
+  marker.style.overflow = "hidden";
+  marker.style.verticalAlign = "top";
+  m.appendChild(marker);
+
+  // The mirror has no padding, so its border box top is the first row's top.
+  const top = marker.getBoundingClientRect().top - m.getBoundingClientRect().top;
+  marker.remove();
+  return Math.max(0, Math.round(top / lineHeight));
 }
 
 /** Caret sits on the textarea's first rendered row (so ArrowUp may recall history). */
 export function composerCaretOnFirstLine(el: HTMLTextAreaElement): boolean {
-  return textRows(el, el.value.slice(0, el.selectionStart)) <= 1;
+  return caretRow(el, el.value.slice(0, el.selectionStart)) === 0;
 }
 
 /** Caret sits on the textarea's last rendered row (so ArrowDown may recall history). */
 export function composerCaretOnLastLine(el: HTMLTextAreaElement): boolean {
-  return textRows(el, el.value.slice(el.selectionEnd)) <= 1;
+  const lastRow = caretRow(el, el.value);
+  return caretRow(el, el.value.slice(0, el.selectionEnd)) >= lastRow;
 }
