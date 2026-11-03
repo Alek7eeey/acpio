@@ -2564,8 +2564,12 @@ export function SettingsPage() {
     }
   };
 
+  // The diagnostics page holds the window's height instead of scrolling the
+  // page: its dumps list is the one scroller there (see .pageFit / .panelFit).
+  const diagLeafOpen = section === "agent" && leaf === "diagnostics";
+
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page}${diagLeafOpen ? ` ${styles.pageFit}` : ""}`}>
       <div className={styles.mobileSearch}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
           <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.8" />
@@ -2590,7 +2594,7 @@ export function SettingsPage() {
         ) : null}
       </div>
       <form
-        className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}`}
+        className={`${styles.panel}${section === "interface" && leaf === "chat" ? ` ${styles.panelChat}` : ""}${diagLeafOpen ? ` ${styles.panelFit}` : ""}`}
         onSubmit={(e) => void onSubmit(e)}
       >
         <SettingsSearchProvider query={settingsQuery} filtering={viewingResults}>
@@ -4982,7 +4986,7 @@ export function SettingsPage() {
             </SearchGate>
             </div>
 
-            <div className={styles.sectionBlock}>
+            <div className={`${styles.sectionBlock} ${styles.diagDumpsBlock}`}>
             <SearchGate terms={[t("diagnostics.dumpsTitle"), t("diagnostics.dumpsHint"), t("diagnostics.empty"), t("diagnostics.copyJson")]}>
               <h2 className={styles.sectionHeading}>{highlightText(t("diagnostics.dumpsTitle"), settingsQuery)}</h2>
             <p className={styles.fieldHint}>{t("diagnostics.dumpsHint")}</p>
