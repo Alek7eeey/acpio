@@ -140,6 +140,7 @@ export class TsLsp {
             synchronization: { didSave: false, dynamicRegistration: false },
             definition: { linkSupport: false },
             references: {},
+            documentSymbol: {},
             publishDiagnostics: {},
           },
         },
@@ -206,6 +207,22 @@ export class TsLsp {
     });
   }
 
+  /**
+   * tsserver holds only the documents it was handed, so a cross-file definition
+   * answers with the import line. Handing it the document's own imports makes
+   * those jumps resolve — loading a whole tsconfig would take minutes.
+   */
+  async preload(paths: string[]): Promise<void> {
+    await Promise.all(
+      paths.map((rel) =>
+        this.request("workspace/executeCommand", {
+          command: "typescript.tsserverRequest",
+          arguments: ["open", { file: `${this.root}\\${rel}` }],
+        }).catch(() => null),
+      ),
+    );
+  }
+
   change(path: string, text: string): void {
     const uri = pathToUri(`${this.root}\\${path}`);
     if (!this.versions.has(uri)) return this.open(path, text);
@@ -223,12 +240,60 @@ export class TsLsp {
     this.notify("textDocument/didClose", { textDocument: { uri } });
   }
 
+  /**
+   * tsserver resolves the project's own rules — `#` subpath imports, `paths`,
+   * `customConditions` — only once the tsconfig is loaded, and loading it costs a
+   * full read of the project. So it runs here, in the background: the pane keeps
+   * its own compiler path for clicks until the server is ready.
+   */
+  loadProject(): void {
+    void this.request("workspace/executeCommand", {
+      command: "typescript.tsserverRequest",
+      arguments: ["reloadProjects", {}],
+    }).catch(() => null);
+  }
+
   async definition(path: string, line: number, character: number): Promise<LspLocation[]> {
     const res = await this.request<unknown>("textDocument/definition", {
       textDocument: { uri: pathToUri(`${this.root}\\${path}`) },
       position: { line, character },
     });
     return toLocations(res);
+  }
+
+  /**
+   * Where a file itself declares a name. The server can answer this for a file it
+   * cannot resolve a specifier to — a `#subpath` import in an unloaded project.
+   */
+  async symbolAt(path: string, name: string): Promise<LspLocation | null> {
+    const uri = pathToUri(`${this.root}\\${path}`);
+    // Two shapes come back: nested `DocumentSymbol` and a flat `SymbolInformation`.
+    type Symbol = {
+      name?: string;
+      range?: { start: { line: number; character: number } };
+      location?: { range?: { start: { line: number; character: number } } };
+      children?: Symbol[];
+    };
+    const walk = (items: Symbol[]): LspLocation | null => {
+      for (const item of items) {
+        const range = item.range ?? item.location?.range;
+        if (item.name === name && range) {
+          return { uri, line: range.start.line + 1, col: range.start.character + 1 };
+        }
+        const nested = item.children ? walk(item.children) : null;
+        if (nested) return nested;
+      }
+      return null;
+    };
+    const ask = async () =>
+      (await this.request<unknown>("textDocument/documentSymbol", { textDocument: { uri } }).catch(
+        () => null,
+      )) as Symbol[] | null;
+    const found = walk((await ask()) ?? []);
+    if (found) return found;
+    // A document opened a moment ago may still be unregistered: one more ask.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return walk((await ask()) ?? []);
   }
 
   async references(path: string, line: number, character: number): Promise<LspLocation[]> {

@@ -62,6 +62,27 @@ export const editorApi = {
       project: string;
     }>(`/api/editor/tools?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`),
   /** The file a relative import points at, when the language server has no answer. */
+  /** Where a name is declared, found by the project's compiler with no server. */
+  declaration: async (
+    root: string,
+    path: string,
+    spec: string,
+    name: string,
+  ): Promise<{ path: string; line: number; col: number } | null> => {
+    const res = await request<{ at: { path: string; line: number; col: number } | null }>(
+      "/api/editor/declaration",
+      { method: "POST", body: JSON.stringify({ root, path, spec, name }) },
+    );
+    return res.at;
+  },
+  /** A document's relative imports: what the language server needs besides it. */
+  imports: async (root: string, path: string): Promise<string[]> => {
+    const res = await request<{ paths: string[] }>("/api/editor/imports", {
+      method: "POST",
+      body: JSON.stringify({ root, path }),
+    });
+    return res.paths;
+  },
   resolve: async (root: string, path: string, spec: string): Promise<string | null> => {
     const res = await request<{ path: string | null }>("/api/editor/resolve", {
       method: "POST",

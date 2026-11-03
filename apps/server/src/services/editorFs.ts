@@ -342,6 +342,155 @@ export async function resolveImport(
   return null;
 }
 
+type TsModule = typeof import("typescript");
+type ProjectConfig = { ts: TsModule; options: import("typescript").CompilerOptions } | null;
+
+/** Compiler options per folder, so one tsconfig is parsed once per pane. */
+const configs = new Map<string, ProjectConfig>();
+
+/** The compiler that owns a project: its own copy first, ours as a fallback. */
+function compilerFor(dir: string): TsModule | null {
+  for (const anchor of [path.join(dir, "package.json"), import.meta.url]) {
+    try {
+      return createRequire(anchor)("typescript") as TsModule;
+    } catch {
+      // Next anchor: a project may have no TypeScript of its own.
+    }
+  }
+  return null;
+}
+
+/** The nearest tsconfig above a file, parsed the way `tsc` would parse it. */
+function configFor(root: string, fromAbs: string): ProjectConfig {
+  const base = path.resolve(root);
+  const walked: string[] = [];
+  let result: ProjectConfig = null;
+  for (let dir = path.dirname(fromAbs); ; dir = path.dirname(dir)) {
+    if (configs.has(dir)) {
+      result = configs.get(dir) ?? null;
+      break;
+    }
+    walked.push(dir);
+    if (existsSync(path.join(dir, "tsconfig.json"))) {
+      const ts = compilerFor(dir);
+      const parsed = ts?.getParsedCommandLineOfConfigFile(path.join(dir, "tsconfig.json"), {}, {
+        ...ts.sys,
+        onUnRecoverableConfigFileDiagnostic: () => {},
+      });
+      result = ts && parsed ? { ts, options: parsed.options } : null;
+      break;
+    }
+    if (dir === base || path.dirname(dir) === dir) break;
+  }
+  for (const dir of walked) configs.set(dir, result);
+  return result;
+}
+
+/**
+ * The file a module specifier points at: any kind the project's own compiler
+ * understands — relative, `baseUrl`, tsconfig `paths`, package, `#` subpath
+ * import — because it is the compiler doing the resolving, not a guess.
+ */
+export async function resolveSpecifier(
+  root: string,
+  fromRel: string,
+  spec: string,
+): Promise<string | null> {
+  const fromAbs = insideRoot(root, fromRel);
+  if (!fromAbs) return null;
+  const config = configFor(root, fromAbs);
+  if (!config) return resolveImport(root, fromRel, spec);
+  const resolved = config.ts.resolveModuleName(spec, fromAbs, config.options, config.ts.sys).resolvedModule;
+  const file = resolved?.resolvedFileName;
+  if (!file) return null;
+  const abs = insideRoot(root, path.relative(path.resolve(root), file));
+  // A package's own sources are the server's business, not the pane's.
+  if (!abs || abs.split(/[\\/]/).includes("node_modules")) return null;
+  return path.relative(path.resolve(root), abs).replaceAll("\\", "/");
+}
+
+/** Where a top-level declaration of `name` starts in a file, if it has one. */
+function declarationIn(ts: TsModule, text: string, name: string): { line: number; col: number } | null {
+  const source = ts.createSourceFile("pane.ts", text, ts.ScriptTarget.Latest, true);
+  for (const statement of source.statements) {
+    const named = statement as unknown as { name?: { text?: string } };
+    if (named.name?.text !== name) continue;
+    const at = source.getLineAndCharacterOfPosition(statement.getStart(source));
+    return { line: at.line + 1, col: at.character + 1 };
+  }
+  return null;
+}
+
+/**
+ * Where a name imported through `spec` is actually declared, without asking the
+ * language server: the compiler resolves the specifier, the compiler reads the
+ * syntax tree, and a barrel's re-export line leads to the next hop.
+ */
+export async function findDeclaration(
+  root: string,
+  fromRel: string,
+  spec: string,
+  name: string,
+): Promise<{ path: string; line: number; col: number } | null> {
+  let from = fromRel;
+  let specifier = spec;
+  for (let hop = 0; hop < 4 && specifier; hop += 1) {
+    const target = await resolveSpecifier(root, from, specifier);
+    const abs = target ? insideRoot(root, target) : null;
+    const ts = abs ? (configFor(root, abs)?.ts ?? compilerFor(root)) : null;
+    const text = ts && abs ? await fsp.readFile(abs, "utf8").catch(() => null) : null;
+    if (!target || !ts || !text) return null;
+    const found = declarationIn(ts, text, name);
+    if (found) return { path: target, line: found.line, col: found.col };
+    // A barrel re-exports the name instead of declaring it: follow that line.
+    const line = text
+      .split("\n")
+      .find((one) => /^\s*export\b/.test(one) && one.includes(name) && /from\s*["']/.test(one));
+    specifier = line ? (/from\s*["']([^"']+)["']/.exec(line)?.[1] ?? "") : "";
+    from = target;
+  }
+  return null;
+}
+
+/**
+ * The relative imports of a file and of their imports, breadth first. tsserver
+ * only knows the documents it was handed, so the pane feeds it this reachable
+ * set — enough for a jump through a barrel, far cheaper than a whole tsconfig.
+ */
+export async function resolveImports(
+  root: string,
+  rel: string,
+  depth = 3,
+  max = 400,
+): Promise<string[]> {
+  const seen = new Set<string>([rel]);
+  let frontier = [rel];
+  for (let level = 0; level < depth && frontier.length && seen.size < max; level += 1) {
+    const found = await Promise.all(
+      frontier.map(async (file) => {
+        const abs = insideRoot(root, file);
+        if (!abs) return [];
+        const text = await fsp.readFile(abs, "utf8").catch(() => "");
+        // `from "x"`, `import "x"` and `export … from "x"`; aliases and packages
+        // are left to the server, which resolves them in its own program.
+        const specs = new Set(
+          [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)].map((m) => m[1]),
+        );
+        const paths = await Promise.all([...specs].map((spec) => resolveSpecifier(root, file, spec)));
+        return paths.filter((p): p is string => Boolean(p));
+      }),
+    );
+    frontier = [];
+    for (const file of found.flat()) {
+      if (seen.has(file) || seen.size >= max) continue;
+      seen.add(file);
+      frontier.push(file);
+    }
+  }
+  seen.delete(rel);
+  return [...seen];
+}
+
 /** What oxlint actually parses — anything else it would report as "no files found". */
 const LINT_EXTS = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue"]);
 

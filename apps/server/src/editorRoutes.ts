@@ -1,11 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import {
+  findDeclaration,
   formatText,
   lintFile,
   listEntries,
   readText,
-  resolveImport,
+  resolveImports,
+  resolveSpecifier,
   toolStatus,
   writeText,
   type ToolPreference,
@@ -20,6 +22,18 @@ const resolveBody = z.object({
   root: z.string().min(1),
   path: z.string().min(1),
   spec: z.string().min(1),
+});
+
+const declarationBody = z.object({
+  root: z.string().min(1),
+  path: z.string().min(1),
+  spec: z.string().min(1),
+  name: z.string().min(1),
+});
+
+const importsBody = z.object({
+  root: z.string().min(1),
+  path: z.string().min(1),
 });
 
 function fail(reply: { code: (n: number) => { send: (b: unknown) => unknown } }, err: unknown) {
@@ -88,7 +102,29 @@ export async function registerEditorRoutes(app: FastifyInstance): Promise<void> 
   app.post("/api/editor/resolve", async (req, reply) => {
     try {
       const body = resolveBody.parse(req.body);
-      return { path: await resolveImport(body.root, body.path, body.spec) };
+      return { path: await resolveSpecifier(body.root, body.path, body.spec) };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // The language server cannot say where a name is declared when it never
+  // resolved the specifier: the project's compiler can, syntax tree and all.
+  app.post("/api/editor/declaration", async (req, reply) => {
+    try {
+      const body = declarationBody.parse(req.body);
+      return { at: await findDeclaration(body.root, body.path, body.spec, body.name) };
+    } catch (err) {
+      return fail(reply, err);
+    }
+  });
+
+  // What the pane hands tsserver besides the file itself: without its imports
+  // in the program, every cross-file definition answers with the import line.
+  app.post("/api/editor/imports", async (req, reply) => {
+    try {
+      const body = importsBody.parse(req.body);
+      return { paths: await resolveImports(body.root, body.path) };
     } catch (err) {
       return fail(reply, err);
     }

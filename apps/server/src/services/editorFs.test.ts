@@ -9,6 +9,7 @@ import {
   parseOxlint,
   projectDir,
   resolveImport,
+  resolveImports,
   toolStatus,
 } from "./editorFs.js";
 
@@ -108,6 +109,65 @@ describe("resolveImport", () => {
     expect(await resolveImport(repo, "web/src/a.ts", "react")).toBeNull();
     expect(await resolveImport(repo, "web/src/a.ts", "./missing")).toBeNull();
     expect(await resolveImport(repo, "web/src/a.ts", "../../../../etc/passwd")).toBeNull();
+  });
+});
+
+describe("resolveImports", () => {
+  it("lists the files a document imports, once each and relative only", async () => {
+    write("web/src/kit/index.ts", "export const kit = 1;\n");
+    write("web/src/util.ts", "export const util = 2;\n");
+    write(
+      "web/src/a.ts",
+      [
+        'import { util } from "./util";',
+        'import "./kit";',
+        'import { kit } from "./kit/index";',
+        'import React from "react";',
+        'import type { X } from "@/lib/x";',
+        'export { util as u } from "./util";',
+        "",
+      ].join("\n"),
+    );
+    expect(await resolveImports(repo, "web/src/a.ts")).toEqual(["web/src/util.ts", "web/src/kit/index.ts"]);
+  });
+
+  it("walks through a barrel transitively, so a jump lands past `export * from`", async () => {
+    write("web/deep/inner/leaf.ts", "export interface Leaf { a: 1 }\n");
+    write("web/deep/inner/index.ts", "export * from './leaf';\n");
+    write("web/deep/index.ts", "export * from './inner';\n");
+    write("web/user.ts", 'import type { Leaf } from "./deep";\n');
+    expect(await resolveImports(repo, "web/user.ts")).toEqual([
+      "web/deep/index.ts",
+      "web/deep/inner/index.ts",
+      "web/deep/inner/leaf.ts",
+    ]);
+  });
+
+  it("resolves every import kind the project's compiler does: paths and `#` subpaths", async () => {
+    write(
+      "app/tsconfig.json",
+      JSON.stringify({
+        compilerOptions: { module: "esnext", moduleResolution: "bundler", baseUrl: ".", paths: { "@/*": ["./src/*"] } },
+      }),
+    );
+    write("app/package.json", JSON.stringify({ name: "app", imports: { "#kit": "./src/kit.ts" } }));
+    write("app/src/kit.ts", "export const kit = 1;\n");
+    write("app/src/lib.ts", "export const lib = 1;\n");
+    write("app/src/user.ts", ['import { kit } from "#kit";', 'import { lib } from "@/lib";', ""].join("\n"));
+    expect(await resolveImports(repo, "app/src/user.ts")).toEqual(["app/src/kit.ts", "app/src/lib.ts"]);
+  });
+
+  it("stops at the depth and at the file cap instead of walking a whole project", async () => {
+    write("web/chain/0.ts", 'import "./1";\n');
+    write("web/chain/1.ts", 'import "./2";\n');
+    write("web/chain/2.ts", 'import "./3";\n');
+    write("web/chain/3.ts", "export const end = 1;\n");
+    expect(await resolveImports(repo, "web/chain/0.ts", 2)).toEqual(["web/chain/1.ts", "web/chain/2.ts"]);
+    expect(await resolveImports(repo, "web/chain/0.ts", 3, 3)).toEqual(["web/chain/1.ts", "web/chain/2.ts"]);
+  });
+
+  it("says nothing about a file that does not exist", async () => {
+    expect(await resolveImports(repo, "web/src/missing.ts")).toEqual([]);
   });
 });
 

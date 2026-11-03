@@ -325,6 +325,27 @@ function importSpecAt(view: EditorView, pos: number): string | null {
   return stringRangeAt(line, pos - line.from)?.text ?? null;
 }
 
+/** The identifier the caret sits in — `serviceDef` in `… = serviceDef<T>(…)`. */
+function wordAt(text: string, offset: number): string {
+  const isWord = (char: string | undefined) => Boolean(char && /[\w$]/.test(char));
+  let from = offset;
+  let to = offset;
+  while (from > 0 && isWord(text[from - 1])) from -= 1;
+  while (to < text.length && isWord(text[to])) to += 1;
+  return text.slice(from, to);
+}
+
+/** The module specifier that brings `name` into a document, if any import does. */
+function specForName(text: string, name: string): string | null {
+  const word = new RegExp(`\\b${name}\\b`);
+  for (const line of text.split("\n")) {
+    if (!/^\s*(import|export)\b/.test(line)) continue;
+    const spec = /from\s*["']([^"']+)["']/.exec(line)?.[1];
+    if (spec && word.test(line)) return spec;
+  }
+  return null;
+}
+
 /** Ctrl held or released without moving the mouse: the underline follows it. */
 export function syncLink(view: EditorView, point: { x: number; y: number } | null) {
   if (!point) {
@@ -711,8 +732,8 @@ export function EditorPage() {
   );
 
   /**
-   * Everything a plain open does to the document — read it, give it to the
-   * language server, lint it. Tabs only decide which view shows it.
+   * Everything a plain open does to the document — read it, give it and its
+   * imports to the language server, lint it. Tabs only decide what shows it.
    */
   const ensureDocument = useCallback(
     async (path: string) => {
@@ -725,6 +746,12 @@ export function EditorPage() {
         const file = await editorApi.file(rootPath, path);
         statesRef.current.set(path, makeState(path, file.text, rootPath));
         lspRef.current?.open(path, file.text);
+        // The server knows only what it was handed: its imports go with it, so a
+        // jump into another file lands on the declaration instead of the import.
+        void editorApi.imports(rootPath, path).then(
+          (paths) => void lspRef.current?.preload(paths),
+          () => {},
+        );
         // Lint on open too: the panel is useless if it fills only on a keystroke.
         if (!oxlintRef.current.has(path)) {
           void editorApi.lint(rootPath, path).then(
@@ -748,11 +775,14 @@ export function EditorPage() {
   /** Put a tab in front. `line`/`col` only make sense for a file tab. */
   const activateTab = useCallback(
     (tab: EditorTab, line?: number, col?: number) => {
+      // A diff owns the visible area: switching files leaves it. And the state
+      // goes to the tab view — `viewRef` may still point at the merge view.
+      if (tab.kind === "file" && diff) closeDiff();
       activeRef.current = tab.path;
       setActiveKey(tabKey(tab));
       applyDiagnostics(tab.path);
       if (tab.kind !== "file") return;
-      const view = mainViewRef.current;
+      const view = mainViewRef.current ?? viewRef.current;
       const state = statesRef.current.get(tab.path);
       if (!view || !state) return;
       view.setState(state);
@@ -768,7 +798,7 @@ export function EditorPage() {
       }
       view.focus();
     },
-    [applyDiagnostics, applyEditorConfig],
+    [applyDiagnostics, applyEditorConfig, closeDiff, diff],
   );
 
   const addTab = useCallback((tab: EditorTab) => {
@@ -847,41 +877,28 @@ export function EditorPage() {
   const openDiff = useCallback(
     async (path: string) => {
       if (!sessionId || !changes) return;
-      // The document first: a file the language server never saw would answer
-      // no definitions from either tab.
-      if (!(await ensureDocument(path))) return;
       try {
-        if (!diffBaseRef.current.has(path)) {
-          const base = await api.gitFileText(sessionId, paneToRepo(changes.root, root, path));
-          diffBaseRef.current.set(path, base.text);
-        }
+        // The ordinary open first: the tab, the language server and the linter,
+        // exactly as a plain open would give them.
+        await openFile(path);
+        const base = await api.gitFileText(sessionId, paneToRepo(changes.root, root, path));
+        diffBaseRef.current.set(path, base.text);
+        const tab: EditorTab = tabs.find((t) => t.kind === "diff" && t.path === path) ?? {
+          path,
+          kind: "diff",
+          pinned: false,
+        };
+        addTab(tab);
+        activeRef.current = path;
+        setActiveKey(tabKey(tab));
       } catch (err) {
         showToast(err instanceof Error ? err.message : "Не удалось прочитать изменения", {
           tone: "danger",
         });
-        return;
       }
-      const tab: EditorTab = tabs.find((t) => t.kind === "diff" && t.path === path) ?? {
-        path,
-        kind: "diff",
-        pinned: false,
-      };
-      addTab(tab);
-      activateTab(tab);
     },
-    [activateTab, addTab, changes, ensureDocument, root, sessionId, tabs],
+    [addTab, changes, openFile, root, sessionId, tabs],
   );
-
-  // No active tab left (the active one was closed): fall back to the last one.
-  useEffect(() => {
-    if (activeKey && tabs.some((tab) => tabKey(tab) === activeKey)) return;
-    const fallback = tabs[tabs.length - 1];
-    if (fallback) activateTab(fallback);
-    else {
-      setActiveKey(null);
-      activeRef.current = null;
-    }
-  }, [activateTab, activeKey, tabs]);
 
   const saveActive = useCallback(async () => {
     const path = activeRef.current;
@@ -955,40 +972,6 @@ export function EditorPage() {
     }
   }, []);
 
-  /**
-   * Until tsserver finishes loading the tsconfigs it answers «the import
-   * binding» for a symbol from another file. The file is one hop away: open it
-   * where the name is declared instead of jumping to the import.
-   */
-  const followImportBinding = useCallback(
-    async (view: EditorView, loc: LspLocation): Promise<boolean> => {
-      const path = activeRef.current;
-      if (!path || loc.line > view.state.doc.lines) return false;
-      const line = view.state.doc.line(loc.line);
-      if (!/^\s*(import|export)\b/.test(line.text)) return false;
-      const spec = /from\s*["']([^"']+)["']/.exec(line.text)?.[1] ?? null;
-      if (!spec) return false;
-      // `x as y` imports the name before `as`, not the local alias.
-      const name = /^(\w+)/.exec(line.text.slice(loc.col - 1))?.[1] ?? "";
-      const target = await editorApi.resolve(rootRef.current, path, spec).catch(() => null);
-      if (!target) return false;
-      const file = await editorApi.file(rootRef.current, target).catch(() => null);
-      if (!file) return false;
-      const declaration = new RegExp(
-        `^\\s*(?:export\\s+)?(?:declare\\s+)?(?:const|let|var|function|class|interface|type|enum|abstract\\s+class)\\s+${name}\\b`,
-      );
-      const lines = file.text.split("\n");
-      const at = name ? lines.findIndex((text) => declaration.test(text)) : -1;
-      if (at < 0) {
-        await openFile(target);
-        return true;
-      }
-      await openFile(target, at + 1, Math.max(0, lines[at].indexOf(name)) + 1);
-      return true;
-    },
-    [openFile],
-  );
-
   const gotoDefinition = useCallback(async () => {
     const view = viewRef.current;
     const path = activeRef.current;
@@ -996,26 +979,43 @@ export function EditorPage() {
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
     try {
-      const locations = await lspRef.current.definition(path, line.number - 1, head - line.from);
+      const ask = () => lspRef.current!.definition(path, line.number - 1, head - line.from);
+      // While the server loads a project it answers nothing: a click must not
+      // wait for it, so the compiler path below takes over after a moment.
+      const silence = new Promise<LspLocation[]>((done) => setTimeout(() => done([]), 1200));
+      const locations = await Promise.race([ask().catch(() => []), silence]);
       const first = locations[0];
       const rel = first ? relOf(first.uri) : null;
-      if (first && rel === path && (await followImportBinding(view, first))) return;
-      if (first && rel) {
+      if (first && rel && rel !== path) {
         await openFile(rel, first.line, first.col);
         return;
       }
-      // A specifier the server cannot resolve is still a file on disk.
-      const spec = importSpecAt(view, head);
-      const target = spec ? await editorApi.resolve(rootRef.current, path, spec).catch(() => null) : null;
-      if (target) {
-        await openFile(target);
+      // A click on the specifier itself needs no name: open what it points at.
+      const clicked = importSpecAt(view, head);
+      const pointed = clicked ? await editorApi.resolve(rootRef.current, path, clicked).catch(() => null) : null;
+      if (pointed) {
+        await openFile(pointed);
+        return;
+      }
+      // Silence, or «this very file's import line»: the project's compiler knows
+      // the specifier and where the name is declared, with no server involved.
+      const answerLine = first && rel === path ? first.line : line.number;
+      const at = view.state.doc.line(Math.min(answerLine, view.state.doc.lines)).text;
+      const name = wordAt(line.text, head - line.from);
+      const spec = /from\s*["']([^"']+)["']/.exec(at)?.[1] ?? specForName(view.state.doc.toString(), name);
+      const found =
+        spec && name
+          ? await editorApi.declaration(rootRef.current, path, spec, name).catch(() => null)
+          : null;
+      if (found) {
+        await openFile(found.path, found.line, found.col);
         return;
       }
       setStatus("definition: не найдено");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "definition failed", { tone: "danger" });
     }
-  }, [followImportBinding, openFile, relOf]);
+  }, [openFile, relOf]);
 
   const findReferences = useCallback(async () => {
     const view = viewRef.current;
@@ -1135,14 +1135,10 @@ export function EditorPage() {
     void editorApi.tools(root, activePath).then(setTools, () => setTools(null));
   }, [root, activePath, settings.editorToolOxfmt, settings.editorToolOxlint, settings.editorToolTypescript]);
 
-  const project = tools?.project ?? "";
-
-  // One language server per project of the open file: a pane opened on a
-  // repository above `web/` still needs `web/tsconfig.json`. Reconnects when the
-  // project or the TypeScript copy changes, so the chosen one is the one that runs.
+  // The language server is per project root: reconnect when the folder changes.
   useEffect(() => {
     if (!root) return;
-    const lsp = new TsLsp(root, project);
+    const lsp = new TsLsp(root);
     lspRef.current = lsp;
     lsp.onDiagnostics = (path, items) => {
       lspDiagsRef.current.set(path, items);
@@ -1152,6 +1148,9 @@ export function EditorPage() {
       () => {
         setStatus("language server: ready");
         for (const [path, state] of statesRef.current) lsp.open(path, state.doc.toString());
+        // Native resolution of the project's own rules arrives when this lands;
+        // until then `gotoDefinition` keeps to the compiler path.
+        lsp.loadProject();
       },
       (err: Error) => setStatus(`language server: ${err.message}`),
     );
@@ -1159,7 +1158,7 @@ export function EditorPage() {
       lsp.dispose();
       lspRef.current = null;
     };
-  }, [applyDiagnostics, project, root, settings.editorToolTypescript]);
+  }, [applyDiagnostics, root]);
 
   // Both menus close the way a native one does.
   const anyMenu = menu != null || changeMenu != null;
@@ -1182,17 +1181,6 @@ export function EditorPage() {
       window.removeEventListener("resize", close);
     };
   }, [anyMenu]);
-
-  // The settings popover closes on a click outside it, like the menus above;
-  // the button itself is outside this listener because it sits in the same box.
-  useEffect(() => {
-    if (!panelOpen) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest("[data-editor-tools]")) setPanelOpen(false);
-    };
-    window.addEventListener("pointerdown", close, true);
-    return () => window.removeEventListener("pointerdown", close, true);
-  }, [panelOpen]);
 
   const commitKey = (action: keyof EditorKeys) => {
     const raw = draftKeys[action].trim();
@@ -1240,7 +1228,7 @@ export function EditorPage() {
     >
       {/* Всё, что раньше жило в шапке, — хоткеи, правый клик и статус-бар: строку
           на кнопки не тратим, высота нужна документу. */}
-      <div className={styles.headerTools} data-editor-tools>
+      <div className={styles.headerTools}>
           {panelOpen ? (
             <div className={styles.popover} role="dialog" aria-label="Настройки редактора">
               <label className={styles.field}>
@@ -1533,8 +1521,7 @@ export function EditorPage() {
           onClick={(event) => {
             const box = event.currentTarget.getBoundingClientRect();
             setMenu({
-              // Строка кончается у правого края: без сдвига меню уезжает за экран.
-              x: Math.min(box.left, window.innerWidth - MENU_MIN_WIDTH - 8),
+              x: box.left,
               y: window.innerHeight - box.top + 4,
               pos: viewRef.current?.state.selection.main.head ?? 0,
               up: true,
@@ -1615,7 +1602,10 @@ export function EditorPage() {
             <div
               className={styles.menu}
               role="menu"
-              style={menu.up ? { left: menu.x, bottom: menu.y } : { left: menu.x, top: menu.y }}
+              style={{
+                left: Math.min(menu.x, window.innerWidth - MENU_MIN_WIDTH - 8),
+                ...(menu.up ? { bottom: menu.y } : { top: menu.y }),
+              }}
               onPointerDown={(event) => event.stopPropagation()}
             >
               {menuItem("К определению", keys.definition, () => void gotoDefinition())}
