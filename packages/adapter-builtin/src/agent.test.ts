@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -427,6 +427,114 @@ describe("builtin provider routing", () => {
       close: () => new Promise<void>((resolve) => server.close(() => resolve())),
     };
   }
+
+  it("carries the repository's own rules in the system prompt while the setting lists them", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    writeFileSync(join(dir, "AGENTS.md"), "Tabs, not spaces.");
+    mkdirSync(join(dir, ".cursor", "rules"), { recursive: true });
+    writeFileSync(
+      join(dir, ".cursor", "rules", "ui.mdc"),
+      "---\ndescription: UI conventions\nglobs: src/ui/**\n---\nUse tokens.",
+    );
+    const provider = {
+      id: "p1",
+      name: "P",
+      url: stub.url,
+      apiKey: "sk",
+      models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+    };
+    // The system message the provider saw on the last request.
+    const system = () =>
+      String(
+        ((stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>)[0]?.content,
+      );
+    try {
+      const on = boot({ builtinProviders: [provider] }, dir);
+      await on.call("session/new", { cwd: dir });
+      await on.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await on.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(system()).toContain("--- AGENTS.md ---\nTabs, not spaces.");
+      // A glob-gated rule is named, not pasted.
+      expect(system()).toContain("- `.cursor/rules/ui.mdc` — UI conventions (globs: src/ui/**)");
+      expect(system()).not.toContain("Use tokens.");
+
+      // An empty list is the off switch, without a restart.
+      const off = boot({ builtinProviders: [provider], builtinProjectRules: [] }, dir);
+      await off.call("session/new", { cwd: dir });
+      await off.call("session/set_config_option", { configId: "model", value: "p1::m1" });
+      await off.call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      expect(system()).not.toContain("Project rules");
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it("inlines the rule of a file the conversation already touched", async () => {
+    const stub = await startStub();
+    const dir = tempDir();
+    mkdirSync(join(dir, ".cursor", "rules"), { recursive: true });
+    writeFileSync(
+      join(dir, ".cursor", "rules", "ui.mdc"),
+      "---\ndescription: UI conventions\nglobs: web/plugins/**\n---\nUse tokens.",
+    );
+    // A stored turn that already read a file of the web/plugins area.
+    saveBuiltinSession(dir, "rules-1", {
+      version: 1,
+      cwd: dir,
+      modelId: "p1::m1",
+      messages: [
+        { role: "user", content: [{ type: "text", text: "look at the plugin" }] },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "c1",
+              toolName: "read",
+              input: { path: "web/plugins/x.ts" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "c1",
+              toolName: "read",
+              output: { type: "text", value: "export const x = 1;" },
+            },
+          ],
+        },
+      ],
+    });
+    try {
+      const { call } = boot(
+        {
+          builtinProviders: [
+            {
+              id: "p1",
+              name: "P",
+              url: stub.url,
+              apiKey: "sk",
+              models: [{ id: "m1", label: "M1", contextWindow: 8_000 }],
+            },
+          ],
+        },
+        dir,
+      );
+      await call("session/load", { sessionId: "rules-1", cwd: dir });
+      await call("session/prompt", { prompt: [{ type: "text", text: "hi" }] });
+      const prompt = String(
+        ((stub.bodies.at(-1)?.messages ?? []) as Array<Record<string, unknown>>)[0]?.content,
+      );
+      expect(prompt).toContain("--- .cursor/rules/ui.mdc ---\nUse tokens.");
+      expect(prompt).not.toContain("Conditional project rules");
+    } finally {
+      await stub.close();
+    }
+  });
 
   it("sends each turn to the endpoint that owns the selected model", async () => {
     const one = await startStub();

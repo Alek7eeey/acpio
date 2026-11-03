@@ -20,6 +20,7 @@
     "@acpio/shared": "*",
     "@ai-sdk/openai-compatible": "^3.0.57",
     "ai": "^7.0.116",
+    "minimatch": "^10.2.6",
     "zod": "^3.24.2"
   },
   "devDependencies": {

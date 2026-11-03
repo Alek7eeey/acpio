@@ -46,6 +46,8 @@ import {
   type PluginsStateDto,
   DEFAULT_MCP_PROJECT_FILES,
   DEFAULT_BUILTIN_SKILL_PATHS,
+  DEFAULT_BUILTIN_PROJECT_RULES,
+  DEFAULT_IGNORE_FILES,
   DEFAULT_BUILTIN_SUBAGENTS,
   builtinModelValue,
   BUILTIN_MAX_OUTPUT_TOKENS_MAX,
@@ -1778,6 +1780,8 @@ export function SettingsPage() {
   // just created and pin the caret, so typing continues against the draft and
   // the canonical join returns once the field loses focus.
   const [skillPathsDraft, setSkillPathsDraft] = useState<string | null>(null);
+  const [projectRulesDraft, setProjectRulesDraft] = useState<string | null>(null);
+  const [ignoreFilesDraft, setIgnoreFilesDraft] = useState<string | null>(null);
   /** Skills the app ships, with the mode they currently run in. */
   const [builtinSkills, setBuiltinSkills] = useState<BuiltinSkillDto[]>([]);
   const [mcpFilesDraft, setMcpFilesDraft] = useState<string | null>(null);
@@ -4076,6 +4080,78 @@ export function SettingsPage() {
                     );
                   })}
                 </div>
+              </SettingRow>
+              {/* The repository's own rules sit next to the skills: both are
+                  instructions the agent reads from disk, and both lists are
+                  patterns relative to the chat's folder. */}
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinProjectRulesTitle")}
+                hint={t("settings.builtinProjectRulesHint")}
+                terms={[
+                  t("settings.builtinProjectRulesTitle"),
+                  t("settings.builtinProjectRulesHint"),
+                  "AGENTS.md",
+                  ".cursorrules",
+                  ".cursor/rules",
+                  "mdc",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={3}
+                  spellCheck={false}
+                  value={projectRulesDraft ?? (form.builtinProjectRules ?? []).join("\n")}
+                  onChange={(e) => {
+                    setProjectRulesDraft(e.target.value);
+                    patch("builtinProjectRules", parsePathLines(e.target.value));
+                  }}
+                  onBlur={() => setProjectRulesDraft(null)}
+                  aria-label={t("settings.builtinProjectRulesTitle")}
+                  placeholder={DEFAULT_BUILTIN_PROJECT_RULES.join("\n")}
+                />
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("builtinProjectRules", [...DEFAULT_BUILTIN_PROJECT_RULES])}
+                >
+                  {t("settings.builtinProjectRulesReset")}
+                </button>
+              </SettingRow>
+              {/* The other half of the same story: what the agent is to look
+                  at, and what it may walk past. */}
+              <SettingRow
+                layout="stack"
+                label={t("settings.builtinIgnoreFilesTitle")}
+                hint={t("settings.builtinIgnoreFilesHint")}
+                terms={[
+                  t("settings.builtinIgnoreFilesTitle"),
+                  t("settings.builtinIgnoreFilesHint"),
+                  ".gitignore",
+                  ".cursorignore",
+                  "gitignore",
+                ]}
+              >
+                <textarea
+                  className={styles.mcpFilesInput}
+                  rows={3}
+                  spellCheck={false}
+                  value={ignoreFilesDraft ?? (form.builtinIgnoreFiles ?? []).join("\n")}
+                  onChange={(e) => {
+                    setIgnoreFilesDraft(e.target.value);
+                    patch("builtinIgnoreFiles", parsePathLines(e.target.value));
+                  }}
+                  onBlur={() => setIgnoreFilesDraft(null)}
+                  aria-label={t("settings.builtinIgnoreFilesTitle")}
+                  placeholder={DEFAULT_IGNORE_FILES.join("\n")}
+                />
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => patch("builtinIgnoreFiles", [...DEFAULT_IGNORE_FILES])}
+                >
+                  {t("settings.builtinIgnoreFilesReset")}
+                </button>
               </SettingRow>
               {/* The picture line is one sentence of the same system prompt the
                   instructions above extend, so it lives in this group. */}

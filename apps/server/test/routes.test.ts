@@ -434,6 +434,24 @@ describe("health & settings", () => {
     );
   });
 
+  it("heals builtinProjectRules to relative glob patterns, keeping an empty list empty", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinProjectRules: [" .cursor\\rules\\*.mdc ", "C:/outside/AGENTS.md", "../escape.md", "AGENTS.md"],
+      },
+    });
+    expect(put.statusCode).toBe(200);
+    const body = (await app.inject({ method: "GET", url: "/api/settings" })).json();
+    expect(body.builtinProjectRules).toEqual([".cursor/rules/*.mdc", "AGENTS.md"]);
+
+    await app.inject({ method: "PUT", url: "/api/settings", payload: { builtinProjectRules: [] } });
+    expect(
+      (await app.inject({ method: "GET", url: "/api/settings" })).json().builtinProjectRules,
+    ).toEqual([]);
+  });
+
   it("PUT /api/settings stores and heals builtin subagents", async () => {
     const put = await app.inject({
       method: "PUT",
@@ -3093,7 +3111,12 @@ describe("built-in agent image attachments", () => {
   // A file that lives outside the chat folder — a board task's upload, staged
   // in acpio's own data folder — is named by its absolute path: the only one
   // the agent can open from where it stands.
-  it("gives the agent an absolute address for a file outside the chat folder", async () => {
+  // A file staged outside the chat's folder used to reach the model by its
+  // absolute path — a path inside this app's own store, which a model reads as
+  // "the project": on chat 12c738c9 that turned the first turn into a hunt
+  // through the harness's sources (4 runs of 4). The name it gets now is the
+  // scheme `read` resolves — a handle without a disk location.
+  it("names a file outside the chat folder att://<name>, never its store path", async () => {
     const stub = await startModelStub();
     const cwd = await newTempDir("acpio-attach-abs-");
     const outside = await newTempDir("acpio-attach-store-");
@@ -3139,9 +3162,12 @@ describe("built-in agent image attachments", () => {
       expect(sent.statusCode).toBe(200);
 
       // No pixels ride along here, so the text goes as one string.
-      expect(await stub.firstUserContent).toEqual(
-        expect.stringContaining(`прочитай [notes.md](${notes.replace(/\\/g, "/")})`),
-      );
+      const prompt = await stub.firstUserContent;
+      expect(prompt).toContain("прочитай [notes.md](att://notes.md)");
+      expect(prompt).toMatch(/\[Прикреплённые файлы: att:\/\/notes\.md/);
+      // The handle alone left the model guessing it could not be opened.
+      expect(prompt).toContain('read({ path: "att://notes.md" })');
+      expect(prompt).not.toContain(outside.replace(/\\/g, "/"));
 
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {

@@ -37,6 +37,8 @@ import {
   canonicalCwd,
   normalizeMcpProjectFiles,
   normalizeSkillModes,
+  normalizeBuiltinProjectRules,
+  normalizeIgnoreFiles,
   normalizeSkillPaths,
   readSettingsSchema,
 } from "@acpio/shared";
@@ -453,6 +455,10 @@ function mergeSettings(raw: unknown): AppSettings {
   merged.pluginEntries = healPluginEntries(merged.pluginEntries);
   // Built-in skill folders: relative to the chat cwd, absolute = global.
   merged.builtinSkillPaths = normalizeSkillPaths(merged.builtinSkillPaths);
+  // Project rules: glob patterns inside the chat's own cwd only.
+  merged.builtinProjectRules = normalizeBuiltinProjectRules(merged.builtinProjectRules);
+  // Ignore files the built-in agent's glob/grep read, same folder.
+  merged.builtinIgnoreFiles = normalizeIgnoreFiles(merged.builtinIgnoreFiles);
   // Per-skill modes: what the agent announces and what it follows from turn 1.
   merged.builtinSkillModes = normalizeSkillModes(merged.builtinSkillModes);
   // Skill folders plugins ship come from the loader on read, never from the

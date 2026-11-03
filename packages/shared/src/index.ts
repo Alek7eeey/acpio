@@ -737,6 +737,73 @@ export function normalizeSkillPaths(paths: unknown): string[] {
 }
 
 /**
+ * Files the built-in agent reads as the repository's own rules, by default —
+ * relative to the chat's own cwd. `AGENTS.md` and the Cursor-compatible
+ * `.cursor/rules` are what other tools already write there. Configurable in
+ * Settings → Built-in agent; glob patterns (`*`, `**`) are allowed, and an
+ * empty list turns project rules off.
+ */
+export const DEFAULT_BUILTIN_PROJECT_RULES: readonly string[] = [
+  "AGENTS.md",
+  ".cursorrules",
+  ".cursor/rules/**/*.mdc",
+];
+
+/**
+ * Ignore files the built-in agent's `glob` and `grep` honour, by default —
+ * relative to the chat's own cwd. Both are written in the same gitignore
+ * syntax, and a project that has both usually says different things in them:
+ * `.gitignore` keeps build output out of the repository, `.cursorignore` keeps
+ * it out of the agent's search. A later file decides over an earlier one.
+ */
+export const DEFAULT_IGNORE_FILES: readonly string[] = [".gitignore", ".cursorignore"];
+
+/**
+ * Configured ignore files: trimmed, forward-slashed, de-duplicated, relative to
+ * the chat's cwd only (an ignore file describes its own tree). A non-array
+ * (absent setting) means the defaults; an empty list turns them off.
+ */
+export function normalizeIgnoreFiles(files: unknown): string[] {
+  if (!Array.isArray(files)) return [...DEFAULT_IGNORE_FILES];
+  const out: string[] = [];
+  for (const raw of files) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/{2,}/g, "/");
+    if (!trimmed || trimmed.startsWith("/") || /^[a-z]:/i.test(trimmed)) continue;
+    if (trimmed.split("/").some((seg) => seg === "..")) continue;
+    if (!out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
+/**
+ * Configured project-rule patterns: trimmed, forward-slashed, de-duplicated,
+ * glob metacharacters kept. Absolute paths and paths escaping the chat's cwd are
+ * dropped — these are the rules of the repository itself. A non-array (absent
+ * setting) means the defaults.
+ */
+export function normalizeBuiltinProjectRules(patterns: unknown): string[] {
+  if (!Array.isArray(patterns)) return [...DEFAULT_BUILTIN_PROJECT_RULES];
+  const out: string[] = [];
+  for (const raw of patterns) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "")
+      .replace(/\/{2,}/g, "/");
+    if (!trimmed || trimmed.startsWith("/") || /^[a-z]:/i.test(trimmed)) continue;
+    if (trimmed.split("/").some((seg) => seg === "..")) continue;
+    if (!out.includes(trimmed)) out.push(trimmed);
+  }
+  return out;
+}
+
+/**
  * How a skill is offered to the built-in agent (Settings → Built-in agent):
  * `off` — the skill does not exist for the chat at all, `/name` included;
  * `hidden` — the system prompt never mentions it, while the `/` menu and a
@@ -2430,6 +2497,20 @@ export interface AppSettings {
    */
   builtinSkillModes: Record<string, SkillMode>;
   /**
+   * Files the built-in agent reads as the repository's own rules, relative to
+   * the chat's cwd and matched as glob patterns ({@link
+   * DEFAULT_BUILTIN_PROJECT_RULES} for the default). A rule that always applies
+   * is inlined into the system prompt; one gated on `globs` is listed by path
+   * for the model to read. An empty list turns the feature off.
+   */
+  builtinProjectRules: string[];
+  /**
+   * Ignore files the built-in agent's workspace walk honours, relative to the
+   * chat's cwd ({@link DEFAULT_IGNORE_FILES} for the default). Written in
+   * gitignore syntax; an empty list leaves only the built-in skip list.
+   */
+  builtinIgnoreFiles: string[];
+  /**
    * Skill folders plugins ship, filled by the plugin host at boot and never
    * stored — like the providers a plugin contributes, they ride in on read so
    * every reader of the settings sees them without a restart-order dance. An
@@ -2620,6 +2701,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   pluginsConfig: "",
   builtinSkillPaths: [...DEFAULT_BUILTIN_SKILL_PATHS],
   builtinSkillModes: {},
+  builtinProjectRules: [...DEFAULT_BUILTIN_PROJECT_RULES],
+  builtinIgnoreFiles: [...DEFAULT_IGNORE_FILES],
   pluginSkills: [],
   builtinSubagents: DEFAULT_BUILTIN_SUBAGENTS,
   builtinAllowOutsideCwd: false,

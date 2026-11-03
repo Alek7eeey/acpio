@@ -15,6 +15,8 @@ import {
   normalizeBuiltinSubagents,
   normalizeMcpProjectFiles,
   normalizeSkillModes,
+  normalizeBuiltinProjectRules,
+  normalizeIgnoreFiles,
   normalizeSkillPaths,
   type AgentProvider,
   type AppSettings,
@@ -581,6 +583,8 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
     ? partial.mcpBuiltinDisabledIds.filter((id): id is string => typeof id === "string")
     : [...DEFAULT_SETTINGS.mcpBuiltinDisabledIds];
   merged.builtinSkillPaths = normalizeSkillPaths(partial.builtinSkillPaths);
+  merged.builtinProjectRules = normalizeBuiltinProjectRules(partial.builtinProjectRules);
+  merged.builtinIgnoreFiles = normalizeIgnoreFiles(partial.builtinIgnoreFiles);
   merged.builtinSkillModes = normalizeSkillModes(partial.builtinSkillModes);
   merged.builtinExtraInstructions = normalizeBuiltinExtraInstructions(
     partial.builtinExtraInstructions,

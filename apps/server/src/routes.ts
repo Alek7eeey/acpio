@@ -465,6 +465,8 @@ const settingsSchema = z.object({
     )
     .optional(),
   mcpProjectFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
+  builtinProjectRules: z.array(z.string().min(1).max(512)).max(50).optional(),
+  builtinIgnoreFiles: z.array(z.string().min(1).max(512)).max(50).optional(),
   pluginsConfig: z.string().max(2_000).optional(),
   /** Plugins added by hand — the config source stays the way to point at several. */
   pluginEntries: z

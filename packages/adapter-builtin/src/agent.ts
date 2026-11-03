@@ -48,6 +48,7 @@ import {
   type TurnOutcome,
 } from "./loop.js";
 import { McpManager, mcpToolSet, parseMcpServers } from "./mcp.js";
+import { renderProjectRules, touchedFiles } from "./projectRules.js";
 import {
   builtinSlashCommands,
   discoverSettingsSkills,
@@ -252,6 +253,8 @@ export function systemPrompt(
   extraInstructions: string,
   /** The harness's own rider (the thinking knob) — not the user's words. */
   thinkingInstructions: string,
+  /** The repository's own rules, already rendered (see `projectRules.ts`). */
+  projectRules = "",
 ): string {
   // The prompt speaks the UI language: every fixed line below has its Russian
   // twin, so a reader flipping the language reads rules in their own.
@@ -309,6 +312,9 @@ export function systemPrompt(
     ...RULES.filter(
       (rule) => !supersededRules.has(rule.id) && (planTool || rule.id !== "plan"),
     ).map((rule) => `- ${t(rule.text, rule.ru)}`),
+    // The repository's rules sit right below: more specific than the laws
+    // above, less than a skill the user turned on.
+    ...(projectRules ? [projectRules] : []),
     // Stable to volatile, top to bottom: the rules and the frozen skills block
     // come first so a MCP server coming online or the thinking knob turning mid
     // chat rewrites only the tail, never the head the provider has cached.
@@ -1771,6 +1777,15 @@ export class BuiltinAgent implements InProcessAgentTransport {
       // Built once for the whole turn: the summariser borrows this exact string
       // so its request starts where this turn's did (see `ask`), and a retried
       // attempt must not drift the prefix the first attempt already warmed.
+      // Read live, like every other knob: a pattern added in Settings reaches
+      // the very next turn, and the files behind it are re-read each turn.
+      const projectRules = await renderProjectRules(
+        this.cwd,
+        live.builtinProjectRules,
+        // The files this conversation already opened: their rules are inlined
+        // instead of waiting in the list (see `renderProjectRules`).
+        touchedFiles(this.messages, this.cwd),
+      );
       const system = systemPrompt(
         live.locale,
         // Read live, like the switches below: the setting reaches the prompt of
@@ -1792,6 +1807,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
         planToolEnabled,
         live.builtinExtraInstructions ?? "",
         THINKING_INSTRUCTIONS[this.thinking],
+        projectRules,
       );
       this.lastSystem = system;
       // Built before the prompt for the same reason as the system prompt: the

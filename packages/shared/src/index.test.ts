@@ -21,7 +21,9 @@ import {
   builtinMcpServers,
   BG_MCP_SERVER_ID,
   expandMcpVars,
+  normalizeIgnoreFiles,
   normalizeMcpProjectFiles,
+  normalizeBuiltinProjectRules,
   normalizeSkillPaths,
   parseMcpProjectFile,
   isMcpServerAttached,
@@ -554,6 +556,8 @@ describe("DEFAULT_SETTINGS", () => {
     pluginSkills: [],
     builtinSkillPaths: [".agents/skills", "~/.agents/skills"],
     builtinSkillModes: {},
+    builtinProjectRules: ["AGENTS.md", ".cursorrules", ".cursor/rules/**/*.mdc"],
+    builtinIgnoreFiles: [".gitignore", ".cursorignore"],
     builtinSubagents: { enabled: false, allowAdhoc: true, agents: [] },
     builtinAllowOutsideCwd: false,
     builtinReplyLanguage: "auto",
@@ -994,6 +998,49 @@ describe("normalizeMcpProjectFiles", () => {
     expect(normalizeMcpProjectFiles(["../outside/mcp.json"])).toEqual([]);
     expect(normalizeMcpProjectFiles([".config/../mcp.json"])).toEqual([]);
     expect(normalizeMcpProjectFiles(["", "   ", 7])).toEqual([]);
+  });
+});
+
+describe("normalizeBuiltinProjectRules", () => {
+  it("falls back to the default files for a missing setting", () => {
+    expect(normalizeBuiltinProjectRules(undefined)).toEqual([
+      "AGENTS.md",
+      ".cursorrules",
+      ".cursor/rules/**/*.mdc",
+    ]);
+  });
+
+  it("keeps globs, trims, slashes and de-duplicates", () => {
+    expect(normalizeBuiltinProjectRules([" .cursor\\rules\\*.mdc ", "docs/**/*.md"])).toEqual([
+      ".cursor/rules/*.mdc",
+      "docs/**/*.md",
+    ]);
+    expect(normalizeBuiltinProjectRules([])).toEqual([]);
+  });
+
+  it("drops absolute paths and paths escaping the folder", () => {
+    expect(normalizeBuiltinProjectRules(["C:/other/AGENTS.md", "/etc/AGENTS.md", "../AGENTS.md"])).toEqual(
+      [],
+    );
+  });
+});
+
+describe("normalizeIgnoreFiles", () => {
+  it("falls back to .gitignore and .cursorignore for a missing setting", () => {
+    expect(normalizeIgnoreFiles(undefined)).toEqual([".gitignore", ".cursorignore"]);
+  });
+
+  it("trims, slashes and de-duplicates, and an empty list stays empty", () => {
+    expect(
+      normalizeIgnoreFiles([" .cursorignore ", "./.gitignore", ".gitignore", "sub/ignore"]),
+    ).toEqual([".cursorignore", ".gitignore", "sub/ignore"]);
+    expect(normalizeIgnoreFiles([])).toEqual([]);
+  });
+
+  it("drops absolute paths and paths escaping the folder", () => {
+    expect(normalizeIgnoreFiles(["C:/other/.gitignore", "/etc/.gitignore", "../.gitignore"])).toEqual(
+      [],
+    );
   });
 });
 

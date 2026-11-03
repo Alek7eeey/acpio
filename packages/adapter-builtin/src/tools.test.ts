@@ -181,6 +181,39 @@ describe("createBuiltinTools", () => {
     });
   });
 
+  it("grep says where else to look when the ignore files hid folders", async () => {
+    const { tools, host } = setup();
+    host.request.mockResolvedValue({
+      hits: [],
+      files: [],
+      truncated: false,
+      ignoredDirCount: 3,
+      ignoredDirs: ["ConsoleServer/bin", "web/dist"],
+    });
+    const out = (await exec(tools, "grep", { pattern: "MZ" })) as string;
+    expect(out).toContain("No matches for /MZ/");
+    expect(out).toContain(
+      "3 folder(s) listed in the ignore files — ConsoleServer/bin, web/dist (and 1 more)",
+    );
+    // Both hints have to be actions the tool really takes.
+    expect(out).toContain('grep({ path: "ConsoleServer/bin" })');
+    expect(out).toContain("grep inside a folder to list the ignored ones there");
+  });
+
+  it("grep names the skipped folders under a result too", async () => {
+    const { tools, host } = setup();
+    host.request.mockResolvedValue({
+      hits: [{ path: "a.ts", line: 1, text: "x" }],
+      files: [{ path: "a.ts", bytes: 512, lines: 8 }],
+      ignoredDirCount: 1,
+      ignoredDirs: ["bin"],
+    });
+    const out = (await exec(tools, "grep", { pattern: "x" })) as string;
+    expect(out).toContain("1 folder(s) listed in the ignore files — bin");
+    // Nothing was left out of the list, so no "and N more".
+    expect(out).not.toContain("more)");
+  });
+
   it("grep marks a truncated result", async () => {
     const { tools, host } = setup();
     host.request.mockResolvedValue({

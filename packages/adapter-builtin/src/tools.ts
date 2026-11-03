@@ -215,20 +215,41 @@ function notSearched(
         skippedLarge?: number;
         skippedLargeFiles?: Array<{ path: string; bytes: number }>;
         skippedBinary?: number;
+        ignoredDirs?: string[];
+        ignoredDirCount?: number;
       }
     | undefined,
 ): string {
   const large = res?.skippedLarge ?? 0;
   const binary = res?.skippedBinary ?? 0;
-  if (!large && !binary) return "";
-  const named = res?.skippedLargeFiles ?? [];
+  // A project's ignore files can hide more than a scan cap does, and an empty
+  // answer is exactly when the model has to know where else it could look.
+  const ignored = res?.ignoredDirCount ?? 0;
+  const ignoredShown = res?.ignoredDirs ?? [];
   const parts: string[] = [];
   if (large) {
+    const named = res?.skippedLargeFiles ?? [];
     const list = named.map((f) => `${f.path} (${sizeLabel(f.bytes)})`).join(", ");
     parts.push(`${large} file(s) over the scan cap${list ? ` — ${list}` : ""}`);
   }
   if (binary) parts.push(`${binary} binary file(s)`);
-  const how = named[0] ? ` Search a named file with grep({ path: "${named[0].path}" }).` : "";
+  if (ignored) {
+    const more = ignored - ignoredShown.length;
+    parts.push(
+      `${ignored} folder(s) listed in the ignore files${ignoredShown.length ? ` — ${ignoredShown.join(", ")}` : ""}` +
+        // The list is capped: a folder past it is reached by narrowing the
+        // search, which is what makes the cap harmless rather than a dead end.
+        (more > 0 ? ` (and ${more} more)` : ""),
+    );
+  }
+  if (!parts.length) return "";
+  const named = res?.skippedLargeFiles ?? [];
+  const how = ignoredShown[0]
+    ? ` Name a skipped folder as \`path\` to search it anyway: grep({ path: "${ignoredShown[0]}" });` +
+      " grep inside a folder to list the ignored ones there."
+    : named[0]
+      ? ` Search a named file with grep({ path: "${named[0].path}" }).`
+      : "";
   return `\n[not searched: ${parts.join("; ")}.${how}]`;
 }
 
@@ -671,6 +692,8 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
         skippedLarge?: number;
         skippedLargeFiles?: Array<{ path: string; bytes: number }>;
         skippedBinary?: number;
+        ignoredDirs?: string[];
+        ignoredDirCount?: number;
       }>("fs/search", {
         pattern,
         ...(path ? { path } : {}),
@@ -680,7 +703,7 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
       });
       const hits = res?.hits ?? [];
       if (!hits.length) {
-        return `No matches for /${pattern}/${ignore_case ? "i" : ""}${res?.truncated ? " (search stopped early)" : ""}.`;
+        return `No matches for /${pattern}/${ignore_case ? "i" : ""}${res?.truncated ? " (search stopped early)" : ""}.${notSearched(res)}`;
       }
       // One header per file instead of the path on every hit: the model reads a
       // file's context once, and a long path repeated 200 times is dead weight.

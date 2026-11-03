@@ -630,6 +630,14 @@ export const en = {
     builtinSkillPathsHint:
       "Folders the agent scans for skills — a skill is a subfolder with a SKILL.md — one path per line. Relative paths resolve against each chat's folder; `~` is the server user's home (e.g. ~/.agents/skills); absolute paths are global too. Clear the list to turn skills off. A `/name` message invokes a skill.",
     builtinSkillPathsReset: "Reset to defaults",
+    builtinProjectRulesTitle: "Project rules",
+    builtinProjectRulesHint:
+      "Files the built-in agent reads as the repository's own rules — AGENTS.md, the Cursor-compatible .cursor/rules — one glob per line, relative to each chat's folder (default: AGENTS.md, .cursorrules, .cursor/rules/**/*.mdc). A rule that always applies is added to the system prompt; one gated on globs is listed by path and read when a matching file is touched. Clear the list to turn project rules off.",
+    builtinProjectRulesReset: "Reset to defaults",
+    builtinIgnoreFilesTitle: "Ignore files",
+    builtinIgnoreFilesHint:
+      "Files whose gitignore-style patterns the agent's glob and grep honour, one path per line, relative to each chat's folder (default: .gitignore, .cursorignore). A later file decides over an earlier one, so .cursorignore can bring back what .gitignore hides. A file or folder the agent names explicitly is still read or searched, and grep lists the skipped folders when it finds nothing. Clear the list to search everything.",
+    builtinIgnoreFilesReset: "Reset to defaults",
     builtinSkillsTitle: "Built-in skills",
     builtinSkillsHint:
       "Skills the app itself ships — every chat has them, and the folders above do not affect them. “Disabled” — the chat has no such skill at all, `/name` included. “Not visible” — the system prompt says nothing about it (not even the skills block, when nothing else is left to show), while `/name` and the `/` menu still work. “Visible, not activated” — the agent sees it listed and reads the SKILL.md when a task matches. “Active by default” — the SKILL.md body goes into the system prompt of every turn, so the skill is in effect from the first message, at the cost of context in every request.",

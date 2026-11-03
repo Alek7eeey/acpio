@@ -637,6 +637,19 @@ describe("normalizeBuiltinExtraInstructions", () => {
     expect(mergeClientAppSettings({}).builtinExtraInstructions).toBe("");
     expect(mergeClientAppSettings({ builtinExtraInstructions: 7 }).builtinExtraInstructions).toBe("");
   });
+
+  it("carries the default project-rule patterns and heals what it is sent", () => {
+    expect(mergeClientAppSettings({}).builtinProjectRules).toEqual([
+      "AGENTS.md",
+      ".cursorrules",
+      ".cursor/rules/**/*.mdc",
+    ]);
+    expect(
+      mergeClientAppSettings({ builtinProjectRules: [" .cursor\\rules\\*.mdc ", 7] })
+        .builtinProjectRules,
+    ).toEqual([".cursor/rules/*.mdc"]);
+    expect(mergeClientAppSettings({ builtinProjectRules: [] }).builtinProjectRules).toEqual([]);
+  });
 });
 
 describe("normalizeBuiltinSubagents", () => {
