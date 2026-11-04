@@ -1050,10 +1050,20 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
           // narrowing the command.
           const message = err instanceof Error ? err.message : String(err);
           if (!/timed out/i.test(message)) throw err;
+          // What the command printed before the kill is the model's only clue
+          // about how far it got. Dropping it is what teaches it to wrap every
+          // command in `timeout N … > file` just to keep the output.
+          const partial = await host
+            .request<{ output?: string }>("terminal/output", { terminalId })
+            .catch(() => ({ output: "" }));
+          const seen = clip(partial?.output ?? "").trim();
           throw new Error(
             `command killed after ${Math.round(limitMs / 1000)}s — that is the bash timeout. ` +
               `Pass a bigger \`timeout_ms\` (up to ${Math.round(MAX_BASH_TIMEOUT_MS / 1000)}s) for a build or a ` +
-              "test run, or narrow the command (a path, a glob) instead of repeating it.",
+              "test run, or narrow the command (a path, a glob) instead of repeating it." +
+              (seen
+                ? `\n--- output before the kill ---\n${seen}`
+                : "\n(the command printed nothing before the kill)"),
           );
         }
         const out = await host.request<{ output?: string; truncated?: boolean }>("terminal/output", {

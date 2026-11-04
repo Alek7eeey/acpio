@@ -341,6 +341,7 @@ describe("createBuiltinTools", () => {
     host.request.mockImplementation(async (method: string) => {
       if (method === "terminal/create") return { terminalId: "T1" };
       if (method === "terminal/wait_for_exit") throw new Error("Terminal timed out after 15000ms");
+      if (method === "terminal/output") return { output: "step 3 of 9 done\n" };
       return {};
     });
     const tools = createBuiltinTools({
@@ -353,6 +354,9 @@ describe("createBuiltinTools", () => {
     // still released — a killed command must not leave one hanging.
     const killed = exec(tools, "bash", { command: "git log -S x --all" });
     await expect(killed).rejects.toThrow(/killed after 15s .*timeout_ms/s);
+    // The output the command did print comes back with the error: without it
+    // the model has to wrap commands in `timeout N … > file` to see anything.
+    await expect(killed).rejects.toThrow(/output before the kill ---\nstep 3 of 9 done/);
     // The model cannot open Settings: a path to it only invites "raise the limit"
     // instead of the narrowing the message asks for.
     await expect(killed).rejects.not.toThrow(/Settings/);
