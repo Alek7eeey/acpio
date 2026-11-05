@@ -7979,7 +7979,9 @@ function ChatThread() {
           <div
             className={`${styles.pill} ${composerMultiline ? styles.pillMultiline : ""} ${
               turnBusy ? styles.pillBusy : ""
-            } ${composerLocked ? styles.pillLoading : ""}`}
+            } ${composerLocked ? styles.pillLoading : ""} ${
+              attachmentLinks.length ? styles.pillPainted : ""
+            }`}
           >
             <SlashCommandMenu
               open={slashMenuOpen}

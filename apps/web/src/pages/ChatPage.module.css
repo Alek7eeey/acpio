@@ -3180,6 +3180,30 @@ button.userSlashCmd:focus-visible {
   -webkit-text-fill-color: var(--text-secondary);
 }
 
+/* No attached file in the draft: there is no name to colour, so the field
+   paints its own text and the caret cannot part ways with it. The copy takes
+   over only when a name has to read as a link (see `ComposerMirror`) — two
+   layers of the same text is exactly where a caret drifts, and a browser's
+   textarea and a div need not space every glyph alike. */
+.pill:not(.pillPainted) .pillInput {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
+.pill:not(.pillPainted) .pillInput::selection {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
+.pill:not(.pillPainted) .pillMirror {
+  display: none;
+}
+
+.pillLoading:not(.pillPainted) .pillInput {
+  color: var(--text-secondary);
+  -webkit-text-fill-color: var(--text-secondary);
+}
+
 /* The same text, drawn: every metric that moves a glyph has to match
    `.pillInput` exactly, or the painted line and the caret drift apart. */
 .pillMirror {

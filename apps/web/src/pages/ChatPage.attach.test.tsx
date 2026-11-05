@@ -335,6 +335,22 @@ describe("the link an attached file writes into the composer", () => {
     expect(painted.querySelector(`.${styles.pillLink}`)?.textContent).toBe("screenshot.png");
   });
 
+  // Nothing to colour as a link: the field paints its own text, so the glyphs
+  // and the caret are one layer. Two layers is where the caret drifts — a
+  // textarea and a div need not space every glyph alike.
+  it("paints its own text while no file's name is in the draft", async () => {
+    const { container } = renderComposer();
+    const textarea = container.querySelector("textarea")!;
+    await screen.findByLabelText("Остановить");
+    fireEvent.change(textarea, { target: { value: "привет" } });
+    const pill = textarea.closest(`.${styles.pill}`)!;
+    expect(pill.className).not.toContain(styles.pillPainted);
+
+    pasteImage(textarea);
+    await waitFor(() => expect(textarea.value).toBe("приветscreenshot.png"));
+    expect(pill.className).toContain(styles.pillPainted);
+  });
+
   it("names the file alone while the reader types", async () => {
     const { container } = renderComposer();
     const textarea = container.querySelector("textarea")!;
