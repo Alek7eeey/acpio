@@ -599,8 +599,10 @@ function ComposerMirror({
           <span key={i}>{part.text}</span>
         ),
       )}
-      {/* A trailing newline is a line the textarea reserves and a div does not. */}
-      {text.endsWith("\n") ? "\u200b" : null}
+      {/* A trailing newline is a line the textarea reserves and a div does not;
+          a trailing space is a width the div drops at the end of a line (the
+          single-line pill is `nowrap`) while the caret stays after it. */}
+      {/\s$/.test(text) ? "\u200b" : null}
     </div>
   );
 }
