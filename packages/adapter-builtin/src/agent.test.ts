@@ -154,8 +154,13 @@ describe("system prompt rules", () => {
   });
 
   it("keeps the plan rule only while the plan tool is offered", () => {
-    expect(build([])).toContain("goes into the `plan` tool");
+    // The plan is a file and two stages: the rule says where it lives and that
+    // the reader's pace outranks it.
+    expect(build([])).toContain(".acpio/plan.md");
+    expect(build([])).toContain("`apply_plan`");
+    expect(build([])).toContain("The reader sets the pace");
     expect(build([], "", false)).not.toContain("`plan` tool");
+    expect(build([], "", false)).not.toContain("`apply_plan`");
     // The other laws stay: the switch takes the tool, not the rules.
     expect(build([], "", false)).toContain("Make the smallest change that fully solves the task.");
   });

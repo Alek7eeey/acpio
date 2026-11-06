@@ -114,7 +114,13 @@ import {
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
 import { listProviderCommands } from "./acp/providerCommands.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
-import { discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
+import {
+  discoverSettingsSkills,
+  planFilePath,
+  readPlan,
+  setPlanOptions,
+  skillMode,
+} from "@acpio/adapter-builtin";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -2317,10 +2323,34 @@ export async function registerRoutes(app: FastifyInstance) {
     const body = z.object({ mode: z.enum(["agent", "plan", "ask"]) }).parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    if (!getAgentAvailability(detail.provider)) {
+    if (harnessRefusesWork(detail.provider, await getSettings())) {
       return sendAgentOffline(req, reply);
     }
     return setSessionMode(id, body.mode);
+  });
+
+  /**
+   * The plan file's own switches — the stage and the pace the panel draws. The
+   * panel speaks to the agent through `.acpio/plan.md` rather than through a
+   * second channel: the agent's watcher sees the change exactly like a hand
+   * edit and republishes the plan.
+   */
+  app.post("/api/sessions/:id/plan", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = z
+      .object({
+        stage: z.enum(["draft", "applying"]).optional(),
+        pacing: z.enum(["whole", "step"]).optional(),
+      })
+      .parse(req.body);
+    const detail = await getSessionDetail(id);
+    if (!detail) return reply.code(404).send({ error: "Not found" });
+    const file = planFilePath(detail.cwd);
+    const saved = setPlanOptions(file, body, (await getSettings()).locale === "ru" ? "ru" : "en");
+    // No file means no plan to switch: the panel is showing a plan some other
+    // agent published, and there is nothing here to write to.
+    if (!saved) return reply.code(404).send({ error: "No plan file" });
+    return { ok: true, plan: readPlan(file) };
   });
 
   app.post("/api/sessions/:id/permissions/:requestId", async (req) => {

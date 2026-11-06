@@ -1,7 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { describe, expect, it, vi, type Mock } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { BUILTIN_BASH_TIMEOUT_SEC_MAX, TERMINAL_WAIT_MAX_MS } from "@acpio/shared";
-import { createBuiltinTools, shellCommand, windowRead } from "./tools.js";
+import { readPlan, writePlan, type PlanState } from "./planFile.js";
+import { createBuiltinTools, shellCommand, windowRead, type PlanBridge } from "./tools.js";
 
 /** Tool execution options the SDK passes; only abortSignal is used here. */
 const CTX = { abortSignal: new AbortController().signal, toolCallId: "C1" };
@@ -623,24 +627,45 @@ describe("createBuiltinTools with subagents", () => {
   });
 });
 
-describe("the plan tool", () => {
-  const emitPlan = () => vi.fn();
-  const setupPlan = (emit: Mock) =>
-    createBuiltinTools({
+describe("the plan tools", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A tool set over a real plan file in a temp folder, with the panel's side stubbed. */
+  const setupPlan = (accepted = true) => {
+    const dir = mkdtempSync(join(tmpdir(), "acpio-plan-tools-"));
+    dirs.push(dir);
+    const file = join(dir, "plan.md");
+    const published: PlanState[] = [];
+    const approve = vi.fn(async () => accepted);
+    const bridge: PlanBridge = {
+      file,
+      path: ".acpio/plan.md",
+      read: () => readPlan(file),
+      write: (state) => {
+        writePlan(file, state);
+        published.push(state);
+      },
+      approve,
+    };
+    const tools = createBuiltinTools({
       host: { request: vi.fn(async () => ({})) },
       ask: vi.fn(async () => undefined),
       sessionId: "S1",
-      emitPlan: emit,
+      plan: bridge,
     });
+    return { tools, file, published, approve };
+  };
 
   it("is offered only to the session's own tool set", () => {
     expect(Object.keys(setup().tools)).not.toContain("plan");
-    expect(Object.keys(setupPlan(emitPlan()))).toContain("plan");
+    expect(Object.keys(setupPlan().tools)).toContain("apply_plan");
   });
 
-  it("publishes the whole list as ACP plan entries", async () => {
-    const emit = emitPlan();
-    const tools = setupPlan(emit);
+  it("writes the steps into the plan file, and publishes the same state", async () => {
+    const { tools, file, published } = setupPlan();
     await expect(
       exec(tools, "plan", {
         entries: [
@@ -650,55 +675,81 @@ describe("the plan tool", () => {
         ],
       }),
     ).resolves.toContain("2 step(s)");
-    // No document in the call: the update is the steps alone, the shape every
-    // other ACP agent sends.
-    expect(emit).toHaveBeenCalledWith({
-      entries: [
-        { content: "Read the code", status: "in_progress", priority: "medium" },
-        { content: "Fix it", status: "pending", priority: "medium" },
-      ],
-    });
+    const onDisk = readPlan(file);
+    expect(onDisk?.entries).toEqual([
+      { content: "Read the code", status: "in_progress", priority: "medium" },
+      { content: "Fix it", status: "pending", priority: "medium" },
+    ]);
+    expect(onDisk?.stage).toBe("draft");
+    expect(published.at(-1)).toEqual(onDisk);
   });
 
-  it("hands the plan itself over with the steps when the user asked for one", async () => {
-    const emit = emitPlan();
-    const tools = setupPlan(emit);
+  it("carries the document into the file when the user asked for a plan", async () => {
+    const { tools, file } = setupPlan();
     await expect(
       exec(tools, "plan", {
         name: " Export ",
         overview: "  Three steps. ",
-        plan: " # Plan\n\n1. Read. ",
+        plan: "## Файлы\n\n`chatExport.ts`.",
         entries: [{ content: "Read the code" }],
       }),
     ).resolves.toContain("Plan published");
-    expect(emit).toHaveBeenCalledWith({
+    const onDisk = readPlan(file);
+    expect(onDisk?.name).toBe("Export");
+    expect(onDisk?.overview).toBe("Three steps.");
+    // The detailed part keeps its own headings; only the wrapper is the file's.
+    expect(onDisk?.plan).toBe("## Файлы\n\n`chatExport.ts`.");
+  });
+
+  it("keeps the document a later status call carries none of", async () => {
+    const { tools, file } = setupPlan();
+    await exec(tools, "plan", {
       name: "Export",
       overview: "Three steps.",
-      plan: "# Plan\n\n1. Read.",
-      entries: [{ content: "Read the code", status: "pending", priority: "medium" }],
-    });
-  });
-
-  it("leaves the document out when the call carries none", async () => {
-    const emit = emitPlan();
-    const tools = setupPlan(emit);
-    await exec(tools, "plan", {
-      name: "  ",
-      overview: "",
       entries: [{ content: "Read the code" }],
     });
-    // Blank fields are absent, not empty: the agent keeps the plan it has.
-    expect(emit).toHaveBeenCalledWith({
-      entries: [{ content: "Read the code", status: "pending", priority: "medium" }],
-    });
+    await exec(tools, "plan", { name: "  ", entries: [{ content: "Read the code", status: "completed" }] });
+    const onDisk = readPlan(file);
+    expect(onDisk?.name).toBe("Export");
+    expect(onDisk?.overview).toBe("Three steps.");
+    expect(onDisk?.entries[0]?.status).toBe("completed");
   });
 
-  it("refuses a call whose entries carry no content", async () => {
-    const emit = emitPlan();
-    const tools = setupPlan(emit);
-    await expect(exec(tools, "plan", { entries: [{ content: "  " }] })).rejects.toThrow(
-      /needs `content`/,
-    );
-    expect(emit).not.toHaveBeenCalled();
+  it("republishes the file untouched when the call carries nothing", async () => {
+    const { tools, file, published } = setupPlan();
+    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    const before = published.length;
+    await exec(tools, "plan", {});
+    expect(published).toHaveLength(before + 1);
+    expect(published.at(-1)?.entries.map((e) => e.content)).toEqual(["Read the code"]);
+    expect(readPlan(file)?.entries).toHaveLength(1);
+  });
+
+  it("asks the reader before implementing, and only approval flips the stage", async () => {
+    const { tools, file, approve } = setupPlan(true);
+    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await expect(exec(tools, "apply_plan", {})).resolves.toContain("Plan approved");
+    expect(approve).toHaveBeenCalledTimes(1);
+    expect(readPlan(file)?.stage).toBe("applying");
+  });
+
+  it("leaves the plan in draft when the reader says no", async () => {
+    const { tools, file } = setupPlan(false);
+    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await expect(exec(tools, "apply_plan", {})).resolves.toContain("did not approve");
+    expect(readPlan(file)?.stage).toBe("draft");
+  });
+
+  it("takes the pace from the call and keeps it", async () => {
+    const { tools, file } = setupPlan(true);
+    await exec(tools, "plan", { entries: [{ content: "Read the code" }] });
+    await exec(tools, "apply_plan", { pacing: "step" });
+    expect(readPlan(file)?.pacing).toBe("step");
+  });
+
+  it("refuses to apply a plan that has no steps", async () => {
+    const { tools, approve } = setupPlan(true);
+    await expect(exec(tools, "apply_plan", {})).rejects.toThrow(/no steps yet/);
+    expect(approve).not.toHaveBeenCalled();
   });
 });

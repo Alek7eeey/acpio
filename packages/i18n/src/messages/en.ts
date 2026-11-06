@@ -650,7 +650,7 @@ export const en = {
       "Tell the agent that this chat draws a picture out of markdown — `![shot](path)`, a path inside the working folder or an absolute one. Without the hint the model answers that it cannot show an image.",
     builtinPlanTool: "Plan tool",
     builtinPlanToolHint:
-      "Let the agent keep a task in the `plan` tool: the steps in the right-hand panel, and — when you ask for a plan — the plan itself above them. Off, the tool is not offered and its rule leaves the prompt, so nothing is published there.",
+      "Let the agent keep the plan as `.acpio/plan.md` in the working folder: the steps and the plan itself in the right-hand panel, the draft → implementing stages, and the approval button. The file is edited with the ordinary tools and in your own editor. Off, the tools are not offered and their rule leaves the prompt, so nothing is published there.",
     agentAdvancedTitle: "Advanced",
     profileTitle: "Profile",
     agentConnectDesc: "Agents are checked automatically when the app starts",

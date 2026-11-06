@@ -1352,7 +1352,15 @@
   },
   "planPanel": {
     "title": "План работ",
-    "remove": "Удалить план"
+    "remove": "Удалить план",
+    "stageDraft": "Черновик",
+    "stageApplying": "Реализация",
+    "approve": "Утвердить и начать",
+    "approvePrompt": "План утверждён — приступай к реализации.",
+    "pacing": "Темп",
+    "pacingWhole": "Всё сразу",
+    "pacingStep": "По одному",
+    "progress": "{{done}} из {{total}}"
   },
   "question": {
     "plan": "План",

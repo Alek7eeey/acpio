@@ -53,7 +53,22 @@ import {
   supersededRules,
 } from "./skills.js";
 import { isValidSessionId, loadBuiltinSession, saveBuiltinSession } from "./store.js";
-import { createBuiltinTools, type PlanDocument, type PlanEntry, type PlanUpdate } from "./tools.js";
+import {
+  PLAN_DIR,
+  PLAN_FILE,
+  planFilePath,
+  planSignature,
+  readPlan,
+  writePlan,
+  type PlanPacing,
+  type PlanStage,
+  type PlanState,
+} from "./planFile.js";
+import {
+  createBuiltinTools,
+  type PlanEntry,
+  type PlanBridge,
+} from "./tools.js";
 import {
   createSubagentsBridge,
   type SubagentsBridge,
@@ -131,17 +146,24 @@ const RULES: ReadonlyArray<{ id: string; text: string }> = [
   { id: "smallest-change", text: "Make the smallest change that fully solves the task." },
   // The side panel is the plan's home: the same place other ACP agents put
   // theirs. A model told nothing publishes nothing, and one that restates the
-  // list in its answer makes the reader read the same steps twice.
+  // list in its answer makes the reader read the same steps twice. The plan is a
+  // file (`.acpio/plan.md`) and two stages: `draft` is what the reader is still
+  // reading, `applying` is what they approved — and only an approved plan is
+  // work the turn owes.
   {
     id: "plan",
     text:
-      "Work that takes more than a couple of steps goes into the `plan` tool before the first " +
-      "one: the whole list in a single call, then the step you are on marked `in_progress` and " +
-      "`completed` once it lands. Steps left open send the turn back to you: finish them, or " +
-      "say why a step cannot be done and drop it. When the user asks for a plan, or to plan " +
-      "before acting, hand the plan itself over in that call — `name`, a line or two of " +
-      "`overview` and `plan` as Markdown — and the right-hand panel opens with it above the " +
-      "steps. The reader watches that panel — never repeat it in the answer.",
+      "A task longer than a couple of steps goes into the plan file `.acpio/plan.md` before the " +
+      "first step: a title, an `## Overview` of a line or two, the steps as `- [ ]` lines under " +
+      "`## Шаги` (`- [~]` while you work one, `- [x]` when it lands), then the files, the " +
+      "reasoning and how it will be checked in the sections after them. Write it with the `plan` " +
+      "tool, or with `write`/`edit` and then `plan` with no arguments to republish it; call " +
+      "`plan` again as each step starts and lands. In the `draft` stage nothing is implemented " +
+      "yet: read, search, form the plan, then call `apply_plan` — it stops the turn and asks the " +
+      "reader to approve. Only once the stage is `applying` does the work begin. The reader " +
+      "sets the pace: if they want one step at a time, or not to start without them, that " +
+      "outranks everything here — do not close the whole list in one turn, and say where you " +
+      "stopped. The reader watches the right-hand panel — never repeat the plan in the answer.",
   },
   {
     id: "batch",
@@ -485,20 +507,24 @@ export class BuiltinAgent implements InProcessAgentTransport {
    */
   private frozenSkills: { section: string; supersedes: Set<string> } | null = null;
   /**
-   * The plan document this session published: the title, the overview and the
-   * Markdown the panel draws above the steps. Kept for the session — a later
-   * `plan` call that only moves a step's status arrives without one, and the
-   * plan must not fall out of the panel mid-task (see `publishPlan`).
+   * The plan as this session last read it out of `.acpio/plan.md` — title,
+   * overview, the Markdown, the steps and the stage. The file is the source of
+   * truth (the tools write it, the reader may edit it by hand, the watcher
+   * follows it); this copy is what the nudge and the panel are drawn from.
    */
-  private planDocument: PlanDocument = {};
+  private planState: PlanState | undefined;
   /**
-   * Steps of the plan as last published, and how many `plan` calls have landed.
-   * A turn that wrote a plan has to finish it (see the nudge in `prompt`); the
-   * count is how that turn is told apart from one where the plan was already
-   * there — an unrelated question must not be pulled back into old work.
+   * Signature of the plan as last published, so the poll below can tell a hand
+   * edit from its own write, and how many `plan` calls have landed. A turn that
+   * wrote a plan into an approved one owes its steps (see the nudge in
+   * `prompt`); the count is how that turn is told apart from one where the plan
+   * was already there — an unrelated question must not be pulled back into old
+   * work.
    */
-  private planEntries: PlanEntry[] = [];
+  private planPublished = "";
   private planEpoch = 0;
+  /** Polls `.acpio/plan.md` while the session is open — see `watchPlan`. */
+  private planWatch: NodeJS.Timeout | undefined;
   /** Archive of bulky tool results for this session, when offloading is on. */
   private offload: OffloadStore | undefined;
   private abort: AbortController | null = null;
@@ -578,6 +604,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
   close(): void {
     if (this.stopping) return;
     this.stopping = true;
+    this.unwatchPlan();
     this.abort?.abort();
     this.mcp.close();
     this.rpc.failAll(new Error("встроенный агент остановлен"));
@@ -693,6 +720,11 @@ export class BuiltinAgent implements InProcessAgentTransport {
     );
     this.sessionId = sessionId;
     this.cwd = cwd || this.opts.cwd;
+    // The plan belongs to the chat that opens it: a restored session picks its
+    // own file back up, and a new one starts from a stage the file decides.
+    this.planState = undefined;
+    this.planWatch = undefined;
+    this.watchPlan();
     // A conversation saved before providers existed carries a bare model id —
     // normalize it so the picker reports the value it actually runs.
     const storedModel = stored?.modelId?.trim();
@@ -832,25 +864,120 @@ export class BuiltinAgent implements InProcessAgentTransport {
   }
 
   /**
-   * What the `plan` tool puts on the wire: the steps as the model sent them,
-   * plus the plan document this session has — the one from an earlier call when
-   * this one carries none, so moving a status never blanks the panel.
+   * Everything the panel learns about the plan, on one `session/update: plan`
+   * frame: the steps, the document and the stage (see `PlanUpdate`).
    */
-  private publishPlan(update: PlanUpdate): void {
-    const next: PlanDocument = {};
-    for (const field of ["name", "overview", "plan"] as const) {
-      const value = update[field]?.trim() || this.planDocument[field];
-      if (value) next[field] = value;
-    }
-    this.planDocument = next;
-    this.planEntries = update.entries;
+  private planFrame(state: PlanState): Record<string, unknown> {
+    return {
+      sessionUpdate: "plan",
+      ...(state.name ? { name: state.name } : {}),
+      ...(state.overview ? { overview: state.overview } : {}),
+      ...(state.plan ? { plan: state.plan } : {}),
+      entries: state.entries,
+      stage: state.stage,
+      pacing: state.pacing,
+      path: this.planDisplayPath(),
+    };
+  }
+
+  /** The plan file of this session — one per chat, inside the working folder. */
+  private planFile(): string {
+    return planFilePath(this.cwd);
+  }
+
+  /** What the panel shows instead of an absolute path. */
+  private planDisplayPath(): string {
+    return `${PLAN_DIR}/${PLAN_FILE}`;
+  }
+
+  private planLocale(): "ru" | "en" {
+    return this.opts.settings.locale === "ru" ? "ru" : "en";
+  }
+
+  /** Publish a state the file already holds: file first, panel second. */
+  private publishPlan(state: PlanState): void {
+    this.planState = state;
+    this.planPublished = planSignature(state);
     this.planEpoch += 1;
-    this.emitUpdate({ sessionUpdate: "plan", ...next, entries: update.entries });
+    this.emitUpdate(this.planFrame(state));
+  }
+
+  /** Write the file and put the very same state on the wire. */
+  private savePlan(state: PlanState): void {
+    writePlan(this.planFile(), state, this.planLocale());
+    this.publishPlan(state);
+  }
+
+  /**
+   * `apply_plan`'s gate: the approval card. The harness draws it from the plan
+   * itself (`requestKinds` maps this method to `create_plan`), so the reader
+   * approves the very document the panel shows. A turn cut short while it waits
+   * reads as a no — silence is not consent.
+   */
+  private async approvePlan(state: PlanState): Promise<boolean> {
+    const plan = this.planFrame(state);
+    delete plan.sessionUpdate;
+    try {
+      const res = await this.rpc.request<{ outcome?: { outcome?: string } }>(
+        "builtin/plan_approval",
+        plan,
+      );
+      return res?.outcome?.outcome === "accepted";
+    } catch {
+      return false;
+    }
+  }
+
+  /** The plan file as the tools see it — see `PlanBridge`. */
+  private planBridge(): PlanBridge {
+    const file = this.planFile();
+    return {
+      file,
+      path: this.planDisplayPath(),
+      // The file first: it is the truth, and the memory copy only stands in
+      // when the reader deleted it mid-task.
+      read: () => readPlan(file) ?? this.planState,
+      write: (state) => this.savePlan(state),
+      approve: (state) => this.approvePlan(state),
+    };
   }
 
   /** Steps the plan still owes: not `completed` — what the turn is nudged for. */
   private openPlanSteps(): PlanEntry[] {
-    return this.planEntries.filter((entry) => entry.status !== "completed");
+    return (this.planState?.entries ?? []).filter((entry) => entry.status !== "completed");
+  }
+
+  /**
+   * Follow the plan file: an edit made by hand — the reader in their editor, or
+   * the model with plain `write`/`edit` — reaches the panel without waiting for
+   * the next tool call. Polled rather than watched: `fs.watch` on Windows fires
+   * twice per write and misses renames, and one parse a second is nothing. The
+   * timer is unref'd, so it never keeps a process alive on its own.
+   */
+  private watchPlan(): void {
+    this.unwatchPlan();
+    const file = this.planFile();
+    this.planState = readPlan(file) ?? this.planState;
+    this.planPublished = planSignature(readPlan(file));
+    const timer = setInterval(() => {
+      if (this.stopping) return;
+      const state = readPlan(file);
+      if (!state) return;
+      const signature = planSignature(state);
+      if (signature === this.planPublished) return;
+      // A hand edit is not this turn's plan: the epoch stays, so a reader
+      // touching the file never turns into a nudge.
+      this.planPublished = signature;
+      this.planState = state;
+      this.emitUpdate(this.planFrame(state));
+    }, 1_000);
+    timer.unref?.();
+    this.planWatch = timer;
+  }
+
+  private unwatchPlan(): void {
+    if (this.planWatch) clearInterval(this.planWatch);
+    this.planWatch = undefined;
   }
 
   private emitUpdate(update: Record<string, unknown>): void {
@@ -1567,7 +1694,7 @@ export class BuiltinAgent implements InProcessAgentTransport {
           // next call, without restarting the chat.
           bashTimeoutMs: normalizeBuiltinBashTimeoutSec(live.builtinBashTimeoutSec) * 1000,
           subagents: subagents ?? undefined,
-          emitPlan: planToolEnabled ? (update) => this.publishPlan(update) : undefined,
+          plan: planToolEnabled ? this.planBridge() : undefined,
           // Same channel as the MCP tools: `read` on a picture hands the bytes
           // to the turn, which puts them right after that call's result.
           onImages: (toolCallId, images) => toolImages.set(toolCallId, images),
@@ -1686,6 +1813,13 @@ export class BuiltinAgent implements InProcessAgentTransport {
         if (outcome.failure || outcome.reasoningLimitHit) break;
         if (outcome.stopReason !== "end_turn" && outcome.stopReason !== "max_tokens") break;
         if (this.planEpoch === planEpochAtStart) break;
+        // Only an approved plan is a promise this turn owes. A plan still in
+        // `draft` is what the reader is reading — pushing the model to close it
+        // is exactly the case the user asked us not to push. `step` pacing is
+        // the same request in the reader's own words: one step, then it is
+        // their floor again, so nothing pushes the model there either.
+        if (this.planState?.stage !== "applying") break;
+        if (this.planState.pacing === "step") break;
         const open = this.openPlanSteps();
         if (!open.length) break;
         // What this turn produced has to be in the history the rerun reads.
@@ -1702,6 +1836,8 @@ export class BuiltinAgent implements InProcessAgentTransport {
           `План не закрыт: прошу модель доработать оставшиеся шаги ` +
             `(${asked} из ${PLAN_FINISH_NUDGES}).`,
         );
+        // The plan file is the record of that work: the model closes steps
+        // with `plan`, and the reader sees them land in the panel.
         outcome = await runTurnWithRetry(turn, retryOpts);
       }
       if (folded !== outcome) keepResponse(outcome);

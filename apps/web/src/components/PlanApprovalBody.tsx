@@ -20,6 +20,14 @@ export type PlanPayload = {
   todos?: PlanTodo[];
   phases?: PlanPhase[];
   isProject?: boolean;
+  /**
+   * The built-in agent's plan is a file (`.acpio/plan.md`): `path` is where the
+   * reader finds it, `stage` says whether it is still a draft or already being
+   * implemented, `pacing` how the reader wants the steps done.
+   */
+  path?: string;
+  stage?: string;
+  pacing?: string;
 };
 
 function todoLabel(todo: PlanTodo) {
@@ -101,6 +109,9 @@ export function coercePlanPayload(raw: Record<string, unknown>): PlanPayload | n
   todos = todos.filter((t) => todoLabel(t));
   const phases = Array.isArray(raw.phases) ? (raw.phases as PlanPhase[]) : undefined;
   if (!plan && !todos.length && !phases?.length && !name) return null;
+  const path = String(raw.path ?? "").trim();
+  const stage = String(raw.stage ?? "").trim();
+  const pacing = String(raw.pacing ?? "").trim();
   return {
     name: name || undefined,
     overview: overview || undefined,
@@ -108,6 +119,9 @@ export function coercePlanPayload(raw: Record<string, unknown>): PlanPayload | n
     todos: todos.length ? todos : undefined,
     phases,
     isProject: Boolean(raw.isProject),
+    path: path || undefined,
+    stage: stage || undefined,
+    pacing: pacing || undefined,
   };
 }
 

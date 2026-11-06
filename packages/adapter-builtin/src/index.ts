@@ -23,6 +23,22 @@ export { shellCommand } from "./tools.js";
  * are exported here instead of being invented a second time.
  */
 export {
+  PLAN_DIR,
+  PLAN_FILE,
+  archivePlan,
+  parsePlan,
+  planFilePath,
+  readPlan,
+  renderPlan,
+  setPlanOptions,
+  writePlan,
+  type PlanEntry,
+  type PlanPacing,
+  type PlanStage,
+  type PlanState,
+} from "./planFile.js";
+
+export {
   BUILTIN_SKILLS_DIR,
   builtinSlashCommands,
   discoverAgentSkills,
@@ -100,6 +116,9 @@ export const builtinAdapter: HarnessAdapter = {
 
   requestKinds: {
     "session/request_permission": "permission",
+    // `apply_plan`'s gate: the approval card the panel draws around the plan
+    // the reader is being asked about (see `PlanBridge`).
+    "builtin/plan_approval": "create_plan",
   },
 };
 

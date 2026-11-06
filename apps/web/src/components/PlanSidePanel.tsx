@@ -36,6 +36,8 @@ export function PlanSidePanel({
   onRemove,
   onAccept,
   onReject,
+  onApprove,
+  onPacing,
 }: {
   plan: PlanPayload | null;
   open: boolean;
@@ -47,6 +49,10 @@ export function PlanSidePanel({
   onRemove?: () => void;
   onAccept?: () => void;
   onReject?: () => void;
+  /** Draft stage: approve the plan and start implementing. */
+  onApprove?: () => void;
+  /** Applying stage: switch the pace the steps are done at. */
+  onPacing?: (pacing: "whole" | "step") => void;
 }) {
   const t = useT();
   const [width, setWidth] = useState(readStoredWidth);
@@ -114,6 +120,24 @@ export function PlanSidePanel({
 
   if (!open || !plan) return null;
 
+  const stage = String(plan.stage ?? "").trim();
+  const pacing = String(plan.pacing ?? "").trim() === "step" ? "step" : "whole";
+  const todos = plan.todos ?? [];
+  const done = todos.filter((todo) =>
+    /^(completed|complete)$/i.test(String(todo.status ?? "")),
+  ).length;
+  const stageLabel =
+    stage === "applying"
+      ? t("planPanel.stageApplying")
+      : stage === "draft"
+        ? t("planPanel.stageDraft")
+        : "";
+  // The footer answers the stage the file declares: a draft can be approved, an
+  // approved plan can be paced, and a card waiting for an answer is neither.
+  const reviewing = Boolean(pending && onAccept && onReject);
+  const canApprove = !reviewing && stage === "draft" && Boolean(onApprove) && todos.length > 0;
+  const canPace = !reviewing && !canApprove && stage === "applying" && Boolean(onPacing);
+
   return (
     <aside
       className={`${styles.panel}${fillPane ? ` ${styles.panelFill}` : ""} ${dragging ? styles.resizing : ""}`}
@@ -138,6 +162,11 @@ export function PlanSidePanel({
         <div className={styles.headerText}>
           <span className={styles.eyebrow}>{t("planPanel.title")}</span>
           {pending ? <span className={styles.pendingBadge}>{t("question.planAwaiting")}</span> : null}
+          {stageLabel ? (
+            <span className={styles.stageChip} data-stage={stage}>
+              {stageLabel}
+            </span>
+          ) : null}
         </div>
         <div className={styles.headerActions}>
           {onRemove ? (
@@ -171,9 +200,55 @@ export function PlanSidePanel({
           </button>
         </div>
       </div>
+      {plan.path ? (
+        <div className={styles.meta}>
+          <code className={styles.metaPath} title={plan.path}>
+            {plan.path}
+          </code>
+          {todos.length > 0 ? (
+            <span className={styles.progress}>
+              {t("planPanel.progress", { done, total: todos.length })}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
       <div className={styles.body}>
         <PlanApprovalBody payload={plan} fallbackTitle={t("question.plan")} scrollable={false} />
       </div>
+      {canApprove ? (
+        <div className={styles.footerSingle}>
+          <button type="button" className={styles.primary} onClick={onApprove}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+              <path
+                d="M5 12.5l5 5L19 7.5"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            <span>{t("planPanel.approve")}</span>
+          </button>
+        </div>
+      ) : null}
+      {canPace ? (
+        <div className={styles.footerPace}>
+          <span className={styles.paceLabel}>{t("planPanel.pacing")}</span>
+          <div className={styles.paceGroup} role="group" aria-label={t("planPanel.pacing")}>
+            {(["whole", "step"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`${styles.paceBtn} ${pacing === option ? styles.paceBtnActive : ""}`}
+                aria-pressed={pacing === option}
+                onClick={() => onPacing?.(option)}
+              >
+                {t(option === "whole" ? "planPanel.pacingWhole" : "planPanel.pacingStep")}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {pending && onAccept && onReject ? (
         <div className={styles.footer}>
           <button type="button" className={styles.danger} onClick={onReject}>

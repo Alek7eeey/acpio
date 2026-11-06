@@ -4573,6 +4573,7 @@ function ChatThread() {
     return p;
   });
   const answerQuestion = useAppStore((s) => s.answerQuestion);
+  const setSessionPlan = useAppStore((s) => s.setSessionPlan);
   const promptQueueAll = useAppStore((s) => s.promptQueue);
   const promptQueue = useMemo(
     () =>
@@ -4930,6 +4931,8 @@ function ChatThread() {
       activePlan.name ?? "",
       (activePlan.plan ?? "").slice(0, 120),
       String(activePlan.todos?.length ?? 0),
+      // A stage flip is a visible change the panel should open for.
+      activePlan.stage ?? "",
       pendingQuestion?.requestId ?? "",
     ].join("|");
   }, [activePlan, pendingQuestion?.requestId]);
@@ -8179,6 +8182,25 @@ function ChatThread() {
           onAccept={
             planPending
               ? () => void answerQuestion({ outcome: { outcome: "accepted" } })
+              : undefined
+          }
+          /*
+           * The draft's own approve: the file's stage flips first (that is what
+           * makes the harness push the model to close the steps), and the turn
+           * that follows is the reader's own message — so the agent starts on
+           * the plan it just published instead of asking them to approve twice.
+           */
+          onApprove={
+            activePlan?.stage === "draft" && activeSession
+              ? () => {
+                  void setSessionPlan({ stage: "applying" }, activeSession.id);
+                  void sendPrompt(t("planPanel.approvePrompt"));
+                }
+              : undefined
+          }
+          onPacing={
+            activePlan?.stage === "applying" && activeSession
+              ? (pacing) => void setSessionPlan({ pacing }, activeSession.id)
               : undefined
           }
           onReject={

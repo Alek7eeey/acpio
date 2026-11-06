@@ -256,6 +256,13 @@ describe("normalizePlanPartPayload", () => {
       { name: "Plan", overview: "Ov", plan: "Pl", phases: ["x"], todos: [{ content: "T" }] },
       { name: "Plan", overview: "Ov", plan: "Pl", phases: ["x"], todos: [{ content: "T" }] },
     ],
+    // the built-in agent's file plan: stage, pace and path reach the panel
+    [
+      { stage: " applying ", pacing: "step", path: ".acpio/plan.md" },
+      { stage: "applying", pacing: "step", path: ".acpio/plan.md" },
+    ],
+    // a stage nobody knows, or a non-string one: kept out
+    [{ stage: "  " }, { stage: "  " }],
   ])("normalizePlanPartPayload(%j) === %j", (raw, expected) => {
     expect(normalizePlanPartPayload(raw)).toEqual(expected);
   });

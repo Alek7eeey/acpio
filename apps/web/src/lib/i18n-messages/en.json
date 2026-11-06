@@ -1324,7 +1324,15 @@
   },
   "planPanel": {
     "title": "Outline",
-    "remove": "Remove plan"
+    "remove": "Remove plan",
+    "stageDraft": "Draft",
+    "stageApplying": "Implementing",
+    "approve": "Approve and start",
+    "approvePrompt": "The plan is approved — start implementing.",
+    "pacing": "Pace",
+    "pacingWhole": "All at once",
+    "pacingStep": "One at a time",
+    "progress": "{{done}} of {{total}}"
   },
   "question": {
     "plan": "Plan",

@@ -798,6 +798,13 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
 
   const cleanedTodos = todos?.filter((t) => String((t as { content?: string }).content ?? "").trim());
 
+  // The built-in agent's plan is a file with a stage and a pace (see
+  // `planFile.ts`): the panel draws the switches from these three, so they have
+  // to survive the normalisation that shapes the rest of the payload.
+  const stage = String(raw.stage ?? "").trim();
+  const pacing = String(raw.pacing ?? "").trim();
+  const path = String(raw.path ?? "").trim();
+
   return {
     ...raw,
     ...(name ? { name } : {}),
@@ -805,6 +812,9 @@ export function normalizePlanPartPayload(raw: Record<string, unknown>): Record<s
     ...(plan ? { plan } : {}),
     ...(cleanedTodos?.length ? { todos: cleanedTodos } : {}),
     ...(phases ? { phases } : {}),
+    ...(stage ? { stage } : {}),
+    ...(pacing ? { pacing } : {}),
+    ...(path ? { path } : {}),
   };
 }
 

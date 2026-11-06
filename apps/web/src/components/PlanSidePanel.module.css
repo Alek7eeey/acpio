@@ -120,6 +120,52 @@
   padding: 3px 8px;
 }
 
+.stageChip {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.stageChip[data-stage="applying"] {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 55%, var(--bg-secondary));
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.metaPath {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.progress {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .headerActions {
   display: flex;
   align-items: center;
@@ -188,6 +234,67 @@
   border-top: 1px solid var(--border-soft);
   background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
   flex-shrink: 0;
+}
+
+.footerSingle {
+  display: flex;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.footerSingle button {
+  flex: 1;
+}
+
+.footerPace {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.paceLabel {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.paceGroup {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, var(--surface));
+}
+
+.paceBtn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.paceBtn:hover {
+  color: var(--text);
+}
+
+.paceBtnActive {
+  background: var(--surface);
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
 }
 
 .footer button {

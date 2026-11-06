@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,14 +48,18 @@ function answer(reply: Reply, index: number, chunk: Chunk): string {
 /**
  * A stub OpenAI-compatible endpoint answering `replies` in order (the last one
  * repeats), plus a booted built-in agent over it. `bodies` are the requests the
- * model received — the prompt and the tool declarations it was handed.
+ * model received — the prompt and the tool declarations it was handed; `dir` is
+ * the working folder the plan file lands in.
  */
 async function boot(
   replies: Reply[],
   settings: Partial<AppSettings> = {},
+  /** What the reader answers the plan approval card with. */
+  approval: "accepted" | "rejected" = "accepted",
 ): Promise<{
   frames: Array<Record<string, unknown>>;
   bodies: Array<Record<string, unknown>>;
+  dir: string;
   prompt: (text: string) => Promise<void>;
   close: () => Promise<void>;
 }> {
@@ -108,6 +112,17 @@ async function boot(
   agent.onLine((line) => {
     const frame = JSON.parse(line) as Record<string, unknown>;
     frames.push(frame);
+    // The approval card is the harness's: answer it like the panel would.
+    if (frame.method === "builtin/plan_approval") {
+      agent.write(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: { outcome: approval } },
+        }),
+      );
+      return;
+    }
     if (typeof frame.id !== "number" || typeof frame.method === "string") return;
     const done = pending.get(frame.id);
     pending.delete(frame.id);
@@ -124,6 +139,7 @@ async function boot(
   return {
     frames,
     bodies,
+    dir,
     prompt: async (text) => {
       await call("session/prompt", { prompt: [{ type: "text", text }] });
     },
@@ -159,57 +175,59 @@ function lastMessageText(body: Record<string, unknown>): string {
     .join("\n");
 }
 
+function nudges(bodies: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return bodies.filter((body) => lastMessageText(body).includes("The plan is not finished"));
+}
+
 const DOCUMENT = {
   name: "Переписать экспорт чата",
   overview: "Экспорт знает про план, но не про туду: три шага, последний — тесты.",
-  plan: "## Шаги\n\n1. Прочитать `chatExport.ts`.\n2. Добавить ветку `plan`.\n3. Тесты.",
+  plan: "## Файлы\n\n`chatExport.ts` — ветка `plan`.\n\n## Проверка\n\n`npm test`.",
 };
 
-it("publishes the plan itself, and keeps it when a later call moves a status", async () => {
-  const { frames, prompt, close } = await boot([
-    {
-      tool: {
-        name: "plan",
-        args: {
-          ...DOCUMENT,
-          entries: [
-            { content: "Read the code", status: "in_progress" },
-            { content: "Fix it" },
-          ],
-        },
-      },
-    },
+const STEPS = [
+  { content: "Read the code", status: "in_progress" },
+  { content: "Fix it" },
+];
+
+const CLOSED = [
+  { content: "Read the code", status: "completed" },
+  { content: "Fix it", status: "completed" },
+];
+
+it("writes the plan file and publishes it, keeping the document on a status-only call", async () => {
+  const { frames, prompt, dir, close } = await boot([
+    { tool: { name: "plan", args: { ...DOCUMENT, entries: STEPS } } },
     // The steps that land: the model sends the statuses alone.
-    {
-      tool: {
-        name: "plan",
-        args: {
-          entries: [
-            { content: "Read the code", status: "completed" },
-            { content: "Fix it", status: "completed" },
-          ],
-        },
-      },
-    },
+    { tool: { name: "plan", args: { entries: CLOSED } } },
     { text: "Готово." },
   ]);
   try {
     await prompt("составь план");
     const updates = planUpdates(frames);
     expect(updates).toHaveLength(2);
-    // First call: the document and the steps, on the same update the panel draws.
+    // The plan is a file the reader can open, edit and keep.
+    const file = join(dir, ".acpio", "plan.md");
+    expect(existsSync(file)).toBe(true);
+    const onDisk = readFileSync(file, "utf8");
+    expect(onDisk).toContain("stage: draft");
+    expect(onDisk).toContain(DOCUMENT.name);
+    expect(onDisk).toContain("- [x] Read the code");
+    // The panel gets the same state, plus where it lives.
     expect(updates[0]).toEqual({
       sessionUpdate: "plan",
       ...DOCUMENT,
+      path: ".acpio/plan.md",
+      stage: "draft",
+      pacing: "whole",
       entries: [
         { content: "Read the code", status: "in_progress", priority: "medium" },
         { content: "Fix it", status: "pending", priority: "medium" },
       ],
     });
-    // Second call carries no document of its own — the plan stays in the panel
-    // instead of being replaced by a bare list.
-    expect(updates[1]).toEqual({
-      sessionUpdate: "plan",
+    // The second call carries no document of its own — the plan stays in the
+    // panel instead of being replaced by a bare list.
+    expect(updates[1]).toMatchObject({
       ...DOCUMENT,
       entries: [
         { content: "Read the code", status: "completed", priority: "medium" },
@@ -221,48 +239,25 @@ it("publishes the plan itself, and keeps it when a later call moves a status", a
   }
 });
 
-it("sends the model back to finish a plan it left open", async () => {
+it("sends the model back to finish a plan the reader approved", async () => {
   const { frames, bodies, prompt, close } = await boot([
-    {
-      tool: {
-        name: "plan",
-        args: {
-          entries: [
-            { content: "Read the code", status: "in_progress" },
-            { content: "Fix it" },
-          ],
-        },
-      },
-    },
+    { tool: { name: "plan", args: { entries: STEPS } } },
+    { tool: { name: "apply_plan", args: {} } },
     // The model calls it done with both steps still open: the turn is not over.
     { text: "Готово." },
-    {
-      tool: {
-        name: "plan",
-        args: {
-          entries: [
-            { content: "Read the code", status: "completed" },
-            { content: "Fix it", status: "completed" },
-          ],
-        },
-      },
-    },
+    { tool: { name: "plan", args: { entries: CLOSED } } },
     { text: "Готово." },
   ]);
   try {
     await prompt("сделай");
-    // plan, answer, the nudge, the finished plan, its answer.
-    expect(bodies).toHaveLength(4);
-    const last = lastMessageText(bodies[2] ?? {});
+    // plan, apply, answer, the nudge, the finished plan and its answer.
+    expect(bodies).toHaveLength(5);
+    const last = lastMessageText(bodies[3] ?? {});
     expect(last).toContain("The plan is not finished");
     expect(last).toContain("Read the code (in_progress)");
     expect(last).toContain("Fix it (pending)");
-    // The panel ends the turn closed, and the reader is told why the turn ran on.
-    const updates = planUpdates(frames);
-    expect(updates.at(-1)?.entries).toEqual([
-      { content: "Read the code", status: "completed", priority: "medium" },
-      { content: "Fix it", status: "completed", priority: "medium" },
-    ]);
+    // Approval flipped the stage the panel draws.
+    expect(planUpdates(frames).some((update) => update.stage === "applying")).toBe(true);
     const notes = frames
       .map((f) => (f.params as { update?: { sessionUpdate?: string; content?: { text?: string } } }))
       .filter((u) => u?.update?.sessionUpdate === "agent_thought_chunk")
@@ -273,36 +268,62 @@ it("sends the model back to finish a plan it left open", async () => {
   }
 });
 
-it("nudges at most twice when the model will not close its plan", async () => {
+it("never pushes a plan the reader has not approved", async () => {
   const { bodies, prompt, close } = await boot([
-    {
-      tool: {
-        name: "plan",
-        args: { entries: [{ content: "Fix it", status: "in_progress" }] },
-      },
-    },
-    // From here on the model only ever answers, never closing the step.
-    { text: "Не могу." },
+    { tool: { name: "plan", args: { entries: STEPS } } },
+    // A draft is what the reader is reading: stopping here is the whole point.
+    { text: "План готов, смотри." },
   ]);
   try {
-    await prompt("сделай");
-    // plan, answer, the first nudge, the second — then the turn is let go.
-    expect(bodies).toHaveLength(4);
-    const nudges = bodies.filter((body) =>
-      lastMessageText(body).includes("The plan is not finished"),
-    );
-    expect(nudges).toHaveLength(2);
+    await prompt("составь план, ничего не делай");
+    expect(bodies).toHaveLength(2);
+    expect(nudges(bodies)).toHaveLength(0);
   } finally {
     await close();
   }
 });
 
-it("leaves the plan tool out of the turn when the switch is off", async () => {
+it("leaves the model alone when the reader asked for one step at a time", async () => {
+  const { bodies, prompt, close } = await boot([
+    { tool: { name: "plan", args: { entries: STEPS } } },
+    { tool: { name: "apply_plan", args: { pacing: "step" } } },
+    { text: "Первый шаг сделал." },
+  ]);
+  try {
+    await prompt("по одному шагу, спрашивай меня");
+    // plan, apply, the answer — and nothing after it: the floor is the reader's.
+    expect(bodies).toHaveLength(3);
+    expect(nudges(bodies)).toHaveLength(0);
+  } finally {
+    await close();
+  }
+});
+
+it("nudges at most twice when the model will not close an approved plan", async () => {
+  const { bodies, prompt, close } = await boot([
+    { tool: { name: "plan", args: { entries: [{ content: "Fix it", status: "in_progress" }] } } },
+    { tool: { name: "apply_plan", args: {} } },
+    // From here on the model only ever answers, never closing the step.
+    { text: "Не могу." },
+  ]);
+  try {
+    await prompt("сделай");
+    // plan, apply, answer, the first nudge, the second — then the turn is let go.
+    expect(bodies).toHaveLength(5);
+    expect(nudges(bodies)).toHaveLength(2);
+  } finally {
+    await close();
+  }
+});
+
+it("leaves the plan tools out of the turn when the switch is off", async () => {
   const { bodies, prompt, close } = await boot([{ text: "ok" }], { builtinPlanTool: false });
   try {
     await prompt("сделай");
     const tools = (bodies[0]?.tools ?? []) as Array<{ function?: { name?: string } }>;
-    expect(tools.map((t) => t.function?.name)).not.toContain("plan");
+    const names = tools.map((t) => t.function?.name);
+    expect(names).not.toContain("plan");
+    expect(names).not.toContain("apply_plan");
     const messages = (bodies[0]?.messages ?? []) as Array<{ role?: string; content?: unknown }>;
     expect(String(messages[0]?.content ?? "")).not.toContain("`plan` tool");
   } finally {

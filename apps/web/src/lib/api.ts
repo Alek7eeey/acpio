@@ -263,6 +263,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ mode }),
     }),
+  /**
+   * The plan file's switches: the stage and the pace. Written into
+   * `.acpio/plan.md` on the server, which the agent folds back into the panel.
+   */
+  setSessionPlan: (id: string, patch: { stage?: "draft" | "applying"; pacing?: "whole" | "step" }) =>
+    request<{ ok: boolean; plan?: Record<string, unknown> }>(`/api/sessions/${id}/plan`, {
+      method: "POST",
+      body: JSON.stringify(patch),
+    }),
   pickDirectory: (initialPath?: string) =>
     request<{ path: string | null }>("/api/fs/pick-directory", {
       method: "POST",

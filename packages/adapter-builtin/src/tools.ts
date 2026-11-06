@@ -4,6 +4,16 @@ import { jsonSchema, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import type { HostClient } from "./host.js";
 import type { ToolImagePart } from "./loop.js";
+import {
+  archivePlan,
+  emptyPlanState,
+  startsNewPlan,
+  type PlanDocument,
+  type PlanEntry,
+  type PlanPacing,
+  type PlanStage,
+  type PlanState,
+} from "./planFile.js";
 import { makeTaskTool, type SubagentsBridge } from "./subagents.js";
 
 /** Ask the harness permission dialog; throws when the user declines. */
@@ -14,29 +24,31 @@ export type AskPermission = (toolCall: {
   input: Record<string, unknown>;
 }) => Promise<void>;
 
-/** One step of the ACP plan update the harness renders in its side panel. */
-export type PlanEntry = {
-  content: string;
-  status: "pending" | "in_progress" | "completed";
-  priority: "high" | "medium" | "low";
-};
+// The plan's own shapes live with the file that carries them (see `planFile.ts`).
+export type { PlanDocument, PlanEntry, PlanPacing, PlanStage, PlanState } from "./planFile.js";
+
+/** One `plan` call as the panel gets it: the state, plus where it lives. */
+export type PlanUpdate = {
+  entries: PlanEntry[];
+  stage: PlanStage;
+  pacing: PlanPacing;
+  /** Path of the plan file as the reader should see it. */
+  path: string;
+} & PlanDocument;
 
 /**
- * The plan itself, for a user who asked for one: what the harness draws *above*
- * the steps in the right-hand panel — a title, a line or two on the shape of
- * it, and the plan as Markdown. Absent on a call that only moves a status.
+ * The plan file as a tool sees it: read what is on disk, write it back (file
+ * and panel in one step), and — for `apply_plan` — ask the reader to approve.
+ * `file` is the absolute path the tools archive; `path` is what the panel
+ * shows, relative to the working folder whenever the file is inside it.
  */
-export type PlanDocument = {
-  name?: string;
-  overview?: string;
-  plan?: string;
-};
-
-/** One `plan` call: the whole list of steps, plus the document when there is one. */
-export type PlanUpdate = { entries: PlanEntry[] } & PlanDocument;
-
-/** Publish the plan over ACP (`sessionUpdate: "plan"`). */
-export type EmitPlan = (update: PlanUpdate) => void;
+export interface PlanBridge {
+  file: string;
+  path: string;
+  read: () => PlanState | undefined;
+  write: (state: PlanState) => void;
+  approve: (state: PlanState) => Promise<boolean>;
+}
 
 export interface BuiltinToolOptions {
   host: HostClient;
@@ -66,10 +78,11 @@ export interface BuiltinToolOptions {
   outsideCwd?: boolean;
   /**
    * Present when the user left the plan tool on (Settings → Built-in agent):
-   * adds the `plan` tool. A child also runs without it — it runs inside the
-   * parent's chat and must not replace the plan the reader is already watching.
+   * adds `plan` and `apply_plan` over the session's `.acpio/plan.md`. A child
+   * also runs without it — it runs inside the parent's chat and must not
+   * replace the plan the reader is already watching.
    */
-  emitPlan?: EmitPlan;
+  plan?: PlanBridge;
   /**
    * `bash` kill time when the call names none (Settings → Built-in agent).
    * Omitted it falls back to {@link DEFAULT_BASH_TIMEOUT_MS}.
@@ -728,24 +741,26 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
   });
 
   /**
-   * The plan the side panel shows. Other ACP agents report theirs with
-   * `session/update: plan`; this tool is the built-in agent's way onto that same
-   * wire, and the whole list rides every call so a status change is one update.
-   * A user who asks for a plan gets the plan itself too — `name`, `overview`
-   * and the Markdown — which the harness draws above the steps (see
-   * {@link PlanDocument}).
+   * The plan the side panel shows — a file the model edits like any other, and
+   * the same file the reader opens in their editor. `plan` writes it and
+   * publishes it; `apply_plan` is the gate between forming the plan and
+   * implementing it. Other ACP agents report a plan with `session/update: plan`
+   * and nothing else; this pair is the built-in agent's way onto that wire plus
+   * the stage the wire has no field for.
    */
-  const emitPlan = opts.emitPlan;
-  const planTool: ToolSet = emitPlan
+  const planBridge = opts.plan;
+  const planTool: ToolSet = planBridge
     ? {
         plan: tool({
           description:
-            "Publish your plan for the task: every step in order, each with its status. Call it " +
-            "before the first step and again when a step starts or lands — the reader watches " +
-            "the plan in the side panel, so do not repeat it in the answer. When the user asks " +
-            "for a plan, or to plan before acting, hand the plan itself over in that call too: " +
-            "`name`, a line or two of `overview` and `plan` as Markdown, which the panel opens " +
-            "with above the steps. Later calls carry the steps alone — the document stays.",
+            "Write or update the plan file the right-hand panel shows: the whole list of steps in " +
+            "order, each with its status, plus `name`, `overview` and the reasoning as Markdown. " +
+            "Omitted fields keep what the file already has, so a call that only moves a step's " +
+            "status carries `entries` alone; a call with nothing at all republishes the file as it " +
+            `is (${planBridge.path}), which is what you want after editing it with \`read\`/\`edit\`.` +
+            " Call it before the first step and again as a step starts or lands. The reader watches " +
+            "the panel — never repeat the plan in the answer. When the plan is written, call " +
+            "`apply_plan`: that is what asks for the approval.",
           inputSchema: z.object({
             entries: z
               .array(
@@ -758,11 +773,12 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
                 }),
               )
               .min(1)
-              .describe("The whole plan, in order — every call replaces the previous one."),
-            name: z
-              .string()
               .optional()
-              .describe("Title of the plan, when the user asked for the plan itself."),
+              .describe(
+                "The whole plan, in order — every call replaces the previous list. Omit it to " +
+                  "keep the steps the file already has.",
+              ),
+            name: z.string().optional().describe("Title of the plan."),
             overview: z
               .string()
               .optional()
@@ -771,29 +787,87 @@ export function createBuiltinTools(opts: BuiltinToolOptions): ToolSet {
               .string()
               .optional()
               .describe(
-                "The plan itself as Markdown: the steps with the files and the reasoning that " +
-                  "ties them together. The panel draws it above the list.",
+                "The plan itself as Markdown: the files, the reasoning that ties the steps " +
+                  "together, how it will be checked. The panel draws it below the overview.",
               ),
           }),
           execute: async ({ entries, name, overview, plan: markdown }) => {
             const list: PlanEntry[] = [];
-            for (const entry of entries) {
+            for (const entry of entries ?? []) {
               const content = entry.content.trim();
               if (!content) continue;
               list.push({ content, status: entry.status ?? "pending", priority: "medium" });
             }
-            if (!list.length) throw new Error("plan: every entry needs `content`");
-            // An empty field means "no document on this call", so it is left
-            // out rather than sent empty: the agent keeps the one it has.
             const document: PlanDocument = {
               ...(name?.trim() ? { name: name.trim() } : {}),
               ...(overview?.trim() ? { overview: overview.trim() } : {}),
               ...(markdown?.trim() ? { plan: markdown.trim() } : {}),
             };
-            emitPlan({ ...document, entries: list });
-            return document.plan
-              ? `Plan published: ${list.length} step(s), the plan itself in the side panel above them.`
-              : `Plan updated: ${list.length} step(s), shown in the side panel.`;
+            // A document arriving over a finished plan is a new task, not a
+            // step of the old one: the old file goes to `.acpio/plans/` and the
+            // stage drops back to draft — a new task is not an approved one.
+            const replaced = startsNewPlan(planBridge.read(), document);
+            if (replaced) archivePlan(planBridge.file);
+            const prev = replaced ? emptyPlanState() : (planBridge.read() ?? emptyPlanState());
+            const next: PlanState = {
+              ...prev,
+              ...document,
+              entries: list.length ? list : prev.entries,
+            };
+            planBridge.write(next);
+            const where = `${planBridge.path} · stage ${next.stage}`;
+            return next.entries.length
+              ? `Plan ${replaced ? "replaced" : "published"}: ${next.entries.length} step(s) in ${where}.`
+              : `Plan document written to ${where} — it has no steps yet, add them before \`apply_plan\`.`;
+          },
+        }),
+        apply_plan: tool({
+          description:
+            "Ask the reader to approve the plan and start implementing: the right-hand panel shows " +
+            "«Утвердить и начать» / «Правки» and the turn waits for the answer. Call it once the " +
+            "plan is written, in the same turn. Approved, the stage turns `applying` and the work " +
+            "begins; rejected, nothing is implemented — ask what to change. Never call it before " +
+            "the reader has seen the plan, and never again once the stage is `applying`.",
+          inputSchema: z.object({
+            pacing: z
+              .enum(["whole", "step"])
+              .optional()
+              .describe(
+                "How the reader wants the steps done: `whole` — work through the list in one turn; " +
+                  "`step` — one step, then wait for them. Take it from what they asked for.",
+              ),
+          }),
+          execute: async ({ pacing }) => {
+            const prev = planBridge.read() ?? emptyPlanState();
+            if (!prev.entries.length) {
+              throw new Error(
+                `apply_plan: ${planBridge.path} has no steps yet — write the plan with \`plan\` first.`,
+              );
+            }
+            const pace = pacing ?? prev.pacing;
+            if (prev.stage === "applying") {
+              planBridge.write({ ...prev, pacing: pace });
+              return (
+                `The plan is already approved — stage applying, pacing ${pace}. Keep working ` +
+                "through the open steps and close each one with `plan`."
+              );
+            }
+            const asked: PlanState = { ...prev, pacing: pace, stage: "draft" };
+            const accepted = await planBridge.approve(asked);
+            if (!accepted) {
+              planBridge.write({ ...asked, stage: "draft" });
+              return (
+                "The reader did not approve the plan. Implement nothing: ask what to change, " +
+                "rework the plan file, and call `apply_plan` again when it is ready."
+              );
+            }
+            planBridge.write({ ...asked, stage: "applying" });
+            const open = asked.entries.filter((entry) => entry.status !== "completed");
+            return (
+              `Plan approved — stage applying, pacing ${pace}. ${open.length} step(s) open; start ` +
+              `with: ${open[0]?.content ?? "the first one"}. Mark each step in_progress as you ` +
+              "start it and completed when it lands."
+            );
           },
         }),
       }
