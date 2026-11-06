@@ -121,7 +121,7 @@ import {
   setPlanOptions,
   skillMode,
 } from "@acpio/adapter-builtin";
-import { searchMessages } from "./services/search.js";
+import { searchChats, searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
   defaultDiagnosticsDir,
@@ -1000,14 +1000,28 @@ export async function registerRoutes(app: FastifyInstance) {
     return listProviderCommands(query.provider, query.cwd);
   });
 
+  /** `q` + a clamped `limit` — both search routes read them the same way. */
+  const readSearchQuery = (query: unknown, fallbackLimit: number) => {
+    const { q, limit: raw } = (query ?? {}) as { q?: unknown; limit?: unknown };
+    const rawLimit = Number(raw ?? fallbackLimit);
+    return {
+      needle: typeof q === "string" ? q : "",
+      limit: Number.isFinite(rawLimit)
+        ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100)
+        : fallbackLimit,
+    };
+  };
+
   app.get("/api/search", async (req) => {
-    const q = (req.query as { q?: unknown }).q;
-    const rawLimit = Number((req.query as { limit?: unknown }).limit ?? 50);
-    const needle = typeof q === "string" ? q : "";
-    const limit = Number.isFinite(rawLimit)
-      ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100)
-      : 50;
+    const { needle, limit } = readSearchQuery(req.query, 50);
     return searchMessages(needle, limit);
+  });
+
+  // Names, not text: the tree's chats tab, which has no row for a board task
+  // and so cannot find one on its own.
+  app.get("/api/search/chats", async (req) => {
+    const { needle, limit } = readSearchQuery(req.query, 40);
+    return searchChats(needle, limit);
   });
 
   /**

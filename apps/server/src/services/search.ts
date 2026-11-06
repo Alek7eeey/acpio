@@ -1,6 +1,8 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
+import type { SessionDto } from "@acpio/shared";
 import { db } from "../db/client.js";
 import { messageParts, messages, sessions } from "../db/schema.js";
+import { listSessionsByIds } from "./sessions.js";
 
 export type MessageSearchHit = {
   sessionId: string;
@@ -24,10 +26,12 @@ function buildSnippet(text: string, needle: string): string {
 }
 
 /**
- * Full-text search over every session's text parts (user + assistant).
- * SQLite's LIKE (and lower()) only folds ASCII, so case-insensitive matching
- * for Cyrillic is done in JS over the text parts, ordered by message recency
- * so the freshest hits come first. Fine at this scale (local single-user).
+ * Full-text search over every session's text parts (user + assistant) — board
+ * tasks included: a chat the board made is a chat, and the tree's search is
+ * the only place its text can be found. SQLite's LIKE (and lower()) only folds
+ * ASCII, so case-insensitive matching for Cyrillic is done in JS over the text
+ * parts, ordered by message recency so the freshest hits come first. Fine at
+ * this scale (local single-user).
  */
 export async function searchMessages(raw: string, limit = 50): Promise<MessageSearchHit[]> {
   const needle = raw.trim();
@@ -47,7 +51,7 @@ export async function searchMessages(raw: string, limit = 50): Promise<MessageSe
     .from(messageParts)
     .innerJoin(messages, eq(messageParts.messageId, messages.id))
     .innerJoin(sessions, eq(messages.sessionId, sessions.id))
-    .where(and(eq(messageParts.type, "text"), isNull(sessions.boardId)))
+    .where(eq(messageParts.type, "text"))
     .orderBy(desc(messages.createdAt));
 
   return rows
@@ -62,4 +66,33 @@ export async function searchMessages(raw: string, limit = 50): Promise<MessageSe
       snippet: buildSnippet(r.text ?? "", needle),
       createdAt: r.createdAt.toISOString(),
     }));
+}
+
+/**
+ * Chats matching a needle by name, folder or — for a board task — the card's
+ * own text, board tasks included: the tree shows no row for those, so this
+ * search is the only way to reach one by name. Same ASCII-only caveat as
+ * above: the match runs in JS, freshest write first.
+ */
+export async function searchChats(raw: string, limit = 40): Promise<SessionDto[]> {
+  const needle = raw.trim().toLowerCase();
+  if (!needle) return [];
+  const rows = await db
+    .select({
+      id: sessions.id,
+      title: sessions.title,
+      cwd: sessions.cwd,
+      taskDescription: sessions.taskDescription,
+    })
+    .from(sessions)
+    .orderBy(desc(sessions.updatedAt));
+  const ids = rows
+    .filter((r) =>
+      [r.title, r.cwd, r.taskDescription].some((text) =>
+        (text ?? "").toLowerCase().includes(needle),
+      ),
+    )
+    .slice(0, limit)
+    .map((r) => r.id);
+  return listSessionsByIds(ids);
 }

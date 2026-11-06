@@ -145,6 +145,12 @@ export const api = {
     if (limit) qs.set("limit", String(limit));
     return request<MessageSearchHit[]>(`/api/search?${qs.toString()}`);
   },
+  /** Chats by name or folder across every partition, board tasks included. */
+  searchChats: (q: string, limit?: number) => {
+    const qs = new URLSearchParams({ q });
+    if (limit) qs.set("limit", String(limit));
+    return request<SessionDto[]>(`/api/search/chats?${qs.toString()}`);
+  },
   updateSettings: (patch: Partial<AppSettings>) =>
     request<AppSettings>("/api/settings", {
       method: "PUT",

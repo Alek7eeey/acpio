@@ -1113,6 +1113,48 @@ describe("search", () => {
     expect(hit.snippet).toContain("fox");
   });
 
+  // A chat the board made is a chat: the tree's search reaches it in both
+  // tabs — the text of its turns and its own name — even though the tree
+  // keeps no row for it.
+  it("reaches a board task from both tabs", async () => {
+    const [task] = await db
+      .insert(sessionsTable)
+      .values({
+        title: "Fix the login token",
+        provider: "omp",
+        cwd: "",
+        mode: "agent",
+        boardId: "board-search",
+        taskDescription: "Fix the login token\nThe handler never refreshes it",
+      })
+      .returning();
+    const [msg] = await db
+      .insert(messagesTable)
+      .values({ sessionId: task.id, role: "user" })
+      .returning();
+    await db.insert(messagePartsTable).values({
+      messageId: msg.id,
+      type: "text",
+      payload: { text: "The login token is not refreshed" },
+    });
+    const chat = await seedSession({ title: "Login form polish" });
+
+    const hits = (await app.inject({ method: "GET", url: "/api/search?q=refreshed" })).json();
+    expect(hits.map((h: { sessionId: string }) => h.sessionId)).toContain(task.id);
+
+    const chats = await app.inject({ method: "GET", url: "/api/search/chats?q=login" });
+    expect(chats.statusCode).toBe(200);
+    expect(chats.json().map((c: { id: string }) => c.id)).toEqual(
+      expect.arrayContaining([task.id, chat.id]),
+    );
+    // A card that has not started yet has no messages: its own text is the
+    // only thing there is to match.
+    const cardText = await app.inject({ method: "GET", url: "/api/search/chats?q=refreshes" });
+    expect(cardText.json().map((c: { id: string }) => c.id)).toEqual([task.id]);
+    const empty = await app.inject({ method: "GET", url: "/api/search/chats?q=" });
+    expect(empty.json()).toEqual([]);
+  });
+
   it.each([
     ["an unmatched query", "zzzzz-no-such-word"],
     ["an empty query", ""],

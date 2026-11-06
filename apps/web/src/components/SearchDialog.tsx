@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import type { SessionDto } from "@acpio/shared";
 import { api, type MessageSearchHit } from "../lib/api";
+import { readComposerDraft, setComposerDraft } from "../lib/composerDrafts";
 import { useLocale, useT } from "../lib/i18n";
 import { sessionTreeDisplayTitle } from "../lib/sessionTitle";
 import { useAppStore } from "../lib/store";
@@ -62,10 +63,14 @@ export function SearchDialog({
   const [tab, setTab] = useState<SearchDialogTab>(initialTab);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[]>([]);
+  /** Chats the tree has no row for (board tasks) — the server owns every
+   *  partition, so the name search asks it instead of the local list. */
+  const [chatHits, setChatHits] = useState<SessionDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const seq = useRef(0);
+  const chatSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const effectiveTab: SearchDialogTab =
@@ -82,6 +87,7 @@ export function SearchDialog({
     setTab(nextTab);
     setQuery("");
     setHits([]);
+    setChatHits([]);
     setLoading(false);
     setError(null);
     setActiveIndex(0);
@@ -89,7 +95,7 @@ export function SearchDialog({
   }, [open, initialTab, chatsEnabled, messagesEnabled]);
 
   const chatNeedle = query.trim().toLowerCase();
-  const chatResults = useMemo(() => {
+  const localChats = useMemo(() => {
     const list = sortSessions(sessions);
     if (!chatNeedle) return list.slice(0, 24);
     return list
@@ -100,6 +106,35 @@ export function SearchDialog({
       )
       .slice(0, 40);
   }, [sessions, chatNeedle]);
+
+  useEffect(() => {
+    if (!open || effectiveTab !== "chats") return;
+    const q = query.trim();
+    if (!q) {
+      setChatHits([]);
+      return;
+    }
+    const s = ++chatSeq.current;
+    const timer = window.setTimeout(() => {
+      api
+        .searchChats(q)
+        .then((h) => {
+          if (chatSeq.current === s) setChatHits(h);
+        })
+        .catch(() => {
+          if (chatSeq.current === s) setChatHits([]);
+        });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [query, open, effectiveTab]);
+
+  // The tree's own rows answer at once; the board's chats join behind them,
+  // never twice.
+  const chatResults = useMemo(() => {
+    if (!chatNeedle) return localChats;
+    const seen = new Set(localChats.map((s) => s.id));
+    return [...localChats, ...chatHits.filter((s) => !seen.has(s.id))].slice(0, 40);
+  }, [localChats, chatHits, chatNeedle]);
 
   useEffect(() => {
     if (!open || effectiveTab !== "messages") return;
@@ -140,9 +175,14 @@ export function SearchDialog({
   const msgNeedle = query.trim();
   const resultCount = effectiveTab === "chats" ? chatResults.length : hits.length;
 
-  const openChat = (sessionId: string) => {
+  const openChat = (session: SessionDto) => {
     onClose();
-    void selectSession(sessionId);
+    // A board task opens through the board with its description waiting in the
+    // composer; a hit on a card that has not started must not land on a blank
+    // chat instead.
+    const description = session.boardId && !session.startedAt ? session.taskDescription?.trim() : "";
+    if (description && !readComposerDraft(session.id)) setComposerDraft(session.id, description);
+    void selectSession(session.id);
     navigate("/chat");
   };
 
@@ -157,7 +197,7 @@ export function SearchDialog({
   const activateAt = (index: number) => {
     if (effectiveTab === "chats") {
       const row = chatResults[index];
-      if (row) openChat(row.id);
+      if (row) openChat(row);
       return;
     }
     const row = hits[index];
@@ -296,7 +336,7 @@ export function SearchDialog({
                   role="option"
                   aria-selected={index === activeIndex}
                   className={`${styles.hit}${index === activeIndex ? ` ${styles.hitActive}` : ""}`}
-                  onClick={() => openChat(session.id)}
+                  onClick={() => openChat(session)}
                   onMouseEnter={() => setActiveIndex(index)}
                 >
                   <span className={styles.hitTop}>
