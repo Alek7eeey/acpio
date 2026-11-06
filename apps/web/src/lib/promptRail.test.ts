@@ -4,6 +4,7 @@ import {
   buildPromptRailItems,
   RAIL_CUT_HEIGHT_PX,
   RAIL_MAX_GAP_PX,
+  RAIL_MIN_GAP_PX,
   RAIL_PILL_BASE_PX,
   RAIL_PILL_HEIGHT_PX,
   RAIL_PROMPT_CHARS,
@@ -175,9 +176,9 @@ describe("railWindow", () => {
   });
 
   it("never paints past the thread, whatever the height and the prompt count", () => {
-    // A column too short for a pill *and* a marker still overflows by design —
-    // there is no smaller way to say "there is more" than a pill and its dots.
-    const floor = RAIL_PILL_HEIGHT_PX + 2 * RAIL_CUT_HEIGHT_PX;
+    // A column too short for a pill (with its air) *and* a marker still overflows
+    // by design — there is no smaller way to say "there is more" than that.
+    const floor = RAIL_PILL_HEIGHT_PX + RAIL_MIN_GAP_PX + 2 * RAIL_CUT_HEIGHT_PX;
     for (const total of [0, 1, 5, 43, 200, 1000]) {
       for (const room of [0, 12, 40, 100, 679, 1600]) {
         for (const active of [-1, 0, 2, total - 1]) {
@@ -213,10 +214,15 @@ describe("railWindow", () => {
     expect(railWindow(10, 9, 0)).toMatchObject({ count: 1, above: 9, below: 0 });
   });
 
-  it("tightens the pitch to the pill's own height before it starts clipping", () => {
-    const view = railWindow(100, 99, 100);
+  // The bug this guards: 125 prompts squeezed the pitch to the pill's own height,
+  // and the rail read as one thick dashed stroke instead of a list of prompts.
+  it("keeps a pill's air and clips the rest instead of packing the column solid", () => {
+    const view = railWindow(125, 124, 580);
 
-    expect(view.slot).toBeGreaterThanOrEqual(RAIL_PILL_HEIGHT_PX);
+    expect(view.slot).toBeGreaterThanOrEqual(RAIL_PILL_HEIGHT_PX + RAIL_MIN_GAP_PX);
     expect(view.slot).toBeLessThanOrEqual(RAIL_PILL_HEIGHT_PX + RAIL_MAX_GAP_PX);
+    expect(view.above).toBeGreaterThan(0);
+    expect(view.count).toBeLessThan(125);
+    expect(paintedHeight(view)).toBeLessThanOrEqual(580);
   });
 });

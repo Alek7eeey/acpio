@@ -6507,6 +6507,8 @@ function ChatThread() {
     () => buildPromptRailItems(messageRows.map((r) => r.msg)),
     [messageRows],
   );
+  /** Top of the thread the rail may not use: the split button's corner. */
+  const splitFabInset = useSplitFabShown() ? SPLIT_FAB_RAIL_INSET_PX : 0;
   // Window sooner than the tree: reply messages can be huge (long texts, many
   // tool parts), so a session with a few dozen messages is already expensive.
   // Trigger on message count OR estimated total height (~px, from the same
@@ -6797,6 +6799,15 @@ function ChatThread() {
   /** Pin to bottom across skeleton → first paint of an unloaded chat. */
   const pendingBottomPinRef = useRef(false);
   const [scrolledAway, setScrolledAway] = useState(false);
+  /** The prompt the rail brackets its column on. While the end of the thread is
+   *  on screen (`!scrolledAway`, the same flag that keeps the "jump to latest"
+   *  button away) it is the last prompt: a chat whose end the reader already
+   *  sees must not have the rail promising prompts below its column. The
+   *  reading line can lag there — a tall answer under the last prompt leaves it
+   *  far above the line, and a measured id is one more thing that can be stale. */
+  const railActiveId = scrolledAway
+    ? activePromptId
+    : (promptRailItems[promptRailItems.length - 1]?.id ?? activePromptId);
   const scrollRafRef = useRef(0);
   const threadInnerRef = useRef<HTMLDivElement>(null);
 
@@ -7418,14 +7429,6 @@ function ChatThread() {
 
       {error && <div className={styles.banner}>{error}</div>}
 
-      {promptQueue.length > 0 && (
-        <PromptQueueBar
-          items={promptQueue}
-          onEdit={beginQueueEdit}
-          editingId={editingQueueId}
-        />
-      )}
-
       {!isShellSessionActive ? (
       <form
         className={`${styles.composer}${composerHeld ? ` ${styles.composerSkeleton}` : ""}${
@@ -7473,6 +7476,17 @@ function ChatThread() {
           ) : emptyReady ? (
             <p className={styles.emptyReadyLead}>{t("chat.emptyReady")}</p>
           ) : null}
+          {/* The queue rides with the composer, not above it: an empty chat
+              centres its input in the whole pane, and a bar left outside that
+              block would pin itself to the top of the screen instead of the
+              line the requests are waiting for. */}
+          {promptQueue.length > 0 && (
+            <PromptQueueBar
+              items={promptQueue}
+              onEdit={beginQueueEdit}
+              editingId={editingQueueId}
+            />
+          )}
           <div className={styles.composerStatusSlot} aria-live="polite">
             {editingMessageId && (
               <div className={styles.typingBar}>
@@ -8163,9 +8177,11 @@ function ChatThread() {
       {!isShellSessionActive && promptRailItems.length > 0 ? (
         <ChatPromptRail
           items={promptRailItems}
-          top={threadBox.top}
-          height={threadBox.height}
-          activeId={activePromptId}
+          /* The split button floats in the thread's top-left corner: the column
+             starts under it instead of drawing pills across the icon. */
+          top={threadBox.top + splitFabInset}
+          height={threadBox.height - splitFabInset}
+          activeId={railActiveId}
           onSelect={setFocusMessageId}
         />
       ) : null}
@@ -8265,11 +8281,22 @@ function ChatThread() {
   );
 }
 
-function SplitToggleFab({ enabled }: { enabled: boolean }) {
-  const t = useT();
+/** The floating split button, and the corner it takes from the thread's top-left:
+ *  the prompt rail is told to start below it, so no pill runs under the icon. */
+const SPLIT_FAB_RAIL_INSET_PX = 44;
+
+/** Whether the thread carries the floating split button: a desktop chat in a
+ *  single pane. The button draws itself by this, and the rail keeps clear by it. */
+function useSplitFabShown() {
+  const enabled = useChatSplitAllowed() && useAppStore((s) => s.settings.chatSplit !== false);
   const count = useAppStore((s) => Math.max(1, s.chatPaneIds?.length ?? 1));
+  return enabled && count === 1;
+}
+
+function SplitToggleFab() {
+  const t = useT();
   const setChatPaneCount = useAppStore((s) => s.setChatPaneCount);
-  if (!enabled || count > 1) return null;
+  if (!useSplitFabShown()) return null;
   return (
     <button
       type="button"
@@ -8421,7 +8448,7 @@ export function ChatPage() {
 
   return (
     <div className={split ? styles.splitWorkspace : styles.splitSingle}>
-      <SplitToggleFab enabled={desktop && splitSetting} />
+      <SplitToggleFab />
       <div
         className={split ? styles.splitCols : styles.splitColsSingle}
         style={split ? { gridTemplateColumns: `repeat(${paneCount}, minmax(0, 1fr))` } : undefined}

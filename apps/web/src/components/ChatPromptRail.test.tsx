@@ -4,7 +4,7 @@
 // a cut marker, so the column never runs over the header or the composer.
 
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { DEFAULT_SETTINGS } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
@@ -43,7 +43,12 @@ function prompts(count: number): PromptRailItem[] {
   }));
 }
 
-function renderRail(items: PromptRailItem[], height: number, activeId: string | null) {
+function renderRail(
+  items: PromptRailItem[],
+  height: number,
+  activeId: string | null,
+  onSelect: (id: string) => void = () => {},
+) {
   useAppStore.setState({ settings: DEFAULT_SETTINGS });
   return render(
     <I18nProvider>
@@ -52,7 +57,7 @@ function renderRail(items: PromptRailItem[], height: number, activeId: string | 
         top={0}
         height={height}
         activeId={activeId}
-        onSelect={() => {}}
+        onSelect={onSelect}
       />
     </I18nProvider>,
   );
@@ -94,6 +99,27 @@ describe("ChatPromptRail", () => {
     const current = document.querySelector('[aria-current="true"]');
     expect(current?.getAttribute("data-prompt-id")).toBe("u2");
     expect(screen.getByRole("img", { name: /more below/ })).toBeTruthy();
+  });
+
+  // A clipped prompt is not lost: hovering the dots names the prompts they stand
+  // for, nearest to the column first, and one of them is one click away.
+  it("lists the clipped prompts under the dots and jumps to the one clicked", () => {
+    const onSelect = vi.fn();
+    renderRail(prompts(300), 600, "u299", onSelect);
+    const view = railWindow(300, 299, 580);
+
+    fireEvent.pointerOver(screen.getByRole("img", { name: `${view.above} more above` }));
+
+    const list = screen.getByRole("group", { name: `${view.above} more above` });
+    const rows = within(list).getAllByRole("button");
+    // The nearest prompts, oldest first — the ones the column had to clip last.
+    expect(rows[0]?.textContent).toBe(`prompt ${view.start - 12}`);
+    expect(rows[rows.length - 1]?.textContent).toBe(`prompt ${view.start - 1}`);
+    // Everything further up is only counted, not named.
+    expect(within(list).getByText(`and ${view.above - 12} more`)).toBeTruthy();
+
+    fireEvent.click(rows[rows.length - 1]!);
+    expect(onSelect).toHaveBeenCalledWith(`u${view.start - 1}`);
   });
 
   it("counts the marker in the column's height, not on top of it", () => {

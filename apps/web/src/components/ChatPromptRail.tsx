@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "../lib/i18n";
 import { useFixedMenuPlacement, type MenuAnchor } from "../lib/menuPosition";
@@ -15,6 +15,12 @@ import styles from "./ChatPromptRail.module.css";
 const TRACK_PAD_PX = 10;
 /** Distance between a pill and its tooltip. */
 const TIP_GAP_PX = 10;
+/** Clipped prompts the dots' list spells out — the nearest ones to the column.
+ *  A chat can clip hundreds, and a flyout of hundreds is a second chat. */
+const CUT_LIST_MAX = 12;
+/** Time a flyout survives the pointer leaving it — long enough to cross the gap
+ *  between the dots and the list without it folding up under the cursor. */
+const FLYOUT_CLOSE_MS = 160;
 
 type ChatPromptRailProps = {
   items: PromptRailItem[];
@@ -28,19 +34,42 @@ type ChatPromptRailProps = {
   onSelect: (messageId: string) => void;
 };
 
-type HoveredPrompt = { index: number; item: PromptRailItem; anchor: MenuAnchor };
+type HoveredPrompt = { kind: "pill"; index: number; item: PromptRailItem; anchor: MenuAnchor };
+
+/** The dots under the pointer: the prompts they stand for, nearest first, plus
+ *  how many of the clipped ones the list had no room to name. */
+type HoveredCut = {
+  kind: "cut";
+  side: "above" | "below";
+  prompts: PromptRailItem[];
+  hidden: number;
+  anchor: MenuAnchor;
+};
+
+type RailFlyout = HoveredPrompt | HoveredCut;
 
 /** Stands in for the prompts an end of the column had to clip: three dots instead
  *  of a pill, so the rail keeps saying "there is more this way" while its pills
- *  stay inside the thread. The count is in the tooltip, not in the glyph — the
- *  rail is a glance, and a number would outshout the pills. */
-function CutDots({ side, count }: { side: "above" | "below"; count: number }) {
-  const t = useT();
-  const label = t(side === "above" ? "chat.promptRailCutAbove" : "chat.promptRailCutBelow", {
-    count,
-  });
+ *  stay inside the thread. The count is in the label, not in the glyph — the
+ *  rail is a glance, and a number would outshout the pills; hovering the dots
+ *  spells the clipped prompts out (see the flyout below). */
+function CutDots({
+  label,
+  onEnter,
+  onLeave,
+}: {
+  label: string;
+  onEnter: (el: HTMLElement) => void;
+  onLeave: () => void;
+}) {
   return (
-    <span className={styles.cut} role="img" aria-label={label} title={label}>
+    <span
+      className={styles.cut}
+      role="img"
+      aria-label={label}
+      onPointerEnter={(e) => onEnter(e.currentTarget)}
+      onPointerLeave={onLeave}
+    >
       <span className={styles.cutDots} aria-hidden />
     </span>
   );
@@ -66,8 +95,12 @@ function CutDots({ side, count }: { side: "above" | "below"; count: number }) {
  * message it points at.
  *
  * A thread too short for its prompts shows a window of them rather than a
- * column running over the header and the composer; the clipped end is marked
- * with dots (lib/promptRail.ts: railWindow).
+ * column running over the header and the composer, and a chat too long for the
+ * pills to keep their air is clipped the same way — packed edge to edge the
+ * column is one thick stroke, not a list. Each clipped end is marked with dots
+ * (lib/promptRail.ts: railWindow), and hovering the dots lists the prompts they
+ * stand for, nearest to the column first, so a clipped prompt is still one hover
+ * and one click away.
  */
 export function ChatPromptRail({
   items,
@@ -78,9 +111,25 @@ export function ChatPromptRail({
 }: ChatPromptRailProps) {
   const t = useT();
   const touch = useIsTouchUi();
-  const [hovered, setHovered] = useState<HoveredPrompt | null>(null);
-  const tipRef = useRef<HTMLDivElement>(null);
-  const tipStyle = useFixedMenuPlacement(hovered?.anchor ?? null, tipRef);
+  const [flyout, setFlyout] = useState<RailFlyout | null>(null);
+  const flyoutRef = useRef<HTMLDivElement>(null);
+  const flyoutStyle = useFixedMenuPlacement(flyout?.anchor ?? null, flyoutRef);
+  /** A pending close: the pointer has to cross the gap from the dots into their
+   *  list, so a leave waits instead of folding the list up under the cursor. */
+  const closeTimer = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimer.current === null) return;
+    window.clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+  const closeSoon = () => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setFlyout(null);
+    }, FLYOUT_CLOSE_MS);
+  };
+  useEffect(() => cancelClose, []);
 
   if (touch || items.length === 0 || height <= 0) return null;
 
@@ -93,6 +142,36 @@ export function ChatPromptRail({
     available,
   );
   const shown = items.slice(view.start, view.start + view.count);
+  const cutHint = (side: "above" | "below", count: number) =>
+    t(side === "above" ? "chat.promptRailCutAbove" : "chat.promptRailCutBelow", { count });
+
+  /** The dots of one end, wired to the list of the prompts they stand for — the
+   *  ones nearest the column, the rest counted in the list's footer. */
+  const cutDots = (side: "above" | "below") => {
+    const count = side === "above" ? view.above : view.below;
+    if (count <= 0) return null;
+    const clipped =
+      side === "above" ? items.slice(0, view.start) : items.slice(view.start + view.count);
+    const prompts =
+      side === "above" ? clipped.slice(-CUT_LIST_MAX) : clipped.slice(0, CUT_LIST_MAX);
+    return (
+      <CutDots
+        label={cutHint(side, count)}
+        onEnter={(el) => {
+          const rect = el.getBoundingClientRect();
+          cancelClose();
+          setFlyout({
+            kind: "cut",
+            side,
+            prompts,
+            hidden: clipped.length - prompts.length,
+            anchor: { x: rect.right + TIP_GAP_PX, y: rect.top },
+          });
+        }}
+        onLeave={closeSoon}
+      />
+    );
+  };
 
   return (
     <div
@@ -101,7 +180,7 @@ export function ChatPromptRail({
       role="navigation"
       aria-label={t("chat.promptRail")}
     >
-      {view.above > 0 ? <CutDots side="above" count={view.above} /> : null}
+      {cutDots("above")}
       <div className={styles.stack}>
         {shown.map((item, index) => (
           <button
@@ -113,38 +192,79 @@ export function ChatPromptRail({
             aria-current={item.id === activeId ? "true" : undefined}
             aria-label={item.prompt}
             onClick={() => {
-              setHovered(null);
+              setFlyout(null);
               onSelect(item.id);
             }}
             onPointerEnter={(e) => {
               const rect = e.currentTarget.getBoundingClientRect();
-              setHovered({
+              cancelClose();
+              setFlyout({
+                kind: "pill",
                 index,
                 item,
                 anchor: { x: rect.right + TIP_GAP_PX, y: rect.top },
               });
             }}
-            onPointerLeave={() => setHovered(null)}
+            onPointerLeave={() => setFlyout(null)}
           >
             <span
               className={styles.pillBar}
               aria-hidden
               style={{
-                width: hovered
-                  ? railPillWidth(Math.abs(index - hovered.index))
-                  : RAIL_PILL_BASE_PX,
+                width:
+                  flyout?.kind === "pill"
+                    ? railPillWidth(Math.abs(index - flyout.index))
+                    : RAIL_PILL_BASE_PX,
               }}
             />
           </button>
         ))}
       </div>
-      {view.below > 0 ? <CutDots side="below" count={view.below} /> : null}
-      {hovered && tipStyle
+      {cutDots("below")}
+      {flyout && flyoutStyle
         ? createPortal(
-            <div ref={tipRef} className={styles.tip} style={tipStyle} role="tooltip">
-              <p className={styles.tipPrompt}>{hovered.item.prompt}</p>
-              {hovered.item.reply ? <p className={styles.tipReply}>{hovered.item.reply}</p> : null}
-            </div>,
+            flyout.kind === "pill" ? (
+              <div ref={flyoutRef} className={styles.tip} style={flyoutStyle} role="tooltip">
+                <p className={styles.tipPrompt}>{flyout.item.prompt}</p>
+                {flyout.item.reply ? <p className={styles.tipReply}>{flyout.item.reply}</p> : null}
+              </div>
+            ) : (
+              <div
+                ref={flyoutRef}
+                className={styles.cutList}
+                style={flyoutStyle}
+                role="group"
+                aria-label={cutHint(flyout.side, flyout.prompts.length + flyout.hidden)}
+                onPointerEnter={cancelClose}
+                onPointerLeave={closeSoon}
+              >
+                <p className={styles.cutListTitle}>
+                  {cutHint(flyout.side, flyout.prompts.length + flyout.hidden)}
+                </p>
+                <ul className={styles.cutListRows}>
+                  {flyout.prompts.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className={styles.cutListRow}
+                        title={item.prompt}
+                        onClick={() => {
+                          setFlyout(null);
+                          onSelect(item.id);
+                        }}
+                      >
+                        {item.prompt}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {flyout.hidden > 0 ? (
+                  <p className={styles.cutListMore}>
+                    {t("chat.promptRailCutMore", { count: flyout.hidden })}
+                  </p>
+                ) : null}
+              </div>
+            ),
             document.body,
           )
         : null}

@@ -10,6 +10,9 @@ export const RAIL_REPLY_CHARS = 220;
 export const RAIL_PILL_HEIGHT_PX = 3;
 /** Gap between pills while the column has room to breathe. */
 export const RAIL_MAX_GAP_PX = 8;
+/** Air a pill keeps under the next one. A column packed tighter is one thick
+ *  dashed stroke, not a list of prompts, so past this the rail clips instead. */
+export const RAIL_MIN_GAP_PX = 5;
 /** Height of the marker that stands for prompts clipped off an end of the
  *  column. Keep in sync with `.cut` in ChatPromptRail.module.css. */
 export const RAIL_CUT_HEIGHT_PX = 12;
@@ -45,9 +48,13 @@ export function railPillSlot(
   available: number,
   pillHeight: number,
   maxGap: number,
+  minGap = 0,
 ): number {
   if (count < 1) return pillHeight;
-  return Math.max(pillHeight, Math.min(pillHeight + maxGap, available / count));
+  return Math.max(
+    pillHeight + minGap,
+    Math.min(pillHeight + maxGap, available / count),
+  );
 }
 
 /** What the rail draws in a thread of a given height: a window of the prompt
@@ -74,6 +81,10 @@ export type PromptRailWindow = {
  *
  * The window follows the prompt the reader is in: the lit pill is the one thing
  * the rail is for, so it must never be the pill that gets clipped.
+ *
+ * A pill also keeps its air: a chat far longer than any thread is clipped with
+ * the dots rather than packed edge to edge, where the column would read as one
+ * thick stroke instead of a list of prompts.
  */
 export function railWindow(
   total: number,
@@ -82,26 +93,28 @@ export function railWindow(
   pillHeight: number = RAIL_PILL_HEIGHT_PX,
   cutHeight: number = RAIL_CUT_HEIGHT_PX,
   maxGap: number = RAIL_MAX_GAP_PX,
+  minGap: number = RAIL_MIN_GAP_PX,
 ): PromptRailWindow {
   if (total < 1) return { start: 0, count: 0, above: 0, below: 0, slot: pillHeight };
   const room = Math.max(0, available);
   const active = Math.min(Math.max(activeIndex, 0), total - 1);
-  // The most pills the column could ever hold — before the cut markers, which
-  // cost a slot each, take their room back inside the loop.
-  let count = Math.min(total, Math.max(1, Math.floor(room / pillHeight)));
+  // The tightest pitch the column may squeeze to — the most pills it could ever
+  // hold, before the cut markers take their room back inside the loop.
+  const minSlot = pillHeight + minGap;
+  let count = Math.min(total, Math.max(1, Math.floor(room / minSlot)));
   for (;;) {
     const start = Math.min(Math.max(active - count + 1, 0), total - count);
     const above = start;
     const below = total - start - count;
     const cuts = (above > 0 ? cutHeight : 0) + (below > 0 ? cutHeight : 0);
     const fit = room - cuts;
-    if (count === 1 || count * pillHeight <= fit) {
+    if (count === 1 || count * minSlot <= fit) {
       return {
         start,
         count,
         above,
         below,
-        slot: railPillSlot(count, Math.max(pillHeight, fit), pillHeight, maxGap),
+        slot: railPillSlot(count, Math.max(minSlot, fit), pillHeight, maxGap, minGap),
       };
     }
     count -= 1;

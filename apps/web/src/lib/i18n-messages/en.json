@@ -295,6 +295,7 @@
     "promptRail": "Prompts in this chat",
     "promptRailCutAbove": "{{count}} more above",
     "promptRailCutBelow": "{{count}} more below",
+    "promptRailCutMore": "and {{count}} more",
     "queueCount": "Queued: {{count}}",
     "queueReorder": "Drag to reorder",
     "sendNow": "Send now",

@@ -121,6 +121,75 @@
   animation: railTipIn 0.12s ease both;
 }
 
+/* The clipped prompts, listed under the dots that stand for them. Unlike a
+   pill's tooltip this one is a menu: the pointer has to be able to come inside
+   and click a row, so it takes pointer events and the dots keep it open while
+   the cursor crosses the gap. */
+.cutList {
+  position: fixed;
+  z-index: 340;
+  width: min(300px, 56vw);
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow:
+    0 2px 6px rgb(15 23 42 / 10%),
+    0 10px 28px rgb(15 23 42 / 12%);
+  pointer-events: auto;
+  animation: railTipIn 0.12s ease both;
+}
+
+.cutListTitle {
+  margin: 0;
+  padding: 4px 6px 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.cutListRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One prompt per row, cut to one line: a list is read by the head of the
+   prompt, and the full text is the row's own tooltip. */
+.cutListRow {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.cutListRow:hover,
+.cutListRow:focus-visible {
+  background: var(--bg-tertiary);
+}
+
+.cutListMore {
+  margin: 2px 0 0;
+  padding: 4px 6px;
+  border-top: 1px solid var(--border-soft);
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
 @keyframes railTipIn {
   from {
     opacity: 0;
