@@ -65,6 +65,9 @@ const apiMock = vi.hoisted(() => {
       fileName: "ref.md",
       size: 42,
     })),
+    // The board's own delete: the cross on a card and the card's menu both
+    // reach it through the store, only after the confirm dialog.
+    deleteSession: vi.fn(async () => ({ ok: true })),
     // The new-task form asks the picked agent for its `/` menu before the task
     // exists — the list itself comes from the test that needs one.
     agentCommands: vi.fn(async () => [] as Array<{ name: string; description: string }>),
@@ -617,6 +620,46 @@ describe("BoardPage custom columns", () => {
     expect(apiMock.updateSession).not.toHaveBeenCalled();
   });
 
+  // In Progress is no place a hand can make, but it *is* where a running card
+  // stands: the drop from a lane of the reader's takes the placement away —
+  // the very write «Вернуть в работу» in the card's menu makes — and the
+  // lifecycle holds the card again.
+  it("takes a running card back into In Progress from a lane of its own", async () => {
+    const running: SessionDto = {
+      ...finishedTask,
+      status: "running",
+      boardColumnId: "col-review",
+    };
+    useAppStore.setState({
+      boards: [{ ...board, columns: [...defaultBoardColumns(), review] }],
+      boardSessions: [running],
+    });
+    const { container } = renderBoard();
+    await screen.findByText("Finished task");
+
+    const reviewLane = container.querySelector('[data-column="col-review"]') as HTMLElement;
+    const card = reviewLane.querySelector('[data-task-id="t2"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    const progressLane = container.querySelector('[data-column="progress"]') as HTMLElement;
+    expect(progressLane.querySelector('[data-task-id="t2"]')).toBeNull();
+
+    const release = hoverOver(card, progressLane);
+    try {
+      // The lane says what it will do before the hand lets go.
+      expect(progressLane.querySelector('[data-drop-mark="reopen"]')).toBeTruthy();
+    } finally {
+      release();
+    }
+
+    // Only the placement is written: the card is running, and its own row
+    // already says so.
+    await waitFor(() => expect(apiMock.updateSession).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateSession.mock.calls[0]![1]).toEqual({ boardColumnId: null });
+
+    await waitFor(() => expect(progressLane.querySelector('[data-task-id="t2"]')).toBeTruthy());
+    expect(reviewLane.querySelector('[data-task-id="t2"]')).toBeNull();
+  });
+
   // Done is a stage door a hand *can* open: dropping the card there is the
   // card's own «Отметить готовой» button, made with the pointer.
   it("marks a card ready when it is dropped on Done", async () => {
@@ -1019,6 +1062,44 @@ function renderBoard() {
   );
 }
 
+describe("BoardPage new task form slash menu", () => {
+  // A task's skill is the `/name` its first message opens with, and every
+  // harness this app drives speaks ACP — so the form offers the menu of the
+  // agent the task is written for, not only the in-process one's (whose skills
+  // the server can read from files): a spawned agent is asked for its own list.
+  it("offers a spawned agent's own commands for the task's folder", async () => {
+    useAppStore.setState({
+      boardSessions: [],
+      adapters: [{ id: "omp", label: "OMP" } as never],
+      agentAvailability: { omp: true },
+    });
+    apiMock.agentCommands.mockResolvedValue([
+      { name: "review", description: "Review the branch I am on" },
+    ]);
+    renderBoard();
+    await screen.findByText("Add task");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+
+    // Asked for the agent picked for the task, in the task's own folder — the
+    // commands of a CLI depend on both.
+    expect(apiMock.agentCommands).toHaveBeenCalledWith("omp", "/projects/app");
+
+    await userEvent.type(textarea, "/");
+    const option = await screen.findByRole("option", { name: /\/review/ });
+    expect(option.textContent).toContain("Review the branch I am on");
+
+    // Picking it writes the command the agent expands as the first token.
+    await userEvent.click(option);
+    expect(textarea.value).toBe("/review ");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
+
 describe("BoardPage new task form", () => {
   // The lane's own placeholder is the same door as the group's "+": a project
   // group without tasks shows a card-shaped "Add task" instead of bare space.
@@ -1064,44 +1145,6 @@ describe("BoardPage new task form", () => {
     expect(tools).toBeTruthy();
     expect(within(tools).getByRole("button", { name: /^Attach/ })).toBeTruthy();
     expect(within(row).getAllByRole("button").length).toBe(3);
-
-describe("BoardPage new task form slash menu", () => {
-  // A task's skill is the `/name` its first message opens with, and every
-  // harness this app drives speaks ACP — so the form offers the menu of the
-  // agent the task is written for, not only the in-process one's (whose skills
-  // the server can read from files): a spawned agent is asked for its own list.
-  it("offers a spawned agent's own commands for the task's folder", async () => {
-    useAppStore.setState({
-      boardSessions: [],
-      adapters: [{ id: "omp", label: "OMP" } as never],
-      agentAvailability: { omp: true },
-    });
-    apiMock.agentCommands.mockResolvedValue([
-      { name: "review", description: "Review the branch I am on" },
-    ]);
-    renderBoard();
-    await screen.findByText("Add task");
-
-    const group = document.querySelector("[data-group]") as HTMLElement;
-    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
-    const textarea = within(group).getByPlaceholderText(
-      "Describe the task…",
-    ) as HTMLTextAreaElement;
-
-    // Asked for the agent picked for the task, in the task's own folder — the
-    // commands of a CLI depend on both.
-    expect(apiMock.agentCommands).toHaveBeenCalledWith("omp", "/projects/app");
-
-    await userEvent.type(textarea, "/");
-    const option = await screen.findByRole("option", { name: /\/review/ });
-    expect(option.textContent).toContain("Review the branch I am on");
-
-    // Picking it writes the command the agent expands as the first token.
-    await userEvent.click(option);
-    expect(textarea.value).toBe("/review ");
-    expect(screen.queryByRole("listbox")).toBeNull();
-  });
-});
 
     // What the task starts on is words, not controls: one pressable line that
     // names the agent and the model, and no picker or switch standing in the
@@ -1152,6 +1195,76 @@ describe("BoardPage new task form slash menu", () => {
     // No other block under the textarea: the labelled pickers are gone.
     expect(box.querySelectorAll(`.${styles.composerField}`).length).toBe(0);
     expect(box.querySelectorAll(`.${styles.composerActions}`).length).toBe(0);
+  });
+
+  // The report: the line under the box said «auto» and the panel's model row
+  // said «Select model» while Settings already name the model the task starts
+  // on — the pick read as unmade, and the task was created on the agent's own
+  // default instead of that model.
+  it("opens on the model the settings default the agent to", async () => {
+    useAppStore.setState({
+      boardSessions: [],
+      settings: {
+        ...DEFAULT_SETTINGS,
+        defaultProvider: "opencode",
+        defaultModel: "gpt-5-codex",
+      },
+      adapters: [{ id: "opencode", label: "OpenCode" } as never],
+      agentAvailability: { opencode: true },
+    });
+    apiMock.listModels.mockResolvedValue({
+      ok: true,
+      models: [
+        { value: "gpt-5-codex", name: "GPT-5 Codex" },
+        { value: "claude-sonnet-4", name: "Claude Sonnet 4" },
+      ],
+      modelParams: [],
+    } as never);
+    // jsdom ships no scrollIntoView; the picker's list scrolls its row in.
+    Element.prototype.scrollIntoView = () => {};
+
+    renderBoard();
+    await screen.findByText("Add task");
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+
+    // The agent and the model, in the words the settings already picked — an
+    // empty pick is «auto», and this form no longer has one.
+    const line = within(group).getByRole("button", { name: /^What the task starts on:/ });
+    await waitFor(() => expect(line.textContent).toContain("OpenCode · GPT-5 Codex"));
+    expect(line.textContent).not.toContain("auto");
+
+    // The panel says the same, and it is a real pick: the menu stands on that
+    // model, and another one chosen there is what the line then states.
+    await userEvent.click(line);
+    const panel = await screen.findByRole("dialog", { name: "What the task starts on" });
+    expect(within(panel).queryByRole("button", { name: "Select model" })).toBeNull();
+    await userEvent.click(within(panel).getByRole("button", { name: /GPT-5 Codex/ }));
+    expect(
+      (await screen.findByRole("option", { name: /GPT-5 Codex/ })).getAttribute("aria-selected"),
+    ).toBe("true");
+    await userEvent.click(screen.getByRole("option", { name: /Claude Sonnet 4/ }));
+    await waitFor(() => expect(line.textContent).toContain("OpenCode · Claude Sonnet 4"));
+
+    // The start switch outlives the suite, and only the created task is this
+    // test's business — a turn started by it is not.
+    if (within(panel).getByRole("switch").getAttribute("aria-checked") === "true") {
+      await userEvent.click(within(panel).getByRole("switch"));
+    }
+    await userEvent.click(line);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // And the task is created on the model the form states.
+    await userEvent.type(
+      within(group).getByPlaceholderText("Describe the task…"),
+      "Ship the release",
+    );
+    await userEvent.click(within(group).getByRole("button", { name: "Create" }));
+    await waitFor(() =>
+      expect(apiMock.createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "opencode", model: "claude-sonnet-4" }),
+      ),
+    );
   });
 
   // Regression: the form ignored every press outside it, so an accidental "+"
@@ -1298,6 +1411,23 @@ describe("BoardPage card context menu", () => {
     // The dialog took over — same title key, so the format radio disambiguates.
     expect(await screen.findByRole("radio", { name: "Markdown (.md)" })).toBeTruthy();
     expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // The menu carries the same delete the card's cross does: it asks first,
+  // and the confirmation is what drops the task.
+  it("deletes a task from the card's context menu", async () => {
+    renderBoard();
+    const card = await screen.findByText("Fix the login bug");
+
+    fireEvent.contextMenu(card);
+    const menu = screen.getByRole("menu");
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Delete chat?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(screen.queryByText("Fix the login bug")).toBeNull());
+    expect(apiMock.deleteSession).toHaveBeenCalledWith("t1");
   });
 
   it("dismisses the card menu on a press outside it", async () => {
@@ -1562,6 +1692,94 @@ describe("BoardPage file drop", () => {
 
     expect(taken).toBe(false);
     expect(screen.queryByText("plan.pdf")).toBeNull();
+  });
+});
+
+// The report: a card's pencil opened a second, poorer editor — a bare box and an
+// agent pick — while the task had been written in the full form. The card is now
+// rewritten in that same form, filled with what the task stands on.
+//
+// It sits at the end of the file on purpose: the agent catalogues are cached per
+// provider for the module's life, and this one answers for its own agent.
+describe("BoardPage task edit form", () => {
+  it("rewrites a Todo card in the new-task form, opened on the task", async () => {
+    useAppStore.setState({
+      // The pickers are settings switches: this test is about the form having
+      // them at all, so both are on. The settings default is another model, so
+      // a form that ignored the task's own pick would say so.
+      settings: {
+        ...DEFAULT_SETTINGS,
+        boardTaskModelPicker: true,
+        defaultModel: "claude-sonnet-4",
+      },
+      adapters: [{ id: "cursor", label: "Cursor" } as never],
+      agentAvailability: { cursor: true },
+      boardSessions: [{ ...task, provider: "cursor", model: "gpt-5-codex" }],
+    });
+    apiMock.listModels.mockResolvedValue({
+      ok: true,
+      models: [{ value: "gpt-5-codex", name: "GPT-5 Codex" }],
+      modelParams: [],
+    } as never);
+    // jsdom ships no scrollIntoView; the pickers scroll their row in.
+    Element.prototype.scrollIntoView = () => {};
+
+    renderBoard();
+    const card = (await screen.findByText("Fix the login bug")).closest(
+      "[data-task-id]",
+    ) as HTMLElement;
+    await userEvent.click(within(card).getByLabelText("Edit task"));
+
+    // The same box as the creation form, holding the task's own text.
+    const box = within(card).getByPlaceholderText("Describe the task…") as HTMLTextAreaElement;
+    expect(box.value).toBe("Fix the login bug");
+    const form = box.closest(`.${styles.composer}`) as HTMLElement;
+    expect(form).toBeTruthy();
+
+    // …with the paperclip and the start line, and the model is the task's own.
+    const tools = form.querySelector(`.${styles.composerTools}`) as HTMLElement;
+    expect(within(tools).getByRole("button", { name: /^Attach/ })).toBeTruthy();
+    const line = within(form).getByRole("button", { name: /^What the task starts on:/ });
+    await waitFor(() => expect(line.textContent).toContain("Cursor ·"));
+    // The task's model, not the settings default the create form would open on.
+    expect(line.textContent).toContain("Codex");
+    expect(line.textContent).not.toContain("Sonnet");
+    expect(line.textContent).not.toContain("auto");
+
+    // The panel is the creation form's too — minus the switch that belongs to
+    // creating («start immediately» is what the board does with NEW tasks).
+    await userEvent.click(line);
+    const panel = await screen.findByRole("dialog", { name: "What the task starts on" });
+    expect(within(panel).queryByRole("switch")).toBeNull();
+    await userEvent.click(line);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // An edit saves what a creation creates.
+    expect(within(form).getByRole("button", { name: "Save" })).toBeTruthy();
+    expect(within(form).queryByRole("button", { name: "Create" })).toBeNull();
+
+    await userEvent.clear(box);
+    await userEvent.type(box, "Fix the login token");
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(apiMock.updateSession).toHaveBeenCalledWith(
+        "t1",
+        expect.objectContaining({
+          taskDescription: "Fix the login token",
+          title: "Fix the login token",
+          provider: "cursor",
+          model: "gpt-5-codex",
+        }),
+      ),
+    );
+    // The form is gone and the card carries the rewritten text.
+    await waitFor(() => expect(screen.queryByPlaceholderText("Describe the task…")).toBeNull());
+    expect(within(card).getByText("Fix the login token")).toBeTruthy();
+
+    // The agents go back to what the file found: a form opened on a leaked one
+    // asks for its catalog, and that answer is cached for the whole file.
+    useAppStore.setState({ adapters: [], agentAvailability: {} });
   });
 });
 

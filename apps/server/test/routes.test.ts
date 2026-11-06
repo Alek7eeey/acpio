@@ -74,12 +74,14 @@ function connectAgent() {
 }
 
 /** Insert a session row directly (no agent involved). */
-async function seedSession(opts: { title?: string; createdAt?: Date; cwd?: string } = {}) {
+async function seedSession(
+  opts: { title?: string; createdAt?: Date; cwd?: string; provider?: string } = {},
+) {
   const [row] = await db
     .insert(sessionsTable)
     .values({
       title: opts.title ?? "Seeded session",
-      provider: "omp",
+      provider: opts.provider ?? "omp",
       cwd: opts.cwd ?? "",
       mode: "agent",
       ...(opts.createdAt
@@ -827,6 +829,35 @@ describe("sessions", () => {
       payload: { mcpDisabledIds: [] },
     });
     expect(cleared.json().mcpDisabledIds).toEqual([]);
+  });
+
+  // A Todo card is rewritten in the same form that created it, so the model and
+  // its params come with the text — but only while the task has not reached its
+  // agent yet.
+  it("PATCH /api/sessions/:id takes the model of a Todo card, only before the first turn", async () => {
+    const seeded = await seedSession({ title: "Todo card" });
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${seeded.id}`,
+      payload: { model: "gpt-5-codex", modelParams: { effort: "high" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().model).toBe("gpt-5-codex");
+    expect(res.json().modelParams).toEqual({ effort: "high" });
+
+    // A task that has reached its agent belongs to its chat: the board's form
+    // cannot pick a model behind the running session's back.
+    await db
+      .update(sessionsTable)
+      .set({ acpSessionId: "acp-1" })
+      .where(eq(sessionsTable.id, seeded.id));
+    const started = await app.inject({
+      method: "PATCH",
+      url: `/api/sessions/${seeded.id}`,
+      payload: { model: "claude-sonnet-4" },
+    });
+    expect(started.statusCode).toBe(400);
+    expect(started.json().error).toBe("alreadyStarted");
   });
 
   it("DELETE /api/sessions/:id removes the session; re-fetch → 404", async () => {

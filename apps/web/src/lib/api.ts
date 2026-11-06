@@ -412,6 +412,11 @@ export const api = {
       boardColumnId?: string | null;
       /** Pre-start agent pick for a board task. */
       provider?: AgentProvider;
+      /** Pre-start too: the model the task lands on and its params. */
+      model?: string;
+      modelParams?: Record<string, string>;
+      /** Files the server already holds, bound to the task's first turn. */
+      attachments?: Array<{ name: string; path: string }>;
     },
   ) =>
     request<SessionDto>(`/api/sessions/${id}`, {

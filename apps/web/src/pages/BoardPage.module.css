@@ -1102,6 +1102,16 @@
   gap: 6px;
 }
 
+/* The card's own rewrite is the new-task form, word for word, which paints its
+   text through a mirror of its own: it must not take the plain field's colours
+   below — those belong to the card's prompt box, which has no mirror behind it
+   and therefore has to let its field draw the glyphs. */
+.cardEditForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* The fields a card opens in place — the task's text and the next prompt — have
    no painted copy laid over them the way the new-task form does: a card carries
    no file links to colour, so the field is the only thing drawing the text, and
@@ -1251,6 +1261,11 @@
 }
 
 .menuIconHeart {
+  color: var(--danger);
+}
+
+/* A destructive row (deleting the card) reads as danger at a glance. */
+.menuItemDanger {
   color: var(--danger);
 }
 

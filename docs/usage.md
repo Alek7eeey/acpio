@@ -196,10 +196,11 @@ marks the card ready (a tick under the pointer) and lets go of the hand placemen
 stands in **Done** instead of staying on its own lane; a card that is already closed and standing
 on a lane of its own comes home the same way — the lane goes, its own done mark stays — a drop on
 **Wait** sends it back to the workflow — the closed mark and any hand placement go with it (a
-return arrow). **Todo** and **In Progress** refuse the drop and light a cross, because «not
-started» and «running» are not something a hand decides. **Back to the workflow** in the card's
-menu does the same without a
-drag. A lane of your own holds its cards: the turn that starts on one leaves the
+return arrow). **Todo** and **In Progress** take one card only: the one the lifecycle already
+puts there — a running card taken off a lane of yours comes home to **In Progress**, a never
+started one to **Todo**, by losing its placement, the same write **Back to the workflow** makes
+without a drag; any other card lights a cross, because «not started» and «running» are not
+something a hand decides. A lane of your own holds its cards: the turn that starts on one leaves the
 placement alone, so «Deferred» stays deferred and «In review» never slides back to Wait
 after the agent answers. Switch the lane's **Stays here while the agent runs** off in the
 editor and it becomes a step instead of a place — a begun turn lets go of the placement the

@@ -1398,9 +1398,24 @@ export async function registerRoutes(app: FastifyInstance) {
         boardColumnId: z.string().min(1).max(64).nullable().optional(),
         /** Pre-start only: a task picks its agent before the first turn. */
         provider: registeredProviderSchema.optional(),
+        /** Pre-start only, like the agent: the model the task boots on and its
+         *  params — the edit of a Todo card names them before the first turn. */
+        model: z.string().max(200).optional(),
+        modelParams: z.record(z.string()).optional(),
+        /** Files already on the server's disk, picked while the card was being
+         *  rewritten: only paths to carry into the first turn. */
+        attachments: z
+          .array(
+            z.object({
+              name: z.string().min(1).max(255),
+              path: z.string().min(1).max(4096),
+            }),
+          )
+          .max(8)
+          .optional(),
       })
       .parse(req.body ?? {});
-    if (body.provider) {
+    if (body.provider || body.model !== undefined || body.attachments?.length) {
       const rows = await db
         .select({ acpSessionId: sessions.acpSessionId })
         .from(sessions)
@@ -1408,6 +1423,9 @@ export async function registerRoutes(app: FastifyInstance) {
         .limit(1);
       if (!rows[0]) return reply.code(404).send({ error: "Not found" });
       if (rows[0].acpSessionId) return reply.code(400).send({ error: "alreadyStarted" });
+      // Bound before the write below, so its row already carries them: the
+      // card shows a task that holds the files it was just given.
+      if (body.attachments?.length) await addTaskAttachments(id, body.attachments);
     }
     if (body.boardColumnId) {
       // A card may only be placed in a column of its own board.
@@ -1422,7 +1440,9 @@ export async function registerRoutes(app: FastifyInstance) {
         return reply.code(400).send({ error: "Unknown board column" });
       }
     }
-    const { doneAt, provider, ...rest } = body;
+    // The files are the task's own column (bound above), not a field of the
+    // session patch; the rest — the text, the model — is the row itself.
+    const { doneAt, provider, attachments: _files, ...rest } = body;
     // Neither a star nor a card moving between columns is activity: the board's
     // log lanes order by their own stamps, so a write that only places the card
     // must leave `updatedAt` alone and keep it where it stands.

@@ -292,10 +292,25 @@ type AppState = {
   setTaskDone: (id: string, done: boolean) => Promise<void>;
   /** Board task: star it for the board's Favorites section (or unstar it). */
   setTaskFavorite: (id: string, favorite: boolean) => Promise<void>;
-  /** Board task: edit the text an existing task card carries. */
-  setTaskDescription: (id: string, description: string) => Promise<void>;
   /** Board task: pick the agent before the first turn (the server accepts it only then). */
   setTaskProvider: (id: string, provider: AgentProvider) => Promise<void>;
+  /** Board task: rewrite a card still in Todo with everything the creation
+   *  form sets — its text, the agent and the model it starts on, its files. */
+  updateBoardTask: (
+    id: string,
+    patch: {
+      /** The card's text; its first line names the chat, as on creation. */
+      description: string;
+      provider?: AgentProvider;
+      /** The model the task boots on (empty = the agent's own default). */
+      model?: string;
+      modelParams?: Record<string, string>;
+      /** Device files: uploaded for the task and bound to its first turn. */
+      files?: File[];
+      /** Files the server already holds: only their paths ride along. */
+      attachments?: PendingAttachment[];
+    },
+  ) => Promise<void>;
   /** Board task: order within its project group (persisted as `sortOrder`). */
   reorderBoardTasks: (
     items: Array<{ id: string; themeId: string | null; sortOrder: number }>,
@@ -2226,22 +2241,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(apply(!favorite));
     }
   },
-  setTaskDescription: async (id, description) => {
-    // The card's text and the chat's own name are the same line: the title is
-    // the description's first line, derived exactly as createBoardTask does.
-    const title = description.trim().split("\n")[0]?.slice(0, 120) || "";
-    try {
-      const updated = await api.updateSession(id, {
-        taskDescription: description,
-        ...(title ? { title } : {}),
-      });
-      set((s) => ({
-        boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)),
-      }));
-    } catch {
-      // server offline — the card keeps the text it had
-    }
-  },
   setTaskProvider: async (id, provider) => {
     try {
       const updated = await api.updateSession(id, { provider });
@@ -2251,6 +2250,37 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch {
       // server offline — the WS mirror reconciles on the next event
     }
+  },
+  updateBoardTask: async (id, { description, provider, model, modelParams, files, attachments }) => {
+    // The card's text and the chat's own name are the same line: the title is
+    // the description's first line, derived exactly as createBoardTask does.
+    const title = titleFromTaskDescription(description);
+    let updated: SessionDto;
+    try {
+      updated = await api.updateSession(id, {
+        taskDescription: description,
+        ...(title ? { title } : {}),
+        ...(provider ? { provider } : {}),
+        ...(model ? { model } : {}),
+        ...(modelParams && Object.keys(modelParams).length ? { modelParams } : {}),
+        // Files the server already holds are bound by this write: there is
+        // nothing to upload, and nothing leaves the task to carry them.
+        ...(attachments?.length ? { attachments } : {}),
+      });
+    } catch {
+      // server offline — the card keeps the text it had
+      return;
+    }
+    // The files ride behind the row (the upload is per session) and are bound
+    // to the task server-side, so they reach the agent with the first turn.
+    for (const file of files ?? []) {
+      try {
+        await api.uploadAttachment(id, file, file.name || "file");
+      } catch {
+        // The task is rewritten; one lost file must not undo the edit.
+      }
+    }
+    set((s) => ({ boardSessions: s.boardSessions.map((b) => (b.id === id ? updated : b)) }));
   },
   reorderBoardTasks: async (items) => {
     // Optimistic: the board already shows the new order. This shortcut avoids

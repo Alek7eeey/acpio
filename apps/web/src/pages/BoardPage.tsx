@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  boardColumn,
   boardColumnHome,
   boardColumnOf,
   boardColumnsInOrder,
@@ -22,6 +23,7 @@ import {
   type BoardColumn,
   type BoardColumnDto,
   modelDisplayName,
+  modelForProvider,
   modelParamFamily,
   modelParamLabel,
   type ModelOption,
@@ -51,7 +53,7 @@ import {
   mergeSlashCommands,
 } from "../lib/slashCommands";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
-import { harnessLabel, pickCreateProvider } from "../lib/harness";
+import { harnessLabel, isAgentUsable, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore, type PendingAttachment } from "../lib/store";
@@ -252,6 +254,10 @@ const NewTaskComposer = memo(function NewTaskComposer({
   defaultProvider,
   attachSource,
   draftKey,
+  seed,
+  submitLabel,
+  persistDraft = true,
+  showAutoStart = true,
   onSubmit,
   onCancel,
 }: {
@@ -279,6 +285,18 @@ const NewTaskComposer = memo(function NewTaskComposer({
   /** The composer draft this form writes into: the text outlives the form, so
    *  leaving the board for a task's chat keeps the half-written task. */
   draftKey: string;
+  /** A task being rewritten (the edit of a Todo card): its text, the model it
+   *  starts on and that model's params fill the very fields a new task is
+   *  written into — the form is the same one, opened on the task. */
+  seed?: { text: string; model?: string | null; params?: Record<string, string> | null };
+  /** What the primary button says: an edit saves where a creation creates. */
+  submitLabel: string;
+  /** Whether the text lives on in the draft registry after the form closes.
+   *  A rewrite keeps its text in the card it belongs to, so it does not. */
+  persistDraft?: boolean;
+  /** The board's «starts by itself» switch: a creation's question, not an
+   *  edit's — the switch changes what the board does with NEW tasks. */
+  showAutoStart?: boolean;
   onSubmit: (
     cwd: string,
     description: string,
@@ -293,15 +311,19 @@ const NewTaskComposer = memo(function NewTaskComposer({
   onCancel: () => void;
 }) {
   const t = useT();
-  const [draft, setDraft] = useState(() => readComposerDraft(draftKey));
+  /** What the box opens on: the task being rewritten, or the draft the reader
+   *  left in this folder's form. */
+  const [draft, setDraft] = useState(() => seed?.text ?? readComposerDraft(draftKey));
   /** Files for the task being written — uploaded with it, staged in acpio. */
   const [files, setFiles] = useState<DraftFile[]>([]);
   /** Agent this task is created for; empty = the default the form opened on. */
   const [draftProvider, setDraftProvider] = useState<AgentProvider | "">("");
   /** Model this task starts on; empty = whatever the agent defaults to. */
-  const [draftModel, setDraftModel] = useState("");
+  const [draftModel, setDraftModel] = useState(() => seed?.model ?? "");
   /** Params of that model (effort, fast, …) as picked in its own menu. */
-  const [draftParams, setDraftParams] = useState<Record<string, string>>({});
+  const [draftParams, setDraftParams] = useState<Record<string, string>>(
+    () => seed?.params ?? {},
+  );
   const [taskModels, setTaskModels] = useState<ModelOption[]>([]);
   /** Params of the model the task would start on — what the ⋯ menu edits. */
   const [taskParams, setTaskParams] = useState<ModelParamDto[]>([]);
@@ -314,7 +336,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
   /** The server's filesystem picker, open while its source is the one chosen. */
   const [attachDialogOpen, setAttachDialogOpen] = useState(false);
   /** Caret in the description — where a skill picked from the menu lands. */
-  const [caret, setCaret] = useState(0);
+  const [caret, setCaret] = useState(() => seed?.text.length ?? 0);
   /** The painted copy of the description (see `splitLinkNames`). */
   const mirrorRef = useRef<HTMLDivElement>(null);
   /** The chip whose link is being offered, and where the menu stands. */
@@ -341,6 +363,11 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const createAutoStart = useBoardAutoStart("create");
 
   const provider = draftProvider || defaultProvider;
+  const settings = useAppStore((s) => s.settings);
+  /** The model this task starts on: the pick made in the panel, else the one
+   *  the settings default that agent to. Empty means the agent's own default —
+   *  the only case the line calls «auto». */
+  const model = draftModel || modelForProvider(settings, provider);
   /** Any agent has a `/` menu to offer — every harness this app drives speaks
    *  ACP, and announces its commands. */
   const skillsOffered = Boolean(provider);
@@ -379,9 +406,15 @@ const NewTaskComposer = memo(function NewTaskComposer({
 
   // Another agent offers another set of models: a pick made for one of them
   // means nothing on the next, so the form starts over with the agent default.
+  // A form opened on a task keeps what that task stands on — the reset below
+  // is for an agent switched by hand, not for the opening itself.
+  const openedRef = useRef(true);
   useEffect(() => {
-    setDraftModel("");
-    setDraftParams({});
+    if (openedRef.current) openedRef.current = false;
+    else {
+      setDraftModel("");
+      setDraftParams({});
+    }
     setTaskModels([]);
     setTaskParams([]);
     setParamsByModel({});
@@ -495,17 +528,23 @@ const NewTaskComposer = memo(function NewTaskComposer({
     }
   };
 
-  // The form is opened by a "+", so the caret belongs in it.
+  // The form is opened by a "+" (or by a card's pencil), so the caret belongs
+  // in it — at the end of a task's own text, where the rewrite starts.
+  const seedText = seed?.text ?? "";
   useEffect(() => {
-    inputRef.current?.focus();
-  }, [inputRef]);
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    if (seedText) input.setSelectionRange(seedText.length, seedText.length);
+  }, [inputRef, seedText]);
 
   // Live, not on unmount: the board is unmounted by a trip to a task's chat,
   // and what was being written has to be in the registry by then. A form that
   // is cancelled or created clears its entry on its own way out.
   useEffect(() => {
+    if (!persistDraft) return;
     setComposerDraft(draftKey, draft);
-  }, [draftKey, draft]);
+  }, [draftKey, draft, persistDraft]);
 
   // A press outside only drops a form that costs nothing to drop: this ref is
   // how the page sees that there is text (or a pasted file) to protect — or an
@@ -639,7 +678,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
       files.flatMap((entry) => (entry.file ? [entry.file] : [])),
       files.flatMap((entry) => (entry.path ? [{ name: entry.name, path: entry.path }] : [])),
       draftProvider || defaultProvider,
-      showModelPicker ? draftModel : "",
+      showModelPicker ? model : "",
       showModelPicker ? draftParams : {},
     );
   };
@@ -706,14 +745,14 @@ const NewTaskComposer = memo(function NewTaskComposer({
    *  by itself» only while that is on — an off switch is not news. */
   const startSummary = [
     agentOptions.find((agent) => agent.id === provider)?.label ?? "",
-    draftModel
+    model
       ? modelDisplayName(
-          draftModel,
-          taskModels.find((entry) => entry.value === draftModel)?.name,
+          model,
+          taskModels.find((entry) => entry.value === model)?.name,
           t("models.auto"),
         )
       : t("models.auto"),
-    ...(createAutoStart ? [t("chat.boardAutoStart")] : []),
+    ...(showAutoStart && createAutoStart ? [t("chat.boardAutoStart")] : []),
   ]
     .filter(Boolean)
     .join(" · ");
@@ -1041,7 +1080,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
             disabled={!draft.trim() || busy}
             onClick={submit}
           >
-            {t("common.create")}
+            {submitLabel}
           </button>
         </div>
       </div>
@@ -1086,7 +1125,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
                   <span className={styles.startRowLabel}>{t("common.model")}</span>
                   <ModelPicker
                     dense
-                    model={draftModel}
+                    model={model}
                     models={taskModels}
                     params={taskParams}
                     paramValues={draftParams}
@@ -1102,20 +1141,22 @@ const NewTaskComposer = memo(function NewTaskComposer({
                   />
                 </div>
               ) : null}
-              <button
-                type="button"
-                role="switch"
-                aria-checked={createAutoStart}
-                className={`${styles.startRow} ${styles.startSwitch}${
-                  createAutoStart ? ` ${styles.switchOn}` : ""
-                }`}
-                onClick={() => toggleBoardAutoStart("create")}
-              >
-                {t("chat.boardAutoStart")}
-                <span className={`${styles.switchTrack} ${styles.switchTrackSmall}`} aria-hidden>
-                  <span className={styles.switchKnob} />
-                </span>
-              </button>
+              {showAutoStart ? (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={createAutoStart}
+                  className={`${styles.startRow} ${styles.startSwitch}${
+                    createAutoStart ? ` ${styles.switchOn}` : ""
+                  }`}
+                  onClick={() => toggleBoardAutoStart("create")}
+                >
+                  {t("chat.boardAutoStart")}
+                  <span className={`${styles.switchTrack} ${styles.switchTrackSmall}`} aria-hidden>
+                    <span className={styles.switchKnob} />
+                  </span>
+                </button>
+              ) : null}
             </div>,
             document.body,
           )
@@ -1163,8 +1204,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const setTaskDone = useAppStore((s) => s.setTaskDone);
   const setTaskColumn = useAppStore((s) => s.setTaskColumn);
   const setTaskFavorite = useAppStore((s) => s.setTaskFavorite);
-  const setTaskDescription = useAppStore((s) => s.setTaskDescription);
   const setTaskProvider = useAppStore((s) => s.setTaskProvider);
+  const updateBoardTask = useAppStore((s) => s.updateBoardTask);
   const deleteBoardTask = useAppStore((s) => s.deleteBoardTask);
   const setBoardFolders = useAppStore((s) => s.setBoardFolders);
   const setBoardFolderTag = useAppStore((s) => s.setBoardFolderTag);
@@ -1186,7 +1227,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   /** Agents for the task picker — the same shape the chat tree's picker takes. */
   const agentOptions = useMemo(
     () =>
-      adapters.map((a) => ({ id: a.id, label: a.label, online: agentAvailability[a.id] === true })),
+      adapters.map((a) => ({
+        id: a.id,
+        label: a.label,
+        online: isAgentUsable(agentAvailability, adapters, a.id),
+      })),
     [adapters, agentAvailability],
   );
 
@@ -1196,7 +1241,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    * exactly what the new-chat picker preselects.
    */
   const defaultTaskProvider = useMemo(
-    () => pickCreateProvider(agentAvailability, adapters.map((a) => a.id), preferredProvider),
+    () => pickCreateProvider(agentAvailability, adapters, preferredProvider),
     [adapters, agentAvailability, preferredProvider],
   );
 
@@ -1309,11 +1354,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [mcpCwd, setMcpCwd] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<SessionDto | null>(null);
-  /** The Todo card whose text is being rewritten, and the text as typed. */
+  /** The Todo card being rewritten: its edit form is the new-task form. */
   const [editTaskId, setEditTaskId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState("");
-  /** Agent the edited card is being moved to; empty = the one it already has. */
-  const [editProvider, setEditProvider] = useState<AgentProvider | "">("");
   const [savingEdit, setSavingEdit] = useState(false);
   /** The Wait card whose next prompt is being typed on the board, and the text. */
   const [promptTaskId, setPromptTaskId] = useState<string | null>(null);
@@ -1326,6 +1368,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   const composerBoxRef = useRef<HTMLDivElement>(null);
   /** The card editor as a whole — a press inside it must not dismiss it. */
   const taskEditorRef = useRef<HTMLDivElement>(null);
+  /** What is written in it — text, files, or the picks a task starts on. */
+  const editDirtyRef = useRef(false);
+  const editInputRef = useRef<HTMLTextAreaElement>(null);
   /** The quick-prompt form as a whole — a press inside it must not dismiss it. */
   const promptBoxRef = useRef<HTMLDivElement>(null);
   /** Its textarea: a press that did not dismiss the form puts the caret back. */
@@ -1500,6 +1545,9 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
       // The agent picker of the editor hangs its menu in a portal of its own:
       // a press inside it chooses, it must not drop the editor underneath.
       if (target instanceof Element && target.closest('[role="dialog"], [role="listbox"]')) return;
+      // A form that holds something is not dropped by a press outside it — the
+      // same rule the new-task form keeps: Cancel or Escape is the way it goes.
+      if (editTaskId && editDirtyRef.current) return;
       cancelTaskEdit();
       cancelPromptEntry();
     };
@@ -1833,8 +1881,11 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
    *    a place, not a stage the card has left;
    *  - over Wait — back to the workflow: the closed mark is dropped and any
    *    placement with it, so the card lands where its lifecycle says;
-   *  - over any other stage home (Todo, In Progress) — nothing happens: the
-   *    lifecycle decides what stands there, and the lane answers with a cross;
+   *  - over Todo or In Progress — a card the lifecycle already puts there (a
+   *    running one in In Progress, a never-started one in Todo) comes home:
+   *    its placement is dropped and the lane holds it again; any other card
+   *    is refused, because the lifecycle decides what stands in those two and
+   *    the lane answers with a cross;
    *  - inside its own Todo group — the pointer twin of the card's up/down
    *    arrows. The card under the pointer marks the slot it would land in, and
    *    the release writes that one order through the same `sortOrder` list the
@@ -1910,9 +1961,13 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
 
       /**
        * What a lane does with this card: take it as a placement, take it as a
-       * stage action, or refuse it. Todo and In Progress refuse — neither is
-       * something a hand can decide — while Done and Wait are the two stage
-       * doors a reader actually wants (mark ready, send back to work).
+       * stage action, or refuse it. Done and Wait are the two stage doors a
+       * reader actually wants (mark ready, send back to work). Todo and In
+       * Progress are the lifecycle's answer alone, so their door opens for one
+       * card only: the one the lifecycle already puts there — a card parked on
+       * a lane of the reader's coming home by losing its placement. A running
+       * card thus walks back into In Progress, a never-started one into Todo;
+       * everything else is refused with a cross.
        */
       const resolveTarget = (laneId: string): "placement" | "done" | "reopen" | "blocked" => {
         const column = columnById.get(laneId);
@@ -1927,6 +1982,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         if (column.anchor === "wait") {
           return task.doneAt || task.boardColumnId ? "reopen" : "blocked";
         }
+        if (task.boardColumnId && boardColumn(task) === column.anchor) return "reopen";
         return "blocked";
       };
       suppressCardClickRef.current = false;
@@ -2175,34 +2231,46 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
   };
 
   /**
-   * Rewrite a task card where it lies: the editor takes the card over, seeded
-   * with the text the card shows — a task created empty has none, and its
-   * title is that text.
+   * Rewrite a task card where it lies: the card opens the same form a new task
+   * is written in, filled with what the task says — its text, its agent, the
+   * model it will start on — so a card is never corrected in a poorer editor
+   * than the one that wrote it.
    */
   const startTaskEdit = (task: SessionDto) => {
     setTaskMenu(null);
-    setEditDraft(task.taskDescription?.trim() || task.title);
-    setEditProvider(task.provider);
+    editDirtyRef.current = false;
     setEditTaskId(task.id);
   };
 
   const cancelTaskEdit = () => {
+    editDirtyRef.current = false;
     setEditTaskId(null);
-    setEditDraft("");
-    setEditProvider("");
   };
 
-  /** Commit the card editor; an empty text is never saved — a card without one is nothing to read.
-   *  The card is also where its agent is rewritten: a task still in Todo has not
-   *  reached the agent yet, so the edit hands it to the one picked here. */
-  const submitTaskEdit = async (task: SessionDto) => {
-    const description = editDraft.trim();
-    if (!description || savingEdit) return;
+  /** Commit the card editor; an empty text is never saved — a card without one
+   *  is nothing to read. A task still in Todo has not reached its agent yet, so
+   *  the text, the agent, the model and the files are all still the card's to
+   *  change — written in the one patch the creation form would have sent. */
+  const submitTaskEdit = async (
+    task: SessionDto,
+    description: string,
+    files: File[],
+    attachments: PendingAttachment[],
+    provider: AgentProvider | null,
+    model: string,
+    modelParams: Record<string, string>,
+  ) => {
+    const text = description.trim();
+    if (!text || savingEdit) return;
     setSavingEdit(true);
-    await setTaskDescription(task.id, description);
-    if (editProvider && editProvider !== task.provider) {
-      await setTaskProvider(task.id, editProvider);
-    }
+    await updateBoardTask(task.id, {
+      description: text,
+      provider: provider ?? task.provider,
+      model,
+      modelParams,
+      files,
+      attachments,
+    });
     setSavingEdit(false);
     cancelTaskEdit();
   };
@@ -2560,65 +2628,51 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
         </div>
         {headline ? <p className={styles.cardTitle}>{headline}</p> : null}
         {editTaskId === task.id ? (
-          /* The editor takes the card over where the card lies: the text being
-             rewritten stays on the lane and in the project group it belongs to. */
+          /* The card opens the form a new task is written in — the same box,
+             paperclip, start line and actions — filled with what this task
+             stands on. The editor takes the card over where the card lies, so
+             the rewrite stays on the lane and in the group it belongs to. */
           <div
-            ref={taskEditorRef}
-            className={styles.cardEdit}
+            className={styles.cardEditForm}
             onClick={(e) => e.stopPropagation()}
             onContextMenu={(e) => e.stopPropagation()}
+            // A press in the form is writing, not carrying the card.
+            onPointerDown={(e) => e.stopPropagation()}
           >
-            <textarea
-              className={styles.composerInput}
-              value={editDraft}
-              maxLength={20000}
-              placeholder={t("chat.boardTaskPlaceholder")}
-              aria-label={t("chat.boardEditTask")}
-              autoFocus
-              onChange={(e) => setEditDraft(e.target.value)}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void submitTaskEdit(task);
-                } else if (e.key === "Escape") {
-                  cancelTaskEdit();
-                }
+            <NewTaskComposer
+              cwd={task.cwd}
+              busy={savingEdit}
+              boxRef={taskEditorRef}
+              inputRef={editInputRef}
+              dirtyRef={editDirtyRef}
+              agentOptions={agentOptions}
+              showAgentPicker={taskAgentPicker}
+              showModelPicker={taskModelPicker}
+              showModelParams={taskEffortPicker}
+              defaultProvider={task.provider}
+              attachSource={attachDefaultSource}
+              draftKey={`board-edit:${task.id}`}
+              persistDraft={false}
+              seed={{
+                text: task.taskDescription?.trim() || task.title,
+                model: task.model ?? "",
+                params: task.modelParams ?? {},
               }}
+              submitLabel={t("common.save")}
+              showAutoStart={false}
+              onSubmit={(cwd, description, files, attachments, provider, model, modelParams) =>
+                void submitTaskEdit(
+                  task,
+                  description,
+                  files,
+                  attachments,
+                  provider,
+                  model,
+                  modelParams,
+                )
+              }
+              onCancel={cancelTaskEdit}
             />
-            {/* The agent the task is handed to — the same pick the creation
-                form offers, so a card created on the wrong agent is corrected
-                where it lies instead of being deleted and written again. */}
-            {taskAgentPicker && agentOptions.length ? (
-              <div className={styles.composerField}>
-                <span className={styles.composerFieldLabel}>{t("chat.boardTaskAgent")}</span>
-                <OptionPicker
-                  variant="compact"
-                  placement="up"
-                  menuTitle={t("chat.boardTaskAgent")}
-                  placeholder={t("common.pickAgent")}
-                  value={editProvider || task.provider}
-                  options={agentOptions.map((agent) => ({
-                    value: agent.id,
-                    label: agent.label,
-                  }))}
-                  onChange={(value) => setEditProvider(value as AgentProvider)}
-                />
-              </div>
-            ) : null}
-            <div className={styles.composerActions}>
-              <button type="button" className={styles.ghostBtn} onClick={cancelTaskEdit}>
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                disabled={!editDraft.trim() || savingEdit}
-                onClick={() => void submitTaskEdit(task)}
-              >
-                {t("common.save")}
-              </button>
-            </div>
           </div>
         ) : showFirstMessage ? (
           <p className={styles.cardText}>{text}</p>
@@ -3010,6 +3064,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                               defaultProvider={defaultTaskProvider}
                               attachSource={attachDefaultSource}
                               draftKey={boardTaskDraftKey(boardId, group.cwd)}
+                              submitLabel={t("common.create")}
                               onCancel={() => {
                                 // Cancel is the way out of a half-written task:
                                 // the form goes, and so does its text.
@@ -3339,6 +3394,30 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 />
               </svg>
               {t("chat.boardDeriveChat")}
+            </button>
+            {/* The same door the card's cross opens: the confirm dialog, so a
+                right-click cannot drop a chat the buttons would have asked
+                about. */}
+            <button
+              type="button"
+              role="menuitem"
+              className={`${styles.menuItem} ${styles.menuItemDanger}`}
+              onClick={() => {
+                const task = taskMenu.task;
+                setTaskMenu(null);
+                setConfirmDelete(task);
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M4.5 6.5h15M9.5 6.5V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M7 6.5l.8 12a1 1 0 0 0 1 1h6.4a1 1 0 0 0 1-1l.8-12M10.5 10.5v5M13.5 10.5v5"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("common.delete")}
             </button>
           </div>,
           document.body,
