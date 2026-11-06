@@ -1648,37 +1648,6 @@ describe("agent status", () => {
   });
 });
 
-/** Poll GET /api/sessions/:id until `check` passes. The warm-up/agent side is
- *  a real child process, so fake timers cannot advance it. */
-async function waitForDetail(
-  sessionId: string,
-  check: (detail: SessionDetailDto) => boolean,
-  timeoutMs = 8000,
-) {
-  const deadline = Date.now() + timeoutMs;
-  let lastSeen = "no detail fetched";
-  while (Date.now() < deadline) {
-    const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
-    if (res.statusCode === 200) {
-      const detail = res.json() as SessionDetailDto;
-      if (check(detail)) return detail;
-      lastSeen = `status=${detail.status} parts=${detail.messages
-        .flatMap((m) => m.parts)
-        .map(
-          (p) =>
-            `${p.type}:${p.payload.pending ? "pending" : "settled"}${
-              typeof p.payload.text === "string" ? `(${p.payload.text.slice(0, 120)})` : ""
-            }`,
-        )
-        .join(",")}`;
-    }
-    const { promise, resolve } = Promise.withResolvers<void>();
-    setTimeout(resolve, 50);
-    await promise;
-  }
-  throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
-}
-
 describe("GET /api/agent/commands", () => {
   // The board's new-task form writes a task's first message, so the skill it
   // names has to be offered while the task is still a draft — before any
@@ -1749,6 +1718,37 @@ describe("GET /api/agent/commands", () => {
     expect(res.json()).toEqual([]);
   });
 });
+
+/** Poll GET /api/sessions/:id until `check` passes. The warm-up/agent side is
+ *  a real child process, so fake timers cannot advance it. */
+async function waitForDetail(
+  sessionId: string,
+  check: (detail: SessionDetailDto) => boolean,
+  timeoutMs = 8000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen = "no detail fetched";
+  while (Date.now() < deadline) {
+    const res = await app.inject({ method: "GET", url: `/api/sessions/${sessionId}` });
+    if (res.statusCode === 200) {
+      const detail = res.json() as SessionDetailDto;
+      if (check(detail)) return detail;
+      lastSeen = `status=${detail.status} parts=${detail.messages
+        .flatMap((m) => m.parts)
+        .map(
+          (p) =>
+            `${p.type}:${p.payload.pending ? "pending" : "settled"}${
+              typeof p.payload.text === "string" ? `(${p.payload.text.slice(0, 120)})` : ""
+            }`,
+        )
+        .join(",")}`;
+    }
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 50);
+    await promise;
+  }
+  throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
+}
 
 function questionPart(detail: SessionDetailDto): MessagePartDto | undefined {
   for (const message of detail.messages) {
@@ -2387,6 +2387,25 @@ describe("disabled providers", () => {
       await app.inject({ method: "GET", url: `/api/sessions/${session.id}` })
     ).json();
     expect(detail.messages.some((m: { role: string }) => m.role === "user")).toBe(false);
+  });
+});
+
+describe("the built-in agent whose probe failed", () => {
+  it("still takes a prompt, and the turn itself names the missing setting", async () => {
+    const session = await seedSession({ provider: "builtin" });
+    runtimeSessionIds.push(session.id);
+    // No endpoint: the probe says so, and that verdict used to refuse every
+    // prompt with `agentOffline` — a refusal the web keeps in its queue forever,
+    // so a board card sent its next message into nothing. The agent runs inside
+    // the server: an unconfigured harness is a reason the turn says in the chat.
+    setAgentAvailable("builtin", false);
+    const prompt = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "start the task" },
+    });
+    expect(prompt.statusCode).toBe(200);
+    expect(prompt.json().error).toBeUndefined();
   });
 });
 

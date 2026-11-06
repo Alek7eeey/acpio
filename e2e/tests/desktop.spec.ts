@@ -106,7 +106,9 @@ test.describe("desktop shell", () => {
     const gate = page.getByRole("dialog", { name: "Agents on this PC" });
     await expect(gate).toBeVisible();
     await expect(gate.getByText(E2E_AGENT_LABEL)).toBeVisible();
-    await expect(gate.getByText("online", { exact: true })).toBeVisible();
+    // The in-process agent is listed too, and it is never offline.
+    await expect(gate.getByText("Built-in", { exact: true })).toBeVisible();
+    await expect(gate.getByText("offline", { exact: true })).toHaveCount(0);
 
     const proceed = gate.getByRole("button", { name: "Continue" });
     await expect(proceed).toBeEnabled({ timeout: 30_000 });

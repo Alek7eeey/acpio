@@ -46,16 +46,48 @@ export function onlineProviders(
   return ids.filter((id) => availability[id] === true);
 }
 
+/**
+ * Harnesses a chat may be started on: the ones a probe confirmed, plus every
+ * enabled harness of the built-in family. The built-in agent runs inside the
+ * server, so no probe can vouche for it — and a probe that says `false` here
+ * means only "no endpoint or model yet", which the composer names as its own
+ * warning when a prompt is about to be sent. Letting that verdict decide would
+ * leave the new-chat path dead while the board — which asks no probe at all —
+ * keeps creating tasks on the same agent.
+ */
+export function usableAgentIds(
+  availability: AgentAvailabilityMap,
+  adapters: AdapterMetaDto[],
+): AgentProvider[] {
+  return adapters
+    .filter((adapter) => availability[adapter.id] === true || isBuiltinFamilyAdapter(adapter))
+    .map((adapter) => adapter.id);
+}
+
+/** One harness by the {@link usableAgentIds} rule — the pickers' own flag. */
+export function isAgentUsable(
+  availability: AgentAvailabilityMap,
+  adapters: AdapterMetaDto[],
+  id: AgentProvider | string | null | undefined,
+): boolean {
+  if (!id) return false;
+  if (availability[id as AgentProvider] === true) return true;
+  return adapters.some((adapter) => adapter.id === id && isBuiltinFamilyAdapter(adapter));
+}
+
 export function pickCreateProvider(
   availability: AgentAvailabilityMap,
-  ids: AgentProvider[],
+  adapters: AdapterMetaDto[],
   preferred?: AgentProvider | null,
 ): AgentProvider | null {
-  const online = onlineProviders(availability, ids);
-  if (!online.length) return null;
+  const usable = usableAgentIds(availability, adapters);
+  if (!usable.length) return null;
 
-  if (preferred && online.includes(preferred)) return preferred;
-  return online[0] ?? null;
+  if (preferred && usable.includes(preferred)) return preferred;
+  // A harness a probe confirmed beats one that is usable only because it
+  // runs in-process: the probe is a fact about this PC, the built-in row a
+  // constant that says nothing was checked.
+  return usable.find((id) => availability[id] === true) ?? usable[0] ?? null;
 }
 
 export function harnessShortLabel(provider: AgentProvider | string | null | undefined): string {

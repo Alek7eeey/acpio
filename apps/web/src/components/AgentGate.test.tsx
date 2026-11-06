@@ -56,17 +56,20 @@ afterEach(() => {
 });
 
 describe("AgentGate", () => {
-  it("lists external harnesses and skips the built-in agent", () => {
+  it("lists every harness, with the built-in agent green whatever its probe said", () => {
     useAppStore.setState({
       adapters: [CURSOR, OMP, BUILTIN],
-      agentAvailability: { cursor: false, omp: false, builtin: true },
+      agentAvailability: { cursor: false, omp: false, builtin: false },
       agentProbing: {},
     });
     renderGate();
 
     expect(screen.getByText("Cursor CLI")).toBeTruthy();
     expect(screen.getByText("OMP CLI")).toBeTruthy();
-    expect(screen.queryByText("Built-in")).toBeNull();
+    // The in-process harness runs inside the server: no CLI probe speaks for it.
+    expect(screen.getByText("Built-in")).toBeTruthy();
+    expect(screen.getAllByText("online")).toHaveLength(1);
+    expect(screen.getAllByText("offline")).toHaveLength(2);
   });
 
   it("enables Continue once the listed harnesses settle, without waiting on the built-in probe", () => {
@@ -81,11 +84,13 @@ describe("AgentGate", () => {
     expect(continueButton.disabled).toBe(false);
   });
 
-  it("shows no gate when the built-in agent is the only harness", () => {
+  it("shows a built-in-only install as already green, with nothing to wait for", () => {
     useAppStore.setState({ adapters: [BUILTIN], agentAvailability: {}, agentProbing: {} });
     renderGate();
 
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("Built-in")).toBeTruthy();
+    expect(screen.getByText("online")).toBeTruthy();
+    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(false);
   });
 });
 

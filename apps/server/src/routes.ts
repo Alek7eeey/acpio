@@ -168,7 +168,7 @@ import {
 } from "./services/git.js";
 import { buildChatsExport, buildExport, defaultExportDir, referenceExportDir, saveChatsExportToDisk, saveExportToDisk } from "./services/chatExport.js";
 import { isErrorCode, localeFromRequest, resolveLocale, localizeError, serverT } from "./lib/locale.js";
-import { adapters, RESERVED_AGENT_IDS } from "./adapters/registry.js";
+import { adapters, isBuiltinFamily, RESERVED_AGENT_IDS } from "./adapters/registry.js";
 import type { AgentProvider, AppSettings } from "@acpio/shared";
 import {
   isLoopbackClient,
@@ -524,6 +524,21 @@ async function sendAgentOffline(req: FastifyRequest, reply: FastifyReply) {
   return reply
     .code(400)
     .send({ error: errorMessage(await resolveLocale(req), "agentOffline") });
+}
+
+/**
+ * Whether this chat's harness must be refused before any work reaches it: a
+ * switched-off harness never takes work, and neither does one the last probe
+ * failed. The built-in agent — and every preset of it — is the exception: it
+ * runs inside the server, so a failed probe there means only "no endpoint or
+ * model yet", which the composer names before a prompt and the turn itself
+ * says otherwise. Refusing it would swallow the message with nothing to act on
+ * (the web keeps a rejected prompt in its queue), while the same agent's board
+ * task is created without a word.
+ */
+function harnessRefusesWork(provider: AgentProvider, settings: AppSettings): boolean {
+  if (settings.disabledProviders.includes(provider)) return true;
+  return !isBuiltinFamily(provider) && !getAgentAvailability(provider);
 }
 
 /** A repeated header arrives as an array — take the first value. */
@@ -1478,10 +1493,7 @@ export async function registerRoutes(app: FastifyInstance) {
       if (!(await boardAcceptsCwd(body.boardId, cwd))) {
         return reply.code(400).send({ error: "unknownBoardFolder" });
       }
-    } else if (
-      !isShellSession(provider) &&
-      (settings.disabledProviders.includes(provider) || !getAgentAvailability(provider))
-    ) {
+    } else if (!isShellSession(provider) && harnessRefusesWork(provider, settings)) {
       return sendAgentOffline(req, reply);
     }
     const session = await createSession({
@@ -2133,10 +2145,7 @@ export async function registerRoutes(app: FastifyInstance) {
     const settings = await getSettings();
     // A harness the user switched off must not be driven through an old chat
     // either - regardless of what the stale client believes about availability.
-    if (settings.disabledProviders.includes(detail.provider)) {
-      return sendAgentOffline(req, reply);
-    }
-    if (!getAgentAvailability(detail.provider)) {
+    if (harnessRefusesWork(detail.provider, settings)) {
       return sendAgentOffline(req, reply);
     }
 
@@ -2312,7 +2321,7 @@ export async function registerRoutes(app: FastifyInstance) {
       .parse(req.body);
     const detail = await getSessionDetail(id);
     if (!detail) return reply.code(404).send({ error: "Not found" });
-    if (!getAgentAvailability(detail.provider)) {
+    if (harnessRefusesWork(detail.provider, await getSettings())) {
       return sendAgentOffline(req, reply);
     }
     return setSessionModel(id, body.model, body.params);

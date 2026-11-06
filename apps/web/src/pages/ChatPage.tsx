@@ -47,7 +47,7 @@ import {
   type BackgroundJobNoteStatus,
 } from "@acpio/shared";
 import { api } from "../lib/api";
-import { harnessNamesForCopy } from "../lib/harness";
+import { harnessNamesForCopy, isAgentUsable, usableAgentIds } from "../lib/harness";
 import { planReasoningCollapseScroll } from "../lib/reasoningCollapseScroll";
 import { composerCaretOnFirstLine, composerCaretOnLastLine } from "../lib/composerCaretLines";
 import {
@@ -5227,10 +5227,12 @@ function ChatThread() {
     adaptersLoaded && agentProvider && !adapters.some((a) => a.id === agentProvider),
   );
   const agentUnavailable = agentOffline || agentDisabled;
+  // A harness a probe confirmed, plus the built-in agent whose probe only says
+  // "no endpoint or model yet" — the composer names that itself before a prompt.
   const noOnlineAgents =
     !isShellSessionActive &&
     !agentProvider &&
-    !adapters.some((a) => agentAvailability[a.id] === true);
+    usableAgentIds(agentAvailability, adapters).length === 0;
   const agentMissing = noOnlineAgents;
   const catalog =
     agentProvider && modelsCatalog?.provider === agentProvider ? modelsCatalog : null;
@@ -8085,7 +8087,7 @@ function ChatThread() {
           recentCwds={recentCwds}
           agents={adapters
             .map((a) => ({ id: a.id, label: a.label }))
-            .map((a) => ({ ...a, online: agentAvailability[a.id] === true }))}
+            .map((a) => ({ ...a, online: isAgentUsable(agentAvailability, adapters, a.id) }))}
           preferredProvider={settings.defaultProvider}
           onClose={() => setFolderPicker(null)}
           onConfirm={async (cwd, provider) => {

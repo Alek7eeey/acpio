@@ -119,37 +119,43 @@ export function AgentGate() {
   const dismissAgentGate = useAppStore((s) => s.dismissAgentGate);
 
   // Enabled harnesses only, and nothing before /api/adapters answers: guessing
-  // here could name an agent the user switched off. The built-in agent — and
-  // every preset of it — runs inside the server, where a startup status row
-  // carries no signal, so the family is not listed and the gate does not wait
-  // on its probe.
-  const ids: readonly string[] = adapters
+  // here could name an agent the user switched off. Every enabled harness is
+  // listed: the built-in agent — and every preset of it — runs inside the
+  // server, so its row is green from the first frame and only the external
+  // CLIs are checked, with their probes alone holding Continue back.
+  if (!adapters.length) return null;
+  const checkedIds: readonly string[] = adapters
     .filter((a) => !isBuiltinFamilyAdapter(a))
     .map((a) => a.id);
-  // Every listable harness switched off — there is nothing to check, so no gate.
-  if (!ids.length) return null;
   const started = Object.keys(probing).length > 0 || Object.keys(availability).length > 0;
-  const settled = ids.filter((id) => started && !probing[id] && availability[id] != null).length;
-  const checking = !started || ids.some((id) => probing[id] || availability[id] == null);
+  const settled = checkedIds.filter(
+    (id) => started && !probing[id] && availability[id] != null,
+  ).length;
+  const checking =
+    checkedIds.length > 0 &&
+    (!started || checkedIds.some((id) => probing[id] || availability[id] == null));
 
   return (
     <GateShell
       titleId="agent-gate-title"
       title={t("common.agentGateTitle")}
       lead={t("common.agentGateLead")}
-      progress={ids.length ? settled / ids.length : 0}
+      progress={checkedIds.length ? settled / checkedIds.length : 1}
       actionLabel={t("common.agentGateContinue")}
       actionDisabled={checking}
       onAction={() => dismissAgentGate()}
     >
-      {ids.map((id) => {
-        const loading = !started || probing[id] || availability[id] == null;
+      {adapters.map((adapter) => {
+        const id = adapter.id;
+        const inProcess = isBuiltinFamilyAdapter(adapter);
+        const loading =
+          !inProcess && (!started || probing[id] || availability[id] == null);
         return (
           <AgentRow
             key={id}
             label={harnessLabel(id, adapters)}
             loading={loading}
-            online={availability[id] === true}
+            online={inProcess || availability[id] === true}
             checkingLabel={t("common.agentChecking")}
             onlineLabel={t("common.online")}
             offlineLabel={t("common.offline")}

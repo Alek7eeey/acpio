@@ -31,7 +31,7 @@ import { isChatSearchEnabled } from "../lib/chatTreeSearch";
 import { ChatSidebar } from "./ChatSidebar";
 import { EditorPage } from "../pages/EditorPage";
 import { collectRecentCwds, CreateSessionFolderPicker } from "./CreateSessionFolderPicker";
-import { harnessLabel } from "../lib/harness";
+import { harnessLabel, isAgentUsable } from "../lib/harness";
 import { canonicalCwd } from "@acpio/shared";
 import { firstUserTitleLine, localizePlaceholderSessionTitle, sessionTreeDisplayTitle, truncateSessionTitle } from "../lib/sessionTitle";
 import { showToast } from "../lib/toast";
@@ -229,7 +229,10 @@ export function AppShell() {
   }, [settingsTree, settingsQuery, searchIndex, settingsSectionWords]);
 
   const harnessIds = adapters.map((a) => a.id);
-  const onlineHarnessCount = harnessIds.filter((id) => agentAvailability[id] === true).length;
+  /** Harnesses a chat can start on: the probed ones plus the in-process family. */
+  const onlineHarnessCount = harnessIds.filter((id) =>
+    isAgentUsable(agentAvailability, adapters, id),
+  ).length;
   const harnessTotal = harnessIds.length;
 
   const agentStatusTitle = useMemo(
@@ -1694,7 +1697,7 @@ export function AppShell() {
           agents={harnessIds.map((id) => ({
             id,
             label: harnessLabel(id, adapters),
-            online: agentAvailability[id] === true,
+            online: isAgentUsable(agentAvailability, adapters, id),
           }))}
           preferredProvider={settings.defaultProvider}
           initialKind={railFolderPicker.initialKind}
@@ -2007,7 +2010,7 @@ export function AppShell() {
                 <div className={styles.agentTip} role="tooltip">
                   <div className={styles.agentTipHarnessList}>
                   {harnessIds.map((id) => {
-                    const online = agentAvailability[id] === true;
+                    const online = isAgentUsable(agentAvailability, adapters, id);
                     const label =
                       harnessLabel(id, adapters);
                     const modelId = modelForProvider(settings, id);

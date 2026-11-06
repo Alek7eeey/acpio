@@ -3,13 +3,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { DEFAULT_SETTINGS, type BoardDto, type SessionDto } from "@acpio/shared";
+import { DEFAULT_SETTINGS, type AdapterMetaDto, type BoardDto, type SessionDto } from "@acpio/shared";
 import { useAppStore } from "../lib/store";
 import { I18nProvider } from "../lib/i18n";
 import { ChatSidebar } from "./ChatSidebar";
 import styles from "./AppShell.module.css";
 
-vi.mock("../lib/api", () => ({ api: {} }));
+// The new-chat picker lists the harness's own resumable sessions as it opens.
+vi.mock("../lib/api", () => ({ api: { listHarnessSessions: async () => [] } }));
 
 if (!window.matchMedia) {
   window.matchMedia = ((query: string) => ({
@@ -114,6 +115,45 @@ describe("chat tree selection", () => {
     expect(container.querySelector(`[data-board-id="b1"]`)!.classList).not.toContain(
       styles.folderHeadActive,
     );
+  });
+});
+
+describe("new-chat picker", () => {
+  const builtin: AdapterMetaDto = {
+    id: "builtin",
+    label: "Built-in",
+    enabled: true,
+    family: "builtin",
+    commandField: "",
+    argsField: "",
+    defaultCommand: "",
+    defaultArgs: [],
+    installHint: "",
+    restoreMode: "resume",
+    parameterizedModelPicker: false,
+    subagentStreaming: false,
+    cloudCatalog: false,
+    midTurnSteering: false,
+    defaultModes: [],
+    subagentToolKinds: [],
+  };
+
+  // Regression: with only the built-in agent switched on, "Новый чат" said
+  // "no agents available" — the picker read a probe that the in-process agent
+  // cannot answer (it runs inside the server), while the board kept creating
+  // tasks on the very same agent.
+  it("offers the built-in agent even when its probe says it is offline", () => {
+    useAppStore.setState({
+      adapters: [builtin],
+      adaptersLoaded: true,
+      agentAvailability: { builtin: false },
+    });
+    const { container } = renderTree("/chat");
+
+    fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Новый чат в папке"]')!);
+
+    expect(screen.queryByText("Сейчас нет доступных агентов")).toBeNull();
+    expect(screen.getByText("Built-in")).toBeTruthy();
   });
 });
 

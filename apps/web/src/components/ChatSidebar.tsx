@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import type { AgentProvider, BoardDto, SessionDto } from "@acpio/shared";
 import { useT } from "../lib/i18n";
-import { harnessLabel, harnessNamesForCopy } from "../lib/harness";
+import { harnessLabel, harnessNamesForCopy, isAgentUsable } from "../lib/harness";
 import { isShellSession } from "@acpio/shared";
 import { sessionTreeDisplayTitle, sessionActivityAt, sessionRowMark, sortSessions, groupByFolder } from "../lib/sessionTitle";
 import { canonicalCwd } from "@acpio/shared";
@@ -316,7 +316,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
     () =>
       adapters
         .map((a) => ({ id: a.id, label: a.label }))
-        .map((a) => ({ ...a, online: agentAvailability[a.id] === true })),
+        .map((a) => ({ ...a, online: isAgentUsable(agentAvailability, adapters, a.id) })),
     [adapters, agentAvailability],
   );
 

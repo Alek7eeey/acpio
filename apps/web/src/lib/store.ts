@@ -2367,8 +2367,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   warnIfHarnessNotConfigured(sessionId) {
     const id = sessionId ?? get().activeSessionId;
+    // A board task lives in `boardSessions`, not in the sidebar's tree: the
+    // board's own send door would otherwise find no provider for it, skip this
+    // check and hand the message to a server that only refuses it — where it
+    // waits in the queue forever with no reason shown on the card.
     const provider =
       (id ? get().sessions.find((s) => s.id === id)?.provider : null) ??
+      (id ? get().boardSessions.find((s) => s.id === id)?.provider : null) ??
       (get().activeSession?.id === id ? get().activeSession?.provider : null) ??
       null;
     const reason = harnessNotConfiguredReason(provider, get().adapters, get().settings);
@@ -3004,11 +3009,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   async createSession(cwd, provider, model) {
     const trimmedCwd = cwd?.trim();
     const shell = isShellSession(provider);
-    const ids = get().adapters.map((a) => a.id) as AgentProvider[];
     const chosen = shell
       ? SHELL_SESSION_PROVIDER
       : provider ??
-        pickCreateProvider(get().agentAvailability, ids, get().settings.defaultProvider);
+        pickCreateProvider(get().agentAvailability, get().adapters, get().settings.defaultProvider);
     if (!chosen) {
       throw new Error("noAgentsOnline");
     }
