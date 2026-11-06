@@ -39,6 +39,8 @@ import { CreateSessionFolderPicker } from "../components/CreateSessionFolderPick
 import { ExportDialog } from "../components/ExportDialog";
 import { McpFolderDialog } from "../components/McpFolderDialog";
 import { OptionPicker } from "../components/OptionPicker";
+import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
+import { chatLink } from "../lib/shareLink";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
 import { api } from "../lib/api";
@@ -1279,6 +1281,7 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
     null,
   );
   const [taskMenuPos, setTaskMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const { tip: shareTip, shareLink } = useShareLinkTip();
   /** The task whose chat is being peeked at, and where its menu stood. */
   const [peek, setPeek] = useState<{ task: SessionDto; x: number; y: number } | null>(null);
   /** A folder's context menu (rail row, board lane head, folders dialog row). */
@@ -3226,6 +3229,8 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
           document.body,
         )}
 
+      <ShareLinkTip tip={shareTip} />
+
       {taskMenu &&
         createPortal(
           <div
@@ -3345,6 +3350,30 @@ export function BoardPage({ boardId: boardIdProp }: { boardId?: string } = {}) {
                 <HeartIcon size={13} filled={Boolean(taskMenu.task.favorite)} />
               </span>
               {taskMenu.task.favorite ? t("chat.boardRemoveFavorite") : t("chat.boardAddFavorite")}
+            </button>
+            {/* The task's chat, shareable like any other chat: the card lives
+                off the tree, so its menu is the only place to hand the link on. */}
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                const task = taskMenu.task;
+                const at = taskMenuPos ?? { x: taskMenu.x, y: taskMenu.y };
+                setTaskMenu(null);
+                void shareLink(chatLink(task.id), t("chat.shareChatCopied"), at.x, at.y);
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden>
+                <path
+                  d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                  stroke="currentColor"
+                  strokeWidth="1.7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {t("common.share")}
             </button>
             <button
               type="button"

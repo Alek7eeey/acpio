@@ -41,7 +41,7 @@ const CHIP_LABEL_KEY: Record<ChatMetaChipId, string> = {
 };
 const TREE_ORDER: ChatTreeElementId[] = ["search", "pin", "archive", "more"];
 const COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "model", "mode", "mic"];
-const TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
+const TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "share", "delete"];
 
 /** i18n key for each action's tooltip/label. */
 const ACTION_LABEL_KEY: Record<ChatActionId, string> = {
@@ -75,6 +75,7 @@ const TREE_MENU_LABEL_KEY: Record<ChatTreeMenuId, string> = {
   rename: "chat.renameSession",
   move: "chat.newInFolder",
   export: "chat.exportChat",
+  share: "common.share",
   delete: "common.delete",
 };
 

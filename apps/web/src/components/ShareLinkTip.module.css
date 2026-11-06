@@ -1,0 +1,24 @@
+.tip {
+  position: fixed;
+  z-index: 120;
+  max-width: 420px;
+  display: grid;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.16);
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.link {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { DEFAULT_SETTINGS, type AdapterMetaDto, type BoardDto, type SessionDto } from "@acpio/shared";
@@ -213,6 +213,44 @@ describe("folder menu tree commands", () => {
     });
     expect(screen.getAllByRole("menu").length).toBe(1);
     expect(screen.getByRole("menuitem", { name: "Архивировать все чаты" })).toBeTruthy();
+  });
+});
+
+describe("chat row share command", () => {
+  function openChatMenu(container: HTMLElement) {
+    fireEvent.contextMenu(container.querySelector<HTMLElement>('[data-session-id="s1"]')!, {
+      clientX: 40,
+      clientY: 220,
+    });
+    return screen.getByRole("menu");
+  }
+
+  // The row's menu carries the same share a message has, pointed at the chat:
+  // the link opens this chat, with no message part.
+  it("copies the chat link and shows it by the press", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    const { container } = renderTree("/chat");
+
+    await userEvent.click(within(openChatMenu(container)).getByRole("menuitem", { name: "Поделиться" }));
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/chat?session=s1`);
+    expect(await screen.findByText("Ссылка на чат скопирована")).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  // The command is the reader's to switch off, like every other one in the
+  // "⋯" menu.
+  it("is gone when the settings drop it", () => {
+    useAppStore.setState({
+      settings: { ...DEFAULT_SETTINGS, locale: "ru" as const, chatTreeMenu: ["rename", "delete"] },
+    });
+    const { container } = renderTree("/chat");
+
+    expect(within(openChatMenu(container)).queryByRole("menuitem", { name: "Поделиться" })).toBeNull();
   });
 });
 

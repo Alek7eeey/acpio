@@ -118,7 +118,9 @@ import {
 } from "../components/CreateSessionFolderPicker";
 import { MarkdownContent, MarkdownImage } from "../components/MarkdownContent";
 import { ImageViewer, type ViewerPicture } from "../components/ImageViewer";
+import { ShareLinkTip, useShareLinkTip } from "../components/ShareLinkTip";
 import { SlashCommandMenu } from "../components/SlashCommandMenu";
+import { chatLink } from "../lib/shareLink";
 import { notifyTurnComplete } from "../lib/notify";
 import { useFillPanelWhenChatTight } from "../lib/panelLayout";
 import { canonicalCwd } from "@acpio/shared";
@@ -3312,14 +3314,13 @@ function MessageActions({
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null);
   const [ctxSelection, setCtxSelection] = useState("");
-  const [shareTip, setShareTip] = useState<{ x: number; y: number; link: string } | null>(null);
+  const { tip: shareTip, shareLink } = useShareLinkTip();
   const [dislikeOpen, setDislikeOpen] = useState(false);
   const [dislikeText, setDislikeText] = useState("");
   const [dislikeBusy, setDislikeBusy] = useState(false);
   const [dislikeDone, setDislikeDone] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
-  const shareTipTimer = useRef<number | null>(null);
   const runRef = useRef<(action: MessageHotAction) => boolean>(() => false);
   const speaking = speakingMessageId === message.id;
 
@@ -3362,27 +3363,14 @@ function MessageActions({
   };
 
   /** Share a deep link to this message: open the same chat, jump to it. */
-  const shareAt = async (x: number, y: number) => {
+  const shareAt = (x: number, y: number) => {
     if (!text) return;
-    const base = typeof window !== "undefined" ? window.location.origin : "";
-    const link = `${base}/chat?session=${encodeURIComponent(session?.id ?? "")}&message=${encodeURIComponent(message.id)}`;
-    try {
-      await navigator.clipboard.writeText(link);
-      setShareTip({
-        x: Math.min(x, window.innerWidth - 240),
-        y: Math.min(y + 6, window.innerHeight - 80),
-        link,
-      });
-      if (shareTipTimer.current) window.clearTimeout(shareTipTimer.current);
-      shareTipTimer.current = window.setTimeout(() => setShareTip(null), 2600);
-    } catch {
-      // ignore
-    }
+    void shareLink(chatLink(session?.id ?? "", message.id), t("chat.shareCopied"), x, y);
   };
 
-  const share = async (e: MouseEvent<HTMLButtonElement>) => {
+  const share = (e: MouseEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    await shareAt(Math.min(rect.right - 224, window.innerWidth - 240), rect.bottom);
+    shareAt(Math.min(rect.right - 224, window.innerWidth - 240), rect.bottom);
   };
 
   const setRating = (next: MsgRating | null) => {
@@ -3413,7 +3401,6 @@ function MessageActions({
     // Stop read-aloud if this message unmounts (session switch, regeneration…).
     return () => {
       if (useAppStore.getState().speakingMessageId === message.id) stopReadAloud();
-      if (shareTipTimer.current) window.clearTimeout(shareTipTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [message.id]);
@@ -3527,8 +3514,8 @@ function MessageActions({
         setDislikeOpen(true);
         break;
       case "share":
-        if (at) void shareAt(at.x, at.y);
-        else void shareAt(window.innerWidth - 40, window.innerHeight - 40);
+        if (at) shareAt(at.x, at.y);
+        else shareAt(window.innerWidth - 40, window.innerHeight - 40);
         break;
       case "regenerate":
         onRegenerate();
@@ -3884,19 +3871,7 @@ function MessageActions({
           document.body,
         )}
 
-      {shareTip &&
-        createPortal(
-          <div
-            className={styles.msgShareTip}
-            style={{ left: shareTip.x, top: shareTip.y }}
-            role="status"
-          >
-            <span className={styles.msgShareTipLabel}>{t("chat.shareCopied")}</span>
-            <code className={styles.msgShareTipLink}>{shareTip.link}</code>
-          </div>,
-          document.body,
-        )}
-
+      <ShareLinkTip tip={shareTip} />
       {dislikeOpen &&
         createPortal(
           <AppDialog

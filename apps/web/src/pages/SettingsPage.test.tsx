@@ -426,6 +426,40 @@ describe("SettingsPage form state", () => {
   });
 });
 
+describe("Chat tree menu commands", () => {
+  // "share" is one more command of the row's "⋯" menu, so it is the reader's
+  // to switch off — and it ships on, where the default list keeps it.
+  it("offers share switched on and saves it switched off", async () => {
+    const user = userEvent.setup();
+    useAppStore.setState({ settings: DEFAULT_SETTINGS, bootstrapped: true });
+    render(
+      <MemoryRouter initialEntries={["/settings?section=interface&leaf=chat"]}>
+        <I18nProvider>
+          <SettingsPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+
+    // "share" names two commands on this page — the message action and the
+    // tree's — so the chip is read out of the "⋯" row itself.
+    const row = screen
+      .getAllByText("“⋯” menu commands")[0]!
+      .closest("[class*=row]") as HTMLElement;
+    const chip = within(row).getByRole("button", { name: "Share" });
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+
+    await user.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(apiMock.updateSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ chatTreeMenu: ["rename", "move", "export", "delete"] }),
+      ),
+    );
+  });
+});
+
 describe("Built-in providers", () => {
   const providerA = {
     id: "p1",

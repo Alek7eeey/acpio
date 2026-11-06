@@ -441,6 +441,7 @@ export const ru = {
     likedSection: "Понравившиеся",
     likedUnknownSession: "Чат удалён",
     shareCopied: "Ссылка на сообщение скопирована",
+    shareChatCopied: "Ссылка на чат скопирована",
     ttsGenerating: "Генерация озвучки…",
     voiceInput: "Голосовой ввод",
     voiceListening: "Говорите… Нажмите, чтобы остановить",

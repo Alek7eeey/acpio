@@ -16,6 +16,7 @@ import {
   normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinExtraInstructions,
   normalizeChatMetaChips,
+  normalizeChatTreeMenu,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
 
@@ -116,6 +117,39 @@ describe("normalizeChatMetaChips", () => {
   });
 });
 
+describe("normalizeChatTreeMenu", () => {
+  // "share" joined the tree menu's commands with schema 8: a list saved
+  // before it opens with it, where the default keeps it.
+  it("adds share to settings saved before it", () => {
+    expect(normalizeChatTreeMenu(["rename", "move", "export", "delete"], 7)).toEqual([
+      "rename",
+      "move",
+      "export",
+      "share",
+      "delete",
+    ]);
+    expect(normalizeChatTreeMenu(["rename"], 7)).toEqual(["rename", "share"]);
+  });
+
+  it("keeps a current list as it is", () => {
+    expect(normalizeChatTreeMenu(["rename", "delete", "share"], 8)).toEqual([
+      "rename",
+      "delete",
+      "share",
+    ]);
+  });
+
+  // Emptying the list hides the row's "⋯" button on purpose.
+  it("leaves an emptied list empty", () => {
+    expect(normalizeChatTreeMenu([], 7)).toEqual([]);
+  });
+
+  it("drops unknown ids and duplicates", () => {
+    expect(normalizeChatTreeMenu(["rename", "nope", "rename", 7], 8)).toEqual(["rename"]);
+    expect(normalizeChatTreeMenu(undefined, 8)).toEqual(DEFAULT_SETTINGS.chatTreeMenu);
+  });
+});
+
 describe("mergeClientAppSettings", () => {
   it("migrates legacy chat meta chips from API payload", () => {
     const merged = mergeClientAppSettings({
@@ -135,6 +169,12 @@ describe("mergeClientAppSettings", () => {
 
   it("falls back to defaults for missing payload", () => {
     expect(mergeClientAppSettings(null).chatMetaChips).toEqual(DEFAULT_SETTINGS.chatMetaChips);
+  });
+
+  it("migrates the tree menu for a payload saved before share", () => {
+    const merged = mergeClientAppSettings({ chatTreeMenu: ["rename", "export", "delete"] });
+    expect(merged.chatTreeMenu).toEqual(["rename", "export", "share", "delete"]);
+    expect(merged.settingsSchema).toBe(SETTINGS_SCHEMA_VERSION);
   });
 
   it("defaults chat toolbar style to classic buttons", () => {

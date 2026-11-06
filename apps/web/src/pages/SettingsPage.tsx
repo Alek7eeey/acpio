@@ -196,7 +196,7 @@ const CHAT_CHIP_ORDER: ChatMetaChipId[] = [
   "bgJobs",
 ];
 import { isChatSearchEnabled, toggleChatTreeElement } from "../lib/chatTreeSearch";
-const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "delete"];
+const CHAT_TREE_MENU_ORDER: ChatTreeMenuId[] = ["rename", "move", "export", "share", "delete"];
 const CHAT_COMPOSER_ORDER: ChatComposerButtonId[] = ["attach", "mic", "model", "mode"];
 const CHAT_HEADER_ICON_ORDER: ChatHeaderIconId[] = ["lang", "install", "theme"];
 
@@ -658,6 +658,7 @@ function ChatInteractiveConfigRows({
               ["rename", t("chat.renameSession")],
               ["move", t("chat.newInFolder")],
               ["export", t("chat.exportChat")],
+              ["share", t("common.share")],
               ["delete", t("common.delete")],
             ] as Array<[ChatTreeMenuId, string]>
           ).map(([id, label]) => {

@@ -138,6 +138,7 @@ export {
   normalizeChatMetaChips,
   normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
+  normalizeChatTreeMenu,
   readSettingsSchema,
 } from "./appSettingsMerge.js";
 export {
@@ -1098,7 +1099,7 @@ export type ChatTreeElementId = "search" | "searchMsgs" | "pin" | "archive" | "m
 
 /** Commands shown inside the session "⋯" context menu in the tree.
  *  Pin/archive live on the row buttons and are configured separately. */
-export type ChatTreeMenuId = "rename" | "move" | "export" | "delete";
+export type ChatTreeMenuId = "rename" | "move" | "export" | "share" | "delete";
 
 /** Icons in the app header bar (language, install, theme). */
 export type ChatHeaderIconId = "lang" | "install" | "theme";
@@ -2367,7 +2368,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   chatComposerButtons: ["attach", "mic", "model", "mode"],
   attachDefaultSource: "device",
   chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
-  chatTreeMenu: ["rename", "move", "export", "delete"],
+  chatTreeMenu: ["rename", "move", "export", "share", "delete"],
   chatTreeShowArchive: true,
   chatTreeRecentLimit: 0,
   chatHeaderHeight: 52,

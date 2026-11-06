@@ -421,6 +421,7 @@ export const en = {
     likedSection: "Liked",
     likedUnknownSession: "Chat deleted",
     shareCopied: "Message link copied",
+    shareChatCopied: "Chat link copied",
     ttsGenerating: "Generating speech…",
     voiceInput: "Voice input",
     voiceListening: "Listening… Tap to stop",

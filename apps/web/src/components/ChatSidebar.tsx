@@ -24,6 +24,8 @@ import {
 } from "./CreateSessionFolderPicker";
 import { ExportDialog } from "./ExportDialog";
 import { McpFolderDialog } from "./McpFolderDialog";
+import { ShareLinkTip, useShareLinkTip } from "./ShareLinkTip";
+import { chatLink } from "../lib/shareLink";
 import styles from "./AppShell.module.css";
 
 /** Tree section key for chats that live outside any folder. */
@@ -457,6 +459,7 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
   /** Board row context menu + inline rename/delete confirm. */
   const [boardMenu, setBoardMenu] = useState<({ board: BoardDto } & TreeMenuAnchor) | null>(null);
   const boardMenuRef = useRef<HTMLDivElement>(null);
+  const { tip: shareTip, shareLink } = useShareLinkTip();
   const [renamingBoardId, setRenamingBoardId] = useState<string | null>(null);
   const [boardDraft, setBoardDraft] = useState("");
   const [confirmDeleteBoardId, setConfirmDeleteBoardId] = useState<string | null>(null);
@@ -2440,6 +2443,30 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
               {t("chat.exportChat")}
             </button>
             )}
+            {/* The chat's own link, the one a message's share carries without
+                its `message` part: the same press, pointed at the chat. */}
+            {(settings.chatTreeMenu ?? []).includes("share") && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const { x, y } = menu;
+                  setMenu(null);
+                  void shareLink(chatLink(menuSession.id), t("chat.shareChatCopied"), x, y);
+                }}
+              >
+                <MenuIcon>
+                  <path
+                    d="M12 3v10M12 3l-3.5 3.5M12 3l3.5 3.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"
+                    stroke="currentColor"
+                    strokeWidth="1.7"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </MenuIcon>
+                {t("common.share")}
+              </button>
+            )}
             {(settings.chatTreeMenu ?? []).includes("delete") && (
             <>
             <div className={styles.contextMenuDivider} aria-hidden />
@@ -2816,6 +2843,8 @@ export function ChatSidebar({ onOpenSearch }: { onOpenSearch?: () => void }) {
           />,
           document.body,
         )}
+
+      <ShareLinkTip tip={shareTip} />
 
       {exportDialogId &&
         createPortal(

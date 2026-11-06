@@ -516,7 +516,7 @@ describe("DEFAULT_SETTINGS", () => {
     chatComposerButtons: ["attach", "mic", "model", "mode"],
     attachDefaultSource: "device",
     chatTreeElements: ["search", "searchMsgs", "pin", "archive", "more"],
-    chatTreeMenu: ["rename", "move", "export", "delete"],
+    chatTreeMenu: ["rename", "move", "export", "share", "delete"],
     chatTreeShowArchive: true,
     chatTreeRecentLimit: 0,
     chatHeaderHeight: 52,

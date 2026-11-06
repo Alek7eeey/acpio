@@ -30,6 +30,7 @@ import {
   normalizeChatMetaChips,
   normalizeChatTitleMaxLen,
   normalizeChatTreeRecentLimit,
+  normalizeChatTreeMenu,
   normalizeCustomAgents,
   canonicalCwd,
   normalizeMcpProjectFiles,
@@ -304,7 +305,7 @@ function mergeSettings(raw: unknown): AppSettings {
   if (!Array.isArray(merged.chatTreeMenu)) {
     merged.chatTreeMenu = [...DEFAULT_SETTINGS.chatTreeMenu];
   } else {
-    merged.chatTreeMenu = filterValid(merged.chatTreeMenu, ["rename", "move", "export", "delete"]);
+    merged.chatTreeMenu = normalizeChatTreeMenu(merged.chatTreeMenu, readSettingsSchema(raw));
   }
   if (typeof merged.chatTreeShowArchive !== "boolean") {
     merged.chatTreeShowArchive = DEFAULT_SETTINGS.chatTreeShowArchive;

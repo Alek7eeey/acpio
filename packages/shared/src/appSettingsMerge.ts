@@ -23,11 +23,12 @@ import {
   type ChatChangesMetrics,
   type ChatChipOptions,
   type ChatMetaChipId,
+  type ChatTreeMenuId,
   type ChatToolbarStyle,
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 7;
+export const SETTINGS_SCHEMA_VERSION = 8;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "folder",
@@ -105,6 +106,36 @@ export function normalizeChatMetaChips(
   return next.filter((chip) => {
     if (!CHAT_META_CHIP_IDS.includes(chip) || seen.has(chip)) return false;
     seen.add(chip);
+    return true;
+  });
+}
+
+const CHAT_TREE_MENU_IDS: ChatTreeMenuId[] = ["rename", "move", "export", "share", "delete"];
+
+/**
+ * Normalize the tree's "⋯" commands and migrate a new one into saved
+ * settings. "share" arrived with schema 8, so a stored list opens with it
+ * placed where the default keeps it — but a list the reader emptied on
+ * purpose stays empty: the "⋯" button is what they meant to hide.
+ */
+export function normalizeChatTreeMenu(raw: unknown, schemaVersion: number): ChatTreeMenuId[] {
+  const list = Array.isArray(raw)
+    ? raw.filter((v): v is string => typeof v === "string")
+    : [...CHAT_TREE_MENU_IDS];
+  let next = list.filter((id): id is ChatTreeMenuId =>
+    CHAT_TREE_MENU_IDS.includes(id as ChatTreeMenuId),
+  );
+  if (schemaVersion < 8 && next.length > 0 && !next.includes("share")) {
+    const deleteIdx = next.indexOf("delete");
+    next =
+      deleteIdx >= 0
+        ? [...next.slice(0, deleteIdx), "share", ...next.slice(deleteIdx)]
+        : [...next, "share"];
+  }
+  const seen = new Set<ChatTreeMenuId>();
+  return next.filter((id) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
     return true;
   });
 }
@@ -492,6 +523,7 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.attachDefaultSource = partial.attachDefaultSource === "server" ? "server" : "device";
   merged.chatGitBranchPosition = normalizeChatGitBranchPosition(partial.chatGitBranchPosition);
   merged.chatTreeRecentLimit = normalizeChatTreeRecentLimit(partial.chatTreeRecentLimit);
+  merged.chatTreeMenu = normalizeChatTreeMenu(partial.chatTreeMenu, schemaVersion);
   merged.chatTitleMaxLen = normalizeChatTitleMaxLen(partial.chatTitleMaxLen);
   merged.editorTheme = normalizeEditorTheme(partial.editorTheme);
   merged.editorSplit = normalizeEditorSplit(partial.editorSplit);

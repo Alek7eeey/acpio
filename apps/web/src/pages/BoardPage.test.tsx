@@ -1413,6 +1413,27 @@ describe("BoardPage card context menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  // A board task lives off the tree, so this menu is the only place its chat's
+  // link can be handed on — the same link a chat row copies.
+  it("shares a task's chat from the card's context menu", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderBoard();
+    const card = await screen.findByText("Fix the login bug");
+
+    fireEvent.contextMenu(card);
+    await userEvent.click(
+      within(screen.getByRole("menu")).getByRole("menuitem", { name: "Share" }),
+    );
+
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/chat?session=t1`);
+    expect(await screen.findByText("Chat link copied")).toBeTruthy();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
   // The menu carries the same delete the card's cross does: it asks first,
   // and the confirmation is what drops the task.
   it("deletes a task from the card's context menu", async () => {
