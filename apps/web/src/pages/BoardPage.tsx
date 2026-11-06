@@ -51,7 +51,7 @@ import {
   mergeSlashCommands,
 } from "../lib/slashCommands";
 import { toggleBoardAutoStart, useBoardAutoStart } from "../lib/boardAutoStart";
-import { harnessLabel, isBuiltinFamilyProvider, pickCreateProvider } from "../lib/harness";
+import { harnessLabel, pickCreateProvider } from "../lib/harness";
 import { useT } from "../lib/i18n";
 import { folderLabel } from "../lib/pathSegments";
 import { useAppStore, type PendingAttachment } from "../lib/store";
@@ -341,19 +341,15 @@ const NewTaskComposer = memo(function NewTaskComposer({
   const createAutoStart = useBoardAutoStart("create");
 
   const provider = draftProvider || defaultProvider;
-  /** Registry view: it is what says whether the picked agent is the in-process
-   *  built-in one (or a preset of it). */
-  const adapters = useAppStore((s) => s.adapters);
-  /** Only the built-in agent keeps its skills as `SKILL.md` files the server
-   *  can read ahead of time — its presets included, they are the same agent.
-   *  Cursor and OMP hold theirs inside their own CLI, which does not exist
-   *  until the task does — so the menu stays away there. */
-  const skillsOffered = isBuiltinFamilyProvider(provider, adapters);
+  /** Any agent has a `/` menu to offer — every harness this app drives speaks
+   *  ACP, and announces its commands. */
+  const skillsOffered = Boolean(provider);
 
   // A task's skill is the `/name` its first message opens with, so the menu is
-  // the one a chat of that agent would open: the built-in agent's own commands
-  // and the folder's skills. No session exists yet to announce it, so the
-  // server builds it from the same list the agent hands a composer.
+  // the one a chat of that agent would open: its own commands and the folder's
+  // skills. No session exists yet to announce it, so the server asks the agent
+  // itself — the built-in one reads its `SKILL.md` files, the rest answer from
+  // a throwaway session it starts and disposes.
   useEffect(() => {
     if (!skillsOffered || !cwd) {
       setSkills([]);
@@ -363,7 +359,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
     let live = true;
     setSkillsLoading(true);
     void api
-      .builtinCommands(cwd)
+      .agentCommands(provider, cwd)
       .then((found) => {
         // The composer's own shape: `off` skills are already gone, a hidden one
         // stays (hidden means out of the model's prompt, not out of the menu),
@@ -379,7 +375,7 @@ const NewTaskComposer = memo(function NewTaskComposer({
     return () => {
       live = false;
     };
-  }, [skillsOffered, cwd, t]);
+  }, [provider, skillsOffered, cwd, t]);
 
   // Another agent offers another set of models: a pick made for one of them
   // means nothing on the next, so the form starts over with the agent default.

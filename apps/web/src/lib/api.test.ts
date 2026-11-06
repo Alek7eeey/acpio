@@ -88,6 +88,20 @@ describe("request: success paths", () => {
     expect(fetchMock).toHaveBeenLastCalledWith("/api/search?q=hello&limit=10", expect.anything());
   });
 
+  // The board's new-task form asks any agent for its `/` menu: the provider and
+  // the folder are the whole question, and an empty one is left out.
+  it("asks for a provider's commands with its folder, dropping empty params", async () => {
+    fetchMock.mockResolvedValue(jsonResponse([]));
+    await api.agentCommands();
+    expect(fetchMock).toHaveBeenCalledWith("/api/agent/commands", expect.anything());
+
+    await api.agentCommands("omp", "E:/projects/app");
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "/api/agent/commands?provider=omp&cwd=E%3A%2Fprojects%2Fapp",
+      expect.anything(),
+    );
+  });
+
   it("omits empty query params for listModels", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ ok: true, provider: "cursor", models: [] }));
     await api.listModels();

@@ -126,14 +126,19 @@ export const api = {
     return request<BuiltinSkillDto[]>(`/api/skills${qs}`);
   },
   /**
-   * The slash menu the built-in agent announces for a folder: its own commands
-   * and the skills in effect. The board's new-task form asks before anything is
-   * attached, so a task's first message can open with `/name` — the form then
-   * offers the very list a chat composer does.
+   * The `/` menu a provider offers for a folder, asked for before anything is
+   * attached: the board's new-task form writes a task's first message, so the
+   * skill it names has to be offered while the task is still a draft. The
+   * built-in agent's list is read from its `SKILL.md` files; every other
+   * harness is asked through a throwaway ACP session the server starts and
+   * disposes (and caches per provider and folder).
    */
-  builtinCommands: (cwd?: string | null) => {
-    const qs = cwd?.trim() ? `?cwd=${encodeURIComponent(cwd.trim())}` : "";
-    return request<SlashCommandDto[]>(`/api/builtin-commands${qs}`);
+  agentCommands: (provider?: AgentProvider | null, cwd?: string | null) => {
+    const q = new URLSearchParams();
+    if (provider?.trim()) q.set("provider", provider.trim());
+    if (cwd?.trim()) q.set("cwd", cwd.trim());
+    const qs = q.toString();
+    return request<SlashCommandDto[]>(`/api/agent/commands${qs ? `?${qs}` : ""}`);
   },
   searchMessages: (q: string, limit?: number) => {
     const qs = new URLSearchParams({ q });

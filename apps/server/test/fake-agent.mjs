@@ -32,6 +32,10 @@
 //                                  client sent for this session (new/load/resume)
 //   prompt starting with "ELICIT-DIE:" → issues elicitation/create, ends the
 //                                  turn, then exits(1) before any answer
+//   FAKE_COMMANDS=1       → announces available_commands right after
+//                            session/new, the way a real harness does (the
+//                            board's new-task form asks for that list before
+//                            any session exists)
 import readline from "node:readline";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -80,6 +84,20 @@ function sessionBusyError() {
   err.code = -32003;
   err.data = { reason: "session_busy", hint: "steer|followUp|wait" };
   return err;
+}
+
+/** The harness's own `/` menu, sent right after session/new (`FAKE_COMMANDS=1`). */
+function announceCommands(sessionId) {
+  if (process.env.FAKE_COMMANDS !== "1") return;
+  notify("session/update", {
+    sessionId,
+    update: {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [
+        { name: "fake-command", description: "A command only this harness knows" },
+      ],
+    },
+  });
 }
 
 /** After session/new, stream a turn the host never prompted (OMP bg-job wake). */
@@ -141,6 +159,7 @@ async function handle(method, params, id) {
         );
       }
       startAutonomousTurn(sessionId);
+      announceCommands(sessionId);
       return {
         sessionId,
         configOptions: structuredClone(CONFIG_OPTIONS),

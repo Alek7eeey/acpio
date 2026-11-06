@@ -37,8 +37,11 @@ With text already in front of the `/`, the menu offers skills only: an agent hon
 inside a message, while `/clear` and the like belong to its opening.
 Pick a command to insert it; some commands show an input hint for extra arguments.
 Slash commands are sent to the agent as prompts, not handled locally by the UI.
-The board's new-task form opens the same menu a built-in agent's chat does — the agent's own
-commands and the folder's skills, since a task invokes one with `/name` in its first line.
+The board's new-task form opens the same menu a chat of the picked agent does — its own
+commands and the folder's skills, since a task invokes one with `/name` in its first line. It
+asks the agent itself: the built-in one is read from its `SKILL.md` files, any other harness
+answers from a short-lived session the server starts in the task's folder (and caches), so the
+menu costs a process start at most once per folder every few minutes.
 
 ### Message search
 

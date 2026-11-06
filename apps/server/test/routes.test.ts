@@ -1679,6 +1679,77 @@ async function waitForDetail(
   throw new Error(`condition not met within ${timeoutMs}ms (${lastSeen})`);
 }
 
+describe("GET /api/agent/commands", () => {
+  // The board's new-task form writes a task's first message, so the skill it
+  // names has to be offered while the task is still a draft — before any
+  // session exists to announce the list. A spawned harness is therefore asked
+  // through a throwaway session of its own.
+  it("asks a spawned harness for its menu, then answers from the cache", async () => {
+    const conn = await connectAgent();
+    expect(conn.statusCode).toBe(200);
+    const cwd = await newTempDir("acpio-commands-");
+    const url = `/api/agent/commands?provider=omp&cwd=${encodeURIComponent(cwd)}`;
+    const previous = process.env.FAKE_COMMANDS;
+    process.env.FAKE_COMMANDS = "1";
+    try {
+      const first = await app.inject({ method: "GET", url });
+      expect(first.statusCode).toBe(200);
+      expect((first.json() as Array<{ name: string }>).map((c) => c.name)).toEqual([
+        "fake-command",
+      ]);
+      // The process is gone after the probe, and the answer is remembered: a
+      // freshly spawned agent would now stay silent and answer nothing.
+      process.env.FAKE_COMMANDS = "0";
+      const second = await app.inject({ method: "GET", url });
+      expect(second.statusCode).toBe(200);
+      expect((second.json() as Array<{ name: string }>).map((c) => c.name)).toEqual([
+        "fake-command",
+      ]);
+      // Another folder is another menu — it is asked for on its own.
+      const other = await newTempDir("acpio-commands-");
+      const elsewhere = await app.inject({
+        method: "GET",
+        url: `/api/agent/commands?provider=omp&cwd=${encodeURIComponent(other)}`,
+      });
+      expect(elsewhere.statusCode).toBe(200);
+      expect(elsewhere.json()).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.FAKE_COMMANDS;
+      else process.env.FAKE_COMMANDS = previous;
+    }
+  }, 40_000);
+
+  // The in-process agent needs no session at all: its commands are constants
+  // and its skills are files, so the list is the one a chat composer opens.
+  it("reads the built-in agent's menu from its own files", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/agent/commands?provider=builtin&cwd=${encodeURIComponent(REPO_ROOT)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    const names = (res.json() as Array<{ name: string }>).map((c) => c.name);
+    expect(names).toContain("compact");
+    // A skill this build ships, and one this repo's own folder carries.
+    expect(names).toContain("goal-loop");
+    expect(names).toContain("commit-en");
+  });
+
+  it("offers nothing for a harness switched off in settings", async () => {
+    await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: { disabledProviders: ["omp"] },
+    });
+    const cwd = await newTempDir("acpio-commands-off-");
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/agent/commands?provider=omp&cwd=${encodeURIComponent(cwd)}`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual([]);
+  });
+});
+
 function questionPart(detail: SessionDetailDto): MessagePartDto | undefined {
   for (const message of detail.messages) {
     const part = message.parts.find((p) => p.type === "question");

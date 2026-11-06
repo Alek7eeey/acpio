@@ -65,6 +65,9 @@ const apiMock = vi.hoisted(() => {
       fileName: "ref.md",
       size: 42,
     })),
+    // The new-task form asks the picked agent for its `/` menu before the task
+    // exists — the list itself comes from the test that needs one.
+    agentCommands: vi.fn(async () => [] as Array<{ name: string; description: string }>),
   };
 });
 vi.mock("../lib/api", () => ({ api: apiMock }));
@@ -1061,6 +1064,44 @@ describe("BoardPage new task form", () => {
     expect(tools).toBeTruthy();
     expect(within(tools).getByRole("button", { name: /^Attach/ })).toBeTruthy();
     expect(within(row).getAllByRole("button").length).toBe(3);
+
+describe("BoardPage new task form slash menu", () => {
+  // A task's skill is the `/name` its first message opens with, and every
+  // harness this app drives speaks ACP — so the form offers the menu of the
+  // agent the task is written for, not only the in-process one's (whose skills
+  // the server can read from files): a spawned agent is asked for its own list.
+  it("offers a spawned agent's own commands for the task's folder", async () => {
+    useAppStore.setState({
+      boardSessions: [],
+      adapters: [{ id: "omp", label: "OMP" } as never],
+      agentAvailability: { omp: true },
+    });
+    apiMock.agentCommands.mockResolvedValue([
+      { name: "review", description: "Review the branch I am on" },
+    ]);
+    renderBoard();
+    await screen.findByText("Add task");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+
+    // Asked for the agent picked for the task, in the task's own folder — the
+    // commands of a CLI depend on both.
+    expect(apiMock.agentCommands).toHaveBeenCalledWith("omp", "/projects/app");
+
+    await userEvent.type(textarea, "/");
+    const option = await screen.findByRole("option", { name: /\/review/ });
+    expect(option.textContent).toContain("Review the branch I am on");
+
+    // Picking it writes the command the agent expands as the first token.
+    await userEvent.click(option);
+    expect(textarea.value).toBe("/review ");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
 
     // What the task starts on is words, not controls: one pressable line that
     // names the agent and the model, and no picker or switch standing in the

@@ -112,8 +112,9 @@ import {
   updateBoardColumn,
 } from "./services/boards.js";
 import { getMcpStatus, refreshMcpStatus } from "./services/mcpStatus.js";
+import { listProviderCommands } from "./acp/providerCommands.js";
 import { discoverProjectMcp } from "./services/projectMcp.js";
-import { builtinSlashCommands, discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
+import { discoverSettingsSkills, skillMode } from "@acpio/adapter-builtin";
 import { searchMessages } from "./services/search.js";
 import { openPath } from "./services/openPath.js";
 import {
@@ -963,17 +964,19 @@ export async function registerRoutes(app: FastifyInstance) {
     }));
   });
 
-  // The slash menu the built-in agent announces for a folder: its own commands
-  // plus the skills in effect — `off` ones already dropped, `hidden` ones kept,
-  // exactly what a chat composer opens. The board's new-task form writes a
-  // task's first message, so it offers that list before any session exists to
-  // announce it.
-  app.get("/api/builtin-commands", async (req) => {
-    const query = z.object({ cwd: z.string().max(4096).optional() }).parse(req.query ?? {});
-    const settings = await getSettings();
-    const cwd = query.cwd?.trim() || settings.defaultCwd;
-    const skills = await discoverSettingsSkills(settings, cwd);
-    return builtinSlashCommands(settings, skills);
+  // The slash menu a provider offers for a folder, asked for before any session
+  // exists: the board's new-task form writes a task's first message, so the
+  // skill it names has to be offered while the task is still a draft. The
+  // built-in agent's list is read from files; every other harness is asked
+  // through a throwaway ACP session, cached per provider and folder.
+  app.get("/api/agent/commands", async (req) => {
+    const query = z
+      .object({
+        provider: z.string().max(200).optional(),
+        cwd: z.string().max(4096).optional(),
+      })
+      .parse(req.query ?? {});
+    return listProviderCommands(query.provider, query.cwd);
   });
 
   app.get("/api/search", async (req) => {
