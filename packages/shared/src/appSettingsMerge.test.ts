@@ -15,6 +15,7 @@ import {
   mergeClientAppSettings,
   normalizeBuiltinBashTimeoutSec,
   normalizeBuiltinExtraInstructions,
+  normalizeChatAgentTurnTimeline,
   normalizeChatMetaChips,
   normalizeChatTreeMenu,
   readSettingsSchema,
@@ -54,7 +55,6 @@ describe("normalizeChatMetaChips", () => {
       "board",
       "gitBranch",
       "gitChanges",
-      "thoughts",
       "mcp",
       "context",
       "console",
@@ -69,7 +69,6 @@ describe("normalizeChatMetaChips", () => {
       "board",
       "gitBranch",
       "gitChanges",
-      "thoughts",
       "mcp",
       "context",
       "console",
@@ -84,7 +83,6 @@ describe("normalizeChatMetaChips", () => {
       "board",
       "gitBranch",
       "gitChanges",
-      "thoughts",
       "mcp",
       "context",
       "console",
@@ -104,6 +102,26 @@ describe("normalizeChatMetaChips", () => {
     ]);
   });
 
+  // The "Размышления" chip left the default row with schema 9 (the turn
+  // timeline draws the reasoning in place): a list saved before it gives the
+  // chip up once, and a list saved after it keeps whatever it has.
+  it("drops the thoughts chip from settings saved before the timeline", () => {
+    expect(normalizeChatMetaChips(["folder", "thoughts", "console"], 8)).toEqual([
+      "folder",
+      "console",
+    ]);
+    expect(normalizeChatMetaChips(["folder", "thoughts", "console"], 9)).toEqual([
+      "folder",
+      "thoughts",
+      "console",
+    ]);
+  });
+
+  it("falls back to the shipped row without the thoughts chip", () => {
+    expect(normalizeChatMetaChips(undefined, 9)).toEqual(DEFAULT_SETTINGS.chatMetaChips);
+    expect(DEFAULT_SETTINGS.chatMetaChips).not.toContain("thoughts");
+  });
+
   // The background-task chip is the newest default: settings saved before it
   // pick it up at the end of their list, and a list that already has it keeps
   // its place.
@@ -114,6 +132,30 @@ describe("normalizeChatMetaChips", () => {
       "bgJobs",
     ]);
     expect(normalizeChatMetaChips(["bgJobs", "folder"], 6)).toEqual(["bgJobs", "folder"]);
+  });
+});
+
+describe("normalizeChatAgentTurnTimeline", () => {
+  // The timeline is the default reading of a turn from schema 9 on. A stored
+  // `false` is the old default, not a choice, so an older save is flipped once;
+  // after that the switch owns the value.
+  it("turns the timeline on for settings saved before it was the default", () => {
+    expect(normalizeChatAgentTurnTimeline(false, 8)).toBe(true);
+    expect(normalizeChatAgentTurnTimeline(undefined, 8)).toBe(true);
+  });
+
+  it("keeps the stored value once the schema is current", () => {
+    expect(normalizeChatAgentTurnTimeline(false, 9)).toBe(false);
+    expect(normalizeChatAgentTurnTimeline(true, 9)).toBe(true);
+    expect(normalizeChatAgentTurnTimeline("yes", 9)).toBe(false);
+  });
+
+  it("carries the new default through the client merge", () => {
+    expect(mergeClientAppSettings({}).chatAgentTurnTimeline).toBe(true);
+    expect(
+      mergeClientAppSettings({ settingsSchema: 9, chatAgentTurnTimeline: false })
+        .chatAgentTurnTimeline,
+    ).toBe(false);
   });
 });
 

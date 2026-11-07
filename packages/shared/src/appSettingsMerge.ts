@@ -28,7 +28,7 @@ import {
 } from "./index.js";
 
 /** Bumped when persisted settings need a one-time migration on load. */
-export const SETTINGS_SCHEMA_VERSION = 8;
+export const SETTINGS_SCHEMA_VERSION = 9;
 
 const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "folder",
@@ -41,7 +41,10 @@ const CHAT_META_CHIP_IDS: ChatMetaChipId[] = [
   "console",
   "bgJobs",
 ];
-const DEFAULT_CHAT_META_CHIPS: ChatMetaChipId[] = [...CHAT_META_CHIP_IDS];
+/** A file without a chip list gets the row the app ships, not every chip.
+ *  Read at call time: `index.ts` imports this module, so its defaults are still
+ *  missing while this file is being evaluated. */
+const defaultChatMetaChips = (): ChatMetaChipId[] => [...DEFAULT_SETTINGS.chatMetaChips];
 
 function expandLegacyGitChip(chips: string[]): ChatMetaChipId[] {
   const out: ChatMetaChipId[] = [];
@@ -71,7 +74,7 @@ export function normalizeChatMetaChips(
 ): ChatMetaChipId[] {
   const raw = Array.isArray(chips)
     ? chips.filter((v): v is string => typeof v === "string")
-    : [...DEFAULT_CHAT_META_CHIPS];
+    : [...defaultChatMetaChips()];
 
   let next = expandLegacyGitChip(raw);
 
@@ -101,6 +104,12 @@ export function normalizeChatMetaChips(
   if (schemaVersion < 7 && !next.includes("bgJobs")) {
     next = [...next, "bgJobs"];
   }
+  // The agent turn timeline draws the reasoning in place (schema 9), so the
+  // "Размышления" chip left the default row: a list saved before it gives the
+  // chip up once instead of keeping a switch the timeline made redundant.
+  if (schemaVersion < 9) {
+    next = next.filter((chip) => chip !== "thoughts");
+  }
 
   const seen = new Set<ChatMetaChipId>();
   return next.filter((chip) => {
@@ -108,6 +117,17 @@ export function normalizeChatMetaChips(
     seen.add(chip);
     return true;
   });
+}
+
+/**
+ * The agent turn timeline became the default reading of a turn (schema 9). A
+ * stored boolean cannot pick a new default up on its own — every install that
+ * ever saved its settings carries the old `false` — so it is flipped once, and
+ * a value saved after that (the switch is off in the UI) stays as it is.
+ */
+export function normalizeChatAgentTurnTimeline(value: unknown, schemaVersion: number): boolean {
+  if (schemaVersion < 9) return true;
+  return value === true;
 }
 
 const CHAT_TREE_MENU_IDS: ChatTreeMenuId[] = ["rename", "move", "export", "share", "delete"];
@@ -511,6 +531,10 @@ export function mergeClientAppSettings(raw: unknown): AppSettings {
   merged.builtinBashTimeoutSec = normalizeBuiltinBashTimeoutSec(partial.builtinBashTimeoutSec);
   normalizeBuiltinContextSettings(merged);
   merged.chatMetaChips = normalizeChatMetaChips(partial.chatMetaChips, schemaVersion);
+  merged.chatAgentTurnTimeline = normalizeChatAgentTurnTimeline(
+    partial.chatAgentTurnTimeline,
+    schemaVersion,
+  );
   merged.chatToolbarStyle = normalizeChatToolbarStyle(partial.chatToolbarStyle);
   merged.boardAddCardStyle = normalizeBoardAddCardStyle(partial.boardAddCardStyle);
   merged.boardTaskAgentPicker = normalizeBoardTaskAgentPicker(partial.boardTaskAgentPicker);
