@@ -607,6 +607,7 @@ function ComposerMirror({
 
 function MessageArticle({
   msg,
+  noteParts,
   isLiveAssistant,
   turnActive,
   stepsStreaming,
@@ -621,6 +622,9 @@ function MessageArticle({
   onSlashCommandClick,
 }: {
   msg: MessageDto;
+  /** Settled background jobs folded into this turn as its own last steps
+   *  (see `foldedNotes` in the thread). */
+  noteParts?: MessagePartDto[];
   isLiveAssistant: boolean;
   turnActive: boolean;
   stepsStreaming: boolean;
@@ -669,6 +673,7 @@ function MessageArticle({
       ) : (
         <AssistantParts
           message={msg}
+          noteParts={noteParts}
           session={activeSession}
           onRegenerate={onRegenerate}
           turnActive={turnActive}
@@ -4150,6 +4155,7 @@ function coalesceAssistantParts(
 
 function AssistantParts({
   message,
+  noteParts,
   session,
   onRegenerate,
   turnActive,
@@ -4159,6 +4165,9 @@ function AssistantParts({
   agentTurnTimeline,
 }: {
   message: MessageDto;
+  /** Background-job notes folded into this turn: they arrived after it, as
+   *  messages of their own, and are drawn as its last work rows. */
+  noteParts?: MessagePartDto[];
   session: SessionDetailDto | null;
   onRegenerate: () => void;
   turnActive: boolean;
@@ -4190,8 +4199,10 @@ function AssistantParts({
   }, [stepsStreaming, session?.status]);
 
   const parts = useMemo(() => {
-    return coalesceAssistantParts(message.parts);
-  }, [message.parts]);
+    const own = coalesceAssistantParts(message.parts);
+    // Folded notes ride at the turn's tail, in the order their jobs settled.
+    return noteParts && noteParts.length > 0 ? [...own, ...noteParts] : own;
+  }, [message.parts, noteParts]);
 
   // A parked question renders outside the spoiler (see below), so the "Working…"
   // header never covers an agent that is really waiting for the user.
@@ -6711,6 +6722,51 @@ function ChatThread() {
     return out;
   }, [activeSession?.messages]);
 
+  // A settled background job reaches the chat as a prompt (the agent has to be
+  // woken with it), so on the wire it is a user message of its own. The reader
+  // does not read it as their own turn: it belongs to the work that produced it
+  // and to the answers that follow, so it is folded into the assistant turn
+  // above it as one more step row instead of standing as a block of its own.
+  const foldedNotes = useMemo(() => {
+    const into = new Map<string, MessagePartDto[]>();
+    const hidden = new Set<string>();
+    let host: MessageDto | null = null;
+    // The host survives a segment boundary: a note opens a segment of its own
+    // (it is a user message), and it is the turn *before* it that carries it.
+    for (const segment of segments) {
+      for (const m of segment) {
+        if (m.role === "assistant") {
+          // Only a turn that is actually drawn can carry a note into view.
+          host = hasRenderableAssistantContent(m.parts) ? m : null;
+          continue;
+        }
+        if (m.role !== "user") continue;
+        const text = messagePlainText(m);
+        if (!isBackgroundJobNote(text)) {
+          host = null;
+          continue;
+        }
+        if (!host) continue;
+        const rows = into.get(host.id) ?? [];
+        const lastOrder = [...host.parts, ...rows].reduce(
+          (max, p) => Math.max(max, p.order ?? 0),
+          0,
+        );
+        rows.push({
+          id: `note:${m.id}`,
+          messageId: host.id,
+          type: "note",
+          order: lastOrder + 1,
+          payload: { text },
+          createdAt: m.createdAt,
+        });
+        into.set(host.id, rows);
+        hidden.add(m.id);
+      }
+    }
+    return { into, hidden };
+  }, [segments]);
+
   // ── Message virtualization ────────────────────────────────────────────────
   // Beyond a threshold the flat message feed is windowed with
   // @tanstack/react-virtual; small feeds keep the plain render untouched.
@@ -6719,6 +6775,8 @@ function ChatThread() {
       segments.flatMap((segment, segIndex) =>
         segment
           .filter((m) => {
+            // Folded into the turn above it — see `foldedNotes`.
+            if (foldedNotes.hidden.has(m.id)) return false;
             // A settings notice IS its own notice part: one stored without it
             // would render as an empty row.
             if (m.role === "system") return m.parts.some((p) => p.type === "notice");
@@ -6735,7 +6793,7 @@ function ChatThread() {
               settings.multitask && inflight >= 2 && segIndex === segments.length - 1 && idx === 0,
           })),
       ),
-    [segments, settings.multitask, inflight, lastMessageId],
+    [segments, foldedNotes, settings.multitask, inflight, lastMessageId],
   );
   // Prompt rail: the user's prompts as an ordered column beside the thread.
   const promptRailItems = useMemo(
@@ -6847,6 +6905,7 @@ function ChatThread() {
       <MessageArticle
         key={msg.id}
         msg={msg}
+        noteParts={foldedNotes.into.get(msg.id)}
         isLiveAssistant={isLiveAssistant}
         // The plan card parks the turn (see `planPending`): the last answer is
         // drawn in its finished form, with the card right under it.
@@ -7655,6 +7714,8 @@ function ChatThread() {
                 )}
                 <div className={styles.turnSegment}>
                   {segment.map((msg, index) => {
+                    // Folded into the turn above it — see `foldedNotes`.
+                    if (foldedNotes.hidden.has(msg.id)) return null;
                     const globalIndex =
                       activeSession?.messages.findIndex((m) => m.id === msg.id) ?? index;
                     const isLiveAssistant =

@@ -146,6 +146,37 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe("a settled background job", () => {
+  it("rides in the turn's steps instead of standing as its own block", async () => {
+    const d = detail([asked]);
+    d.messages.push({
+      id: "u2",
+      sessionId: "s1",
+      role: "user",
+      createdAt: "2026-10-16T09:33:04.000Z",
+      parts: [
+        part("p2", "u2", "text", 0, {
+          text: "[Фоновая задача] «wait10» завершилась: код 0, длительность 3s (id bg-51).",
+        }),
+      ],
+    });
+    mount(d);
+    const { container } = render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <I18nProvider>
+          <ChatPage />
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+    await new Promise((r) => setTimeout(r, 100));
+
+    // The note is the turn's own last step: drawn inside the assistant message,
+    // and its own user message is gone from the thread.
+    expect(container.querySelector('[data-message-id="a1"]')?.textContent).toContain("bg-51");
+    expect(container.querySelector('[data-message-id="u2"]')).toBeNull();
+  }, 20_000);
+});
+
 describe("a turn that stops being one item", () => {
   it("keeps the interface instead of tearing the tree down", async () => {
     mount(detail([asked]));
