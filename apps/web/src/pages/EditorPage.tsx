@@ -216,6 +216,8 @@ async function copyToClipboard(text: string, label: string): Promise<void> {
 type EditorWorkspace = {
   tabs: EditorTab[];
   active: string | null;
+  /** Caret per file, so a reload comes back where the reader left it. */
+  carets?: Record<string, { line: number; col: number }>;
   /** Unsaved text written by an older build straight into localStorage. */
   buffers?: Record<string, string>;
 };
@@ -278,7 +280,8 @@ function readPins(root: string): string[] {
   }
 }
 
-function readWorkspace(root: string): EditorWorkspace | null {
+// Exported for their own test: the shape a reload reads back.
+export function readWorkspace(root: string): EditorWorkspace | null {
   if (typeof window === "undefined") return null;
   try {
     const parsed = JSON.parse(
@@ -289,9 +292,16 @@ function readWorkspace(root: string): EditorWorkspace | null {
       (tab): tab is EditorTab =>
         typeof tab?.path === "string" && (tab.kind === "file" || tab.kind === "diff"),
     );
+    const carets: Record<string, { line: number; col: number }> = {};
+    for (const [path, at] of Object.entries(parsed.carets ?? {})) {
+      const line = Number(at?.line);
+      const col = Number(at?.col);
+      if (Number.isFinite(line) && Number.isFinite(col)) carets[path] = { line, col };
+    }
     return {
       tabs,
       active: typeof parsed.active === "string" ? parsed.active : null,
+      carets,
       buffers:
         parsed.buffers && typeof parsed.buffers === "object"
           ? (parsed.buffers as Record<string, string>)
@@ -302,9 +312,14 @@ function readWorkspace(root: string): EditorWorkspace | null {
   }
 }
 
-function writeWorkspace(root: string, tabs: EditorTab[], active: string | null): void {
+export function writeWorkspace(
+  root: string,
+  tabs: EditorTab[],
+  active: string | null,
+  carets?: Record<string, { line: number; col: number }>,
+): void {
   try {
-    localStorage.setItem(workspaceKey(root), JSON.stringify({ tabs, active }));
+    localStorage.setItem(workspaceKey(root), JSON.stringify({ tabs, active, carets }));
   } catch {
     // A full quota must not break editing: the pane still works, the reload forgets.
   }
@@ -776,6 +791,21 @@ export function EditorPage({
   const oxlintRef = useRef(new Map<string, LintItem[]>());
   const lspDiagsRef = useRef(new Map<string, LintItem[]>());
   const activeRef = useRef<string | null>(null);
+  // Where the reader was in each file: a reload puts the caret back there.
+  const caretsRef = useRef(new Map<string, { line: number; col: number }>());
+  const rememberCaret = useCallback(() => {
+    const view = viewRef.current;
+    const path = activeRef.current;
+    // The merge view has its own document and its own line numbers.
+    if (!view || !path || view !== mainViewRef.current) return;
+    const head = view.state.selection.main.head;
+    const line = view.state.doc.lineAt(head);
+    caretsRef.current.set(path, { line: line.number, col: head - line.from + 1 });
+  }, []);
+  const caretsOf = useCallback(
+    () => Object.fromEntries(caretsRef.current) as Record<string, { line: number; col: number }>,
+    [],
+  );
   const rootRef = useRef(root);
   const sessionRef = useRef<string | null>(sessionId);
   const lintTimer = useRef<number>(0);
@@ -1017,6 +1047,7 @@ export function EditorPage({
   /** Put a tab in front. `line`/`col` only make sense for a file tab. */
   const activateTab = useCallback(
     (tab: EditorTab, line?: number, col?: number) => {
+      rememberCaret();
       // A diff owns the visible area: switching files leaves it. And the state
       // goes to the tab view — `viewRef` may still point at the merge view.
       if (tab.kind === "file" && diff) closeDiff();
@@ -1029,10 +1060,12 @@ export function EditorPage({
       if (!view || !state) return;
       view.setState(state);
       applyEditorConfig(view);
-      if (line != null) {
+      // A jump says where to go; a restored or revisited tab goes back to its caret.
+      const at = line != null ? { line, col: col ?? 1 } : caretsRef.current.get(tab.path);
+      if (at) {
         const doc = view.state.doc;
-        const target = doc.line(Math.min(line, doc.lines));
-        const pos = Math.min(target.to, target.from + Math.max(0, (col ?? 1) - 1));
+        const target = doc.line(Math.min(at.line, doc.lines));
+        const pos = Math.min(target.to, target.from + Math.max(0, (at.col ?? 1) - 1));
         view.dispatch({
           selection: { anchor: pos },
           effects: EditorView.scrollIntoView(pos, { y: "center" }),
@@ -1042,7 +1075,7 @@ export function EditorPage({
       }
       view.focus();
     },
-    [applyDiagnostics, applyEditorConfig, closeDiff, diff],
+    [applyDiagnostics, applyEditorConfig, closeDiff, diff, rememberCaret],
   );
 
   const addTab = useCallback((tab: EditorTab) => {
@@ -1298,6 +1331,9 @@ export function EditorPage({
     const tabs = workspace?.tabs ?? [];
     setTabs(tabs);
     setActiveKey(workspace?.active ?? null);
+    for (const [path, at] of Object.entries(workspace?.carets ?? {})) {
+      caretsRef.current.set(path, at);
+    }
     const reopen = async () => {
       const legacy = Object.entries(workspace?.buffers ?? {});
       if (legacy.length > 0) {
@@ -1312,7 +1348,10 @@ export function EditorPage({
       const last = tabs.find((tab) => tabKey(tab) === workspace?.active);
       if (!last) return;
       if (last.kind === "diff") void openDiff(last.path);
-      else void openFile(last.path);
+      else {
+        const at = workspace?.carets?.[last.path];
+        void openFile(last.path, at?.line, at?.col);
+      }
     };
     void reopen();
   }, [openDiff, openFile, root]);
@@ -1330,7 +1369,8 @@ export function EditorPage({
     if (!root) return;
     // Debounced, and per file: typing in one buffer never rewrites the others.
     const timer = window.setTimeout(() => {
-      writeWorkspace(root, tabs, activeKey);
+      rememberCaret();
+      writeWorkspace(root, tabs, activeKey, caretsOf());
       const writes: Array<Promise<void>> = [];
       for (const path of dirty) {
         const text = statesRef.current.get(path)?.doc.toString();
@@ -1347,13 +1387,14 @@ export function EditorPage({
       void Promise.all(writes);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [activeKey, dirty, root, tabs]);
+  }, [activeKey, caretsOf, dirty, rememberCaret, root, tabs]);
 
   // A reload or a closed tab gives no time for the debounce: write now.
   useEffect(() => {
     if (!root) return;
     const flush = () => {
-      writeWorkspace(root, tabs, activeKey);
+      rememberCaret();
+      writeWorkspace(root, tabs, activeKey, caretsOf());
       for (const path of dirty) {
         const text = statesRef.current.get(path)?.doc.toString();
         if (text != null) void saveBuffer(root, path, text);
@@ -1365,7 +1406,7 @@ export function EditorPage({
       window.removeEventListener("pagehide", flush);
       document.removeEventListener("visibilitychange", flush);
     };
-  }, [activeKey, dirty, root, tabs]);
+  }, [activeKey, caretsOf, dirty, rememberCaret, root, tabs]);
 
   const gotoDefinition = useCallback(async () => {
     const view = viewRef.current;
