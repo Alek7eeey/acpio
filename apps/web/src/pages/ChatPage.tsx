@@ -822,6 +822,12 @@ function UserMessage({
 
   if (!text && fileParts.length === 0) return null;
 
+  // The reader rewrote this bubble: the server keeps the moment, so the mark
+  // survives a reload and reads the same in every tab.
+  const editedAt = message.editedAt ? new Date(message.editedAt) : null;
+  const editedTitle =
+    editedAt && !Number.isNaN(editedAt.getTime()) ? editedAt.toLocaleString() : undefined;
+
   // The files this message carries, by the name its text says: the message
   // reads like the field that wrote it — the name as a link — and the address
   // behind it is this message's own file part.
@@ -887,6 +893,11 @@ function UserMessage({
             );
           })}
         </div>
+      ) : null}
+      {message.editedAt ? (
+        <span className={styles.editedMark} title={editedTitle}>
+          {t("chat.messageEdited")}
+        </span>
       ) : null}
       <UserMessageActions
         messageId={message.id}

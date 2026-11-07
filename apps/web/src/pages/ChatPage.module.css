@@ -1431,6 +1431,17 @@
   align-self: flex-end;
 }
 
+/* A message the reader rewrote: the thread keeps one bubble, and this quiet
+   line says its text is not the one first sent. */
+.editedMark {
+  margin-right: 10px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  opacity: 0.75;
+  user-select: none;
+}
+
 /* ── A settled background job ────────────────────────────────────────────────
    The runner's note travels as a prompt (that is how the agent is woken), so
    the transcript holds it as a user message — but it is machine output, not

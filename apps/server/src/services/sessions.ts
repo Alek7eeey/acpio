@@ -190,6 +190,7 @@ export async function getSessionDetail(id: string): Promise<SessionDetailDto | n
     sessionId: msg.sessionId,
     role: msg.role as MessageDto["role"],
     createdAt: msg.createdAt.toISOString(),
+    ...(msg.editedAt ? { editedAt: msg.editedAt.toISOString() } : {}),
     parts: partsByMessage.get(msg.id) ?? [],
   }));
 
@@ -744,6 +745,9 @@ export async function replaceUserMessageText(
   if (!rows[0] || rows[0].sessionId !== sessionId || rows[0].role !== "user") {
     throw Object.assign(new Error("User message not found"), { statusCode: 404 });
   }
+  // The stamp says what the bubble is: the text the reader sees now was written
+  // over the one they sent, and the reply under it answers the rewrite.
+  await db.update(messages).set({ editedAt: new Date() }).where(eq(messages.id, messageId));
   await db.delete(messageParts).where(eq(messageParts.messageId, messageId));
   const trimmed = text.trim();
   const slashMatch = trimmed.match(/^\/([a-z][\w-]*(?::[a-z][\w-]*)?)/i);

@@ -3716,6 +3716,26 @@ describe("prompt delivery while the agent is busy", () => {
     );
   });
 
+  it("leaves a message nobody rewrote without an edit stamp", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "обычный вопрос" },
+    });
+    const detail = await waitForDetail(
+      session.id,
+      (d) => d.status === "idle" && textParts(d).some((t) => t.includes("echo: обычный вопрос")),
+    );
+    expect(detail.messages.every((m) => m.editedAt == null)).toBe(true);
+  });
+
   it("keeps the default delivery: the same message without one waits for the turn", async () => {
     await connectAgent();
     const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
@@ -3745,6 +3765,54 @@ describe("prompt delivery while the agent is busy", () => {
         1_500,
       ),
     ).rejects.toThrow(/condition not met/);
+  });
+
+  it("interrupts the live answer and regenerates it when the reader edits the message", async () => {
+    await connectAgent();
+    const created = await app.inject({ method: "POST", url: "/api/sessions", payload: {} });
+    expect(created.statusCode).toBe(200);
+    const session = created.json();
+    runtimeSessionIds.push(session.id);
+    await waitForAcpSessionId(session.id);
+
+    // A turn that never ends by itself: an edit is the only thing that ends it.
+    await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "SLOW-HANG черновой вопрос" },
+    });
+    const hung = await waitForDetail(session.id, (d) =>
+      allPartTexts(d).some((t) => t.includes("hang tick")),
+    );
+    const edited = hung.messages.find((m) => m.role === "user");
+    expect(edited).toBeTruthy();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/sessions/${session.id}/prompt`,
+      payload: { text: "переписанный вопрос", editMessageId: edited!.id },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // Answered although the first turn was still open: the edit replaced that
+    // answer instead of waiting behind it.
+    const detail = await waitForDetail(
+      session.id,
+      (d) =>
+        d.status === "idle" &&
+        textParts(d).some((t) => t.includes("echo: переписанный вопрос")),
+    );
+    // One message, rewritten in place — the replaced answer and the turn that was
+    // still streaming it are gone from the thread.
+    expect(
+      detail.messages
+        .filter((m) => m.role === "user")
+        .map((m) => String(m.parts.find((p) => p.type === "text")?.payload.text ?? "")),
+    ).toEqual(["переписанный вопрос"]);
+    expect(allPartTexts(detail).some((t) => t.includes("hang tick"))).toBe(false);
+    // The reader can tell the bubble was rewritten — it is stored, not a tab's
+    // own guess, so it survives a reload and shows in every tab.
+    expect(detail.messages.find((m) => m.role === "user")?.editedAt).toBeTruthy();
   });
 
   it("queues an afterStep message for a harness that cannot fold it", async () => {

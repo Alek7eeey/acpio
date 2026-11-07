@@ -3324,6 +3324,12 @@ export interface MessageDto {
   sessionId: string;
   role: "user" | "assistant" | "system";
   createdAt: string;
+  /**
+   * When the reader rewrote this message. An edit replaces the message and every
+   * reply after it, so the thread carries one bubble that says it is no longer
+   * what was first sent.
+   */
+  editedAt?: string | null;
   parts: MessagePartDto[];
 }
 

@@ -844,6 +844,19 @@ function turnCancelledForSession(state: AppState, sessionId: string) {
  */
 const messagesAfterCancel = new Map<string, Set<string>>();
 
+/**
+ * Messages an edit cut away, per session.
+ *
+ * The edit drops everything after the rewritten message, but the turn it
+ * interrupted keeps streaming for a moment — its parts are addressed to the
+ * assistant message that no longer exists, and the batch flush would take each
+ * unknown id as a new assistant bubble (the replaced answer, back on screen next
+ * to the fresh one). The server stops that turn before it truncates, so these
+ * ids are the only place such a part can still point: drop them until the
+ * authoritative `messages.replaced` arrives.
+ */
+const droppedByEdit = new Map<string, Set<string>>();
+
 function noteMessageAfterCancel(state: AppState, sessionId: string, messageId: string) {
   if (!turnCancelledForSession(state, sessionId)) return;
   const seen = messagesAfterCancel.get(sessionId) ?? new Set<string>();
@@ -1533,8 +1546,10 @@ function flushPendingPartEvents(get: () => AppState, set: (partial: Partial<AppS
     if (!current) continue;
     let messages = current.messages;
     let touched = false;
+    const dropped = droppedByEdit.get(sessionId);
     for (const event of events) {
       if (partSilencedByCancel(state, sessionId, event.messageId)) continue;
+      if (dropped?.has(event.messageId)) continue;
       let messageId = resolveClientMessageId(event.messageId, current.id);
       if (messageId === event.messageId) {
         const optimisticId =
@@ -3364,6 +3379,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     // turn: say so now instead of queueing a message that would only come back
     // as a failure.
     if (get().warnIfHarnessNotConfigured(sid)) return;
+    // An edit is not one more request waiting behind the turn — it replaces the
+    // answer that turn is writing. The interrupted answer stops here, and the
+    // new text goes to the agent at once instead of standing in the queue as a
+    // second copy of a message the reader already has on screen.
+    // `keepQueue`: the requests queued behind the turn are other questions and
+    // are not part of the answer being replaced.
+    const editing = Boolean(opts?.editMessageId) && Boolean(sid);
+    if (editing) await get().cancelPrompt(sid ?? undefined, { keepQueue: true });
     const limit = get().settings.multitask ? 2 : 1;
     const detail = sid ? liveDetail(get(), sid) : get().activeSession;
     const listed = sid ? get().sessions.find((s) => s.id === sid) : null;
@@ -3373,6 +3396,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ? get().promptQueue.filter((q) => q.sessionId === sid)
       : get().promptQueue;
     const busy =
+      !editing &&
       !internal &&
       (inf >= limit || queued.length > 0 || status === "running" || status === "waiting");
     if (busy) {
@@ -3747,10 +3771,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (idx >= 0) {
         const trimmed = text.trim();
         const slashMatch = trimmed.match(/^\/([\w-]+)/);
+        const now = new Date().toISOString();
+        const cut = new Set([...droppedByEdit.get(id) ?? []]);
+        for (const gone of msgs.slice(idx + 1)) cut.add(gone.id);
+        droppedByEdit.set(id, cut);
         const truncated = msgs.slice(0, idx + 1).map((m, i) => {
           if (i !== idx) return m;
           return {
             ...m,
+            // The reader's own text now: the marker says so until the server's
+            // own `messages.replaced` carries the stored timestamp.
+            editedAt: now,
             parts: [
               {
                 id: m.parts[0]?.id ?? `local-${m.id}`,
@@ -3769,7 +3800,6 @@ export const useAppStore = create<AppState>((set, get) => ({
           };
         });
         const epoch = get().promptEpoch + 1;
-        const now = new Date().toISOString();
         const assistantId = `local-assistant-${epoch}`;
         const userId = msgs[idx]!.id;
         const pair = { userId, assistantId, sessionId: id };
@@ -4344,6 +4374,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     if (event.type === "messages.truncated" || event.type === "messages.replaced") {
+      // The list is authoritative again: whatever an edit cut away is either in
+      // it or gone for good, so late parts of the replaced turn had their moment.
+      droppedByEdit.delete(event.sessionId);
       const current = liveDetail(state, event.sessionId);
       if (!current) return;
       commitDetail(get, set, { ...current, messages: event.messages });

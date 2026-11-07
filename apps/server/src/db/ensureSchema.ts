@@ -106,6 +106,14 @@ export async function ensureSchema() {
     )
   `);
 
+  // A message the reader rewrote: the thread shows one bubble and says it was
+  // edited, instead of a new message appearing next to the old one.
+  try {
+    db.run(sql`ALTER TABLE messages ADD COLUMN edited_at INTEGER`);
+  } catch (err) {
+    if (!isDuplicateColumn(err)) throw err;
+  }
+
   db.run(sql`
     CREATE TABLE IF NOT EXISTS message_parts (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),

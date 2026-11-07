@@ -82,6 +82,8 @@ export const messages = sqliteTable("messages", {
     .references(() => sessions.id, { onDelete: "cascade" }),
   role: text("role").notNull(),
   createdAt: createdAt(),
+  /** Set when the reader rewrote the message; NULL for one sent once. */
+  editedAt: integer("edited_at", { mode: "timestamp_ms" }),
 });
 
 export const messageParts = sqliteTable("message_parts", {

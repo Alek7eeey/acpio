@@ -2758,17 +2758,24 @@ export async function runPrompt(
       await updateSession(sessionId, { status: "idle" }).catch(() => {});
       throw Object.assign(new Error("User message not found"), { statusCode: 404 });
     }
+    // An edit replaces the answer, so the turn writing that answer has to stop
+    // and settle BEFORE the transcript it feeds is truncated: a turn still
+    // landing parts writes them into rows this is about to delete, and its own
+    // finalize then publishes "idle" over the claim of the turn started below.
+    // Stop itself keeps the queued prompts only until the runtime is disposed
+    // below, which is the same full replacement this path has always made.
+    try {
+      await cancelPrompt(sessionId);
+      await waitTurnSettled(rt);
+    } catch {
+      // ignore
+    }
     await truncateMessagesAfter(sessionId, opts.editMessageId);
     await replaceUserMessageText(sessionId, opts.editMessageId, text);
     const detailAfter = await getSessionDetail(sessionId);
     priorTranscript = buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
     promptUserText = text;
 
-    try {
-      await cancelPrompt(sessionId);
-    } catch {
-      // ignore
-    }
     disposeRuntime(sessionId);
     rt = getRuntime(sessionId);
     rt.startingTurn = true;
