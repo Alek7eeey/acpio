@@ -30,6 +30,8 @@ const apiMock = vi.hoisted(() => ({
   })),
   // Each provider's models editor fetches its endpoint's /models list.
   builtinModels: vi.fn(async () => ({ ok: true, models: [] })),
+  // The spend row of a provider of a known kind asks for its limits.
+  builtinLimits: vi.fn(async () => ({ ok: true, meters: [], fetchedAt: "2026-11-07T10:00:00.000Z" })),
   // The built-in-skill rows are named by the skills the build ships.
   listSkills: vi.fn(async () => [] as Array<{ name: string; description: string; mode: string }>),
   // The About leaf asks whether npm has a newer Acpio than the running build.
@@ -484,9 +486,19 @@ describe("Built-in providers", () => {
   const cardSummary = (card: HTMLDetailsElement) =>
     card.querySelector("summary") as HTMLElement;
 
-  const renderProviders = () => {
+  /**
+   * The add-provider chooser: a kind is chosen before a row exists. Scoped to
+   * the chooser — every card's own kind picker shows the same words.
+   */
+  const addProvider = async (user: ReturnType<typeof userEvent.setup>, kind: string) => {
+    await user.click(screen.getByRole("button", { name: /\+ Add provider/ }));
+    const chooser = screen.getByRole("group", { name: "Provider" });
+    await user.click(within(chooser).getByRole("button", { name: kind }));
+  };
+
+  const renderProviders = (providers: AppSettings["builtinProviders"] = [providerA, providerB]) => {
     useAppStore.setState({
-      settings: { ...DEFAULT_SETTINGS, builtinProviders: [providerA, providerB] },
+      settings: { ...DEFAULT_SETTINGS, builtinProviders: providers },
       bootstrapped: true,
     });
     return render(
@@ -514,7 +526,8 @@ describe("Built-in providers", () => {
     await user.clear(urlA);
     await user.type(urlA, "http://localhost:11434/v2");
 
-    await user.click(screen.getByRole("button", { name: /\+ Add provider/ }));
+    // Adding asks for the kind first; "Other" is the blank endpoint.
+    await addProvider(user, "Other");
     expect(screen.getByLabelText("Unnamed provider 3 · Provider name")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Delete · OpenRouter" }));
@@ -594,11 +607,55 @@ describe("Built-in providers", () => {
     const user = userEvent.setup();
     const { container } = renderProviders();
 
-    await user.click(screen.getByRole("button", { name: /\+ Add provider/ }));
+    await addProvider(user, "Other");
 
     const cards = providerCards(container);
     expect(cards).toHaveLength(3);
     expect(cards[2]!.hasAttribute("open")).toBe(true);
+  });
+
+  // The kind is what the whole spend row hangs on: a known provider prefills
+  // its endpoint and gets its limits read, an unknown one gets neither.
+  it("adds a provider of a chosen kind and reads its limits", async () => {
+    const user = userEvent.setup();
+    apiMock.builtinLimits.mockClear();
+    apiMock.builtinLimits.mockResolvedValueOnce({
+      ok: true,
+      meters: [{ key: "balance", amount: 110, unit: "CNY" }],
+      fetchedAt: "2026-11-07T10:00:00.000Z",
+    });
+    const { container } = renderProviders();
+
+    await addProvider(user, "DeepSeek");
+
+    const cards = providerCards(container);
+    expect(cards).toHaveLength(3);
+    expect(cardSummary(cards[2]!).textContent).toContain("DeepSeek");
+    // The endpoint came with the kind — no typing of a URL to start with.
+    const url = screen.getByLabelText("DeepSeek · Endpoint") as HTMLInputElement;
+    expect(url.value).toBe("https://api.deepseek.com/v1");
+
+    // The card is unfolded, so the row reads the limits right away.
+    await waitFor(() =>
+      expect(apiMock.builtinLimits).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "deepseek", url: "https://api.deepseek.com/v1" }),
+      ),
+    );
+    expect(await screen.findByText("110 CNY")).toBeTruthy();
+    expect(screen.getByText("DeepSeek · Spend")).toBeTruthy();
+  });
+
+  it("gives the plain endpoint no spend row at all", async () => {
+    const user = userEvent.setup();
+    apiMock.builtinLimits.mockClear();
+    renderProviders();
+
+    // A row written before kinds existed is "other": nothing to ask.
+    expect(screen.queryByText("Ollama · Spend")).toBeNull();
+
+    await addProvider(user, "Other");
+    expect(screen.queryByText("Unnamed provider 3 · Spend")).toBeNull();
+    expect(apiMock.builtinLimits).not.toHaveBeenCalled();
   });
 
   // A search hunts for single rows, which live inside the folded cards: the

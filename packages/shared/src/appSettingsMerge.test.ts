@@ -3,6 +3,8 @@ import {
   DEFAULT_SETTINGS,
   builtinProviderHeaders,
   builtinProviderKeys,
+  hasBuiltinProviderLimits,
+  normalizeBuiltinProviderKind,
   normalizeBuiltinProviders,
 } from "./index.js";
 import {
@@ -528,6 +530,36 @@ describe("normalizeBuiltinProviders: keys", () => {
     expect(builtinProviderKeys({ apiKey: "sk-plugin" })).toEqual(["sk-plugin"]);
     expect(builtinProviderKeys({ apiKeys: ["sk-list"], apiKey: "sk-old" })).toEqual(["sk-list"]);
     expect(builtinProviderKeys({})).toEqual([]);
+  });
+});
+
+describe("normalizeBuiltinProviders: kind", () => {
+  it("keeps a known kind and stores nothing for the plain endpoint", () => {
+    const [known, plain, unknown] = normalizeBuiltinProviders({
+      builtinProviders: [
+        { id: "a", name: "DeepSeek", url: "https://api.deepseek.com/v1", kind: "deepseek", models: [] },
+        { id: "b", name: "Mine", url: "http://a/v1", kind: "other", models: [] },
+        { id: "c", name: "Mystery", url: "http://b/v1", kind: "nonsense", models: [] },
+      ],
+    });
+    expect(known.kind).toBe("deepseek");
+    // An absent field already means "other", so the default is never written.
+    expect("kind" in plain).toBe(false);
+    expect("kind" in unknown).toBe(false);
+  });
+
+  it("reads a kind case-insensitively and falls back to other", () => {
+    expect(normalizeBuiltinProviderKind(" OpenRouter ")).toBe("openrouter");
+    expect(normalizeBuiltinProviderKind(undefined)).toBe("other");
+    expect(normalizeBuiltinProviderKind(7)).toBe("other");
+  });
+
+  it("only a known kind can report limits", () => {
+    expect(hasBuiltinProviderLimits("deepseek")).toBe(true);
+    expect(hasBuiltinProviderLimits("opencode")).toBe(true);
+    // The spend row hangs on this: an endpoint of an unknown kind has no API.
+    expect(hasBuiltinProviderLimits("other")).toBe(false);
+    expect(hasBuiltinProviderLimits(undefined)).toBe(false);
   });
 });
 

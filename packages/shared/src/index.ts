@@ -1524,6 +1524,13 @@ export interface BuiltinProviderConfig {
   pluginId?: string;
   /** Where the user gets a key for a plugin's provider. */
   apiKeyHint?: string;
+  /**
+   * The vendor this endpoint is (Settings → Built-in agent → Providers).
+   * A known kind is what makes the spend row possible: each one reports its
+   * current balance or quota through its own API, while `"other"` — and an
+   * absent field — is an endpoint we know nothing about, so no row is offered.
+   */
+  kind?: BuiltinProviderKind;
 }
 
 /**
@@ -1539,6 +1546,88 @@ export const BUILTIN_KEY_MODES: readonly BuiltinKeyMode[] = ["rotate", "exhauste
 
 /** Absent `apiKeyMode` means rotate: a list of keys is there to be spread. */
 export const BUILTIN_KEY_MODE_DEFAULT: BuiltinKeyMode = "rotate";
+
+/**
+ * The vendors a provider row can name (Settings → Built-in agent →
+ * Providers). Only a known kind can show the spend row — it is the one that
+ * says which API to ask for the current balance or quota. `"other"` is every
+ * OpenAI-compatible endpoint we know nothing about; it is the default.
+ */
+export type BuiltinProviderKind = "opencode" | "deepseek" | "openrouter" | "moonshot" | "other";
+
+export const BUILTIN_PROVIDER_KINDS: readonly BuiltinProviderKind[] = [
+  "opencode",
+  "deepseek",
+  "openrouter",
+  "moonshot",
+  "other",
+];
+
+/** Absent `kind` means other: a plain OpenAI-compatible endpoint. */
+export const BUILTIN_PROVIDER_KIND_DEFAULT: BuiltinProviderKind = "other";
+
+/**
+ * What the add-provider picker offers and what a new row starts as: the vendor
+ * name it is stored under and the endpoint its models and limits live behind.
+ * Everything else (keys, models, headers) stays the user's to fill.
+ */
+export interface BuiltinProviderPreset {
+  kind: BuiltinProviderKind;
+  /** Name a provider of this kind starts with (`""` for other: the user names it). */
+  name: string;
+  /** Endpoint a provider of this kind starts with (`""` for other). */
+  url: string;
+}
+
+export const BUILTIN_PROVIDER_PRESETS: readonly BuiltinProviderPreset[] = [
+  { kind: "opencode", name: "OpenCode Zen", url: "https://opencode.ai/zen/go/v1" },
+  { kind: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com/v1" },
+  { kind: "openrouter", name: "OpenRouter", url: "https://openrouter.ai/api/v1" },
+  { kind: "moonshot", name: "Moonshot", url: "https://api.moonshot.ai/v1" },
+  { kind: "other", name: "", url: "" },
+];
+
+/** `kind` as stored/sent — anything unknown is an endpoint we know nothing about. */
+export function normalizeBuiltinProviderKind(kind: unknown): BuiltinProviderKind {
+  const word = typeof kind === "string" ? kind.trim().toLowerCase() : "";
+  return (BUILTIN_PROVIDER_KINDS as readonly string[]).includes(word)
+    ? (word as BuiltinProviderKind)
+    : BUILTIN_PROVIDER_KIND_DEFAULT;
+}
+
+/**
+ * Whether this provider can report its own limits — the gate of the spend row:
+ * an endpoint of an unknown kind has nothing to ask, so it gets no row at all.
+ */
+export function hasBuiltinProviderLimits(kind: unknown): boolean {
+  return normalizeBuiltinProviderKind(kind) !== BUILTIN_PROVIDER_KIND_DEFAULT;
+}
+
+/**
+ * One bucket of a provider's own limits, as its API reported it (Settings →
+ * Built-in agent → Providers → the spend row). Whichever shape the vendor has:
+ * a quota already spent (`percent`, or the `used`/`total` pair a bar can be
+ * drawn from), or a single `amount` — a wallet with nothing to compare it to.
+ * The `key` is the vendor's own bucket name, so the UI can label the ones it
+ * knows and show the rest as they came.
+ */
+export interface BuiltinLimitMeter {
+  key: string;
+  /** Percent of the quota spent, 0–100 — the providers that report one. */
+  percent?: number;
+  /** Amount already spent — only together with `total`. */
+  used?: number;
+  /** The whole amount the quota is. */
+  total?: number;
+  /** A single amount with nothing to compare it to (a balance). */
+  amount?: number;
+  /** Currency of the amounts (`CNY`, `USD`), where the provider names one. */
+  unit?: string;
+  /** When the bucket starts over, ISO — the provider's own words. */
+  resetsAt?: string;
+  /** The provider's own status word (`ok`, `exhausted` …). */
+  status?: string;
+}
 
 /** A provider's key list ceiling — enough to pool a team's quota, not a vault. */
 export const BUILTIN_MAX_PROVIDER_KEYS = 20;
@@ -1748,6 +1837,11 @@ export function healBuiltinProviders(raw: unknown): BuiltinProviderConfig[] {
       // Conditional: settings written before headers existed keep their shape.
       ...(headers.length ? { headers } : {}),
       ...(body ? { body } : {}),
+      // Conditional: an endpoint of an unknown kind stores nothing — that is
+      // what an absent field means, and it keeps old rows byte-identical.
+      ...(normalizeBuiltinProviderKind(r.kind) === BUILTIN_PROVIDER_KIND_DEFAULT
+        ? {}
+        : { kind: normalizeBuiltinProviderKind(r.kind) }),
       // Conditional: only a provider a plugin contributed carries these.
       ...(typeof r.pluginId === "string" && r.pluginId.trim()
         ? { pluginId: r.pluginId.trim().slice(0, 128) }

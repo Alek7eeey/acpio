@@ -5,6 +5,7 @@ import type {
   AppSettings,
   AppUpdateStateDto,
   BuiltinHeaderConfig,
+  BuiltinLimitMeter,
   BoardColumnDto,
   BoardDto,
   ChatThemeDto,
@@ -42,6 +43,11 @@ export type MessageSearchHit = {
 export type BuiltinModelCatalogResult =
   | { ok: true; models: DiscoveredBuiltinModel[] }
   | { ok: false; models: []; error: string };
+
+/** What a provider's key has left, in the provider's own terms. */
+export type BuiltinProviderLimitsResult =
+  | { ok: true; meters: BuiltinLimitMeter[]; fetchedAt: string }
+  | { ok: false; meters: []; error: string };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -216,6 +222,16 @@ export const api = {
   },
   builtinModels: (body: { url: string; apiKey: string; headers?: BuiltinHeaderConfig[] }) =>
     request<BuiltinModelCatalogResult>("/api/agent/builtin/models", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  builtinLimits: (body: {
+    kind?: string;
+    url: string;
+    apiKey: string;
+    headers?: BuiltinHeaderConfig[];
+  }) =>
+    request<BuiltinProviderLimitsResult>("/api/agent/builtin/limits", {
       method: "POST",
       body: JSON.stringify(body),
     }),

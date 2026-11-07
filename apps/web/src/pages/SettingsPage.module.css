@@ -1855,6 +1855,20 @@
   white-space: nowrap;
 }
 
+/* The add-provider chooser: the button, and under it the kinds it can create
+   (the last of them, "other", adds the blank row this list used to get). */
+.providerAdd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.providerAdd .actionChips {
+  justify-content: flex-start;
+  max-width: none;
+}
+
 .actionChips {
   display: flex;
   flex-wrap: wrap;

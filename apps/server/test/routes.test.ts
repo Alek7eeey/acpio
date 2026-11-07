@@ -194,6 +194,42 @@ describe("health & settings", () => {
     expect(get.json().displayName).toBe("Tester");
   });
 
+  // The Spend row hangs on `kind`, and zod drops what it does not know: a kind
+  // missing from the schema would vanish on save without a word.
+  it("PUT /api/settings keeps a provider's kind", async () => {
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/settings",
+      payload: {
+        builtinProviders: [
+          {
+            id: "p1",
+            name: "DeepSeek",
+            url: "https://api.deepseek.com/v1",
+            apiKeys: [],
+            models: [],
+            kind: "deepseek",
+          },
+          {
+            id: "p2",
+            name: "Mine",
+            url: "http://localhost:11434/v1",
+            apiKeys: [],
+            models: [],
+          },
+        ],
+      },
+    });
+    expect(put.statusCode).toBe(200);
+
+    const get = await app.inject({ method: "GET", url: "/api/settings" });
+    const rows = get.json().builtinProviders;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ id: "p1", kind: "deepseek" });
+    // A plain endpoint stores no kind at all — absent is what "other" means.
+    expect("kind" in rows[1]).toBe(false);
+  });
+
   it("PUT /api/settings persists composer layout settings", async () => {
     const put = await app.inject({
       method: "PUT",

@@ -6,7 +6,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "./db/client.js";
 import { messages, messageParts, sessions } from "./db/schema.js";
 import { defaultSessionTitle, errorMessage } from "@acpio/i18n";
-import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH } from "@acpio/shared";
+import type { BuiltinProviderKind } from "@acpio/shared";
+import { BUILD_INFO, EDITOR_SPLITS, EDITOR_THEMES, EDITOR_TOOL_SOURCES, CONSOLE_TERMINAL_LIMITS, CUSTOM_AGENT_MAX, BUILTIN_MAX_OUTPUT_TOKENS_MAX, BUILTIN_TURN_RETRY_ATTEMPTS_MIN, BUILTIN_TURN_RETRY_ATTEMPTS_MAX, BUILTIN_THINKING_LIMIT_MAX, BUILTIN_BASH_TIMEOUT_SEC_MIN, BUILTIN_BASH_TIMEOUT_SEC_MAX, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MIN, BUILTIN_COMPACTION_THRESHOLD_PERCENT_MAX, BUILTIN_KEEP_RECENT_PERCENT_MIN, BUILTIN_KEEP_RECENT_PERCENT_MAX, BUILTIN_MAX_SUMMARY_TOKENS_MAX, BUILTIN_PRUNE_TOOL_RESULTS_KEEP_LAST_MAX, CHAT_TITLE_MAX_LEN_MIN, CHAT_TITLE_MAX_LEN_MAX, isShellSession, canonicalCwd, normalizeBuiltinSubagents, normalizeSkillModes, BUILTIN_PRESET_MAX, normalizeBuiltinPresets, SHELL_SESSION_PROVIDER, titleFromTaskDescription, titleFromUserText, titleFromSlashCommand, builtinProviderKeys, BUILTIN_MAX_PROVIDER_KEYS, BUILTIN_MAX_KEY_LENGTH, BUILTIN_PROVIDER_KINDS } from "@acpio/shared";
 import {
   buildSettingsFile,
   forgetMcpFolderConfig,
@@ -80,6 +81,7 @@ import {
 import { pickDirectory } from "./services/pickDirectory.js";
 import { createAppUpdater, restartServer } from "./services/appUpdate.js";
 import { fetchBuiltinModelCatalog } from "./services/builtinModelCatalog.js";
+import { fetchBuiltinProviderLimits } from "./services/builtinProviderLimits.js";
 import { browseDirectory } from "./services/browseDirectory.js";
 import {
   MAX_ATTACH_UPLOAD_BYTES,
@@ -265,6 +267,12 @@ const settingsSchema = z.object({
         // folds both into `apiKeys`.
         apiKeys: z.array(z.string().max(BUILTIN_MAX_KEY_LENGTH)).max(BUILTIN_MAX_PROVIDER_KEYS).optional(),
         apiKeyMode: z.enum(["rotate", "exhausted"]).optional(),
+        // Which vendor the endpoint is (Settings → Built-in agent → Providers).
+        // Zod strips what it does not know, so a kind missing here is dropped on
+        // save and the spend row disappears again — the list is the shared one.
+        kind: z
+          .enum(BUILTIN_PROVIDER_KINDS as unknown as [BuiltinProviderKind, ...BuiltinProviderKind[]])
+          .optional(),
         apiKey: z.string().max(BUILTIN_MAX_KEY_LENGTH).optional(),
         enabled: z.boolean().optional(),
         models: z
@@ -823,6 +831,54 @@ export async function registerRoutes(app: FastifyInstance) {
       ok: false,
       models: [],
       error: t(`builtinCatalog.${result.code}`, {
+        detail: result.detail ?? "",
+        status: result.detail ?? "",
+      }),
+    };
+  });
+
+  /**
+   * What a provider's key has left (Settings → Built-in agent → Providers →
+   * its spend row). The body carries the form's kind/URL/key, so the row shows
+   * a fresh number before Save; a provider of an unknown kind is answered as
+   * such — its endpoint has no limits API to ask.
+   */
+  app.post("/api/agent/builtin/limits", async (req) => {
+    const body = z
+      .object({
+        kind: z.string().max(40).optional(),
+        url: z.string().max(500).optional(),
+        apiKey: z.string().max(500).optional(),
+        headers: z
+          .array(
+            z.object({
+              name: z.string().max(200),
+              value: z.string().max(2000),
+            }),
+          )
+          .max(50)
+          .optional(),
+      })
+      .parse(req.body ?? {});
+    const settings = await getSettings();
+    const fallback = settings.builtinProviders[0];
+    const kind = body.kind !== undefined ? body.kind : fallback?.kind;
+    const url = body.url !== undefined ? body.url : (fallback?.url ?? "");
+    // Reading limits spends no tokens, so the pool's first key is the one.
+    const apiKey =
+      body.apiKey !== undefined
+        ? body.apiKey
+        : fallback
+          ? (builtinProviderKeys(fallback)[0] ?? "")
+          : "";
+    const headers = body.headers !== undefined ? body.headers : fallback?.headers;
+    const result = await fetchBuiltinProviderLimits(url, apiKey, kind, { headers });
+    if (result.ok) return result;
+    const t = serverT(await resolveLocale(req));
+    return {
+      ok: false,
+      meters: [],
+      error: t(`builtinLimits.${result.code}`, {
         detail: result.detail ?? "",
         status: result.detail ?? "",
       }),

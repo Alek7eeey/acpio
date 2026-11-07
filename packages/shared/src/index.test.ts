@@ -36,6 +36,8 @@ import {
   boardColumn,
   healBuiltinProviders,
   parseBuiltinBody,
+  BUILTIN_PROVIDER_KINDS,
+  BUILTIN_PROVIDER_PRESETS,
 } from "@acpio/shared";
 
 describe("parseModelWire", () => {
@@ -1156,6 +1158,33 @@ describe("parseBuiltinBody", () => {
     ]);
     expect(kept.body).toBe('{"thinking":{"type":"disabled"}}');
     expect(dropped.body).toBeUndefined();
+  });
+});
+
+describe("BuiltinProviderKind", () => {
+  it("heal keeps a provider's kind and drops the plain-endpoint one", () => {
+    const [deep, plain, unknown] = healBuiltinProviders([
+      { id: "p1", name: "DeepSeek", url: "https://api.deepseek.com/v1", kind: "deepseek" },
+      { id: "p2", url: "http://a/v1", kind: "other" },
+      { id: "p3", url: "http://b/v1", kind: "nonsense" },
+    ]);
+    expect(deep.kind).toBe("deepseek");
+    // "other" is what an absent field means, and an unknown kind is just that.
+    expect("kind" in plain).toBe(false);
+    expect("kind" in unknown).toBe(false);
+  });
+
+  it("offers one preset per kind, and a blank one only for the plain endpoint", () => {
+    expect(BUILTIN_PROVIDER_PRESETS.map((p) => p.kind)).toEqual([...BUILTIN_PROVIDER_KINDS]);
+    for (const preset of BUILTIN_PROVIDER_PRESETS) {
+      if (preset.kind === "other") {
+        expect(preset).toMatchObject({ name: "", url: "" });
+        continue;
+      }
+      // A known kind is only worth offering when it comes with what to ask.
+      expect(preset.name).not.toBe("");
+      expect(preset.url.startsWith("https://")).toBe(true);
+    }
   });
 });
 

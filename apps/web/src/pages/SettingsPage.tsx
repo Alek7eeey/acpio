@@ -21,6 +21,10 @@ import {
   type AttachSource,
   type BuiltinKeyMode,
   type BuiltinProviderConfig,
+  type BuiltinProviderKind,
+  BUILTIN_PROVIDER_PRESETS,
+  hasBuiltinProviderLimits,
+  normalizeBuiltinProviderKind,
   type BuiltinSubagentsSetting,
   type ChatActionId,
   type ChatComposerButtonId,
@@ -90,6 +94,7 @@ import { ModelPicker } from "../components/ModelPicker";
 import { BuiltinApiKeysEditor } from "../components/BuiltinApiKeysEditor";
 import { BuiltinHeadersEditor } from "../components/BuiltinHeadersEditor";
 import { BuiltinModelsEditor } from "../components/BuiltinModelsEditor";
+import { BuiltinProviderLimits } from "../components/BuiltinProviderLimits";
 import { OptionPicker } from "../components/OptionPicker";
 import { ServerFolderBrowseDialog } from "../components/ServerFolderBrowseDialog";
 import { SettingRow, SettingTable, Toggle } from "../components/SettingRow";
@@ -1740,6 +1745,8 @@ export function SettingsPage() {
    * any of the rows.
    */
   const [openProviderCards, setOpenProviderCards] = useState<string[]>([]);
+  /** The add-provider chooser is open: the kind decides the name and endpoint. */
+  const [addProviderOpen, setAddProviderOpen] = useState(false);
   const providerSearchActive = settingsQuery.trim().length > 0;
   const [folderBrowseOpen, setFolderBrowseOpen] = useState(false);
   const [folderBrowseTarget, setFolderBrowseTarget] = useState<
@@ -3682,6 +3689,32 @@ export function SettingsPage() {
                     </summary>
                     <div className={styles.providerCardBody}>
                       <SettingTable>
+                        {/* Which vendor this endpoint is. It is what the add
+                            picker sets, what prefills the URL, and the reason
+                            a spend row exists at all. */}
+                        <SettingRow
+                          layout="stack"
+                          label={`${displayName} · ${t("settings.builtinProviderKind")}`}
+                          hint={t("settings.builtinProviderKindHint")}
+                          terms={[
+                            ...BUILTIN_PROVIDER_PRESETS.map((preset) => preset.name),
+                            t("settings.builtinProviderKindOther"),
+                            t("settings.builtinProviderKind"),
+                          ]}
+                        >
+                          <OptionPicker
+                            value={normalizeBuiltinProviderKind(provider.kind)}
+                            options={BUILTIN_PROVIDER_PRESETS.map((preset) => ({
+                              value: preset.kind,
+                              label:
+                                preset.kind === "other"
+                                  ? t("settings.builtinProviderKindOther")
+                                  : preset.name,
+                            }))}
+                            onChange={(value) => update({ kind: value as BuiltinProviderKind })}
+                            dense
+                          />
+                        </SettingRow>
                         <SettingRow
                           layout="stack"
                           label={nameLabel}
@@ -3758,6 +3791,35 @@ export function SettingsPage() {
                                 );
                               })}
                             </div>
+                          </SettingRow>
+                        ) : null}
+                        {/* What the key has left, in the provider's own terms.
+                            Only a known kind has an API to ask — an endpoint of
+                            kind "other" gets no row rather than an empty one. */}
+                        {hasBuiltinProviderLimits(provider.kind) ? (
+                          <SettingRow
+                            layout="stack"
+                            label={`${displayName} · ${t("settings.builtinSpendTitle")}`}
+                            hint={t("settings.builtinSpendHint")}
+                            terms={[
+                              t("settings.builtinSpendTitle"),
+                              t("settings.builtinSpendHint"),
+                              t("settings.builtinSpendRefresh"),
+                              "limits",
+                              "лимиты",
+                              "balance",
+                              "баланс",
+                            ]}
+                          >
+                            <BuiltinProviderLimits
+                              kind={normalizeBuiltinProviderKind(provider.kind)}
+                              endpointUrl={provider.url}
+                              // Reading limits spends no tokens, so the pool's
+                              // first key is the one that answers.
+                              apiKey={keys[0] ?? ""}
+                              headers={provider.headers}
+                              open={open}
+                            />
                           </SettingRow>
                         ) : null}
                         <SettingRow
@@ -3884,22 +3946,57 @@ export function SettingsPage() {
                   t("settings.builtinProvidersEmpty"),
                 ]}
               >
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
-                  onClick={() => {
-                    const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-                    patch("builtinProviders", [
-                      ...form.builtinProviders,
-                      { id, name: "", url: "", apiKey: "", models: [] },
-                    ]);
-                    // A fresh provider comes unfolded: naming it is the first
-                    // thing to do, and an empty header says nothing.
-                    setOpenProviderCards((prev) => [...prev, id]);
-                  }}
-                >
-                  + {t("settings.builtinProviderAdd")}
-                </button>
+                <div className={styles.providerAdd}>
+                  <button
+                    type="button"
+                    className={styles.secondaryBtn}
+                    aria-expanded={addProviderOpen}
+                    onClick={() => setAddProviderOpen((open) => !open)}
+                  >
+                    + {t("settings.builtinProviderAdd")}
+                  </button>
+                  {/* The kind is asked first: it is what fills the endpoint and
+                      what makes the spend row possible. "Other" is a blank
+                      row — the way every provider used to be added. */}
+                  {addProviderOpen ? (
+                    <div
+                      className={styles.actionChips}
+                      role="group"
+                      aria-label={t("settings.builtinProviderKind")}
+                    >
+                      {BUILTIN_PROVIDER_PRESETS.map((preset) => (
+                        <button
+                          key={preset.kind}
+                          type="button"
+                          className={styles.actionChip}
+                          onClick={() => {
+                            const id = `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+                            patch("builtinProviders", [
+                              ...form.builtinProviders,
+                              {
+                                id,
+                                name: preset.name,
+                                url: preset.url,
+                                apiKeys: [],
+                                models: [],
+                                // An absent kind is "other", so it is not stored.
+                                ...(preset.kind === "other" ? {} : { kind: preset.kind }),
+                              },
+                            ]);
+                            // A fresh provider comes unfolded: the key and the
+                            // models are the next things to fill in.
+                            setOpenProviderCards((prev) => [...prev, id]);
+                            setAddProviderOpen(false);
+                          }}
+                        >
+                          {preset.kind === "other"
+                            ? t("settings.builtinProviderKindOther")
+                            : preset.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </SettingRow>
             </SettingTable>
           </>
