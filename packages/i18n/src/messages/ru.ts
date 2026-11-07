@@ -1247,6 +1247,8 @@ export const ru = {
     unreachable: "Endpoint не ответил: {{detail}}",
     notJson: "Endpoint вернул не JSON.",
     httpStatus: "Endpoint ответил кодом HTTP {{status}} — проверьте ключ и адрес.",
+    notFound:
+      "По адресу {{detail}} нет API лимитов (HTTP 404). Для OpenCode нужна база https://opencode.ai/zen/go/v1 (Go) или https://opencode.ai/inference/go/openai/v1.",
     unexpected: "В ответе нет лимитов — endpoint не похож на API этого провайдера.",
   },
   errors: {

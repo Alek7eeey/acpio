@@ -645,6 +645,26 @@ describe("Built-in providers", () => {
     expect(screen.getByText("DeepSeek · Spend")).toBeTruthy();
   });
 
+  // OpenCode bills in two plans: the choice names the plan and prefills its
+  // endpoint, while the kind — and the limits API behind it — stays one.
+  it("adds OpenCode Go with its own endpoint", async () => {
+    const user = userEvent.setup();
+    apiMock.builtinLimits.mockClear();
+    const { container } = renderProviders();
+
+    await addProvider(user, "OpenCode Go");
+
+    const cards = providerCards(container);
+    expect(cardSummary(cards[2]!).textContent).toContain("OpenCode Go");
+    const url = screen.getByLabelText("OpenCode Go · Endpoint") as HTMLInputElement;
+    expect(url.value).toBe("https://opencode.ai/zen/go/v1");
+    await waitFor(() =>
+      expect(apiMock.builtinLimits).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "opencode", url: "https://opencode.ai/zen/go/v1" }),
+      ),
+    );
+  });
+
   it("gives the plain endpoint no spend row at all", async () => {
     const user = userEvent.setup();
     apiMock.builtinLimits.mockClear();

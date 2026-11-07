@@ -1418,6 +1418,7 @@
     "unreachable": "The endpoint did not respond: {{detail}}",
     "notJson": "The endpoint answered with something that is not JSON.",
     "httpStatus": "The endpoint answered with HTTP {{status}} — check the key and the URL.",
+    "notFound": "There is no limits API at {{detail}} (HTTP 404). For OpenCode use https://opencode.ai/zen/go/v1 (Go) or https://opencode.ai/inference/go/openai/v1.",
     "unexpected": "The answer carries no limits — this endpoint does not look like that provider's API."
   },
   "errors": {

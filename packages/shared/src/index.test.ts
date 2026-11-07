@@ -1174,8 +1174,20 @@ describe("BuiltinProviderKind", () => {
     expect("kind" in unknown).toBe(false);
   });
 
-  it("offers one preset per kind, and a blank one only for the plain endpoint", () => {
-    expect(BUILTIN_PROVIDER_PRESETS.map((p) => p.kind)).toEqual([...BUILTIN_PROVIDER_KINDS]);
+  it("offers a choice per kind and a plan for the vendor that bills in two", () => {
+    // OpenCode appears twice (Go and Zen) — one vendor, two endpoints — so the
+    // choices are identified by id, and every kind is still offered.
+    expect(new Set(BUILTIN_PROVIDER_PRESETS.map((p) => p.id)).size).toBe(
+      BUILTIN_PROVIDER_PRESETS.length,
+    );
+    expect(new Set(BUILTIN_PROVIDER_PRESETS.map((p) => p.kind))).toEqual(
+      new Set(BUILTIN_PROVIDER_KINDS),
+    );
+    const opencodes = BUILTIN_PROVIDER_PRESETS.filter((p) => p.kind === "opencode");
+    expect(opencodes.map((p) => p.url)).toEqual([
+      "https://opencode.ai/zen/go/v1",
+      "https://opencode.ai/zen/v1",
+    ]);
     for (const preset of BUILTIN_PROVIDER_PRESETS) {
       if (preset.kind === "other") {
         expect(preset).toMatchObject({ name: "", url: "" });

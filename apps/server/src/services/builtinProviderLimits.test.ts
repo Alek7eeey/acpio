@@ -34,8 +34,9 @@ beforeAll(async () => {
       res.setHeader("content-type", "application/json");
       res.end(JSON.stringify(payload));
     };
-    // OpenCode Zen: the metered subscription windows, on the go/ base.
-    if (url === "/zen/go/v1/usage") {
+    // OpenCode Zen: the metered subscription windows, on the go/ base and on
+    // the sibling of the inference base (the two shapes the CLI and the app use).
+    if (url === "/zen/go/v1/usage" || url === "/inference/go/v1/usage") {
       json({
         usage: {
           rolling: { status: "ok", percent: 1, resetsAt: "2026-11-07T16:54:11.000Z" },
@@ -131,6 +132,33 @@ describe("fetchBuiltinProviderLimits", () => {
     expect(result.ok).toBe(true);
     // The plain base answers 404, which is what sends it to the sibling.
     expect(seen.map((s) => s.path)).toEqual(["/zen/v1/usage", "/zen/go/v1/usage"]);
+  });
+
+  // The base the OpenCode CLI talks to nests an extra openai/ segment, and its
+  // /usage lives on the sibling /v1 — the same rule its model list follows.
+  it("reads the limits of the inference base the OpenCode CLI uses", async () => {
+    seen = [];
+    const result = await fetchBuiltinProviderLimits(
+      `${base}/inference/go/openai/v1`,
+      "oc_sk-4",
+      "opencode",
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.meters.map((m) => m.key)).toEqual(["rolling", "weekly", "monthly"]);
+    expect(seen.map((s) => s.path)).toEqual([
+      "/inference/go/openai/v1/usage",
+      "/inference/go/v1/usage",
+    ]);
+  });
+
+  // "No such route" anywhere and "wrong key" are different answers: one says
+  // the URL is not a limits API, the other sends the user to the key.
+  it("says the address has no limits API when every candidate is a 404", async () => {
+    const result = await fetchBuiltinProviderLimits(`${base}/nowhere/v1`, "oc_sk-5", "opencode");
+    expect(result).toEqual({ ok: false, code: "notFound", detail: `${base}/nowhere/v1/usage` });
+    expect(await fetchBuiltinProviderLimits(`${base}/api/v1`, "sk", "openrouter", withCase("401")))
+      .toEqual({ ok: false, code: "httpStatus", detail: "401" });
   });
 
   it("reads the DeepSeek wallet, one row per currency", async () => {

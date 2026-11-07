@@ -22,6 +22,8 @@ import {
   type BuiltinKeyMode,
   type BuiltinProviderConfig,
   type BuiltinProviderKind,
+  BUILTIN_PROVIDER_KIND_NAMES,
+  BUILTIN_PROVIDER_KINDS,
   BUILTIN_PROVIDER_PRESETS,
   hasBuiltinProviderLimits,
   normalizeBuiltinProviderKind,
@@ -3702,17 +3704,18 @@ export function SettingsPage() {
                             t("settings.builtinProviderKind"),
                           ]}
                         >
+                          {/* The vendor, not the plan: which base the plan lives
+                              behind is the endpoint field below. */}
                           <OptionPicker
                             value={normalizeBuiltinProviderKind(provider.kind)}
-                            options={BUILTIN_PROVIDER_PRESETS.map((preset) => ({
-                              value: preset.kind,
+                            options={BUILTIN_PROVIDER_KINDS.map((kind) => ({
+                              value: kind,
                               label:
-                                preset.kind === "other"
+                                kind === "other"
                                   ? t("settings.builtinProviderKindOther")
-                                  : preset.name,
+                                  : BUILTIN_PROVIDER_KIND_NAMES[kind],
                             }))}
                             onChange={(value) => update({ kind: value as BuiltinProviderKind })}
-                            dense
                           />
                         </SettingRow>
                         <SettingRow
@@ -3966,7 +3969,7 @@ export function SettingsPage() {
                     >
                       {BUILTIN_PROVIDER_PRESETS.map((preset) => (
                         <button
-                          key={preset.kind}
+                          key={preset.id}
                           type="button"
                           className={styles.actionChip}
                           onClick={() => {

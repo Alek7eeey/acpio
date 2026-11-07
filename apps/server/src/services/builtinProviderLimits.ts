@@ -22,6 +22,8 @@ export type BuiltinLimitsErrorCode =
   | "unreachable"
   | "notJson"
   | "httpStatus"
+  /** Every candidate was a 404: this address is not a limits API at all. */
+  | "notFound"
   | "unexpected";
 
 export type BuiltinLimitsResult =
@@ -58,11 +60,19 @@ const LIMIT_SOURCES: Record<Exclude<BuiltinProviderKind, "other">, LimitSource> 
   opencode: {
     urls: (base) => {
       const urls = [`${trimSlash(base.href)}/usage`];
-      if (/\/zen\/v1$/.test(trimSlash(base.pathname))) {
+      const pathname = trimSlash(base.pathname);
+      const sibling = (path: string) => {
         const alt = new URL(base.href);
-        alt.pathname = alt.pathname.replace(/\/zen\/v1$/, "/zen/go/v1/usage");
-        urls.push(alt.href);
-      }
+        alt.pathname = path;
+        alt.search = "";
+        if (!urls.includes(alt.href)) urls.push(alt.href);
+      };
+      // The plain Zen base (pay-as-you-go) serves /usage one segment up, under
+      // go/ — that is where the metered windows live.
+      if (/\/zen\/v1$/.test(pathname)) sibling(pathname.replace(/\/zen\/v1$/, "/zen/go/v1/usage"));
+      // The base the OpenCode CLI talks to nests an extra openai/ segment, and
+      // its /usage sits on the sibling /v1 — the rule its model list follows too.
+      if (/\/openai\/v1$/.test(pathname)) sibling(pathname.replace(/\/openai\/v1$/, "/v1/usage"));
       return urls;
     },
     parse: (body) => {
@@ -183,7 +193,10 @@ export async function fetchBuiltinProviderLimits(
   Object.assign(headers, builtinProviderHeaders(opts.headers));
 
   let lastFailure: BuiltinLimitsResult & { ok: false } = { ok: false, code: "badUrl", detail: raw };
+  /** The last URL tried — what a "no such route" answer names to the user. */
+  let lastUrl = raw;
   for (const candidate of source.urls(base)) {
+    lastUrl = candidate;
     let url: URL;
     try {
       url = new URL(candidate);
@@ -221,6 +234,11 @@ export async function fetchBuiltinProviderLimits(
       meters: meters.slice(0, MAX_METERS),
       fetchedAt: new Date().toISOString(),
     };
+  }
+  // Only 404s got here: the address answers, but nothing lives at /usage. That
+  // is a wrong endpoint, not a wrong key — and the two need different advice.
+  if (lastFailure.code === "httpStatus" && lastFailure.detail === "404") {
+    return { ok: false, code: "notFound", detail: lastUrl };
   }
   return lastFailure;
 }

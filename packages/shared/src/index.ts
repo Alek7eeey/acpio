@@ -1572,20 +1572,52 @@ export const BUILTIN_PROVIDER_KIND_DEFAULT: BuiltinProviderKind = "other";
  * Everything else (keys, models, headers) stays the user's to fill.
  */
 export interface BuiltinProviderPreset {
+  /**
+   * Stable choice id — the kind, plus the plan for a vendor that bills in two
+   * (OpenCode's Go subscription and its plain pay-as-you-go base are the same
+   * vendor: one kind, two endpoints).
+   */
+  id: string;
   kind: BuiltinProviderKind;
-  /** Name a provider of this kind starts with (`""` for other: the user names it). */
+  /** Name a provider of this choice starts with (`""` for other: the user names it). */
   name: string;
-  /** Endpoint a provider of this kind starts with (`""` for other). */
+  /** Endpoint a provider of this choice starts with (`""` for other). */
   url: string;
 }
 
 export const BUILTIN_PROVIDER_PRESETS: readonly BuiltinProviderPreset[] = [
-  { kind: "opencode", name: "OpenCode Zen", url: "https://opencode.ai/zen/go/v1" },
-  { kind: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com/v1" },
-  { kind: "openrouter", name: "OpenRouter", url: "https://openrouter.ai/api/v1" },
-  { kind: "moonshot", name: "Moonshot", url: "https://api.moonshot.ai/v1" },
-  { kind: "other", name: "", url: "" },
+  // OpenCode bills in two. The Go subscription metres rolling/weekly/monthly
+  // windows and serves them off the go/ base; the plain Zen base is
+  // pay-as-you-go, and the limits API is the same one.
+  { id: "opencode-go", kind: "opencode", name: "OpenCode Go", url: "https://opencode.ai/zen/go/v1" },
+  {
+    id: "opencode-zen",
+    kind: "opencode",
+    name: "OpenCode Zen",
+    url: "https://opencode.ai/zen/v1",
+  },
+  { id: "deepseek", kind: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com/v1" },
+  {
+    id: "openrouter",
+    kind: "openrouter",
+    name: "OpenRouter",
+    url: "https://openrouter.ai/api/v1",
+  },
+  { id: "moonshot", kind: "moonshot", name: "Moonshot", url: "https://api.moonshot.ai/v1" },
+  { id: "other", kind: "other", name: "", url: "" },
 ];
+
+/**
+ * What the kind picker of an existing row names each vendor. Brand names, so
+ * they read the same in both locales; `"other"` is the one the UI translates.
+ */
+export const BUILTIN_PROVIDER_KIND_NAMES: Record<BuiltinProviderKind, string> = {
+  opencode: "OpenCode",
+  deepseek: "DeepSeek",
+  openrouter: "OpenRouter",
+  moonshot: "Moonshot",
+  other: "",
+};
 
 /** `kind` as stored/sent — anything unknown is an endpoint we know nothing about. */
 export function normalizeBuiltinProviderKind(kind: unknown): BuiltinProviderKind {
