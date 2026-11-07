@@ -35,3 +35,9 @@ dist-npm/
 # Local scratch: session/board dumps and ad-hoc git checks
 /bs.json
 /.tmp-git-verify/
+
+# The agent's own scratch inside a working folder: the plan file it publishes,
+# playwright snapshots, temporary screenshots
+.acpio/
+.playwright-mcp/
+apps/server/tmp/
