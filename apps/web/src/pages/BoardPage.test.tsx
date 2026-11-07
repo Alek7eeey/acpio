@@ -1098,6 +1098,45 @@ describe("BoardPage new task form slash menu", () => {
     expect(textarea.value).toBe("/review ");
     expect(screen.queryByRole("listbox")).toBeNull();
   });
+
+  // The description becomes the task's first message, and an agent honours a
+  // skill named anywhere in it — so a `/` typed after other words offers the
+  // folder's skills too. The commands that only mean something as the message's
+  // first token (`/clear`, `/compact`) stay out there, exactly as in a chat.
+  it("offers skills mid-description, and nothing but skills", async () => {
+    useAppStore.setState({
+      boardSessions: [],
+      adapters: [{ id: "omp", label: "OMP" } as never],
+      agentAvailability: { omp: true },
+    });
+    apiMock.agentCommands.mockResolvedValue([
+      { name: "humanizer", description: "Remove signs of AI writing (project skill)" },
+      { name: "review", description: "Review the branch I am on" },
+    ]);
+    renderBoard();
+    await screen.findByText("Add task");
+
+    const group = document.querySelector("[data-group]") as HTMLElement;
+    await userEvent.click(within(group).getByRole("button", { name: "Add task" }));
+    const textarea = within(group).getByPlaceholderText(
+      "Describe the task…",
+    ) as HTMLTextAreaElement;
+
+    await userEvent.type(textarea, "Правь /");
+    const option = await screen.findByRole("option", { name: /\/humanizer/ });
+    expect(option.textContent).toContain("Remove signs of AI writing");
+    expect(screen.queryByRole("option", { name: /\/review/ })).toBeNull();
+
+    // Picking it puts the skill where the caret is, not at the line's start.
+    await userEvent.click(option);
+    expect(textarea.value).toBe("Правь /humanizer ");
+
+    // A command that is not a skill is not offered inside a message: it would
+    // be a literal `/rev` there, not a command the agent would run.
+    await userEvent.clear(textarea);
+    await userEvent.type(textarea, "Правь /rev");
+    expect(screen.queryByRole("option", { name: /\/review/ })).toBeNull();
+  });
 });
 
 describe("BoardPage new task form", () => {

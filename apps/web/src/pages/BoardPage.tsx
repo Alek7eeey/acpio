@@ -485,14 +485,18 @@ const NewTaskComposer = memo(function NewTaskComposer({
     setDraftParams(next);
   };
 
-  // The agent expands `/name` only as the message's first token, so the menu
-  // offers itself at the opening of the description and nowhere else.
-  const slashCtx = useMemo(() => {
-    const ctx = getSlashContext(draft, caret);
-    return ctx && ctx.start === 0 ? ctx : null;
-  }, [draft, caret]);
+  // A `/` opens the menu anywhere in the description: at its opening every
+  // command is offered (the agent expands that one itself), and after other
+  // words only the skills — the commands that mean something as the message's
+  // first token are not one — exactly as in a chat's composer.
+  const slashCtx = useMemo(() => getSlashContext(draft, caret), [draft, caret]);
   const matchingSkills = useMemo(
-    () => (slashCtx ? filterSlashCommands(skills, slashCtx.query) : []),
+    () =>
+      slashCtx
+        ? filterSlashCommands(skills, slashCtx.query, {
+            midPromptSkillOnly: slashCtx.midPrompt,
+          })
+        : [],
     [skills, slashCtx],
   );
   const skillMenuOpen =
