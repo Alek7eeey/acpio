@@ -830,6 +830,8 @@ let pendingOptimisticPair: { userId: string; assistantId: string; sessionId: str
  *  Stale `session.updated` idle from createMessage must not clobber optimistic running. */
 const serverConfirmedBusy = new Set<string>();
 const delayedIdleTimers = new Map<string, number>();
+/** A prompt POST still on the wire, per session — Stop waits it out (see `cancelPrompt`). */
+const sendingPrompt = new Map<string, Promise<unknown>>();
 
 function sessionHasActiveTurnParts(messages: MessageDto[]) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -3470,8 +3472,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ inflight: get().inflight + 1 });
     }
+    // Remembered while it is on the wire: Stop has to reach the server *after*
+    // the prompt it halts, or the halt lands first and the message — which the
+    // server has not seen yet — arrives as a fresh ask and runs in full.
+    const posted = get().runSendPrompt(text, opts, { optimistic: !internal });
+    if (sid) sendingPrompt.set(sid, posted);
     try {
-      await get().runSendPrompt(text, opts, { optimistic: !internal });
+      await posted;
     } catch (err) {
       // Nothing reached the server. The text goes to the head of the queue — it
       // was meant for now — so the reconnect hands it over instead of the user
@@ -3937,6 +3944,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       commitDetail(get, set, { ...current, status: "idle", messages });
     }
     serverConfirmedBusy.delete(id);
+    // The prompt this Stop is about may still be in flight (the tab keeps the
+    // Stop button on screen from the moment Send is clicked). Let it land, so
+    // the server can tell this halt from one that came before the message.
+    const posted = sendingPrompt.get(id);
+    if (posted) {
+      await Promise.race([posted.catch(() => undefined), new Promise((r) => setTimeout(r, 2_000))]);
+    }
     try {
       await api.cancel(id);
     } catch (err) {

@@ -496,6 +496,12 @@ type TurnOpts = {
    * a button, they did not type "start implementing".
    */
   internal?: boolean;
+  /**
+   * When the host took this prompt. A Stop that lands later — even before the
+   * turn reached `session/prompt`, when there is nothing on the wire to cancel
+   * — is compared against it, so a halted prompt never wakes the agent.
+   */
+  acceptedAt?: number;
 };
 
 /** Attachment chosen from the server machine — referenced or staged into the cwd. */
@@ -2720,11 +2726,36 @@ function buildPriorTranscript(
  */
 const TURN_SETTLE_WAIT_MS = 3_000;
 
+/**
+ * Stops that landed before their prompt reached a turn: the reader pressed
+ * Send and Stop inside the same few milliseconds — the prompt route answers at
+ * once, so the halt can arrive while `runPrompt` is still on its first DB read
+ * and there is no runtime, no client and no `session/prompt` to cancel yet. The
+ * mark is the stop's own record, and {@link stopRacedPrompt} is what the turn
+ * consults before it starts the agent nobody is waiting for any more.
+ */
+const stoppedBeforeTurn = new Map<string, number>();
+
+/** Was this prompt accepted before a Stop that no turn has answered yet? */
+function stopRacedPrompt(sessionId: string, acceptedAt: number): boolean {
+  const stoppedAt = stoppedBeforeTurn.get(sessionId);
+  if (!stoppedAt) return false;
+  // A prompt accepted after the stop is a fresh ask: the mark is spent.
+  if (acceptedAt > stoppedAt) {
+    stoppedBeforeTurn.delete(sessionId);
+    return false;
+  }
+  return true;
+}
+
 export async function runPrompt(
   sessionId: string,
   text: string,
   opts: TurnOpts,
 ) {
+  // When the host took this prompt — the line a Stop is compared against, and
+  // the only thing that can be known before the first await.
+  let acceptedAt = Date.now();
   const settings = await getSettings();
   const locale = settings.locale ?? "en";
   let rt = getRuntime(sessionId);
@@ -2780,10 +2811,17 @@ export async function runPrompt(
     priorTranscript = buildPriorTranscript(detailAfter?.messages ?? [], opts.editMessageId);
     promptUserText = text;
 
+    // The halt above is this prompt's own doing — it must not read as a Stop
+    // that came before it. The mark is cleared, not merely out-timed: a stop
+    // recorded in the same millisecond as this prompt would silence it.
+    stoppedBeforeTurn.delete(sessionId);
     disposeRuntime(sessionId);
     rt = getRuntime(sessionId);
     rt.startingTurn = true;
   }
+
+  // Read by `runTurn` at the wire, where a Stop that beat the boot is caught.
+  opts.acceptedAt = acceptedAt;
 
   // A deferred restart (mid-turn MCP/model edit) must land BEFORE the next
   // turn: a direct prompt would otherwise run on the stale agent with the old
@@ -3783,6 +3821,18 @@ async function runTurn(
         images: images.length,
       },
     });
+    // The last line before the agent is asked anything: a Stop that landed
+    // while this turn was still booting had no client to cancel — the prompt
+    // has to not leave at all (see `stopRacedPrompt`).
+    if (
+      !opts.backgroundJobNote &&
+      stopRacedPrompt(sessionId, opts.acceptedAt ?? agentStartedAt)
+    ) {
+      rt.acceptingStream = false;
+      await appendInterruptNote(rt, 0);
+      await finalizeTurn(sessionId, rt, agentStartedAt);
+      return { stopReason: "cancelled", raw: null };
+    }
     // Measure the actual ACP request, not time spent creating UI/DB messages.
     agentStartedAt = Date.now();
     const result = await promptAwaitingAgentIdle(rt, client, promptText, images);
@@ -3974,6 +4024,9 @@ async function dequeueTurn(rt: SessionRuntime) {
 }
 
 export async function cancelPrompt(sessionId: string) {
+  // Recorded before anything else: a prompt still on its way in has no runtime
+  // to cancel and must find this mark instead (see `stopRacedPrompt`).
+  stoppedBeforeTurn.set(sessionId, Date.now());
   const rt = runtimes.get(sessionId);
   if (rt) await stopLiveTurn(rt, false);
   await updateSession(sessionId, { status: "idle" });
