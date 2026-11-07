@@ -597,6 +597,15 @@
   pointer-events: none;
 }
 
+/* The global `button:active` press nudge carries its own transform, which
+   replaces the pill's centering `translateX(-50%)` for as long as the button is
+   held: the pill jumps half its width to the right, so a press on its left half
+   ends outside the button and no click ever lands there — the thread stayed
+   where it was. Keep the centering in the pressed state. */
+.jumpLatest:active {
+  transform: translate(-50%, 1px);
+}
+
 /* The floating jump-to-latest pill must not cover an open model/mode dropdown:
    the picker sits behind display:contents wrappers + isolation, and Chromium
    hit-tests that stacking incorrectly — z-index alone can't keep the dropdown
