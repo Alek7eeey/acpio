@@ -11,6 +11,11 @@ coverage
 .vite
 diagnostics/
 exports/
+# Screenshots and page dumps from manual browser checks
+.playwright-mcp/
+shots/
+*.spx
+docs/screens/*.png
 dev-dist/
 _temp/
 data/
@@ -41,3 +46,9 @@ dist-npm/
 .acpio/
 .playwright-mcp/
 apps/server/tmp/
+
+# Ad-hoc debugging scripts
+/explorer-open-watch.log
+/apps/server/tmp/
+/apps/server/*.png
+/apps/server/*.jpg
